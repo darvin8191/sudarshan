@@ -36,6 +36,7 @@ import {
   chartNoData,
 } from '@/lib/trading/chartState'
 import { buildChartTheme, quietVolumeStyle } from '@/lib/trading/chartTheme'
+import { watchIstDay } from '@/lib/trading/dayWatch'
 import { instrumentSessionFor } from '@/lib/trading/instrumentSession'
 import { lookbackDays } from '@/lib/trading/intervals'
 import {
@@ -155,6 +156,8 @@ export class PhoneChart {
   private streamed = false
   /** SUDARSHAN (review M3): when the loaded contract stops trading today, epoch ms, from the server. */
   private stopsAt: number | null = null
+  /** Stops the watch for the date in India to change (review N3). */
+  private dayWatch: (() => void) | null = null
   private destroyed = false
   private readonly offs: Array<() => void> = []
 
@@ -317,6 +320,8 @@ export class PhoneChart {
     this.stopCountdownTimer()
     document.removeEventListener('visibilitychange', this.onVisibility)
     for (const off of this.offs.splice(0)) off()
+    this.dayWatch?.()
+    this.dayWatch = null
     this.clock.stop()
     this.resync.stop()
     this.status.destroy()
@@ -569,13 +574,32 @@ export class PhoneChart {
       this.status.setCalendar(null)
       this.status.reset(exchange)
     }
-    const ticket = this.ticket
-    // SUDARSHAN (review M1, M2): the instrument's own facts, asked beside the hours.
+    this.askHours(exchange, builder, this.ticket, false)
+    // SUDARSHAN (review N3): a chart left open past midnight in India asks the day's facts again.
+    this.dayWatch?.()
+    this.dayWatch = watchIstDay(() => {
+      if (!this.destroyed) this.askHours(exchange, this.builder, this.ticket, true)
+    })
+  }
+
+  /**
+   * The exchange's hours and the instrument's own facts for today (review M1, M2, M3), applied to
+   * the live bar and the marker. `again` is a page that was already open when the date changed
+   * (review N3): the facts are asked for the new day, and a stop or closing window that belonged
+   * to the old one is dropped when the new day has none.
+   */
+  private askHours(
+    exchange: string,
+    builder: LiveBarBuilder | null,
+    ticket: number,
+    again: boolean
+  ): void {
     const facts = instrumentSessionFor(this.sym?.symbol ?? '', exchange)
     void sessionCalendarFor(exchange, this.apiKey)
       .then((calendar) => {
         if (this.destroyed || ticket !== this.ticket || !calendar) return facts
         this.status.setCalendar(calendar)
+        if (again && !this.chart.isDestroyed) this.chart.setSessionCalendar(calendar)
         if (!builder || this.builder !== builder) return facts
         builder.setSession(calendar)
         this.clock.start()
@@ -586,7 +610,13 @@ export class PhoneChart {
         if (this.destroyed || ticket !== this.ticket || !found) return
         // A closing print after the cash close goes to the day's last candle.
         if (builder && this.builder === builder) builder.setClosing(found.closing)
-        if (found.stopsAt === null) return
+        if (found.stopsAt === null) {
+          if (this.stopsAt !== null) {
+            this.stopsAt = null
+            this.status.setStop(null)
+          }
+          return
+        }
         // An expiring contract's own stop (review M3): no candle, countdown or "Stale" after it.
         this.stopsAt = found.stopsAt
         this.status.setStop(found.stopsAt / 1000)
@@ -603,6 +633,8 @@ export class PhoneChart {
   }
 
   private stopLive(): void {
+    this.dayWatch?.()
+    this.dayWatch = null
     this.clock.stop()
     this.builder = null
   }

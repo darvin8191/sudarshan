@@ -1,0 +1,74 @@
+# सुदर्शन / SUDARSHAN trade journal and reports (M14, M15): fills paired into trades, the journal's
+# figures, the day report and the morning brief. It reads the owner's account only through the
+# portfolio service (127.0.0.1:5583), the price feed (127.0.0.1:5580 and 5581) and OpenAlgo's own
+# records, read-only; it places no order and needs no internet (cross-design Y4).
+# Its sealed local API answers OpenAlgo's bridge, the alerts' report desk and nudges on 127.0.0.1:5586
+# (loopback only); GET /health there says which release is installed and what the service is doing.
+# The service is off until the release turns SUDARSHAN_JOURNAL on in OpenAlgo's .env
+# (ops/deploy/openalgo-env.conf); off, it answers every request as off, opens no database and runs no job.
+# Docs: sudarshan/journal/README.md. Optional settings: /etc/sudarshan/journal.env (root:sudarshan 640).
+# Installed, enabled and restarted by sudarshan-deploy from each release, like sudarshan-portfolio.
+
+[Unit]
+Description=SUDARSHAN trade journal and reports
+After=network-online.target
+Wants=network-online.target
+# Ordering only, as for the portfolio: no Wants= on OpenAlgo, which would start it while the deploy
+# tool has it stopped. It reads OpenAlgo's .env for the switch and the pepper at start.
+After=openalgo.service
+
+[Service]
+Type=simple
+User=sudarshan
+Group=sudarshan
+Slice=sudarshan.slice
+WorkingDirectory=/opt/sudarshan/apps/openalgo
+ExecStart=/opt/sudarshan/apps/openalgo/.venv/bin/python -m sudarshan.journal
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+EnvironmentFile=-/etc/sudarshan/journal.env
+# The only place it writes: /var/lib/sudarshan-journal (journal.db and its log, and the report
+# events the alerts' report desk reads). openalgo.db, latency.db, sandbox.db, the risk database and
+# the feed's tick recording are read without write access, so db/ stays read-only here.
+StateDirectory=sudarshan-journal
+StateDirectoryMode=0700
+# Restarted after a crash, every 10 s. Not after exit status 2 (a setting or key it cannot use):
+# that would only repeat the same error line. A taken port is not a crash: it waits and tries again.
+Restart=on-failure
+RestartSec=10
+RestartPreventExitStatus=2
+# SIGTERM: the jobs are cancelled, the listener closes and the store is closed; killed after 20 s.
+TimeoutStopSec=20
+# Squeezed before it is killed (75% of MemoryMax), and behind TRINETRA when the box is busy.
+MemoryHigh=192M
+MemoryMax=256M
+CPUWeight=40
+UMask=0077
+LimitCORE=0
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectProc=invisible
+ProtectSystem=strict
+ProtectHome=yes
+ReadOnlyPaths=-/etc/sudarshan
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+RestrictNamespaces=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+LockPersonality=yes
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+SystemCallArchitectures=native
+# Loopback only (cross-design Y4.3): every account read goes through the portfolio service, so the
+# journal never reaches Upstox or anything else off this server.
+IPAddressDeny=any
+IPAddressAllow=localhost
+
+[Install]
+WantedBy=multi-user.target

@@ -42,6 +42,21 @@ PURPOSES = {
 DELIVERY_OPS = ("report_get", "report_file", "delivery")
 #: The only op the family purpose opens (cross-design Y16): counts, never a paise field.
 FAMILY_OPS = ("family_day",)
+#: The only op the nudge purpose opens (cross-design Y17): "orders changed", nothing else.
+NUDGE_OPS = ("nudge",)
+#: Who may seal under each purpose: the seal's ``principal`` must be exactly this.
+PRINCIPALS = {
+    "api": "owner",
+    "delivery": "sudarshan-alerts",
+    "nudge": "sudarshan-alerts",
+    "family": "sudarshan-family",
+}
+#: The largest sealed request each purpose takes (cross-design X9), checked before it is opened.
+SEAL_LIMITS = {"api": 64 * 1024, "delivery": 16 * 1024, "nudge": 4 * 1024, "family": 4 * 1024}
+#: The largest answer the API gives: a report's file, base64 inside the envelope (design 7.2).
+ANSWER_MAX_BYTES = 8 * 1024 * 1024
+#: What a nudge says changed (``sudarshan/alerts/nudge.py``): a CNC fill is ``holdings``.
+NUDGE_KINDS = ("orders", "holdings")
 
 # ---- units -----------------------------------------------------------------------------------
 PAISE_PER_RUPEE = 100
@@ -87,6 +102,9 @@ SURFACES = (
     "strategy_module",
     "python",
     "upstox_app",
+    # An order rebuilt from Upstox's trade history (the 22:00 catch-up of a day no check marked):
+    # where it was placed is not known, and it is never asked about again.
+    "history",
     "unknown",
 )
 EXCURSION_SOURCES = ("recording", "candles", "none")
@@ -140,6 +158,7 @@ OP_NAMES = (
     "reconcile_now",
     "delivery",
     "family_day",
+    "nudge",
 )
 #: Classes of op and what the bridge lets through a minute (design 7.3).
 LIMITS_PER_MIN = {"read": 120, "write": 60, "download": 20, "reconcile": 2}
@@ -166,6 +185,7 @@ ENUMS = {
     "RatioState": RATIO_STATES,
     "DurationState": DURATION_STATES,
     "Cls": tuple(LIMITS_PER_MIN),
+    "NudgeKind": NUDGE_KINDS,
 }
 
 RECORDS = {
@@ -220,20 +240,57 @@ RECORDS = {
     "Analytics": "metrics:Metrics, hold:HoldBucketRow[], calendar:Calendar, equity:Equity, "
     "heat:HeatCell[], by_strategy:BlockRow[], by_tag:BlockRow[], by_playbook:BlockRow[], "
     "expiry:ExpirySplit, beta:Beta|null",
+    # ``period_key``: 20261109 for a day, 2026W45 a week, 202610 a month, FY2627 a year;
+    # ``reason``: why the last delivery did not send it whole, in the owner's words.
     "Report": "id:int, kind:ReportKind, period_key:string, built_ms:int, status:ReportStatus, "
     "text:string, file_name:string|null, file_mime:string|null, file_sha256:string|null, "
-    "reconciled_at:int|null, version:int",
+    "reconciled_at:int|null, version:int, reason:string|null",
+    # The stored file of a report, base64 in the envelope; all four file fields are null until
+    # the renderer has made one (the bridge then says the report has no file to download).
+    "ReportFile": "file_name:string|null, file_mime:string|null, file_sha256:string|null, "
+    "file_b64:string|null",
     "ReportEvent": "id:string, src:string, kind:string, report:int, report_kind:ReportKind, "
     "sha256:string|null",
+    # ``alerts_on``: false while nothing delivers reports (the alerts service, or its report
+    # desk, switched off: cross-design Y38); ``times``: when each report is built, as the page
+    # prints them (the day ones for today, or the next trading day).
     "Settings": "capital_base_paise:int|null, eod_on:bool, brief_on:bool, weekly_on:bool, "
-    "monthly_on:bool, fy_on:bool, report_language:string, charges_plan:ChargePlan, version:int",
+    "monthly_on:bool, fy_on:bool, report_language:string, charges_plan:ChargePlan, version:int, "
+    "alerts_on:bool, rate_card:RateCard, times:ReportTimes",
+    "RateCard": "version:string, from_day:int",
+    "ReportTimes": "brief:string|null, eod:string|null, check:string|null, weekly:string, "
+    "monthly:string, fy:string",
+    # The family service's per-member line (``core/words.family_day``), which it builds itself
+    # from the counts below and the member's own privacy categories (cross-design Y16).
     "FamilyDay": "day:int, line:string|null",
+    # The answer of ``family_day``: counts only, no paise field (Y16). Trades are the live trips
+    # closed on that day; won and lost are those whose net (after est. charges) is above or
+    # below zero, so a flat trade is in ``trades`` and in neither of the other two.
+    "FamilyCounts": "day:int, trades:int, won:int, lost:int",
     "State": "enabled:bool, fills_today:int, open_trips:int, last_reconcile_ms:int|null, "
     "limits:Limits",
     "Limits": ", ".join(f"{k}:int" for k in LIMITS),
     "Done": "id:int|null, version:int|null, words:string|null",
     "Version": "version:int",
+    # One leg of a trip on the trade sheet: its fill's time, side, price, source and order.
+    "TripLeg": "trade_id:string, order_id:string, role:LegRole, action:Action, qty:int, "
+    "price_u:int, exch_ts_ms:int, day:int, source:FillSource",
+    # What OpenAlgo's records say about one order of a trip (M12.12: latency in ms, no broker's).
+    "OrderRef": "order_id:string, strategy:string|null, surface:Surface, pricetype:string|null, "
+    "placed_ms:int|null, rtt_ms:int|null, total_latency_ms:int|null",
 }
+#: ``trip_get``'s answer: the trip, its legs, the owner's note and its orders' references.
+# A row of the trades list: the trip and its mistake tags (the ids of its note's ``mistakes``).
+RECORDS["TripRow"] = RECORDS["Trip"] + ", mistakes:int[]"
+# The trade sheet: the trip, its fills (each as executed: a flip's fill is in both trips, its
+# ``legs`` say how much of it is this trip's), the owner's note (its ``checklist`` is JSON text,
+# ``[{"rule": ..., "yes": ...}]``, or empty), the excursion, the charges estimate of its orders,
+# the first entry order's round trip as OpenAlgo's latency record has it (``latency_ms``), and
+# each order's label.
+RECORDS["TripDetail"] = RECORDS["Trip"] + (
+    ", legs:TripLeg[], fills:Fill[], note:TripNote|null, excursion:Excursion|null, "
+    "charges:ChargeEstimate|null, latency_ms:int|null, orders:OrderRef[]"
+)
 
 
 class Field(NamedTuple):
@@ -290,6 +347,10 @@ def record(name: str) -> tuple[Field, ...]:
     return parse_fields(RECORDS[name])
 
 
+# The analytics filter: ``period`` today, week, month (when nothing is sent), fy or all, or the
+# days ``from`` and ``to`` in its place; ``expiry`` expiry (opened on an index expiry day or the
+# instrument's own) or non_expiry. Calendar keys are 20261109, 2026W45 and 202611; the heat
+# map's weekday 0 is Monday.
 _FILTER = (
     "mode?:Mode, strategy?:string, tag?:int, playbook?:int, from?:int, to?:int, "
     "expiry?:string, period?:string"
@@ -303,9 +364,9 @@ OPS = (
         "read",
         "mode?:Mode, status?:TripStatus, before?:int, limit?:int, strategy?:string, "
         "tag?:int, playbook?:int, from?:int, to?:int",
-        "Trip[]",
+        "TripRow[]",
     ),
-    OpSpec("trip_get", "GET", "/trips/<id>", "read", "id:int", "Trip"),
+    OpSpec("trip_get", "GET", "/trips/<id>", "read", "id:int", "TripDetail"),
     OpSpec(
         "trip_update",
         "PATCH",
@@ -331,18 +392,21 @@ OPS = (
     OpSpec("analytics", "GET", "/analytics", "read", _FILTER, "Analytics"),
     OpSpec("reports_list", "GET", "/reports", "read", "kind?:ReportKind, limit?:int", "Report[]"),
     OpSpec("report_get", "GET", "/reports/<id>", "read", "id:int", "Report"),
-    OpSpec("report_file", "GET", "/reports/<id>/file", "download", "id:int", "Version"),
+    OpSpec("report_file", "GET", "/reports/<id>/file", "download", "id:int", "ReportFile"),
     OpSpec("report_build", "POST", "/reports/build", "write",
            "kind:ReportKind, period?:string", "Done"),
     OpSpec("settings_get", "GET", "/settings", "read", "", "Settings"),
     OpSpec("settings_set", "PUT", "/settings", "write",
            "version:int, capital_base_paise?:int|null, eod_on?:bool, brief_on?:bool, "
-           "weekly_on?:bool, monthly_on?:bool, fy_on?:bool, charges_plan?:ChargePlan", "Done"),
+           "weekly_on?:bool, monthly_on?:bool, fy_on?:bool, charges_plan?:ChargePlan, "
+           "report_language?:string", "Done"),
     OpSpec("reconcile_now", "POST", "/reconcile", "reconcile", "", "Done"),
 )  # fmt: skip
-#: Ops that no route of the bridge carries: the alerts desk and the family service call them.
+#: Ops that no route of the bridge carries: the alerts desk, the family service and the alerts'
+#: nudge call them. A nudge's three fields sit in the seal itself, beside ``op`` (alerts/nudge.py).
 SERVICE_OPS = (
     OpSpec("delivery", "POST", "", "write",
            "report_id:int, channel:string, status:ReportStatus, reason?:string|null", "Done"),
-    OpSpec("family_day", "GET", "", "read", "day:int", "FamilyDay"),
+    OpSpec("family_day", "GET", "", "read", "day:int", "FamilyCounts"),
+    OpSpec("nudge", "POST", "", "write", "kind:NudgeKind, sandbox:bool, at:int", "Done"),
 )  # fmt: skip

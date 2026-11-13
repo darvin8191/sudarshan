@@ -78,6 +78,7 @@ export const OP_NAMES = [
   'reconcile_now',
   'delivery',
   'family_day',
+  'nudge',
 ] as const
 
 export type Mode = 'live' | 'sandbox'
@@ -100,6 +101,7 @@ export type Surface =
   | 'strategy_module'
   | 'python'
   | 'upstox_app'
+  | 'history'
   | 'unknown'
 export type ExcursionSource = 'recording' | 'candles' | 'none'
 export type Mood = 'planned' | 'calm' | 'rushed' | 'fomo' | 'revenge' | 'tired'
@@ -124,6 +126,7 @@ export type RatioState =
   | 'no_capital'
 export type DurationState = 'none' | 'recovered' | 'still_in_drawdown'
 export type Cls = 'read' | 'write' | 'download' | 'reconcile'
+export type NudgeKind = 'orders' | 'holdings'
 
 export interface Fill {
   trade_id: string
@@ -392,6 +395,14 @@ export interface Report {
   file_sha256: string | null
   reconciled_at: number | null
   version: number
+  reason: string | null
+}
+
+export interface ReportFile {
+  file_name: string | null
+  file_mime: string | null
+  file_sha256: string | null
+  file_b64: string | null
 }
 
 export interface ReportEvent {
@@ -413,11 +424,35 @@ export interface Settings {
   report_language: string
   charges_plan: ChargePlan
   version: number
+  alerts_on: boolean
+  rate_card: RateCard
+  times: ReportTimes
+}
+
+export interface RateCard {
+  version: string
+  from_day: number
+}
+
+export interface ReportTimes {
+  brief: string | null
+  eod: string | null
+  check: string | null
+  weekly: string
+  monthly: string
+  fy: string
 }
 
 export interface FamilyDay {
   day: number
   line: string | null
+}
+
+export interface FamilyCounts {
+  day: number
+  trades: number
+  won: number
+  lost: number
 }
 
 export interface State {
@@ -448,6 +483,114 @@ export interface Done {
 
 export interface Version {
   version: number
+}
+
+export interface TripLeg {
+  trade_id: string
+  order_id: string
+  role: LegRole
+  action: Action
+  qty: number
+  price_u: number
+  exch_ts_ms: number
+  day: number
+  source: FillSource
+}
+
+export interface OrderRef {
+  order_id: string
+  strategy: string | null
+  surface: Surface
+  pricetype: string | null
+  placed_ms: number | null
+  rtt_ms: number | null
+  total_latency_ms: number | null
+}
+
+export interface TripRow {
+  id: number
+  mode: Mode
+  exchange: string
+  symbol: string
+  instrument_key: string
+  product: string
+  product_class: ProductClass
+  side: Side
+  qty_max: number
+  entry_qty: number
+  exit_qty: number
+  entry_avg_u: number
+  exit_avg_u: number | null
+  opened_ms: number
+  closed_ms: number | null
+  open_day: number
+  close_day: number | null
+  status: TripStatus
+  gross_paise: number | null
+  charges_est_paise: number | null
+  charges_actual_paise: number | null
+  net_paise: number | null
+  hold_s: number | null
+  strategy: string
+  strategy_override: string | null
+  setup_id: number | null
+  own_expiry_day: boolean
+  index_expiry_day: boolean
+  risk_paise: number | null
+  mae_paise: number | null
+  mfe_paise: number | null
+  mae_ms: number | null
+  mfe_ms: number | null
+  excursion_source: ExcursionSource
+  excursion_note: string | null
+  version: number
+  mistakes: number[]
+}
+
+export interface TripDetail {
+  id: number
+  mode: Mode
+  exchange: string
+  symbol: string
+  instrument_key: string
+  product: string
+  product_class: ProductClass
+  side: Side
+  qty_max: number
+  entry_qty: number
+  exit_qty: number
+  entry_avg_u: number
+  exit_avg_u: number | null
+  opened_ms: number
+  closed_ms: number | null
+  open_day: number
+  close_day: number | null
+  status: TripStatus
+  gross_paise: number | null
+  charges_est_paise: number | null
+  charges_actual_paise: number | null
+  net_paise: number | null
+  hold_s: number | null
+  strategy: string
+  strategy_override: string | null
+  setup_id: number | null
+  own_expiry_day: boolean
+  index_expiry_day: boolean
+  risk_paise: number | null
+  mae_paise: number | null
+  mfe_paise: number | null
+  mae_ms: number | null
+  mfe_ms: number | null
+  excursion_source: ExcursionSource
+  excursion_note: string | null
+  version: number
+  legs: TripLeg[]
+  fills: Fill[]
+  note: TripNote | null
+  excursion: Excursion | null
+  charges: ChargeEstimate | null
+  latency_ms: number | null
+  orders: OrderRef[]
 }
 
 export interface OpSpec {
@@ -589,6 +732,7 @@ export interface SettingsSetReq {
   monthly_on?: boolean
   fy_on?: boolean
   charges_plan?: ChargePlan
+  report_language?: string
 }
 
 export type ReconcileNowReq = Record<string, never>
@@ -604,10 +748,16 @@ export interface FamilyDayReq {
   day: number
 }
 
+export interface NudgeReq {
+  kind: NudgeKind
+  sandbox: boolean
+  at: number
+}
+
 export interface JournalOps {
   state: { req: StateReq; res: State }
-  trips: { req: TripsReq; res: Trip[] }
-  trip_get: { req: TripGetReq; res: Trip }
+  trips: { req: TripsReq; res: TripRow[] }
+  trip_get: { req: TripGetReq; res: TripDetail }
   trip_update: { req: TripUpdateReq; res: Done }
   tags_list: { req: TagsListReq; res: Tag[] }
   tag_create: { req: TagCreateReq; res: Done }
@@ -618,11 +768,12 @@ export interface JournalOps {
   analytics: { req: AnalyticsReq; res: Analytics }
   reports_list: { req: ReportsListReq; res: Report[] }
   report_get: { req: ReportGetReq; res: Report }
-  report_file: { req: ReportFileReq; res: Version }
+  report_file: { req: ReportFileReq; res: ReportFile }
   report_build: { req: ReportBuildReq; res: Done }
   settings_get: { req: SettingsGetReq; res: Settings }
   settings_set: { req: SettingsSetReq; res: Done }
   reconcile_now: { req: ReconcileNowReq; res: Done }
   delivery: { req: DeliveryReq; res: Done }
-  family_day: { req: FamilyDayReq; res: FamilyDay }
+  family_day: { req: FamilyDayReq; res: FamilyCounts }
+  nudge: { req: NudgeReq; res: Done }
 }

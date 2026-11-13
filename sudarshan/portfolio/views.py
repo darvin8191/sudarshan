@@ -391,8 +391,11 @@ class Views:
 
     def _loose_loans(self, tx, tab, today, as_of, now) -> list[dict[str, Any]]:
         """Loans that are on no tab (entered in v0.5.0, before a loan had one), offered on the
-        Summary of every tab the owner can move one to, so that none is out of reach."""
+        Summary of every tab the owner can move one to, so that none is out of reach. A member's
+        scope (a scope with tabs) never sees them: a loan on no tab is shared with no one."""
         if as_of is not None or tab["system"] or tab["kind"] == "upstox" or tab["archived"]:
+            return []
+        if tx.scope.tab_ids is not None:
             return []
         found = []
         for asset in tx.rows("asset"):
@@ -507,12 +510,7 @@ class Views:
     # ---- state and summary ----------------------------------------------------------------------
     def state(self, scope: Scope, *, now: int, version: str) -> dict:
         def run(tx: Tx):
-            jobs = {
-                r["name"]: {k: r[k] for k in ("name", "day", "status", "detail", "at")}
-                for r in tx.job_runs()
-            }
-            nav = tx.nav_day()
-            return {
+            found = {
                 "service_version": version,
                 "schema_version": tx.user_version(),
                 "now": now,
@@ -520,9 +518,22 @@ class Views:
                 "tabs": [serialize.tab(r) for r in tx.rows("tab", "position,id")],
                 "members": [serialize.member(r) for r in tx.rows("member")],
                 "accounts": [serialize.account(r) for r in tx.rows("account")],
-                "jobs": list(jobs.values()),
-                "amfi": {"on": nav is not None, "nav_day": nav},
             }
+            if scope.tab_ids is not None:
+                # A member's scope (Y6): the store has narrowed the rows above to what the shared
+                # tabs reach. An account's note is the owner's own words, and the service's jobs
+                # and fund list are his too.
+                for account in found["accounts"]:
+                    account.pop("note", None)
+                return found
+            jobs = {
+                r["name"]: {k: r[k] for k in ("name", "day", "status", "detail", "at")}
+                for r in tx.job_runs()
+            }
+            nav = tx.nav_day()
+            found["jobs"] = list(jobs.values())
+            found["amfi"] = {"on": nav is not None, "nav_day": nav}
+            return found
 
         return self.store.read(scope, run)
 

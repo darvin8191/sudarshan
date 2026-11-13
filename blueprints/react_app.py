@@ -808,6 +808,19 @@ def react_screener():
     return serve_react_app()
 
 
+# SUDARSHAN M14: the trade journal (its API is /sudarshan/journal/api/*). The page keeps its
+# state in the query string, so this is the only path it owns.
+@react_bp.route("/journal", strict_slashes=False)
+def react_journal():
+    return serve_react_app()
+
+
+# SUDARSHAN M15.10: the reports archive and settings (the same bridge as the journal).
+@react_bp.route("/reports", strict_slashes=False)
+def react_reports():
+    return serve_react_app()
+
+
 # ============================================================
 # Flow Routes - Visual Workflow Automation
 # ============================================================

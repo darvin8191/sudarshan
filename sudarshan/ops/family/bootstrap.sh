@@ -66,7 +66,11 @@ act() { if [[ ${DRY} -eq 1 ]]; then return 0; fi; "$@"; }   # a change, made unl
 # ---- 0. What it needs, checked before anything is changed --------------------------------------------
 if [[ -z "${ROOT}" && ${EUID} -ne 0 ]]; then stop "Run this as root (sudo)."; fi
 for cmd in systemctl nft useradd stat; do
-    command -v "${cmd}" > /dev/null 2>&1 || stop "This server has no ${cmd} command, which the set-up needs."
+    if command -v "${cmd}" > /dev/null 2>&1; then continue; fi
+    if [[ "${cmd}" == nft ]]; then
+        stop "This server has no nft command, which the set-up needs. Install it with: apt install nftables, then run this again."
+    fi
+    stop "This server has no ${cmd} command, which the set-up needs."
 done
 NFT_BIN="$(command -v nft)"
 want_uid=0   # what root's own files are owned by; in a test folder they are the test's own
@@ -144,6 +148,7 @@ ruleset() {
 # Written by sudarshan/ops/family/bootstrap.sh: where the ${ACCOUNT} account may connect.
 # A table of its own, so nothing else in this server's firewall is touched; loading this file again
 # replaces this table only. A refusal is "administratively prohibited", so it is told at once.
+# The "ct state" rule turns connection tracking on for the whole server if it was off.
 table inet ${TABLE}
 delete table inet ${TABLE}
 table inet ${TABLE} {
@@ -171,11 +176,15 @@ unit_text() {
     cat <<EOF
 # Written by sudarshan/ops/family/bootstrap.sh. Loads the ${ACCOUNT} account's allow-list of outgoing
 # connections (${NFT_PATH}) at boot. Its name does not start with sudarshan-, so the deploy tool never
-# manages it. It has no stop command: stopping the unit leaves the rules in place.
+# manages it. It has no stop command: stopping the unit leaves the rules in place. The server's own
+# /etc/nftables.conf usually starts with "flush ruleset", which takes this table away too, so a
+# restart or a reload of nftables.service loads the list again after it (PartOf, ReloadPropagatedFrom).
 [Unit]
 Description=SUDARSHAN family account: allow-list of outgoing connections (nftables)
 After=nftables.service netfilter-persistent.service ufw.service
 Before=sudarshan-family.service
+PartOf=nftables.service
+ReloadPropagatedFrom=nftables.service
 
 [Service]
 Type=oneshot

@@ -107,9 +107,14 @@ def make(base: Path, **modes: int) -> check.Places:
     return check.Places(app, etc, fam, var)
 
 
+#: The loopback ports the set-up's allow-list lets the family account reach.
+ALLOWED = frozenset({5000, 5580, 5581, 5583, 5586})
+
+
 def firewall(host: str, port: int, timeout: float) -> int:
-    """The set-up's firewall, as the family account meets it."""
-    return {5555: errno.EHOSTUNREACH, 8765: errno.EHOSTUNREACH}.get(port, errno.ECONNREFUSED)
+    """The set-up's firewall, as the family account meets it: a port on its list is not refused
+    (nothing listens in a test), every other loopback port is."""
+    return errno.ECONNREFUSED if port in ALLOWED else errno.EHOSTUNREACH
 
 
 def results(places: check.Places, connect=firewall) -> list[list]:
@@ -126,7 +131,7 @@ def failed(found: list[list]) -> list[str]:
 def test_a_server_laid_out_right_passes_every_check(base):
     found = results(make(base))
     assert failed(found) == [], found
-    assert len(found) == 13
+    assert len(found) == 15
     assert all(line.startswith("PASS ") for _p, line in found)
     assert found[8][1].startswith("PASS the family folder: this account opens all 3 files in ")
 
@@ -325,7 +330,24 @@ def test_the_exit_status_is_0_only_when_every_line_passes(base):
 
     assert as_another_account(go(firewall))[0] == 0
     code, out = as_another_account(go(lambda h, p, t: errno.ECONNREFUSED))
-    assert code == 1 and out.count("FAIL ") == 2
+    assert code == 1 and out.count("FAIL ") == 4
+
+
+def test_rules_that_stop_only_the_two_named_ports_fail(base):
+    """L10: the check proves the firewall's default refusal too, on the alerts' port and on a port
+    nothing uses: rules for 5555 and 8765 alone would have passed."""
+
+    def two_ports(host: str, port: int, timeout: float) -> int:
+        return {5555: errno.EHOSTUNREACH, 8765: errno.EHOSTUNREACH}.get(port, errno.ECONNREFUSED)
+
+    places = make(base)
+    refused = "the port itself refused it, so no firewall rule stops it"
+    assert failed(results(places, two_ports)) == [
+        f"FAIL the alerts service (127.0.0.1:5582): {refused}",
+        f"FAIL a port nothing uses (127.0.0.1:1): {refused}",
+    ]
+    passed = [line for _p, line in results(places)]
+    assert "PASS a port nothing uses (127.0.0.1:1): refused by the firewall" in passed
 
 
 def test_the_check_leaves_no_file_or_socket_open(base):

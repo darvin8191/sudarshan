@@ -2191,4 +2191,71 @@ describe('the closing print after the cash close (review M1, M2)', () => {
     })
     live.liveClock.stop()
   })
+
+  it('asks the contract its stop again when the date changes on a terminal left open (review N3)', async () => {
+    const at = (day: number, h: number, mi: number, sec = 0) =>
+      Date.UTC(2026, 11, day, h, mi, sec) / 1000 - 19_800
+    const { state } = mount()
+    const live = state as unknown as {
+      liveStatus: { status(): { line: { kind: string; stoppedAt?: number } } }
+      liveClock: { start(): void; stop(): void }
+    }
+    hours.calendar = new SessionCalendar({
+      timezone: 'Asia/Kolkata',
+      sessions: ['0915-1545:23456'],
+      exceptions: {},
+    })
+    hours.stopped = new SessionCalendar({
+      timezone: 'Asia/Kolkata',
+      sessions: ['0915-1545:23456'],
+      exceptions: { '2026-12-08': ['0915-1530'] },
+    })
+    resetInstrumentSessions()
+    const asked = vi.fn()
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (!String(url).startsWith('/sudarshan/session/instrument?'))
+          return { ok: false, status: 404, json: async () => ({}) }
+        asked()
+        const tuesday = Date.now() + 19_800_000 >= Date.UTC(2026, 11, 8)
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            status: 'success',
+            data: {
+              day: tuesday ? '2026-12-08' : '2026-12-07',
+              stops_at: tuesday ? at(8, 15, 30) * 1000 : null,
+              closing: null,
+            },
+          }),
+        }
+      })
+    )
+    state.sym = { ...state.sym, symbol: 'NIFTY08DEC2625900CE', exchange: 'NFO' }
+    state.interval = '5m'
+    state.rawBars = [bar(at(7, 15, 20), 100), bar(at(7, 15, 25), 100.5)]
+    state.setPriceData()
+    const depth = wiredDepth(state)
+    vi.setSystemTime(at(7, 23, 59, 50) * 1000)
+    state.connectLive()
+    for (let i = 0; i < 5; i++) await vi.advanceTimersByTimeAsync(0)
+    expect(asked).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(10_000) // 00:00:00, a moment short of the timer
+    expect(asked).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(1_000)
+    for (let i = 0; i < 5; i++) await vi.advanceTimersByTimeAsync(0)
+    expect(asked).toHaveBeenCalledTimes(2)
+    vi.setSystemTime(at(8, 15, 29, 50) * 1000)
+    await vi.advanceTimersByTimeAsync(0)
+    depth(100.75, at(8, 15, 29, 59))
+    await vi.advanceTimersByTimeAsync(60_000) // 15:30:50
+    expect(live.liveStatus.status().line).toEqual({
+      kind: 'closed',
+      stoppedAt: at(8, 15, 30) * 1000,
+    })
+    expect(asked).toHaveBeenCalledTimes(2)
+    live.liveClock.stop()
+  })
 })

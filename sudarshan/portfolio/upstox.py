@@ -490,9 +490,9 @@ class UpstoxReader:
         principal: str = OWNER,
     ) -> dict[str, dict[str, Any]]:
         """The parts asked for. ``principal`` is whose read it is: anyone but the owner spends
-        from the budget only above the owner's reserve (budget.RESERVE), and a read the reserve
-        refuses answers the figures already held and changes nothing in the memory the owner
-        reads from."""
+        from the budget only above the owner's reserve (budget.RESERVE), and a read the budget
+        refuses (the reserve, or a bucket empty for the owner too) answers the figures already
+        held and changes nothing in the memory the owner reads from."""
         age = MAX_AGE_S if max_age_s is None else max_age_s
         names = [n for n in UPSTOX_PARTS if n in parts]
         views = await asyncio.gather(*(self._part(name, age, principal) for name in names))
@@ -569,8 +569,11 @@ class UpstoxReader:
             self._say_once("token", "The Upstox token file is missing or unreadable.")
             return self._fail(memory, now, WORDS["token_missing"])
         if not self.budget.take(api, principal):
-            if principal != OWNER and self.budget.can_take(api):
-                return "held"  # the owner could still read: the reserve is what said no
+            if principal != OWNER:
+                # The reserve said no, or a bucket the owner shares is empty: either way a read
+                # for someone else leaves the owner's memory alone, so a family screen never
+                # makes the owner's tab say it is busy (v0.10.0 review M4).
+                return "held"
             return self._fail(memory, now, WORDS["busy"], figures=" They refresh in a moment.")
         path, extra = PATHS[name]
         headers = {"Authorization": f"Bearer {token}", "Accept": "application/json", **extra}

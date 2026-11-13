@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  instrumentSessionDays,
   instrumentSessionFor,
   readInstrumentSession,
   resetInstrumentSessions,
@@ -60,6 +61,18 @@ describe('an instrument session facts (review M1, M2, M3)', () => {
     )
     await instrumentSessionFor('RELIANCE', 'NSE', now + 86_400_000) // the next day
     expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps only today and the previous day, so a page open for weeks holds no more (review N3)', async () => {
+    fetchMock.mockReturnValue(answer({ day: '2026-12-10', stops_at: null, closing: null }))
+    const day = 86_400_000
+    for (let i = 0; i < 5; i++)
+      await instrumentSessionFor('RELIANCE', 'NSE', dec10(11, 0) + i * day)
+    expect(fetchMock).toHaveBeenCalledTimes(5)
+    expect(instrumentSessionDays()).toEqual(['2026-12-13', '2026-12-14'])
+    // an instrument asked the day before is still there the next morning
+    await instrumentSessionFor('RELIANCE', 'NSE', dec10(11, 0) + 4 * day + 60_000)
+    expect(fetchMock).toHaveBeenCalledTimes(5)
   })
 
   it('leaves the chart on the exchange hours when the server cannot say, and asks again later', async () => {

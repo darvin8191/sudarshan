@@ -91,6 +91,11 @@ ORDERS, MARKET, NOTICES, REPORTS = "orders", "market", "notices", "reports"
 #: (two slots each: its text, then its file).
 NOTICES_PER_MINUTE = 1
 REPORTS_PER_MINUTE = 4
+#: A server notice ready to go that has waited this long for a slot takes the next one before a
+#: market alert (review L2): through a steady market storm the two would otherwise race for every
+#: slot of the shared twelve, with no bound on the notice's wait. It costs the market lane at most
+#: one slot a minute (the notice lane's cap).
+NOTICE_WAIT_S = 60.0
 
 
 def _notices_cap() -> int:
@@ -110,14 +115,20 @@ class Pacer(_Pacer):
     PER_MINUTE - MARKET_PER_MINUTE a minute of its own: the other lanes together get the rest, and
     the market lane takes at most MARKET_PER_MINUTE of it. The market lane and the notices lane
     take no slot while order alerts wait; the reports lane takes none while order alerts wait or
-    the market lane has messages waiting.
+    the market lane has messages waiting. The market lane also takes none while a notice ready to
+    go has waited NOTICE_WAIT_S for a slot (the notice desk's LanePace says since when).
     """
 
     def __init__(self) -> None:
         super().__init__(
             (
                 Lane(ORDERS),
-                Lane(MARKET, lambda: MARKET_PER_MINUTE, yields_to=(ORDERS,)),
+                Lane(
+                    MARKET,
+                    lambda: MARKET_PER_MINUTE,
+                    yields_to=(ORDERS,),
+                    yields_after=((NOTICES, lambda: NOTICE_WAIT_S),),
+                ),
                 Lane(NOTICES, _notices_cap, yields_to=(ORDERS,)),
                 Lane(REPORTS, lambda: REPORTS_PER_MINUTE, yields_to=(ORDERS, MARKET)),
             ),

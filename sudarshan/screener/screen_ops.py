@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import asdict
 from datetime import datetime
 from decimal import ROUND_HALF_EVEN, Decimal
@@ -150,12 +150,41 @@ def _sessions_on(ctx, day):
     return sessions_of(day, trading_day=calendar.is_trading_day(day), window=windows.get(day))
 
 
-def next_check(ctx, now: int, active: Sequence[scheduler.Screen], sessions) -> int | None:
+def waits_for(
+    ctx, rows: Iterable[Mapping[str, Any]]
+) -> Callable[[scheduler.Screen], scheduler.Waits] | None:
+    """What the run loop asks of the screens' members, for the next check to read a held 15:30
+    check as its hold's end (review N8): the same ``waits_of`` the runner uses, over the live
+    source's members. None without a source (nothing is held then)."""
+    source = ctx.parts.get("source")
+    if source is None or not hasattr(source, "members"):
+        return None
+    by_id = {row["id"]: row for row in rows}
+    printed_at = getattr(source, "printed_at", None) or (lambda member: 0)
+
+    def waits(screen: scheduler.Screen) -> scheduler.Waits:
+        row = by_id.get(screen.id)
+        if row is None:
+            return scheduler.NO_WAITS
+        members = source.members(row["spec"]["universe"])
+        return scheduler.waits_of(members, printed_at, getattr(source, "follows", None))
+
+    return waits
+
+
+def next_check(
+    ctx,
+    now: int,
+    active: Sequence[scheduler.Screen],
+    sessions,
+    waits: Callable[[scheduler.Screen], scheduler.Waits] | None = None,
+) -> int | None:
     """When the active screens check next: today, or the next trading day's first check
-    ("Market closed · next check Mon 09:30"); None with no active screen."""
+    ("Market closed · next check Mon 09:30"); None with no active screen. A check held for its
+    prints or an index's closing value reads as the moment its hold ends (``waits``)."""
     if not active:
         return None
-    found = scheduler.next_at(active, sessions, now)
+    found = scheduler.next_at(active, sessions, now, waits)
     if found is None:
         found = scheduler.next_trading_boundary(
             active, now, sessions_of=lambda day: _sessions_on(ctx, day)
@@ -163,7 +192,9 @@ def next_check(ctx, now: int, active: Sequence[scheduler.Screen], sessions) -> i
     return found
 
 
-def engine_of(ctx, now: int, active: Sequence[scheduler.Screen], sessions=None) -> words.Engine:
+def engine_of(
+    ctx, now: int, active: Sequence[scheduler.Screen], sessions=None, waits=None
+) -> words.Engine:
     """The runtime's facts when it has them, else sessions and store; the next check either way
     (MEDIUM-3)."""
     facts = ctx.parts.get("engine")
@@ -174,13 +205,15 @@ def engine_of(ctx, now: int, active: Sequence[scheduler.Screen], sessions=None) 
     else:
         base["trading"] = any(s.start <= now < s.end for s in sessions.values())
         base["feed"] = "not_linked"  # no feed link registered: never claim real time (rule 7)
-    base["next_at"] = next_check(ctx, now, active, sessions)
+    base["next_at"] = next_check(ctx, now, active, sessions, waits)
     return words.Engine(**{k: v for k, v in base.items() if k in words.Engine.__dataclass_fields__})
 
 
-def engine_line(ctx, now: int, active: Sequence[scheduler.Screen], sessions=None) -> dict[str, Any]:
+def engine_line(
+    ctx, now: int, active: Sequence[scheduler.Screen], sessions=None, waits=None
+) -> dict[str, Any]:
     """The line under the header, e.g. 'Real-time · next check 10:45'."""
-    engine = engine_of(ctx, now, active, sessions)
+    engine = engine_of(ctx, now, active, sessions, waits)
     state = words.engine_state(engine)
     return {
         "state": state,
@@ -414,7 +447,9 @@ def engine_push(service, last: dict[str, Any] | None) -> dict[str, Any]:
     rows = service.store.read(
         OWNER, lambda tx: [r for r in tx.screens() if r["status"] == "active"]
     )
-    line = engine_line(service, now, [sched_screen(r) for r in rows], sessions)
+    line = engine_line(
+        service, now, [sched_screen(r) for r in rows], sessions, waits_for(service, rows)
+    )
     if last is None or (line["state"], line["line"]) != (last["state"], last["line"]):
         payload = {"_event": EVENT_STATE, "engine": line, "screens": [], "removed": []}
         service.store.write(
@@ -433,22 +468,23 @@ async def state(ctx, args: Mapping[str, Any]) -> dict[str, Any]:
     def read(tx: Tx):
         screens = tx.screens()
         active = [sched_screen(r) for r in screens if r["status"] == "active"]
+        waits = waits_for(ctx, screens)
         rows = []
         for row in screens:
             next_at = (
-                scheduler.next_at([sched_screen(row)], sessions, now)
+                scheduler.next_at([sched_screen(row)], sessions, now, waits)
                 if row["status"] == "active"
                 else None
             )
             rows.append(screen_row(tx, row, now, session, next_at))
         newest = tx.runs_page_all(1)
-        return rows, active, (newest[0]["id"] if newest else 0)
+        return rows, active, (newest[0]["id"] if newest else 0), waits
 
-    rows, active, last_run_id = _translate(lambda: store.read(OWNER, read))
+    rows, active, last_run_id, waits = _translate(lambda: store.read(OWNER, read))
     intraday = sum(1 for r in rows if r["status"] == "active" and r["spec"]["run"]["on"] == "close")
     return {
         "enabled": True,
-        "engine": engine_line(ctx, now, active, sessions),
+        "engine": engine_line(ctx, now, active, sessions, waits),
         "screens": rows,
         "limits": {
             "active": ctx.settings.max_active,
@@ -463,7 +499,9 @@ async def state(ctx, args: Mapping[str, Any]) -> dict[str, Any]:
 def _summary(ctx, tx: Tx, row: Mapping[str, Any], now: int) -> dict[str, Any]:
     sessions = _sessions(ctx, now)
     next_at = (
-        scheduler.next_at([sched_screen(row)], sessions, now) if row["status"] == "active" else None
+        scheduler.next_at([sched_screen(row)], sessions, now, waits_for(ctx, [row]))
+        if row["status"] == "active"
+        else None
     )
     return screen_row(tx, row, now, _session_key(now), next_at)
 
