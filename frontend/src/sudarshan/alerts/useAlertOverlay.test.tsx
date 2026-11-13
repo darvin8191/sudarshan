@@ -61,6 +61,17 @@ describe('the list alert address', () => {
     })
     expect(listAlertAddress({ ref: 'a', name: 'A', count: 0 })).not.toContain('fed')
   })
+
+  it('leaves the count out when it is not known, and reads that back as none (lane F, F10)', () => {
+    const address = listAlertAddress({ ref: 'preset:fno_stocks', name: 'F&O stocks' })
+    expect(address).not.toContain('count')
+    expect(alertOverlayOf(new URL(address, 'http://x').searchParams)).toMatchObject({
+      kind: 'list',
+      count: null,
+    })
+    // A known count of 0 is still said: an own list can be empty.
+    expect(listAlertAddress({ ref: 'a', name: 'A', count: 0 })).toContain('count=0')
+  })
 })
 
 function wrapper(entries: Array<string | { pathname: string; search: string; state?: unknown }>) {

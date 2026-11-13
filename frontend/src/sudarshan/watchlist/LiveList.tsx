@@ -9,6 +9,7 @@ import { exitedToday, tagsOf, usePin } from '@/sudarshan/screener/feed'
 import type { ArrangeEdit } from './ArrangeSheet'
 import { FOLLOW_CAP } from './follow'
 import { figuresFor, type HeldFigures, HeldSwitch, indexBook, isinsOf } from './HoldingLine'
+import { PresetLine } from './PresetLine'
 import { type ArrangeActions, type OrderRequest, SymbolSheet } from './SymbolSheet'
 import { DEFAULT_PREF, isDefaultView } from './sort'
 import { useHeld } from './useHeld'
@@ -54,9 +55,12 @@ export const LiveList = memo(function LiveList({
   readOnly,
   flagNames,
   noRemove,
+  preset,
 }: {
   /** v2 (F8): the five flag names; present while the switch is on. Rows carry flag and note markers and the sheet its flag and note. */
   flagNames?: readonly FlagName[]
+  /** v2 (F10): a built-in list: the server's lines over the rows and Make a copy, which is given the keys as shown. */
+  preset?: { lines: readonly string[]; onCopy: (keys: string[]) => void }
   /** v2 (F8): a flag list is read-only: no Remove in the sheet. */
   noRemove?: boolean
   items: WatchlistItem[]
@@ -181,6 +185,14 @@ export const LiveList = memo(function LiveList({
 
       {pref && !editing && (
         <ViewLine pref={pref} at={sorted.at} readAt={sorted.readAt} onAgain={sorted.again} />
+      )}
+
+      {preset && (
+        <PresetLine // F10
+          lines={preset.lines}
+          empty={shown.length === 0}
+          onCopy={() => preset.onCopy(shown.map((row) => row.key))}
+        />
       )}
 
       <section

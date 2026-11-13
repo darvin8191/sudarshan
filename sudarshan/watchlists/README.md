@@ -794,6 +794,47 @@ page its offers.
   lane A's form, headed "Every symbol of Swing (24)").
 
 
+## F10 - built-in lists on the phone
+
+A built-in list (`preset:<id>`, from W12) opens like any list: from the All lists sheet (the group
+"Built-in (locked)", after the own lists, each with its count, or none while the master is not loaded,
+and its note such as "As of 9 Nov 2026") or from a favourite tab. Nothing assumes the three lists of
+W12: the page reads whatever `lists.presets` names, so W13's typed lists arrive with no phone change.
+
+- **Rows and words.** The page reads the list from `view` alone, as it does a flag list (`itemsOf`), so
+  there is no OpenAlgo item behind a row. The tab carries the lock glyph and a label for screen
+  readers ("built-in, locked"); a list opened from the sheet that is not a favourite gets a tab once
+  its view has said its name. Over the rows (`PresetLine.tsx`) the server's `lines` are shown as sent,
+  in order, each once. F9 has no list-level line of its own: it marks each row outside the followed
+  window ("not real-time: this list follows 120 rows at a time"), which stays, since a row that is not
+  moving must say so. So over 250 rows the server's window line is shown once and the rows carry their
+  own marker.
+- **What is absent, not disabled.** The header Add, edit mode and move, remove in the symbol sheet,
+  sections and "New section", and in the list menu Rename list, Reorder or remove and Delete list
+  (`ListTabs` `locked`). What works: the View sheet (sort and change basis, saved under the built-in
+  list's ref by `pref`), flags and notes, the holdings line, the cap and window of F9, and "Alert on
+  this list".
+- **Make a copy** (48 dp, under the lines) opens the existing name dialog (`NameDialog`, mode `copy`)
+  prefilled "<name> (my copy)" (cut to fit 64 letters), behind the 500 ms open guard (`?sheet=copy`,
+  v2 only). It sends one `copy` with `keys`: every row in the order shown at the tap, after a sort
+  too. The server cuts at 250 and says so in `CopyDone.words`, shown as a toast as sent (the page's own
+  "Copied N symbols to NAME." only when the server sent none). When it is done the lists are read
+  again and the new list is opened. A refusal (the 50-list cap) is shown in the dialog, in the
+  server's sentence, and the dialog stays open.
+- **A list that cannot be shown.** The master not loaded (`failed`) and an unknown id (`gone`) show
+  the server's sentence in place of rows (with Try again for the first only), never an empty list that
+  looks real, and no Make a copy.
+- **Alert on this list without a count.** A built-in list whose count is not known passed 0 and the
+  form read "(0)". `listAlertAddress` (lane A's `alerts/useAlertOverlay.ts`, a small edit marked
+  "lane F (F10)") takes `count` as optional and leaves it out of the address when not known; the page
+  passes the count the open view reports (`total`), else the tab's, else none.
+- **With the switch off** the page is as before: the new code is reached only through `v2`.
+- **Tests:** `pages/Watchlist.preset.test.tsx` (the All lists group with a known and an unknown count,
+  the lock and the lines once each, the window line once over 300 rows, no edit control, sort, flags
+  and notes, Make a copy in the order shown after a sort and the server's words, the refusal, the
+  500 ms guard, the `failed` and `gone` sentences, the alert address with and without a count, the
+  switch off), `alerts/useAlertOverlay.test.tsx` (the address with no count).
+
 ## W12 - built-in lists from the master (`presets/`, `refs/preset.py`, `ops/presets.py`, `words/presets.py`)
 
 Three built-in lists made from today's master: **Indices**, **F&O stocks** and **Index futures**

@@ -64,15 +64,16 @@ function listOf(params: URLSearchParams): AlertOverlay | null {
 export function listAlertAddress(list: {
   ref: string
   name: string
-  count: number
+  /** lane F (F10): absent while the count is not known (a built-in list not read yet), never 0. */
+  count?: number
   fed?: boolean
 }): string {
   const query = new URLSearchParams({
     sheet: 'list',
     ref: list.ref,
     name: list.name,
-    count: String(list.count),
   })
+  if (list.count !== undefined) query.set('count', String(list.count)) // lane F (F10)
   if (list.fed) query.set('fed', '1')
   return `${ALERTS_PATH}?${query.toString()}`
 }

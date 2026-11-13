@@ -104,7 +104,10 @@ export function AllListsSheet({
     void save(next)
   }
 
-  const row = (entry: Pick<Entry, 'ref' | 'kind' | 'name' | 'count'>, extra?: ReactNode) => {
+  const row = (
+    entry: Pick<Entry, 'ref' | 'kind' | 'name' | 'count'> & { note?: string | null },
+    extra?: ReactNode
+  ) => {
     const on = pinnedRefs.has(entry.ref)
     const Glyph = entry.kind === 'preset' ? Lock : entry.kind === 'ranked' ? TrendingUp : Flag
     const flagNo = entry.kind === 'flag' ? Number(entry.ref.slice(5)) : 0 // F8
@@ -135,6 +138,8 @@ export function AllListsSheet({
             )}
             {words}
             {entry.kind !== 'flag' && entry.count !== null && <span>, {entry.count}</span>}
+            {entry.kind === 'preset' && entry.note && <span> · {entry.note}</span>}
+            {/* F10 */}
           </span>
         </button>
         {extra}

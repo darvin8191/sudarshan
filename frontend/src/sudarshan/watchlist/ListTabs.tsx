@@ -54,6 +54,7 @@ export function ListTabs({
   newSectionOff,
   onView,
   alert,
+  locked,
 }: {
   lists: Watchlist[]
   activeId: number | null
@@ -75,6 +76,8 @@ export function ListTabs({
   onView?: () => void
   /** F17: "Alert on this list", for the list on show; off with its reason, never hidden. */
   alert?: AlertOffer
+  /** F10: a built-in list is on show. Rename, Reorder or remove and Delete are absent, not dead. */
+  locked?: boolean
 }) {
   // F3: with v2 on the menu ignores taps for its first half second (openGuard.ts).
   const [menuOpen, setMenuOpen] = useState(false)
@@ -184,10 +187,16 @@ export function ListTabs({
               {LISTS_FULL}
             </p>
           )}
-          <DropdownMenuItem className={MENU_ITEM} disabled={activeId === null} onSelect={onRename}>
-            <Pencil aria-hidden="true" className="size-5" />
-            Rename list
-          </DropdownMenuItem>
+          {!locked && (
+            <DropdownMenuItem
+              className={MENU_ITEM}
+              disabled={activeId === null}
+              onSelect={onRename}
+            >
+              <Pencil aria-hidden="true" className="size-5" />
+              Rename list
+            </DropdownMenuItem>
+          )}
           {onNewSection && (
             <>
               <DropdownMenuItem
@@ -236,23 +245,31 @@ export function ListTabs({
               )}
             </>
           )}
-          <DropdownMenuItem className={MENU_ITEM} disabled={activeId === null} onSelect={onEdit}>
-            {editing ? (
-              <Check aria-hidden="true" className="size-5" />
-            ) : (
-              <ArrowUpDown aria-hidden="true" className="size-5" />
-            )}
-            {editing ? 'Done editing' : 'Reorder or remove'}
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem
-            className={cn(MENU_ITEM, 'text-[color:var(--down)] focus:text-[color:var(--down)]')}
-            disabled={activeId === null}
-            onSelect={onDelete}
-          >
-            <Trash2 aria-hidden="true" className="size-5 text-current" />
-            Delete list
-          </DropdownMenuItem>
+          {!locked && (
+            <>
+              <DropdownMenuItem
+                className={MENU_ITEM}
+                disabled={activeId === null}
+                onSelect={onEdit}
+              >
+                {editing ? (
+                  <Check aria-hidden="true" className="size-5" />
+                ) : (
+                  <ArrowUpDown aria-hidden="true" className="size-5" />
+                )}
+                {editing ? 'Done editing' : 'Reorder or remove'}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                className={cn(MENU_ITEM, 'text-[color:var(--down)] focus:text-[color:var(--down)]')}
+                disabled={activeId === null}
+                onSelect={onDelete}
+              >
+                <Trash2 aria-hidden="true" className="size-5 text-current" />
+                Delete list
+              </DropdownMenuItem>
+            </>
+          )}
         </DropdownMenuContent>
       </DropdownMenu>
     </div>

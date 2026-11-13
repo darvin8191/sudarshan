@@ -20,6 +20,7 @@ import type { OrderRequest } from './SymbolSheet'
  *   known to the address only while v2 is on (`useOverlay(true)`), so with the
  *   switch off the page reads its address exactly as it did.
  * - `?sheet=view` (M8.7 F6, v2 only): the View sheet: sort and change basis.
+ * - `?sheet=copy` (M8.8 F10, v2 only): the name dialog of Make a copy on a built-in list.
  * - `?sheet=to-section&ci=<item>` and `?sheet=to-list&ci=<item>` or `&section=<id>`, with `&move=1`
  *   for a move (M8.4 F5, v2 only): the section picker and the list picker.
  * - `?sheet=section&section=<id>` (M8.4 F3, v2 only): a section's menu; `?sheet=section-name`
@@ -36,6 +37,7 @@ export type Overlay =
   | { kind: 'alert'; alert: AlertPrefill | null }
   | { kind: 'lists' }
   | { kind: 'view' } // F6
+  | { kind: 'copy' } // F10
   | { kind: 'section'; sectionId: number }
   | { kind: 'sectionName'; sectionId: number | null }
   | { kind: 'sectionRemove'; sectionId: number }
@@ -52,6 +54,7 @@ const SHEETS = new Set(['add', 'new', 'rename', 'delete', 'order', 'alert'])
 const V2_SHEETS = new Set([
   'lists',
   'view', // F6
+  'copy', // F10
   'section',
   'section-name',
   'section-remove',

@@ -31,7 +31,7 @@ export interface AlertOffer {
 
 /** Decides one item: the first reason wins (the feature, then the kind of list, then the alerts). */
 export function offerFor(
-  list: { ref: string; name: string; count: number; kind: RefKind; fed: boolean },
+  list: { ref: string; name: string; count?: number; kind: RefKind; fed: boolean }, // F10: no count while not known
   on: { v2: boolean; alerts: boolean },
   go: (href: string) => void
 ): AlertOffer {
@@ -53,7 +53,7 @@ export function useAlertOffers(v2: boolean, fedIds: ReadonlySet<number>) {
   const alerts = useMarketAlertsState().data?.enabled !== false
   const go = useCallback((href: string) => navigate(href), [navigate])
   return useCallback(
-    (ref: string, name: string, count: number, kind: RefKind = 'list') => {
+    (ref: string, name: string, count: number | undefined, kind: RefKind = 'list') => {
       const id = ownId(ref.split('/')[0])
       return offerFor(
         { ref, name, count, kind, fed: id !== null && fedIds.has(id) },

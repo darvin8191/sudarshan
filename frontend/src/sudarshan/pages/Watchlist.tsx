@@ -32,6 +32,7 @@ import { DeleteDialog, NameDialog } from '@/sudarshan/watchlist/ListDialogs'
 import { ListStrip, ownId, ownRef, tabsFor } from '@/sudarshan/watchlist/ListStrip'
 import { LISTS_FULL, ListTabs, PANEL_ID, tabId } from '@/sudarshan/watchlist/ListTabs'
 import { LiveList } from '@/sudarshan/watchlist/LiveList'
+import { copyName, copyPreset } from '@/sudarshan/watchlist/PresetLine'
 import { SectionSheets } from '@/sudarshan/watchlist/SectionMenus'
 import type { OrderRequest } from '@/sudarshan/watchlist/SymbolSheet'
 import { useOverlay } from '@/sudarshan/watchlist/useOverlay'
@@ -44,6 +45,7 @@ import { groupsOf, SECTIONS_FULL, useCollapsed } from '@/sudarshan/watchlist/v2/
 import { LIMITS } from '@/sudarshan/watchlist/v2/types'
 import { useListView, useV2State } from '@/sudarshan/watchlist/v2/useListView'
 import { usePush } from '@/sudarshan/watchlist/v2/usePush'
+import { toast } from '@/utils/toast'
 
 /** The list that was open last on this device: a convenience, so it lives in this browser only. */
 export const OPEN_LIST_KEY = 'sudarshan-watchlist-open'
@@ -109,6 +111,13 @@ export default function Watchlist() {
   const flagRef = v2 && otherRef?.startsWith('flag:') ? otherRef : null
   const flagView = useListView(flagRef).data
   const flagItems = useMemo(() => itemsOf(flagView), [flagView])
+  // F10 (v2): a built-in list is read from `view` alone, as a flag list is: locked, in the master's order.
+  const presetRef = v2 && otherRef?.startsWith('preset:') ? otherRef : null
+  const presetRead = useListView(presetRef)
+  const presetView = presetRead.data
+  const presetItems = useMemo(() => itemsOf(presetView), [presetView])
+  const [copyKeys, setCopyKeys] = useState<readonly string[] | null>(null)
+  const shownItems = flagRef ? flagItems : presetRef ? presetItems : items
 
   // What is open over the list lives in the address, so Back closes it.
   const { overlay, open, swap, close } = useOverlay(v2)
@@ -124,14 +133,15 @@ export default function Watchlist() {
   const orphan =
     overlay !== null &&
     settled &&
-    ((overlay.kind === 'item' &&
-      !(flagRef ? flagItems : items).some((item) => item.id === overlay.itemId)) ||
+    ((overlay.kind === 'item' && !shownItems.some((item) => item.id === overlay.itemId)) ||
+      (overlay.kind === 'copy' && (presetRef === null || copyKeys === null)) || // F10
       (overlay.kind === 'order' && overlay.order === null) ||
       (overlay.kind === 'alert' && overlay.alert === null) ||
       (overlay.kind !== 'item' &&
         overlay.kind !== 'order' &&
         overlay.kind !== 'alert' &&
         overlay.kind !== 'new' &&
+        overlay.kind !== 'copy' &&
         !active))
   useEffect(() => {
     if (orphan) close()
@@ -164,16 +174,23 @@ export default function Watchlist() {
     const shown = tabsFor(v2State?.favourites ?? [], watchlists.lists)
     const open = active ? ownRef(active.id) : null
     // The open list always has a tab, even when it is not a favourite.
+    // F10: a built-in list opened from All lists has a tab too, once its view says its name.
+    if (presetRef && presetView && !shown.some((tab) => tab.ref === presetRef))
+      return [
+        ...shown,
+        { ref: presetRef, kind: 'preset' as const, name: presetView.name, count: presetView.total },
+      ]
     return open && !otherRef && !shown.some((tab) => tab.ref === open) && active
       ? [
           ...shown,
           { ref: open, kind: 'list' as const, name: active.name, count: active.items.length },
         ]
       : shown
-  }, [v2, v2State?.favourites, watchlists.lists, active, otherRef])
+  }, [v2, v2State?.favourites, watchlists.lists, active, otherRef, presetRef, presetView])
   const foreign =
     v2 && otherRef !== null ? (tabs.find((tab) => tab.ref === otherRef) ?? null) : null
-  const activeRef = flagRef ?? (foreign ? foreign.ref : active ? ownRef(active.id) : null)
+  const activeRef =
+    flagRef ?? presetRef ?? (foreign ? foreign.ref : active ? ownRef(active.id) : null)
 
   const activeId = active?.id ?? null
   // F17: "Alert on this list" is for the list on show: an own list, a built-in, ranked or flag one.
@@ -186,15 +203,24 @@ export default function Watchlist() {
         'flag'
       )
     : foreign
-      ? alertFor(foreign.ref, foreign.name, foreign.count ?? 0, foreign.kind)
-      : active
-        ? alertFor(ownRef(active.id), active.name, items.length)
-        : undefined
+      ? alertFor(
+          foreign.ref,
+          foreign.name,
+          (presetRef ? presetView?.total : undefined) ?? foreign.count ?? undefined, // F10: not known is not 0
+          foreign.kind
+        )
+      : presetRef
+        ? undefined // F10: its tab is not there until the list is read
+        : active
+          ? alertFor(ownRef(active.id), active.name, items.length)
+          : undefined
   // F3 (v2): the open own list in sections, read from the `view` op; flat while it is not read.
   const sectionsRef = v2 && active && !foreign && !flagRef ? ownRef(active.id) : null
   const view = useListView(sectionsRef).data
   const folds = useCollapsed(sectionsRef)
-  const viewPref = useViewPref(sectionsRef, view) // F6
+  // F6; F10: a built-in list has a View of its own (sort and basis), saved under its ref.
+  const prefRef = sectionsRef ?? (presetView ? presetRef : null)
+  const viewPref = useViewPref(prefRef, sectionsRef ? view : presetView)
   const sectionLayout = useMemo(
     () =>
       view && sectionsRef
@@ -261,6 +287,10 @@ export default function Watchlist() {
   )
   const deleting = overlay?.kind === 'delete'
   const activeName = active?.name
+  const presetPanel = useMemo(
+    () => ({ id: PANEL_ID, role: 'tabpanel' as const, 'aria-label': presetView?.name }),
+    [presetView?.name]
+  )
   const doomed = useMemo(
     () => (deleting && activeName !== undefined ? { name: activeName, count: items.length } : null),
     [deleting, activeName, items.length]
@@ -290,7 +320,7 @@ export default function Watchlist() {
             <Check aria-hidden="true" className="size-5" />
             Done
           </button>
-        ) : (
+        ) : presetRef ? null /* F10: a built-in list has no Add */ : (
           <button
             type="button"
             disabled={!active || apiKey === null || full || foreign !== null || flagRef !== null}
@@ -304,7 +334,7 @@ export default function Watchlist() {
         )}
       </div>
 
-      {full && !editing && (
+      {full && !editing && !presetRef && (
         <p id="sd-watchlist-full" className="px-1 text-xs font-medium text-muted-foreground">
           {LIST_FULL}
         </p>
@@ -352,7 +382,8 @@ export default function Watchlist() {
               onNewSection={
                 sectionsRef ? () => open({ kind: 'sectionName', sectionId: null }) : undefined
               }
-              onView={sectionsRef ? () => open({ kind: 'view' }) : undefined} // F6
+              onView={prefRef ? () => open({ kind: 'view' }) : undefined} // F6, F10
+              locked={presetRef !== null} // F10
               alert={listAlert} // F17
               newSectionOff={
                 view && view.sections.length >= LIMITS.sections_per_list ? SECTIONS_FULL : null
@@ -378,7 +409,34 @@ export default function Watchlist() {
               </p>
             ) /* F8 */
           }
-          {foreign && !flagRef ? (
+          {presetRef && !presetView ? (
+            <section
+              id={PANEL_ID}
+              role="tabpanel"
+              aria-label={foreign?.name ?? 'Built-in list'}
+              className="flex flex-col items-start gap-3 rounded-[1.125rem] border bg-card px-4 py-6 text-sm font-medium"
+            >
+              {presetRead.isError ? (
+                <>
+                  <p role="alert" className="font-semibold">
+                    {presetRead.error.message /* the server's sentence: never an empty list */}
+                  </p>
+                  {presetRead.error.code !== 'gone' && (
+                    <button
+                      type="button"
+                      onClick={() => void presetRead.refetch()}
+                      className={cn(HEADER_BUTTON, 'border border-input bg-card hover:bg-accent')}
+                    >
+                      <RefreshCw aria-hidden="true" className="size-4" />
+                      Try again
+                    </button>
+                  )}
+                </>
+              ) : (
+                <output>Reading the list.</output>
+              )}
+            </section>
+          ) : foreign && !flagRef && !presetRef ? (
             <section
               id={PANEL_ID}
               role="tabpanel"
@@ -390,14 +448,14 @@ export default function Watchlist() {
             </section>
           ) : (
             <LiveList
-              items={flagRef ? flagItems : items}
+              items={shownItems}
               apiKey={apiKey}
               isOpen={isOpen}
               loading={watchlists.loading}
               editing={editing && !flagRef}
-              listName={active?.name ?? 'the list'}
+              listName={(presetRef ? presetView?.name : active?.name) ?? 'the list'}
               openItemId={openItemId}
-              panel={panel}
+              panel={presetRef ? presetPanel : panel}
               onOpen={openSheet}
               onMove={moveItem}
               onRemove={removeItem}
@@ -405,15 +463,26 @@ export default function Watchlist() {
               onCloseSheet={close}
               onOrder={placeOrder}
               onAlert={setAlert}
-              members={flagRef ? undefined : members}
+              members={flagRef || presetRef ? undefined : members}
               sections={sectionLayout}
               arrange={arrange.edit} // F5
               symbolActions={symbolActions} // F5
-              viewPref={sectionsRef ? viewPref : undefined} // F6
+              viewPref={prefRef ? viewPref : undefined} // F6, F10
               viewOpen={overlay?.kind === 'view'} // F6
-              view={flagRef ? flagView : sectionsRef ? view : undefined} // F7, F8
+              view={flagRef ? flagView : sectionsRef ? view : presetRef ? presetView : undefined} // F7, F8, F10
               flagNames={v2 ? (v2State?.flag_names ?? []) : undefined} // F8
-              noRemove={flagRef !== null} // F8
+              noRemove={flagRef !== null || presetRef !== null} // F8, F10
+              preset={
+                presetView
+                  ? {
+                      lines: presetView.lines,
+                      onCopy: (keys) => {
+                        setCopyKeys(keys)
+                        open({ kind: 'copy' })
+                      },
+                    }
+                  : undefined
+              } // F10
             />
           )}
         </>
@@ -472,10 +541,27 @@ export default function Watchlist() {
       />
 
       <NameDialog
-        mode={overlay?.kind === 'new' ? 'create' : overlay?.kind === 'rename' ? 'rename' : null}
-        current={active?.name ?? ''}
+        mode={
+          overlay?.kind === 'copy' && presetView && copyKeys
+            ? 'copy'
+            : overlay?.kind === 'new'
+              ? 'create'
+              : overlay?.kind === 'rename'
+                ? 'rename'
+                : null
+        }
+        current={
+          overlay?.kind === 'copy' && presetView ? copyName(presetView.name) : (active?.name ?? '')
+        }
         onClose={close}
         onSubmit={async (name) => {
+          if (overlay?.kind === 'copy' && presetRef && copyKeys) {
+            // F10: every key in the order shown; the server's words (the 250 cut) are shown as sent.
+            const copied = await copyPreset(queryClient, presetRef, copyKeys, name)
+            toast.success(copied.words)
+            select(copied.done.list)
+            return
+          }
           if (overlay?.kind === 'rename' && active) {
             await watchlists.rename(active.id, name)
           } else {
