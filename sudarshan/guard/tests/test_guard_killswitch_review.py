@@ -579,7 +579,7 @@ def test_l1_resume_says_new_orders_stay_refused_while_the_day_is_locked(chat, mo
 
 def test_l6_unreadable_settings_still_let_the_switch_be_turned_on(chat, monkeypatch):
     monkeypatch.setenv(flag.ENV, "on")
-    monkeypatch.setattr(killswitch, "_settings", lambda: None)
+    monkeypatch.setattr(killswitch, "_settings", lambda **_: None)
     owner = killswitch.Owner("owner", "app", "owner", "token", "upstox", "KEY")
     assert killswitch.activate(owner, exit_all=False, phrase="nope").status == 400
     assert (

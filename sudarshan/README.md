@@ -514,3 +514,27 @@ Tests: `sudarshan/ops/tests/test_deploy_notices.py` (the whole tool on a fake se
 `test_ops_events.py`, and `sudarshan/alerts/tests/test_alerts_notices.py`.
 
 Tests: `sudarshan/ops/tests/test_ops_docs.py`.
+
+## The risk layer's confirm phrase, if it is forgotten (M5.13)
+
+The kill switch cannot be turned off, and no limit can be loosened, without the confirm phrase,
+and the app never shows it once saved. If it is forgotten, it is set back to the default (STOP)
+on the server, as the service user, from the app folder the deploy tool installs into:
+
+```
+cd /opt/sudarshan/apps/openalgo && sudo -u sudarshan .venv/bin/python -m sudarshan.guard.phrase --reset
+```
+
+- `--status` says whether the phrase is the default. It never prints the phrase.
+- The reset writes a line to Settings > Risk > History ("The confirm phrase was set back to the
+  default on the server.") and sends the owner a notice on Telegram, so a reset nobody asked for
+  is seen. The command's output says whether the notice went; when the Telegram bot is off or no
+  account is linked, it says so and the reset stands.
+- It applies at the next try, within seconds, and nothing needs restarting: the app reads the
+  phrase from the database each time it is asked for, never from what it kept a minute earlier.
+- Change it again afterwards from Settings > Risk. A phrase that is already the default is left
+  alone: the command says so and writes and sends nothing.
+- Every wrong phrase is in History as well (turning the kill switch on or off, changing a limit),
+  with what was being asked and how many tries, never with what was typed.
+
+Tests: `sudarshan/guard/tests/test_guard_phrase.py`.

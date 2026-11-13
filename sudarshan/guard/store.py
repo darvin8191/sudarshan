@@ -237,8 +237,16 @@ class RiskStore:
 
     # -- settings -----------------------------------------------------------------------------
 
-    def settings(self) -> RiskSettings:
-        """The owner's settings, one whole version."""
+    def settings(self, *, fresh: bool = False) -> RiskSettings:
+        """The owner's settings, one whole version.
+
+        ``fresh`` reads the database whatever the cache holds, and keeps what it read for the
+        callers after it. The confirm phrase is asked for this way, so a phrase set back from
+        another process (``phrase.py --reset``) is the one typed against at the next try, not a
+        minute later.
+        """
+        if fresh:
+            self._cache.invalidate("settings")
         return self._cache.get_or_load("settings", self._load_settings)
 
     def _load_settings(self) -> RiskSettings:

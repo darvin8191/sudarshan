@@ -38,6 +38,7 @@ const SURFACES: Record<string, string> = {
   app: 'the app',
   telegram: 'Telegram',
   api: 'a script or an alert',
+  server: 'the server',
 }
 
 /** Where the switch was turned on from, as the trader would say it. */
