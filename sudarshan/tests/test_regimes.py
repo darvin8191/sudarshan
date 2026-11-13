@@ -100,3 +100,67 @@ def test_sessions_py_reads_the_one_table():
     assert sessions.INDEX_UNDERLYINGS is regimes.INDEX_UNDERLYINGS
     assert sessions.SEGMENTS["NSE_FO"] == regimes.REGIMES[0].fo
     assert sessions.SEGMENTS["NSE_EQ"] == regimes.REGIMES[0].cash
+
+
+# ---- which contracts are an index's (review L1) ---------------------------------------------------
+@pytest.mark.parametrize(
+    ("symbol", "underlying", "index"),
+    [
+        ("NIFTY08DEC2625900CE", "NIFTY", True),
+        ("NIFTYFPI29DEC2618000CE", "NIFTYFPI", True),  # read as NIFTY's before L1
+        ("NIFTYFPI27OCT26FUT", "NIFTYFPI", True),
+        ("NIFTYNXT5029DEC26FUT", "NIFTYNXT50", True),
+        ("MIDCPNIFTY29DEC2613000PE", "MIDCPNIFTY", True),
+        ("FINNIFTY29DEC2627000CE", "FINNIFTY", True),
+        ("BANKNIFTY29DEC26FUT", "BANKNIFTY", True),
+        ("SENSEX10DEC2682000PE", "SENSEX", True),
+        ("SENSEX5029DEC26FUT", "SENSEX50", True),
+        ("BANKEX29DEC2660000CE", "BANKEX", True),
+        ("RELIANCE29DEC261400CE", "RELIANCE", False),
+        ("BANKBARODA29DEC26FUT", "BANKBARODA", False),
+        ("BANKINDIA29DEC26120CE", "BANKINDIA", False),
+        ("M&M29DEC263000CE", "M&M", False),
+        ("BAJAJ-AUTO29DEC269000PE", "BAJAJ-AUTO", False),
+        ("360ONE29DEC26FUT", "360ONE", False),
+        ("VEDL25APR24292.5CE", "VEDL", False),
+        ("NIFTY", None, False),  # the index itself, or a cash symbol
+        ("NIFTYBEES", None, False),
+        ("NIFTYIT", None, False),
+        ("NIFTY08DEC26", None, False),  # no FUT, no strike: not a contract
+    ],
+)
+def test_an_index_contract_is_told_by_its_whole_underlying(symbol, underlying, index):
+    assert regimes.underlying_of(symbol) == underlying
+    assert regimes.index_derivative(symbol) is index
+    names = regimes.index_underlyings([(symbol, "FUT")], cash={"RELIANCE", "BANKBARODA",
+                                      "BANKINDIA", "M&M", "BAJAJ-AUTO", "360ONE", "VEDL"})  # fmt: skip
+    assert regimes.index_derivative(symbol, names) is index
+
+
+def test_the_master_says_which_futures_are_an_index_s():
+    """Upstox marks every future FUT: an underlying listed as an index, or not listed as a cash
+    stock, is an index's. A master that marks FUTIDX and FUTSTK says it outright."""
+    upstox = [
+        ("NIFTY29DEC26FUT", "FUT"), ("NIFTYFPI29DEC26FUT", "FUT"), ("FOCIT29DEC26FUT", "FUT"),
+        ("NEWINDEX29DEC26FUT", "FUT"), ("RELIANCE29DEC26FUT", "FUT"), ("M&M29DEC26FUT", "FUT"),
+        ("360ONE29DEC26FUT", "FUT"), ("BANKINDIA29DEC26FUT", "FUT"), ("NIFTY50X29DEC26FUT", "FUT"),
+    ]  # fmt: skip
+    cash = {"RELIANCE", "M&M", "360ONE", "BANKINDIA"}
+    names = regimes.index_underlyings(upstox, cash=cash, indices={"NIFTY", "NIFTY50X"})
+    assert {"FOCIT", "NEWINDEX", "NIFTYFPI", "NIFTY50X"} <= names
+    assert not names & cash
+    assert regimes.index_derivative("FOCIT31DEC2640000CE", names)
+    assert not regimes.index_derivative("BANKINDIA29DEC26120CE", names)
+    marked = [
+        ("NIFTYFPI29DEC26FUT", "FUTIDX"),
+        ("XYZ29DEC26FUT", "FUTSTK"),
+        ("ABC29DEC26FUT", "FUTSTK"),
+    ]
+    assert regimes.index_underlyings(marked) == frozenset(regimes.INDEX_UNDERLYINGS) | {"NIFTYFPI"}
+
+
+def test_a_master_with_no_cash_stocks_makes_no_guess():
+    """Read while the morning's download refills the table: a stock is never taken for an index."""
+    rows = [("RELIANCE29DEC26FUT", "FUT"), ("NIFTYFPI29DEC26FUT", "FUT")]
+    assert regimes.index_underlyings(rows) == frozenset(regimes.INDEX_UNDERLYINGS)
+    assert regimes.index_underlyings([]) == frozenset(regimes.INDEX_UNDERLYINGS)

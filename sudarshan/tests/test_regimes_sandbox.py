@@ -96,3 +96,73 @@ def test_the_days_around_expiry_and_the_next_day_mode_are_unchanged(pm):
     assert not pm.is_contract_expired_now(None, "NFO", now=at(expiry, "15:50"), symbol=nifty)
     pm.settings["expiry_settlement_timing"] = "next_day"
     assert not pm.is_contract_expired_now(expiry, "NFO", now=at(expiry, "23:59"), symbol=nifty)
+
+
+# ---- index contracts from the master (review L1) --------------------------------------------------
+@pytest.fixture
+def master():
+    """OpenAlgo's symbol table in the throwaway database, with Upstox's marks (every future FUT)."""
+    from database.symbol import Base, SymToken, db_session, engine
+    from sudarshan import index_contracts
+
+    Base.metadata.create_all(engine, tables=[SymToken.__table__])
+
+    def fill(rows):
+        for symbol, exchange, kind in rows:
+            db_session.add(SymToken(symbol=symbol, brsymbol=symbol, exchange=exchange,
+                                    instrumenttype=kind, token=f"{exchange}|{symbol}"))  # fmt: skip
+        db_session.commit()
+        index_contracts.forget()
+
+    yield fill
+    db_session.query(SymToken).delete()
+    db_session.commit()
+    db_session.remove()
+    index_contracts.forget()
+
+
+UPSTOX_MASTER = [
+    ("NIFTY29DEC26FUT", "NFO", "FUT"),
+    ("NIFTYFPI29DEC26FUT", "NFO", "FUT"),
+    ("RELIANCE29DEC26FUT", "NFO", "FUT"),
+    ("FOCIT31DEC26FUT", "BFO", "FUT"),  # BSE's Focused IT, under a name no list of ours holds
+    ("RELIANCE", "NSE", "EQ"),
+    ("NIFTY", "NSE_INDEX", "INDEX"),
+]
+
+
+def test_an_index_contract_the_master_lists_settles_at_15_30_from_7_december(pm, master):
+    """NIFTYFPI and BSE's Focused IT were read as stock contracts: from 7 Dec they settled at 15:45
+    in Analyze mode instead of 15:30. The master says they are an index's; RELIANCE stays a stock."""
+    master(UPSTOX_MASTER)
+    dec29, dec31 = date(2026, 12, 29), date(2026, 12, 31)
+    assert pm.expiry_close_time(dec29, "NFO", "NIFTYFPI29DEC2618000CE") == dt_time(15, 30)
+    assert pm.expiry_close_time(dec31, "BFO", "FOCIT31DEC2640000CE") == dt_time(15, 30)
+    assert pm.expiry_close_time(dec29, "NFO", "RELIANCE29DEC261400CE") == dt_time(15, 45)
+    assert pm.is_contract_expired_now(dec31, "BFO", now=at(dec31, "15:30"),
+                                      symbol="FOCIT31DEC2640000CE")  # fmt: skip
+    # Before the change every contract stops with the F&O close.
+    dec1 = date(2026, 12, 1)
+    assert pm.expiry_close_time(dec1, "NFO", "NIFTYFPI01DEC2618000CE") == dt_time(15, 40)
+    assert pm.expiry_close_time(dec1, "NFO", "RELIANCE01DEC261400CE") == dt_time(15, 40)
+
+
+def test_a_master_being_downloaded_leaves_the_known_index_names(pm, master):
+    """No futures in the table (the morning's download empties it first): the names every reader
+    knows stand in, and nothing is kept, so the next question reads the master again."""
+    from sudarshan import index_contracts
+
+    master([])
+    assert index_contracts.underlyings() == index_contracts.KNOWN
+    fpi = pm.expiry_close_time(date(2026, 12, 29), "NFO", "NIFTYFPI29DEC2618000CE")
+    assert fpi == dt_time(15, 30)  # a name every reader knows
+    focit = pm.expiry_close_time(date(2026, 12, 31), "BFO", "FOCIT31DEC2640000CE")
+    assert focit == dt_time(15, 45)  # known only from the master, which has nothing yet
+    from database.symbol import SymToken, db_session
+
+    for symbol, exchange, kind in UPSTOX_MASTER:  # filled now, the cache left as it is
+        db_session.add(SymToken(symbol=symbol, brsymbol=symbol, exchange=exchange,
+                                instrumenttype=kind, token=f"{exchange}|{symbol}"))  # fmt: skip
+    db_session.commit()
+    assert "FOCIT" in index_contracts.underlyings().indices  # read at once, not in ten minutes
+    assert index_contracts.has_futures("RELIANCE") and not index_contracts.has_futures("NIFTY")

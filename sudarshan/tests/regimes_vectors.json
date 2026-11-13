@@ -23,6 +23,9 @@
     {"symbol": "BANKNIFTY29DEC26FUT", "exchange": "NFO", "expiry": "2026-12-29", "index": true, "stop": "15:30"},
     {"symbol": "SENSEX10DEC2682000PE", "exchange": "BFO", "expiry": "2026-12-10", "index": true, "stop": "15:30"},
     {"symbol": "RELIANCE29DEC261400CE", "exchange": "NFO", "expiry": "2026-12-29", "index": false, "stop": "15:45"},
-    {"symbol": "BANKBARODA29DEC26FUT", "exchange": "NFO", "expiry": "2026-12-29", "index": false, "stop": "15:45"}
+    {"symbol": "BANKBARODA29DEC26FUT", "exchange": "NFO", "expiry": "2026-12-29", "index": false, "stop": "15:45"},
+    {"symbol": "NIFTYFPI01DEC2618000CE", "exchange": "NFO", "expiry": "2026-12-01", "index": true, "stop": "15:40"},
+    {"symbol": "NIFTYFPI29DEC2618000CE", "exchange": "NFO", "expiry": "2026-12-29", "index": true, "stop": "15:30"},
+    {"symbol": "BANKINDIA29DEC26120CE", "exchange": "NFO", "expiry": "2026-12-29", "index": false, "stop": "15:45"}
   ]
 }

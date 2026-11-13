@@ -31,7 +31,7 @@ from sandbox.position_locks import holds_position_lock, position_lock  # noqa: F
 from sandbox.session_boundary import IST, last_session_expiry_utc
 from services.market_data_service import get_market_data_service
 from services.quotes_service import get_multiquotes, get_quotes
-from sudarshan import regimes  # SUDARSHAN: the exchange's expiry-day stops by date
+from sudarshan import index_contracts, regimes  # SUDARSHAN: expiry-day stops by date
 from utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -194,12 +194,13 @@ def expiry_close_time(expiry_date, exchange, symbol=None):
     """When a contract expiring on ``expiry_date`` stops trading that day (IST).
 
     SUDARSHAN: NFO and BFO from the exchange's timing table, by the day: an
-    index contract (NIFTY..., SENSEX...) stops at the regime's index expiry
-    stop, any other at the F&O close. Without a symbol the F&O close applies.
-    Other exchanges keep EXCHANGE_CLOSE_TIMES.
+    index contract (NIFTY..., SENSEX..., NIFTYFPI..., any index derivative the
+    master lists) stops at the regime's index expiry stop, any other at the F&O
+    close. Without a symbol the F&O close applies. Other exchanges keep
+    EXCHANGE_CLOSE_TIMES.
     """
     if exchange in REGIME_EXCHANGES:
-        index = bool(symbol) and regimes.index_derivative(str(symbol))
+        index = bool(symbol) and index_contracts.is_index_contract(str(symbol))  # L1: the master
         minute = regimes.expiry_stop(expiry_date, index=index)
         return dt_time(minute // 60, minute % 60)
     return EXCHANGE_CLOSE_TIMES.get(exchange, DEFAULT_CLOSE_TIME)
