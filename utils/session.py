@@ -6,8 +6,13 @@ import pytz
 from flask import redirect, session, url_for
 
 from utils.logging import get_logger
+from utils.thread_safe_cache import MISSING, LockedTTLCache
 
 logger = get_logger(__name__)
+
+#: SUDARSHAN (review HIGH-2): a failed read of the logout record is logged in full at most once
+#: every 10 minutes; every signed-in request asks, and would log it again.
+_cutoff_read_warned = LockedTTLCache(maxsize=1, ttl=600)
 
 
 def is_session_expiry_disabled():
@@ -63,6 +68,12 @@ def is_session_valid():
     # If no login time is set, consider session invalid
     if "login_time" not in session:
         logger.debug("Session invalid: 'login_time' not in session")
+        return False
+
+    # SUDARSHAN (review HIGH-2): a logout of every device since this login has ended it, whatever
+    # the daily expiry says, so this comes first and holds with expiry disabled as well.
+    if session_ended_elsewhere():
+        logger.info("Session invalid: a logout of every device came after this login")
         return False
 
     # Skip expiry check for crypto brokers (24/7 markets)
@@ -161,25 +172,76 @@ def _has_fresher_session(username, current_session_id=None):
     return False
 
 
-def session_row_gone() -> bool:
-    """SUDARSHAN: SIO1. True when this cookie names a session whose active_sessions row the server
-    has removed: a logout, a password change or a reset removes every row. Such a cookie still
-    passes is_session_valid() until the daily expiry (the "sessions valid after" issue, still
-    open), so only two places ask this: the login page's check and /auth/active-sessions, which
-    must agree or the login page loops. It is never asked on an ordinary request, because
-    register_session also replaces the row of an earlier login from the same IP (a laptop and a
-    phone on one Wi-Fi) and drops the oldest row past five sessions. A cookie without a session
-    id, or a row that cannot be read, is not judged: False."""
-    session_id = session.get("session_id")
-    if not session_id:
+def _login_time_ist():
+    """This cookie's login time as an aware IST datetime, or None when it has none to read."""
+    try:
+        login = datetime.fromisoformat(session["login_time"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    return pytz.timezone("Asia/Kolkata").localize(login) if login.tzinfo is None else login
+
+
+def session_ended_elsewhere() -> bool:
+    """SUDARSHAN (review HIGH-2): True when a logout of every device (a logout, a password change
+    or a reset, on any device) came after this cookie's login.
+
+    Flask's session is a cookie the server cannot reach, so the server keeps that moment per user
+    (database.auth_db.SessionCutoff) and this compares the cookie's own login time with it. The
+    session rows cannot answer this: register_session replaces the row of an earlier login from
+    the same address (a laptop and a phone on one Wi-Fi) and drops the oldest past five. A later
+    login is untouched, so a second device's login never ends the first, and nothing here reads
+    or changes the broker feed. A cookie without a user or a readable login time is not judged
+    (False), nor is one whose record cannot be read: that is logged and the daily expiry still
+    applies, where refusing would sign every device out over a database hiccup.
+    """
+    username = session.get("user")
+    login = _login_time_ist() if username else None
+    if login is None:
         return False
     try:
-        from database.auth_db import ActiveSession
+        from database.auth_db import get_sessions_valid_after
 
-        return ActiveSession.query.filter_by(session_id=session_id).first() is None
+        cutoff = get_sessions_valid_after(username)
     except Exception:
-        logger.exception("Could not read the active session row")
+        if _cutoff_read_warned.get("warned", MISSING) is MISSING:
+            _cutoff_read_warned["warned"] = True
+            logger.exception("Could not read when every session was last ended; not judged")
         return False
+    return cutoff is not None and login < cutoff
+
+
+def end_every_session(username) -> None:
+    """SUDARSHAN (review HIGH-2): end every session of ``username`` on every device, now.
+
+    First the record every check reads, so each other device's next request (a page, a read, a
+    socket's reconnect) is refused; then the rows, so Active Sessions lists none of them. For a
+    logout and a password change or reset, each of which does its own broker, Socket.IO and
+    cookie work as before.
+    """
+    from database.auth_db import clear_user_sessions, set_sessions_valid_after
+
+    now_ist = datetime.now(pytz.timezone("UTC")).astimezone(pytz.timezone("Asia/Kolkata"))
+    set_sessions_valid_after(username, now_ist)
+    clear_user_sessions(username)
+
+
+def last_daily_expiry(now_ist):
+    """SUDARSHAN (review HIGH-2): the latest daily expiry at or before ``now_ist`` (aware IST).
+    Every session that logged in before it has ended. None when expiry is disabled."""
+    if is_session_expiry_disabled():
+        return None
+    boundary = _todays_rollover_boundary(now_ist)
+    return boundary if now_ist >= boundary else boundary - timedelta(days=1)
+
+
+def _past_daily_expiry() -> bool:
+    """SUDARSHAN (review HIGH-2): is_session_valid's daily expiry check on its own."""
+    login = _login_time_ist()
+    if login is None or is_session_expiry_disabled():
+        return False
+    now_ist = datetime.now(pytz.timezone("UTC")).astimezone(pytz.timezone("Asia/Kolkata"))
+    boundary = _todays_rollover_boundary(now_ist)
+    return now_ist > boundary and login < boundary
 
 
 def has_login_this_trading_session(username) -> bool:
@@ -209,6 +271,19 @@ def revoke_user_tokens(revoke_db_tokens=True):
     """
     if "user" in session:
         username = session.get("user")
+        # SUDARSHAN (review HIGH-2): a session another device ended is only signed out here. That
+        # ending already did what it does to the broker login and the feed, and removed every
+        # row, so the daily expiry's teardown below would find no login after 03:00 on record and
+        # revoke the Upstox login a password change keeps. A cookie also past the daily expiry
+        # takes that path, as before.
+        if session_ended_elsewhere() and not _past_daily_expiry():
+            current_sid = session.get("session_id")
+            if current_sid:
+                from database.auth_db import remove_session
+
+                remove_session(current_sid)
+            logger.info("Signed out a session that a logout of every device had ended")
+            return
         try:
             from database.auth_db import invalidate_user_auth_cache, upsert_auth
 

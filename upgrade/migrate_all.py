@@ -96,6 +96,8 @@ MIGRATIONS = [
     ("migrate_muhurat_nov_2026.py", "Muhurat Trading Hours (8 November 2026)"),
     # SUDARSHAN M5.13: the risk layer's own file, db/sudarshan_risk.db
     ("migrate_sudarshan_risk.py", "SUDARSHAN Risk Layer (kill switch and order guards)"),
+    # SUDARSHAN review HIGH-2: a logout of every device ends every device's session
+    ("migrate_session_cutoffs.py", "SUDARSHAN Session Cutoffs (logout of every device)"),
 ]
 
 # Legacy migrations historically used non-zero exits for best-effort warnings,

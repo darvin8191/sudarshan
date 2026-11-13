@@ -494,11 +494,10 @@ def drop_owner_room() -> None:
     """Close every Socket.IO connection, /market's and the owner's room's included, when the
     owner's session ends (logout, a forced logout, the daily expiry or revoke), so each reconnect
     meets the connect check (SIO1) again. That refuses a cookie the session's end cleared or
-    expired. It does not refuse a copy of a cookie the server never saw cleared, such as another
-    device's after a logout elsewhere or a password change: that cookie stays valid until the
-    daily expiry, for every HTTP route as well (review HIGH-2, tracked apart). Never raises, and
-    does nothing when there is no socket. Under eventlet from a real thread the close is handed to
-    the hub (utils.real_threading.run_on_hub); everywhere else it runs inline."""
+    expired, and, since review HIGH-2, another device's cookie from before a logout elsewhere or a
+    password change (utils.session.session_ended_elsewhere), as every HTTP route does. Never
+    raises, and does nothing when there is no socket. Under eventlet from a real thread the close
+    is handed to the hub (utils.real_threading.run_on_hub); everywhere else it runs inline."""
     try:
         sockets = [(namespace, sid) for namespace, sid, _ in _sockets()]
         if sockets:

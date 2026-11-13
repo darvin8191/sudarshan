@@ -4,9 +4,10 @@
  * which still took the phone's cookie as signed in, and sent it to the dashboard, whose guard sent
  * it straight back: about 300 session reads in two seconds, until the tab was reloaded.
  *
- * Now the page asks with ?for=login, and the server answers a cookie whose session row it removed
- * as signed out (sudarshan/alerts/tests/test_socketio_owner.py pins that side); and whatever the
- * server answers, the page sends a tab to the dashboard at most once a minute (sudarshan/trips.ts).
+ * Now the server answers a cookie from before a logout elsewhere as signed out, to this page's
+ * ?for=login read and, since review HIGH-2, to every session read (test_socketio_owner.py and
+ * test_sessions_valid_after.py pin that side); and whatever the server answers, the page sends a
+ * tab to the dashboard at most once a minute (sudarshan/trips.ts).
  */
 import { render, screen } from '@testing-library/react'
 import { MemoryRouter, Navigate, Route, Routes } from 'react-router'

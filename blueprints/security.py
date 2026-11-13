@@ -511,12 +511,14 @@ def active_sessions_list():
     """Get all active sessions for the security dashboard."""
     try:
         from flask import session
-        from database.auth_db import get_active_sessions
+
+        from database.auth_db import get_active_sessions, remove_expired_sessions
 
         username = session.get("user")
         if not username:
             return jsonify({"status": "error", "sessions": []}), 401
 
+        remove_expired_sessions(username)  # SUDARSHAN: review HIGH-2, ended sessions not listed
         sessions = get_active_sessions(username)
         current_session_id = session.get("session_id")
         return jsonify({

@@ -159,9 +159,10 @@ SOCKET_RETRY = "Live updates could not start just now. Trying again."
 
 def is_owner_session() -> bool:
     """True when this request's session is valid (``utils.session.is_session_valid``: logged in,
-    broker step done, not past the daily expiry) and is OpenAlgo's owner, the admin account.
+    broker step done, not past the daily expiry, not ended since by a logout of every device) and
+    is OpenAlgo's owner, the admin account.
 
-    An invalid session is answered without reading the database. May raise (the users table
+    An invalid session is answered without reading the users table. May raise (the users table
     unreadable): a caller that admits on True treats a raise as False.
     """
     from flask import session

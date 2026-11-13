@@ -85,9 +85,10 @@ export default function Login() {
           return
         }
 
-        // Check if already logged in. SUDARSHAN SIO1: ?for=login, so a cookie the server has
-        // signed out (its session row removed by a logout elsewhere) is cleared and answered as
-        // signed out, and this page shows the form.
+        // Check if already logged in. SUDARSHAN SIO1 and review HIGH-2: the server clears a
+        // cookie from before a logout elsewhere and answers it as signed out (every session
+        // read does so since HIGH-2; ?for=login only names the caller), and this page shows
+        // the form.
         const sessionResponse = await fetch('/auth/session-status?for=login', {
           credentials: 'include',
         })
