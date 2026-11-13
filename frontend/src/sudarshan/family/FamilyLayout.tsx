@@ -13,6 +13,7 @@ import { PageLoader } from '@/components/ui/page-loader'
 import { MarketDataProvider } from '@/contexts/MarketDataContext'
 import { cn } from '@/lib/utils'
 import { BrandLockup } from '@/sudarshan/BrandLockup'
+import { usePushResync } from '@/sudarshan/pwa/push'
 import { registerFamilyWorker } from '@/sudarshan/pwa/register'
 import { BottomSheet } from '@/sudarshan/watchlist/BottomSheet'
 import { FamilyError, familyApi, onSignedOut } from './api'
@@ -69,6 +70,10 @@ export function FamilyLayout() {
     refetchOnWindowFocus: false,
     refetchOnReconnect: true,
   })
+
+  // SUDARSHAN P6 D8: on every open, a granted permission re-posts the subscription the browser
+  // holds (Chrome does not always say when it changes).
+  usePushResync(session.data != null)
 
   // Coming back to the page (the phone woke, the app was switched back to) checks the session.
   useEffect(() => {

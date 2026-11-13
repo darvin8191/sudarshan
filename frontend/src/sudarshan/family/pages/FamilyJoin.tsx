@@ -7,10 +7,18 @@
 // The password and the code are only ever sent to the service in the one `join` call. Neither is
 // kept in the address, in storage or in a log. A wrong code keeps the other answers on screen.
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Check, ExternalLink, Smartphone } from 'lucide-react'
-import { type FormEvent, useState } from 'react'
+import { Bell, Check, ExternalLink, Smartphone } from 'lucide-react'
+import { type FormEvent, useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router'
 import { BrandLockup } from '@/sudarshan/BrandLockup'
+import {
+  INSTALL_FALLBACK,
+  INSTALL_TITLE,
+  promptInstall,
+  useInstallState,
+} from '@/sudarshan/pwa/install'
+import { BLOCKED_WORDS, enablePush, type PushStatus } from '@/sudarshan/pwa/push'
+import { registerFamilyWorker } from '@/sudarshan/pwa/register'
 import { FamilyError, familyApi } from '../api'
 import { FamilyBadge } from '../FamilyBadge'
 import { Field, OUTLINE, PRIMARY, Problem } from '../forms'
@@ -25,8 +33,7 @@ export const HANDLE_HINT = 'Short, letters and digits (for example a first name)
 export const PASSWORD_HINT = 'At least 12 characters. A sentence you will remember works best.'
 export const CODE_APP_LINE = 'Scan with Google Authenticator or any code app, or type the key'
 export const STAY_LINE = 'This phone stays signed in for 30 days. Sign out any time in Settings.'
-export const INSTALL_TITLE = 'Add सुदर्शन to your home screen'
-export const INSTALL_FALLBACK = 'Chrome menu, Add to Home screen'
+export const NOTIFY_TITLE = 'Get the day’s summary and sign-in notices'
 export const TELEGRAM_TITLE = 'Link the family bot for the summary on Telegram'
 
 type Strength = 'Weak' | 'Fine' | 'Strong'
@@ -88,6 +95,12 @@ export default function FamilyJoin() {
   const [totp, setTotp] = useState('')
   const [problem, setProblem] = useState<{ field: string | null; text: string } | null>(null)
   const [busy, setBusy] = useState(false)
+
+  // The family worker is what lets Chrome offer the install at the end of joining; the shell that
+  // normally registers it is not mounted on this public page.
+  useEffect(() => {
+    void registerFamilyWorker()
+  }, [])
 
   if (info.isPending) {
     return (
@@ -270,7 +283,7 @@ export default function FamilyJoin() {
   return <AfterJoin />
 }
 
-type After = 'install' | 'telegram'
+type After = 'install' | 'notifications' | 'telegram'
 
 /**
  * What follows a sign-in on this phone, one step at a time and each one skippable: the sentence
@@ -282,7 +295,24 @@ function AfterJoin() {
   const [link, setLink] = useState<{ url: string } | null>(null)
   const [problem, setProblem] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const install = useInstallState()
+  const [pushState, setPushState] = useState<PushStatus | null>(null)
   const land = () => navigate('/family', { replace: true })
+
+  // Chrome's permission question is asked here, on this tap, and nowhere before it.
+  const turnOn = async () => {
+    setBusy(true)
+    setProblem(null)
+    try {
+      const now = await enablePush()
+      setPushState(now)
+      if (now === 'on') setStep('telegram')
+    } catch (error) {
+      setProblem(error instanceof FamilyError ? error.message : 'That could not be sent.')
+    } finally {
+      setBusy(false)
+    }
+  }
 
   const openTelegram = async () => {
     setBusy(true)
@@ -309,9 +339,46 @@ function AfterJoin() {
             <Smartphone aria-hidden="true" className="size-5" />
             {INSTALL_TITLE}
           </h2>
-          <p className="text-sm text-[color:var(--text-secondary)]">{INSTALL_FALLBACK}</p>
-          <button type="button" className={`${OUTLINE} w-full`} onClick={() => setStep('telegram')}>
+          {install === 'available' ? (
+            <button
+              type="button"
+              className={`${PRIMARY} w-full`}
+              onClick={() => void promptInstall().then(() => setStep('notifications'))}
+            >
+              {INSTALL_TITLE}
+            </button>
+          ) : (
+            <p className="text-sm text-[color:var(--text-secondary)]">
+              {install === 'installed' ? 'Already on your home screen.' : INSTALL_FALLBACK}
+            </p>
+          )}
+          <button
+            type="button"
+            className={`${OUTLINE} w-full`}
+            onClick={() => setStep('notifications')}
+          >
             Later
+          </button>
+        </section>
+      )}
+      {step === 'notifications' && (
+        <section aria-label="Notifications" className="flex w-full flex-col gap-3">
+          <h2 className="flex items-center gap-2 text-base font-bold">
+            <Bell aria-hidden="true" className="size-5" />
+            {NOTIFY_TITLE}
+          </h2>
+          {pushState === 'blocked' && <Problem text={BLOCKED_WORDS} />}
+          {problem && <Problem text={problem} />}
+          <button
+            type="button"
+            disabled={busy}
+            className={`${PRIMARY} w-full`}
+            onClick={() => void turnOn()}
+          >
+            Turn on
+          </button>
+          <button type="button" className={`${OUTLINE} w-full`} onClick={() => setStep('telegram')}>
+            {pushState === 'on' ? 'Continue' : 'Not now'}
           </button>
         </section>
       )}

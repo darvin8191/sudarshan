@@ -6,18 +6,21 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ExternalLink, LogOut, Pencil, Smartphone } from 'lucide-react'
 import { type FormEvent, useState } from 'react'
 import { useNavigate } from 'react-router'
+import {
+  INSTALL_FALLBACK,
+  INSTALL_TITLE,
+  promptInstall,
+  useInstallState,
+} from '@/sudarshan/pwa/install'
 import { FamilyError, familyApi } from '../api'
 import { getFamilyManager } from '../familyManager'
 import { DANGER, Field, OUTLINE, PRIMARY, Problem, Saved, Section } from '../forms'
+import { DEVICES_KEY, FAILING_WORDS, SETTINGS_KEY } from '../keys'
+import { Notifications } from '../Notifications'
 import type { Device, Language } from '../types'
 import { LIMITS } from '../types'
 import { deviceWhen } from '../when'
 
-export const DEVICES_KEY = ['family', 'devices'] as const
-export const SETTINGS_KEY = ['family', 'settings'] as const
-
-export const FAILING_WORDS =
-  'Notifications may not arrive on this phone. Turn them off and on again in Settings.'
 export const PASSWORD_LINE = 'Changing your password signs out your other devices.'
 export const LANGUAGE_LINE = 'For Telegram and notifications; the app stays in English.'
 export const ABOUT_LINE =
@@ -217,6 +220,24 @@ function Devices() {
           <LogOut aria-hidden="true" className="size-4" />
           Sign out everywhere
         </button>
+      )}
+    </Section>
+  )
+}
+
+/** "Add सुदर्शन to your home screen": offered again here, on a tap, for a phone that said Later. */
+function InstallCard() {
+  const state = useInstallState()
+  if (state === 'installed') return null
+  return (
+    <Section title={INSTALL_TITLE}>
+      {state === 'available' ? (
+        <button type="button" className={PRIMARY} onClick={() => void promptInstall()}>
+          <Smartphone aria-hidden="true" className="size-4" />
+          {INSTALL_TITLE}
+        </button>
+      ) : (
+        <p className="text-sm text-[color:var(--text-secondary)]">{INSTALL_FALLBACK}</p>
       )}
     </Section>
   )
@@ -441,6 +462,7 @@ export default function FamilySettings() {
   return (
     <div className="flex flex-col gap-3">
       <Devices />
+      <Notifications />
       {settings.error && <Problem text={wordsOf(settings.error)} />}
       {settings.data && (
         <>
@@ -453,6 +475,7 @@ export default function FamilySettings() {
         </>
       )}
       <PasswordCard />
+      <InstallCard />
       <Section title="About this view">
         <p className="text-sm text-[color:var(--text-secondary)]">{ABOUT_LINE}</p>
       </Section>

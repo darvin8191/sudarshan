@@ -210,6 +210,8 @@ describe('Join', () => {
     // nothing is asked of Telegram until a tap
     expect(router.urls().some((url) => url.includes('telegram'))).toBe(false)
     await user.click(screen.getByRole('button', { name: 'Later' }))
+    // the notification step sits between them and asks nothing until a tap
+    await user.click(await screen.findByRole('button', { name: 'Not now' }))
     expect(screen.getByText('Link the family bot for the summary on Telegram')).toBeTruthy()
     await user.click(screen.getByRole('button', { name: 'Open Telegram' }))
     await waitFor(() =>
