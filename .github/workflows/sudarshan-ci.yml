@@ -36,9 +36,17 @@ jobs:
       - run: npm run build
       - run: npm run test:run
 
+  # The service tests in four shards side by side (sudarshan/conftest.py splits them by file):
+  # one job had grown past 20 minutes once watchlists v2 was in.
   backend:
     runs-on: ubuntu-24.04-arm
-    timeout-minutes: 20
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    env:
+      SUDARSHAN_TEST_SHARD: ${{ matrix.shard }}/4
     steps:
       - uses: actions/checkout@v6
       - uses: astral-sh/setup-uv@v7
