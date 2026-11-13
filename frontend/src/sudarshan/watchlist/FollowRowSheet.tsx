@@ -11,6 +11,7 @@ import {
   editBody,
   expiriesFor,
   type FollowForm,
+  fixedWords,
   num,
   offsetLabel,
   previewOf,
@@ -148,9 +149,11 @@ function Form({
     }
     toast.success(
       out.words ??
-        (form.mode === 'add'
-          ? `Added a row that follows ${name}. It picks its contract from ${name}'s price.`
-          : 'Row changed.')
+        (form.mode !== 'add'
+          ? 'Row changed.'
+          : draft.strike !== null
+            ? `Added a row on ${name} ${num(draft.strike)}.` // review M3: its contract is not picked from the price
+            : `Added a row that follows ${name}. It picks its contract from ${name}'s price.`)
     )
     onClose()
   }
@@ -176,7 +179,7 @@ function Form({
       />
       {option && draft.strike !== null && (
         <p className="text-sm font-semibold" data-follow-fixed="true">
-          {`Strike ${num(draft.strike)}, kept for good`}
+          {fixedWords(draft.strike)}
         </p>
       )}
       {option && draft.strike === null && (
@@ -218,7 +221,7 @@ function Form({
         data-follow-preview="true"
         className="text-sm font-medium text-[color:var(--text-secondary)]"
       >
-        {previewOf(name, draft)}
+        {previewOf(name, draft, fixed?.expiries)}
       </p>
       <Problem text={problem} />
       <div className="flex gap-2">
@@ -332,6 +335,7 @@ export function FollowRowSheet({
   return (
     <BottomSheet
       open
+      step={form.mode} // review M6: Remove takes the place of Change under the finger, guarded again
       onOpenChange={(open) => {
         if (!open) onClose()
       }}

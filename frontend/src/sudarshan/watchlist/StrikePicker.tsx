@@ -200,7 +200,7 @@ export function StrikePicker(props: StrikePickerProps) {
               underlying: props.underlying,
               exchange: props.exchange,
               sectionId: null,
-              fixed: { strike: each.strike, expiry: rule },
+              fixed: { strike: each.strike, expiry: rule, expiries: ladder.expiries }, // review M3: the form says the dates
             })
           }
           aria-label={`Add as one row at ${num(each.strike)}`}

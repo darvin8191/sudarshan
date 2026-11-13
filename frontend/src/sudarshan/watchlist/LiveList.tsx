@@ -1,6 +1,7 @@
 import { LogOut } from 'lucide-react'
 import { memo, useCallback, useEffect, useMemo, useState } from 'react'
 import type { WatchlistItem } from '@/api/watchlist'
+import { cn } from '@/lib/utils'
 import type { AlertPrefill } from '@/sudarshan/alerts/AlertForm'
 import { LiveLine } from '@/sudarshan/dashboard/LiveLine'
 import { keyOf, type MarketOpen } from '@/sudarshan/dashboard/live'
@@ -567,7 +568,11 @@ export const LiveList = memo(function LiveList({
 
       <section
         {...panel}
-        className="overflow-hidden rounded-[1.125rem] border bg-card shadow-[var(--shadow-card)]"
+        className={cn(
+          'rounded-[1.125rem] border bg-card shadow-[var(--shadow-card)]',
+          // Review M4: the draft's Save bar is sticky, which overflow-hidden would hold in place.
+          editing && arrange ? 'overflow-clip' : 'overflow-hidden'
+        )}
       >
         <WatchlistRows
           rows={shown}

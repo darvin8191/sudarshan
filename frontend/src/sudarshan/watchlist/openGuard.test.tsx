@@ -168,6 +168,47 @@ describe('a sheet that has just opened', () => {
     tap(screen.getByRole('button', { name: 'Cancel this order' }))
     expect(onCancel).not.toHaveBeenCalled()
   })
+
+  // Review M6: a form swapped for its confirmation inside the one open sheet.
+  it('starts a fresh window when it swaps to another step in place, and only then', async () => {
+    const onRemove = vi.fn()
+    function Stepped() {
+      const [step, setStep] = useState<'form' | 'confirm'>('form')
+      const [other, setOther] = useState(0)
+      return (
+        <BottomSheet open onOpenChange={() => {}} title="Change this row" step={step}>
+          {step === 'form' ? (
+            <>
+              <button type="button" onClick={() => setOther((n) => n + 1)}>
+                Redraw {other}
+              </button>
+              <button type="button" onClick={() => setStep('confirm')}>
+                Remove this row
+              </button>
+            </>
+          ) : (
+            <button type="button" onClick={onRemove}>
+              Remove
+            </button>
+          )}
+        </BottomSheet>
+      )
+    }
+    render(<Stepped />)
+    await wait(600)
+    // A redraw on the same step does not start the window again.
+    tap(screen.getByRole('button', { name: 'Redraw 0' }))
+    expect(screen.getByRole('button', { name: 'Redraw 1' })).toBeInTheDocument()
+    tap(screen.getByRole('button', { name: 'Remove this row' }))
+    const remove = screen.getByRole('button', { name: 'Remove' })
+    tap(remove)
+    await wait(499)
+    tap(remove)
+    expect(onRemove).not.toHaveBeenCalled()
+    await wait(1)
+    tap(remove)
+    expect(onRemove).toHaveBeenCalledTimes(1)
+  })
 })
 
 describe('a confirmation that has just opened', () => {

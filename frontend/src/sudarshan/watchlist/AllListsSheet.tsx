@@ -13,7 +13,8 @@ import { LIMITS } from './v2/types'
 import { LISTS_KEY, STATE_KEY, useLists, useV2State } from './v2/useListView'
 
 export const FAVOURITES_FULL = 'Seven favourites at most. Remove one first.'
-export const PICK_HINT = 'Pick your favourites here. They show as numbered tabs.'
+/** Review L9: the tabs carry no number, so the sentence promises none. */
+export const PICK_HINT = 'Pick your favourites here. The tabs then show only your favourites.'
 const ICON_BUTTON =
   'flex size-12 shrink-0 items-center justify-center rounded-xl outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40'
 

@@ -37,7 +37,7 @@ vi.mock('@/api/trading', () => ({
 }))
 
 import type { WatchlistItem } from '@/api/watchlist'
-import { fakeClock, frames } from '@/test/frames'
+import { frames, manualClock } from '@/test/frames'
 import { feed } from '@/test/marketDataHarness'
 import { FOLLOW_CAP, WINDOW } from './follow'
 import { useLiveRows } from './useLiveRows'
@@ -105,7 +105,9 @@ const scrollTo = async (first: number) => {
 beforeEach(() => {
   feed.reset()
   frames.install()
-  fakeClock()
+  // The clock moves only when a test moves it: the window's 300 ms wait is checked at 299 ms, and
+  // a clock that also moved with real time fired it early on a loaded CI runner.
+  manualClock()
   vi.setSystemTime(T0)
   read.calls = []
   screen.first = 0
@@ -216,6 +218,30 @@ describe('the window of a list longer than 250', () => {
     expect(live()).not.toContain(keyAt(260))
     expect(result.current.rows[200].outside).toBeUndefined()
     expect(result.current.rows[0].outside).toBe('window')
+  })
+
+  // The cause of a failure seen only under CI load: real time spent inside the 300 ms (a slow
+  // machine) must never count towards it. With a clock that also moves with real time it did.
+  it('is not moved early by real time spent inside the 300 ms', async () => {
+    mount(items, { sheet: [], listKey: 'built-in' })
+    layOut(400)
+    await settle()
+    screen.first = 200
+    window.dispatchEvent(new Event('scroll'))
+    const busy = performance.now()
+    while (performance.now() - busy < 30) {
+      // 30 ms of a loaded machine, more than the 20 ms a real-time clock steps by
+    }
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(299)
+      frames.flush()
+    })
+    expect(live()).toContain(keyAt(0))
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1)
+      frames.flush()
+    })
+    expect(live()).toContain(keyAt(140))
   })
 
   it('keeps scrolling a held scroll from moving it: the 300 ms starts again with each scroll', async () => {

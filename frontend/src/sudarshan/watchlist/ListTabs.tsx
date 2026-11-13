@@ -23,7 +23,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
 import { useOpenGuard } from './openGuard'
-import { MAX_LISTS } from './useWatchlists'
+import { LISTS_FULL, MAX_LISTS } from './useWatchlists'
 import type { AlertOffer } from './v2/listAlert'
 import { menuFor, tvFor } from './v2/menuRules'
 
@@ -32,8 +32,8 @@ export const tabId = (listId: number) => `sd-watchlist-tab-${listId}`
 
 const MENU_ITEM = 'min-h-12 gap-3 text-[0.9375rem] font-medium'
 
-/** Why "New list" is off, in a trader's words. */
-export const LISTS_FULL = `You have ${MAX_LISTS} lists, the most there can be. Delete one to make another.`
+/** Why "New list" is off, in a trader's words (kept in useWatchlists.ts, where the cap is). */
+export { LISTS_FULL }
 
 /**
  * The lists as tabs along the top, as a broker app shows them: the open one in
