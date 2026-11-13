@@ -523,7 +523,7 @@ Three built-in lists made from today's master: **Indices**, **F&O stocks** and *
 (`presets/__init__.py`: id, name, kind, rule or file, and the two pure functions that build a list)
 is found by discovery like the other registries: a source is a module with `ENTRIES`, so W13's typed
 files add `presets/typed_lists.py` (kind `typed`, an `ORDER` below `master_lists`' 20 puts them
-first) and edit nothing here. `presets/master_lists.py` holds the pure builders over the master's
+first); W13 also made the catalogue asked at each call (see W13). `presets/master_lists.py` holds the pure builders over the master's
 rows as `search.Index` keeps them (references to the snapshot's own rows, never copies).
 
 - **Indices** are a typed list of the 24 OpenAlgo index symbols of design 3.5, in code, checked
@@ -577,3 +577,93 @@ list. `keys` are taken in the order sent (the order shown: the server cannot kno
 or change); with none the whole list in its own order. Over 250 it copies the first 250 and the
 answer's `words` say "Copied the first 250 of 500, in the order shown. A list holds 250." The
 contract did not change.
+
+## W13 - built-in lists from typed files (`presets/typed_lists.py`, `tests/vectors/typed.json`)
+
+Fifteen built-in lists made from files a person typed: NIFTY 50 and NIFTY BANK (the repository's
+two files, the screener's), NIFTY 100, 200 and 500, and ten sector lists. Nothing is downloaded from
+NSE or anywhere else, ever, and no constituent file is added to the repository (the two it has were
+the screener's already; they now carry the header line `# as of 2026-09-30`, X1).
+
+**Where a file comes from.** The server folder `/etc/sudarshan/universes/` first (the environment
+name `SUDARSHAN_UNIVERSES_DIR` points a test, or an install that keeps it elsewhere, at another
+folder), then, for NIFTY 50 and NIFTY BANK only, the repository's `sudarshan/screener/universes/`.
+The server copy of a name wins. A list whose file is in neither place is not offered: it is not in
+`lists`, `symbol` does not look in it, and `view?ref=preset:<id>` answers that it is not offered
+("That built-in list is not offered. Pick another list."). A folder that cannot be read (a file
+or folder the app's user has no right to, a loop of links) is treated as absent and logged once, and
+logged again only after it has been readable in between; a folder that is simply not there is the
+normal state before the owner makes it, and is not logged. A file over 1 MB is not a list somebody
+typed and is treated the same way.
+
+**The files the owner types on the server** (a list is offered the moment its file is there):
+
+| list | ref | file |
+|---|---|---|
+| NIFTY 50 | `preset:nifty50` | `NIFTY50.txt` (also shipped in the repository) |
+| NIFTY BANK | `preset:niftybank` | `NIFTYBANK.txt` (also shipped in the repository) |
+| NIFTY 100 | `preset:nifty100` | `NIFTY100.txt` |
+| NIFTY 200 | `preset:nifty200` | `NIFTY200.txt` |
+| NIFTY 500 | `preset:nifty500` | `NIFTY500.txt` |
+| NIFTY IT | `preset:niftyit` | `NIFTYIT.txt` |
+| NIFTY AUTO | `preset:niftyauto` | `NIFTYAUTO.txt` |
+| NIFTY PHARMA | `preset:niftypharma` | `NIFTYPHARMA.txt` |
+| NIFTY METAL | `preset:niftymetal` | `NIFTYMETAL.txt` |
+| NIFTY FMCG | `preset:niftyfmcg` | `NIFTYFMCG.txt` |
+| NIFTY PSU BANK | `preset:niftypsubank` | `NIFTYPSUBANK.txt` |
+| NIFTY PRIVATE BANK | `preset:niftypvtbank` | `NIFTYPVTBANK.txt` |
+| NIFTY REALTY | `preset:niftyrealty` | `NIFTYREALTY.txt` |
+| NIFTY ENERGY | `preset:niftyenergy` | `NIFTYENERGY.txt` |
+| NIFTY FINANCIAL SERVICES | `preset:niftyfinservice` | `NIFTYFINSERVICE.txt` |
+
+**The format.** One NSE symbol a line, in capital letters, digits, `&`, `-` or `_` (`M&M`,
+`BAJAJ-AUTO`); `#` starts a comment, alone or after a symbol; blank lines are ignored; the date of
+the index review is the header line `# as of YYYY-MM-DD`. A file with no such line reads "date not
+recorded". A line that is not a symbol (a space in it, lower case) or that repeats a symbol already
+on an earlier line is left out of the list and named by its line number in the list's words; the
+rest of the list stands. The screener's reader is more forgiving (it upper-cases a lower-case line);
+for the two shipped files, which are clean, both readers give the same symbols and a test holds
+them equal. Example (made-up symbols):
+
+```
+# as of 2026-09-30
+AAAA
+BBBB   # a comment may follow a symbol
+```
+
+**Words.** "Built-in list, locked. NIFTY 50 as of 30 Sep 2026: 50 symbols." (the file's own date, never
+the master's; "NIFTY 50 (date not recorded)" for a file with no header), then the window line when
+the list is over 250, then the names today's master lacks in W12's words ("2 names in this list are
+not in today's contract list: ABC, XYZ. The list is checked at each index review."), then the lines
+left out ("2 lines in this list's file were left out: line 3 ("ab cd" is not a symbol), line 5 (AAA
+is already on line 2). Symbols are capital letters and digits.", the first five named). Names are
+mapped to NSE cash listings of the master (EQ rows), in the file's order. Over 250 (NIFTY 500) W12's
+window line applies and `copy` cuts at 250 with W12's sentence ("Copied the first 250 of 300, in the
+order shown. A list holds 250."). On the wire a typed list is the same `View` as W12's: `locked`,
+version "0", `as_of` the file's ISO date or null, `missing` as `NSE:<SYMBOL>`; `lists` gives each
+offered list its `count` and `note` ("As of 30 Sep 2026", or null for a file with no date).
+
+**A changed file is read again, without a restart.** One `stat` per call (path, modification time,
+size and inode) is the check; the symbols are parsed again only when it changes. The prepared list
+(references to the master's own rows and the names the master lacks) stays tied to the master's
+generation as W12's are, and `refs/preset.py` now keeps it with that stamp too, so the next call
+after the file changed prepares it again against the same generation. No thread, timer or file
+watcher. The seam W12 left grew by one idea: `presets.CATALOGUE` is now asked at each call (a module
+attribute that answers the lists offered now), because a typed list comes and goes with its file;
+an `Entry` may carry `offered` and `stamp`, and a `Prepared` or `Built` may carry `notes`.
+
+**To add or update a file on the server** (the owner, as the server's administrator; the app runs as
+its own user, which only needs to read the folder and the files):
+
+```
+sudo mkdir -p /etc/sudarshan/universes
+sudo chmod 755 /etc/sudarshan/universes
+sudo nano /etc/sudarshan/universes/NIFTY100.txt      # type or paste the symbols, with the header line
+sudo chmod 644 /etc/sudarshan/universes/NIFTY100.txt
+```
+
+Mode 755 on the folder and 644 on each file let the app's user read them while only an administrator
+can change them. If `/etc/sudarshan` itself exists with a stricter mode, it needs the execute bit for
+others (`sudo chmod o+x /etc/sudarshan`) so the app's user can reach the folder. Nothing needs a restart:
+open the list again and it is read. At each index review, retype the file with the new date in its
+header line; the lists say the date they are as of, so a file that was not updated shows its old date.

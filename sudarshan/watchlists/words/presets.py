@@ -55,6 +55,34 @@ def source_line(rule: str, as_of: str | None) -> str:
     return f"From the Upstox contract list {of}: {RULES[rule]}. {MORNING}"
 
 
+def typed_locked_line(name: str, n: int, as_of: str | None) -> str:
+    """``Built-in list, locked. NIFTY 50 as of 30 Sep 2026: 50 symbols.`` A file with no ``# as
+    of`` line says so instead of a date."""
+    when = date_words(as_of)
+    of = f"as of {when}" if when else "(date not recorded)"
+    return f"Built-in list, locked. {name} {of}: {symbols(n)}."
+
+
+def problems_line(problems: list[tuple[int, str, str, int]], shown: int = 5) -> str:
+    """The lines of a typed file that were left out, each named by its number. A problem is
+    ``(line, kind, text, other)``: kind ``symbol`` (not a symbol), ``repeat`` (``other`` is the
+    line it repeats) or ``date`` (an ``as of`` line whose date is not a date)."""
+    parts = []
+    for line, kind, text, other in problems[:shown]:
+        text = text if len(text) <= 24 else text[:23] + "..."
+        if kind == "repeat":
+            parts.append(f"line {line} ({text} is already on line {other})")
+        elif kind == "date":
+            parts.append(f'line {line} ("{text}" is not a date, so the date is not recorded)')
+        else:
+            parts.append(f'line {line} ("{text}" is not a symbol)')
+    more = len(problems) - shown
+    tail = f", and {more} more" if more > 0 else ""
+    n = len(problems)
+    head = "1 line in this list's file was" if n == 1 else f"{n} lines in this list's file were"
+    return f"{head} left out: {', '.join(parts)}{tail}. Symbols are capital letters and digits."
+
+
 def missing_line(names: list[str], review: bool) -> str:
     """The names a list could not find in today's master. ``review`` says the list is a typed one
     that is checked at each index review."""

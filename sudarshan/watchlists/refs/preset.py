@@ -56,14 +56,17 @@ def entry_of(ident: str) -> presets.Entry:
 
 
 def prepared_for(e: presets.Entry, gen: master.Generation) -> presets.Prepared:
-    """The list prepared against this generation: built once, kept with it."""
+    """The list prepared against this generation: built once, kept with it. A typed list is also
+    kept with its file's stamp, so a file changed on disk is read again at the next call."""
+    stamp = e.stamp() if e.stamp is not None else None  # one stat of the file, no read
     with _slot:
         got = _prepared.get(gen, {}).get(e.id)
-    if got is not None:
-        return got
+    if got is not None and got[0] == stamp:
+        return got[1]
     built = e.prepare(gen.index)  # references only, no hub wait: done outside the lock
     with _slot:
-        return _prepared.setdefault(gen, {}).setdefault(e.id, built)
+        _prepared.setdefault(gen, {})[e.id] = (stamp, built)
+    return built
 
 
 def calendar_close(iso: str) -> int | None:
@@ -104,6 +107,8 @@ def built_now(e: presets.Entry, at_ms: int | None = None) -> tuple[presets.Built
     prepared = prepared_for(e, gen)
     at = now_ms() if at_ms is None else at_ms
     built = e.members(prepared, at, closes_for(prepared, at))
+    if e.kind == "typed":  # a typed list is as of its file's own date, never the master's
+        return built, prepared.as_of
     return built, prepared.as_of or as_of_of(m.snapshot())
 
 
