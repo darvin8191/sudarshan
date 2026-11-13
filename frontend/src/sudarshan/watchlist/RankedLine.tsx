@@ -6,7 +6,9 @@ import { PANEL_ID } from './ListTabs'
 import type { Ranking } from './useRanked'
 import {
   ageLine,
+  ageWords,
   HOLD_MS,
+  isStale,
   leftOutSentence,
   readAgo,
   timesLine,
@@ -56,6 +58,16 @@ function useTick(fast: boolean): void {
       document.removeEventListener('visibilitychange', change)
     }
   }, [fast])
+}
+
+/**
+ * Review L3: a ranking Upstox sent without its own time says when it was read instead, with the
+ * same stale style past ten minutes, so a ranking always says its age.
+ */
+function readLine(readMs: number, nowMs: number): { text: string; stale: boolean } {
+  const stale = isStale(readMs, nowMs)
+  const text = `Ranked by Upstox · read ${ageWords(readMs, nowMs)}`
+  return { text: stale ? `${text} · Pull down to read it again` : text, stale }
 }
 
 /** Pulling the page down from its top asks for a read, as the Refresh button does. */
@@ -166,10 +178,14 @@ export function RankedLine({
   useNoPullToReload()
   const pulling = usePullDown(ranking.pull, line, pullOff)
   const inWindow = holding && got !== null && now - got < HOLD_MS
-  const age =
-    data?.made_at != null && ['ok', 'stale', 'unavailable', 'wait'].includes(data.state)
+  const aged = data !== null && ['ok', 'stale', 'unavailable', 'wait'].includes(data.state)
+  const age = !aged
+    ? null
+    : data.made_at != null
       ? ageLine(data.made_at, now)
-      : null
+      : data.read_at != null
+        ? readLine(data.read_at, now) // review L3
+        : null
   const left =
     data && (data.state === 'ok' || data.state === 'stale')
       ? leftOutSentence(data.words, data.left_out)
@@ -247,9 +263,15 @@ export function RankedLine({
         </output>
       )}
       {data?.state === 'signin' && (
-        <Link to="/autologin" className={cn(BUTTON, 'self-start')}>
-          Sign in
-        </Link>
+        // Review L2: the same two ways out as the price notice, named as those pages name them.
+        <div className="flex flex-wrap gap-2">
+          <Link to="/autologin" className={BUTTON}>
+            Auto login
+          </Link>
+          <Link to="/dashboard" className={BUTTON}>
+            Dashboard
+          </Link>
+        </div>
       )}
       {chips.length > 1 && (
         <fieldset
