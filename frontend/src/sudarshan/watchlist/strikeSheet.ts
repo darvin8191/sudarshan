@@ -14,7 +14,6 @@ import {
   priceForGreeks,
   yearsToExpiry,
 } from '@/lib/optionGreeks'
-import type { SearchResult } from './api'
 import type { Contract } from './v2/types'
 
 /**
@@ -74,64 +73,9 @@ export function straddleOf(ce: number | null, pe: number | null): number | null 
   return ce !== null && pe !== null && ce > 0 && pe > 0 ? ce + pe : null
 }
 
-const MONTHS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']
-
-/** "24-NOV-26" (the master's spelling) or "2026-11-24" as "2026-11-24"; null when it is neither. */
-export function expiryIso(raw: string | null | undefined): string | null {
-  if (!raw) return null
-  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw
-  const match = /^(\d{1,2})-([A-Za-z]{3})-(\d{2}|\d{4})$/.exec(raw.trim())
-  if (!match) return null
-  const month = MONTHS.indexOf(match[2].toUpperCase()) + 1
-  if (month === 0) return null
-  const year = match[3].length === 2 ? 2000 + Number(match[3]) : Number(match[3])
-  return `${year}-${String(month).padStart(2, '0')}-${match[1].padStart(2, '0')}`
-}
-
 /** One later expiry's pair at the same strike (a side the master lacks is null). */
 export interface OtherExpiry {
   expiry: string
   ce: Contract | null
   pe: Contract | null
-}
-
-const positive = (value: unknown): number | null => {
-  const n = typeof value === 'string' ? Number(value) : value
-  return typeof n === 'number' && Number.isFinite(n) && n > 0 ? n : null
-}
-
-/**
- * The same strike on the next `OTHER_EXPIRIES` expiries after `after`, from the instrument search's
- * rows for "<underlying> <strike>" (the page's own search; the server's `strikes` op is not on this
- * branch). Only the underlying's own options on the row's exchange count, and the strike must match.
- */
-export function otherExpiries(
-  found: readonly SearchResult[],
-  args: { underlying: string; exchange: string; strike: number; after: string }
-): OtherExpiry[] {
-  const byExpiry = new Map<string, OtherExpiry>()
-  for (const hit of found) {
-    const expiry = expiryIso(hit.expiry)
-    const right = hit.instrumenttype?.toUpperCase()
-    if (!expiry || expiry <= args.after) continue
-    if (right !== 'CE' && right !== 'PE') continue
-    if (hit.exchange !== args.exchange || (hit.name ?? '').toUpperCase() !== args.underlying)
-      continue
-    if (Number(hit.strike) !== args.strike) continue
-    const contract: Contract = {
-      exchange: hit.exchange,
-      symbol: hit.symbol,
-      key: `${hit.exchange}:${hit.symbol}`,
-      name: hit.name ?? args.underlying,
-      lot: positive(hit.lotsize),
-      tick: positive(hit.tick_size),
-      expiry,
-      isin: null,
-    }
-    const row = byExpiry.get(expiry) ?? { expiry, ce: null, pe: null }
-    byExpiry.set(expiry, right === 'CE' ? { ...row, ce: contract } : { ...row, pe: contract })
-  }
-  return [...byExpiry.values()]
-    .sort((a, b) => a.expiry.localeCompare(b.expiry))
-    .slice(0, OTHER_EXPIRIES)
 }

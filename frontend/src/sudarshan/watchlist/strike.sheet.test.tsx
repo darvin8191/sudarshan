@@ -8,7 +8,7 @@ import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('@/lib/MarketDataManager', () => import('@/test/marketDataHarness'))
-const searched = vi.hoisted(() => ({ rows: [] as unknown[], noPe: false }))
+const searched = vi.hoisted(() => ({ strike: 25900, noPe: false }))
 const bridge = vi.hoisted(() => ({
   current: null as null | ReturnType<typeof import('./v2/mockBridge').createBridge>,
 }))
@@ -18,11 +18,8 @@ vi.mock('@/api/client', async () => {
   return {
     webClient: bridge.current.client,
     apiClient: {
-      post: async (url: string) => ({
-        data:
-          url === '/search'
-            ? { status: 'success', data: searched.rows }
-            : { status: 'success', data: { lotsize: 65, tick_size: 0.05 } },
+      post: async () => ({
+        data: { status: 'success', data: { lotsize: 65, tick_size: 0.05 } },
       }),
     },
   }
@@ -148,29 +145,47 @@ const tick = (price: number) =>
     frames.flush()
   })
 const sym = (day: string, strike: number, right: string) => `NIFTY${day}26${strike}${right}`
-const hit = (day: string, iso: string, strike: number, right: string) => ({
+const contract = (day: string, iso: string, strike: number, right: string) => ({
   symbol: sym(day, strike, right),
   exchange: 'NFO',
+  key: `NFO:${sym(day, strike, right)}`,
   name: 'NIFTY',
-  instrumenttype: right,
-  lotsize: 65,
-  tick_size: 0.05,
+  lot: 65,
+  tick: 0.05,
   expiry: iso,
-  strike,
+  isin: null,
 })
 const EXPIRIES = [
-  ['24NOV', '24-NOV-26'],
-  ['01DEC', '01-DEC-26'],
-  ['08DEC', '08-DEC-26'],
-  ['15DEC', '15-DEC-26'],
-  ['22DEC', '22-DEC-26'],
-  ['29DEC', '29-DEC-26'],
+  ['24NOV', '2026-11-24'],
+  ['01DEC', '2026-12-01'],
+  ['08DEC', '2026-12-08'],
+  ['15DEC', '2026-12-15'],
+  ['22DEC', '2026-12-22'],
+  ['29DEC', '2026-12-29'],
 ]
 const search = (strike: number) => {
-  searched.rows = [
-    ...EXPIRIES.flatMap(([day, iso]) => [hit(day, iso, strike, 'CE'), hit(day, iso, strike, 'PE')]),
-    { ...hit('24NOV', '24-NOV-26', strike, 'CE'), name: 'BANKNIFTY' },
-  ]
+  searched.strike = strike
+}
+/** The server's `strikes` op: the open expiries, and for the one asked the strike alone (n 0 around p). */
+const strikesOp = (call: { params: Record<string, unknown> }) => {
+  const chosen = EXPIRIES.find(([, iso]) => iso === call.params.exp) ?? EXPIRIES[0]
+  const at = Number(call.params.p)
+  return {
+    underlying: 'NIFTY',
+    exchange: 'NSE_INDEX',
+    expiries: EXPIRIES.map(([, iso]) => ({ date: iso, label: iso, month: false })),
+    expiry: chosen[1],
+    atm: at,
+    strikes: [
+      {
+        strike: at,
+        atm: true,
+        ce: contract(chosen[0], chosen[1], at, 'CE'),
+        pe: contract(chosen[0], chosen[1], at, 'PE'),
+      },
+    ],
+    words: '',
+  }
 }
 const push = (strike: number, ce: number, pe: number, extra = {}) =>
   act(() => {
@@ -182,6 +197,7 @@ const sheet = () => document.querySelector('[data-strike-sheet]') as HTMLElement
 
 beforeEach(() => {
   search(25900)
+  b().on('strikes', strikesOp)
   searched.noPe = false
   answers.set(1, () => pairAnswer(25900))
   OPEN_GUARD.ms = 0
@@ -277,6 +293,15 @@ describe('the strike sheet', () => {
     const others = feed.live().filter((key) => /NIFTY(01|08|15|22)DEC/.test(key))
     expect(others).toHaveLength(8)
     expect(feed.live().some((key) => key.includes('29DEC'))).toBe(false)
+    // F13: the contracts come from the server's `strikes` op, asked for the strike alone on the
+    // underlying's own exchange, one answer for the open expiries and one for each of the next four.
+    const asked = b().calls.filter((call) => call.op === 'strikes')
+    expect(asked.length).toBeGreaterThanOrEqual(4)
+    for (const call of asked)
+      expect(call.params).toMatchObject({ u: 'NIFTY', x: 'NSE_INDEX', p: '25900', n: '0' })
+    expect(asked.map((call) => call.params.exp).filter(Boolean)).toEqual(
+      expect.arrayContaining(['2026-12-08', '2026-12-15', '2026-12-22'])
+    )
     act(() => {
       feed.push(sym('01DEC', 25900, 'CE'), 'NFO', { ltp: 250, prev_close: 240 })
       frames.flush()

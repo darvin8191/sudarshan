@@ -202,12 +202,11 @@ export const LiveList = memo(function LiveList({
     sheetPin?.pair && sheetPin.pair.strike !== null && sheetPin.pair.ce.expiry && current
       ? {
           underlying: current.rule.underlying,
-          exchange: derivativesExchange(current.rule),
+          exchange: current.rule.underlying_exchange, // F13: the `strikes` op takes the underlying's own
           strike: sheetPin.pair.strike,
           after: sheetPin.pair.ce.expiry,
         }
-      : null,
-    apiKey
+      : null
   )
   const extraItems = useMemo<WatchlistItem[]>(
     () =>

@@ -39,6 +39,7 @@ export const answer = (strike: number, over: Partial<Resolved> = {}): Resolved =
   price: strike + 12.35,
   price_at: Date.UTC(2026, 10, 13, 4, 42),
   words: `Now: NIFTY ${strike} CE, 24 Nov 2026 (NIFTY at ${strike + 12.35})`,
+  rolled: false,
   ...over,
 })
 
@@ -55,6 +56,7 @@ export const futureAnswer = (id: number, over: Partial<Resolved> = {}): Resolved
   price: null,
   price_at: null,
   words: 'Now: NIFTY future, 24 Nov 2026',
+  rolled: false,
   ...over,
 })
 

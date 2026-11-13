@@ -13,9 +13,6 @@ export interface SearchResult {
   instrumenttype?: string
   lotsize?: number | string | null
   tick_size?: number | string | null
-  /** F12: an option's expiry ("24-NOV-26") and strike, as the master holds them. */
-  expiry?: string | null
-  strike?: number | string | null
 }
 
 interface Answer<T> {
