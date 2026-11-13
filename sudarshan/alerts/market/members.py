@@ -2,8 +2,8 @@
 transport in this one module.
 
     members(ref) / version() -> POST 127.0.0.1:5000/sudarshan/watchlists/internal/read?op=members|version
-      one Fernet token under the watchlists' internal purpose (the integrator adds it to
-      sudarshan/vault/keys.py; the route itself is W23), sealed as the screener's internal calls are
+      one Fernet token under WATCHLISTS_INTERNAL_INFO (sudarshan/vault/keys.py; the route itself is
+      W23), sealed as the screener's internal calls are
 
 The contract this was written against (a stub until the route exists, tests/groups_fakes.py):
 

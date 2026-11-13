@@ -691,6 +691,7 @@ def _market_parts(settings, market, db_path, pacer, off):
         ALERTS_API_INFO,
         ALERTS_PUSH_INFO,
         ALERTS_SCREENER_DIGEST_INFO,
+        WATCHLISTS_INTERNAL_INFO,
         fernet_for,
         pepper_from,
     )
@@ -705,7 +706,8 @@ def _market_parts(settings, market, db_path, pacer, off):
         return ReleasedClaims(feed_url_of()), MarketApi(OffDesk(off), fernet), http_port_of()
     runtime = MarketRuntime(settings, market, owner_reader=lambda: read_owner(db_path),
                             pacer=pacer, openalgo_db=db_path,
-                            push_fernet=fernet_for(pepper, ALERTS_PUSH_INFO))  # fmt: skip
+                            push_fernet=fernet_for(pepper, ALERTS_PUSH_INFO),
+                            members_fernet=fernet_for(pepper, WATCHLISTS_INTERNAL_INFO))  # fmt: skip
     digest_fernet = fernet_for(pepper, ALERTS_SCREENER_DIGEST_INFO)
     return (
         runtime,
