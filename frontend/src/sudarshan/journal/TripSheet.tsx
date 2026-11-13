@@ -18,7 +18,7 @@ import { cn } from '@/lib/utils'
 import { istTime } from '@/sudarshan/books/time'
 import { Signed } from '@/sudarshan/portfolio/Signed'
 import { BottomSheet } from '@/sudarshan/watchlist/BottomSheet'
-import { journalData, problemOf } from './api'
+import { journalData, problemOf, WORDS } from './api'
 import { JOURNAL_KEY } from './keys'
 import { holdWords, openQty, priceText } from './live'
 import { paiseAmount } from './money'
@@ -227,7 +227,8 @@ function Editor({
       onSaved()
     } catch (error) {
       const found = problemOf(error)
-      setProblem({ message: found.message, conflict: found.code === 'conflict' })
+      const conflict = found.code === 'conflict'
+      setProblem({ message: conflict ? WORDS.conflict : found.message, conflict })
     } finally {
       sending.current = false
       setSaving(false)

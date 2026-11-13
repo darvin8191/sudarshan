@@ -44,7 +44,11 @@ export const WORDS = {
   notSent: 'The request could not be sent. Reload the page, then try again.',
   unreadable: 'OpenAlgo’s answer could not be read. Try again in a minute.',
   signedOut: 'Your session has ended. Sign in again, then come back to the journal.',
+  /** Any 409 from the bridge, until the sheet that asked says it in its own words. */
+  changedElsewhere: 'This was changed on another screen. Nothing was saved; open it again.',
   conflict: 'This trade’s notes were changed on another screen. Nothing was saved; open it again.',
+  playbookConflict:
+    'This playbook was changed on another screen. Nothing was saved; open it again.',
 } as const
 
 export type ProblemCode =
@@ -100,7 +104,7 @@ function problemForStatus(status: number): JournalProblem {
       message: 'The journal is for the owner’s sign-in only. Sign in as the owner to see it.',
     }
   }
-  if (status === 409) return { code: 'conflict', message: WORDS.conflict }
+  if (status === 409) return { code: 'conflict', message: WORDS.changedElsewhere }
   if (status === 429) {
     return {
       code: 'busy',
@@ -164,8 +168,8 @@ export function problemOf(error: unknown): JournalProblem {
     return { code: 'unauthorized', message: WORDS.signedOut }
   }
   if (coded) {
-    // A conflict is always said in the one sentence the owner learns.
-    return status === 409 ? { code: 'conflict', message: WORDS.conflict } : coded
+    // A conflict is said in the one sentence the owner learns; the sheet that asked words it.
+    return status === 409 ? { code: 'conflict', message: WORDS.changedElsewhere } : coded
   }
   return problemForStatus(status)
 }

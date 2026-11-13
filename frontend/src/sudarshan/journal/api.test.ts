@@ -72,7 +72,7 @@ describe('journalCall', () => {
 
   it.each([
     [401, 'unauthorized', WORDS.signedOut],
-    [409, 'conflict', WORDS.conflict],
+    [409, 'conflict', WORDS.changedElsewhere],
     [404, 'unavailable', WORDS.notReady],
     [500, 'unavailable', WORDS.unavailable],
   ])('says status %i in words when the answer carries none', (status, code, words) => {
@@ -85,7 +85,7 @@ describe('journalCall', () => {
     const problem = problemOf(
       refused(409, { status: 'error', error: { code: 'conflict', message: 'stale version 3' } })
     )
-    expect(problem.message).toBe(WORDS.conflict)
+    expect(problem).toEqual({ code: 'conflict', message: WORDS.changedElsewhere })
   })
 
   it('says a CSRF refusal as the session having ended', () => {

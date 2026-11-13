@@ -9,6 +9,8 @@ import { Analytics } from '@/sudarshan/journal/Analytics'
 import { journalCall, problemOf } from '@/sudarshan/journal/api'
 import { JOURNAL_STATE_KEY } from '@/sudarshan/journal/keys'
 import { ModeChip } from '@/sudarshan/journal/ModeChip'
+import { PlaybookSheetHost } from '@/sudarshan/journal/PlaybookSheet'
+import { Playbooks } from '@/sudarshan/journal/Playbooks'
 import { Segmented } from '@/sudarshan/journal/Segmented'
 import { TripSheet } from '@/sudarshan/journal/TripSheet'
 import { TripsList } from '@/sudarshan/journal/TripsList'
@@ -40,20 +42,6 @@ function Notice({
       </div>
       <p className="text-base font-bold">{title}</p>
       {children}
-    </div>
-  )
-}
-
-/** What a part says until its own screen arrives. */
-function Stub({ part }: { part: JournalView }) {
-  const words: Record<JournalView, string> = {
-    trades: 'Your trades will be listed here, open ones first.',
-    analytics: 'Your results will be drawn here.',
-    playbooks: 'Your setups will be listed here.',
-  }
-  return (
-    <div className={CARD} data-testid={`journal-${part}`}>
-      <p className="text-sm text-[color:var(--text-secondary)]">{words[part]}</p>
     </div>
   )
 }
@@ -107,7 +95,11 @@ export default function Journal() {
       ) : view === 'analytics' ? (
         <Analytics mode={mode} />
       ) : (
-        <Stub part={view} />
+        <Playbooks
+          mode={mode}
+          onOpen={(playbookId) => open({ kind: 'playbook', playbookId })}
+          onNew={() => open({ kind: 'playbook', playbookId: null })}
+        />
       )
   }
 
@@ -122,6 +114,13 @@ export default function Journal() {
         <Segmented label="Journal parts" value={view} options={PARTS} onChange={setView} />
       )}
       {body}
+      {usable && overlay?.kind === 'playbook' && (
+        <PlaybookSheetHost
+          key={overlay.playbookId ?? 'new'}
+          playbookId={overlay.playbookId}
+          onClose={close}
+        />
+      )}
       {usable && overlay?.kind === 'trade' && (
         <TripSheet key={overlay.tradeId} tradeId={overlay.tradeId} open onClose={close} />
       )}
