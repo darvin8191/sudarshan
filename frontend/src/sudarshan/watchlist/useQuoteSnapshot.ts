@@ -235,7 +235,7 @@ export function useQuoteSnapshot({
     () =>
       new Promise<ReadonlyMap<string, Snapshot> | null>((done) => {
         waiters.current.push(done)
-        void read(0, null)
+        void read(-1, null) // older than any age: every quote, even one read this millisecond
       }),
     [read]
   )

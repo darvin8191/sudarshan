@@ -83,10 +83,7 @@ export function useSortOrder({
       takenFor.current = key
       void fullRead().then((quotes) => {
         if (takenFor.current !== key) return
-        if (quotes === null) {
-          takenFor.current = null
-          return
-        }
+        if (quotes === null) return // `takenFor` stays: only another pick or Sort again reads once more
         const { rows: now, groups: layout } = latest.current
         const byId = new Map(
           now.map((row) => [row.item.id, entryFromSnapshot(row, quotes.get(row.key), pref.basis)])

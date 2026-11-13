@@ -374,7 +374,7 @@ shows the list's own order. Change from today's open is `ltp - open` from the sn
 dash with "Open not known yet", the sheet says how many rows lack it, and a row without one is read once more
 at its first tick after the opening (`useLiveRows.ts`; the snapshot already reads on the market-open event).
 The list stays in LTP mode. The seam for a list longer than 250 rows is `needsFullSnapshot` in `sort.ts`
-(F9 reads one snapshot of every row there before ranking); own lists stop at 250, so it is shut. With the
+(F9 reads one snapshot of every row there before ranking); own lists stop at 250, so it stays shut for them. With the
 switch off the page is as it was. Tests: `sort.test.ts`, `sort.view.test.tsx`.
 
 ## F7 - the holdings line
@@ -460,6 +460,31 @@ Five findings of the mid-point review (H2, M2, M3, L11, L12) and its W5 bullet, 
   only what it changed. `V2_KEY` stays where it is.
 - **W5 decision.** "`ref` is the one ref changed, else `lists`" is no longer all a push says: the
   phone reads `refs` and falls back to `ref` only for a bridge that does not send it.
+
+## F9 - the cap, the window and last ticks
+
+With v2 on (`LiveList` passes `flagNames`), the page follows at most 250 instruments on the pooled socket, and
+`follow.ts` (pure) counts them in this order, stopping at 250: the open sheet's instrument; the underlying of
+each follow row on screen, once each (an input of `useLiveRows`, filled in F11); then the rows in display order,
+a strike row counting 2 (an input, filled in F12). A row that does not fit whole is not followed, and nothing
+after it is. A row not followed shows its last figure, grey, with a clock and "Price at 10:42 · not real-time:
+this list follows 250 prices at most" (and "outside the 250 followed" to a screen reader); with no read yet it
+says "No price read yet". It is never re-read on a timer: the quiet re-sync of `useLiveRows` takes followed rows
+only, and the snapshot's own events (open, reconnect, market opening or closing, back after 15 s) still read
+the whole list. A list longer than 250 (a built-in list, from F10; tests use a synthetic one) follows a window
+of 120 rows (`useFollowWindow.ts`): centred on the first visible row, recomputed 300 ms after the scrolling
+stops (every row of such a list carries `data-row-index`, read from the page), and moved only when the visible
+rows leave the window's middle half, so a move swaps about 30 keys. Rows outside it say "not real-time: this
+list follows 120 rows at a time" and "outside the 120 followed". The window is over the rows as they are
+shown, so a sort moves it. A row that leaves the followed set keeps its last WebSocket tick (`lastTicks` in
+`useLiveRows`, one entry per row of the open list, dropped with the list) and shows it with the time of it; the
+newer of that tick and the latest read wins, so it is never the read made when the list opened if a tick came
+after. One REST snapshot covers the whole list, `QUOTE_KEYS_PER_CALL` (500) keys a call, the calls made at
+once so every row is read at one instant. A price sort on a list longer than 250 calls `readAll` first and
+ranks every row on that read alone (`entryFromSnapshot`, never a tick): the line says "Sorted by % change, high
+first, at 14:00, from prices read at 14:00". A failed read takes no snapshot and the list keeps its order until
+Sort again. With the switch off nothing here applies: every row is followed, as it was. Tests: `follow.test.ts`
+(hand-typed vectors), `useLiveRows.follow.test.tsx`, `follow.view.test.tsx`.
 
 ## W7 - sections (`store/sections.py`, `ops/sections.py`, `words/sections.py`)
 
