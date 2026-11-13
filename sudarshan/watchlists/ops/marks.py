@@ -1,7 +1,7 @@
 """The flag and note ops (M8.6, W9): ``mark``, ``flags``, ``symbol`` and ``expired_clear``.
 
 A symbol has one flag (1 to 5) and one note (up to 500 characters) across every list; ``mark``
-names the symbol's ``updated_at`` it was decided on and ``flags`` and ``expired_clear`` name the
+names the symbol's ``version`` it was decided on and ``flags`` and ``expired_clear`` name the
 flags version, each checked as one compare-and-set in the transaction's first statement
 (``store/symbols.py``), so a stale one is ``conflict`` and changes nothing. Nothing is checked
 against the master except the expired reading and ``expired_clear``; a flag on a contract that
@@ -100,27 +100,29 @@ def _names(raw: list[dict]) -> list[tuple[int, str]]:
     return out
 
 
-def _flags_write(held: int, change) -> tuple[int, object]:
-    """One transaction: check the flags version, ``change(s)``, move the version. ``change`` may
-    return None to leave it where it is. The new version and what ``change`` answered."""
+class _Nothing(Exception):
+    """A clear that found nothing: the transaction is rolled back, the flags version stays."""
+
+
+def _flags_write(held: int, change) -> int:
+    """One transaction: the flags version's compare-and-set first (``versions.advance_flags``),
+    then ``change(s)``; the new version. ``_Nothing`` from ``change`` rolls it all back."""
     if not 0 <= held <= MAX_VERSION:
         raise OpError("conflict", words.CONFLICT)
     with engine.open_session() as s, s.begin():
         try:
-            store.claim_flags(s, held)
-        except store.Stale:
+            version = versions.advance_flags(s, held)
+        except versions.Stale:
             raise OpError("conflict", words.CONFLICT) from None
-        result = change(s)
-        version = held if result is None else versions.advance_flags(s)
-    if result is not None:
-        versions.committed("flags", version)
-    return version, result
+        change(s)
+    versions.committed("flags", version)
+    return version
 
 
 @bumps("flags")
 def flags(args: dict) -> dict:
     pairs = _names(args["names"])
-    version, _ = _flags_write(args["version"], lambda s: store.rename(s, pairs) or True)
+    version = _flags_write(args["version"], lambda s: store.rename(s, pairs))
     return Done(version=str(version), id=None, words=None)
 
 
@@ -137,13 +139,14 @@ def expired_clear(args: dict) -> dict:
     def change(s):
         gone[:] = [(e, y, f) for e, y, f in store.everything(s) if m.row(e, y) is None]
         if not gone:
-            return None
+            raise _Nothing
         store.remove(s, [(e, y) for e, y, _ in gone])
-        return True
 
-    version, result = _flags_write(args["version"], change)
-    done = Done(version=str(version), id=None,
-                words=words.cleared(len(gone)) if result else words.NONE_EXPIRED)  # fmt: skip
+    try:
+        version = _flags_write(args["version"], change)
+    except _Nothing:
+        return Done(version=str(args["version"]), id=None, words=words.NONE_EXPIRED)
+    done = Done(version=str(version), id=None, words=words.cleared(len(gone)))
     done.refs = tuple(sorted({f"flag:{f}" for _, _, f in gone if f}))
     return done
 
@@ -156,7 +159,7 @@ def symbol(args: dict) -> dict:
     with engine.open_session() as s:
         row = store.find(s, exchange, name)
         names = {f["mark"]: f["name"] for f in store.flag_names(s)}
-        found = None if row is None else (row.flag, row.note, row.note_at, row.updated_at)
+        found = None if row is None else (row.flag, row.note, row.note_at, row.version)
     flag, note, note_at, version = found or (None, None, None, None)
     m = master.Master()
     # Own lists only. Built-in lists (W12) join this answer as `Held` records after them.

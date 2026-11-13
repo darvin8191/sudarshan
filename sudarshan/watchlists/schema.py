@@ -160,6 +160,8 @@ class SymbolRow(Base):
     flag_at = Column(BigInteger)
     note = Column(Text)
     note_at = Column(BigInteger)
+    #: A counter, not a time: a write names the one it was decided on (compare-and-set).
+    version = Column(Integer, nullable=False, server_default="1")
     updated_at = Column(BigInteger, nullable=False)
 
     __table_args__ = (

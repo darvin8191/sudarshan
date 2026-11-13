@@ -2,7 +2,7 @@
 
 One ``wl_symbol`` row per symbol across every list; a row with neither a flag nor a note is deleted,
 and a contract that has left the master keeps its row (it reads as expired at read, and only
-``clear`` removes it). A write names the version it was decided on: ``wl_symbol.updated_at`` for a
+``clear`` removes it). A write names the version it was decided on: ``wl_symbol.version`` (a counter) for a
 symbol (None for a symbol with no row), ``wl_meta.flags_version`` for the flag names. Each is
 checked by a compare-and-set in SQL as the transaction's first statement, a guarded UPDATE that
 changes nothing but takes SQLite's write lock at once (the reason is in ``store/sections.py``), so
@@ -12,8 +12,7 @@ run inside the caller's ``with open_session() as s, s.begin():``.
 
 from __future__ import annotations
 
-from sqlalchemy import Integer, delete, select, update
-from sqlalchemy import cast as sql_cast
+from sqlalchemy import delete, select, update
 
 from sudarshan.watchlists import schema
 from sudarshan.watchlists.ops.state import DEFAULT_FLAG_NAMES
@@ -21,7 +20,6 @@ from sudarshan.watchlists.schema import OWNER
 from sudarshan.watchlists.store.sections import Stale, now_ms
 
 SYM = schema.SymbolRow
-FLAGS = "flags_version"
 
 
 def _key(exchange: str, symbol: str) -> tuple:
@@ -34,10 +32,10 @@ def find(s, exchange: str, symbol: str):
 
 
 def claim(s, exchange: str, symbol: str, held: int | None):
-    """Check ``held`` against the symbol's ``updated_at`` (None: it has no row); the row now, or
+    """Check ``held`` against the symbol's ``version`` (None: it has no row); the row now, or
     None. Raises ``Stale`` and the caller's transaction rolls back."""
-    cond = _key(exchange, symbol) + (() if held is None else (SYM.updated_at == held,))
-    done = s.execute(update(SYM).where(*cond).values(updated_at=SYM.updated_at))
+    cond = _key(exchange, symbol) + (() if held is None else (SYM.version == held,))
+    done = s.execute(update(SYM).where(*cond).values(version=SYM.version))
     if (done.rowcount == 1) != (held is not None):
         raise Stale
     return None if held is None else find(s, exchange, symbol)
@@ -51,15 +49,15 @@ def write(s, exchange: str, symbol: str, old, held: int | None, flag, note) -> i
             s.execute(delete(SYM).where(*_key(exchange, symbol)))
         return None
     at = now_ms()
-    version = max(at, (held or 0) + 1)  # never the one held, so a stale writer is told
+    version = (held or 0) + 1
     flag_at = old.flag_at if old is not None and old.flag == flag else (at if flag else None)
     note_at = old.note_at if old is not None and old.note == note else (at if note else None)
     if old is None:
         s.add(SYM(exchange=exchange, symbol=symbol, flag=flag, flag_at=flag_at, note=note,
-                  note_at=note_at, updated_at=version))  # fmt: skip
+                  note_at=note_at, version=version, updated_at=at))  # fmt: skip
     else:
         s.execute(update(SYM).where(*_key(exchange, symbol)).values(
-            flag=flag, flag_at=flag_at, note=note, note_at=note_at, updated_at=version))  # fmt: skip
+            flag=flag, flag_at=flag_at, note=note, note_at=note_at, version=version, updated_at=at))  # fmt: skip
     return version
 
 
@@ -86,18 +84,6 @@ def flag_names(s) -> list[dict]:
     row = schema.FlagNameRow
     own = dict(s.execute(select(row.mark, row.name).where(row.principal == OWNER)).all())
     return [{"mark": n, "name": own.get(n, d)} for n, d in enumerate(DEFAULT_FLAG_NAMES, 1)]
-
-
-def claim_flags(s, held: int) -> None:
-    """Check ``held`` against the flags version, without moving it (``versions.advance_flags``
-    does, in the same transaction). Raises ``Stale``."""
-    meta = schema.MetaRow
-    done = s.execute(update(meta).where(
-        meta.name == FLAGS, sql_cast(meta.value, Integer) == held).values(value=meta.value))  # fmt: skip
-    if done.rowcount == 0 and not (
-        held == 0 and s.scalar(select(meta.value).where(meta.name == FLAGS)) is None
-    ):
-        raise Stale
 
 
 def rename(s, pairs: list[tuple[int, str]]) -> None:

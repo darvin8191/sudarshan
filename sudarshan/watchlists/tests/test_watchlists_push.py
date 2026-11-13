@@ -115,11 +115,15 @@ def test_the_lists_version_reads_boot_and_count_and_the_other_two_are_the_stores
     assert first["favourites"] == 0 and first["flags"] == 0  # an absent row reads as 0
     assert stored("favourites_version") is None
     with engine.open_session() as s, s.begin():
-        n = versions.advance_flags(s)
+        n = versions.advance_flags(s, 0)
     versions.committed("flags", n)
     after = versions.snapshot()
     assert after["lists"] == first["lists"] and emitted == []
     assert after["flags"] == 1 and after["favourites"] == 0 and stored("flags_version") == "1"
+    for held in (0, 5):  # a stale or impossible version is refused and moves nothing
+        with pytest.raises(versions.Stale), engine.open_session() as s, s.begin():
+            versions.advance_flags(s, held)
+    assert stored("flags_version") == "1"
     assert versions.bump("items", ["list:1"]) != first["lists"]
 
 

@@ -332,20 +332,25 @@ removed).
 ## W9 - notes, flags and flag lists (`store/symbols.py`, `ops/marks.py`, `refs/flag.py`, `words/marks.py`)
 
 `wl_symbol` holds one flag (1 to 5) and one note (up to 500 characters, trimmed) per symbol across
-every list; a row with neither is deleted. `mark` (PUT, `EXCHANGE:SYMBOL`) names `wl_symbol.updated_at`
-as its version (absent or null: the symbol has no row), `flags` (rename) and `expired_clear` name
-`wl_meta.flags_version`; a stale one is `conflict` ("Changed on another screen. The list is shown
+every list; a row with neither is deleted. `mark` (PUT, `EXCHANGE:SYMBOL`) names `wl_symbol.version`, an
+integer counter, as its version (absent or null: the symbol has no row), `flags` (rename) and
+`expired_clear` name `wl_meta.flags_version`; a stale one is `conflict` ("Changed on another screen. The list is shown
 again.") and changes nothing. Each is a compare-and-set in SQL and the transaction's first statement,
 a guarded UPDATE that changes nothing but takes SQLite's write lock (W7's reason), so the old row
 read after it cannot have moved; nothing reads a version and writes it back. A field a `mark` leaves
-out stays as it is and `null` clears it; the answer's `version` is the new `updated_at` as text
-(null when the row went), and a write never answers the version it was given. `flag_at` moves only
+out stays as it is and `null` clears it; the answer's `version` is the new counter as text (null
+when the row went). The counter is not a time: two writes in one millisecond or a clock stepped
+back cannot give equal versions. Schema 1 had not shipped in a release, so `wl_symbol.version`
+(integer, default 1) was added to `schema.py` and so to the migration's create path, with no new
+step; `updated_at` stays as the time of the write. `flag_at` moves only
 when the flag changes, so re-sending a flag keeps its place in the flag list.
 
 `flags` renames the five flags (1 to 24 letters, each named once). Absent rows read as Watch,
 Breakout, Results, Long term and Avoid and are never written as if chosen: a name that equals its
-default deletes the row. It moves `flags_version` with `versions.advance_flags` inside its
-transaction and then `versions.committed`. `state` now reads the names from the store (the defaults
+default deletes the row. It moves `flags_version` with `versions.advance_flags(s, held)`, itself the
+compare-and-set (the UPDATE matches only the held version, a row count of 0 raises `Stale`, told
+`conflict`; absent reads as 0 and a first write inserts the row), as the transaction's first
+statement, then `versions.committed`. `state` now reads the names from the store (the defaults
 when it cannot).
 
 `flag:<n>` (`refs/flag.py`, found by discovery, so `view` answers it) is every `wl_symbol` row with

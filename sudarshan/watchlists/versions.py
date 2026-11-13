@@ -26,6 +26,7 @@ import secrets
 from collections.abc import Iterable
 
 from sqlalchemy import Integer, String, cast, select, update
+from sqlalchemy.exc import IntegrityError
 
 from extensions import emit_from_any_thread
 from sudarshan.watchlists import contract, engine
@@ -123,10 +124,29 @@ def advance_favourites(s) -> int:
     return _advance(s, "favourites")
 
 
-def advance_flags(s) -> int:
+class Stale(Exception):
+    """The version a write was decided on is not the stored one: nothing was changed."""
+
+
+def advance_flags(s, held: int) -> int:
     """For the flags writer (W9): inside the write's transaction, then ``committed("flags", n)``
-    after it commits."""
-    return _advance(s, "flags")
+    after it commits. One compare-and-set: the UPDATE only matches when the stored version is
+    ``held`` (absent reads as 0), and a row count of 0 raises ``Stale`` so the caller's
+    transaction rolls back. It is the transaction's first statement, so it takes the write lock."""
+    name = STORED["flags"]
+    done = s.execute(update(MetaRow).where(
+        MetaRow.name == name, cast(MetaRow.value, Integer) == held).values(
+        value=cast(cast(MetaRow.value, Integer) + 1, String)))  # fmt: skip
+    if done.rowcount == 1:
+        return held + 1
+    if held != 0 or s.scalar(select(MetaRow.value).where(MetaRow.name == name)) is not None:
+        raise Stale
+    try:
+        s.add(MetaRow(name=name, value="1"))
+        s.flush()
+    except IntegrityError:
+        raise Stale from None  # another first write made the row between the two statements
+    return 1
 
 
 def bump(why: str, refs: Iterable[str] = ()) -> str:

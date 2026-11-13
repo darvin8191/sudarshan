@@ -52,7 +52,9 @@ def _populate(path: Path) -> None:
     _sql(path, "INSERT INTO wl_row (id, list_id, position, kind, underlying, underlying_exchange,"
          " expiry_rule, \"offset\", created_at, updated_at) VALUES (1, 3, 0, 'atm_option', 'NIFTY',"
          " 'NSE_INDEX', 'nearest', 2, 1, 2)")  # fmt: skip
-    _sql(path, "INSERT INTO wl_symbol VALUES ('owner', 'NSE', 'INFY', 2, 5, 'results soon', 6, 7)")
+    _sql(
+        path, "INSERT INTO wl_symbol VALUES ('owner', 'NSE', 'INFY', 2, 5, 'results soon', 3, 6, 7)"
+    )
     _sql(path, "INSERT INTO wl_flag VALUES ('owner', 2, 'Watch closely')")
     _sql(path, "INSERT INTO wl_favourite VALUES ('owner', 1, 'list:3', 8)")
     _sql(path, "INSERT INTO wl_pref VALUES ('owner', 'list:3', 'change', 1, 'open', 1, 9)")

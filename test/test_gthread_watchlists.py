@@ -393,13 +393,13 @@ def mark_once(server, headers, round_no, i, held):
 
 def test_two_marks_on_one_version_one_wins_and_the_other_is_told_conflict(server_on):
     headers = server_on.login()
-    sql = "SELECT updated_at FROM wl_symbol WHERE symbol = 'INFY'"
+    sql = "SELECT version FROM wl_symbol WHERE symbol = 'INFY'"
     for round_no in range(4):  # a race is only seen when the threads really overlap: try again
         held = store_rows(server_on, sql)[0][0] if round_no else None
         got = at_once(8, lambda i, r=round_no, v=held: mark_once(server_on, headers, r, i, v))
         assert sorted(status for status, _ in got) == [200] + [409] * 7, got  # never a 500
         assert {b["code"] for status, b in got if status == 409} == {"conflict"}
-        (row,) = store_rows(server_on, "SELECT flag, note, updated_at FROM wl_symbol")
+        (row,) = store_rows(server_on, "SELECT flag, note, version FROM wl_symbol")
         (won,) = (i for i, (status, _) in enumerate(got) if status == 200)
         assert row[:2] == (1 + won % 5, f"r{round_no}-{won}") and row[2] != held
     assert len(store_rows(server_on, "SELECT 1 FROM wl_symbol")) == 1
