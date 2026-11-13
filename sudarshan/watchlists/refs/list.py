@@ -49,6 +49,21 @@ def read_live(user: str, lid: int) -> dict | None:
         oa.db_session.remove()  # a read: nothing to commit, and the connection goes back at once
 
 
+def holding(user: str, exchange: str, symbol: str) -> list[tuple[int, str]]:
+    """``(id, name)`` of each of ``user``'s lists that holds the symbol, in list order. Built-in
+    lists are not here: they join the symbol sheet with W12."""
+    from database import watchlist_db as oa
+
+    try:
+        return [(r[0], r[1]) for r in oa.db_session.query(oa.Watchlist.id, oa.Watchlist.name)
+                .join(oa.WatchlistItem, oa.WatchlistItem.watchlist_id == oa.Watchlist.id)
+                .filter(oa.Watchlist.user_id == user, oa.WatchlistItem.symbol == symbol,
+                        oa.WatchlistItem.exchange == exchange)
+                .order_by(oa.Watchlist.id).all()]  # fmt: skip
+    finally:
+        oa.db_session.remove()
+
+
 def read_overlay(lid: int, items: list) -> dict:
     """What the store holds for the list and for its symbols, in one read-only transaction."""
     ref, out = f"list:{lid}", {"oa_created_at": None, "version": None}

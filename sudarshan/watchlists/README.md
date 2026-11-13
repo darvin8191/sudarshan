@@ -329,3 +329,47 @@ Tests: `tests/test_watchlists_arrange.py`, which includes the yield under a real
 subprocess (a second greenlet runs 240+ times during a 250-item copy, and not at all with the yield
 removed).
 
+## W9 - notes, flags and flag lists (`store/symbols.py`, `ops/marks.py`, `refs/flag.py`, `words/marks.py`)
+
+`wl_symbol` holds one flag (1 to 5) and one note (up to 500 characters, trimmed) per symbol across
+every list; a row with neither is deleted. `mark` (PUT, `EXCHANGE:SYMBOL`) names `wl_symbol.updated_at`
+as its version (absent or null: the symbol has no row), `flags` (rename) and `expired_clear` name
+`wl_meta.flags_version`; a stale one is `conflict` ("Changed on another screen. The list is shown
+again.") and changes nothing. Each is a compare-and-set in SQL and the transaction's first statement,
+a guarded UPDATE that changes nothing but takes SQLite's write lock (W7's reason), so the old row
+read after it cannot have moved; nothing reads a version and writes it back. A field a `mark` leaves
+out stays as it is and `null` clears it; the answer's `version` is the new `updated_at` as text
+(null when the row went), and a write never answers the version it was given. `flag_at` moves only
+when the flag changes, so re-sending a flag keeps its place in the flag list.
+
+`flags` renames the five flags (1 to 24 letters, each named once). Absent rows read as Watch,
+Breakout, Results, Long term and Avoid and are never written as if chosen: a name that equals its
+default deletes the row. It moves `flags_version` with `versions.advance_flags` inside its
+transaction and then `versions.committed`. `state` now reads the names from the store (the defaults
+when it cannot).
+
+`flag:<n>` (`refs/flag.py`, found by discovery, so `view` answers it) is every `wl_symbol` row with
+that flag, newest flag first, `locked`, version "0", no sections or follow rows, one line of words,
+the flag's name as its name. It reads `wl_symbol` alone, so a symbol keeps its place after it has
+left every list; `view.merge_flag` is the pure merge. Only `has_note` is ever sent, never a note:
+notes and flags are the owner's alone, and the sealed members route (W23) must not return one
+either (`members` is still W23's).
+
+Expired is decided at read against the master (a loaded master that lacks the contract; with it not
+loaded nothing is called expired), in a list's rows, a flag list's rows and `symbol`. The contract
+has an op for the clear, `expired_clear` (POST, `version` the flags version): it deletes the row of
+every contract the master lacks, and only those, then moves the flags version once. With the master
+not loaded it answers `failed` and clears nothing; with nothing expired it says so and moves
+nothing.
+
+`symbol` answers the flag, its name, the note and when it was written, `expired`, the version
+`mark` must name, and `lists`: the owner's own lists holding it (`refs/list.holding`, read only). The
+built-in lists (W12) join `lists` as more `Held` records after the own ones.
+
+Bumps (`ops.bumps`): `mark` bumps once with why `flags`, naming `flag:<old>` and `flag:<new>` only
+when the flag changed (a note alone changes no membership, so the push says `lists`); `flags` bumps
+once with why `flags` and no refs; `expired_clear` once, naming the flag lists it removed rows from.
+A refused write bumps nothing. Tests: `tests/test_watchlists_marks.py`;
+`test/test_gthread_watchlists.py` (eight threads marking one symbol on one version: one wins, seven
+`conflict`, including the first write to a symbol; eight renames on one flags version).
+

@@ -2,8 +2,8 @@
 
 A ref is ``<kind>:<id>``. Each module of this package names its kind (``KIND``) and gives the
 ``view`` op's dispatcher the reader of that kind; a module added here is found by
-``pkgutil.iter_modules`` and needs no edit elsewhere. Built so far: ``list`` (W6). The preset (W12),
-flag (W9) and ranked (W22) kinds come later, and until then a ref of those kinds is refused as
+``pkgutil.iter_modules`` and needs no edit elsewhere. Built so far: ``list`` (W6) and ``flag`` (W9). The preset (W12)
+and ranked (W22) kinds come later, and until then a ref of those kinds is refused as
 ``invalid`` with field ``ref``.
 
 Every reader module exposes:
