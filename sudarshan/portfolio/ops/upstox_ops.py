@@ -15,7 +15,7 @@ from sudarshan.alerts.market import sessions
 
 from .. import serialize
 from ..core.days import day_of_instant, to_date
-from ..core.kinds import REPORT_SEGMENTS, UPSTOX_HISTORY_DAYS, UPSTOX_PARTS
+from ..core.kinds import REPORT_SEGMENTS, UPSTOX_HISTORY_DAYS, UPSTOX_PAGE_PARTS
 from ..errors import ApiError
 from ..upstox import MAX_AGE_S
 from . import op
@@ -25,13 +25,15 @@ ASK = "The request was incomplete. Reload the page."
 MAX_AGE_LIMIT_S = 3600
 
 
-def _parts(message) -> list[str]:
+def _parts(message, allowed=UPSTOX_PAGE_PARTS) -> list[str]:
+    """The parts asked for, in contract order. The owner's page reads the four of the Upstox tab
+    (``UPSTOX_PAGE_PARTS``); orders and trades are read for the family and the journal only."""
     asked = message.get("parts")
     if asked is None:
-        return list(UPSTOX_PARTS)
-    if not isinstance(asked, list) or not asked or not all(a in UPSTOX_PARTS for a in asked):
+        return list(allowed)
+    if not isinstance(asked, list) or not asked or not all(a in allowed for a in asked):
         raise ApiError(400, "bad_request", ASK)
-    return [a for a in UPSTOX_PARTS if a in asked]
+    return [a for a in allowed if a in asked]
 
 
 def _max_age(message) -> int:

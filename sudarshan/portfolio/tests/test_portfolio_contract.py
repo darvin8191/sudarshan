@@ -265,7 +265,8 @@ def test_a_list_has_no_member_twice():
 def test_holding_kinds_are_the_asset_kinds_that_hold_value():
     assert set(kinds.HOLDING_KINDS) == set(kinds.ASSET_KINDS) - {"liability"}
     assert set(kinds.TODAY_MODES) == set(kinds.TODAY_STATES) - {"unknown"}
-    assert set(kinds.UPSTOX_PARTS) == {"holdings", "positions", "mtf", "funds"}
+    assert set(kinds.UPSTOX_PAGE_PARTS) == {"holdings", "positions", "mtf", "funds"}
+    assert set(kinds.UPSTOX_PARTS) == set(kinds.UPSTOX_PAGE_PARTS) | {"orders", "trades"}
     assert set(kinds.IMPORT_ACTIONS) >= {"BUY", "SELL", "TRANSFER_IN", "TRANSFER_OUT"}
     assert set(kinds.ACTIVITY_KINDS) >= {"BUY", "SELL", "SPLIT", "BONUS", "RIGHTS"}
 

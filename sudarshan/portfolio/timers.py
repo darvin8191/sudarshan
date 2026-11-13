@@ -23,10 +23,11 @@ from sudarshan.common.schedule import (  # noqa: F401  (re-exported)
 def register_all() -> None:
     """Register every job of the service, each from its own module. Called once by the entry
     point; a job module imported here adds one line."""
-    from . import benchmark, eod, feedlink, reports, resolver
+    from . import benchmark, eod, feedlink, probe, reports, resolver
 
     resolver.register_job()
     feedlink.register_job()
+    probe.register_job()
     eod.register_jobs()
     benchmark.register_jobs()
     reports.register_jobs()

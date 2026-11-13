@@ -246,7 +246,11 @@ HELD_FILTERS = ("over", "under")
 LAYOUT_VERSION = 1
 
 # ---- the Upstox tab ------------------------------------------------------------------------
-UPSTOX_PARTS = ("holdings", "positions", "mtf", "funds")
+#: The parts of the Upstox reader. The first four are the Upstox tab's; ``orders`` and ``trades``
+#: (P3, cross-design Y5) are read for the family and the journal and are not shown on the
+#: portfolio page, so the owner's ``upstox_book`` asks for ``UPSTOX_PAGE_PARTS`` only.
+UPSTOX_PARTS = ("holdings", "positions", "mtf", "funds", "orders", "trades")
+UPSTOX_PAGE_PARTS = ("holdings", "positions", "mtf", "funds")
 #: The segments Upstox's trade history and trade-wise P&L reports are kept by (M7.6, M7.7); the
 #: P&L report has no MF.
 REPORT_SEGMENTS = ("EQ", "FO", "COM", "CD", "MF")

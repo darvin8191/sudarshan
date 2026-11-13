@@ -1,7 +1,8 @@
 """Reading the owner's Upstox account on the Analytics Token (M7.1 to M7.4, design 3.1 to 3.3).
 
-Four parts, each its own API with its own budget: holdings, positions, MTF positions and funds.
-All are GETs with ``Authorization: Bearer``, a 10 second timeout and no redirects.
+Six parts, each its own API with its own budget: holdings, positions, MTF positions and funds
+(the Upstox tab), and the day's orders and trades (read for the family and the journal; the
+portfolio page does not show them). All are GETs with ``Authorization: Bearer``, a 10 second timeout and no redirects.
 
 * **Numbers.** The answer is parsed with ``Decimal`` for every fraction, and each figure becomes
   paise, ``qty_u`` or ``price_u`` at the parser, half away from zero. A float never reaches the
@@ -30,13 +31,14 @@ import math
 import os
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
+from datetime import date, datetime
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 from typing import Any
 
 import httpx
 
-from .budget import PAUSE_S, Budget
+from .budget import OWNER, PAUSE_S, Budget
 from .core.days import IST_OFFSET_MS, MS_PER_DAY
 from .core.kinds import PRICE_SCALE, QTY_SCALE, UPSTOX_PARTS
 
@@ -52,6 +54,8 @@ PATHS = {
     "positions": ("/v2/portfolio/short-term-positions", {}),
     "mtf": ("/v3/portfolio/mtf-positions", {}),
     "funds": ("/v3/user/get-funds-and-margin", {"Api-Version": "3.0"}),
+    "orders": ("/v2/order/retrieve-all", {}),
+    "trades": ("/v2/order/trades/get-trades-for-day", {}),
 }
 assert set(PATHS) == set(UPSTOX_PARTS)
 RATE_CODE = "UDAPI10005"
@@ -68,6 +72,7 @@ WORDS = {
     "busy": "SUDARSHAN is reading Upstox as often as it allows.",
     "window": "Upstox does not give funds between midnight and 5:30 AM.",
     "window_none": "Funds are available from 5:30 AM.",
+    "held_back": "SUDARSHAN is keeping its Upstox reads for the account owner just now.",
 }
 
 
@@ -189,6 +194,99 @@ def parse_position(item: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def instant(value) -> int | None:
+    """Upstox's ``YYYY-MM-DD HH:MM:SS`` (IST) as epoch milliseconds; None if it is not one."""
+    if not isinstance(value, str):
+        return None
+    text = value.strip().replace("T", " ")[:19]
+    try:
+        stamp = datetime.strptime(text, "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return None
+    days = (stamp.date() - date(1970, 1, 1)).days
+    seconds = stamp.hour * 3600 + stamp.minute * 60 + stamp.second
+    return days * MS_PER_DAY + seconds * 1000 - IST_OFFSET_MS
+
+
+def _upper(value) -> str | None:
+    text = _text(value)
+    return text.upper() if text else None
+
+
+def parse_order(item: Mapping[str, Any]) -> dict[str, Any]:
+    """One row of ``GET /v2/order/retrieve-all``. Prices are ``price_u``, quantities ``qty_u``,
+    times epoch milliseconds. ``placed_by`` (the account's own id) and ``guid`` are not kept."""
+    order_id, key = _text(item.get("order_id")), _text(item.get("instrument_token"))
+    if order_id is None:
+        raise Unreadable("order_id")
+    if key is None:
+        raise Unreadable("instrument_token")
+    side = _upper(item.get("transaction_type"))
+    if side not in ("BUY", "SELL"):
+        raise Unreadable("transaction_type")
+    return {
+        "order_id": order_id,
+        "exchange_order_id": _text(item.get("exchange_order_id")),
+        "parent_order_id": _text(item.get("parent_order_id")),
+        "instrument_key": key,
+        "exchange": _upper(item.get("exchange")),
+        "symbol": _text(item.get("trading_symbol")),
+        "product": _text(item.get("product")) or "",
+        "order_type": _upper(item.get("order_type")),
+        "validity": _upper(item.get("validity")),
+        "variety": _upper(item.get("variety")),
+        "transaction_type": side,
+        "status": _text(item.get("status")) or "",
+        "status_message": _text(item.get("status_message")),
+        "is_amo": item.get("is_amo") is True,
+        "tag": _text(item.get("tag")),
+        "qty_u": _need(qty_u(item.get("quantity")), "quantity"),
+        "filled_qty_u": qty_u(item.get("filled_quantity")),
+        "pending_qty_u": qty_u(item.get("pending_quantity")),
+        "disclosed_qty_u": qty_u(item.get("disclosed_quantity")),
+        "price_u": price_u(item.get("price")),
+        "trigger_price_u": price_u(item.get("trigger_price")),
+        "avg_price_u": price_u(item.get("average_price")),
+        "placed_at": instant(item.get("order_timestamp")),
+        "exchange_at": instant(item.get("exchange_timestamp")),
+    }
+
+
+def parse_trade(item: Mapping[str, Any]) -> dict[str, Any]:
+    """One row of ``GET /v2/order/trades/get-trades-for-day``: one execution. The amount is
+    quantity x average price in paise, worked out in ``Decimal``."""
+    trade_id, order_id = _text(item.get("trade_id")), _text(item.get("order_id"))
+    if trade_id is None:
+        raise Unreadable("trade_id")
+    if order_id is None:
+        raise Unreadable("order_id")
+    key = _text(item.get("instrument_token"))
+    if key is None:
+        raise Unreadable("instrument_token")
+    side = _upper(item.get("transaction_type"))
+    if side not in ("BUY", "SELL"):
+        raise Unreadable("transaction_type")
+    quantity, average = _decimal(item.get("quantity")), _decimal(item.get("average_price"))
+    if quantity is None or average is None:
+        raise Unreadable("quantity")
+    return {
+        "trade_id": trade_id,
+        "order_id": order_id,
+        "exchange_order_id": _text(item.get("exchange_order_id")),
+        "instrument_key": key,
+        "exchange": _upper(item.get("exchange")),
+        "symbol": _text(item.get("trading_symbol")),
+        "product": _text(item.get("product")) or "",
+        "order_type": _upper(item.get("order_type")),
+        "transaction_type": side,
+        "qty_u": _need(qty_u(quantity), "quantity"),
+        "price_u": _need(price_u(average), "average_price"),
+        "amount_paise": _need(paise(quantity * average), "amount"),
+        "placed_at": instant(item.get("order_timestamp")),
+        "exchange_at": instant(item.get("exchange_timestamp")),
+    }
+
+
 GROUP_LABELS = {
     "cash_available_to_trade": "Cash available to trade",
     "pledge_available_to_trade": "Available against pledged holdings",
@@ -262,6 +360,15 @@ def parse_funds(data: Mapping[str, Any]) -> dict[str, Any]:
     return {"available_paise": total, "groups": groups}
 
 
+ROW_PARSERS = {
+    "holdings": parse_holding,
+    "positions": parse_position,
+    "mtf": parse_position,
+    "orders": parse_order,
+    "trades": parse_trade,
+}
+
+
 def parse_part(name: str, payload: Any) -> Any:
     """The part's figures from the decoded answer; Unreadable if it is not shaped as expected."""
     if not isinstance(payload, Mapping) or payload.get("status") != "success":
@@ -275,7 +382,7 @@ def parse_part(name: str, payload: Any) -> Any:
         return []
     if not isinstance(data, list):
         raise Unreadable("data")
-    parser = parse_holding if name == "holdings" else parse_position
+    parser = ROW_PARSERS[name]
     out, skipped = [], 0
     for item in data:
         try:
@@ -374,21 +481,43 @@ class UpstoxReader:
 
     # ---- the book --------------------------------------------------------------------------
     async def book(
-        self, parts: list[str] | tuple[str, ...], max_age_s: float | None = None
+        self,
+        parts: list[str] | tuple[str, ...],
+        max_age_s: float | None = None,
+        principal: str = OWNER,
     ) -> dict[str, dict[str, Any]]:
+        """The parts asked for. ``principal`` is whose read it is: anyone but the owner spends
+        from the budget only above the owner's reserve (budget.RESERVE), and a read the reserve
+        refuses answers the figures already held and changes nothing in the memory the owner
+        reads from."""
         age = MAX_AGE_S if max_age_s is None else max_age_s
         names = [n for n in UPSTOX_PARTS if n in parts]
-        views = await asyncio.gather(*(self._part(name, age) for name in names))
+        views = await asyncio.gather(*(self._part(name, age, principal) for name in names))
         return dict(zip(names, views, strict=True))
 
-    async def _part(self, name: str, age_s: float) -> dict[str, Any]:
+    async def _part(self, name: str, age_s: float, principal: str = OWNER) -> dict[str, Any]:
         memory = self._memory[name]
         if self._fresh(memory, self.clock(), age_s):
             return memory.view()
+        held = False
         async with memory.lock:  # single flight: the second caller finds the first one's answer
             if not self._fresh(memory, self.clock(), age_s):
-                await self._read(name, memory)
-        return memory.view()
+                held = await self._read(name, memory, principal) == "held"
+        return self._held_back(memory) if held else memory.view()
+
+    @staticmethod
+    def _held_back(memory: PartMemory) -> dict[str, Any]:
+        """The figures held, said to be old, for a read the owner's reserve refused: the shared
+        memory is left as it was, so the owner's next read is not told it failed."""
+        if memory.data is not None and memory.read_at is not None:
+            note = f"{WORDS['held_back']} Figures from {at_clock(memory.read_at)}. They refresh in a minute."
+            return {"state": "stale", "read_at": memory.read_at, "note": note, "data": memory.data}
+        return {
+            "state": "unavailable",
+            "read_at": None,
+            "note": f"{WORDS['held_back']} They refresh in a minute.",
+            "data": None,
+        }
 
     @staticmethod
     def _fresh(memory: PartMemory, now: int, age_s: float) -> bool:
@@ -418,7 +547,8 @@ class UpstoxReader:
             return None
         return token if len(token) >= TOKEN_MIN and not any(c.isspace() for c in token) else None
 
-    async def _read(self, name: str, memory: PartMemory) -> None:
+    async def _read(self, name: str, memory: PartMemory, principal: str = OWNER) -> str | None:
+        """One read into ``memory``; ``"held"`` when the owner's reserve refused it."""
         now = self.clock()
         if self._refused:
             if _signature(self.token_file) == self._refused_at:
@@ -434,7 +564,9 @@ class UpstoxReader:
         if token is None:
             self._say_once("token", "The Upstox token file is missing or unreadable.")
             return self._fail(memory, now, WORDS["token_missing"])
-        if not self.budget.take(name):
+        if not self.budget.take(name, principal):
+            if principal != OWNER and self.budget.can_take(name):
+                return "held"  # the owner could still read: the reserve is what said no
             return self._fail(memory, now, WORDS["busy"], figures=" They refresh in a moment.")
         path, extra = PATHS[name]
         headers = {"Authorization": f"Bearer {token}", "Accept": "application/json", **extra}
@@ -471,7 +603,7 @@ class UpstoxReader:
         except (ValueError, Unreadable) as exc:
             log.error("the %s answer could not be read: %s", name, type(exc).__name__)
             return self._fail(memory, now, WORDS["unreadable"])
-        if self.decorate is not None and name != "funds":
+        if self.decorate is not None and name in ("holdings", "positions", "mtf"):
             try:
                 await asyncio.get_running_loop().run_in_executor(None, self.decorate, data, now)
             except Exception:  # names and auction times are a convenience; the figures stand
