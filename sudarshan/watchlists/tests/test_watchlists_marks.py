@@ -276,13 +276,11 @@ def test_a_ref_that_is_not_one_of_the_five_flags_is_invalid_and_the_kind_is_foun
         )
 
 
-def test_notes_never_leave_in_a_view_and_the_flag_reader_has_no_members_yet(client):
+def test_notes_never_leave_in_a_view(client):
     lid = make_list()
     mark(client, "NSE:INFY", flag=1, note="private words")
     for ref in ("flag:1", f"list:{lid}"):
         assert "private words" not in json.dumps(read(client, ref))
-    with pytest.raises(NotImplementedError):
-        refs.readers()["flag"].members("1", OWNER)
 
 
 # -- expired contracts ---------------------------------------------------------------------------

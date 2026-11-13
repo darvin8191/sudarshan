@@ -137,14 +137,10 @@ def test_the_readers_are_found_once_and_a_view_lists_and_imports_nothing(monkeyp
     assert get(client, f"list:{lid}").status_code == 200
 
 
-def test_every_reader_gives_the_interface_and_members_is_documented_not_built():
+def test_every_reader_gives_the_interface_and_members_is_documented():
     for kind, module in refs.readers().items():
         assert module.KIND == kind and callable(module.view) and callable(module.members)
-        assert module.members.__doc__
-        if kind in ("preset", "ranked"):  # W12 and W22 built theirs (the others are W23's)
-            continue
-        with pytest.raises(NotImplementedError):
-            module.members("1", OWNER)
+        assert module.members.__doc__  # W23 built them all
 
 
 @pytest.mark.parametrize("ident", ["", "0", "-1", "abc", "1.5", " 7", "7 ", "99999999999", "٣"])
