@@ -191,7 +191,9 @@ def _checked(limited):
 
 def _served(op: contract.OpSpec, handler):
     """What a request meets once it passed the checks and its class's limit: the switch, the
-    record check, the request read against the contract, the handler and its bump."""
+    record check, the request read against the contract, the handler and its bump. A write that
+    refuses after committing part of its change names those refs (``OpError.changed``) and is
+    bumped and pushed for them, once, before the refusal is answered."""
 
     @wraps(handler)
     def view(**route):
@@ -202,10 +204,10 @@ def _served(op: contract.OpSpec, handler):
         words = _record_outcome()
         if words is not None:
             return _error("record", words)
+        declared = getattr(handler, "bump", None)
         try:
             args = _read(op, route)
             data = handler(args)
-            declared = getattr(handler, "bump", None)
             if declared is not None:  # a write op: the change is committed, tell the phone
                 why, refs = declared
                 versions.bump(why, refs(args, data) if refs else ())
@@ -213,6 +215,8 @@ def _served(op: contract.OpSpec, handler):
         except _Bad as bad:
             return _error("invalid", field=bad.field)
         except ops.OpError as refused:
+            if refused.changed:  # part of the change committed before the refusal: say so once
+                versions.bump(declared[0] if declared else "lists", refused.changed)
             return _error(refused.code, refused.message, refused.field)
         except (RecordTooNew, RecordUnreadable) as exc:
             _record["record"] = str(exc)

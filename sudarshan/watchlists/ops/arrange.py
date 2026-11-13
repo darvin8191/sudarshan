@@ -5,8 +5,10 @@ Two files, never one transaction: the overlay first (one transaction that claims
 writes the section positions and each symbol's section), then OpenAlgo's own item order through
 its committed reorder, in section-major order (No section first, then each section's symbols), so
 /trading shows the same order flat. A failure between the two leaves the overlay saved and
-OpenAlgo's order as it was, and the op says so (``failed``); a retry names the same version only
-if nothing else changed it, otherwise ``conflict`` and the page shows the list again.
+OpenAlgo's order as it was, and the op says so (``failed``) and names the list as changed, so the
+bridge still bumps the lists version and pushes it (the overlay's version moved); a retry names
+the new version only if nothing else changed it, otherwise ``conflict`` and the page shows the list
+again.
 
 Symbols the list has but the request did not name keep their section and go after the named ones;
 symbols the request names that the list no longer has are left out.
@@ -82,8 +84,8 @@ def arrange(args: dict) -> dict:
         written = False
     finally:
         oa.db_session.remove()
-    if not written:
-        raise OpError("failed", words.ARRANGE_PARTIAL)
+    if not written:  # the overlay's change has committed: the phone is told of it all the same
+        raise OpError("failed", words.ARRANGE_PARTIAL, changed=[f"list:{lid}"])
     done = Done(version=str(version), id=lid, words=None)
     done.ref = f"list:{lid}"
     return done

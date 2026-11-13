@@ -16,19 +16,33 @@ from sudarshan.watchlists import contract
 
 
 class OpError(Exception):
-    """An op's refusal: a code of the contract, the owner's sentence, ``field`` for ``invalid``."""
+    """An op's refusal: a code of the contract, the owner's sentence, ``field`` for ``invalid``.
 
-    def __init__(self, code: str, message: str | None = None, field: str | None = None):
+    ``changed`` names the refs whose change had already committed when the op refused: a write
+    that works in steps across two files (a copy that stopped part way, an arrange whose second
+    write failed) has changed those lists even though it answers an error, so the bridge still
+    bumps the lists version once and pushes them. A refusal that committed nothing leaves it
+    empty and nothing is pushed."""
+
+    def __init__(
+        self,
+        code: str,
+        message: str | None = None,
+        field: str | None = None,
+        changed=(),
+    ):
         super().__init__(message or code)
         if code not in contract.ERROR_CODES:
             raise ValueError(f"not an error code of the contract: {code}")
         self.code, self.message, self.field = code, message, field
+        self.changed = tuple(dict.fromkeys(changed))
 
 
 def bumps(why: str, refs=None):
     """Declare that an op changes what a list, a section or a flag list holds: the bridge bumps
     the lists version once and pushes ``why`` after the handler returns (so after its commit),
-    never for a refusal. ``refs(args, data)`` names the refs changed (none: the whole of lists)."""
+    and after a refusal only for what the refusal names as committed (``OpError.changed``).
+    ``refs(args, data)`` names the refs changed (none: the whole of lists)."""
 
     def mark(handler):
         handler.bump = (why, refs)

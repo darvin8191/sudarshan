@@ -232,7 +232,12 @@ favourites version raised in the same transaction) in one transaction in the ove
 clear drops section membership only, because /trading cannot see sections or follow rows. A store file that is missing (never
 created by a delete) or newer is skipped and logged, and a failure in the hook is logged and never
 changes OpenAlgo's answer. (2) The bridge's own ops: a handler marked `@ops.bumps(why, refs)` has
-the bridge bump and push after it returns, never after a refusal. The hook starts no thread, timer
+the bridge bump and push after it returns. After a refusal the bridge bumps only for what the
+refusal names as already committed (`OpError(code, words, changed=refs)`): a write that works in
+steps and commits part of its change before it answers `failed` or `conflict` (a copy that stopped
+part way, an arrange whose OpenAlgo order failed) still bumps the lists version once and pushes the
+refs it changed, so the tablet and the alerts' backstop learn of it; a refusal that committed
+nothing bumps nothing. The hook starts no thread, timer
 or loop. Tests: `tests/test_watchlists_push.py`; `test/test_gthread_watchlists.py` (twelve bumps at
 once, twelve writes through the hook under a real gthread worker).
 
@@ -321,8 +326,9 @@ and go after the named ones; symbols it names that the list no longer has are le
 OpenAlgo's item order is written through `watchlist_db.reorder_items` in section-major order (No
 section first, then each section in the new order) so /trading shows the same order flat. If that
 second write fails the answer is `failed` ("Saved here, but the order on /trading is unchanged
-until you arrange the list again."); the overlay is saved, OpenAlgo's order is as it was, and the
-page shows the list again.
+until you arrange the list again."); the overlay is saved, OpenAlgo's order is as it was, the
+lists version is bumped and the list pushed all the same (the overlay changed), and the page shows
+the list again.
 
 `copy` takes `from` (`ref` of an own list, plus `keys` of `EXCHANGE:SYMBOL` or one `section_id`,
 never both) and `to` (an existing `list`, or a new `name`; `section_id` only for an existing list),
@@ -335,12 +341,30 @@ room for 3 more symbols; this section has 8. Make room in Swing or pick another 
 already in the target is skipped, never an error (`skipped` in the answer); a move still takes it
 out of the source. Order of writes, one file at a time: OpenAlgo's `add_item` for each symbol (one
 commit each) or `create_watchlist` with all items in one call; then, only when a section is set, one
-overlay transaction that claims the target's version and writes the section rows; then for a move
-OpenAlgo's `remove_item` for each, and one overlay transaction dropping the source's section rows
-(its failure is logged, because rows for symbols the list no longer has are ignored). A failure
-between steps answers `failed` with what was done, and every state it leaves is valid: symbols
-OpenAlgo has and the overlay does not know read as No section. A move is a removal from the
-screener's point of view, which is intended.
+overlay transaction that claims the target's version and writes the section rows of the symbols
+that went in; then for a move OpenAlgo's `remove_item` for each, and one overlay transaction
+dropping the source's section rows (its failure is logged, because rows for symbols the list no
+longer has are ignored). A move is a removal from the screener's point of view, which is intended.
+
+The section rows are written after OpenAlgo's adds, not before as the design orders the two writes
+(overlay first). Decided in the review round of 13 Nov 2026, for this reason: before the adds, the
+rows would be for symbols the list does not hold yet. Every reader ignores such a row, and an
+arrange from another screen in that window rewrites the list's section rows from the symbols it can
+see, deleting them; the copy would then answer done while its symbols landed in No section. After
+the adds, the section step is a claim on the version like every other overlay write, so the only
+thing it can meet is a version another screen moved, and then the answer says so. A stale version
+is still refused before anything is written (a read of the version, before the adds), so a refusal
+that changed nothing is said as before. Every outcome leaves a valid state and its words are true
+whatever ran in between: all added and placed (done); all added but the section step met another
+screen's change (`conflict`: "Added 2 symbols to Long, in No section, because the list was changed
+on another screen meanwhile. The list is shown again.") or could not be written (`failed`, the
+same with "because the section could not be set"); the adds stopped part way (`failed`: how many of
+how many went in, where they are, that the rest were not added and, for a move, that nothing was
+taken out of the source; the ones that went in are placed in the section when the claim holds);
+nothing went in ("Nothing was added to Long. Try again."); a move's removal stopped part way (what
+stayed in the source). A move whose section step missed still takes the symbols out of the source,
+because they are in the target, and says "Moved". Whatever a refusal had committed is named
+(`OpError.changed`), so the lists version is bumped once and the changed lists are pushed (W5).
 
 Bumps (`ops.bumps`), once per write and never also by the hook, because these ops call OpenAlgo's
 functions in process: `arrange` with why `arranged` and `list:<id>`; `copy` and `move` with why

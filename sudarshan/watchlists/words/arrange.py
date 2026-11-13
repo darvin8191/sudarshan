@@ -44,16 +44,43 @@ def name_taken(name: str) -> str:
     return f"You already have a list called {name}. Pick another name."
 
 
-def added_some(done: int, total: int, name: str) -> str:
-    return f"Added {done} of {symbols(total)} to {name}. The rest were not added; try again."
+#: Why symbols the owner put in a section went to No section instead (the copy's section step,
+#: which runs after the symbols are in the list): another screen changed the list first, or the
+#: section rows could not be written.
+STALE, LOST = "stale", "lost"
 
 
-def section_lost(name: str) -> str:
-    return f"Added to {name}, but the section could not be set. They are in No section for now."
+def where(section: str | None) -> str:
+    """Where added symbols are when the section picked was not set; empty when it was."""
+    if section == STALE:
+        return ", in No section, because the list was changed on another screen meanwhile"
+    if section == LOST:
+        return ", in No section, because the section could not be set"
+    return ""
 
 
-def not_removed(n: int, target: str, source: str) -> str:
+def placed_elsewhere(n: int, target: str, section: str, moved: bool) -> str:
+    """Every symbol went into ``target`` (and, for a move, out of the source), but not into the
+    section picked."""
+    again = " The list is shown again." if section == STALE else ""
+    verb = "Moved" if moved else "Added"
+    return f"{verb} {symbols(n)} to {target}{where(section)}.{again}"
+
+
+def added_some(
+    done: int, total: int, name: str, section: str | None = None, source: str | None = None
+) -> str:
+    """The adds stopped part way. ``section`` says where the added ones are when they did not go
+    into the section picked; ``source`` is named for a move, which then takes nothing out."""
+    kept = f" and nothing was taken out of {source}" if source else ""
+    if done == 0:
+        return f"Nothing was added to {name}{kept}. Try again."
+    rest = f"The rest were not added{',' + kept if kept else ''}; try again."
+    return f"Added {done} of {symbols(total)} to {name}{where(section)}. {rest}"
+
+
+def not_removed(n: int, target: str, source: str, section: str | None = None) -> str:
     return (
-        f"Copied to {target}, but {symbols(n)} could not be removed from {source}. "
-        "Remove them there."
+        f"Copied to {target}{where(section)}, but {symbols(n)} could not be removed from "
+        f"{source}. Remove them there."
     )

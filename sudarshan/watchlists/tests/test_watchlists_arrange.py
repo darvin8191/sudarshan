@@ -179,15 +179,22 @@ def test_sections_and_items_that_do_not_match_the_list_are_refused_and_roll_back
     refused(arrange(client, 999, "0", [], []), 404, "gone")
 
 
-def test_a_failure_between_the_two_writes_says_so_and_leaves_a_valid_state(client, monkeypatch):
+def test_a_failure_between_the_two_writes_says_so_and_leaves_a_valid_state(
+    client, monkeypatch, emitted
+):
     from database import watchlist_db as oa
 
     lid, banks, it = two_sections(client)
     flat = oa_order(lid)
+    emitted.clear()
+    before = versions.read()
     with monkeypatch.context() as patch:
         patch.setattr(oa, "reorder_items", lambda *a: False)
         r = arrange(client, lid, "2", [it, banks], [pick("TCS", it), pick("SBIN", banks)])
     assert refused(r, 500, "failed") == words.ARRANGE_PARTIAL
+    # the overlay's change committed, so the phone and the tablet are told once all the same
+    assert versions.read() != before
+    assert [(p["why"], p["refs"]) for p in emitted] == [("arranged", [f"list:{lid}"])]
     assert words.ARRANGE_PARTIAL == (
         "Saved here, but the order on /trading is unchanged until you arrange the list again."
     )
@@ -354,7 +361,7 @@ def test_a_duplicate_symbol_in_the_target_is_not_added_twice_and_is_no_error(cli
 
 
 # -- the two files -------------------------------------------------------------------------------
-def test_a_failed_add_says_how_far_it_got_and_a_move_does_not_remove(client, monkeypatch):
+def test_a_failed_add_says_how_far_it_got_and_a_move_does_not_remove(client, monkeypatch, emitted):
     from database import watchlist_db as oa
 
     src = make_list()
@@ -368,14 +375,23 @@ def test_a_failed_add_says_how_far_it_got_and_a_move_does_not_remove(client, mon
     monkeypatch.setattr(oa, "add_item", flaky)
     r = put(client, {"from": {"ref": f"list:{src}", "keys": [f"NSE:{s}" for s in ("INFY", "TCS", "SBIN")]},
                      "to": {"list": dst}, "move": True})  # fmt: skip
-    assert refused(r, 500, "failed") == words.added_some(2, 3, "Other")
+    said = refused(r, 500, "failed")
+    assert said == words.added_some(2, 3, "Other", source="Swing")
+    assert said == (
+        "Added 2 of 3 symbols to Other. The rest were not added, and nothing was taken out of "
+        "Swing; try again."
+    )
     assert oa_order(dst) == ["INFY", "TCS"] and len(oa_order(src)) == 4
+    assert [(p["why"], p["refs"]) for p in emitted] == [("items", [f"list:{dst}"])]
 
 
-def test_a_failure_setting_the_section_leaves_the_symbols_in_no_section(client, monkeypatch):
+def test_a_failure_setting_the_section_leaves_the_symbols_in_no_section(
+    client, monkeypatch, emitted
+):
     src = make_list()
     dst = make_list(("HDFCBANK",), "Other")
     mine = sec(client, dst, "Picked", "0")
+    emitted.clear()
 
     def boom(*a, **k):
         raise RuntimeError("disk")
@@ -384,14 +400,17 @@ def test_a_failure_setting_the_section_leaves_the_symbols_in_no_section(client, 
         patch.setattr(copy_ops.store_items, "put", boom)
         r = put(client, {"from": {"ref": f"list:{src}", "keys": ["NSE:TCS"]},
                          "to": {"list": dst, "section_id": mine}, "version": "1"})  # fmt: skip
-    assert refused(r, 500, "failed") == words.section_lost("Other")
+    said = refused(r, 500, "failed")
+    assert said == words.placed_elsewhere(1, "Other", words.LOST, False)
+    assert said == "Added 1 symbol to Other, in No section, because the section could not be set."
     data = read(client, dst)
     assert [(r["contract"]["symbol"], r["section_id"]) for r in data["rows"]] == [
         ("HDFCBANK", None), ("TCS", None)]  # fmt: skip
     assert data["version"] == "1"  # the claim rolled back with the rows
+    assert [(p["why"], p["refs"]) for p in emitted] == [("items", [f"list:{dst}"])]
 
 
-def test_a_failed_removal_says_what_stayed_in_the_source(client, monkeypatch):
+def test_a_failed_removal_says_what_stayed_in_the_source(client, monkeypatch, emitted):
     from database import watchlist_db as oa
 
     src, dst = make_list(), make_list((), "Other")
@@ -400,6 +419,157 @@ def test_a_failed_removal_says_what_stayed_in_the_source(client, monkeypatch):
                      "to": {"list": dst}, "move": True})  # fmt: skip
     assert refused(r, 500, "failed") == words.not_removed(2, "Other", "Swing")
     assert oa_order(dst) == ["TCS", "ITC"] and len(oa_order(src)) == 4
+    assert [(p["why"], p["refs"]) for p in emitted] == [("items", [f"list:{dst}"])]
+
+
+# -- a write that commits part of its change still tells the phone (review M1) --------------------
+def test_a_copy_that_stops_part_way_bumps_and_pushes_its_target_once(client, monkeypatch, emitted):
+    from database import watchlist_db as oa
+
+    src, dst = make_list(), make_list(("HDFCBANK",), "Long")
+    real, calls = oa.add_item, []
+
+    def add_once(*args):  # the second add fails (a locked file, the list filled up meanwhile)
+        calls.append(args)
+        return real(*args) if len(calls) == 1 else None
+
+    monkeypatch.setattr(oa, "add_item", add_once)
+    before = versions.read()
+    r = put(client, {"from": {"ref": f"list:{src}", "keys": ["NSE:INFY", "NSE:TCS", "NSE:SBIN"]},
+                     "to": {"list": dst}})  # fmt: skip
+    assert refused(r, 500, "failed") == words.added_some(1, 3, "Long")
+    assert oa_order(dst) == ["HDFCBANK", "INFY"]  # OpenAlgo's list did change
+    assert int(versions.read().split(":")[1]) == int(before.split(":")[1]) + 1
+    assert [(p["why"], p["ref"], p["refs"]) for p in emitted] == [
+        ("items", f"list:{dst}", [f"list:{dst}"])]  # fmt: skip
+
+
+def test_nothing_added_is_said_and_pushes_nothing(client, monkeypatch, emitted):
+    from database import watchlist_db as oa
+
+    src, dst = make_list(), make_list((), "Long")
+    monkeypatch.setattr(oa, "add_item", lambda *a: None)
+    before = versions.read()
+    r = put(client, {"from": {"ref": f"list:{src}", "keys": ["NSE:INFY", "NSE:TCS"]},
+                     "to": {"list": dst}, "move": True})  # fmt: skip
+    assert refused(r, 500, "failed") == "Nothing was added to Long and nothing was taken out " \
+        "of Swing. Try again."  # fmt: skip
+    assert versions.read() == before and emitted == [] and len(oa_order(src)) == 4
+
+
+def other_screen_writes_during_the_adds(monkeypatch, list_id, created, held):
+    """Another screen's write to the target lands while OpenAlgo's adds run."""
+    from sudarshan.watchlists.store import sections as store
+
+    real = copy_ops.add_all
+
+    def add_then_write(user, lid, keys):
+        done = real(user, lid, keys)
+        with engine.open_session() as s, s.begin():
+            store.claim(s, list_id, created, held)
+        return done
+
+    monkeypatch.setattr(copy_ops, "add_all", add_then_write)
+
+
+def created_of(lid):
+    from sudarshan.watchlists.refs import list as listref
+
+    return listref.read_live(OWNER, lid)["created_at"]
+
+
+def test_a_section_claim_lost_after_the_adds_says_what_was_added_and_where(
+    client, monkeypatch, emitted
+):
+    src, dst = make_list(), make_list(("HDFCBANK",), "Long")
+    mine = sec(client, dst, "Picked", "0")  # the target is at 1
+    emitted.clear()
+    other_screen_writes_during_the_adds(monkeypatch, dst, created_of(dst), 1)
+    r = put(client, {"from": {"ref": f"list:{src}", "keys": ["NSE:TCS", "NSE:ITC"]},
+                     "to": {"list": dst, "section_id": mine}, "version": "1"})  # fmt: skip
+    said = refused(r, 409, "conflict")
+    assert said == words.placed_elsewhere(2, "Long", words.STALE, False)
+    assert said == (
+        "Added 2 symbols to Long, in No section, because the list was changed on another screen "
+        "meanwhile. The list is shown again."
+    )
+    rows = [(r["contract"]["symbol"], r["section_id"]) for r in read(client, dst)["rows"]]
+    assert rows == [("HDFCBANK", None), ("TCS", None), ("ITC", None)]  # the words are true
+    assert [(p["why"], p["refs"]) for p in emitted] == [("items", [f"list:{dst}"])]
+
+
+def test_a_move_whose_section_claim_is_lost_still_moves_and_says_so(client, monkeypatch, emitted):
+    src, dst = make_list(), make_list((), "Long")
+    mine = sec(client, dst, "Picked", "0")
+    emitted.clear()
+    other_screen_writes_during_the_adds(monkeypatch, dst, created_of(dst), 1)
+    r = put(client, {"from": {"ref": f"list:{src}", "keys": ["NSE:TCS"]},
+                     "to": {"list": dst, "section_id": mine}, "version": "1", "move": True})  # fmt: skip
+    assert refused(r, 409, "conflict") == (
+        "Moved 1 symbol to Long, in No section, because the list was changed on another screen "
+        "meanwhile. The list is shown again."
+    )
+    assert oa_order(dst) == ["TCS"] and oa_order(src) == ["INFY", "SBIN", "ITC"]
+    assert [(p["why"], p["refs"]) for p in emitted] == [("items", [f"list:{dst}", f"list:{src}"])]
+
+
+def test_a_short_add_into_a_section_places_what_went_in_and_says_the_rest(
+    client, monkeypatch, emitted
+):
+    from database import watchlist_db as oa
+
+    src, dst = make_list(), make_list((), "Long")
+    mine = sec(client, dst, "Picked", "0")
+    emitted.clear()
+    real, calls = oa.add_item, []
+
+    def add_once(*args):
+        calls.append(args)
+        return real(*args) if len(calls) == 1 else None
+
+    monkeypatch.setattr(oa, "add_item", add_once)
+    r = put(client, {"from": {"ref": f"list:{src}", "keys": ["NSE:TCS", "NSE:ITC"]},
+                     "to": {"list": dst, "section_id": mine}, "version": "1"})  # fmt: skip
+    assert refused(r, 500, "failed") == (
+        "Added 1 of 2 symbols to Long. The rest were not added; try again."
+    )
+    data = read(client, dst)
+    assert [(r["contract"]["symbol"], r["section_id"]) for r in data["rows"]] == [("TCS", mine)]
+    assert data["version"] == "2"  # the section step claimed the version for what went in
+    assert [(p["why"], p["refs"]) for p in emitted] == [("items", [f"list:{dst}"])]
+
+
+def test_a_short_removal_pushes_both_lists(client, monkeypatch, emitted):
+    from database import watchlist_db as oa
+
+    src, dst = make_list(), make_list((), "Long")
+    real, calls = oa.remove_item, []
+
+    def remove_once(*args):
+        calls.append(args)
+        return real(*args) if len(calls) == 1 else False
+
+    monkeypatch.setattr(oa, "remove_item", remove_once)
+    r = put(client, {"from": {"ref": f"list:{src}", "keys": ["NSE:TCS", "NSE:ITC"]},
+                     "to": {"list": dst}, "move": True})  # fmt: skip
+    assert refused(r, 500, "failed") == (
+        "Copied to Long, but 1 symbol could not be removed from Swing. Remove them there."
+    )
+    assert oa_order(src) == ["INFY", "SBIN", "ITC"]
+    assert [(p["why"], p["refs"]) for p in emitted] == [("items", [f"list:{dst}", f"list:{src}"])]
+
+
+def test_the_words_of_a_half_done_copy_name_no_code_or_route():
+    for sentence in (
+        words.added_some(0, 3, "Long"), words.added_some(2, 3, "Long", words.STALE, "Swing"),
+        words.placed_elsewhere(3, "Long", words.LOST, True),
+        words.not_removed(2, "Long", "Swing", words.STALE),
+    ):  # fmt: skip
+        assert not any(w in sentence.lower() for w in ("409", "500", "http", "/sudarshan", "error"))
+    assert words.added_some(2, 3, "Long", words.STALE, "Swing") == (
+        "Added 2 of 3 symbols to Long, in No section, because the list was changed on another "
+        "screen meanwhile. The rest were not added, and nothing was taken out of Swing; try again."
+    )
 
 
 # -- the yield -----------------------------------------------------------------------------------

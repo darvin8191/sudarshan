@@ -417,6 +417,33 @@ def test_an_op_that_declares_a_bump_bumps_once_after_it_returns_and_a_refusal_no
     assert len(emitted) == 1
 
 
+def test_a_refusal_after_part_of_the_change_committed_bumps_once_for_what_it_names(emitted):
+    """A write that commits a step and then refuses names what it committed (review M1): the
+    bridge bumps the lists version once and pushes those refs before it answers the refusal."""
+    reset_users()
+
+    @ops.bumps("items", lambda args, data: [f"list:{args['list']}"])
+    def half(args):
+        if args["name"] == "nothing":
+            raise ops.OpError("failed", "Nothing was added to Swing. Try again.")
+        raise ops.OpError("conflict", "Added 2 symbols ...", changed=["list:3", "list:4", "list:3"])
+
+    handlers = echo_handlers()
+    handlers["section_add"] = half
+    client = make_app(handlers).test_client()
+    login_session(client)
+    headers = csrf_headers(client)
+    path = contract.API_PREFIX + "/sections"
+    before = versions.read()
+    r = client.post(path, json={"list": 3, "name": "half", "version": "v"}, headers=headers)
+    assert r.status_code == 409 and r.get_json()["message"] == "Added 2 symbols ..."
+    assert int(versions.read().split(":")[1]) == int(before.split(":")[1]) + 1
+    ((_, data, _),) = emitted
+    assert (data["why"], data["ref"], data["refs"]) == ("items", "lists", ["list:3", "list:4"])
+    r = client.post(path, json={"list": 3, "name": "nothing", "version": "v"}, headers=headers)
+    assert r.status_code == 500 and len(emitted) == 1  # nothing committed: nothing pushed
+
+
 def test_an_op_that_does_not_declare_a_bump_pushes_nothing(emitted):
     reset_users()
     client = make_app(echo_handlers()).test_client()
