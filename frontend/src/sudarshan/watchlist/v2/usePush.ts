@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import type { Socket } from 'socket.io-client'
 import { useSocketContext } from '@/components/socket/SocketProvider'
 import { WATCHLISTS_KEY } from '../useWatchlists'
+import { syncListAlerts } from './alertSync'
 import { afterWrites } from './ownWrites'
 import { EVENT_JOIN, EVENT_PUSH, type Push } from './types'
 import { applyPushes, V2_KEY } from './useListView'
@@ -92,6 +93,8 @@ export function usePush(on: boolean): Hearing {
         settle = null
         const batch = pending
         pending = []
+        // M8.14 (review M5): a list alert on a ref the batch names follows it now, own writes included.
+        syncListAlerts(client, batch)
         // A write of this page still in flight: wait for its answer, so its own push is known.
         let ran = false
         let cancel: (() => void) | undefined

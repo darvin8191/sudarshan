@@ -8,7 +8,10 @@ vi.mock('@/components/socket/SocketProvider', () => ({
   useSocketContext: () => ({ playAlertSound: () => {}, socket: sockets.current }),
 }))
 
+import { marketAlertsApi } from '@/api/marketAlerts'
 import { createQueryClient } from '@/app/providers'
+import { STATE_KEY as ALERTS_STATE_KEY } from '@/sudarshan/alerts/stateCache'
+import { resetOwnWrites, trackWrite } from './ownWrites'
 import { EVENT_JOIN, EVENT_PUSH, type Push } from './types'
 import { viewKey } from './useListView'
 import { JOIN_WAIT_MS, SETTLE_MS, usePush } from './usePush'
@@ -132,5 +135,92 @@ describe('usePush', () => {
     ).toBe(0)
     act(() => vi.advanceTimersByTime(5_000))
     expect(spy).not.toHaveBeenCalled()
+  })
+})
+
+// Review M5: a list alert follows its list at once (design 2.5), from the refs a push names.
+describe('a pushed change of a list that carries a list alert', () => {
+  const alerts = {
+    enabled: true,
+    groups: [
+      { id: 3, ref: 'list:7', status: 'active' },
+      { id: 4, ref: 'list:7/section:2', status: 'active' },
+    ],
+    groups_by_ref: { 'list:7': [3], 'list:7/section:2': [4] },
+  }
+  const named = (v: string, refs: string[], why: Push['why'] = 'items'): Push => ({
+    v,
+    ref: refs.length === 1 ? refs[0] : 'lists',
+    refs,
+    why,
+  })
+  const sync = () => vi.spyOn(marketAlertsApi, 'syncGroups').mockResolvedValue({ groups: [] })
+
+  beforeEach(() => resetOwnWrites())
+  afterEach(() => vi.restoreAllMocks())
+
+  it('asks the alerts to follow the list and its sections at once, once each per batch', async () => {
+    const asked = sync()
+    const { client, socket } = setup()
+    client.setQueryData(ALERTS_STATE_KEY, alerts)
+    act(() => socket.fire('connect'))
+    act(() => {
+      socket.fire(EVENT_PUSH, named('a:2', ['list:7']))
+      socket.fire(EVENT_PUSH, named('a:3', ['list:7'], 'arranged'))
+      vi.advanceTimersByTime(SETTLE_MS - 1)
+    })
+    await act(async () => {})
+    expect(asked).not.toHaveBeenCalled()
+    await act(async () => void vi.advanceTimersByTime(1))
+    expect(asked.mock.calls).toEqual([['list:7'], ['list:7/section:2']])
+  })
+
+  it('asks for a write this page made itself too: its push is skipped for reading only', async () => {
+    const asked = sync()
+    const { client, socket } = setup()
+    client.setQueryData(ALERTS_STATE_KEY, alerts)
+    await trackWrite(async () => ({ lists_version: 'a:9' }))
+    const reads = vi.spyOn(client, 'invalidateQueries')
+    act(() => socket.fire('connect'))
+    await act(async () => {
+      socket.fire(EVENT_PUSH, named('a:9', ['list:7'], 'sections'))
+      vi.advanceTimersByTime(SETTLE_MS)
+    })
+    expect(reads).not.toHaveBeenCalled()
+    expect(asked.mock.calls).toEqual([['list:7'], ['list:7/section:2']])
+  })
+
+  it('asks nothing for a list with no list alert, a favourites push, or with market alerts off', async () => {
+    const asked = sync()
+    const { client, socket } = setup()
+    client.setQueryData(ALERTS_STATE_KEY, alerts)
+    act(() => socket.fire('connect'))
+    await act(async () => {
+      socket.fire(EVENT_PUSH, named('a:2', ['list:8']))
+      socket.fire(EVENT_PUSH, named('a:2', [], 'favourites'))
+      vi.advanceTimersByTime(SETTLE_MS)
+    })
+    client.setQueryData(ALERTS_STATE_KEY, { ...alerts, enabled: false })
+    await act(async () => {
+      socket.fire(EVENT_PUSH, named('a:3', ['list:7']))
+      vi.advanceTimersByTime(SETTLE_MS)
+    })
+    expect(asked).not.toHaveBeenCalled()
+  })
+
+  it('still reads the list again when the request to the alerts cannot even be made', async () => {
+    vi.spyOn(marketAlertsApi, 'syncGroups').mockImplementation(() => {
+      throw new TypeError('no client')
+    })
+    const { client, socket } = setup()
+    client.setQueryData(ALERTS_STATE_KEY, alerts)
+    client.setQueryData(viewKey('list:7'), { version: '1' })
+    const reads = vi.spyOn(client, 'invalidateQueries')
+    act(() => socket.fire('connect'))
+    await act(async () => {
+      socket.fire(EVENT_PUSH, named('a:2', ['list:7']))
+      vi.advanceTimersByTime(SETTLE_MS)
+    })
+    expect(reads).toHaveBeenCalledWith({ queryKey: viewKey('list:7'), exact: true })
   })
 })
