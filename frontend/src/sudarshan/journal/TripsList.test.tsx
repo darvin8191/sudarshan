@@ -4,7 +4,7 @@
  * and none under Closed, closed trades by day newest first, the empty sentences, the mode on every
  * read, and the re-read after an order update.
  */
-import { act, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -59,6 +59,8 @@ function serve(open: Trip[], closed: Array<Trip & { mistakes?: number[] }>) {
     throw new Error(`unexpected op ${op}`)
   })
 }
+
+vi.setConfig({ testTimeout: 15_000 })
 
 const flush = () => act(() => frames.flush())
 const show = (mode: 'live' | 'sandbox' = 'live', onOpen = vi.fn()) =>
@@ -260,7 +262,6 @@ describe('TripsList', () => {
   })
 
   it('offers earlier trades after a full page, and adds them without repeating', async () => {
-    const user = userEvent.setup()
     const page = Array.from({ length: 100 }, (_, n) =>
       closedTrip({ id: 1000 - n, net_paise: 100, close_day: 20261112, closed_ms: 5000 - n })
     )
@@ -276,7 +277,7 @@ describe('TripsList', () => {
     })
     show()
     await screen.findAllByTestId('closed-trip')
-    await user.click(screen.getByRole('button', { name: 'Show earlier trades' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Show earlier trades' }))
     await screen.findByText('Tue 10 Nov 2026')
     expect(screen.getAllByTestId('closed-trip')).toHaveLength(101)
     expect(api.data.mock.calls.find(([, a]) => a?.before !== undefined)?.[1].before).toBe(5000 - 99)

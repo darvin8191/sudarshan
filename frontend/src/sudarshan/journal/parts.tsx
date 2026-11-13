@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowUp, Layers } from 'lucide-react'
+import { ArrowDown, ArrowUp, Layers, TriangleAlert } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { directionOf } from '@/sudarshan/dashboard/format'
 import { TrendArrow } from '@/sudarshan/dashboard/Trend'
@@ -52,3 +52,19 @@ export function OutcomeWord({ paise, show = false }: { paise: number; show?: boo
 }
 
 export { directionOf, TrendArrow }
+
+/** A problem in a sentence with its next step, with an icon: never red alone. */
+export function Problem({ children }: { children: React.ReactNode }) {
+  return (
+    <p
+      role="alert"
+      className="flex items-start gap-2 rounded-[0.875rem] border border-[color:var(--down)]/40 bg-[color:var(--down-tint)] px-3 py-2 text-sm font-medium text-[color:var(--text-primary)]"
+    >
+      <TriangleAlert
+        aria-hidden="true"
+        className="mt-0.5 size-4 shrink-0 text-[color:var(--down)]"
+      />
+      <span>{children}</span>
+    </p>
+  )
+}

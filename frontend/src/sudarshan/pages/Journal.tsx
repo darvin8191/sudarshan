@@ -9,6 +9,7 @@ import { journalCall, problemOf } from '@/sudarshan/journal/api'
 import { JOURNAL_STATE_KEY } from '@/sudarshan/journal/keys'
 import { ModeChip } from '@/sudarshan/journal/ModeChip'
 import { Segmented } from '@/sudarshan/journal/Segmented'
+import { TripSheet } from '@/sudarshan/journal/TripSheet'
 import { TripsList } from '@/sudarshan/journal/TripsList'
 import { type JournalView, useJournalOverlay } from '@/sudarshan/journal/useJournalOverlay'
 
@@ -57,7 +58,7 @@ function Stub({ part }: { part: JournalView }) {
 }
 
 export default function Journal() {
-  const { view, mode, setView, setMode, open } = useJournalOverlay()
+  const { view, mode, overlay, setView, setMode, open, close } = useJournalOverlay()
   const state = useQuery({
     queryKey: JOURNAL_STATE_KEY,
     queryFn: async () => journalCall('state'),
@@ -118,6 +119,9 @@ export default function Journal() {
         <Segmented label="Journal parts" value={view} options={PARTS} onChange={setView} />
       )}
       {body}
+      {usable && overlay?.kind === 'trade' && (
+        <TripSheet key={overlay.tradeId} tradeId={overlay.tradeId} open onClose={close} />
+      )}
     </div>
   )
 }

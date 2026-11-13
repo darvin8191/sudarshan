@@ -15,6 +15,14 @@ vi.mock('@/sudarshan/journal/TripsList', () => ({
   TripsList: ({ mode }: { mode: string }) => <p data-testid="trips-of">{mode}</p>,
 }))
 
+vi.mock('@/sudarshan/journal/TripSheet', () => ({
+  TripSheet: ({ tradeId, onClose }: { tradeId: number; onClose: () => void }) => (
+    <button type="button" onClick={onClose}>
+      {`Sheet of trade ${tradeId}`}
+    </button>
+  ),
+}))
+
 import { renderBook, where } from '@/test/bookPages'
 import Journal from './Journal'
 
@@ -76,5 +84,14 @@ describe('Journal', () => {
     expect(on.getAttribute('aria-checked')).toBe('true')
     await user.click(on)
     await waitFor(() => expect(where()).toBe('/journal'))
+  })
+
+  it('opens a trade’s sheet from the address, and closing it leaves the page where it was', async () => {
+    const user = userEvent.setup()
+    call.mockResolvedValue(ON)
+    renderBook('/journal?trade=5', <Journal />, ['/journal?trade=5'])
+    await user.click(await screen.findByRole('button', { name: 'Sheet of trade 5' }))
+    await waitFor(() => expect(where()).toBe('/journal'))
+    expect(screen.queryByRole('button', { name: /Sheet of trade/ })).toBeNull()
   })
 })
