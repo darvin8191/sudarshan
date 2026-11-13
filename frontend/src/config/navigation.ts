@@ -33,6 +33,7 @@ import {
   ShieldAlert,
   TrendingUp,
   User,
+  Users,
   Workflow,
   Wrench,
   Zap,
@@ -101,6 +102,9 @@ export const profileMenuItems: NavItem[] = [
   { href: '/autologin', label: 'Auto login', icon: KeyRound },
   // SUDARSHAN M20.7: the kill switch and the risk guard.
   { href: '/risk', label: 'Risk', icon: ShieldAlert },
+  // SUDARSHAN P6 D2 (M2.7): the owner's Family page, right after Risk. The viewer's own pages are
+  // not listed here: their menu is sudarshan/family/navigation.ts (cross-design Y35, Y36).
+  { href: '/family-members', label: 'Family', icon: Users },
   { href: '/telegram', label: 'Telegram Bot', icon: MessageSquare },
   { href: '/whatsapp', label: 'WhatsApp Bot', icon: MessageCircle },
   // SUDARSHAN M8.2: the watchlist, for a wide screen where the bottom bar is hidden.

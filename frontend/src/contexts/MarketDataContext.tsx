@@ -45,14 +45,17 @@ export interface MarketDataProviderProps {
   pauseWhenHidden?: boolean
   /** Time in ms to wait before disconnecting when hidden (default: 5000) */
   pauseDelay?: number
+  /** SUDARSHAN P6 D2: a manager of its own (the family viewer socket); default is the owner's. */
+  manager?: MarketDataManager
 }
 
 export function MarketDataProvider({
   children,
   pauseWhenHidden = true,
   pauseDelay = 5000,
+  manager,
 }: MarketDataProviderProps) {
-  const managerRef = useRef<MarketDataManager>(MarketDataManager.getInstance())
+  const managerRef = useRef<MarketDataManager>(manager ?? MarketDataManager.getInstance()) // SUDARSHAN P6 D2
   const { isVisible } = usePageVisibility()
 
   // Initialize state from manager's current state
