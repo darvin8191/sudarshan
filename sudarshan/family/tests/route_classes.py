@@ -83,6 +83,9 @@ public_shell  /dashboard                             react.react_dashboard
 public_shell  /download                              react.react_download
 public_shell  /error                                 react.react_error
 public_shell  /faq                                   react.react_faq
+public_shell  /family                                react.react_family_shell
+public_shell  /family-members                        react.react_family_members
+public_shell  /family/<path:rest>                    react.react_family_shell
 public_shell  /flow                                  react.react_flow_index
 public_shell  /flow/editor/<int:workflow_id>         react.react_flow_editor
 public_shell  /flow/shortcuts                        react.react_flow_shortcuts
@@ -192,8 +195,10 @@ public_static /logo.png                                                   react.
 public_static /mcp/.well-known/oauth-protected-resource                   mcp_http_bp.mcp_resource_metadata_alias                 # remote MCP: the same metadata under /mcp
 public_static /mcp/healthz                                                mcp_http_bp.healthz                                     # remote MCP: liveness for a monitor; no data
 public_static /oauth/jwks.json                                            mcp_oauth_bp.jwks_endpoint                              # remote MCP: the public key its tokens are checked with
+public_static /offline.html                                               react.serve_offline_page                                # the family view's offline page, a fixed document from the build; 404 until a build has it (P6 B2)
 public_static /sounds/<path:filename>                                     react.serve_sounds                                      # alert sounds shipped with the app
 public_static /static/<path:filename>                                     static                                                  # Flask's own static folder; the repository has none, so every file is 404
+public_static /sw.js                                                      react.serve_service_worker                              # the family view's service worker script from the build, scope held to /family/; 404 until a build has it (P6 B2)
 public_static /swaggerui/<path:filename>                                  restx_doc.static                                        # the files of the API documentation viewer
 
 # --- public_auth: the login flow and what the login page reads ---
