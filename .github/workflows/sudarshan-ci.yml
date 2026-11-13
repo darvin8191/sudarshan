@@ -36,7 +36,7 @@ jobs:
       - run: npm run build
       - run: npm run test:run
 
-  # The service tests in four shards side by side (sudarshan/conftest.py splits them by file):
+  # The service tests in four shards side by side (sudarshan/tests/ci_shards.py splits them by file):
   # one job had grown past 20 minutes once watchlists v2 was in.
   backend:
     runs-on: ubuntu-24.04-arm
@@ -45,8 +45,6 @@ jobs:
       fail-fast: false
       matrix:
         shard: [1, 2, 3, 4]
-    env:
-      SUDARSHAN_TEST_SHARD: ${{ matrix.shard }}/4
     steps:
       - uses: actions/checkout@v6
       - uses: astral-sh/setup-uv@v7
@@ -66,12 +64,13 @@ jobs:
           else
             echo "no Python code in sudarshan/ yet"
           fi
-      - name: Tests (sudarshan/ only)
+      - name: Tests (sudarshan/ only, one shard of four)
         run: |
-          if find sudarshan -path '*/tests/*' -name 'test_*.py' 2>/dev/null | grep -q .; then
-            uv run pytest -q sudarshan
+          files=$(uv run python -m sudarshan.tests.ci_shards ${{ matrix.shard }} 4)
+          if [ -n "$files" ]; then
+            uv run pytest -q $files
           else
-            echo "no sudarshan tests yet"
+            echo "no sudarshan tests in this shard"
           fi
 
   # The upstream gthread-migration job's command, so every dispatched run checks the gthread
