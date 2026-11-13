@@ -297,3 +297,24 @@ def test_the_owner_vault_hides_statement_parameters_too(tmp_path):
         assert engine.hide_parameters is True
     finally:
         engine.dispose()
+
+
+def test_the_release_notes_name_the_reset_its_history_line_and_its_notice():
+    """Release review v0.8.0 M3: the S2b fixes joined v0.8.0 without a word in its notes, so a new
+    server command that resets a safety control, its History line and its Telegram notice would
+    have reached the server unnamed."""
+    from datetime import UTC, datetime
+    from pathlib import Path
+
+    changelog = (Path(__file__).resolve().parents[2] / "CHANGELOG.md").read_text()
+    stanza = " ".join(changelog.split("\n## ")[1].split())
+    assert stanza.startswith("v0.8.0")
+    assert "\"The risk layer's confirm phrase, if it is forgotten\"" in stanza
+    assert (
+        "cd /opt/sudarshan/apps/openalgo && sudo -u sudarshan .venv/bin/python "
+        "-m sudarshan.guard.phrase --reset"
+    ) in stanza
+    assert f'"{words.PHRASE_RESET_AUDIT}"' in stanza
+    notice = phrase.told_words(datetime(2026, 11, 13, 9, 0, tzinfo=UTC))
+    assert notice.replace("at 14:30.", "at (the time).") in stanza
+    assert words.phrase_refused("...").removesuffix("....") in stanza

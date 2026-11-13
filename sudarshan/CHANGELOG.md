@@ -53,8 +53,11 @@ feed and API-key calls work as before.
   - every box that asks for the confirm phrase now says "Type your confirm phrase. It is STOP unless
     you changed it.", with its own reason beside it;
   - a forgotten phrase can be set back to STOP on the server (the command is in `sudarshan/README.md`,
-    "The risk layer's confirm phrase, if it is forgotten"). It writes a History line, tells you on
-    Telegram and works at the next try, with no restart. The phrase card says so;
+    "The risk layer's confirm phrase, if it is forgotten", and under What you must do). It works at
+    the next try, with no restart, and the phrase card says so. Every reset writes the History line
+    "The confirm phrase was set back to the default on the server." and tells you on Telegram: "The
+    confirm phrase was set back to the default on the server at (the time). If this was not you,
+    change it in Settings > Risk and check who can reach the server.";
   - a wrong phrase is now written in History, from the app or Telegram, for a settings change and
     for turning the kill switch on or off: "A wrong confirm phrase was refused when asked to ..."
     with what was asked and how many tries in a row (one line, counted up), never what was typed;
@@ -72,17 +75,21 @@ feed and API-key calls work as before.
   change does not change the API key, every signed-in screen could read it, and orders sent with
   it go out from the server's own address. Alerts that still carry the old key are refused from
   then on. The steps are in `sudarshan/README.md`, "Signing out every device, and a lost phone".
+- **If you forget the confirm phrase:** on the server, run
+  `cd /opt/sudarshan/apps/openalgo && sudo -u sudarshan .venv/bin/python -m sudarshan.guard.phrase --reset`,
+  then set a new phrase in Settings > Risk. History and Telegram show every reset. A reset you did
+  not make means someone can run commands on the server: change the phrase and have the server
+  looked at.
 - Once after the install, after the close: put the phone to sleep, log out on the laptop, then wake
   the phone. It should show the login page. Log in again on both (a logout also ends the Upstox
   login, as it always has). The two October rows should be gone from Active Sessions.
 - When you want the offsite copy: the 12 steps in `sudarshan/README.md`, "Setting up the offsite
   copy": the Oracle console (a bucket with versioning on, two lifecycle rules, a budget alert), a
-  key pair made on the laptop, and one `.bat`. The `.bat` sends only
-  the public certificate, shows its fingerprint on the laptop and again on the server, and saves
-  nothing until you type yes; then it asks for the link's expiry date and, in a hidden prompt, the
-  upload link. On the server, root only makes the empty settings file; the settings are written by
-  the job's own user, and no program from the app folder runs as root. The next morning, look for
-  one file in the bucket.
+  key pair made on the laptop, and one `.bat`. The `.bat` sends only the public certificate, shows
+  its fingerprint on the laptop and again on the server, and saves nothing until you type yes; then
+  it asks for the link's expiry date and, in a hidden prompt, the upload link. On the server, root
+  only makes the empty settings file; the settings are written by the job's own user, and no
+  program from the app folder runs as root. The next morning, look for one file in the bucket.
 
 ### What is refused now that used to be accepted
 - A device signed in before a logout, a password change or a password reset elsewhere is sent to the

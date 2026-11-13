@@ -205,3 +205,21 @@ def test_the_notes_say_a_logout_leaves_the_api_key_and_what_to_do_after_a_lost_p
         assert "server's own" in text  # why the static IP rule does not stop them
     assert "use the API key and are not affected" not in STANZA  # not "protected"
     assert "## Signing out every device, and a lost phone (M2.3)" in RAW_README
+
+
+def test_every_status_row_the_release_touches_names_it():
+    """Release review v0.8.0 M3 and L11: M5.13 still listed v0.4.0 to v0.5.1 for a change that
+    ships in v0.8.0, M2.3 named v0.7.0, and M18.11 kept v0.4.0 and called the offsite copy a hook
+    that does nothing until set."""
+    rows = {
+        cells[1].strip(): cells
+        for line in (SUDARSHAN / "STATUS.md").read_text().splitlines()
+        if line.startswith("| M") and len(cells := line.split(" | ")) >= 5
+    }
+    for feature in ("| M2.3", "| M5.13", "| M16.7", "| M18.11", "| M20.7"):
+        (cells,) = [c for key, c in rows.items() if c[0] == feature]
+        assert "v0.8.0" in cells[3].split(", "), (feature, cells[3])
+    (sessions,) = [c for c in rows.values() if c[0] == "| M2.3"]
+    assert "v0.7.0" not in sessions[3]
+    (backups,) = [c for c in rows.values() if c[0] == "| M18.11"]
+    assert "a documented hook" not in backups[1]
