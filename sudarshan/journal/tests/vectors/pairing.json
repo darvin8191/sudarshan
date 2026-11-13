@@ -1,0 +1,933 @@
+{
+ "note": "synthetic; prices in price_u (rupees x 10^4), money in paise",
+ "vectors": [
+  {
+   "id": "P1",
+   "note": "one long trip, one entry and one exit",
+   "fills": [
+    {
+     "trade_id": "a1",
+     "exchange": "NFO",
+     "symbol": "NIFTY25NOV2625000CE",
+     "product": "MIS",
+     "action": "BUY",
+     "qty": 65,
+     "price_u": 1000000,
+     "exch_ts_ms": 1794198660000,
+     "day": 20261109
+    },
+    {
+     "trade_id": "a2",
+     "exchange": "NFO",
+     "symbol": "NIFTY25NOV2625000CE",
+     "product": "MIS",
+     "action": "SELL",
+     "qty": 65,
+     "price_u": 1125000,
+     "exch_ts_ms": 1794199800000,
+     "day": 20261109
+    }
+   ],
+   "trips": [
+    {
+     "side": "long",
+     "status": "closed",
+     "qty_max": 65,
+     "entry_qty": 65,
+     "entry_avg_u": 1000000,
+     "exit_qty": 65,
+     "exit_avg_u": 1125000,
+     "gross_paise": 81250,
+     "hold_s": 1140,
+     "product_class": "intraday",
+     "open_day": 20261109,
+     "close_day": 20261109,
+     "legs": [
+      [
+       "a1",
+       "entry",
+       65
+      ],
+      [
+       "a2",
+       "exit",
+       65
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "id": "P2",
+   "note": "two entries average to 99.00",
+   "fills": [
+    {
+     "trade_id": "a1",
+     "exchange": "NFO",
+     "symbol": "NIFTY25NOV2625000CE",
+     "product": "MIS",
+     "action": "BUY",
+     "qty": 65,
+     "price_u": 1000000,
+     "exch_ts_ms": 1794198660000,
+     "day": 20261109
+    },
+    {
+     "trade_id": "a2",
+     "exchange": "NFO",
+     "symbol": "NIFTY25NOV2625000CE",
+     "product": "MIS",
+     "action": "BUY",
+     "qty": 65,
+     "price_u": 980000,
+     "exch_ts_ms": 1794198720000,
+     "day": 20261109
+    },
+    {
+     "trade_id": "a3",
+     "exchange": "NFO",
+     "symbol": "NIFTY25NOV2625000CE",
+     "product": "MIS",
+     "action": "SELL",
+     "qty": 130,
+     "price_u": 1010000,
+     "exch_ts_ms": 1794200400000,
+     "day": 20261109
+    }
+   ],
+   "trips": [
+    {
+     "side": "long",
+     "status": "closed",
+     "qty_max": 130,
+     "entry_qty": 130,
+     "entry_avg_u": 990000,
+     "exit_qty": 130,
+     "exit_avg_u": 1010000,
+     "gross_paise": 26000,
+     "hold_s": 1740,
+     "product_class": "intraday",
+     "open_day": 20261109,
+     "close_day": 20261109,
+     "legs": [
+      [
+       "a1",
+       "entry",
+       65
+      ],
+      [
+       "a2",
+       "entry",
+       65
+      ],
+      [
+       "a3",
+       "exit",
+       130
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "id": "P3",
+   "note": "two exit legs, gross zero, closed at the second sell",
+   "fills": [
+    {
+     "trade_id": "a1",
+     "exchange": "NFO",
+     "symbol": "NIFTY25NOV2625000CE",
+     "product": "MIS",
+     "action": "BUY",
+     "qty": 130,
+     "price_u": 1000000,
+     "exch_ts_ms": 1794198660000,
+     "day": 20261109
+    },
+    {
+     "trade_id": "a2",
+     "exchange": "NFO",
+     "symbol": "NIFTY25NOV2625000CE",
+     "product": "MIS",
+     "action": "SELL",
+     "qty": 65,
+     "price_u": 1050000,
+     "exch_ts_ms": 1794199200000,
+     "day": 20261109
+    },
+    {
+     "trade_id": "a3",
+     "exchange": "NFO",
+     "symbol": "NIFTY25NOV2625000CE",
+     "product": "MIS",
+     "action": "SELL",
+     "qty": 65,
+     "price_u": 950000,
+     "exch_ts_ms": 1794199800000,
+     "day": 20261109
+    }
+   ],
+   "trips": [
+    {
+     "side": "long",
+     "status": "closed",
+     "qty_max": 130,
+     "entry_qty": 130,
+     "entry_avg_u": 1000000,
+     "exit_qty": 130,
+     "exit_avg_u": 1000000,
+     "gross_paise": 0,
+     "hold_s": 1140,
+     "product_class": "intraday",
+     "open_day": 20261109,
+     "close_day": 20261109,
+     "legs": [
+      [
+       "a1",
+       "entry",
+       130
+      ],
+      [
+       "a2",
+       "exit",
+       65
+      ],
+      [
+       "a3",
+       "exit",
+       65
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "id": "P4",
+   "note": "a flip: the second fill has an exit leg and an entry leg",
+   "fills": [
+    {
+     "trade_id": "a1",
+     "exchange": "NFO",
+     "symbol": "NIFTY25NOV2625000CE",
+     "product": "MIS",
+     "action": "BUY",
+     "qty": 65,
+     "price_u": 1000000,
+     "exch_ts_ms": 1794198660000,
+     "day": 20261109
+    },
+    {
+     "trade_id": "a2",
+     "exchange": "NFO",
+     "symbol": "NIFTY25NOV2625000CE",
+     "product": "MIS",
+     "action": "SELL",
+     "qty": 130,
+     "price_u": 1040000,
+     "exch_ts_ms": 1794199200000,
+     "day": 20261109
+    }
+   ],
+   "trips": [
+    {
+     "side": "long",
+     "status": "closed",
+     "qty_max": 65,
+     "entry_qty": 65,
+     "entry_avg_u": 1000000,
+     "exit_qty": 65,
+     "exit_avg_u": 1040000,
+     "gross_paise": 26000,
+     "hold_s": 540,
+     "product_class": "intraday",
+     "open_day": 20261109,
+     "close_day": 20261109,
+     "legs": [
+      [
+       "a1",
+       "entry",
+       65
+      ],
+      [
+       "a2",
+       "exit",
+       65
+      ]
+     ]
+    },
+    {
+     "side": "short",
+     "status": "open",
+     "qty_max": 65,
+     "entry_qty": 65,
+     "entry_avg_u": 1040000,
+     "exit_qty": 0,
+     "exit_avg_u": null,
+     "gross_paise": null,
+     "hold_s": null,
+     "product_class": "intraday",
+     "open_day": 20261109,
+     "close_day": null,
+     "legs": [
+      [
+       "a2",
+       "entry",
+       65
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "id": "P5",
+   "note": "a short trip",
+   "fills": [
+    {
+     "trade_id": "a1",
+     "exchange": "NFO",
+     "symbol": "NIFTY25NOV2625000CE",
+     "product": "MIS",
+     "action": "SELL",
+     "qty": 65,
+     "price_u": 1000000,
+     "exch_ts_ms": 1794198660000,
+     "day": 20261109
+    },
+    {
+     "trade_id": "a2",
+     "exchange": "NFO",
+     "symbol": "NIFTY25NOV2625000CE",
+     "product": "MIS",
+     "action": "BUY",
+     "qty": 65,
+     "price_u": 900000,
+     "exch_ts_ms": 1794199260000,
+     "day": 20261109
+    }
+   ],
+   "trips": [
+    {
+     "side": "short",
+     "status": "closed",
+     "qty_max": 65,
+     "entry_qty": 65,
+     "entry_avg_u": 1000000,
+     "exit_qty": 65,
+     "exit_avg_u": 900000,
+     "gross_paise": 65000,
+     "hold_s": 600,
+     "product_class": "intraday",
+     "open_day": 20261109,
+     "close_day": 20261109,
+     "legs": [
+      [
+       "a1",
+       "entry",
+       65
+      ],
+      [
+       "a2",
+       "exit",
+       65
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "id": "P6",
+   "note": "one carry trip across days",
+   "fills": [
+    {
+     "trade_id": "a1",
+     "exchange": "NSE",
+     "symbol": "RELIANCE",
+     "product": "CNC",
+     "action": "BUY",
+     "qty": 10,
+     "price_u": 12500000,
+     "exch_ts_ms": 1793593800000,
+     "day": 20261102
+    },
+    {
+     "trade_id": "a2",
+     "exchange": "NSE",
+     "symbol": "RELIANCE",
+     "product": "CNC",
+     "action": "SELL",
+     "qty": 10,
+     "price_u": 13000000,
+     "exch_ts_ms": 1793856600000,
+     "day": 20261105
+    }
+   ],
+   "trips": [
+    {
+     "side": "long",
+     "status": "closed",
+     "qty_max": 10,
+     "entry_qty": 10,
+     "entry_avg_u": 12500000,
+     "exit_qty": 10,
+     "exit_avg_u": 13000000,
+     "gross_paise": 50000,
+     "hold_s": 262800,
+     "product_class": "carry",
+     "open_day": 20261102,
+     "close_day": 20261105,
+     "legs": [
+      [
+       "a1",
+       "entry",
+       10
+      ],
+      [
+       "a2",
+       "exit",
+       10
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "id": "P7",
+   "note": "the same trade id from the stream read and the close reconcile is one fill",
+   "fills": [
+    {
+     "trade_id": "a1",
+     "exchange": "NFO",
+     "symbol": "NIFTY25NOV2625000CE",
+     "product": "MIS",
+     "action": "BUY",
+     "qty": 65,
+     "price_u": 1000000,
+     "exch_ts_ms": 1794198660000,
+     "day": 20261109,
+     "source": "stream_read"
+    },
+    {
+     "trade_id": "a1",
+     "exchange": "NFO",
+     "symbol": "NIFTY25NOV2625000CE",
+     "product": "MIS",
+     "action": "BUY",
+     "qty": 65,
+     "price_u": 1000000,
+     "exch_ts_ms": 1794198660000,
+     "day": 20261109,
+     "source": "close_reconcile"
+    },
+    {
+     "trade_id": "a2",
+     "exchange": "NFO",
+     "symbol": "NIFTY25NOV2625000CE",
+     "product": "MIS",
+     "action": "SELL",
+     "qty": 65,
+     "price_u": 1125000,
+     "exch_ts_ms": 1794199800000,
+     "day": 20261109
+    }
+   ],
+   "trips": [
+    {
+     "side": "long",
+     "status": "closed",
+     "qty_max": 65,
+     "entry_qty": 65,
+     "entry_avg_u": 1000000,
+     "exit_qty": 65,
+     "exit_avg_u": 1125000,
+     "gross_paise": 81250,
+     "hold_s": 1140,
+     "product_class": "intraday",
+     "open_day": 20261109,
+     "close_day": 20261109,
+     "legs": [
+      [
+       "a1",
+       "entry",
+       65
+      ],
+      [
+       "a2",
+       "exit",
+       65
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "id": "P8",
+   "note": "a fill that arrives late with an earlier exchange time: the day replays in time order",
+   "fills": [
+    {
+     "trade_id": "a2",
+     "exchange": "NFO",
+     "symbol": "NIFTY25NOV2625000CE",
+     "product": "MIS",
+     "action": "BUY",
+     "qty": 65,
+     "price_u": 1000000,
+     "exch_ts_ms": 1794198900000,
+     "day": 20261109
+    },
+    {
+     "trade_id": "a3",
+     "exchange": "NFO",
+     "symbol": "NIFTY25NOV2625000CE",
+     "product": "MIS",
+     "action": "SELL",
+     "qty": 65,
+     "price_u": 1100000,
+     "exch_ts_ms": 1794199800000,
+     "day": 20261109
+    },
+    {
+     "trade_id": "a1",
+     "exchange": "NFO",
+     "symbol": "NIFTY25NOV2625000CE",
+     "product": "MIS",
+     "action": "BUY",
+     "qty": 65,
+     "price_u": 980000,
+     "exch_ts_ms": 1794198660000,
+     "day": 20261109
+    }
+   ],
+   "trips": [
+    {
+     "side": "long",
+     "status": "open",
+     "qty_max": 130,
+     "entry_qty": 130,
+     "entry_avg_u": 990000,
+     "exit_qty": 65,
+     "exit_avg_u": 1100000,
+     "gross_paise": null,
+     "hold_s": null,
+     "product_class": "intraday",
+     "open_day": 20261109,
+     "close_day": null,
+     "legs": [
+      [
+       "a1",
+       "entry",
+       65
+      ],
+      [
+       "a2",
+       "entry",
+       65
+      ],
+      [
+       "a3",
+       "exit",
+       65
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "id": "P9",
+   "note": "a live fill and a sandbox fill in the same instrument are two journals",
+   "fills": [
+    {
+     "trade_id": "a1",
+     "exchange": "NFO",
+     "symbol": "NIFTY25NOV2625000CE",
+     "product": "MIS",
+     "action": "BUY",
+     "qty": 65,
+     "price_u": 1000000,
+     "exch_ts_ms": 1794198660000,
+     "day": 20261109,
+     "mode": "live"
+    },
+    {
+     "trade_id": "sb:7",
+     "exchange": "NFO",
+     "symbol": "NIFTY25NOV2625000CE",
+     "product": "MIS",
+     "action": "SELL",
+     "qty": 65,
+     "price_u": 1010000,
+     "exch_ts_ms": 1794198660000,
+     "day": 20261109,
+     "mode": "sandbox"
+    }
+   ],
+   "trips": [
+    {
+     "side": "long",
+     "status": "open",
+     "qty_max": 65,
+     "entry_qty": 65,
+     "entry_avg_u": 1000000,
+     "exit_qty": 0,
+     "exit_avg_u": null,
+     "gross_paise": null,
+     "hold_s": null,
+     "product_class": "intraday",
+     "open_day": 20261109,
+     "close_day": null,
+     "legs": [
+      [
+       "a1",
+       "entry",
+       65
+      ]
+     ]
+    },
+    {
+     "side": "short",
+     "status": "open",
+     "qty_max": 65,
+     "entry_qty": 65,
+     "entry_avg_u": 1010000,
+     "exit_qty": 0,
+     "exit_avg_u": null,
+     "gross_paise": null,
+     "hold_s": null,
+     "product_class": "intraday",
+     "open_day": 20261109,
+     "close_day": null,
+     "legs": [
+      [
+       "sb:7",
+       "entry",
+       65
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "id": "P10",
+   "note": "MIS and NRML are two product classes: two trips, both open",
+   "fills": [
+    {
+     "trade_id": "a1",
+     "exchange": "NFO",
+     "symbol": "NIFTY25NOV2625000CE",
+     "product": "MIS",
+     "action": "BUY",
+     "qty": 65,
+     "price_u": 1000000,
+     "exch_ts_ms": 1794198660000,
+     "day": 20261109
+    },
+    {
+     "trade_id": "a2",
+     "exchange": "NFO",
+     "symbol": "NIFTY25NOV2625000CE",
+     "product": "NRML",
+     "action": "SELL",
+     "qty": 65,
+     "price_u": 1010000,
+     "exch_ts_ms": 1794198660000,
+     "day": 20261109
+    }
+   ],
+   "trips": [
+    {
+     "side": "long",
+     "status": "open",
+     "qty_max": 65,
+     "entry_qty": 65,
+     "entry_avg_u": 1000000,
+     "exit_qty": 0,
+     "exit_avg_u": null,
+     "gross_paise": null,
+     "hold_s": null,
+     "product_class": "intraday",
+     "open_day": 20261109,
+     "close_day": null,
+     "legs": [
+      [
+       "a1",
+       "entry",
+       65
+      ]
+     ]
+    },
+    {
+     "side": "short",
+     "status": "open",
+     "qty_max": 65,
+     "entry_qty": 65,
+     "entry_avg_u": 1010000,
+     "exit_qty": 0,
+     "exit_avg_u": null,
+     "gross_paise": null,
+     "hold_s": null,
+     "product_class": "carry",
+     "open_day": 20261109,
+     "close_day": null,
+     "legs": [
+      [
+       "a2",
+       "entry",
+       65
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "id": "P11",
+   "note": "NRML buy then the stream reports the exit as CNC: one carry trip",
+   "fills": [
+    {
+     "trade_id": "a1",
+     "exchange": "NFO",
+     "symbol": "NIFTY25NOV2625000CE",
+     "product": "NRML",
+     "action": "BUY",
+     "qty": 65,
+     "price_u": 1000000,
+     "exch_ts_ms": 1794198660000,
+     "day": 20261109
+    },
+    {
+     "trade_id": "a2",
+     "exchange": "NFO",
+     "symbol": "NIFTY25NOV2625000CE",
+     "product": "CNC",
+     "action": "SELL",
+     "qty": 65,
+     "price_u": 1010000,
+     "exch_ts_ms": 1794200400000,
+     "day": 20261109
+    }
+   ],
+   "trips": [
+    {
+     "side": "long",
+     "status": "closed",
+     "qty_max": 65,
+     "entry_qty": 65,
+     "entry_avg_u": 1000000,
+     "exit_qty": 65,
+     "exit_avg_u": 1010000,
+     "gross_paise": 6500,
+     "hold_s": 1740,
+     "product_class": "carry",
+     "open_day": 20261109,
+     "close_day": 20261109,
+     "legs": [
+      [
+       "a1",
+       "entry",
+       65
+      ],
+      [
+       "a2",
+       "exit",
+       65
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "id": "P12",
+   "note": "a currency trip: the gross is summed from fill values, not from the rounded average",
+   "fills": [
+    {
+     "trade_id": "a1",
+     "exchange": "CDS",
+     "symbol": "USDINR25NOV26FUT",
+     "product": "MIS",
+     "action": "BUY",
+     "qty": 1000,
+     "price_u": 830000,
+     "exch_ts_ms": 1794198660000,
+     "day": 20261109
+    },
+    {
+     "trade_id": "a2",
+     "exchange": "CDS",
+     "symbol": "USDINR25NOV26FUT",
+     "product": "MIS",
+     "action": "BUY",
+     "qty": 2000,
+     "price_u": 830001,
+     "exch_ts_ms": 1794198720000,
+     "day": 20261109
+    },
+    {
+     "trade_id": "a3",
+     "exchange": "CDS",
+     "symbol": "USDINR25NOV26FUT",
+     "product": "MIS",
+     "action": "SELL",
+     "qty": 3000,
+     "price_u": 840000,
+     "exch_ts_ms": 1794200400000,
+     "day": 20261109
+    }
+   ],
+   "trips": [
+    {
+     "side": "long",
+     "status": "closed",
+     "qty_max": 3000,
+     "entry_qty": 3000,
+     "entry_avg_u": 830001,
+     "exit_qty": 3000,
+     "exit_avg_u": 840000,
+     "gross_paise": 299980,
+     "hold_s": 1740,
+     "product_class": "intraday",
+     "open_day": 20261109,
+     "close_day": 20261109,
+     "legs": [
+      [
+       "a1",
+       "entry",
+       1000
+      ],
+      [
+       "a2",
+       "entry",
+       2000
+      ],
+      [
+       "a3",
+       "exit",
+       3000
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "id": "P13",
+   "note": "two fills in the same millisecond are ordered by trade id",
+   "fills": [
+    {
+     "trade_id": "b2",
+     "exchange": "NFO",
+     "symbol": "NIFTY25NOV2625000CE",
+     "product": "MIS",
+     "action": "BUY",
+     "qty": 65,
+     "price_u": 1000000,
+     "exch_ts_ms": 1794198660000,
+     "day": 20261109
+    },
+    {
+     "trade_id": "b1",
+     "exchange": "NFO",
+     "symbol": "NIFTY25NOV2625000CE",
+     "product": "MIS",
+     "action": "SELL",
+     "qty": 65,
+     "price_u": 1010000,
+     "exch_ts_ms": 1794198660000,
+     "day": 20261109
+    }
+   ],
+   "trips": [
+    {
+     "side": "short",
+     "status": "closed",
+     "qty_max": 65,
+     "entry_qty": 65,
+     "entry_avg_u": 1010000,
+     "exit_qty": 65,
+     "exit_avg_u": 1000000,
+     "gross_paise": 6500,
+     "hold_s": 0,
+     "product_class": "intraday",
+     "open_day": 20261109,
+     "close_day": 20261109,
+     "legs": [
+      [
+       "b1",
+       "entry",
+       65
+      ],
+      [
+       "b2",
+       "exit",
+       65
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "id": "P14",
+   "note": "a withdrawn fill is left out of the pairing",
+   "fills": [
+    {
+     "trade_id": "a1",
+     "exchange": "NFO",
+     "symbol": "NIFTY25NOV2625000CE",
+     "product": "MIS",
+     "action": "BUY",
+     "qty": 65,
+     "price_u": 1000000,
+     "exch_ts_ms": 1794198660000,
+     "day": 20261109
+    },
+    {
+     "trade_id": "a9",
+     "exchange": "NFO",
+     "symbol": "NIFTY25NOV2625000CE",
+     "product": "MIS",
+     "action": "SELL",
+     "qty": 65,
+     "price_u": 900000,
+     "exch_ts_ms": 1794198900000,
+     "day": 20261109,
+     "source": "withdrawn"
+    },
+    {
+     "trade_id": "a2",
+     "exchange": "NFO",
+     "symbol": "NIFTY25NOV2625000CE",
+     "product": "MIS",
+     "action": "SELL",
+     "qty": 65,
+     "price_u": 1125000,
+     "exch_ts_ms": 1794199800000,
+     "day": 20261109
+    }
+   ],
+   "trips": [
+    {
+     "side": "long",
+     "status": "closed",
+     "qty_max": 65,
+     "entry_qty": 65,
+     "entry_avg_u": 1000000,
+     "exit_qty": 65,
+     "exit_avg_u": 1125000,
+     "gross_paise": 81250,
+     "hold_s": 1140,
+     "product_class": "intraday",
+     "open_day": 20261109,
+     "close_day": 20261109,
+     "legs": [
+      [
+       "a1",
+       "entry",
+       65
+      ],
+      [
+       "a2",
+       "exit",
+       65
+      ]
+     ]
+    }
+   ]
+  }
+ ]
+}

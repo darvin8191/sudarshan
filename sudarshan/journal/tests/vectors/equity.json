@@ -1,0 +1,316 @@
+{
+ "note": "synthetic; money in paise; points are [equity, peak, drawdown]",
+ "equity": [
+  {
+   "id": "E1",
+   "note": "nets +500, -300, -400, +200, +900 across a weekend",
+   "days": [
+    20261104,
+    20261105,
+    20261106,
+    20261109,
+    20261111
+   ],
+   "trips": [
+    {
+     "close_day": 20261104,
+     "net_paise": 50000
+    },
+    {
+     "close_day": 20261105,
+     "net_paise": -30000
+    },
+    {
+     "close_day": 20261106,
+     "net_paise": -40000
+    },
+    {
+     "close_day": 20261109,
+     "net_paise": 20000
+    },
+    {
+     "close_day": 20261111,
+     "net_paise": 90000
+    }
+   ],
+   "capital_base_paise": 10000000,
+   "points": [
+    [
+     50000,
+     50000,
+     0
+    ],
+    [
+     20000,
+     50000,
+     -30000
+    ],
+    [
+     -20000,
+     50000,
+     -70000
+    ],
+    [
+     0,
+     50000,
+     -50000
+    ],
+    [
+     90000,
+     90000,
+     0
+    ]
+   ],
+   "drawdown": {
+    "max_drawdown_paise": -70000,
+    "max_drawdown_pct": "-0.70",
+    "peak_day": 20261104,
+    "trough_day": 20261106,
+    "recovered_day": 20261111,
+    "duration_days": 4,
+    "duration_state": "recovered"
+   }
+  },
+  {
+   "id": "E2",
+   "note": "a flat week with no trades keeps equity and drawdown",
+   "days": [
+    20261104,
+    20261105,
+    20261106,
+    20261109,
+    20261111
+   ],
+   "trips": [
+    {
+     "close_day": 20261104,
+     "net_paise": 50000
+    },
+    {
+     "close_day": 20261105,
+     "net_paise": -30000
+    }
+   ],
+   "capital_base_paise": null,
+   "points": [
+    [
+     50000,
+     50000,
+     0
+    ],
+    [
+     20000,
+     50000,
+     -30000
+    ],
+    [
+     20000,
+     50000,
+     -30000
+    ],
+    [
+     20000,
+     50000,
+     -30000
+    ],
+    [
+     20000,
+     50000,
+     -30000
+    ]
+   ],
+   "drawdown": {
+    "max_drawdown_paise": -30000,
+    "max_drawdown_pct": null,
+    "peak_day": 20261104,
+    "trough_day": 20261105,
+    "recovered_day": null,
+    "duration_days": null,
+    "duration_state": "still_in_drawdown"
+   }
+  },
+  {
+   "id": "E3",
+   "note": "the first trade is a loss: the peak stays 0 and the drawdown is the loss",
+   "days": [
+    20261104,
+    20261105,
+    20261106
+   ],
+   "trips": [
+    {
+     "close_day": 20261104,
+     "net_paise": -30000
+    },
+    {
+     "close_day": 20261105,
+     "net_paise": 10000
+    }
+   ],
+   "capital_base_paise": 10000000,
+   "points": [
+    [
+     -30000,
+     0,
+     -30000
+    ],
+    [
+     -20000,
+     0,
+     -20000
+    ],
+    [
+     -20000,
+     0,
+     -20000
+    ]
+   ],
+   "drawdown": {
+    "max_drawdown_paise": -30000,
+    "max_drawdown_pct": "-0.30",
+    "peak_day": null,
+    "trough_day": 20261104,
+    "recovered_day": null,
+    "duration_days": null,
+    "duration_state": "still_in_drawdown"
+   }
+  },
+  {
+   "id": "E4",
+   "note": "a loss first, then back to zero: counted from the day before the list",
+   "days": [
+    20261104,
+    20261105,
+    20261106
+   ],
+   "trips": [
+    {
+     "close_day": 20261104,
+     "net_paise": -30000
+    },
+    {
+     "close_day": 20261105,
+     "net_paise": 30000
+    }
+   ],
+   "capital_base_paise": null,
+   "points": [
+    [
+     -30000,
+     0,
+     -30000
+    ],
+    [
+     0,
+     0,
+     0
+    ],
+    [
+     0,
+     0,
+     0
+    ]
+   ],
+   "drawdown": {
+    "max_drawdown_paise": -30000,
+    "max_drawdown_pct": null,
+    "peak_day": null,
+    "trough_day": 20261104,
+    "recovered_day": 20261105,
+    "duration_days": 2,
+    "duration_state": "recovered"
+   }
+  },
+  {
+   "id": "E5",
+   "note": "no drawdown at all",
+   "days": [
+    20261104,
+    20261105
+   ],
+   "trips": [
+    {
+     "close_day": 20261104,
+     "net_paise": 100
+    },
+    {
+     "close_day": 20261105,
+     "net_paise": 100
+    }
+   ],
+   "capital_base_paise": 10000000,
+   "points": [
+    [
+     100,
+     100,
+     0
+    ],
+    [
+     200,
+     200,
+     0
+    ]
+   ],
+   "drawdown": {
+    "max_drawdown_paise": 0,
+    "max_drawdown_pct": "0.00",
+    "peak_day": null,
+    "trough_day": null,
+    "recovered_day": null,
+    "duration_days": null,
+    "duration_state": "none"
+   }
+  }
+ ],
+ "heat": {
+  "note": "entry hour in IST, weekday 0 is Monday",
+  "trips": [
+   {
+    "opened_ms": 1794196200000,
+    "net_paise": 10000
+   },
+   {
+    "opened_ms": 1794198540000,
+    "net_paise": -4000
+   },
+   {
+    "opened_ms": 1794198900000,
+    "net_paise": 2500
+   },
+   {
+    "opened_ms": 1794303600000,
+    "net_paise": -600
+   },
+   {
+    "opened_ms": 1794126900000,
+    "net_paise": 300
+   }
+  ],
+  "cells": [
+   {
+    "weekday": 0,
+    "hour": 9,
+    "trips": 2,
+    "net_paise": 6000
+   },
+   {
+    "weekday": 0,
+    "hour": 10,
+    "trips": 1,
+    "net_paise": 2500
+   },
+   {
+    "weekday": 1,
+    "hour": 15,
+    "trips": 1,
+    "net_paise": -600
+   },
+   {
+    "weekday": 6,
+    "hour": 14,
+    "trips": 1,
+    "net_paise": 300
+   }
+  ]
+ }
+}

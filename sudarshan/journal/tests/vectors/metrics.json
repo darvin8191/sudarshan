@@ -1,0 +1,335 @@
+{
+ "note": "synthetic; money in paise, prices in price_u (rupees x 10^4)",
+ "metrics": [
+  {
+   "id": "M1",
+   "note": "3 wins, 2 losses, 1 flat; risk 500.00 each",
+   "trips": [
+    {
+     "net_paise": 81250,
+     "risk_paise": 50000
+    },
+    {
+     "net_paise": -32500,
+     "risk_paise": 50000
+    },
+    {
+     "net_paise": 26000,
+     "risk_paise": 50000
+    },
+    {
+     "net_paise": 0,
+     "risk_paise": 50000
+    },
+    {
+     "net_paise": 65000,
+     "risk_paise": 50000
+    },
+    {
+     "net_paise": -100000,
+     "risk_paise": 50000
+    }
+   ],
+   "expect": {
+    "trips": 6,
+    "wins": 3,
+    "losses": 2,
+    "flats": 1,
+    "net_paise": 39750,
+    "win_rate": "60.00",
+    "win_rate_state": "ok",
+    "profit_factor": "1.30",
+    "profit_factor_state": "ok",
+    "expectancy_paise": 6625,
+    "avg_win_paise": 57417,
+    "avg_loss_paise": -66250,
+    "largest_win_paise": 81250,
+    "largest_loss_paise": -100000,
+    "payoff": "0.87",
+    "payoff_state": "ok",
+    "r_known": 6,
+    "r_total": "0.7950",
+    "r_avg": "0.1325"
+   }
+  },
+  {
+   "id": "M2",
+   "note": "no losses: a state, never a number",
+   "trips": [
+    {
+     "net_paise": 10000,
+     "risk_paise": 50000
+    },
+    {
+     "net_paise": 20000,
+     "risk_paise": 50000
+    }
+   ],
+   "expect": {
+    "wins": 2,
+    "losses": 0,
+    "win_rate": "100.00",
+    "profit_factor": null,
+    "profit_factor_state": "no_losing_trades",
+    "payoff": null,
+    "payoff_state": "no_losing_trades",
+    "avg_loss_paise": null,
+    "largest_loss_paise": null
+   }
+  },
+  {
+   "id": "M3",
+   "note": "all flat: no win rate",
+   "trips": [
+    {
+     "net_paise": 0,
+     "risk_paise": 50000
+    },
+    {
+     "net_paise": 0,
+     "risk_paise": 50000
+    },
+    {
+     "net_paise": 0,
+     "risk_paise": 50000
+    }
+   ],
+   "expect": {
+    "trips": 3,
+    "wins": 0,
+    "losses": 0,
+    "flats": 3,
+    "win_rate": null,
+    "win_rate_state": "no_trades",
+    "profit_factor": null,
+    "profit_factor_state": "no_trades",
+    "expectancy_paise": 0,
+    "payoff_state": "no_trades"
+   }
+  },
+  {
+   "id": "M4",
+   "note": "a flat trade is neither a win nor a loss: 1 win, 1 loss, 2 flats is 50.00",
+   "trips": [
+    {
+     "net_paise": 100000,
+     "risk_paise": 50000
+    },
+    {
+     "net_paise": -100000,
+     "risk_paise": 50000
+    },
+    {
+     "net_paise": 0,
+     "risk_paise": 50000
+    },
+    {
+     "net_paise": 0,
+     "risk_paise": 50000
+    }
+   ],
+   "expect": {
+    "wins": 1,
+    "losses": 1,
+    "flats": 2,
+    "win_rate": "50.00",
+    "profit_factor": "1.00",
+    "expectancy_paise": 0
+   }
+  },
+  {
+   "id": "M5",
+   "note": "R only where a planned risk above zero is known",
+   "trips": [
+    {
+     "net_paise": 50000,
+     "risk_paise": null
+    },
+    {
+     "net_paise": -25000,
+     "risk_paise": 0
+    },
+    {
+     "net_paise": 10000,
+     "risk_paise": 20000
+    }
+   ],
+   "expect": {
+    "r_known": 1,
+    "r_total": "0.5000",
+    "r_avg": "0.5000"
+   }
+  },
+  {
+   "id": "M6",
+   "note": "no risk anywhere: no R at all",
+   "trips": [
+    {
+     "net_paise": 50000
+    }
+   ],
+   "expect": {
+    "r_known": 0,
+    "r_total": null,
+    "r_avg": null
+   }
+  },
+  {
+   "id": "M7",
+   "note": "only losses: profit factor 0.00, payoff 0.00",
+   "trips": [
+    {
+     "net_paise": -100,
+     "risk_paise": 50000
+    },
+    {
+     "net_paise": -300,
+     "risk_paise": 50000
+    }
+   ],
+   "expect": {
+    "wins": 0,
+    "losses": 2,
+    "win_rate": "0.00",
+    "profit_factor": "0.00",
+    "profit_factor_state": "ok",
+    "payoff": "0.00",
+    "avg_win_paise": null,
+    "avg_loss_paise": -200
+   }
+  },
+  {
+   "id": "M8",
+   "note": "no trades at all",
+   "trips": [],
+   "expect": {
+    "trips": 0,
+    "net_paise": 0,
+    "expectancy_paise": null,
+    "win_rate": null,
+    "win_rate_state": "no_trades",
+    "r_known": 0
+   }
+  },
+  {
+   "id": "M9",
+   "note": "charges impact: all charges 50.00 over the gross of the winning trip 800.00 is 6.25%",
+   "trips": [
+    {
+     "net_paise": 76000,
+     "gross_paise": 80000,
+     "charges_paise": 4000
+    },
+    {
+     "net_paise": -1000,
+     "gross_paise": 0,
+     "charges_paise": 1000
+    }
+   ],
+   "expect": {
+    "charges_paise": 5000,
+    "gross_paise": 80000,
+    "charges_impact_pct": "6.25"
+   }
+  }
+ ],
+ "live": [
+  {
+   "id": "L1",
+   "note": "long 65 at 100.00",
+   "side": "long",
+   "qty": 65,
+   "entry_avg_u": 1000000,
+   "ticks": [
+    {
+     "ltp_u": 1015000,
+     "pnl_paise": 9750
+    },
+    {
+     "ltp_u": 990000,
+     "pnl_paise": -6500
+    },
+    {
+     "ltp_u": 1000000,
+     "pnl_paise": 0
+    }
+   ]
+  },
+  {
+   "id": "L2",
+   "note": "short 65 at 104.00",
+   "side": "short",
+   "qty": 65,
+   "entry_avg_u": 1040000,
+   "ticks": [
+    {
+     "ltp_u": 1000000,
+     "pnl_paise": 26000
+    },
+    {
+     "ltp_u": 1060000,
+     "pnl_paise": -13000
+    }
+   ]
+  },
+  {
+   "id": "L3",
+   "note": "the open leg of a flip (P4): short 65 at 104.00 after the long closed",
+   "side": "short",
+   "qty": 65,
+   "entry_avg_u": 1040000,
+   "ticks": [
+    {
+     "ltp_u": 1042500,
+     "pnl_paise": -1625
+    },
+    {
+     "ltp_u": 1037500,
+     "pnl_paise": 1625
+    }
+   ]
+  },
+  {
+   "id": "L4",
+   "note": "a currency lot: 1,000 at 83.0001; 0.0002 on 1,000 is 0.20",
+   "side": "long",
+   "qty": 1000,
+   "entry_avg_u": 830001,
+   "ticks": [
+    {
+     "ltp_u": 830003,
+     "pnl_paise": 20
+    },
+    {
+     "ltp_u": 830000,
+     "pnl_paise": -10
+    },
+    {
+     "ltp_u": 829999,
+     "pnl_paise": -20
+    }
+   ]
+  },
+  {
+   "id": "L5",
+   "note": "a tie of half a paisa rounds away from zero, either side",
+   "side": "long",
+   "qty": 1,
+   "entry_avg_u": 1000000,
+   "ticks": [
+    {
+     "ltp_u": 1000050,
+     "pnl_paise": 1
+    },
+    {
+     "ltp_u": 999950,
+     "pnl_paise": -1
+    },
+    {
+     "ltp_u": 1000049,
+     "pnl_paise": 0
+    }
+   ]
+  }
+ ]
+}

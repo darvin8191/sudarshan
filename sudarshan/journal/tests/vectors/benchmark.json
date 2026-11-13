@@ -1,0 +1,434 @@
+{
+ "note": "synthetic; the index at 24,000.00 in price_u",
+ "beta": {
+  "capital_base_paise": 10000000,
+  "vectors": [
+   {
+    "id": "B1",
+    "note": "r_m +1,-1,+2,-2 %, r_p +2,-2,+4,-4 %: beta 2, correlation 1 (min_days lowered to 4 for the arithmetic)",
+    "min_days": 4,
+    "days": [
+     {
+      "net_paise": 200000,
+      "close_u": 1010000,
+      "prev_close_u": 1000000
+     },
+     {
+      "net_paise": -200000,
+      "close_u": 990000,
+      "prev_close_u": 1000000
+     },
+     {
+      "net_paise": 400000,
+      "close_u": 1020000,
+      "prev_close_u": 1000000
+     },
+     {
+      "net_paise": -400000,
+      "close_u": 980000,
+      "prev_close_u": 1000000
+     }
+    ],
+    "expect": {
+     "beta": "2.0000",
+     "correlation": "1.0000",
+     "state": "ok",
+     "correlation_state": "ok",
+     "days": 4,
+     "need": 4,
+     "note": null
+    }
+   },
+   {
+    "id": "B1b",
+    "note": "the same account moving against the index: beta -2, correlation -1",
+    "min_days": 4,
+    "days": [
+     {
+      "net_paise": -200000,
+      "close_u": 1010000,
+      "prev_close_u": 1000000
+     },
+     {
+      "net_paise": 200000,
+      "close_u": 990000,
+      "prev_close_u": 1000000
+     },
+     {
+      "net_paise": -400000,
+      "close_u": 1020000,
+      "prev_close_u": 1000000
+     },
+     {
+      "net_paise": 400000,
+      "close_u": 980000,
+      "prev_close_u": 1000000
+     }
+    ],
+    "expect": {
+     "beta": "-2.0000",
+     "correlation": "-1.0000",
+     "state": "ok",
+     "correlation_state": "ok",
+     "days": 4,
+     "need": 4,
+     "note": null
+    }
+   },
+   {
+    "id": "B2",
+    "note": "the account never moved: beta 0, correlation has no variation",
+    "min_days": 4,
+    "days": [
+     {
+      "net_paise": 0,
+      "close_u": 1010000,
+      "prev_close_u": 1000000
+     },
+     {
+      "net_paise": 0,
+      "close_u": 990000,
+      "prev_close_u": 1000000
+     },
+     {
+      "net_paise": 0,
+      "close_u": 1020000,
+      "prev_close_u": 1000000
+     },
+     {
+      "net_paise": 0,
+      "close_u": 980000,
+      "prev_close_u": 1000000
+     }
+    ],
+    "expect": {
+     "beta": "0.0000",
+     "correlation": null,
+     "state": "ok",
+     "correlation_state": "no_variation",
+     "days": 4,
+     "need": 4,
+     "note": null
+    }
+   },
+   {
+    "id": "B2b",
+    "note": "the index never moved: no beta and no correlation",
+    "min_days": 4,
+    "days": [
+     {
+      "net_paise": 100000,
+      "close_u": 1000000,
+      "prev_close_u": 1000000
+     },
+     {
+      "net_paise": -100000,
+      "close_u": 1000000,
+      "prev_close_u": 1000000
+     },
+     {
+      "net_paise": 100000,
+      "close_u": 1000000,
+      "prev_close_u": 1000000
+     },
+     {
+      "net_paise": 200000,
+      "close_u": 1000000,
+      "prev_close_u": 1000000
+     }
+    ],
+    "expect": {
+     "beta": null,
+     "correlation": null,
+     "state": "no_variation",
+     "correlation_state": "no_variation",
+     "days": 4,
+     "need": 4,
+     "note": null
+    }
+   },
+   {
+    "id": "B3",
+    "note": "19 days: not shown yet",
+    "ready_day": 20261209,
+    "days": [
+     {
+      "net_paise": -100000,
+      "close_u": 990000,
+      "prev_close_u": 1000000
+     },
+     {
+      "net_paise": 100000,
+      "close_u": 1010000,
+      "prev_close_u": 1000000
+     },
+     {
+      "net_paise": -100000,
+      "close_u": 990000,
+      "prev_close_u": 1000000
+     },
+     {
+      "net_paise": 100000,
+      "close_u": 1010000,
+      "prev_close_u": 1000000
+     },
+     {
+      "net_paise": -100000,
+      "close_u": 990000,
+      "prev_close_u": 1000000
+     },
+     {
+      "net_paise": 100000,
+      "close_u": 1010000,
+      "prev_close_u": 1000000
+     },
+     {
+      "net_paise": -100000,
+      "close_u": 990000,
+      "prev_close_u": 1000000
+     },
+     {
+      "net_paise": 100000,
+      "close_u": 1010000,
+      "prev_close_u": 1000000
+     },
+     {
+      "net_paise": -100000,
+      "close_u": 990000,
+      "prev_close_u": 1000000
+     },
+     {
+      "net_paise": 100000,
+      "close_u": 1010000,
+      "prev_close_u": 1000000
+     },
+     {
+      "net_paise": -100000,
+      "close_u": 990000,
+      "prev_close_u": 1000000
+     },
+     {
+      "net_paise": 100000,
+      "close_u": 1010000,
+      "prev_close_u": 1000000
+     },
+     {
+      "net_paise": -100000,
+      "close_u": 990000,
+      "prev_close_u": 1000000
+     },
+     {
+      "net_paise": 100000,
+      "close_u": 1010000,
+      "prev_close_u": 1000000
+     },
+     {
+      "net_paise": -100000,
+      "close_u": 990000,
+      "prev_close_u": 1000000
+     },
+     {
+      "net_paise": 100000,
+      "close_u": 1010000,
+      "prev_close_u": 1000000
+     },
+     {
+      "net_paise": -100000,
+      "close_u": 990000,
+      "prev_close_u": 1000000
+     },
+     {
+      "net_paise": 100000,
+      "close_u": 1010000,
+      "prev_close_u": 1000000
+     },
+     {
+      "net_paise": -100000,
+      "close_u": 990000,
+      "prev_close_u": 1000000
+     }
+    ],
+    "expect": {
+     "beta": null,
+     "correlation": null,
+     "state": "short",
+     "correlation_state": "short",
+     "days": 19,
+     "need": 20,
+     "note": "shown after 20 trading days (from 9 Dec 2026)"
+    }
+   },
+   {
+    "id": "B3b",
+    "note": "exactly 20 days: shown",
+    "days": [
+     {
+      "net_paise": -100000,
+      "close_u": 990000,
+      "prev_close_u": 1000000
+     },
+     {
+      "net_paise": 100000,
+      "close_u": 1010000,
+      "prev_close_u": 1000000
+     },
+     {
+      "net_paise": -100000,
+      "close_u": 990000,
+      "prev_close_u": 1000000
+     },
+     {
+      "net_paise": 100000,
+      "close_u": 1010000,
+      "prev_close_u": 1000000
+     },
+     {
+      "net_paise": -100000,
+      "close_u": 990000,
+      "prev_close_u": 1000000
+     },
+     {
+      "net_paise": 100000,
+      "close_u": 1010000,
+      "prev_close_u": 1000000
+     },
+     {
+      "net_paise": -100000,
+      "close_u": 990000,
+      "prev_close_u": 1000000
+     },
+     {
+      "net_paise": 100000,
+      "close_u": 1010000,
+      "prev_close_u": 1000000
+     },
+     {
+      "net_paise": -100000,
+      "close_u": 990000,
+      "prev_close_u": 1000000
+     },
+     {
+      "net_paise": 100000,
+      "close_u": 1010000,
+      "prev_close_u": 1000000
+     },
+     {
+      "net_paise": -100000,
+      "close_u": 990000,
+      "prev_close_u": 1000000
+     },
+     {
+      "net_paise": 100000,
+      "close_u": 1010000,
+      "prev_close_u": 1000000
+     },
+     {
+      "net_paise": -100000,
+      "close_u": 990000,
+      "prev_close_u": 1000000
+     },
+     {
+      "net_paise": 100000,
+      "close_u": 1010000,
+      "prev_close_u": 1000000
+     },
+     {
+      "net_paise": -100000,
+      "close_u": 990000,
+      "prev_close_u": 1000000
+     },
+     {
+      "net_paise": 100000,
+      "close_u": 1010000,
+      "prev_close_u": 1000000
+     },
+     {
+      "net_paise": -100000,
+      "close_u": 990000,
+      "prev_close_u": 1000000
+     },
+     {
+      "net_paise": 100000,
+      "close_u": 1010000,
+      "prev_close_u": 1000000
+     },
+     {
+      "net_paise": -100000,
+      "close_u": 990000,
+      "prev_close_u": 1000000
+     },
+     {
+      "net_paise": 100000,
+      "close_u": 1010000,
+      "prev_close_u": 1000000
+     }
+    ],
+    "expect": {
+     "beta": "1.0000",
+     "correlation": "1.0000",
+     "state": "ok",
+     "correlation_state": "ok",
+     "days": 20,
+     "need": 20,
+     "note": null
+    }
+   }
+  ]
+ },
+ "week": {
+  "vectors": [
+   {
+    "id": "B4",
+    "note": "+1.20% on the capital, the index up 2.08%",
+    "net_paise": 120000,
+    "capital_base_paise": 10000000,
+    "index_close_u": 245000000,
+    "index_prev_close_u": 240000000,
+    "expect": {
+     "account_pct": "1.20",
+     "account_state": "ok",
+     "index_pct": "2.08"
+    }
+   },
+   {
+    "id": "B5",
+    "note": "a losing week against a falling index",
+    "net_paise": -250000,
+    "capital_base_paise": 10000000,
+    "index_close_u": 239000000,
+    "index_prev_close_u": 240000000,
+    "expect": {
+     "account_pct": "-2.50",
+     "account_state": "ok",
+     "index_pct": "-0.42"
+    }
+   },
+   {
+    "id": "B6",
+    "note": "no trading capital typed: the index still shows",
+    "net_paise": 120000,
+    "capital_base_paise": null,
+    "index_close_u": 245000000,
+    "index_prev_close_u": 240000000,
+    "expect": {
+     "account_pct": null,
+     "account_state": "no_capital",
+     "index_pct": "2.08"
+    }
+   },
+   {
+    "id": "B7",
+    "note": "no index close: the account still shows",
+    "net_paise": 120000,
+    "capital_base_paise": 10000000,
+    "index_close_u": null,
+    "index_prev_close_u": null,
+    "expect": {
+     "account_pct": "1.20",
+     "account_state": "ok",
+     "index_pct": null
+    }
+   }
+  ]
+ }
+}

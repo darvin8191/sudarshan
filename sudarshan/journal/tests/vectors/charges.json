@@ -1,0 +1,457 @@
+{
+ "note": "synthetic; every figure an estimate; money in paise, prices in price_u",
+ "vectors": [
+  {
+   "id": "C1",
+   "note": "P1's trip, two API orders, the owner's plan (Plus, Rs 30 an order); each component rounded per order",
+   "plan": "plus",
+   "fills": [
+    {
+     "order_id": "O1",
+     "trade_id": "O1t",
+     "day": 20261109,
+     "action": "BUY",
+     "qty": 65,
+     "price_u": 1000000,
+     "exchange": "NFO",
+     "symbol": "NIFTY25NOV2625000CE",
+     "product": "MIS",
+     "surface": "api"
+    },
+    {
+     "order_id": "O2",
+     "trade_id": "O2t",
+     "day": 20261109,
+     "action": "SELL",
+     "qty": 65,
+     "price_u": 1125000,
+     "exchange": "NFO",
+     "symbol": "NIFTY25NOV2625000CE",
+     "product": "MIS",
+     "surface": "api"
+    }
+   ],
+   "orders": 2,
+   "expect": {
+    "brokerage_paise": 6000,
+    "stt_paise": 1097,
+    "exchange_paise": 491,
+    "sebi_paise": 2,
+    "stamp_paise": 20,
+    "gst_paise": 1169,
+    "total_paise": 8779
+   }
+  },
+  {
+   "id": "C2",
+   "note": "the same trip from the Upstox app on the standard plan: Rs 20 an order",
+   "plan": "standard",
+   "fills": [
+    {
+     "order_id": "O1",
+     "trade_id": "O1t",
+     "day": 20261109,
+     "action": "BUY",
+     "qty": 65,
+     "price_u": 1000000,
+     "exchange": "NFO",
+     "symbol": "NIFTY25NOV2625000CE",
+     "product": "MIS",
+     "surface": "upstox_app"
+    },
+    {
+     "order_id": "O2",
+     "trade_id": "O2t",
+     "day": 20261109,
+     "action": "SELL",
+     "qty": 65,
+     "price_u": 1125000,
+     "exchange": "NFO",
+     "symbol": "NIFTY25NOV2625000CE",
+     "product": "MIS",
+     "surface": "upstox_app"
+    }
+   ],
+   "orders": 2,
+   "expect": {
+    "brokerage_paise": 4000,
+    "stt_paise": 1097,
+    "exchange_paise": 491,
+    "sebi_paise": 2,
+    "stamp_paise": 20,
+    "gst_paise": 809,
+    "total_paise": 6419
+   }
+  },
+  {
+   "id": "C2b",
+   "note": "the same trip by API on the standard plan: Rs 10 an order until 31 Dec 2026",
+   "plan": "standard",
+   "fills": [
+    {
+     "order_id": "O1",
+     "trade_id": "O1t",
+     "day": 20261109,
+     "action": "BUY",
+     "qty": 65,
+     "price_u": 1000000,
+     "exchange": "NFO",
+     "symbol": "NIFTY25NOV2625000CE",
+     "product": "MIS",
+     "surface": "api"
+    },
+    {
+     "order_id": "O2",
+     "trade_id": "O2t",
+     "day": 20261109,
+     "action": "SELL",
+     "qty": 65,
+     "price_u": 1125000,
+     "exchange": "NFO",
+     "symbol": "NIFTY25NOV2625000CE",
+     "product": "MIS",
+     "surface": "api"
+    }
+   ],
+   "orders": 2,
+   "expect": {
+    "brokerage_paise": 2000,
+    "stt_paise": 1097,
+    "exchange_paise": 491,
+    "sebi_paise": 2,
+    "stamp_paise": 20,
+    "gst_paise": 449,
+    "total_paise": 4059
+   }
+  },
+  {
+   "id": "C2c",
+   "note": "standard plan, API, from 1 Jan 2027 the offer has ended: Rs 20",
+   "plan": "standard",
+   "fills": [
+    {
+     "order_id": "O1",
+     "trade_id": "O1t",
+     "day": 20270104,
+     "action": "BUY",
+     "qty": 65,
+     "price_u": 1000000,
+     "exchange": "NFO",
+     "symbol": "NIFTY25NOV2625000CE",
+     "product": "MIS",
+     "surface": "api"
+    },
+    {
+     "order_id": "O2",
+     "trade_id": "O2t",
+     "day": 20270104,
+     "action": "SELL",
+     "qty": 65,
+     "price_u": 1125000,
+     "exchange": "NFO",
+     "symbol": "NIFTY25NOV2625000CE",
+     "product": "MIS",
+     "surface": "api"
+    }
+   ],
+   "orders": 2,
+   "expect": null,
+   "brokerage_paise": 4000
+  },
+  {
+   "id": "C3a",
+   "note": "a SELL option order on 31 Mar 2026: STT still 0.1%, exchange already 0.03553%",
+   "plan": "plus",
+   "fills": [
+    {
+     "order_id": "O2",
+     "trade_id": "O2t",
+     "day": 20260331,
+     "action": "SELL",
+     "qty": 65,
+     "price_u": 1125000,
+     "exchange": "NFO",
+     "symbol": "NIFTY25NOV2625000CE",
+     "product": "MIS",
+     "surface": "api"
+    }
+   ],
+   "orders": 1,
+   "parts_only": {
+    "stt_paise": 731,
+    "exchange_paise": 260
+   }
+  },
+  {
+   "id": "C3b",
+   "note": "the same order on 1 Apr 2026: STT 0.15%, exchange 0.03553%",
+   "plan": "plus",
+   "fills": [
+    {
+     "order_id": "O2",
+     "trade_id": "O2t",
+     "day": 20260401,
+     "action": "SELL",
+     "qty": 65,
+     "price_u": 1125000,
+     "exchange": "NFO",
+     "symbol": "NIFTY25NOV2625000CE",
+     "product": "MIS",
+     "surface": "api"
+    }
+   ],
+   "orders": 1,
+   "parts_only": {
+    "stt_paise": 1097,
+    "exchange_paise": 260
+   }
+  },
+  {
+   "id": "C3c",
+   "note": "28 Feb 2026 is before the exchange row of 1 Mar: 0.03503%",
+   "plan": "plus",
+   "fills": [
+    {
+     "order_id": "O2",
+     "trade_id": "O2t",
+     "day": 20260228,
+     "action": "SELL",
+     "qty": 65,
+     "price_u": 1125000,
+     "exchange": "NFO",
+     "symbol": "NIFTY25NOV2625000CE",
+     "product": "MIS",
+     "surface": "api"
+    }
+   ],
+   "orders": 1,
+   "parts_only": {
+    "exchange_paise": 256
+   }
+  },
+  {
+   "id": "C3d",
+   "note": "1 Mar 2026: 0.03553%",
+   "plan": "plus",
+   "fills": [
+    {
+     "order_id": "O2",
+     "trade_id": "O2t",
+     "day": 20260301,
+     "action": "SELL",
+     "qty": 65,
+     "price_u": 1125000,
+     "exchange": "NFO",
+     "symbol": "NIFTY25NOV2625000CE",
+     "product": "MIS",
+     "surface": "api"
+    }
+   ],
+   "orders": 1,
+   "parts_only": {
+    "exchange_paise": 260
+   }
+  },
+  {
+   "id": "C3e",
+   "note": "a day before the whole card begins uses the earliest row",
+   "plan": "plus",
+   "fills": [
+    {
+     "order_id": "O2",
+     "trade_id": "O2t",
+     "day": 20240101,
+     "action": "SELL",
+     "qty": 65,
+     "price_u": 1125000,
+     "exchange": "NFO",
+     "symbol": "NIFTY25NOV2625000CE",
+     "product": "MIS",
+     "surface": "api"
+    }
+   ],
+   "orders": 1,
+   "parts_only": {
+    "stt_paise": 731,
+    "exchange_paise": 256
+   }
+  },
+  {
+   "id": "C4",
+   "note": "a SELL order filled in three parts (20@100, 20@101, 25@102): ONE brokerage; STT 9.855 rounds half-up to 9.86",
+   "plan": "plus",
+   "fills": [
+    {
+     "order_id": "O9",
+     "trade_id": "t1",
+     "day": 20261109,
+     "action": "SELL",
+     "qty": 20,
+     "price_u": 1000000,
+     "exchange": "NFO",
+     "symbol": "NIFTY25NOV2625000CE",
+     "product": "MIS",
+     "surface": "api"
+    },
+    {
+     "order_id": "O9",
+     "trade_id": "t2",
+     "day": 20261109,
+     "action": "SELL",
+     "qty": 20,
+     "price_u": 1010000,
+     "exchange": "NFO",
+     "symbol": "NIFTY25NOV2625000CE",
+     "product": "MIS",
+     "surface": "api"
+    },
+    {
+     "order_id": "O9",
+     "trade_id": "t3",
+     "day": 20261109,
+     "action": "SELL",
+     "qty": 25,
+     "price_u": 1020000,
+     "exchange": "NFO",
+     "symbol": "NIFTY25NOV2625000CE",
+     "product": "MIS",
+     "surface": "api"
+    }
+   ],
+   "orders": 1,
+   "expect": {
+    "brokerage_paise": 3000,
+    "stt_paise": 986,
+    "exchange_paise": 233,
+    "sebi_paise": 1,
+    "stamp_paise": 0,
+    "gst_paise": 582,
+    "total_paise": 4802
+   }
+  },
+  {
+   "id": "C5",
+   "note": "equity delivery, one buy and one sell: STT both sides, stamp on the buy",
+   "plan": "plus",
+   "fills": [
+    {
+     "order_id": "D1",
+     "trade_id": "D1t",
+     "day": 20261109,
+     "action": "BUY",
+     "qty": 10,
+     "price_u": 12500000,
+     "exchange": "NSE",
+     "symbol": "RELIANCE",
+     "product": "CNC",
+     "surface": "api"
+    },
+    {
+     "order_id": "D2",
+     "trade_id": "D2t",
+     "day": 20261109,
+     "action": "SELL",
+     "qty": 10,
+     "price_u": 13000000,
+     "exchange": "NSE",
+     "symbol": "RELIANCE",
+     "product": "CNC",
+     "surface": "api"
+    }
+   ],
+   "orders": 2,
+   "expect": {
+    "brokerage_paise": 6000,
+    "stt_paise": 2550,
+    "exchange_paise": 78,
+    "sebi_paise": 2,
+    "stamp_paise": 188,
+    "gst_paise": 1094,
+    "total_paise": 9912
+   }
+  },
+  {
+   "id": "C6",
+   "note": "a currency future is not modelled: nothing is charged and it says so",
+   "plan": "plus",
+   "fills": [
+    {
+     "order_id": "X1",
+     "trade_id": "X1t",
+     "day": 20261109,
+     "action": "BUY",
+     "qty": 1000,
+     "price_u": 830001,
+     "exchange": "CDS",
+     "symbol": "USDINR25NOV26FUT",
+     "product": "MIS",
+     "surface": "api"
+    }
+   ],
+   "orders": 1,
+   "modelled": false,
+   "expect": {
+    "brokerage_paise": 0,
+    "stt_paise": 0,
+    "exchange_paise": 0,
+    "sebi_paise": 0,
+    "stamp_paise": 0,
+    "gst_paise": 0,
+    "total_paise": 0
+   }
+  },
+  {
+   "id": "C7",
+   "note": "two fills of the same order id on two days are two orders",
+   "plan": "plus",
+   "fills": [
+    {
+     "order_id": "G1",
+     "trade_id": "a",
+     "day": 20261109,
+     "action": "BUY",
+     "qty": 65,
+     "price_u": 1000000,
+     "exchange": "NFO",
+     "symbol": "NIFTY25NOV2625000CE",
+     "product": "MIS",
+     "surface": "api"
+    },
+    {
+     "order_id": "G1",
+     "trade_id": "b",
+     "day": 20261110,
+     "action": "BUY",
+     "qty": 65,
+     "price_u": 1000000,
+     "exchange": "NFO",
+     "symbol": "NIFTY25NOV2625000CE",
+     "product": "MIS",
+     "surface": "api"
+    }
+   ],
+   "orders": 2,
+   "brokerage_paise": 6000
+  }
+ ],
+ "gap": [
+  {
+   "estimate_paise": 10500,
+   "actual_paise": 10000,
+   "flagged": false,
+   "diff_pct": "5.00"
+  },
+  {
+   "estimate_paise": 10501,
+   "actual_paise": 10000,
+   "flagged": true,
+   "diff_pct": "5.01"
+  },
+  {
+   "estimate_paise": 9400,
+   "actual_paise": 10000,
+   "flagged": true,
+   "diff_pct": "-6.00"
+  }
+ ]
+}
