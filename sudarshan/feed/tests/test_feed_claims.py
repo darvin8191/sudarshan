@@ -21,9 +21,13 @@ from sudarshan.feed.subscriptions import (
     CLAIM_TTL_S,
     COMBINED_CAPS,
     MAX_OTHER_CLIENTS,
+    OTHER_QUOTA,
+    QUOTAS,
+    RING_CEILING,
     CapError,
     Subscriptions,
     check_ring,
+    parse_keys_file,
     validate_claims,
 )
 
@@ -74,8 +78,9 @@ def test_a_claim_that_breaks_a_cap_changes_nothing(tmp_path):
 
 
 def test_each_client_has_a_quota_and_the_ring_a_ceiling(tmp_path):
-    """Cross-design R1: screener 700, alerts 300, portfolio 200, any other 50; 1,400 in all,
-    a key two clients hold counting once. A refusal names the client and changes nothing."""
+    """Cross-design R1 and Y12: screener 700, alerts 300, portfolio 200, family 100, journal 50,
+    protect 50, any other 50; 1,450 in all, a key two clients hold counting once. A refusal names
+    the client and changes nothing."""
     subs = subs_with(tmp_path, {NIFTY: "ltpc"})
 
     def keys(prefix: str, n: int, start: int = 0) -> dict:
@@ -86,23 +91,48 @@ def test_each_client_has_a_quota_and_the_ring_a_ceiling(tmp_path):
         subs.put_claims(A, keys("a", 301), NOW)
     with pytest.raises(CapError, match="^sudarshan-x may claim at most 50 keys"):
         subs.put_claims("sudarshan-x", keys("x", 51), NOW)
+    with pytest.raises(CapError, match="^sudarshan-family may claim at most 100 keys"):
+        subs.put_claims("sudarshan-family", keys("f", 101), NOW)
+    with pytest.raises(CapError, match="^sudarshan-journal may claim at most 50 keys"):
+        subs.put_claims("sudarshan-journal", keys("j", 51), NOW)
+    with pytest.raises(CapError, match="^sudarshan-protect may claim at most 50 keys"):
+        subs.put_claims("sudarshan-protect", keys("q", 51), NOW)
     subs.put_claims(S, keys("s", 700), NOW)
     subs.put_claims(A, keys("a", 300), NOW)
     subs.put_claims("sudarshan-portfolio", keys("p", 200), NOW)
-    assert MAX_OTHER_CLIENTS == 4  # 50 each fills the ring's headroom over the named quotas
-    for n in range(4):
-        subs.put_claims(f"sudarshan-x{n}", keys(f"x{n}-", 50), NOW)
-    assert len(subs.desired()) == 1 + 1400
-    with pytest.raises(CapError, match="^sudarshan-x4: at most 4 clients other than "
-                                       "sudarshan-alerts, sudarshan-portfolio, "
+    subs.put_claims("sudarshan-family", keys("f", 100), NOW)
+    subs.put_claims("sudarshan-journal", keys("j", 50), NOW)
+    subs.put_claims("sudarshan-protect", keys("q", 50), NOW)
+    assert len(subs.desired()) == 1 + 1400  # every named client at its quota
+    assert MAX_OTHER_CLIENTS == 1  # the headroom over the named quotas is one more client's 50
+    subs.put_claims("sudarshan-x0", keys("x0-", 50), NOW)
+    assert len(subs.desired()) == 1 + RING_CEILING
+    with pytest.raises(CapError, match="^sudarshan-x1: at most 1 client other than "
+                                       "sudarshan-alerts, sudarshan-family, sudarshan-journal, "
+                                       "sudarshan-portfolio, sudarshan-protect, "
                                        "sudarshan-screener may hold claims at once$"):  # fmt: skip
-        subs.put_claims("sudarshan-x4", keys("s", 1), NOW)  # review L6: ids are bounded
-    assert "sudarshan-x4" not in subs.claims
-    subs.put_claims("sudarshan-x0", keys("s", 50), NOW)  # one of the four may change its set
-    subs.put_claims("sudarshan-x1", {}, NOW)  # and a slot frees when one lets go
-    subs.put_claims("sudarshan-x4", keys("x4-", 50), NOW)
-    with pytest.raises(CapError, match="at most 1400 together$"):  # the ring, as at a start
-        check_ring(subs.claims | {"sudarshan-y": {"keys": keys("y", 51)}})
+        subs.put_claims("sudarshan-x1", keys("s", 1), NOW)  # review L6: ids are bounded
+    assert "sudarshan-x1" not in subs.claims
+    subs.put_claims("sudarshan-x0", keys("s", 50), NOW)  # the one may change its set
+    subs.put_claims("sudarshan-x0", {}, NOW)  # and the slot frees when it lets go
+    subs.put_claims("sudarshan-x1", keys("x1-", 50), NOW)
+    with pytest.raises(CapError, match="at most 1450 together$"):  # the ring, as at a start
+        check_ring(subs.claims | {"sudarshan-y": {"keys": keys("y", 1)}})
+
+
+def test_the_quota_arithmetic_holds_at_the_later_ceilings():
+    """Cross-design 5.3 and Y12: the ring's named quotas, the base set and Upstox's combined cap."""
+    base = len(parse_keys_file(Path(__file__).parents[1] / "default_keys.txt"))
+    assert QUOTAS == {
+        "sudarshan-screener": 700, "sudarshan-alerts": 300, "sudarshan-portfolio": 200,
+        "sudarshan-family": 100, "sudarshan-journal": 50, "sudarshan-protect": 50,
+    }  # fmt: skip
+    assert sum(QUOTAS.values()) == 1_400 and RING_CEILING == 1_450
+    assert MAX_OTHER_CLIENTS >= 1 and MAX_OTHER_CLIENTS == 1
+    assert sum(QUOTAS.values()) + MAX_OTHER_CLIENTS * OTHER_QUOTA <= RING_CEILING
+    assert base == 12 and base + RING_CEILING <= min(COMBINED_CAPS.values())  # 1,462 of 1,500
+    later = base + 300 + 200 + 700 + 100 + 50 + 50  # the later ceilings, claims by name (5.3)
+    assert later == 1_412 <= base + RING_CEILING
 
 
 def test_a_stored_claim_over_its_quota_is_dropped_at_start(tmp_path, caplog):

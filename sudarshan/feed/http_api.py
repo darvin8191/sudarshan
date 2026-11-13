@@ -10,6 +10,11 @@ POST /unsubscribe {"keys": [...]}
 GET    /claims                      every client's claims (M18.1)
 PUT    /claims/<client> {"keys": {KEY: MODE}}   replace and renew; 400 bad request, 409 over a cap
 DELETE /claims/<client>
+
+FL1: every write above and every /upstox/ call carries ``Authorization: Bearer <token>`` of the
+client it names (the path for /claims/<client>, X-Sudarshan-Client for the rest); 401 otherwise.
+While no client has a token at all, writes stay open (client_auth.py). /health, /snapshot,
+/subscriptions and GET /claims are open.
 """
 
 from __future__ import annotations
@@ -31,6 +36,12 @@ LOCAL_PEERS = {"127.0.0.1", "::1", "::ffff:127.0.0.1"}
 PATHS = {"/health", "/snapshot", "/snapshot/all", "/subscriptions", "/subscribe", "/unsubscribe",
          "/claims"}  # fmt: skip
 CLAIMS = "/claims/"
+CLIENT_HEADER = "x-sudarshan-client"
+REFUSED_KEY = (
+    "The price feed did not accept this request because the part of SUDARSHAN sending it did "
+    "not show its key. This is a fault in SUDARSHAN itself; nothing in your settings needs "
+    "changing."
+)
 REST = "/upstox/"  # M18.9: below it the REST governor answers, with Upstox's status and bytes
 REASONS = {
     200: "OK", 400: "Bad Request", 403: "Forbidden", 404: "Not Found", 405: "Method Not Allowed",
@@ -61,6 +72,12 @@ async def _serve(service, reader: asyncio.StreamReader, writer: asyncio.StreamWr
             raise HTTPError(403, "local clients only")
         # Only reading is time-limited: a subscribe that has started sending must finish.
         method, url, body, headers = await asyncio.wait_for(_read(reader, writer), READ_TIMEOUT_S)
+        writer_name = _writer(method, url, headers)  # FL1: who is writing, None for a read
+        if writer_name is not None and not service.client_tokens.allows(
+            writer_name, headers.get("authorization")
+        ):
+            service.client_tokens.refuse(writer_name)
+            raise HTTPError(401, REFUSED_KEY)
         if url.path.startswith(REST):  # M18.9: the governor answers, Upstox's bytes or its own
             work = service.rest.serve(method, url, headers, partial(_answer, writer))
             await _unless_gone(reader, work)
@@ -166,6 +183,19 @@ async def _read(reader, writer) -> tuple[str, SplitResult, bytes, dict[str, str]
     except asyncio.IncompleteReadError:
         raise HTTPError(400, "body shorter than Content-Length") from None
     return method, urlsplit(target), body, headers  # header names in lower case
+
+
+def _writer(method: str, url: SplitResult, headers: dict[str, str]) -> str | None:
+    """The client a request that needs a token says it is from; None for one that is open. A
+    name the path or header does not give is "" (no token can match it once tokens exist)."""
+    path = url.path.rstrip("/") or "/"
+    if url.path.startswith(REST):
+        return headers.get(CLIENT_HEADER, "").strip()
+    if method == "POST" and path in ("/subscribe", "/unsubscribe"):
+        return headers.get(CLIENT_HEADER, "").strip()
+    if method in ("PUT", "DELETE") and path.startswith(CLAIMS):
+        return path[len(CLAIMS) :]
+    return None
 
 
 def _json_object(body: bytes, example: str) -> dict:

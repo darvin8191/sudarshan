@@ -51,6 +51,7 @@ from sudarshan.alerts.market.sessions import (
     sessions_of,
 )
 from sudarshan.autologin.schedule import IST
+from sudarshan.feed.client_auth import auth_headers  # FL1
 
 from . import candles, universe
 from .bars import UNFOLLOWED, Bar, Bars, Followed, Sealed
@@ -85,6 +86,8 @@ MASTER_AT_MIN = 9 * 60
 
 class FeedLink(alerts_feedlink.FeedLink):
     """The alerts' feed link with this service's client id on its claims."""
+
+    NAME = CLIENT  # FL1: its own token, not the alerts'
 
     async def put_claims(
         self, keys: dict[str, str], timeout: float = alerts_feedlink.HTTP_TIMEOUT_S
@@ -912,7 +915,7 @@ async def release_claims(service, *, waits: Sequence[float] = (0.0, 5.0, 30.0, 1
         for wait in waits:
             await asyncio.sleep(wait)
             try:
-                answer = await client.delete(url, timeout=5.0)
+                answer = await client.delete(url, timeout=5.0, headers=auth_headers(CLIENT))
             except httpx.HTTPError:
                 continue
             if answer.status_code == 200:

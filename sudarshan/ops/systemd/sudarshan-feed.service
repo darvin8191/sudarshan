@@ -18,6 +18,10 @@ ExecStart=/opt/sudarshan/apps/openalgo/.venv/bin/python -m sudarshan.feed
 Environment=PYTHONUNBUFFERED=1
 EnvironmentFile=-/etc/sudarshan/feed.env
 StateDirectory=sudarshan-feed
+# Y25.1: the state folder holds every client's claimed keys (the owner's holdings and positions
+# instruments), so it is closed to other accounts, and files made in it are never world-readable.
+StateDirectoryMode=0750
+UMask=0027
 Restart=always
 RestartSec=10
 # SIGTERM -> close frame to Upstox (<= 5 s), final snapshot and recorder flush.
