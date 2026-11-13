@@ -314,8 +314,28 @@ LOOK = "if it is incomplete again, have the server looked at."
         ),
         (
             {"why": "offsite"},
-            "The nightly backup is safe on the server, but copying it offsite did not work. "
-            "It tries again with the next backup.",
+            "Tonight's offsite backup did not upload: the offsite copy did not work. "
+            "The local backup is fine.",
+        ),
+        (
+            {"why": "offsite", "reason": "network"},
+            "Tonight's offsite backup did not upload: the server could not reach Oracle's "
+            "storage. The local backup is fine.",
+        ),
+        (
+            {"why": "offsite", "reason": "$(rm -rf /)"},
+            "Tonight's offsite backup did not upload: the offsite copy did not work. "
+            "The local backup is fine.",
+        ),
+        (
+            {"why": "offsite_soon", "days": "14", "date": "2026-11-26"},
+            "The access link for the offsite backup expires in 14 days, on 26 Nov 2026. Make a "
+            "new one before then (steps are in the README), or the offsite copies will stop.",
+        ),
+        (
+            {"why": "offsite_soon", "days": "0", "date": "2026-11-26"},
+            "The access link for the offsite backup expires today, on 26 Nov 2026. Make a "
+            "new one before then (steps are in the README), or the offsite copies will stop.",
         ),
         (
             {"why": "settings"},
@@ -416,7 +436,7 @@ def test_a_failed_backup_is_told_with_the_rest_of_its_run_after_the_install_fact
     lines = compose(found, T0 + timedelta(minutes=2)).splitlines()
     assert lines[0] == BRAND
     assert lines[1].startswith("v0.3.3 installed")
-    assert lines[2].startswith("The nightly backup is safe on the server")  # in the order recorded
+    assert lines[2].startswith("Tonight's offsite backup did not upload")  # in the order recorded
     assert lines[3].startswith("The nightly backup is incomplete: junk.db")
     assert lines[4].startswith("v0.3.4 is ready")
 
@@ -428,7 +448,7 @@ def test_no_backup_message_carries_a_status_code_a_tool_name_or_a_symbol():
         for n, (why, because) in enumerate(
             (
                 ("space", ""), ("cap", ""), ("write", ""), ("source", ""), ("integrity", ""),
-                ("offsite", ""), ("settings", ""), ("lock", ""), ("other", ""),
+                ("offsite", ""), ("offsite", "expired"), ("settings", ""), ("lock", ""), ("other", ""),
                 ("overdue", "deploy"), ("overdue", "busy"), ("overdue", "market"),
                 ("overdue", "soon"),
             )

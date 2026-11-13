@@ -208,7 +208,7 @@ nightly backup job records) every 20 seconds and sends through the same path as 
   waited and the names of up to ten files or folders that could not be saved (letters, digits,
   `.`, `_`, `-` and `/`) are ever repeated from a fact; nothing else in the file reaches the
   message, and the Markdown characters Telegram would act on never do. A backup's cause is one
-  of space, cap, write, source, integrity, offsite, settings, lock, overdue or other
+  of space, cap, write, source, integrity, offsite, offsite_soon, settings, lock, overdue or other
   (`ops/backup.py`); any other word reads as "could not be completed".
 
 `SUDARSHAN_ORDER_ALERTS=off` also turns these off. The service exits only if market alerts are off too; with them on, the process stays up and only order alerts and these notices stop. `SUDARSHAN_NOTICE_SPOOLS`

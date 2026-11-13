@@ -616,6 +616,6 @@ def test_a_clean_night_leaves_only_the_documented_files_in_the_state_folder(serv
     server.populate()
     go(server)
     assert sorted(p.name for p in server.state.iterdir()) == [
-        "archive", "backup.lock", "own.db", "status.json", "work",
+        "archive", "backup.lock", "offsite.noted", "own.db", "status.json", "work",
     ]  # fmt: skip
     assert sorted(p.name for p in server.archive_dir.iterdir()) == [ARCHIVE]

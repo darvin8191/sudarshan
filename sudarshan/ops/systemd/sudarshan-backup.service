@@ -61,7 +61,7 @@ ProtectKernelLogs=yes
 ProtectControlGroups=yes
 ProtectClock=yes
 RestrictNamespaces=yes
-# The network is for the offsite command, once the owner sets one.
+# The network is for the offsite upload (offsite.py), once the owner has set it up.
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 RestrictSUIDSGID=yes
 RestrictRealtime=yes
