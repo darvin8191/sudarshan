@@ -75,6 +75,7 @@ import {
   WarningLine,
   WhyNot,
 } from './parts'
+import { ReadOnlyPositions, type ReadOnlyPositionsProps } from './ReadOnlyPositions'
 import { useBookOverlay } from './useBookOverlay'
 import { bookRow, type PricedRow, useFramePrices } from './useFramePrices'
 import { useHeld, useLatest } from './useLatest'
@@ -100,6 +101,7 @@ export type BookPosition = Position & {
 }
 
 export interface PositionCardsProps {
+  readOnly?: never
   /** The book as read, every position: the page's filters are not the phone's. */
   positions: Position[]
   /** When the book was asked for, so only newer ticks move it. */
@@ -336,7 +338,7 @@ function openCount(count: number): string {
   return count === 1 ? '1 open position' : `${count} open positions`
 }
 
-export function PositionCards(props: PositionCardsProps) {
+function OwnerPositionCards(props: PositionCardsProps) {
   const onRefresh = useLatest(props.onRefresh)
   const onExit = useLatest(props.onExit)
   const onExitAll = useLatest(props.onExitAll)
@@ -1193,4 +1195,12 @@ function TableExitConfirm({
       onClose={onClose}
     />
   )
+}
+
+// SUDARSHAN P6 D4 (M3.1): `readOnly` is the viewer's path. It dispatches to a board of its own that
+// holds no Exit, no Add and no order ticket, and reads nothing from the owner's endpoints. The
+// owner's board below it is unchanged.
+export function PositionCards(props: PositionCardsProps | ReadOnlyPositionsProps) {
+  if (props.readOnly) return <ReadOnlyPositions {...props} />
+  return <OwnerPositionCards {...props} />
 }

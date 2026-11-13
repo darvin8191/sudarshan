@@ -3,6 +3,7 @@ import { useAuthStore } from '@/stores/authStore'
 import { useBrokerStore } from '@/stores/brokerStore'
 import { useSessionStore } from '@/stores/sessionStore'
 import { useThemeStore } from '@/stores/themeStore'
+import { inFamilyScope } from '@/sudarshan/pwa/register' // SUDARSHAN P6 D2
 
 interface AuthSyncProps {
   children: React.ReactNode
@@ -100,11 +101,15 @@ export async function syncSession({ keepOnFailure = false }: SyncOptions = {}): 
  * Also syncs app mode (live/analyzer) from the backend.
  */
 export function AuthSync({ children }: AuthSyncProps) {
-  const [isChecking, setIsChecking] = useState(true)
+  // SUDARSHAN P6 D2: no owner session check on /family/*; a viewer has no owner session, and the
+  // viewer phone's nginx would refuse the call anyway (the family shell reads its own `me`).
+  const onFamily = inFamilyScope(window.location.pathname)
+  const [isChecking, setIsChecking] = useState(!onFamily)
 
   useEffect(() => {
+    if (onFamily) return // SUDARSHAN P6 D2
     void syncSession().finally(() => setIsChecking(false))
-  }, [])
+  }, [onFamily])
 
   // Show nothing while checking - prevents flash of wrong content
   if (isChecking) {
