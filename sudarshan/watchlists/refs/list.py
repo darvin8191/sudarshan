@@ -98,7 +98,7 @@ def view(ident: str, user: str) -> dict:
     if live is None:
         raise OpError("gone", words.LIST_GONE)
     overlay = read_overlay(lid, live["items"])
-    m = master.Master()
+    m = master.shared()  # the process's one: a request never keeps a master of its own
     return merge_view.merge(live, overlay, m.row, loaded=m.loaded(), isin=m.isin)
 
 

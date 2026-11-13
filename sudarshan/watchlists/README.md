@@ -116,15 +116,25 @@ W-10). Vectors: `tests/vectors/ranked.json`.
 
 ## W11 - master access (`master.py`) and the exception's tests (`tests/test_exception.py`)
 
-`master.py` is the one reader of OpenAlgo's symbol master. It keeps one generation of reference
+`master.py` is the one reader of OpenAlgo's symbol master. `master.shared()` is the process's one
+`Master` (made lazily with `utils/lazy`), and every reader uses it: `refs/list.py` now, and the
+built-in lists, follow rows, search and the members route (W12, W13, W15, W17, W23) when they come;
+no module builds a `Master` of its own (a test scans for one). It keeps one generation of reference
 maps (`search.Index`: the snapshot's own rows, never copies) tied to the snapshot it came from,
-builds it in slices that yield to the hub behind a keyed single flight, and drops it when the
-snapshot is replaced or lapses. Symbol, exchange and instrument-key lookups read OpenAlgo's snapshot
-and keep nothing. `tests/test_exception.py` holds the limits that let this feature live inside
-OpenAlgo: no thread, timer, executor, scheduler or event loop anywhere in `sudarshan/watchlists/`
-or the bridge (an AST scan, and a check that no thread starts for any op or master swap); one
-generation, the old rows freed with it; the derived maps under 15 MB on 120,000 rows (about 2 MB
-measured). Do not loosen these tests to land a feature.
+builds it in slices that yield to the hub behind a keyed single flight (the first caller builds,
+the others wait and share it, and the previous generation is let go before the next is built), and
+drops it the moment OpenAlgo frees the snapshot it replaced: the generation holds its snapshot by a
+weak reference whose callback empties the slot, so the old rows never outlive their snapshot
+waiting for the next request. A snapshot that lapses is dropped at the next call. A request in
+flight finishes with the maps it was handed and never builds or keeps a generation of its own.
+Symbol, exchange and instrument-key lookups read OpenAlgo's snapshot and keep nothing.
+`tests/test_exception.py` holds the limits that let this feature live inside OpenAlgo: no thread,
+timer, executor, scheduler or event loop anywhere in `sudarshan/watchlists/` or the bridge (an AST
+scan, and a check that no thread starts for any op or master swap); one generation for the process
+(two requests in flight through the bridge share one build and `generations_alive()` is 1 while
+both run; two greenlets under a real eventlet hub share one build that yields to the hub), the old
+rows freed with it when OpenAlgo publishes the next snapshot; the derived maps under 15 MB on
+120,000 rows (about 2 MB measured). Do not loosen these tests to land a feature.
 
 ## W1 - the store (`schema.py`, `engine.py`, `words/store.py`)
 
