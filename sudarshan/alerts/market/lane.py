@@ -138,6 +138,7 @@ class MarketLane:
         return len(self._pending)
 
     def add(self, lines: list[Line]) -> None:
+        dropped = False
         for line in lines:
             if line.event_id in self._pending or self._buffered(line):
                 continue
@@ -146,7 +147,10 @@ class MarketLane:
                 self._dropped += 1
                 self.stats["dropped"] += 1
                 self._result(_ids([oldest]), NOT_SENT, TOO_MANY)
+                dropped = True
             self._pending[line.event_id] = line
+        if dropped:
+            self._end_orphaned_windows()
         if self._pending:
             if self._since is None:
                 self._since = time.monotonic()
@@ -242,6 +246,7 @@ class MarketLane:
         self.stats["failed"] += len(_ids(gone))
         self.throttle(logging.ERROR, "too-old", "Market alerts could not be sent for 5 minutes")
         self._result(_ids(gone), NOT_SENT, TOO_OLD)
+        self._end_orphaned_windows()
 
     def _take(self) -> tuple[list[Line], int]:
         batch: list[Line] = []
@@ -303,6 +308,17 @@ class MarketLane:
         for line in batch:
             if line.group is not None and line.group.window_s > 0:
                 self._windows.setdefault(line.group.id, _Window()).end = now + line.group.window_s
+
+    def _end_orphaned_windows(self) -> None:
+        """A window that never opened (no message of its group went) has nothing to end it once
+        every line of its group that waited is gone, dropped as too old or for room. It ends now,
+        so its buffer goes as a digest at the next tick rather than after the group's next fire
+        plus a window, however old by then (review L5)."""
+        waiting = {line.group.id for line in self._pending.values() if line.group is not None}
+        now = time.monotonic()
+        for group_id, window in self._windows.items():
+            if window.end is None and window.buffer and group_id not in waiting:
+                window.end = now
 
     def _next_window(self) -> float | None:
         ends = [w.end for w in self._windows.values() if w.end is not None]
