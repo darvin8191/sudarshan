@@ -76,7 +76,7 @@ class Runner:
         makes nothing wait for the prints."""
         members = self.source.members(screen_row["spec"]["universe"])
         printed_at = getattr(self.source, "printed_at", None) or (lambda member: 0)
-        return scheduler.waits_of(members, printed_at)
+        return scheduler.waits_of(members, printed_at, getattr(self.source, "follows", None))
 
     def prune(self, now: int) -> dict[str, int] | None:
         """Retention (6.1): runs 100 days (never under 90), values 7, done outbox rows 2; at

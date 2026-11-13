@@ -257,12 +257,13 @@ def test_before_the_set_up_a_run_is_what_it_was_but_for_the_feed_tokens(
 def test_the_tokens_are_made_once_and_never_written_again(tmp_path):
     box = quiet_box(tmp_path)
     assert box.run().returncode == 0
-    folder = feed_dir(box)
+    folder, beside = feed_dir(box), box.etc / ".feed-clients.new"
     assert stat.S_IMODE(folder.stat().st_mode) == 0o750
     chowns = lines(box, "chown")
-    assert f"-- root:sudarshan {folder}" in chowns
+    assert f"-- root:sudarshan {beside}" in chowns  # made beside, then renamed into place
     for name in CLIENTS:
-        assert owned_as(box, "root:sudarshan", folder, name), name
+        assert f"-- root:sudarshan {beside}/{name}" in chowns, name
+    assert not beside.exists()
     (folder / "sudarshan-alerts").write_text(
         "chosen by the owner\n"
     )  # whatever a token holds, it stays
@@ -277,7 +278,71 @@ def test_the_tokens_are_made_once_and_never_written_again(tmp_path):
     (folder / "sudarshan-journal").unlink()  # one taken away is made again, and only that one
     third = box.run()
     assert third.stdout == "" and TOKEN.fullmatch((folder / "sudarshan-journal").read_text())
+    assert owned_as(box, "root:sudarshan", folder, "sudarshan-journal")  # through a file beside it
     assert (folder / "sudarshan-alerts").read_text() == "chosen by the owner\n"
+
+
+# Records, for a move onto the tokens folder, whether the folder was already there and what the folder
+# moved into place held, then moves it.
+MV_WATCH = r"""
+dest="${@: -1}"; src="${@: -2:1}"
+if [[ "${dest}" == "FEEDDIR" ]]; then
+    if [[ -e "${dest}" ]]; then state=there; else state=absent; fi
+    echo "${state} $(cd -- "${src}" && ls -A | sort | tr '\n' ' ')" >> "${FAKE_WEB}/mv_feed"
+fi
+exec MV "$@"
+"""
+
+
+@whole_tool
+def test_the_six_tokens_appear_at_once(tmp_path):
+    """L1: the feed reads the folder again within a second and, once any token is there, refuses a
+    client whose file is not yet: the first six are made in a folder beside it, renamed whole."""
+    box = quiet_box(tmp_path)
+    folder = feed_dir(box)
+    watch = MV_WATCH.replace("FEEDDIR", str(folder)).replace("MV", shutil.which("mv") or "mv")
+    _shim(box.bin, "mv", watch)
+    done = box.run()
+    assert (done.returncode, done.stdout) == (0, "")
+    moves = [line.split() for line in (box.web / "mv_feed").read_text().splitlines()]
+    assert moves == [["absent", *sorted(CLIENTS)]]  # one move: no folder before, all six in it
+    assert sorted(p.name for p in folder.iterdir()) == sorted(CLIENTS)
+    assert all(TOKEN.fullmatch((folder / name).read_text()) for name in CLIENTS)
+    assert not (box.etc / ".feed-clients.new").exists()
+
+
+@whole_tool
+def test_a_half_made_tokens_folder_a_killed_run_left_is_made_again_whole(tmp_path):
+    box = quiet_box(tmp_path)
+    beside = box.etc / ".feed-clients.new"
+    beside.mkdir(mode=0o750)
+    (beside / "sudarshan-alerts").write_text("cut off\n")
+    assert box.run().returncode == 0
+    folder = feed_dir(box)
+    assert sorted(p.name for p in folder.iterdir()) == sorted(CLIENTS)
+    assert TOKEN.fullmatch((folder / "sudarshan-alerts").read_text())
+    assert not beside.exists()
+
+
+@whole_tool
+def test_a_temporary_file_a_killed_run_left_is_removed_whatever_its_age(tmp_path):
+    """L3: every writer of the family folder and the tokens folder is this tool, which holds
+    deploy.lock, so a temporary file found there is a killed run's. One kept for ten minutes was a
+    file the family check cannot open: the next run took provisioned away and told the owner."""
+    box = quiet_box(tmp_path)
+    bootstrapped(box)
+    box.feed_tokens_in_place()
+    left = [
+        fam_dir(box) / ".seal-admin.key.Ab12Cd",
+        fam_dir(box) / ".provisioned.Zx98Yw",
+        feed_dir(box) / ".sudarshan-alerts.Qw34Er",
+    ]
+    for path in left:
+        path.write_text("cut off\n")
+        path.chmod(0o600)
+    assert box.run().returncode == 0
+    assert [path for path in left if path.exists()] == []
+    assert (fam_dir(box) / "provisioned").exists()
 
 
 @whole_tool

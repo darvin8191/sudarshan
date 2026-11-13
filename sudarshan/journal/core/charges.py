@@ -39,6 +39,8 @@ GST_RATE = Fraction(18, 100)
 PARTS = ("brokerage", "stt", "exchange", "sebi", "stamp", "gst")
 #: What a rate row without an earlier date is dated by: the first day of the page's table.
 CARD_START = 20241001
+#: The card as shipped: the day its rates were read (bump it with any row below).
+CARD_VERSION = "2026-11-14"
 
 
 def _rate(text: str) -> Fraction:

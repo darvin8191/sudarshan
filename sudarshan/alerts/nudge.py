@@ -32,7 +32,6 @@ is logged once in ten minutes for each receiver and kind.
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import logging
 import os
 import pwd
@@ -44,6 +43,7 @@ import httpx
 from cryptography.fernet import Fernet
 
 from sudarshan.autologin.handoff import seal
+from sudarshan.tasks import cancel_and_wait
 
 from . import loopback
 from .orders import parse
@@ -167,17 +167,24 @@ class NudgeSender:
             line.wake.set()
 
     async def run(self) -> None:
-        """One sending task for each receiver, until cancelled."""
+        """One sending task for each receiver, until cancelled.
+
+        The tasks post with httpx, which can lose a cancel while it connects (sudarshan/tasks.py),
+        so they are stopped with ``cancel_and_wait`` and never awaited through ``gather``: a cancel
+        of this task ends the wait at once, and the stop cancels each sender until it has ended."""
         self._tasks = [
             asyncio.create_task(self._run_one(line), name=f"nudge: {line.receiver.name}")
             for line in self._lines
         ]
+        if not self._tasks:
+            return
         try:
-            await asyncio.gather(*self._tasks)
+            done, _ = await asyncio.wait(self._tasks, return_when=asyncio.FIRST_EXCEPTION)
+            for task in done:
+                if not task.cancelled():  # stopped by close()
+                    task.result()  # a sender that failed is raised once the others are stopped
         finally:
-            for task in self._tasks:
-                task.cancel()
-            await asyncio.gather(*self._tasks, return_exceptions=True)
+            await cancel_and_wait(*self._tasks)
 
     async def _run_one(self, line: _Line) -> None:
         while True:
@@ -250,13 +257,11 @@ class NudgeSender:
             log.warning("A nudge to the %s service was not delivered: it %s", receiver.name, why)
 
     async def close(self) -> None:
-        """Nothing is held back at a stop: an unsent nudge is only a hint, and is dropped."""
+        """Nothing is held back at a stop: an unsent nudge is only a hint, and is dropped. A sender
+        whose cancel httpx lost is cancelled again until it has ended (``cancel_and_wait``)."""
         for line in self._lines:
             line.pending = None
-        for task in self._tasks:
-            task.cancel()
-        with contextlib.suppress(Exception):
-            await asyncio.gather(*self._tasks, return_exceptions=True)
+        await cancel_and_wait(*self._tasks)
 
 
 def receivers_for(

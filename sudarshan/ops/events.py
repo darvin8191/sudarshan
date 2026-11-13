@@ -159,8 +159,10 @@ def record(
     compacted to its newest ``KEEP_LINES`` lines once it has grown past ``COMPACT_ABOVE``.
 
     ``file_mode`` is the mode a new file is created with (0o640 for a spool another account
-    reads); compaction keeps the file's mode. A folder is made only when it is missing (private,
-    0o700): one that exists is never changed.
+    reads), set on the file itself once it is made: ``os.open`` takes the umask off its mode, and
+    the family unit runs with UMask=0077, which would leave a 0600 spool the notice desk cannot
+    read. A file that exists keeps its mode, and compaction keeps it too. A folder is made only
+    when it is missing (private, 0o700): one that exists is never changed.
     """
     path = Path(path)
     if kind not in KINDS or src not in SOURCES or not ID.fullmatch(event_id):
@@ -172,8 +174,7 @@ def record(
             return True
         path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         payload = (json.dumps(line, ensure_ascii=False, separators=(",", ":")) + "\n").encode()
-        flags = os.O_RDWR | os.O_APPEND | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
-        fd = os.open(path, flags, file_mode)
+        fd = _open_for_append(path, file_mode)
         try:
             _append(fd, payload)
         finally:
@@ -185,6 +186,22 @@ def record(
     except OSError:
         pass  # the event is written; a file left long is trimmed by the next writer
     return True
+
+
+def _open_for_append(path: Path, file_mode: int) -> int:
+    """The file open for appending, made with exactly ``file_mode`` when it is not there yet. A
+    symbolic link is refused (O_NOFOLLOW; O_EXCL never follows one either)."""
+    flags = os.O_RDWR | os.O_APPEND | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(path, flags | os.O_CREAT | os.O_EXCL, file_mode)
+    except FileExistsError:
+        return os.open(path, flags)
+    try:
+        os.fchmod(fd, file_mode)  # made by this call: the umask took bits off the mode
+    except BaseException:
+        os.close(fd)
+        raise
+    return fd
 
 
 def _append(fd: int, payload: bytes) -> None:
@@ -219,8 +236,8 @@ def _compact(path: Path) -> None:
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0), mode)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            os.fchmod(handle.fileno(), mode)  # the umask took bits off the creation mode
             handle.write(keep)
-        tmp.chmod(mode)  # the umask may have taken bits off the creation mode
     except BaseException:
         tmp.unlink(missing_ok=True)
         raise

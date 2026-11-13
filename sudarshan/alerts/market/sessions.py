@@ -84,7 +84,6 @@ AUCTION = "+auction"
 PRE_OPEN_MIN = 15
 
 
-
 @dataclass(frozen=True, slots=True)
 class Session:
     segment: str
@@ -277,3 +276,20 @@ def next_session(
         if found is not None and found.start > after_ms:
             return found
     return None
+
+
+#: The cash market's post-close session ends this many minutes after the cash close: trades at
+#: the closing price from 15:50 to 16:00 (SEBI's circular of 15 Oct 2026, para 4.2; the same
+#: times before 7 Dec 2026, cross-design Y22). A special day's is put the same distance after
+#: its own cash close, which can only be later than the exchange's.
+POST_CLOSE_AFTER_CASH_MIN = 30
+
+
+def post_close_end(
+    day: date, *, trading_day: bool, window: tuple[int, int] | None = None
+) -> int | None:
+    """When the cash market's post-close session ends on ``day`` (epoch ms): 16:00 on a normal
+    day; None on a day without a session. The gate refuses its trades; the journal's close check
+    reads the day's trades after it (cross-design Y22)."""
+    span = hours("NSE_EQ", window, day=day) if trading_day else None
+    return None if span is None else epoch_ms(day, span[1] + POST_CLOSE_AFTER_CASH_MIN)

@@ -843,3 +843,117 @@ describe("an expiring contract's own stop (review M3)", () => {
     expect(heard.statuses.at(-1)?.opensAt).toBeNull()
   })
 })
+
+/**
+ * SUDARSHAN review N3: a chart of the contract expiring on Tue 8 Dec, opened on Mon 7 Dec and
+ * left on screen overnight, asked the instrument's facts once, on Monday, which said no stop. On
+ * Tuesday it got none, opened flat candles after 15:30 and said Stale. It asks again when the date
+ * in India changes. The clock here moves only when the test moves it.
+ */
+describe('a chart left open past midnight in India (review N3)', () => {
+  const at = (day: number, h: number, mi: number, s = 0) =>
+    Date.UTC(2026, 11, day, h, mi, s) / 1000 - 19_800
+  const contract = 'NIFTY08DEC2625900CE'
+  const factsAsked = () =>
+    vi
+      .mocked(fetch)
+      .mock.calls.filter(([url]) => String(url).startsWith('/sudarshan/session/instrument?')).length
+
+  beforeEach(() => {
+    mocks.calendar = new SessionCalendar({
+      timezone: 'Asia/Kolkata',
+      sessions: ['0915-1545:23456'],
+      exceptions: {},
+    })
+    mocks.stopped = new SessionCalendar({
+      timezone: 'Asia/Kolkata',
+      sessions: ['0915-1545:23456'],
+      exceptions: { '2026-12-08': ['0915-1530'] },
+    })
+    historyReply = () => ({
+      status: 'success',
+      data: [15, 20, 25].map((mi) => ({
+        time: at(7, 15, mi),
+        timestamp: at(7, 15, mi),
+        open: 100,
+        high: 101,
+        low: 99,
+        close: 100,
+        volume: 500,
+      })),
+    })
+    // The server answers for the day it is asked on: the stop is Tuesday's.
+    factsReply = () => ({
+      status: 'success',
+      data: {
+        day: new Date(Date.now() + 19_800_000).toISOString().slice(0, 10),
+        stops_at: Date.now() + 19_800_000 >= Date.UTC(2026, 11, 8) ? at(8, 15, 30) * 1000 : null,
+        closing: null,
+      },
+    })
+  })
+
+  async function openMonday() {
+    vi.setSystemTime(at(7, 23, 59, 50) * 1000)
+    const view = mount()
+    const socket = latestSocket()
+    socket.accept()
+    await view.chart.load(contract, 'NFO', '5m')
+    await vi.advanceTimersByTimeAsync(0)
+    return { ...view, socket }
+  }
+
+  it('asks the facts again at midnight, not a second before, and stops the contract at 15:30', async () => {
+    const { chart, heard, socket } = await openMonday()
+    expect(factsAsked()).toBe(1)
+    await vi.advanceTimersByTimeAsync(9_000) // 23:59:59
+    expect(factsAsked()).toBe(1)
+    await vi.advanceTimersByTimeAsync(1_000) // 00:00:00, the timer waits a moment more
+    expect(factsAsked()).toBe(1)
+    await vi.advanceTimersByTimeAsync(1_000) // 00:00:01
+    expect(factsAsked()).toBe(2)
+    vi.setSystemTime(at(8, 15, 29, 40) * 1000) // the same open page, Tuesday afternoon
+    await vi.advanceTimersByTimeAsync(19_000)
+    socket.receive(depthFrame(contract, 'NFO', 100.5, at(8, 15, 29, 59), 50_000))
+    await vi.advanceTimersByTimeAsync(90_000) // 15:31:29: F&O trades on, this contract does not
+    expect(internals(chart).bars.some((bar) => bar.time >= at(8, 15, 30))).toBe(false)
+    expect(lastLine(heard)).toEqual({ kind: 'closed', stoppedAt: at(8, 15, 30) * 1000 })
+    expect(factsAsked()).toBe(2) // once for the day change, no poll
+  })
+
+  it('asks again when a phone that slept past midnight wakes, once', async () => {
+    const { chart } = await openMonday()
+    vi.setSystemTime(at(8, 9, 0) * 1000) // asleep through the timer
+    expect(factsAsked()).toBe(1)
+    setVisibility('hidden')
+    await vi.advanceTimersByTimeAsync(0)
+    expect(factsAsked()).toBe(1) // not while hidden
+    setVisibility('visible')
+    await vi.advanceTimersByTimeAsync(0)
+    expect(factsAsked()).toBe(2)
+    window.dispatchEvent(new Event('focus'))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(factsAsked()).toBe(2) // the facts are today's now
+    chart.destroy()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('drops the stop a day carried when the next day has none', async () => {
+    factsReply = () => ({
+      status: 'success',
+      data: {
+        day: new Date(Date.now() + 19_800_000).toISOString().slice(0, 10),
+        stops_at: Date.now() + 19_800_000 < Date.UTC(2026, 11, 8) ? at(7, 15, 30) * 1000 : null,
+        closing: null,
+      },
+    })
+    const { heard } = await openMonday()
+    await vi.advanceTimersByTimeAsync(2_000)
+    vi.setSystemTime(at(8, 10, 0) * 1000)
+    await vi.advanceTimersByTimeAsync(0)
+    setVisibility('visible')
+    await vi.advanceTimersByTimeAsync(0)
+    expect(factsAsked()).toBe(2)
+    expect(lastLine(heard)?.kind).not.toBe('closed')
+  })
+})

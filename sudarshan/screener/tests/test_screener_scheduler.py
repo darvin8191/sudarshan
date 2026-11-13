@@ -134,7 +134,9 @@ def test_the_last_cash_boundary_waits_for_the_auction_prints_until_15_35_05():
         (date(2026, 12, 10), "15:30", "15:45"),
     ],
 )
-def test_the_last_cash_boundary_waits_for_the_prints_on_both_sides_of_7_december(day, close, latest):
+def test_the_last_cash_boundary_waits_for_the_prints_on_both_sides_of_7_december(
+    day, close, latest
+):
     """From 7 Dec 2026 a stock that closes by auction trades to the cash end and prints 10 minutes
     later: its 15:15-15:30 candle still waits for the print, now to 15:45:05 (the print may come
     until five minutes after the auction's latest close, 15:40)."""
@@ -506,7 +508,9 @@ def test_before_7_december_a_check_is_late_as_it_was():
     assert late_at(day, walk(CAS_15, day, "15:29", "15:31", lambda now: early)) == [
         ("15:30", "15:30:05", False),
     ]
-    restarted = sch.due([CAS_15], sessions, hm(day, "15:32"), lambda k: False, waits=lambda s: early)
+    restarted = sch.due(
+        [CAS_15], sessions, hm(day, "15:32"), lambda k: False, waits=lambda s: early
+    )
     assert [(clock(day, d.boundary.end), d.late) for d in restarted][-1] == ("15:30", True)
     missed = sch.due(
         [CAS_15], sessions, hm(day, "15:40"), lambda k: False, waits=lambda s: NOT_PRINTED
@@ -515,3 +519,88 @@ def test_before_7_december_a_check_is_late_as_it_was():
     assert late_at(day, walk(CAS_15, day, "15:30", "15:36", lambda now: NOT_PRINTED)) == [
         ("15:30", "15:35:05", False),
     ]
+
+
+# ---- the next check of a held check is its hold's end (review N8) -------------------------------
+def _said(day: date, at: int | None) -> str | None:
+    return None if at is None else times(day, [sch.Boundary(0, 0, 0, at, "")], "at")[0]
+
+
+def test_a_held_closing_check_reads_as_the_end_of_its_hold_not_the_next_day():
+    """Thu 10 Dec from 15:30:05: an index screen, or one with an auction stock that has not
+    printed, still has its 15:30 check to make; it is made at 15:45:05, so that is the next check
+    (it read as the next trading day, which is None on this day)."""
+    day = date(2026, 12, 10)
+    found = sessions_of(day, trading_day=True)
+    for screen, waits in ((INDICES, INDEXED), (CAS, NOT_PRINTED), (WATCH, INDEXED)):
+        for now in (hm(day, "15:30") + 5_000, hm(day, "15:40"), hm(day, "15:45") + 4_999):
+            at = sch.next_at([screen], found, now, lambda s, w=waits: w)
+            assert _said(day, at) == "15:45:05", (screen.id, now)
+        assert sch.next_at([screen], found, hm(day, "15:45") + 5_000, lambda s, w=waits: w) is None
+    # before the 15:30 check is due it reads as before, and with no word of the members it is
+    # what it was
+    assert _said(day, sch.next_at([INDICES], found, hm(day, "15:29"), lambda s: INDEXED)) == (
+        "15:30:05"
+    )
+    assert sch.next_at([INDICES], found, hm(day, "15:31")) is None
+    # a screen with nothing to wait for is not held
+    assert sch.next_at([INDICES], found, hm(day, "15:31"), lambda s: PRINTED) is None
+
+
+def test_a_held_check_holds_the_next_checks_of_a_mixed_screen_on_10_december():
+    """A 5-minute watchlist screen holding an index, 15:30:05 to 15:45:05: neither 15:35 nor
+    15:40 is the next check, as neither runs before the hold ends. Held only for prints, which
+    arrive at 15:39:40, the next check is that moment's 15:40:05 once they are in."""
+    day = date(2026, 12, 10)
+    found = sessions_of(day, trading_day=True)
+    screen = sch.Screen(9, 1, "close", 5, WATCHLIST)
+    for now in (hm(day, "15:30") + 5_000, hm(day, "15:36"), hm(day, "15:41")):
+        at = sch.next_at([screen], found, now, lambda s: INDEXED)
+        assert _said(day, at) == "15:45:05", now
+    held = sch.next_at([screen], found, hm(day, "15:36"), lambda s: NOT_PRINTED)
+    assert _said(day, held) == "15:45:05"
+    in_ = sch.next_at(
+        [screen], found, hm(day, "15:36"), lambda s: sch.Waits(printed=hm(day, "15:35"))
+    )
+    assert _said(day, in_) == "15:40:05", "the prints are in: only the later checks remain"
+
+
+def test_before_7_december_a_check_held_for_a_missing_print_reads_15_35_05():
+    """Fri 4 Dec: the 15:30 check of an auction-stock screen whose print has not come by 15:30:05
+    waits for the window's end, 15:35:05; once it has come the check is no longer held."""
+    day = date(2026, 12, 4)
+    found = sessions_of(day, trading_day=True)
+    now = hm(day, "15:30") + 5_000
+    assert _said(day, sch.next_at([CAS], found, now, lambda s: NOT_PRINTED)) == "15:35:05"
+    assert sch.next_at([CAS], found, now, lambda s: PRINTED) is None
+    assert sch.next_at([CAS], found, now) is None
+
+
+def test_the_next_check_of_a_held_screen_is_the_earliest_of_the_screens():
+    day = date(2026, 12, 10)
+    found = sessions_of(day, trading_day=True)
+    now = hm(day, "15:30") + 5_000
+
+    def waits(screen: sch.Screen) -> sch.Waits:
+        return INDEXED if screen is INDICES else PRINTED
+
+    both = sch.Screen(9, 1, "close", 5, frozenset({"NSE_FO"}))
+    at = sch.next_at([INDICES, both], found, now, waits)
+    assert _said(day, at) == "15:35:05", "the unheld screen's own next check"
+
+
+def test_the_screen_ops_read_the_members_word_for_the_next_check():
+    """``screen_ops.waits_for``: the same members' word the run loop uses, from the live source;
+    none without a source."""
+    from types import SimpleNamespace
+
+    from sudarshan.screener import screen_ops
+
+    nifty = Member("NSE_INDEX|Nifty 50", "NIFTY", "NSE_INDEX", "NSE_INDEX")
+    source = SimpleNamespace(members=lambda universe: [nifty], printed_at=lambda m: 0)
+    row = {"id": 6, "spec": {"universe": {"kind": "indices"}}}
+    ctx = SimpleNamespace(parts={"source": source})
+    waits = screen_ops.waits_for(ctx, [row])
+    assert waits(INDICES) == sch.Waits(printed=0, index=True)
+    assert waits(sch.Screen(99, 1, "close", 15, frozenset({"NSE_EQ"}))) == sch.NO_WAITS
+    assert screen_ops.waits_for(SimpleNamespace(parts={}), [row]) is None

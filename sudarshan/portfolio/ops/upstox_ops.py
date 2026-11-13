@@ -54,6 +54,10 @@ async def upstox_book(ctx, message):
         parts = _parts(message)
     age = _max_age(message)
     extra = {} if who.principal == "owner" else {"principal": who.principal}
+    if extra:
+        # A member reads no fresher than the five seconds of memory: max_age 0 from a family
+        # screen would spend the per-second reads the owner's own tab needs (review M4).
+        age = max(age, MAX_AGE_S)
     book = await ctx.ensure_upstox().book(parts, age, **extra)
     return serialize.out(who.scope, book)
 

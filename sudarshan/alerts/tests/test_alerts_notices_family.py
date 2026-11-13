@@ -139,6 +139,26 @@ def test_a_fact_that_is_not_plain_stays_out_of_the_sentence():
     assert not any("rm -rf" in line or "money" in line for line in text)
 
 
+@pytest.mark.parametrize(
+    "label",
+    ["pay.example.in", "Pixel 8 at shop.example", "x.co", "pay-now.example/x", "Pixel/start"],
+)
+def test_a_device_label_that_could_be_a_link_or_a_command_stays_out(label):
+    """L11: Telegram makes a web address a link and "/word" a command in the owner's chat, so a
+    label from the family's file that holds one is left out of the sentence."""
+    text = lines_of(event("lockout", device=label), event("new_device", event_id="n", device=label))
+    assert text[0] == "A family sign-in was locked after several wrong attempts."
+    assert text[1].startswith("A family member signed in on a new phone at 18:42 IST.")
+    assert not any(label in line for line in text)
+
+
+@pytest.mark.parametrize("label", ["Android 15 \u00b7 Chrome", "Pixel 8.1", "iOS 17.2 (Safari)"])
+def test_a_plain_device_label_with_a_version_is_still_said(label):
+    assert lines_of(event("new_device", device=label))[0].startswith(
+        f"A family member signed in on a new phone: {label}, 18:42 IST."
+    )
+
+
 # ---- members are not named -----------------------------------------------------------------
 
 

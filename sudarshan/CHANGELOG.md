@@ -5,6 +5,60 @@ publish. The owner publishes each release on GitHub. The server's deploy timer t
 outside 08:30-16:00 IST on trading days (09:00-15:45 until v0.3.1), keeps backups, and rolls
 back if the app does not come up healthy.
 
+## v0.10.0 (14 Nov 2026)
+
+Groundwork for the family view and the trade journal, which come in the next releases. Nothing you
+trade with or look at changes. It includes everything in v0.9.0. **Publish it only after v0.9.0 has
+installed and run one trading day.**
+
+### What changes for you from the day you install it
+- **Nothing on your screens.** Orders, the risk rules, charts, alerts, the screener, the watchlists
+  and the portfolio work as in v0.9.0.
+- **The price feed knows its clients.** At the deploy's next run, about ten minutes after the
+  install, six key files appear together in `/etc/sudarshan/feed-clients/`, one for each SUDARSHAN
+  service that asks the feed for prices. From then on the feed changes what it follows for a service
+  only when that service shows its own key, so one service can no longer drop another's prices.
+  Everything keeps running while this happens. A service that cannot read its key keeps the prices
+  it already follows and says the feed did not take its new ones; no screen says "Real-time"
+  without ticks.
+- **The portfolio checks the Upstox Analytics Token once a day,** at its first start that day (three
+  reads), so a lapsed token is said early.
+- **Server notices on Telegram take turns with order and market alerts.** During a burst of market
+  alerts a server notice waits a minute at most.
+- **The portfolio's database gains two empty tables** (for tabs you may later share with family),
+  made when the service starts; a rollback puts the old file back.
+- **The price feed's state folder can be read only by the SUDARSHAN account and its group,** as the
+  other services' folders already are.
+
+### What you must do
+- **Nothing when you publish.**
+- **For the family view, when you want it** (it comes in a later release, switched off): run the
+  one-time set-up from your SSH session, as written in `sudarshan/README.md` under "The family view's
+  one-time set-up". It makes the family account, its own folder of keys and its own firewall rules,
+  then checks that the account cannot read any of your secrets, and ends with `PASS.` Nothing else on
+  the server changes, nothing runs for the family until that release arrives and you turn it on, and
+  running it again is safe. Put ` --dry-run` after it to see first what it would do.
+
+### What is refused now that used to be accepted
+- **A request that changes what the price feed follows, without a service's key,** once the key
+  files exist. Only SUDARSHAN's own services make such requests; the `curl` examples in
+  `sudarshan/feed/README.md` now need the key's header.
+
+### Still to check, or not modelled
+- **The family and journal parts in this release do nothing yet:** the portfolio's reads for family
+  members (a member sees only what the tabs shared with them reach, never another member's name or
+  account), the family check and the family notices stay switched off until their own releases.
+- **Upstox's orders and trades answers,** which the family view and the journal will read, were
+  built from Upstox's documented fields, not from a captured answer. They are compared with the live
+  book on the first session that uses them.
+- **In the family view, a member not shown quantities would also miss the line saying how old the
+  figures are** (that line travels with the quantities). This is settled before the family view is
+  turned on.
+- **If the alerts service cannot show the feed its key,** its log says "The price feed is not
+  answering", which is not the cause. The prices it already follows keep coming.
+- **If the server runs out of open files while the feed lists its key folder,** the feed reads the
+  folder as empty and accepts requests without a key until its next listing.
+
 ## v0.9.0 (14 Nov 2026)
 
 The new watchlists: sections inside a list, rows that follow an index's ATM option or its

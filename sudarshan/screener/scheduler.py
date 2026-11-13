@@ -132,14 +132,20 @@ class Waits:
 NO_WAITS = Waits()
 
 
-def waits_of(members: Iterable[Any], printed_at: Callable[[Any], int | None]) -> Waits:
+def waits_of(
+    members: Iterable[Any],
+    printed_at: Callable[[Any], int | None],
+    followed: Callable[[Any], bool] | None = None,
+) -> Waits:
     """A screen's ``Waits`` from its members today (each with ``cas`` and ``segment``, as
     ``runs.Member``): ``printed_at(member)`` is when a stock's closing auction print arrived (0
-    when not known), or None while it has not come."""
+    when not known), or None while it has not come. ``followed(member)`` says whether the
+    screener follows the instrument (review N9): one it does not follow can never print here, so
+    its arrival is unknown and nothing waits for it. None counts every member as followed."""
     found = tuple(members)
     last: int | None = 0
     for member in found:
-        if member.cas and last is not None:
+        if member.cas and last is not None and (followed is None or followed(member)):
             arrived = printed_at(member)
             last = None if arrived is None else max(last, arrived)
     return Waits(last, any(member.segment in INDEX_SEGMENTS for member in found))
@@ -284,14 +290,48 @@ def due(
     return out
 
 
-def next_at(screens: Iterable[Screen], sessions: Mapping[str, Session], now: int) -> int | None:
-    """The next moment any screen runs today, or None when today has no more."""
+def _hold_end(prints: int | None, index: int | None, waits: Waits, now: int) -> int | None:
+    """When the hold on a boundary ends if it is held at ``now`` (the later of the holds that
+    apply, as ``_released`` reads them), else None."""
+    ends: list[int] = []
+    if prints is not None and waits.printed is None and now < prints:
+        ends.append(prints)
+    if index is not None and waits.index and now < index:
+        ends.append(index)
+    return max(ends) if ends else None
+
+
+def next_at(
+    screens: Iterable[Screen],
+    sessions: Mapping[str, Session],
+    now: int,
+    waits: Callable[[Screen], Waits] | None = None,
+) -> int | None:
+    """The next moment any screen runs today, or None when today has no more. With ``waits`` (the
+    same members' word ``due`` takes), a boundary whose moment has come but which is held reads as
+    the moment its hold ends (review N8): the prints' window end plus the grace, or an index's.
+    A held boundary holds the later ones, so none of them is named before it."""
     best: int | None = None
     for screen in screens:
+        found: Waits | None = None
         for boundary in boundaries(screen, sessions):
-            if boundary.at > now and (best is None or boundary.at < best):
-                best = boundary.at
-                break
+            if boundary.at <= now:
+                if waits is None:
+                    continue
+                prints = _held_until(screen, sessions, boundary)
+                index = _index_hold(screen, sessions, boundary)
+                if prints is None and index is None:
+                    continue
+                found = waits(screen) if found is None else found
+                until = _hold_end(prints, index, found, now)
+                if until is None:
+                    continue
+                at = until
+            else:
+                at = boundary.at
+            if best is None or at < best:
+                best = at
+            break
     return best
 
 
