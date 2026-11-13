@@ -7,7 +7,9 @@ the favourites resolved. ``state`` carries the favourites resolved too (``favour
 Until the owner pins anything (the favourites version has never moved and no slot exists) the
 favourites are his first seven lists in OpenAlgo's order: a suggestion computed at read and never
 stored as his choice. A slot that names a list that was deleted, or a preset or flag that does not
-exist, is dropped at read; the delete hook and the next write remove the row itself.
+exist, is dropped at read; the delete hook and the next write remove the row itself. A ``list:`` slot also
+keeps the list's ``created_at`` and is dropped when the live list's differs: OpenAlgo gives a
+deleted list's id to the next list made, and the slot must not follow that other list.
 
 Not read here, on purpose:
 
@@ -71,6 +73,14 @@ def exists(ref: str, user: str) -> bool | None:
     return True if ident in {str(n) for n in FLAGS} else None  # the five flags always exist
 
 
+def created_of(lid: int, user: str) -> str | None:
+    """The live list's ``created_at`` as the guards store it; None when there is no such list."""
+    from sudarshan.watchlists.refs import list as listref
+
+    live = listref.read_live(user, lid)
+    return None if live is None else live["created_at"]
+
+
 def named(ref: str, found: dict) -> tuple[str, str, int | None] | None:
     """``(kind, name, count)`` of a ref that exists now, else None. ``found`` is ``gather``'s."""
     kind, _, ident = ref.partition(":")
@@ -87,14 +97,16 @@ def named(ref: str, found: dict) -> tuple[str, str, int | None] | None:
     return None
 
 
-def resolve(slots: list[tuple[int, str]], version: int, found: dict) -> list[dict]:
+def resolve(slots: list[tuple[int, str, str | None]], version: int, found: dict) -> list[dict]:
     """The ``Favourite`` records: each slot that still names something, else the suggestion when
     the owner has never pinned anything."""
     if not slots and version == 0:  # a suggestion, never stored
-        slots = [(n, f"list:{lid}") for n, lid in enumerate(found["own"], 1)
+        slots = [(n, f"list:{lid}", found["created"][lid]) for n, lid in enumerate(found["own"], 1)
                  if n <= contract.LIMITS["favourite_slots"]]  # fmt: skip
     out = []
-    for slot, ref in slots:
+    for slot, ref, made in slots:
+        if ref.startswith("list:") and found["created"].get(int(ref[5:])) != made:
+            continue  # a deleted list's id handed to another list (or no identity stored)
         got = named(ref, found)
         if got is not None:
             out.append({"slot": slot, "ref": ref, "kind": got[0], "name": got[1], "count": got[2]})
@@ -119,6 +131,7 @@ def gather(user: str) -> dict:
         for lid, name, made, count in live
     }
     found["symbols"] = {lid: count for lid, _, _, count in live}
+    found["created"] = {lid: made for lid, _, made, _ in live}
     return found
 
 

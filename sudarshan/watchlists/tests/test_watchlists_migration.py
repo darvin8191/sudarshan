@@ -54,7 +54,7 @@ def _populate(path: Path) -> None:
          " 'NSE_INDEX', 'nearest', 2, 1, 2)")  # fmt: skip
     _sql(path, "INSERT INTO wl_symbol VALUES ('owner', 'NSE', 'INFY', 2, 5, 'results soon', 6, 7)")
     _sql(path, "INSERT INTO wl_flag VALUES ('owner', 2, 'Watch closely')")
-    _sql(path, "INSERT INTO wl_favourite VALUES ('owner', 1, 'list:3', 8)")
+    _sql(path, "INSERT INTO wl_favourite VALUES ('owner', 1, 'list:3', 8, '2026-01-01 00:00:00')")
     _sql(path, "INSERT INTO wl_pref VALUES ('owner', 'list:3', 'change', 1, 'open', 1, 9)")
     _sql(path, "INSERT INTO wl_meta VALUES ('flags_version', '5')")
 

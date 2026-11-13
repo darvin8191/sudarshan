@@ -25,7 +25,7 @@ from sudarshan.watchlists.words import favourites as words
 MAX_VERSION = 2**63 - 1
 
 
-def _slots(raw: list[dict]) -> list[tuple[int, str]]:
+def _slots(raw: list[dict]) -> list[tuple[int, str, str | None]]:
     if len(raw) > contract.LIMITS["favourite_slots"] or any(
         s["slot"] > contract.LIMITS["favourite_slots"] for s in raw
     ):
@@ -36,14 +36,19 @@ def _slots(raw: list[dict]) -> list[tuple[int, str]]:
         raise OpError("invalid", words.SLOT_TWICE, "slots")
     if len({s["ref"] for s in raw}) != len(raw):
         raise OpError("invalid", words.REF_TWICE, "slots")
-    user = session.get("user") or ""
+    user, out = session.get("user") or "", []
     for s in raw:
-        found = known.exists(s["ref"], user)
+        found, made = known.exists(s["ref"], user), None
         if found is None:
             raise OpError("invalid", words.REF_BAD, "slots")
         if not found:
             raise OpError("gone", words.GONE)
-    return sorted((s["slot"], s["ref"]) for s in raw)
+        if s["ref"].startswith("list:"):  # the list's identity, so a reused id is not followed
+            made = known.created_of(int(s["ref"][5:]), user)
+            if made is None:
+                raise OpError("gone", words.GONE)
+        out.append((s["slot"], s["ref"], made))
+    return sorted(out)
 
 
 def favourites(args: dict) -> dict:

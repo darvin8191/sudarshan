@@ -123,6 +123,17 @@ def test_the_lists_version_reads_boot_and_count_and_the_other_two_are_the_stores
     assert versions.bump("items", ["list:1"]) != first["lists"]
 
 
+def test_a_favourites_advance_on_a_held_version_refuses_a_stale_one_and_changes_nothing():
+    engine.ready()
+    with engine.open_session() as s, s.begin():
+        assert versions.advance_favourites(s, 0) == 1  # no row yet: 0 is what it holds
+        assert versions.advance_favourites(s, 1) == 2
+    for held in (0, 1, 3):
+        with engine.open_session() as s, pytest.raises(versions.StaleVersion), s.begin():
+            versions.advance_favourites(s, held)
+    assert stored("favourites_version") == "2"
+
+
 def test_a_writer_adds_one_in_its_own_transaction_and_a_rollback_adds_nothing():
     engine.ready()
     with engine.open_session() as s, s.begin():

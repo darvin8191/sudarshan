@@ -150,6 +150,26 @@ def test_a_renamed_flag_and_the_flags_count_come_from_the_store(client):
     }
 
 
+def test_a_slot_does_not_follow_another_list_that_took_a_deleted_lists_id(client):
+    from database import watchlist_db as oa
+
+    (a,) = make_lists("Swing")
+    put(client, [(1, f"list:{a}")], 0)
+    with engine.open_session() as s:
+        (row,) = s.scalars(select(schema.FavouriteRow))
+        assert row.oa_created_at == lists_op.merge_view.created_key(_created(a))
+    assert show(client) == [(1, f"list:{a}", "Swing", "list")]
+    # the id is handed to a list made later: the same id, another created_at
+    later = _created(a).replace(year=2030)
+    oa.db_session.query(oa.Watchlist).filter_by(id=a).update(
+        {"name": "Momentum", "created_at": later}
+    )
+    oa.db_session.commit()
+    oa.db_session.remove()
+    assert show(client) == []  # dropped at read, not followed
+    assert state(client)["versions"]["favourites"] == 1 and len(rows(schema.FavouriteRow)) == 1
+
+
 def test_the_eighth_slot_is_refused_in_words_and_nothing_is_written(client, emitted):
     ids = make_lists(*[f"L{n}" for n in range(8)])
     too_many = [(n, f"list:{lid}") for n, lid in enumerate(ids, 1)]

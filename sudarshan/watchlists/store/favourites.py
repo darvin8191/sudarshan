@@ -1,16 +1,16 @@
 """The seven favourite slots, and what a favourite resolves against (M8.5, W10).
 
 ``claim`` is the favourites version's compare-and-set, the first statement of the write's
-transaction: an UPDATE guarded on the held number, which takes SQLite's write lock at once (a read
-first and a write after fails under WAL as a lock error no retry clears), then
-``versions.advance_favourites`` in the same transaction. The slots are replaced as a whole. The
+transaction: ``versions.advance_favourites(s, held)``, an UPDATE guarded on the held number and
+checked by its row count, which takes SQLite's write lock at once (a read first and a write after
+fails under WAL as a lock error no retry clears). The slots are replaced as a whole. The
 reads here are one read-only session each and never write: a slot naming something that is gone is
 dropped by the caller, and the delete hook (``store/prune.py``) empties the slots of a deleted list.
 """
 
 from __future__ import annotations
 
-from sqlalchemy import Integer, cast, delete, func, select, update
+from sqlalchemy import delete, func, select
 
 from sudarshan.watchlists import schema, versions
 from sudarshan.watchlists.schema import OWNER
@@ -26,28 +26,26 @@ def claim(s, held: int) -> int:
     """Check ``held`` against the favourites version and advance it, as one step; the new version.
     ``held`` 0 is a store that has never held one. Raises ``Stale`` (the caller's transaction rolls
     back, so a refused claim changes nothing)."""
-    meta = schema.MetaRow
-    done = s.execute(update(meta).where(
-        meta.name == META, cast(meta.value, Integer) == held).values(value=meta.value))  # fmt: skip
-    if done.rowcount == 0 and (
-        held != 0 or s.scalar(select(meta.value).where(meta.name == META)) is not None
-    ):
-        raise Stale
-    return versions.advance_favourites(s)
+    try:
+        return versions.advance_favourites(s, held)  # an UPDATE first: the write lock at once
+    except versions.StaleVersion:
+        raise Stale from None
 
 
-def replace(s, slots: list[tuple[int, str]], at: int) -> None:
-    """The seven slots become exactly ``slots`` (inside the claimed transaction)."""
+def replace(s, slots: list[tuple[int, str, str | None]], at: int) -> None:
+    """The seven slots become exactly ``slots``, each ``(slot, ref, oa_created_at)`` (the created
+    text of a ``list:`` slot's list, else None), inside the claimed transaction."""
     fav = schema.FavouriteRow
     s.execute(delete(fav).where(fav.principal == OWNER))
-    s.add_all(fav(slot=n, ref=ref, updated_at=at) for n, ref in slots)
+    s.add_all(fav(slot=n, ref=ref, oa_created_at=made, updated_at=at) for n, ref, made in slots)
     s.flush()
 
 
-def slots(s) -> list[tuple[int, str]]:
+def slots(s) -> list[tuple[int, str, str | None]]:
     fav = schema.FavouriteRow
-    return [(r[0], r[1]) for r in s.execute(select(fav.slot, fav.ref).where(
-        fav.principal == OWNER).order_by(fav.slot)).all()]  # fmt: skip
+    got = s.execute(select(fav.slot, fav.ref, fav.oa_created_at).where(
+        fav.principal == OWNER).order_by(fav.slot)).all()  # fmt: skip
+    return [(r[0], r[1], r[2]) for r in got]
 
 
 def version(s) -> int:

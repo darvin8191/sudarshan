@@ -364,3 +364,13 @@ screen feeds are not marked here: the screener is a service of its own, its stat
 in this process, and the page keeps marking them from the screener's state as it does today.
 Tests: `tests/test_watchlists_favourites.py`; `test/test_gthread_watchlists.py` (eight threads on
 one favourites version: one wins, seven `conflict`, one push for each win).
+
+Two decisions from the mid-point review. (1) The favourites advance is a compare-and-set:
+`versions.advance_favourites(s, held)` guards its UPDATE on the held number, checks the row count
+and raises `versions.StaleVersion` (the op answers `conflict`); only the delete prune, which cannot
+be refused, calls it without one (`advance_flags` is W9's and is unchanged here). (2) A `list:`
+favourite keeps the list's `created_at` in `wl_favourite.oa_created_at`, written as
+`view.created_key` gives it, and a slot whose value differs from the live list's is dropped at read,
+so a favourite never follows another list that was handed a deleted list's id. The column is part
+of schema 1 itself (added in `schema.py`, so the W2 migration's create path makes it) because schema
+1 has not shipped in any release; there is no upgrade step for it.
