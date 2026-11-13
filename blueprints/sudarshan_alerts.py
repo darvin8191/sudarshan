@@ -14,6 +14,10 @@ Owner routes (OpenAlgo session, CSRF, the owner himself, and a limiter on each):
     GET    /sudarshan/alerts/api/events/since?after=&limit=
     GET    /sudarshan/alerts/api/prefs                 PUT {"telegram": bool, "app": bool}
     POST   /sudarshan/alerts/api/test
+    POST   /sudarshan/alerts/api/groups                {"group": {...}}   (an alert over a list)
+    PATCH  /sudarshan/alerts/api/groups/<id>           {"version", "action", "group"}
+    DELETE /sudarshan/alerts/api/groups/<id>
+    POST   /sudarshan/alerts/api/groups/sync           {"ref"} or {"id"}  (the watchlist page's push)
 
 The service's route (no session and no CSRF cookie: its body is sealed under ALERTS_PUSH_INFO,
 which only a process that can read OpenAlgo's .env can make; 404 to anything that came through
@@ -90,6 +94,10 @@ HEALTH_TIMEOUT_S = 3.0
 TIMEOUTS = {
     "state": 3.0, "create": 6.0, "update": 6.0, "delete": 6.0, "events": 3.0,
     "events_since": 3.0, "prefs_get": 3.0, "prefs_set": 6.0, "test": 12.0,
+    # A list alert reads its list first (3 s), then claims at the feed (4.5 s), and an edit or a
+    # resume follows its list again after that.
+    "group_add": 10.0, "group_edit": 12.0, "group_pause": 12.0, "group_resume": 12.0,
+    "group_delete": 6.0, "group_sync": 12.0,
 }  # fmt: skip
 #: The codes of the contract (section 1) the service may answer with; any other (a transport
 #: refusal such as 'size' or 'timeout') is the bridge's 500 'failed', in a sentence.
@@ -101,6 +109,11 @@ CODES = frozenset({
 #: What the page may set; the instrument's key, tick size and expiry come from the master.
 DRAFT = ("kind", "params", "frequency", "candle", "cooldown_s", "ends", "note", "channels",
          "price")  # fmt: skip
+#: What the page may set of a list alert: the list's own members come from the service's sealed
+#: route, never from the page.
+GROUP_DRAFT = ("ref", "name", "kind", "params", "frequency", "candle", "candle_min", "cooldown_s",
+               "ends", "note", "delivery", "digest_min")  # fmt: skip
+GROUP_ACTIONS = {"edit": "group_edit", "pause": "group_pause", "resume": "group_resume"}
 WORDS = {
     "owner_only": "Only the account owner can manage market alerts.",
     "not_answering": "The alert service is not answering. Your alerts are kept; checking "
@@ -443,6 +456,61 @@ def set_prefs():
 @limiter.limit("6 per minute")
 def send_test():
     return _call("test")
+
+
+# -- list alerts (M8.14): one alert per symbol of a list, forwarded as the service's group ops --
+
+
+def _group(value):
+    """The page's group draft cut to what it may set (a list's rows are never taken from it)."""
+    if not isinstance(value, dict):
+        return None
+    return {name: value[name] for name in GROUP_DRAFT if name in value}
+
+
+@sudarshan_alerts_bp.route("/api/groups", methods=["POST"])
+@check_session_validity
+@_owner_only
+@limiter.limit("30 per minute")
+def create_group():
+    group = _group(_json_body().get("group"))
+    if group is None:
+        return _error("draft", 400)
+    return _call("group_add", {"group": group})
+
+
+@sudarshan_alerts_bp.route("/api/groups/<int:group_id>", methods=["PATCH"])
+@check_session_validity
+@_owner_only
+@limiter.limit("30 per minute")
+def change_group(group_id: int):
+    body = _json_body()
+    op = GROUP_ACTIONS.get(body.get("action"))
+    if op is None:
+        return _error("draft", 400)
+    fields = {"id": group_id, "version": body.get("version")}
+    if op == "group_edit":
+        fields["group"] = _group(body.get("group"))
+        if fields["group"] is None:
+            return _error("draft", 400)
+    return _call(op, fields)
+
+
+@sudarshan_alerts_bp.route("/api/groups/<int:group_id>", methods=["DELETE"])
+@check_session_validity
+@_owner_only
+@limiter.limit("30 per minute")
+def delete_group(group_id: int):
+    return _call("group_delete", {"id": group_id})
+
+
+@sudarshan_alerts_bp.route("/api/groups/sync", methods=["POST"])
+@check_session_validity
+@_owner_only
+@limiter.limit("60 per minute")  # a pushed change of a list with a group, one call each
+def sync_groups():
+    body = _json_body()
+    return _call("group_sync", {"ref": body.get("ref"), "id": body.get("id")})
 
 
 # -- the service's push and the owner's room (M10.7) ------------------------------------------
