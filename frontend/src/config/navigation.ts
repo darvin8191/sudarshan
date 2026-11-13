@@ -13,6 +13,7 @@ import {
   Code2,
   Database,
   FileBarChart,
+  FileBarChart2,
   FileStack,
   FileText,
   FlaskConical,
@@ -110,6 +111,8 @@ export const profileMenuItems: NavItem[] = [
   { href: '/screener', label: 'Screener', icon: ScanSearch },
   // SUDARSHAN M14: the trade journal, right after the screener (before Holdings).
   { href: '/journal', label: 'Journal', icon: NotebookPen },
+  // SUDARSHAN M15.10: the reports archive, right after the journal.
+  { href: '/reports', label: 'Reports', icon: FileBarChart2 },
   { href: '/holdings', label: 'Holdings', icon: ClipboardList },
   { href: '/flow', label: 'Flow Editor', icon: Workflow },
   { href: '/scalping', label: 'Scalping', icon: Zap },

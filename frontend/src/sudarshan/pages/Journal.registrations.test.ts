@@ -32,7 +32,7 @@ describe('the Journal page registrations', () => {
     expect(flask.indexOf(view)).toBeGreaterThan(flask.indexOf('def react_screener():'))
   })
 
-  it('is in the menu after Screener and before Holdings, as Journal with a notebook', () => {
+  it('is in the menu after Screener, before Reports and Holdings, as Journal with a notebook', () => {
     const hrefs = profileMenuItems.map((item) => item.href)
     const index = hrefs.indexOf('/journal')
     expect(profileMenuItems[index]).toMatchObject({ label: 'Journal' })
@@ -40,7 +40,7 @@ describe('the Journal page registrations', () => {
     expect(hrefs.indexOf('/watchlist')).toBeLessThan(hrefs.indexOf('/portfolio'))
     expect(hrefs.indexOf('/portfolio')).toBeLessThan(hrefs.indexOf('/screener'))
     expect(hrefs[index - 1]).toBe('/screener')
-    expect(hrefs[index + 1]).toBe('/holdings')
+    expect(hrefs[index + 1]).toBe('/reports')
     expect(hrefs.filter((href) => href === '/journal')).toHaveLength(1)
   })
 })

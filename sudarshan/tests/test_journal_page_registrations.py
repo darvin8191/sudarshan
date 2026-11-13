@@ -10,7 +10,10 @@ from pathlib import Path
 import pytest
 
 REPO = Path(__file__).resolve().parents[2]
-PAGES = (("journal", "Journal", "react_journal"),)
+PAGES = (
+    ("journal", "Journal", "react_journal"),
+    ("reports", "Reports", "react_reports"),
+)
 
 
 @pytest.mark.parametrize(("path", "component", "view"), PAGES)

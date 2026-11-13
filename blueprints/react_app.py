@@ -815,6 +815,12 @@ def react_journal():
     return serve_react_app()
 
 
+# SUDARSHAN M15.10: the reports archive and settings (the same bridge as the journal).
+@react_bp.route("/reports", strict_slashes=False)
+def react_reports():
+    return serve_react_app()
+
+
 # ============================================================
 # Flow Routes - Visual Workflow Automation
 # ============================================================
