@@ -1,0 +1,74 @@
+# सुदर्शन / SUDARSHAN family view (P6): family members see the books, view only, never an order.
+# One listener on 127.0.0.1:5585 (loopback only): the viewer API and the phones' WebSocket that nginx
+# forwards, the sealed admin and nudge routes, and GET /health. It is the one ring service that takes
+# input from people other than the owner, so it runs as its own account, sudarshan-family, which can
+# read none of the owner's secrets: its keys and settings are in /etc/sudarshan-family, made by the
+# deploy's provision step, and it starts only once the family check has passed (the provisioned file)
+# and its firewall allow-list is loaded. Off until SUDARSHAN_FAMILY=on in family.env.
+# Docs: sudarshan/family/README.md. Installed, enabled and restarted by sudarshan-deploy from each release.
+
+[Unit]
+Description=SUDARSHAN family view (view only, its own account)
+After=network-online.target
+Wants=network-online.target
+# The account's egress allow-list (loaded at boot by the owner's one-time set-up): never run without it.
+Requires=nft-sudarshan-family.service
+After=nft-sudarshan-family.service
+# Written by the deploy only after python -m sudarshan.family.check passed as this account.
+ConditionPathExists=/etc/sudarshan-family/provisioned
+
+[Service]
+Type=simple
+User=sudarshan-family
+Group=sudarshan-family
+Slice=sudarshan.slice
+WorkingDirectory=/opt/sudarshan/apps/openalgo
+ExecStart=/opt/sudarshan/apps/openalgo/.venv/bin/python -m sudarshan.family
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+EnvironmentFile=-/etc/sudarshan-family/family.env
+# The only places it writes: /var/lib/sudarshan-family (family.db) and the export folder it shares by
+# group with the ring (notices, the store's copy for the nightly backup).
+StateDirectory=sudarshan-family
+StateDirectoryMode=0700
+ReadWritePaths=-/var/lib/sudarshan-family-export
+ReadOnlyPaths=-/etc/sudarshan-family
+# Defence in depth: the family check proves the real file modes at every deploy run.
+InaccessiblePaths=-/etc/sudarshan -/opt/sudarshan/apps/openalgo/db -/opt/sudarshan/apps/openalgo/.env
+# Restarted after a crash, every 10 s. Not after exit status 2 (a setting or key it cannot use).
+# A taken port is not a crash: it waits and tries again every minute.
+Restart=on-failure
+RestartSec=10
+RestartPreventExitStatus=2
+# SIGTERM: the sockets are closed, the jobs cancelled, the store closed; killed after 20 s.
+TimeoutStopSec=20
+# Squeezed before it is killed (about 75% of MemoryMax), and behind TRINETRA when the box is busy.
+MemoryHigh=192M
+MemoryMax=256M
+CPUWeight=40
+UMask=0077
+LimitCORE=0
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectProc=invisible
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+RestrictNamespaces=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+LockPersonality=yes
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+SystemCallArchitectures=native
+# No IPAddressDeny: the family bot (api.telegram.org) and Web Push are outbound on 443; the account's
+# own firewall allow-list keeps it off every other local port.
+
+[Install]
+WantedBy=multi-user.target
