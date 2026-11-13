@@ -168,7 +168,7 @@ class _Report(FPDF):
 
     # ---- blocks --------------------------------------------------------------------------
     def heading(self, b: D.Heading) -> None:
-        self.ensure(14)
+        self.ensure(34)  # the heading never stands alone at the foot of a page
         self.set_y(self.get_y() + 3)
         self.set_font(TITLE, "", 15)
         self.set_text_color(*style.BRAND)
