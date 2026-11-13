@@ -199,6 +199,7 @@ def _futures_today(read: Read, chunks) -> dict:
         (i.symbol, i.exchange, i.rule) for c in chunks for s in c for i in s.items
         if i.kind == "fixed_future"))  # fmt: skip
     found, memo = {}, {}
+    indices = sessions.index_underlyings() if wanted else frozenset()
 
     def closes_of(fo, dates):
         key = (fo, tuple(dates))
@@ -214,7 +215,7 @@ def _futures_today(read: Read, chunks) -> dict:
         got = resolver.resolve_rows(
             rules, {n: {"id": n} for n in rules}, now_ms=_now_ms(), connected=False, ix=read.ix,
             row_of=read.master.row, isin=read.master.isin, closes_of=closes_of,
-            is_open=lambda exchange, at_ms: True, feed=lambda keys: {},
+            is_open=lambda exchange, at_ms: True, feed=lambda keys: {}, indices=indices,
         )  # fmt: skip
         for n, entry in enumerate(got):
             fut = entry.get("future")

@@ -83,6 +83,7 @@ def _resolve(rules: dict[int, dict], *, price: bool) -> dict[int, dict]:
         rules, {i: {"id": i} for i in rules}, now_ms=_now_ms(), connected=False,
         ix=ix, row_of=m.row, isin=m.isin, closes_of=lambda fo, dates: sessions.closes(dates, fo),
         is_open=sessions.market_open, feed=feedsnap.read if price else (lambda keys: {}),
+        indices=sessions.index_underlyings(),
     )  # fmt: skip
     return {r["id"]: r for r in got}
 

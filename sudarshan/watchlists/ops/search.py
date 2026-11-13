@@ -64,13 +64,14 @@ def _closes(now: int, fo: str = "NFO") -> dict[str, int]:
     return {} if got is None else {today: got}
 
 
-def _stop_ms(expiry: str, name: str, fo: str, closes: dict[str, int]) -> int:
+def _stop_ms(expiry: str, name: str, fo: str, closes: dict[str, int], indices) -> int:
     """The instant a contract expiring on ``expiry`` stops: the one rule of ``expiry.py`` for NFO
     and BFO (an index contract by its regime of the day, a stock's at the F&O close, a special
-    session from the calendar). MCX is not in that rule: its own calendar window if it has one for
-    the day, else the end of the day."""
+    session from the calendar; which underlyings are an index's is the master's answer,
+    ``indices``). MCX is not in that rule: its own calendar window if it has one for the day, else
+    the end of the day."""
     if fo in _RULED:
-        return dynamic.close_ms(expiry, closes, index=stops.is_index(name), exchange=fo)
+        return dynamic.close_ms(expiry, closes, index=stops.is_index(name, indices), exchange=fo)
     if expiry in closes:
         return closes[expiry]
     nxt = datetime.fromisoformat(expiry).date() + timedelta(days=1)
@@ -136,11 +137,13 @@ def search_op(args: dict) -> dict:
     if not query:
         return {"understood": "", "hits": [], "underlying": None, "underlying_exchange": None,
                 "suggestion": None}  # fmt: skip
+    from sudarshan.watchlists import sessions
+
     held = _held(args.get("list"))
     ix, now = _index(), now_ms()
-    closes = _closes(now)
+    closes, indices = _closes(now), sessions.index_underlyings()
     got = search.search(ix, query, price=price, now_ms=now, segment=segment, limit=limit,
-                        closes=closes)  # fmt: skip
+                        closes=closes, indices=indices)  # fmt: skip
     rank = {g: n for n, g in enumerate(GROUPS)}
     hits = sorted(got.hits, key=lambda h: rank[h[0]])  # stable: each group keeps its order
     answer = {
@@ -156,7 +159,7 @@ def search_op(args: dict) -> dict:
     }  # fmt: skip
     if not hits and not got.understood.needs_price:
         elsewhere = segment != "all" and search.search(
-            ix, query, price=price, now_ms=now, closes=closes, limit=1).hits  # fmt: skip
+            ix, query, price=price, now_ms=now, closes=closes, limit=1, indices=indices).hits  # fmt: skip
         answer["suggestion"] = (
             strike_words.segment_empty(segment, query)
             if elsewhere
@@ -186,9 +189,11 @@ def strikes_op(args: dict) -> dict:
     listed = cash or {rows[0].exchange for rows in by.values() if rows}
     if args["x"] not in listed:
         raise OpError("invalid", strike_words.EXCHANGE_BAD, "x")
+    from sudarshan.watchlists import sessions
+
     fo = next((rows[0].exchange for rows in by.values() if rows), "NFO")
-    closes = _closes(now, fo)
-    live = sorted(e for e in by if _stop_ms(e, name, fo, closes) > now)
+    closes, indices = _closes(now, fo), sessions.index_underlyings()
+    live = sorted(e for e in by if _stop_ms(e, name, fo, closes, indices) > now)
     answer = {"underlying": name, "exchange": args["x"], "expiries": [], "expiry": None,
               "atm": None, "strikes": [], "words": strike_words.no_open_expiry(name)}  # fmt: skip
     if not live:
@@ -223,7 +228,7 @@ def strikes_op(args: dict) -> dict:
                      "pe": _contract(pair["PE"]) if "PE" in pair else None})  # fmt: skip
         absent += [(s, side) for side in ("CE", "PE") if side not in pair]
     if chosen == numfmt.ist_date(now).isoformat() and fo in _RULED:  # MCX: no end time is said
-        lines.insert(0, strike_words.ends_today(_stop_ms(chosen, name, fo, closes)))
+        lines.insert(0, strike_words.ends_today(_stop_ms(chosen, name, fo, closes, indices)))
     if absent:
         lines.append(strike_words.missing_sides(absent))
     answer.update(expiry=chosen, atm=centre, strikes=rows, words=" ".join(lines))

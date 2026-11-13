@@ -164,10 +164,13 @@ def _closes(rows: list, now_ms: int) -> dict[str, int]:
 
 def wire(got: dict, now_ms: int) -> dict:
     """A reader's ``Members`` record as the route answers it (see the module's note)."""
+    from sudarshan.watchlists import sessions
+
     m = master.shared()
     if not m.loaded():
         raise _Failed(words.NOT_LOADED)
     closes = _closes(got["members"], now_ms)
+    indices = None  # the master's index underlyings (review M1), read once for the first future
     rows, left_out, seen = [], [], set()
     for c in got["members"]:
         row = m.row(c["exchange"], c["symbol"])
@@ -180,8 +183,10 @@ def wire(got: dict, now_ms: int) -> dict:
         out = {"symbol": c["symbol"], "exchange": c["exchange"], "instrument_key": row.token,
                "tick_size": _tick(c["tick"]), "expiry": c["expiry"], "lot": c["lot"]}  # fmt: skip
         if row.instrumenttype == "FUT" and c["expiry"]:
+            if indices is None:
+                indices = sessions.index_underlyings()
             out["valid_until"] = stops.stop_ms(
-                c["expiry"], index=stops.is_index(row.underlying or row.name or ""),
+                c["expiry"], index=stops.is_index(row.underlying or row.name or "", indices),
                 exchange=row.exchange, window_end_ms=closes.get(c["expiry"]),
             )  # fmt: skip
         rows.append(out)
