@@ -166,6 +166,9 @@ dependencies = [
   "litellm==1.104.0",
   "agno==3.0.5",
   "ddgs>=9.16.0",
+  "fpdf2==2.9.0",
+  "fonttools==4.63.0",
+  "defusedxml==0.7.1",
 ]
 
 [build-system]
