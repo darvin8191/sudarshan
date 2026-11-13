@@ -4,6 +4,9 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const api = vi.hoisted(() => ({
+  state: vi.fn(),
+  shareList: vi.fn(),
+  auditList: vi.fn(),
   memberList: vi.fn(),
   memberCreate: vi.fn(),
   inviteCreate: vi.fn(),
@@ -36,6 +39,12 @@ beforeEach(() => {
   vi.setSystemTime(START)
   for (const fn of Object.values(api)) fn.mockReset()
   api.deviceList.mockResolvedValue([])
+  api.state.mockResolvedValue({
+    enabled: true,
+    data: { enabled: true, message: null, store_version: 5, members: 1, sessions: 1, sockets: 0 },
+  })
+  api.shareList.mockResolvedValue([])
+  api.auditList.mockResolvedValue({ lines: [], older: null })
 })
 afterEach(() => {
   vi.useRealTimers()
@@ -174,5 +183,43 @@ describe('the Family page', () => {
     ])
     await userEvent.click(screen.getByRole('button', { name: 'Add member', hidden: false }))
     expect(await screen.findByRole('button', { name: 'Invite' })).toBeInTheDocument()
+  })
+
+  it('has Members, Shares, Audit and Service, each read only when it is opened', async () => {
+    api.memberList.mockResolvedValue([cardOf()])
+    mount()
+    await screen.findByText('Test One')
+    expect(screen.getAllByRole('tab').map((t) => t.textContent)).toEqual([
+      'Members',
+      'Shares',
+      'Audit',
+      'Service',
+    ])
+    expect(api.auditList).not.toHaveBeenCalled()
+    expect(api.shareList).not.toHaveBeenCalled()
+    await userEvent.click(screen.getByRole('tab', { name: 'Audit' }))
+    await waitFor(() => expect(api.auditList).toHaveBeenCalledTimes(1))
+    await userEvent.click(screen.getByRole('tab', { name: 'Service' }))
+    expect(await screen.findByText('Store version 5')).toBeInTheDocument()
+  })
+
+  it('shows the service state with the message when the family view is off', async () => {
+    api.memberList.mockRejectedValue(
+      new OwnerError('off', 'The family view is switched off on the server.')
+    )
+    api.state.mockResolvedValue({
+      enabled: true,
+      data: {
+        enabled: false,
+        message: 'The family view is switched off on the server.',
+        store_version: null,
+        members: 0,
+        sessions: 0,
+        sockets: 0,
+      },
+    })
+    mount()
+    expect(await screen.findByText('Off')).toBeInTheDocument()
+    expect(screen.queryByRole('tab')).toBeNull()
   })
 })
