@@ -104,6 +104,8 @@ export function useLiveRows({
   retry: () => void
   /** F9: read every quote again at once and give them; null when a call failed. */
   readAll: () => Promise<ReadonlyMap<string, Snapshot> | null>
+  /** F11: the newest cache line of every followed instrument, for the follow rows' underlyings. */
+  lines: ReadonlyMap<string, SymbolData>
 } {
   const itemsKey = useMemo(
     () => items.map((item) => keyOf(item.symbol, item.exchange)).join(','),
@@ -263,5 +265,6 @@ export function useLiveRows({
     read: snapshot.quotes.size > 0 || snapshot.status === 'error', // F6
     retry: snapshot.retry,
     readAll: snapshot.readAll, // F9
+    lines, // F11
   }
 }
