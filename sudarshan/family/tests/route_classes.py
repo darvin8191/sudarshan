@@ -83,6 +83,9 @@ public_shell  /dashboard                             react.react_dashboard
 public_shell  /download                              react.react_download
 public_shell  /error                                 react.react_error
 public_shell  /faq                                   react.react_faq
+public_shell  /family                                react.react_family_shell
+public_shell  /family-members                        react.react_family_members
+public_shell  /family/<path:rest>                    react.react_family_shell
 public_shell  /flow                                  react.react_flow_index
 public_shell  /flow/editor/<int:workflow_id>         react.react_flow_editor
 public_shell  /flow/shortcuts                        react.react_flow_shortcuts
@@ -192,8 +195,10 @@ public_static /logo.png                                                   react.
 public_static /mcp/.well-known/oauth-protected-resource                   mcp_http_bp.mcp_resource_metadata_alias                 # remote MCP: the same metadata under /mcp
 public_static /mcp/healthz                                                mcp_http_bp.healthz                                     # remote MCP: liveness for a monitor; no data
 public_static /oauth/jwks.json                                            mcp_oauth_bp.jwks_endpoint                              # remote MCP: the public key its tokens are checked with
+public_static /offline.html                                               react.serve_offline_page                                # the family view's offline page, a fixed document from the build; 404 until a build has it (P6 B2)
 public_static /sounds/<path:filename>                                     react.serve_sounds                                      # alert sounds shipped with the app
 public_static /static/<path:filename>                                     static                                                  # Flask's own static folder; the repository has none, so every file is 404
+public_static /sw.js                                                      react.serve_service_worker                              # the family view's service worker script from the build, scope held to /family/; 404 until a build has it (P6 B2)
 public_static /swaggerui/<path:filename>                                  restx_doc.static                                        # the files of the API documentation viewer
 
 # --- public_auth: the login flow and what the login page reads ---
@@ -297,6 +302,7 @@ webhook       /sudarshan/risk/api/killswitch  sudarshan_risk_bp.api_turn_on     
 internal      /sudarshan/alerts/internal/push          sudarshan_alerts.internal_push                  # sudarshan-alerts pushes events: sealed, 404 through nginx
 internal      /sudarshan/autologin/internal/preflight  sudarshan_autologin.internal_preflight          # the auto-login worker asks before a login: sealed, 404 through nginx
 internal      /sudarshan/autologin/internal/report     sudarshan_autologin.internal_report             # the auto-login worker hands over the token: sealed, 404 through nginx
+internal      /sudarshan/family/internal/watchlists    sudarshan_family.internal_watchlists            # sudarshan-family reads the lists the owner shares: sealed, 404 through nginx (P6 B1)
 internal      /sudarshan/screener/internal/push        sudarshan_screener_internal.internal_push       # sudarshan-screener pushes results: sealed, 404 through nginx
 internal      /sudarshan/screener/internal/watchlist   sudarshan_screener_internal.internal_watchlist  # sudarshan-screener reads and fills a watchlist: sealed, 404 through nginx
 internal      /sudarshan/watchlists/internal/read      sudarshan_watchlists_internal.read              # sudarshan-alerts reads a list's members: sealed, 404 through nginx
@@ -707,6 +713,21 @@ protected     /sudarshan/autologin/status                                       
 protected     /sudarshan/autologin/test                                                 sudarshan_autologin.test_now
 protected     /sudarshan/autologin/totp-secret                                          sudarshan_autologin.clear_totp_secret
 protected     /sudarshan/autologin/totp-secret                                          sudarshan_autologin.set_totp_secret
+protected     /sudarshan/family/api/audit_list                                          sudarshan_family.audit_list
+protected     /sudarshan/family/api/device_list                                         sudarshan_family.device_list
+protected     /sudarshan/family/api/device_revoke                                       sudarshan_family.device_revoke
+protected     /sudarshan/family/api/invite_create                                       sudarshan_family.invite_create
+protected     /sudarshan/family/api/invite_revoke                                       sudarshan_family.invite_revoke
+protected     /sudarshan/family/api/member_create                                       sudarshan_family.member_create
+protected     /sudarshan/family/api/member_list                                         sudarshan_family.member_list
+protected     /sudarshan/family/api/member_remove                                       sudarshan_family.member_remove
+protected     /sudarshan/family/api/member_status                                       sudarshan_family.member_status
+protected     /sudarshan/family/api/member_update                                       sudarshan_family.member_update
+protected     /sudarshan/family/api/share_list                                          sudarshan_family.share_list
+protected     /sudarshan/family/api/share_remove                                        sudarshan_family.share_remove
+protected     /sudarshan/family/api/share_set                                           sudarshan_family.share_set
+protected     /sudarshan/family/api/signin_reset                                        sudarshan_family.signin_reset
+protected     /sudarshan/family/api/state                                               sudarshan_family.state
 protected     /sudarshan/journal/api/analytics                                          sudarshan_journal.analytics
 protected     /sudarshan/journal/api/playbooks                                          sudarshan_journal.playbook_create
 protected     /sudarshan/journal/api/playbooks                                          sudarshan_journal.playbooks_list

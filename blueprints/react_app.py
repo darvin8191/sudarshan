@@ -5,9 +5,10 @@ Serves the pre-built React app for migrated routes.
 
 import mimetypes
 import os
+import re
 from pathlib import Path
 
-from flask import Blueprint, abort, request, send_file, send_from_directory
+from flask import Blueprint, Response, abort, jsonify, request, send_file, send_from_directory
 
 react_bp = Blueprint("react", __name__)
 
@@ -98,6 +99,48 @@ npm run build</pre>
     # pick up frontend updates without ever clearing their cache.
     response.headers["Cache-Control"] = "no-cache"
     return response
+
+
+# SUDARSHAN M2.7, M20.10: the family view's shell (P6 B2, design 2.7). The same bundle as every
+# other page with the family's manifest in place of the owner's, so a family phone installs the
+# family app (start_url and scope /family/, cross-design Y34). The manifest is the frontend's file;
+# until a build carries it the shell keeps the owner's link, never one that answers 404.
+FAMILY_MANIFEST = "images/sudarshan-family.webmanifest"
+_FAMILY_HREF = b"/" + FAMILY_MANIFEST.encode()
+_HTML_COMMENT = re.compile(rb"<!--.*?-->", re.DOTALL)
+_LINK_TAG = re.compile(rb"<link\b[^>]*>", re.IGNORECASE)
+_MANIFEST_REL = re.compile(rb"""(?<=\s)rel\s*=\s*(["']?)manifest\1(?=[\s/>])""", re.IGNORECASE)
+_HREF = re.compile(rb"""((?<=\s)href\s*=\s*)(["'])[^"']*\2""", re.IGNORECASE)
+#: For a family phone whose request for the family service reached OpenAlgo instead (nginx's
+#: family lines are not installed): never the shell, which a page would read as data.
+FAMILY_UNREACHED = "The family view is not set up on this server yet. Ask the account owner."
+
+
+def family_shell(index: bytes) -> bytes:
+    """``index`` with the href of its first manifest link outside a comment pointing at the
+    family manifest, every other byte as it was; unchanged when it has no such link."""
+    hidden = [found.span() for found in _HTML_COMMENT.finditer(index)]
+    for link in _LINK_TAG.finditer(index):
+        inside = any(start <= link.start() < end for start, end in hidden)
+        if inside or not _MANIFEST_REL.search(link.group()):
+            continue
+        tag = _HREF.sub(lambda m: m[1] + m[2] + _FAMILY_HREF + m[2], link.group(), count=1)
+        return index[: link.start()] + tag + index[link.end() :]
+    return index
+
+
+def serve_family_shell():
+    """index.html for /family and every page under it (``family_shell``, when the build has the
+    family manifest), revalidated on every load as ``serve_react_app``'s is."""
+    if not is_react_frontend_available():
+        return serve_react_app()  # its page saying the frontend is not built
+    body = (FRONTEND_DIST / "index.html").read_bytes()
+    if (FRONTEND_DIST / FAMILY_MANIFEST).is_file():
+        body = family_shell(body)
+    response = Response(body, mimetype="text/html")
+    response.headers["Cache-Control"] = "no-cache"
+    response.add_etag()
+    return response.make_conditional(request.environ)
 
 
 # ============================================================
@@ -821,6 +864,26 @@ def react_reports():
     return serve_react_app()
 
 
+# SUDARSHAN M20.6: the owner's Family page (its API is /sudarshan/family/api/*).
+@react_bp.route("/family-members", strict_slashes=False)
+def react_family_members():
+    return serve_react_app()
+
+
+# SUDARSHAN M2.7, M20.10: the family view's pages, all on the family shell. /family/api and
+# /family/ws belong to sudarshan-family, and nginx sends them there; one that reaches OpenAlgo is
+# told so in the family's envelope.
+@react_bp.route("/family", strict_slashes=False)
+@react_bp.route("/family/<path:rest>", strict_slashes=False)
+def react_family_shell(rest: str = ""):
+    if rest.split("/", 1)[0] in ("api", "ws"):
+        response = jsonify(status="error", code="off", message=FAMILY_UNREACHED)
+        response.status_code = 503
+        response.headers["Cache-Control"] = "no-store"
+        return response
+    return serve_family_shell()
+
+
 # ============================================================
 # Flow Routes - Visual Workflow Automation
 # ============================================================
@@ -927,6 +990,35 @@ def serve_apple_touch_icon():
     if not is_react_frontend_available():
         return "Not found", 404
     return send_from_directory(FRONTEND_DIST, "apple-touch-icon.png")
+
+
+def _root_file(name: str, mimetype: str) -> Response:
+    """SUDARSHAN M10.6: a file at the root of the build, revalidated on every load. While the build
+    lacks it the 404 is returned, not raised: a raised one counts toward the 404 ban of a visitor
+    OpenAlgo does not know, and every family phone is one."""
+    if (FRONTEND_DIST / name).is_file():
+        response = send_from_directory(FRONTEND_DIST, name, mimetype=mimetype)
+    else:
+        response = Response("Not found", status=404, mimetype="text/plain")
+    response.headers["Cache-Control"] = "no-cache"
+    return response
+
+
+@react_bp.route("/sw.js")
+def serve_service_worker():
+    """SUDARSHAN M10.6: the family view's service worker (the frontend's ``public/sw.js``). Its
+    scope is held to the family shell: Service-Worker-Allowed narrows what any registration of it
+    may claim to /family/, so no owner page comes under it (cross-design Y26)."""
+    response = _root_file("sw.js", "text/javascript")
+    if response.status_code != 404:
+        response.headers["Service-Worker-Allowed"] = "/family/"
+    return response
+
+
+@react_bp.route("/offline.html")
+def serve_offline_page():
+    """SUDARSHAN M10.6: the page the family view's service worker shows with no network."""
+    return _root_file("offline.html", "text/html")
 
 
 @react_bp.route("/images/<path:filename>")
