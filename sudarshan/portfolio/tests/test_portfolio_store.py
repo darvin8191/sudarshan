@@ -27,6 +27,7 @@ from sudarshan.portfolio.store import (
     UnknownPrincipal,
     VersionConflict,
 )
+from sudarshan.tests.fdwatch import FdWatch
 
 NOW = 1_793_000_000_000
 OWNER = Scope.owner()
@@ -456,17 +457,14 @@ def test_a_retried_create_is_found_by_its_request_id(made):
 
 # ---- descriptors ---------------------------------------------------------------------------
 def test_opening_using_and_closing_leaks_no_descriptors(path):
-    def open_files() -> int:
-        return len(os.listdir("/proc/self/fd"))
-
     PortfolioStore(path, now=NOW).close()  # warm: the thread, imports, the file itself
-    base = open_files()
+    watch = FdWatch()
     for _ in range(15):
         opened = PortfolioStore(path, now=NOW)
         opened.write(OWNER, lambda tx: tx.rows("tab"))
         opened.read(OWNER, lambda tx: tx.count("tab"))
         opened.close()
         migrate.file_version(path)
-    assert open_files() <= base + 1
+    watch.assert_clean()
     store.stop()
     assert not [t for t in threading.enumerate() if t.name.startswith(store.THREAD_PREFIX)]

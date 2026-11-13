@@ -20,7 +20,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
-from backup_fakes import NIGHT, Archive, Server, go, ist, make_database, no_sleep, open_files
+from backup_fakes import NIGHT, Archive, Server, go, ist, make_database, no_sleep
 
 from sudarshan.alerts import notices
 from sudarshan.alerts.notices import NoticeDesk
@@ -36,6 +36,7 @@ from sudarshan.ops.backup import (
     SKIPPED,
     SPACE,
 )
+from sudarshan.tests.fdwatch import FdWatch
 
 ARCHIVE = "sudarshan-backup-20261027-163102.tar.gz"
 GIB = 1 << 30
@@ -427,7 +428,7 @@ def test_the_offsite_command_leaves_no_file_open_however_it_ends(server, tmp_pat
     ends = {"works": 0, "fails": 3}
     sends = {name: offsite_in(server, tmp_path / name, code) for name, code in ends.items()}
     go(server, force=True, settings=server.settings(sends["works"]))  # the first use may keep one
-    before = open_files()
+    watch = FdWatch()
 
     for number, (env, limit) in enumerate(
         [(sends["works"], 3600.0), (sends["fails"], 3600.0), (missing, 3600.0), (hanging, 0.5)]
@@ -435,7 +436,7 @@ def test_the_offsite_command_leaves_no_file_open_however_it_ends(server, tmp_pat
         when = NIGHT + timedelta(minutes=number + 1)
         go(server, when, force=True, settings=server.settings(env, offsite_timeout_s=limit))
 
-    assert open_files() == before
+    watch.assert_clean()
 
 
 def offsite_in(server: Server, folder: Path, exit_code: int) -> dict[str, str]:
