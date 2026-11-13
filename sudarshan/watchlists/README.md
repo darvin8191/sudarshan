@@ -159,9 +159,11 @@ read. Tests: `tests/test_watchlists_store.py` (columns typed by hand from the de
 
 Creates `db/sudarshan_watchlists.db` and its tables from `schema.py` on an upgrade. Listed in
 `migrate_all.py`'s `MIGRATIONS` (beside the risk layer's line), deliberately not in
-`REQUIRED_MIGRATIONS`: an overlay of OpenAlgo's lists is not worth rolling a release back, and with
-the file missing the bridge answers in words while OpenAlgo's lists keep working. A failure still
-shows in the summary. Safe to run again: tables, columns and indexes only when missing, the `schema`
+`REQUIRED_MIGRATIONS`: an overlay of OpenAlgo's lists is not worth rolling a release back. With the
+file missing or older the app's store makes or completes it on first use (`engine.ready()` creates
+whatever is missing, as this script does), so a migration that did not run costs nothing; only a
+file the store cannot open, or one from a newer release, is answered in the owner's words, while
+OpenAlgo's lists keep working. A failure still shows in the summary. Safe to run again: tables, columns and indexes only when missing, the `schema`
 record only when absent or lower, nothing seeded, no row or value ever written over. `--status`
 opens the file read-only and prints the file, its schema, this release's schema and what is pending
 (the file's bytes are unchanged; SQLite may leave its own `-wal` and `-shm` beside a file in WAL
@@ -265,7 +267,10 @@ is not a whole number answer `invalid` with field `ref`; a list that does not ex
 user's) answers `gone`.
 
 `refs/list.py` reads OpenAlgo's list and items through `database/watchlist_db.py` (read only, its
-scoped session removed after the read) and the overlay in one read-only session of the store: the
+scoped session removed after the read) and the overlay in one read-only session of the store (one
+session, not one transaction: pysqlite begins none for reads, so the rows after the guard row can
+come from a later commit; the guard's version is read first, so a write in between can only make
+the page's next write a `conflict`, never one decided on a wrong merge): the
 `wl_list` guard row (version, `oa_created_at`), `wl_section`, `wl_section_item`, `wl_row` (follow
 rows as the rules they are, never resolved: resolving is W15), each symbol's flag and whether it has
 a note (a length test in the query, the note itself is never read) and `wl_pref`, or the defaults

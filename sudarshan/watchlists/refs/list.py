@@ -2,9 +2,14 @@
 
 OpenAlgo's list and its items are read in process through ``database/watchlist_db.py``, read only
 (its models and its scoped session, which the app's teardown also releases). The overlay comes from
-the store, in one read-only session and so one transaction: the list's guard row, sections, section
-membership, follow rows (rules, not resolved: resolving is W15), the flag of each symbol and
-whether it has a note (never the note), and the list's preference. The merge itself is
+the store, in one read-only session: the list's guard row, sections, section membership, follow
+rows (rules, not resolved: resolving is W15), the flag of each symbol and whether it has a note
+(never the note), and the list's preference. One session is not one transaction: pysqlite begins
+none for reads, so the rows after the guard row can come from a later commit than it. That is safe
+as written, because the guard's version is read first: a write in between makes the version the
+page holds older than the rows it shows, so its next write is a ``conflict`` and it reads again,
+never a write decided on a wrong merge. A reader that needs one snapshot must begin a transaction
+itself. The merge itself is
 ``view.merge`` (imported here as ``merge_view``, because this module's own ``view`` is the
 interface of ``refs/__init__``), which is pure. Nothing is written: a stale overlay (see the guard in ``sudarshan/watchlists/view.py``)
 is left for the next write that touches the list to prune.
@@ -50,7 +55,8 @@ def read_live(user: str, lid: int) -> dict | None:
 
 
 def read_overlay(lid: int, items: list) -> dict:
-    """What the store holds for the list and for its symbols, in one read-only transaction."""
+    """What the store holds for the list and for its symbols, in one read-only session, the guard
+    row first (not one transaction; see the module's note on why that is safe)."""
     ref, out = f"list:{lid}", {"oa_created_at": None, "version": None}
     with engine.open_session() as s:
         guard = s.execute(select(schema.ListRow.oa_created_at, schema.ListRow.version).where(

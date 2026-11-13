@@ -8,9 +8,12 @@ preferences and the meta table that records the schema. A file of its own, so no
 changes.
 
 Listed in migrate_all.py's MIGRATIONS but not in REQUIRED_MIGRATIONS, on purpose: an overlay of
-OpenAlgo's lists is not worth rolling a release back. With the file missing or older, the bridge
-answers in words, the feature is off by default, and OpenAlgo's lists keep working. A failure here
-is still reported by migrate_all's summary.
+OpenAlgo's lists is not worth rolling a release back. With the file missing or older, the app's
+store makes or completes it on first use (sudarshan/watchlists/engine.py creates whatever is
+missing, as this script does), so a run that did not happen costs nothing; only a file the store
+cannot open, or one from a newer release, is answered in the owner's words. The feature is off by
+default, and OpenAlgo's lists keep working either way. A failure here is still reported by
+migrate_all's summary.
 
 Idempotent and safe to re-run. A table that exists keeps its rows; a column or index a later
 release adds is added in place; the schema row is written only when absent. Nothing is seeded:
