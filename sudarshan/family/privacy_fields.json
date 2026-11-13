@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "note": "The one table of what each privacy category hides (cross-design Y24). An entry is a field name, or a pattern that starts with * for every field that ends so. A category's fields are removed from an answer at any depth. P&L is offered only together with quantities: while qty is hidden, pnl is hidden too, and everything qty hides is hidden with it. Never hidden: symbol, exchange, direction, product, the live price and its change, the market status.",
+  "note": "The one table of what each privacy category hides (cross-design Y24). An entry is a field name, or a pattern that starts with * for every field that ends so. A category's fields are removed from an answer at any depth. P&L is offered only together with quantities: while qty is hidden, pnl is hidden too, and everything qty hides is hidden with it. Never hidden: symbol, exchange, direction, product, the live price and its change, the market status, and today (the trading date; the P&L of the day is the paise, base_paise and pct inside a Today figure).",
   "categories": {
     "pnl": [
       "pnl",
@@ -25,7 +25,7 @@
       "by_fy",
       "benchmarks",
       "effect",
-      "today"
+      "base_paise"
     ],
     "qty": [
       "qty",
@@ -69,6 +69,7 @@
     "prev_close_u",
     "now_u",
     "tick_size_u",
-    "strike_price_u"
+    "strike_price_u",
+    "today"
   ]
 }

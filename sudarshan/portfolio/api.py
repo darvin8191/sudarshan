@@ -81,6 +81,11 @@ ALLOWED = {
     JOURNAL: frozenset(kinds.JOURNAL_OPS),
 }
 FAMILY_PRINCIPAL = re.compile(re.escape(kinds.FAMILY_PRINCIPAL_PREFIX) + r"[A-Za-z0-9_-]{1,40}")
+#: Family ops whose answer is about the one tab its ``id`` names, the ones about the Upstox tab,
+#: and the one whose answer is an entry per tab (L6: a restricted share masks its own tab only).
+ONE_TAB_OPS = frozenset({"tab_get", "performance"})
+UPSTOX_TAB_OPS = frozenset({"upstox_book", "upstox_history"})
+BY_TAB_OPS = frozenset({"summary"})
 #: The bridge lets through about 190 requests a minute (120 reads, 60 writes, 10 imports); the
 #: book holds 2 x 60 s x 8 a second, X9's rule for a route's peak, and answers 503 past it.
 PEAK_PER_S = 8
@@ -251,7 +256,7 @@ class PortfolioApi:
             args = {}
         if not isinstance(args, dict):
             raise ApiError(400, "bad_request", WORDS["failed"])
-        caller = await self._caller(purpose, principal, args)
+        caller = await self._caller(purpose, principal, args, op)
         token = ops_common.CALLER.set(caller)
         try:
             # The arguments are what the bridge put under "args"; op, nonce and principal stay
@@ -261,6 +266,8 @@ class PortfolioApi:
             ops_common.CALLER.reset(token)
         if purpose != OWNER_PURPOSE:
             data = serialize.out(caller.scope, data)  # the mask once more, on the way out (Y6)
+        if caller.access is not None:
+            data = caller.access.by_tab(data)  # and a restricted tab's part, whatever the op did
         return {"status": "success", "data": data}
 
     @staticmethod
@@ -273,9 +280,16 @@ class PortfolioApi:
             return FAMILY_PRINCIPAL.fullmatch(principal) is not None
         return principal == kinds.JOURNAL_PRINCIPAL
 
-    async def _caller(self, purpose: str, principal: str, args: dict) -> ops_common.Caller:
+    async def _caller(
+        self, purpose: str, principal: str, args: dict, op: str = ""
+    ) -> ops_common.Caller:
         """Who the op answers. For the family purpose the scope is built here from the stored
-        shares and privacy; ``args.tabs`` can only narrow it and ``args.mask`` only add to it."""
+        shares and privacy; ``args.tabs`` can only narrow it and ``args.mask`` only add to it.
+
+        A restricted share hides the figures of its own tab only (L6), so the scope is the one of
+        the tabs the answer is about: the tab an op names (``ONE_TAB_OPS``), the Upstox tab
+        (``UPSTOX_TAB_OPS``), each entry's own tab (``BY_TAB_OPS``: the base scope, the op and
+        the way out mask each entry), and otherwise every shared tab at once."""
         if purpose != FAMILY:
             return ops_common.Caller(purpose, principal)
         store = ops_common.need(self.desk)
@@ -288,7 +302,17 @@ class PortfolioApi:
                 lambda tx: sharing.access_for(tx, member, now, args.get("tabs"), args.get("mask")),
             )
         )
-        return ops_common.Caller(purpose, principal, access.scope, access)
+        named = args.get("id")
+        if op in ONE_TAB_OPS and isinstance(named, int) and not isinstance(named, bool):
+            scope = access.scope_about({named})
+        elif op in UPSTOX_TAB_OPS:
+            upstox = access.upstox_tab_id
+            scope = access.scope_about(() if upstox is None else {upstox})
+        elif op in BY_TAB_OPS:
+            scope = access.scope
+        else:
+            scope = access.scope_about()
+        return ops_common.Caller(purpose, principal, scope, access)
 
     def _refuse(self, purpose: str, op: str, principal: Any) -> None:
         """An op that is not on the purpose's list: a security event, said once a minute per op

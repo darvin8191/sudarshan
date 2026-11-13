@@ -163,10 +163,12 @@ class Server:
         rec = self.fake / f"owner-{hashlib.sha256(str(path).encode()).hexdigest()[:16]}"
         return rec.read_text().strip() if rec.exists() else ""
 
-    def run(self, *args: str, tool: bool = True) -> subprocess.CompletedProcess:
+    def run(
+        self, *args: str, tool: bool = True, path: str | None = None
+    ) -> subprocess.CompletedProcess:
         env = {
             **os.environ,
-            "PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}",
+            "PATH": f"{self.bin}{os.pathsep}{os.environ['PATH'] if path is None else path}",
             "FAKE": str(self.fake),
             "BOOTSTRAP_ROOT": str(self.root),
             "TMPDIR": str(self.tmp),
@@ -336,6 +338,21 @@ def test_no_deploy_settings_no_set_up(server):
     nothing_changed(server, server.run())
 
 
+def test_a_server_without_nft_is_told_how_to_install_it(server):
+    """L8: the owner is given the action, not only the missing command."""
+    (server.bin / "nft").unlink()
+    dirs = [d for d in os.environ["PATH"].split(os.pathsep) if d and not (Path(d) / "nft").exists()]
+    if shutil.which("bash", path=os.pathsep.join(dirs)) is None:
+        pytest.skip("nft sits beside bash on this machine")
+    done = server.run(path=os.pathsep.join(dirs))
+    nothing_changed(server, done)
+    assert done.stdout.splitlines() == [
+        "This server has no nft command, which the set-up needs. Install it with: apt install "
+        "nftables, then run this again.",
+        "Nothing was changed.",
+    ]
+
+
 def test_it_is_for_root(tmp_path):
     """Without the test folder it is the server: anyone but root is stopped before anything."""
     command = ["bash", str(SCRIPT), "--dry-run"]
@@ -451,6 +468,18 @@ def test_the_unit_loads_it_at_boot_and_has_no_stop(server):
     assert re.search(r"^ExecStart=\S*nft -f /etc/nftables-sudarshan-family\.nft$", unit, re.M)
     assert "ExecStop" not in unit and "Type=oneshot" in unit and "RemainAfterExit=yes" in unit
     assert "Before=sudarshan-family.service" in unit and "WantedBy=multi-user.target" in unit
+
+
+def test_the_unit_loads_the_list_again_after_the_servers_firewall_is_reloaded(server):
+    """L9: a stock /etc/nftables.conf starts with flush ruleset, so a restart or a reload of
+    nftables.service takes the family table away; the unit follows both, after it."""
+    assert server.run().returncode == 0
+    unit = server.unit_file.read_text()
+    head = unit.split("[Service]")[0]
+    assert re.search(r"^After=.*\bnftables\.service\b", head, re.M)
+    assert re.search(r"^PartOf=nftables\.service$", head, re.M)
+    assert re.search(r"^ReloadPropagatedFrom=nftables\.service$", head, re.M)
+    assert re.search(r"^ExecReload=\S*nft -f /etc/nftables-sudarshan-family\.nft$", unit, re.M)
 
 
 def test_the_script_touches_no_other_service_or_table():

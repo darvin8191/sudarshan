@@ -112,6 +112,30 @@ def test_the_waiting_callbacks_and_who_gives_way_to_whom():
     assert pacer.waiting("orders") and not pacer.waiting("notices")
 
 
+def test_a_lane_gives_way_to_another_once_its_message_has_waited_long_enough():
+    """L2: a busy lane cannot hold a small one back without a bound."""
+    clock = Clock()
+    pacer = Pacer(
+        (Lane("orders"), Lane("market", yields_after=(("notices", 60.0),)), Lane("notices", 1)),
+        gap_s=1.1,
+        clock=clock,
+    )
+    since: dict[str, float | None] = {"at": None}
+    pacer.set_waiting("notices", lambda: since["at"] is not None, since=lambda: since["at"])
+    assert pacer.waited("notices") == 0.0 and not pacer.blocked("market")
+    since["at"] = clock.now  # a notice starts to wait
+    clock.now += 60.0
+    assert pacer.waited("notices") == pytest.approx(60.0) and not pacer.blocked("market")
+    clock.now += 0.5
+    assert pacer.blocked("market") and not pacer.blocked("notices")
+    since["at"] = None  # it took its slot
+    assert pacer.waited("notices") == 0.0 and not pacer.blocked("market")
+    pacer.set_waiting("orders", lambda: True)  # a lane that never said since when waited 0 s
+    assert pacer.waited("orders") == 0.0
+    with pytest.raises(ValueError):
+        Pacer((Lane("a", yields_after=(("b", 1.0),)),), gap_s=1)
+
+
 def test_flushing_the_reserved_lane_ignores_what_the_others_sent():
     clock = Clock()
     pacer = owner_like(clock, gap_s=0.0, per_minute=5)
