@@ -633,3 +633,35 @@ cd /opt/sudarshan/apps/openalgo && sudo -u sudarshan .venv/bin/python -m sudarsh
   with what was being asked and how many tries, never with what was typed.
 
 Tests: `sudarshan/guard/tests/test_guard_phrase.py`.
+
+## Signing out every device, and a lost phone (M2.3)
+
+A logout, a password change or a password reset on one device signs every device out at its next
+page, read or reconnect, a phone that was asleep at the time included (v0.8.0). The server keeps
+that moment (`session_cutoffs`) and refuses a session that logged in before it. A second device's
+login never signs the first one out.
+
+What they do not change:
+
+- **The API key.** TradingView, Amibroker and the strategy host place orders with it, and those
+  orders go out from the server's own registered address, so the static IP rule does not stop
+  them. A logout or a password change leaves the key working, and every signed-in screen could
+  read it. The app keeps a copy in the browser and removes it as soon as a screen learns that its
+  session has ended (a logout, a read the server refuses, a live connection refused after a
+  logout elsewhere).
+- **The Upstox login**, on a password change or a reset: orders keep working. A logout ends it,
+  as it always has.
+
+If a phone is lost, or a session may have been copied:
+
+1. On another device, change your password: Profile, Account, Change Password. Every device is
+   signed out; log in again with the new password.
+2. Open API Key in the profile menu, choose Regenerate and confirm, then Copy the new key.
+3. Put the new key into every TradingView alert (and into Amibroker and your strategies, if you
+   use them). From now on an alert that still carries the old key is refused.
+
+If the answer to a logout, a password change or a reset says that your other devices could not be
+signed out, the server could not record the time: log in and log out once more.
+
+Tests: `sudarshan/alerts/tests/test_sessions_valid_after.py`, `test/test_gthread_sessions_valid_after.py`
+and `frontend/src/sudarshan/signout.test.tsx`.

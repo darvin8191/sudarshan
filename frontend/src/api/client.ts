@@ -1,4 +1,5 @@
 import axios from 'axios'
+import { forgetApiKey } from '@/sudarshan/signout' // SUDARSHAN: release review v0.8.0 M2
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || ''
 
@@ -45,6 +46,7 @@ apiClient.interceptors.response.use(
   (error) => {
     if (error.response?.status === 401) {
       // Handle unauthorized - redirect to login
+      forgetApiKey() // SUDARSHAN (M2): no API key left stored behind a refused session
       window.location.href = '/login'
     }
     return Promise.reject(error)
@@ -142,6 +144,7 @@ webClient.interceptors.response.use(
     const status = error.response?.status
     if (status === 401) {
       // Unauthorized - redirect to login
+      forgetApiKey() // SUDARSHAN (M2): no API key left stored behind a refused session
       window.location.href = '/login'
     } else if (status === 403) {
       // Forbidden - user doesn't have permission for this resource

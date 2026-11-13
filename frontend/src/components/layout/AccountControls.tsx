@@ -18,6 +18,7 @@ import { useAuthStore } from '@/stores/authStore'
 import { useThemeStore } from '@/stores/themeStore'
 import { MODE_CHIP, MODE_CHIP_BASE, MODE_DOT } from '@/sudarshan/modeChip'
 import { RiskChip } from '@/sudarshan/risk/RiskBanner' // SUDARSHAN M20.7
+import { logoutWords } from '@/sudarshan/signout' // SUDARSHAN: review L6
 import { showToast } from '@/utils/toast'
 
 /**
@@ -47,10 +48,13 @@ export function AccountControls({ variant = 'navbar' }: { variant?: 'navbar' | '
 
   const handleLogout = async () => {
     try {
-      await authApi.logout()
+      const answer = await authApi.logout()
       logout()
       navigate('/login')
-      showToast.success('Logged out successfully')
+      // SUDARSHAN (review L6): the server's sentence when it could not sign the others out
+      const said = logoutWords(answer)
+      if (said.kind === 'error') showToast.error(said.text)
+      else showToast.success(said.text)
     } catch {
       logout()
       navigate('/login')

@@ -5,6 +5,7 @@
  * to be open and is not is asked to connect again.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { useAuthStore } from '@/stores/authStore'
 import { claimTrip, resetTripsForTests, TRIP_GAP_MS } from '@/sudarshan/trips'
 import {
   acquireSharedSocket,
@@ -222,6 +223,30 @@ describe('a connect the server refuses (SIO1)', () => {
     expect(toLogin).toHaveBeenCalledTimes(1)
     await vi.advanceTimersByTimeAsync(REFUSED_RETRY_MS.reduce((sum, pause) => sum + pause, 0))
     expect(made[0].connects).toBe(0)
+  })
+
+  it('for a session that has ended forgets the API key kept in the browser (review M2)', async () => {
+    vi.useFakeTimers()
+    useAuthStore.getState().login('owner', 'upstox')
+    useAuthStore.getState().setApiKey('test-api-key')
+    handle({ askSession: async () => 'ended', toLogin: vi.fn() })
+    acquireSharedSocket(create)
+
+    made[0].refuse()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(useAuthStore.getState().apiKey).toBeNull()
+
+    // and when the tab went to the login page a moment ago, so the line asks instead
+    useAuthStore.getState().setApiKey('test-api-key')
+    expect(claimTrip('login')).toBe(false)
+    made[0].connected = true
+    made[0].active = true
+    made[0].fire('connect')
+    made[0].refuse()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(signInNeededNow()).toBe(true)
+    expect(useAuthStore.getState().apiKey).toBeNull()
+    useAuthStore.getState().logout()
   })
 
   it('is asked again at once when the page comes back into view or the browser is online', async () => {

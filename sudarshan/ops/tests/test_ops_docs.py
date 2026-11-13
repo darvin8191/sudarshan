@@ -192,3 +192,16 @@ def test_the_expiry_the_readme_describes_is_the_one_the_code_keeps():
     assert "Expiry date of the upload link, as the console shows it" in README
     assert "`offsite: set (the link stops working in N days, on <the date you typed>)`" in README
     assert "set (the link stops working" in inspect.getsource(backup._offsite_state)
+
+
+def test_the_notes_say_a_logout_leaves_the_api_key_and_what_to_do_after_a_lost_phone():
+    """Release review v0.8.0 M2: "a logout ends every device's session" read as if a lost phone
+    were harmless after a password change, while the API key it could read keeps placing orders
+    from the server's own address."""
+    assert "a logout or a password change does not change the API key" in STANZA
+    assert "A logout or a password change leaves the key working" in README
+    for text in (README, STANZA):
+        assert "choose Regenerate" in text and "TradingView alert" in text
+        assert "server's own" in text  # why the static IP rule does not stop them
+    assert "use the API key and are not affected" not in STANZA  # not "protected"
+    assert "## Signing out every device, and a lost phone (M2.3)" in RAW_README

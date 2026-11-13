@@ -47,6 +47,8 @@ The Flask session is a signed cookie the server cannot reach, so removing rows e
 
 A failed write of the cutoff is tried once more for the same moment; when that fails too, the rows are still cleared and the answer of the logout, password change or reset says (status `error`) that the other devices could not be signed out and that one more logout does it (release review v0.8.0, L6). A password change or reset keeps the rows with no address, which only auto-login records: it makes no cookie, so its row keeps no device signed in, and the daily expiry of a stale cookie reads it as the login after the rollover that keeps the Upstox login the change kept (`auth_db.clear_browser_sessions`, L7). A logout still clears every row.
 
+None of this changes the API key: `/api/v1` orders placed with it go out from the server's own registered address, every signed-in screen was given it by `/auth/session-status`, and the app keeps a copy in the browser's storage (`stores/authStore.ts`). After a lost device, or a password change made because a session may have been copied, the owner also makes a new API key on the API Key page and puts it into TradingView, Amibroker and his strategies (release review v0.8.0, M2). The app forgets its stored copy at every sign-out: a logout, a 401 from either axios client, a refused Socket.IO connect whose session read says ended, and the error page's logout (`frontend/src/sudarshan/signout.ts`).
+
 ## Frontend Behavior
 
 `AuthSync` restores user, broker, API key, app mode, capabilities, and active-session count. A normal unauthenticated response clears the Zustand stores. Network errors preserve existing state for the current render rather than forcing a false logout.

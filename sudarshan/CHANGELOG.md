@@ -18,7 +18,18 @@ feed and API-key calls work as before.
   device signs every other device out at its next page, read or reconnect, a phone that was asleep
   at the time included. Before, the other devices stayed signed in until 03:00.
 - **A second device's login never signs the first one out** and never touches the price feed, as
-  before. TradingView, Amibroker and the strategy host use the API key and are not affected.
+  before. TradingView, Amibroker and the strategy host place orders with the API key, and none of
+  this changes it: a logout or a password change does not change the API key (after a lost phone,
+  see What you must do).
+- **The app forgets the API key at every sign-out.** The copy the app keeps in the browser is
+  removed as soon as a screen learns that its session has ended (a logout, a read the server
+  refuses, a live connection refused after a logout elsewhere), before it goes to the login page.
+  Before, it stayed until the next page load.
+- **A logout that could not sign the other devices out says so.** If the server could not record
+  the time, a logout, a password change or a reset tells you, instead of "Logged out
+  successfully"; log in and log out once more. A password change or reset also keeps the
+  auto-login's entry in Active Sessions, so an old session's next page no longer ends the Upstox
+  login the change kept.
 - **Old rows leave Active Sessions.** Rows of sessions the 03:00 expiry had already ended (the two
   October rows) go at the next login, or when the Security screen opens.
 - **An offsite copy of the nightly backup, off until you set it up.** After each good backup the
@@ -53,6 +64,12 @@ feed and API-key calls work as before.
 
 ### What you must do
 - Nothing when you publish. The install adds one small table for the logout time.
+- **If a phone is lost, or you change your password because a session may have been copied:**
+  also open API Key in the profile menu, choose Regenerate, and put the new key into your
+  TradingView alerts (and Amibroker and your strategies, if you use them). A logout or a password
+  change does not change the API key, every signed-in screen could read it, and orders sent with
+  it go out from the server's own address. Alerts that still carry the old key are refused from
+  then on. The steps are in `sudarshan/README.md`, "Signing out every device, and a lost phone".
 - Once after the install, after the close: put the phone to sleep, log out on the laptop, then wake
   the phone. It should show the login page. Log in again on both (a logout also ends the Upstox
   login, as it always has). The two October rows should be gone from Active Sessions.
