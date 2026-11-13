@@ -529,6 +529,27 @@ A record that cannot be opened turns market alerts off with a line in the journa
 carry on. A record from a newer release (after a rollback) does the same until that release is
 back.
 
+### List alerts follow their list (M8.14)
+
+A list alert (a group of alerts, one per symbol of a watchlist) keeps its members equal to the
+list's. The desired members come from OpenAlgo's sealed members route (`market/members.py`: the
+seal and the loopback call in one small module, the contract in its docstring, a stub in the tests
+until the route is built). `market/groups.py` decides, purely, what to add, remove and keep; the
+desk (`sync` in `desk.py`) translates: it asks the route outside the change lock, then claims the
+new keys at the feed in one request, and writes the adds, the removes and the group's words in one
+transaction. A removed member's key is released at the feed only when no other alert holds it.
+A sync runs on the `group_sync` op (the watchlist page calls it at once when its push names a
+list that has a group; the op takes `ref` or a group `id`), on the first clock tick of each day
+and at the service start (the morning build), when a current-month future's end passes, and as a
+backstop once a minute inside a session when the lists' version differs from the group's. These ride on
+the existing one-second clock job: no timer of their own, and one sync task at a time, cancelled
+with the other jobs at a stop. When the watchlist feature is switched off the route answers `off`
+and the group freezes with its last members and the card's words, never an error and never an empty
+list; a deleted list stops the group; a route that cannot be asked changes nothing. A list that
+outgrows the 200 instruments or 500 Active alerts is covered in list order as far as both allow.
+Not yet reachable from any screen: making, editing and resuming a group (which sync once) arrive
+with the group ops of the alerts API.
+
 ## Tests
 
 `uv run pytest -q sudarshan/alerts` (no network: a fake WebSocket proxy and a fake OpenAlgo on

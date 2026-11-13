@@ -34,11 +34,12 @@ from collections.abc import Mapping
 from datetime import datetime
 from typing import Any
 
-from sudarshan.alerts.market import clock, spec, words
+from sudarshan.alerts.market import clock, groups, spec, words
 from sudarshan.alerts.market.api import OWNER, SERVICE, ApiError
 from sudarshan.alerts.market.book import BASE_CHANGED
 from sudarshan.alerts.market.engine import NOT_CHECKED, NOT_JUDGED, Reason, stop_reason
 from sudarshan.alerts.market.feedlink import FeedRefused, FeedUnreachable
+from sudarshan.alerts.market.members import Unavailable
 from sudarshan.alerts.market.sessions import AUCTION, next_session
 from sudarshan.alerts.market.store import MOVES, NotFound, Refused, StoreError, VersionConflict
 from sudarshan.alerts.messages import quantity
@@ -55,6 +56,8 @@ SINCE, SINCE_MAX = 200, 200
 #: not saved (503) before the bridge's 6 s end, and a change the page was told failed never
 #: lands (review M1).
 CHANGE_WAIT_S = 4.5
+#: List alerts ask their lists again at most this often (the one-minute check inside a session).
+GROUP_CHECK_MS = 60_000
 ACTIONS = ("edit", "pause", "resume", "restart")
 #: What the service takes from a draft; the bridge adds the key, tick size and expiry.
 DRAFT = (
@@ -97,6 +100,12 @@ class OwnerDesk:
         self.rt = runtime
         self._changes = asyncio.Lock()
         self._line: dict | None = None  # the page's line as last pushed to the open apps
+        #: List alerts: the day of the last morning sync, when the next check may start, whether
+        #: the lists said "off" last, and each group's earliest current-month future's end.
+        self._group_day = None
+        self._group_next = 0
+        self._off: bool | None = None
+        self._ask: dict[int, int] = {}
         runtime.on_change, runtime.on_second = self._changed, self._second
         runtime.on_engine = self.engine_line
 
@@ -107,6 +116,154 @@ class OwnerDesk:
 
     async def call(self, op: str, message: Mapping[str, Any]) -> Any:
         return await getattr(self, f"_{op}")(message)
+
+    # ---- list alerts follow their list (M8.14) -----------------------------------------------
+    async def _group_sync(self, message) -> dict[str, Any]:
+        """The watchlist page's push named ``ref`` (or one group by ``id``): its groups follow it
+        now. The answer is each group's brief."""
+        rt = self._running()
+        gid, ref = message.get("id"), message.get("ref")
+        if not (isinstance(gid, int) and not isinstance(gid, bool)) and not isinstance(ref, str):
+            raise ApiError(400, "invalid", WORDS["number"], "id")
+        rows = await self._write(rt.store.groups, OWNER)
+        found = [g["id"] for g in rows if (g["id"] == gid if gid is not None else g["ref"] == ref)]
+        return {"groups": [b for i in found if (b := await self.sync(i)) is not None]}
+
+    def _group_step(self, now: int) -> None:
+        """Each second, on the clock job's own tick (no timer of its own): the morning sync on
+        the first tick of a day, then the lists' check at most once a minute inside a session,
+        and sooner than that a current-month future's end."""
+        rt = self.rt
+        if rt.members is None or (rt.group_task is not None and not rt.group_task.done()):
+            return
+        day = _day(now)
+        if day != self._group_day:
+            reason = "morning"
+        elif now < self._group_next:
+            return
+        elif self._ask and min(self._ask.values()) <= now:
+            reason = "ask"
+        elif rt.in_session(now):
+            reason = "check"
+        else:
+            return
+        self._group_day, self._group_next = day, now + GROUP_CHECK_MS
+        rt.group_task = asyncio.create_task(self._follow(reason), name="market alerts: list alerts")
+
+    async def _follow(self, reason: str) -> None:
+        """One pass over the groups: the lists' version first on a check (list membership is not
+        market data, so asking is allowed); the morning and a future's end sync them all."""
+        rt = self.rt
+        try:
+            rows = [
+                g for g in await self._write(rt.store.groups, OWNER) if g["status"] != "stopped"
+            ]
+            now = rt.now_ms()
+            self._ask = {i: at for i, at in self._ask.items() if i in {g["id"] for g in rows}}
+            if reason == "ask":  # only the groups whose current-month future has ended
+                rows = [g for g in rows if self._ask.get(g["id"], now + 1) <= now]
+            if rows and reason == "check":
+                answer = await rt.members.version()
+                if answer.state != groups.OK:  # off: freeze once; gone cannot be a version
+                    rows = rows if answer.state == groups.OFF and not self._off else []
+                elif not self._off:
+                    rows = [g for g in rows if g["synced_version"] != answer.version]
+            for group in rows:
+                await self.sync(group["id"])
+        except (ApiError, Unavailable) as exc:
+            log.warning("list alerts could not follow their lists just now: %s", exc)
+        except Exception:
+            log.exception("list alerts could not follow their lists")
+
+    async def sync(self, group_id: int) -> dict[str, Any] | None:
+        """One group follows its list: the members route's answer (outside the change lock), then
+        add, remove and keep in one transaction (groups.plan decides; this only translates).
+        A route that cannot be asked changes nothing. Returns the group's brief."""
+        rt = self._running()
+        group = await self._write(rt.store.group, OWNER, group_id)
+        self._ask.pop(group_id, None)
+        if group is None or group["status"] == "stopped" or rt.members is None:
+            return None
+        try:
+            answer = await rt.members.members(group["ref"])
+        except Unavailable as exc:
+            log.info("the list of group %d could not be read just now: %s", group_id, exc)
+            return None
+        self._off = answer.state == groups.OFF
+        deadline = asyncio.get_running_loop().time() + CHANGE_WAIT_S
+        async with self._turn(deadline), self._claims(deadline):
+            try:
+                brief = await self._follow_list(group_id, answer, deadline)
+            finally:
+                rt.wake_claims()  # a key no alert holds now is released at the feed
+        return brief
+
+    async def _follow_list(self, group_id: int, answer, deadline: float) -> dict | None:
+        rt, config = self.rt, self.rt.config
+        now = rt.now_ms()
+
+        def read():
+            return rt.store.group(OWNER, group_id), rt.store.group_members(OWNER, group_id), \
+                rt.store.alerts(OWNER)  # fmt: skip
+
+        group, members, alerts = await self._write(read)
+        if group is None or group["status"] == "stopped":
+            return None
+        held: dict[str, set[int]] = {}
+        for row in alerts:
+            if row["status"] == "active":
+                held.setdefault(row["instrument_key"], set()).add(row["id"])
+        plan = groups.plan(answer.state, answer.rows, [groups.Member(m["id"], m["instrument_key"])
+                           for m in members], held, name=group["name"],
+                           active=group["status"] == "active", max_instruments=config.max_instruments,
+                           max_active=config.max_active, left_out=answer.left_out)  # fmt: skip
+        if plan.action == "stop":
+            await self._write(rt.store.stop_group, OWNER, group_id, plan.note, now)
+            for row in await self._write(rt.store.group_members, OWNER, group_id):
+                rt.owner_put(row)
+            log.info("list alert group %d stopped: its list was deleted", group_id)
+            brief = _group_brief(await self._write(rt.store.group, OWNER, group_id))
+            self._push(now, [{"id": m["id"], "version": m["version"], "status": "stopped",
+                              "status_reason": plan.note, "check": None, "fired_today": 0}
+                             for m in members], groups=[brief])  # fmt: skip
+            return brief
+        if plan.action == "freeze" and group["status_reason"] == plan.note:
+            return None  # already said
+        built, skipped = [], 0
+        for row in plan.add:
+            try:
+                built.append(_member(group, row, now))
+            except spec.SpecError:
+                skipped += 1  # a row the alerts cannot follow (an expired contract): left out
+        if group["status"] == "active" and built:
+            await self._claim_all([_probe(m, 0, "active") for m in built], deadline)
+        left = list(plan.left_out) + ([groups.LEFT_OUT_OTHER.format(n=quantity(skipped))]
+                                      if skipped else [])  # fmt: skip
+        frozen = plan.action == "freeze"
+        fit = groups.fit_check(config.max_instruments, config.max_active)
+
+        def write():
+            kept = group["synced_version"] if frozen else answer.version
+            done = rt.store.sync_group(
+                OWNER, group_id, now, add=built, remove=list(plan.remove), left_out=left if not frozen
+                else group["left_out"], covered=plan.covered - skipped, synced_version=kept,
+                fit=fit, note=plan.note)  # fmt: skip
+            return done, rt.store.group_members(OWNER, group_id)
+
+        done, rows = await self._write(write)
+        for alert_id in plan.remove:
+            rt.owner_drop(alert_id)
+        for row in rows:
+            if rt.alert(row["id"]) is None:
+                rt.owner_put(row)
+        if plan.ask_again_at is not None:
+            self._ask[group_id] = plan.ask_again_at
+        if plan.add or plan.remove:
+            log.info("list alert group %d followed its list: %d added, %d removed, %d released",
+                     group_id, len(built), len(plan.remove), len(plan.release))  # fmt: skip
+        brief = _group_brief(done)
+        self._push(now, removed=list(plan.remove), groups=[brief])
+        return brief
 
     # ---- reading -------------------------------------------------------------------------
     async def _state(self, message) -> dict[str, Any]:
@@ -342,6 +499,10 @@ class OwnerDesk:
         self._push(now, [brief])
 
     def _second(self, now: int) -> None:
+        self._group_step(now)
+        self._tick(now)
+
+    def _tick(self, now: int) -> None:
         """Every second: a new line under "Alerts" (the market opened or closed, the feed went
         down or came back) reaches the open apps, which then read the page again."""
         if self.rt.pusher is None:
@@ -358,11 +519,14 @@ class OwnerDesk:
             self._push(now, [{name: view[name] for name in BRIEF}])
         return view
 
-    def _push(self, now: int, alerts=(), *, removed=(), engine=None) -> None:
-        if self.rt.pusher is None:
+    def _push(self, now: int, alerts=(), *, removed=(), engine=None, groups=()) -> None:
+        if self.rt.pusher is None or not (alerts or removed or engine or groups):
             return
-        self.rt.push_state({"engine": engine or self.engine_line(now), "alerts": list(alerts),
-                            "removed": list(removed), "server_time": now})  # fmt: skip
+        data = {"engine": engine or self.engine_line(now), "alerts": list(alerts),
+                "removed": list(removed), "server_time": now}  # fmt: skip
+        if groups:
+            data["groups"] = list(groups)
+        self.rt.push_state(data)
 
     # ---- the page's lines ----------------------------------------------------------------
     def engine_line(self, now: int) -> dict[str, Any]:
@@ -513,13 +677,22 @@ class OwnerDesk:
     async def _claim(self, alert: spec.Alert, deadline: float) -> None:
         """The alert's key at the feed, in the mode it needs, before the alert is saved: full for
         a stock that closes by auction, whose print is known by its volume (X6i)."""
+        await self._claim_all([alert], deadline)
+
+    async def _claim_all(self, alerts: list[spec.Alert], deadline: float) -> None:
+        """The keys of several alerts at the feed in one request (a list's new members)."""
         rt = self.rt
         modes = rt.book.modes(full=rt.market.auction)
-        held = modes.get(alert.key)
-        need = "full" if rt.closes_by_auction(alert) else alert.cond.feed
-        if held in ("full", need):
+        added = False
+        for alert in alerts:
+            held = modes.get(alert.key)
+            need = "full" if rt.closes_by_auction(alert) else alert.cond.feed
+            if held in ("full", need):
+                continue
+            modes[alert.key] = "full" if "full" in (held, need) else need
+            added = True
+        if not added:
             return
-        modes[alert.key] = "full" if "full" in (held, need) else need
         left = deadline - asyncio.get_running_loop().time()
         try:
             async with asyncio.timeout_at(deadline):
@@ -565,6 +738,24 @@ def _fired_today(state, today: int) -> int:
 
 def _line(code: str, text: str, real_time: bool = False) -> dict[str, Any]:
     return {"code": code, "line": text, "real_time": real_time}
+
+
+def _group_brief(group: Mapping[str, Any]) -> dict[str, Any]:
+    """What the open apps need of a group after a sync: its card's status and words."""
+    return {name: group[name] for name in (
+        "id", "version", "status", "status_reason", "covered", "left_out", "synced_at")}  # fmt: skip
+
+
+def _member(group: Mapping[str, Any], row, now: int) -> dict[str, Any]:
+    """One list member as the alert the group makes of it: the group's condition on the row's
+    instrument (spec.check, so a row the alerts cannot follow raises SpecError)."""
+    made = spec.check({
+        "instrument_key": row.instrument_key, "symbol": row.symbol, "exchange": row.exchange,
+        "tick_size": row.tick_size, "expiry": row.expiry, "kind": group["kind"],
+        "params": group["params"], "frequency": group["frequency"],
+        "candle_min": group["candle_min"], "cooldown_s": group["cooldown_s"],
+        "note": group["note"]}, now)  # fmt: skip
+    return made | {"ends_at": group["ends_at"]}
 
 
 def _probe(fields: Mapping[str, Any], alert_id: int, status: str) -> spec.Alert:

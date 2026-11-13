@@ -54,7 +54,7 @@ HEALTH_PATH = "/health"
 OPS_PREFIX = "/v1/"
 OPS = frozenset(
     {"state", "create", "update", "delete", "events", "events_since", "prefs_get", "prefs_set",
-     "test", "screener_digest"}
+     "test", "screener_digest", "group_sync"}
 )  # fmt: skip
 #: The screener's digests come sealed under their own purpose (sudarshan/alerts/screener-digest/v1,
 #: cross-design X9): this op opens only with that key, the others only with the bridge's.

@@ -518,11 +518,14 @@ class MarketStore:
         self, principal: str, group_id: int, now: int, *, add: list[Mapping[str, Any]],
         remove: list[int], covered: int, left_out: list[str], synced_version: str | None,
         fit: Callable[[frozenset[str], int, list[str]], str | None] | None = None,
+        note: str | None = None,
     ) -> dict[str, Any]:  # fmt: skip
         """The list changed: ``add`` become members (each in the group's status), ``remove`` (alert
         ids of this group) go with their state, and what the group covers and when it was last in
         step are written, all in one transaction. The group's version stays: it counts the owner's
-        edits. A group that is not Active adds nothing to the limits and is not held to them."""
+        edits. A group that is not Active adds nothing to the limits and is not held to them.
+        ``note`` (when given) is the card's words for an Active group: frozen, or how far it
+        covers; an empty one clears them."""
         who = self._who(principal)
         with self._tx() as conn:
             row = _group_for_update(conn, who, group_id, None)
@@ -536,7 +539,9 @@ class MarketStore:
             _add_members(conn, who, group_id, add, now, status=row.status)
             conn.execute(update(alert_group).where(alert_group.c.id == group_id).values(
                 covered=covered, left_out=json.dumps(list(left_out)),
-                synced_version=synced_version, synced_at=now, updated_at=now))  # fmt: skip
+                synced_version=synced_version, synced_at=now, updated_at=now,
+                status_reason=note if note is not None and row.status == "active"
+                else row.status_reason))  # fmt: skip
         return self.group(principal, group_id)
 
     def group(self, principal: str, group_id: int) -> dict[str, Any] | None:
