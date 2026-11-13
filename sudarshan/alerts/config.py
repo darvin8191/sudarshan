@@ -96,7 +96,8 @@ class Settings:
     openalgo_url: str
     window: tuple[int, int]  # IST minutes after midnight: [open, close)
     always_on: bool
-    #: The files the deploy tool and the backup job record their notices in (notices.py).
+    #: The files the deploy tool, the backup job and the family service record their notices in
+    #: (notices.py). A file that is not there (no family service) is normal and silent.
     notice_spools: tuple[Path, ...] = DEFAULT_SPOOLS
     #: Where the deploy tool records the installed release (shown on the health page).
     deployed_tag_file: Path = DEPLOYED_TAG_FILE

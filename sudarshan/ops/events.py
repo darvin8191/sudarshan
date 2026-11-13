@@ -11,7 +11,7 @@ A line (every value is a string, as ``jq --arg`` writes them):
 
     v     "1", the format
     id    the event's id: letters, digits and . _ -, at most 120; a message is sent once per id
-    src   who recorded it: deploy or backup
+    src   who recorded it: deploy, backup, family or journal
     kind  what happened (KINDS)
     at    seconds since 1970 when it happened
     run   the events of one run share it; the owner is told one run's facts in one message
@@ -29,6 +29,7 @@ import json
 import math
 import os
 import re
+import stat
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -39,11 +40,38 @@ from .files import read_regular
 #: backup job runs as the sudarshan user and writes under its unit's state directory.
 DEPLOY_SPOOL = Path("/var/lib/sudarshan/events.jsonl")
 BACKUP_SPOOL = Path("/var/lib/sudarshan-backup/events.jsonl")
-DEFAULT_SPOOLS = (DEPLOY_SPOOL, BACKUP_SPOOL)
-#: What a notice can be about. Each has its words in ``sudarshan/alerts/notices.py``.
-KINDS = frozenset({"installed", "rolled_back", "unit_refused", "waiting", "backup_failed"})
+#: The family service's export folder is made by root (mode 2750, group sudarshan), so a spool in
+#: it is written 0640 (``record(..., file_mode=0o640)``) and read by the notice desk.
+FAMILY_SPOOL = Path("/var/lib/sudarshan-family-export/events.jsonl")
+#: The journal records the reports it has made here. It is read by the report desk (a later
+#: change), never by the notice desk: a report is not a notice.
+JOURNAL_SPOOL = Path("/var/lib/sudarshan-journal/events.jsonl")
+#: What the notice desk reads. A missing file is normal: the family service may not be on.
+DEFAULT_SPOOLS = (DEPLOY_SPOOL, BACKUP_SPOOL, FAMILY_SPOOL)
+#: What a notice can be about. Each has its words in ``sudarshan/alerts/notices.py``, except
+#: ``report`` (src journal): it carries the id of a report, its kind and the sha256 of its file and
+#: no text, and belongs to the report desk, not to the notice desk.
+KINDS = frozenset(
+    {
+        "installed",
+        "rolled_back",
+        "unit_refused",
+        "waiting",
+        "backup_failed",
+        "report",
+        "lockout",
+        "new_device",
+        "invite_used",
+        "member_removed",
+        "push_failing",
+        "bot_token_rejected",
+        "store_newer",
+        "family_check_failed",
+    }
+)
 FORMAT = "1"
-SOURCES = frozenset({"deploy", "backup"})
+SOURCES = frozenset({"deploy", "backup", "journal", "family"})
+DEFAULT_FILE_MODE = 0o600
 ID = re.compile(r"[A-Za-z0-9._-]{1,120}")
 KEEP_LINES = 200
 #: Compaction starts above this many lines (the deploy tool uses the same numbers).
@@ -114,13 +142,25 @@ def read_events(path: Path | str) -> list[Event]:
 
 
 def record(
-    path: Path | str, *, kind: str, event_id: str, at: float, run: str, src: str, **facts: str
+    path: Path | str,
+    *,
+    kind: str,
+    event_id: str,
+    at: float,
+    run: str,
+    src: str,
+    file_mode: int = DEFAULT_FILE_MODE,
+    **facts: str,
 ) -> bool:
     """Append one event to the file; True when it is there. Never raises.
 
     For the writers that run as the sudarshan user (the root deploy tool does the same in bash).
     An id already in the file is not written again. The file is created private (mode 600) and
     compacted to its newest ``KEEP_LINES`` lines once it has grown past ``COMPACT_ABOVE``.
+
+    ``file_mode`` is the mode a new file is created with (0o640 for a spool another account
+    reads); compaction keeps the file's mode. A folder is made only when it is missing (private,
+    0o700): one that exists is never changed.
     """
     path = Path(path)
     if kind not in KINDS or src not in SOURCES or not ID.fullmatch(event_id):
@@ -133,7 +173,7 @@ def record(
         path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         payload = (json.dumps(line, ensure_ascii=False, separators=(",", ":")) + "\n").encode()
         flags = os.O_RDWR | os.O_APPEND | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
-        fd = os.open(path, flags, 0o600)
+        fd = os.open(path, flags, file_mode)
         try:
             _append(fd, payload)
         finally:
@@ -174,7 +214,14 @@ def _compact(path: Path) -> None:
     if len(lines) <= COMPACT_ABOVE:
         return
     keep = "\n".join(lines[-KEEP_LINES:]) + "\n"
+    mode = stat.S_IMODE(path.stat().st_mode)
     tmp = path.with_name(f".{path.name}.new")
-    tmp.write_text(keep, encoding="utf-8")
-    tmp.chmod(0o600)
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0), mode)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(keep)
+        tmp.chmod(mode)  # the umask may have taken bits off the creation mode
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
     os.replace(tmp, path)

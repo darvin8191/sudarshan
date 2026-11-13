@@ -77,10 +77,31 @@ MINUTE_S = 60.0
 GIVE_WAY_S = 1.0  # LanePace: look again this soon when order alerts are waiting
 #: The kinds that are told at once, in market hours too. Everything else waits for the close.
 FAILURES = frozenset({"rolled_back", "unit_refused", "backup_failed"})
+#: The family service's notices (src family, family_check_failed from deploy) that are told at
+#: once too: a sign-in or a device the owner may need to act on, a removal, a refused bot token,
+#: a failed server check. The rest (invite_used, push_failing, store_newer) wait for the close.
+FAMILY_AT_ONCE = frozenset(
+    {"lockout", "new_device", "member_removed", "bot_token_rejected", "family_check_failed"}
+)
+AT_ONCE = FAILURES | FAMILY_AT_ONCE
 MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 UNIT = re.compile(r"sudarshan-[a-z0-9-]+\.(?:service|timer)")
 #: The order the facts of one run are told in.
-KIND_ORDER = ("installed", "rolled_back", "unit_refused", "backup_failed", "waiting")
+KIND_ORDER = (
+    "installed",
+    "rolled_back",
+    "unit_refused",
+    "backup_failed",
+    "waiting",
+    "lockout",
+    "new_device",
+    "member_removed",
+    "bot_token_rejected",
+    "family_check_failed",
+    "invite_used",
+    "push_failing",
+    "store_newer",
+)
 
 #: Why an install was undone, in the owner's words (the cause only; ``rolled_back`` adds the rest).
 ROLLBACK_CAUSES = {
@@ -279,6 +300,111 @@ def _waiting(event: Event, now: datetime) -> list[str]:
     ]
 
 
+#: Facts of the family kinds come from another account's file, so a value goes into a sentence
+#: only when it matches one of these narrow patterns; anything else is left out of the sentence.
+_DEVICE = re.compile(r"[A-Za-z0-9][A-Za-z0-9 .+()/\u00b7-]{0,39}")
+_ATTEMPTS = re.compile(r"[0-9]{1,2}")
+_EPOCH = re.compile(r"[0-9]{9,11}")
+_HANDLE = re.compile(r"[a-z0-9][a-z0-9._-]{0,31}")
+
+
+def _handle(event: Event) -> str:
+    """The member's handle when the owner turned naming on (``name_members`` = 1), else ''.
+    A display name is never used, and a handle that is not plain is not used either."""
+    handle = event.fact("handle")
+    if event.fact("name_members") == "1" and _HANDLE.fullmatch(handle):
+        return handle
+    return ""
+
+
+def _device(event: Event) -> str:
+    device = event.fact("device")
+    return device if _DEVICE.fullmatch(device) else ""
+
+
+def _lockout(event: Event, now: datetime) -> list[str]:
+    attempts = event.fact("attempts")
+    tries = (
+        f"{attempts} wrong attempts" if _ATTEMPTS.fullmatch(attempts) else "several wrong attempts"
+    )
+    device = _device(event)
+    until = event.fact("until")
+    who, handle = "A family sign-in was", _handle(event)
+    if handle:
+        who = f"The sign-in of family member {handle} was"
+    line = f"{who} locked after {tries}" + (f" ({device})" if device else "") + "."
+    if _EPOCH.fullmatch(until):
+        line += f" It opens again at {_when(float(until), now)}."
+    return [line]
+
+
+def _new_device(event: Event, now: datetime) -> list[str]:
+    handle = _handle(event)
+    who = f"Family member {handle}" if handle else "A family member"
+    where = f": {_device(event)}, " if _device(event) else " at "
+    return [
+        f"{who} signed in on a new phone{where}{_when(event.at, now)}. "
+        "Not you or them? Open Family and remove the device."
+    ]
+
+
+def _invite_used(event: Event, now: datetime) -> list[str]:
+    handle = _handle(event)
+    who = handle if handle else "the member"
+    return [f"A family invite was used: {who} is signed in, {_when(event.at, now)}."]
+
+
+def _member_removed(event: Event, now: datetime) -> list[str]:
+    handle = _handle(event)
+    who = f"Family member {handle} was" if handle else "A family member was"
+    return [f"{who} removed. Their phones are signed out and their Telegram unlinked."]
+
+
+def _push_failing(event: Event, now: datetime) -> list[str]:
+    handle = _handle(event)
+    whose = f"{handle}'s phone" if handle else "a family member's phone"
+    return [
+        f"Notifications to {whose} keep failing. "
+        "They can turn notifications off and on in Settings."
+    ]
+
+
+def _bot_token_rejected(event: Event, now: datetime) -> list[str]:
+    return [
+        "Telegram refused the family bot's token. Make a new token in BotFather "
+        "and give it to the server with the laptop .bat."
+    ]
+
+
+def _store_newer(event: Event, now: datetime) -> list[str]:
+    return [
+        "The family data was written by a newer release. "
+        "Install that release again; nothing was changed."
+    ]
+
+
+def _family_check_failed(event: Event, now: datetime) -> list[str]:
+    return [
+        "The family view stays off: the server check found something the family account can "
+        "read but must not, or a setting it cannot read. "
+        "Run the family set-up again from the laptop."
+    ]
+
+
+#: The words of the kinds that are made one event at a time. ``report`` has none on purpose: a
+#: report is not a notice, it belongs to the report desk.
+_FAMILY_WORDS = {
+    "lockout": _lockout,
+    "new_device": _new_device,
+    "invite_used": _invite_used,
+    "member_removed": _member_removed,
+    "push_failing": _push_failing,
+    "bot_token_rejected": _bot_token_rejected,
+    "store_newer": _store_newer,
+    "family_check_failed": _family_check_failed,
+}
+
+
 def run_lines(events: list[Event], now: datetime) -> list[str]:
     """The lines for the facts of one run, in KIND_ORDER."""
     lines: list[str] = []
@@ -292,21 +418,29 @@ def run_lines(events: list[Event], now: datetime) -> list[str]:
         if kind == "backup_failed":
             lines += [line for event in of_kind for line in _backup_failed(event)]
             continue
+        if kind in _FAMILY_WORDS:
+            lines += [line for event in of_kind for line in _FAMILY_WORDS[kind](event, now)]
+            continue
         make = {"installed": _installed, "rolled_back": _rolled_back, "waiting": _waiting}[kind]
         for event in of_kind:
             lines += make(event, now)
     return lines
 
 
-def compose(events: Sequence[Event], now: datetime) -> str:
-    """The Telegram message: the brand line, then each run's lines in the order they happened."""
+def batch_lines(events: Sequence[Event], now: datetime) -> list[str]:
+    """Each run's lines, in the order the runs happened. Empty when no event has words."""
     runs: dict[str, list[Event]] = {}
     for event in sorted(events, key=lambda e: (e.at, e.id)):
         runs.setdefault(event.run, []).append(event)
     lines: list[str] = []
     for run in runs.values():
         lines += run_lines(run, now)
-    return "\n".join([BRAND, *lines])
+    return list(dict.fromkeys(lines))  # the same sentence twice (two members) is said once
+
+
+def compose(events: Sequence[Event], now: datetime) -> str:
+    """The Telegram message: the brand line, then each run's lines in the order they happened."""
+    return "\n".join([BRAND, *batch_lines(events, now)])
 
 
 class Pace(Protocol):
@@ -450,6 +584,12 @@ class NoticeDesk:
             return POLL_S
         ids = [e.id for e in batch]
         try:
+            if not batch_lines(batch, self.clock()):
+                # No words for any of them: a message of the brand line alone is never sent.
+                self.store.settle_notices(ids, "dropped", now)
+                self.stats["dropped"] += len(ids)
+                log.info("%d server notice(s) had nothing to tell and were not sent", len(ids))
+                return 1.0
             if not self.owner_ready():
                 self.store.release_notices(ids)
                 return self._try_later("there is no OpenAlgo API key to send with yet")
@@ -474,6 +614,8 @@ class NoticeDesk:
         seen: dict[str, Event] = {}
         for spool in self.spools:
             for event in read_events(spool):
+                if event.kind not in KIND_ORDER:
+                    continue  # a report is the report desk's, not a notice
                 seen.setdefault(event.id, event)
         if not seen:
             return []
@@ -499,7 +641,7 @@ class NoticeDesk:
         if not events or not self._trading():
             self._held.clear()
             return events
-        urgent = {e.run for e in events if e.kind in FAILURES}
+        urgent = {e.run for e in events if e.kind in AT_ONCE}
         due = [e for e in events if e.run in urgent]
         held = {e.id for e in events if e.run not in urgent}
         if held and held != self._held:
