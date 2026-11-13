@@ -38,7 +38,7 @@ jobs:
 
   backend:
     runs-on: ubuntu-24.04-arm
-    timeout-minutes: 20
+    timeout-minutes: 30  # one job runs every service test: about 16 minutes on a busy runner
     steps:
       - uses: actions/checkout@v6
       - uses: astral-sh/setup-uv@v7
