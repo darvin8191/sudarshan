@@ -1498,3 +1498,51 @@ A list reads its view once, resolves its month-future rows with the same code as
 Tests: `tests/test_watchlists_members.py` (the readers) and `tests/test_watchlists_internal.py` (the
 seal, each kind of ref, futures, the versions, the switch, and the alerts service's own members
 client reading the route through a test app).
+
+## F16 - ranked lists on the phone
+
+A ranked list (`ranked:<futures|options>:<INDEX|STOCK|COMMODITY>:<category>`, from W22) opens like any list
+and is read from the `ranked` op alone, never from `view` (the page needs `state`, `made_at` and `read_at`, which
+`view` does not carry). `useRanked.ts` is its one reader, `RankedLine.tsx` what is said over the rows,
+`v2/ranked.ts` the pure words and rules, and `LiveList` and `WatchlistRows` take one optional `metrics` map
+(EXCHANGE:SYMBOL to the ranking's own figure) for each row's second line. With the switch off nothing here is
+reached: the page opens no ranked list and `ranked` is never asked.
+- **All lists.** The block "Ranked by Upstox" is grouped Futures then Options, each by Index, Stock and
+  Commodity, each row named by its category ("OI gainers") with "Ranked by Upstox · Index futures" under it. Only
+  what the server's catalogue offers is shown (MTF never is); a ref the page cannot place is listed after the
+  groups under its own name. A ranked list opened from the sheet gets a tab named as the server names it
+  ("Index options · OI gainers").
+- **Locked.** No Add, edit mode, move, sections or View, and the list menu follows `menuFor('ranked')`: nothing
+  that edits. "Alert on this list" stays, off, with F17's sentence. Rows show name, price and change from the feed
+  under F9's rules; the figure Upstox ranked on ("OI +12.4%", "Traded ₹1,320.9 cr", "Costs ₹4,350 to buy") is on
+  the second line, as read. A contract keeps its row id from the first read that showed it, so an open sheet stays
+  on its contract when a later read moves it.
+- **The age line.** "Ranked by Upstox · 2 min ago", from `made_at` ("just now", "6 min ago", "2 h ago"), redrawn
+  once a minute while the page is visible (and once a second only while the Refresh button counts its minute);
+  the redraw asks for nothing. A tap shows "Ranking made 10:41:05, read 10:43:10". After ten minutes the line takes
+  the stale style (a clock icon, bold, the age) and adds "Pull down to read it again". `unavailable` and `wait`
+  keep their old rows under the same line; `closed` shows the server's "Market closed · ranking from ..." as sent;
+  `signin` shows the server's sentence, no rows and a Sign in button to the Auto login page (the page every other
+  sign-in notice uses); the left-out sentence is the server's, taken from the end of `words`.
+- **When it reads, and only then.** Opening the list; coming back after more than 15 s away (`visibilitychange`
+  visible, with the time hidden measured on the phone); a pull down from the top of the page (80 px); and the
+  48 dp Refresh ranking button. A pull or the button inside 60 s of the last read (an `ok`, `stale` or `closed`
+  answer) makes no request and shows that read: the button is off and says "Read 20 s ago". An `unavailable`,
+  `wait` or `signin` answer is not held, so the next pull asks again (the server answers from its own cache or
+  its 3 s failure window). A page that is hidden asks for nothing: a read owed to a list opened while hidden is
+  made when the page is shown. There is no timer that asks for anything; thirty minutes of fake time with the list
+  open make one request in the test.
+- **Rows move only at a read.** The order is the answer's, never a tick's. After a read that changed the order the
+  line says for one minute "Ranking updated 10:44 · 1 new: NIFTY 26,050 PE" (three names at most, then "and N
+  more"; "the order changed" when only the order moved). A read of another size (see below) is not an update.
+- **The underlying chip.** One chip per underlying present (most contracts first, eight at most, each with its
+  count); a tap filters the rows on the phone and says "2 of the top 4 are NIFTY contracts", a second tap clears it.
+- **20 rows, 50 on request.** Owner decision 8: the first read is 20 rows; "Show the top 50" reads again with
+  `size` 50 (the server's cache already holds the 50-row page) and the chip says "of the top 50".
+- **Make a copy** (48 dp, F10's button and name dialog) sends one `copy {from: {ref, keys}}` with every key shown,
+  in the order shown and after the chip's filter, shows the server's words as sent and opens the new list.
+- **Tests.** `v2/ranked.test.ts` (the words and refs, hand-typed), `pages/Watchlist.ranked.test.tsx` (the groups,
+  opening reads once, locked, the figure, the age line and its stale style, thirty minutes with no request, the
+  15 s return rule, a hidden page, a pull inside a minute with "Read 20 s ago", rows that do not move on a tick,
+  "Ranking updated", each state's words and the Sign in button, the chip, Make a copy in the order shown, the 500 ms
+  guard, the switch off).
