@@ -163,3 +163,50 @@ def merge(
         "follow": [f for section_id in follow_in for f in follow_in[section_id]],
         "pref": _pref(own.get("pref")),
     }
+
+
+def merge_flag(
+    mark: int,
+    name: str,
+    rows: list,
+    lookup: Callable[[str, str], Any],
+    *,
+    loaded: bool = True,
+    isin: Callable[[Any], str | None] = lambda row: None,
+    pref: dict | None = None,
+    lines: list[str] | None = None,
+) -> dict:
+    """The ``View`` record of a flag list. ``rows`` are ``(exchange, symbol, note)`` already in
+    the order to show (newest flag first); the note only decides ``has_note`` and is never sent.
+    A flag list is read-only (``locked``), has no sections and no follow rows, and its version is
+    "0": nothing is written against it."""
+    out, missing = [], []
+    for exchange, symbol, note in rows:
+        row = lookup(exchange, symbol)
+        gone = loaded and row is None
+        if gone:
+            missing.append(key_of(exchange, symbol))
+        out.append({
+            "item": None,
+            "contract": contract(exchange, symbol, row, isin(row)),
+            "section_id": None,
+            "flag": mark,
+            "has_note": bool(note),
+            "expired": gone,
+            "metric": None,
+        })  # fmt: skip
+    return {
+        "ref": f"flag:{mark}",
+        "kind": "flag",
+        "name": name,
+        "version": "0",
+        "locked": True,
+        "as_of": None,
+        "lines": list(lines or []),
+        "total": len(out),
+        "missing": missing,
+        "sections": [],
+        "rows": out,
+        "follow": [],
+        "pref": _pref(pref),
+    }

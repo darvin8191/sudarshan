@@ -2,9 +2,14 @@
 
 OpenAlgo's list and its items are read in process through ``database/watchlist_db.py``, read only
 (its models and its scoped session, which the app's teardown also releases). The overlay comes from
-the store, in one read-only session and so one transaction: the list's guard row, sections, section
-membership, follow rows (rules, not resolved: resolving is W15), the flag of each symbol and
-whether it has a note (never the note), and the list's preference. The merge itself is
+the store, in one read-only session: the list's guard row, sections, section membership, follow
+rows (rules, not resolved: resolving is W15), the flag of each symbol and whether it has a note
+(never the note), and the list's preference. One session is not one transaction: pysqlite begins
+none for reads, so the rows after the guard row can come from a later commit than it. That is safe
+as written, because the guard's version is read first: a write in between makes the version the
+page holds older than the rows it shows, so its next write is a ``conflict`` and it reads again,
+never a write decided on a wrong merge. A reader that needs one snapshot must begin a transaction
+itself. The merge itself is
 ``view.merge`` (imported here as ``merge_view``, because this module's own ``view`` is the
 interface of ``refs/__init__``), which is pure. Nothing is written: a stale overlay (see the guard in ``sudarshan/watchlists/view.py``)
 is left for the next write that touches the list to prune.
@@ -49,8 +54,24 @@ def read_live(user: str, lid: int) -> dict | None:
         oa.db_session.remove()  # a read: nothing to commit, and the connection goes back at once
 
 
+def holding(user: str, exchange: str, symbol: str) -> list[tuple[int, str]]:
+    """``(id, name)`` of each of ``user``'s lists that holds the symbol, in list order. Built-in
+    lists are not here: they join the symbol sheet with W12."""
+    from database import watchlist_db as oa
+
+    try:
+        return [(r[0], r[1]) for r in oa.db_session.query(oa.Watchlist.id, oa.Watchlist.name)
+                .join(oa.WatchlistItem, oa.WatchlistItem.watchlist_id == oa.Watchlist.id)
+                .filter(oa.Watchlist.user_id == user, oa.WatchlistItem.symbol == symbol,
+                        oa.WatchlistItem.exchange == exchange)
+                .order_by(oa.Watchlist.id).all()]  # fmt: skip
+    finally:
+        oa.db_session.remove()
+
+
 def read_overlay(lid: int, items: list) -> dict:
-    """What the store holds for the list and for its symbols, in one read-only transaction."""
+    """What the store holds for the list and for its symbols, in one read-only session, the guard
+    row first (not one transaction; see the module's note on why that is safe)."""
     ref, out = f"list:{lid}", {"oa_created_at": None, "version": None}
     with engine.open_session() as s:
         guard = s.execute(select(schema.ListRow.oa_created_at, schema.ListRow.version).where(
@@ -66,10 +87,13 @@ def read_overlay(lid: int, items: list) -> dict:
                                .where(sym.principal == OWNER,
                                       tuple_(sym.exchange, sym.symbol).in_(pairs))).all()
         } if pairs else {}  # fmt: skip
+        pref = schema.PrefRow  # a preference is kept for a list that has no guard row yet (W10)
+        p = s.scalars(select(pref).where(pref.principal == OWNER, pref.ref == ref)).first()
+        out["pref"] = None if p is None else {"sort": p.sort, "descending": p.descending,
+                                              "basis": p.basis, "held": p.held}  # fmt: skip
         if guard is None:
             return out
-        sec, item, fol, pref = (schema.SectionRow, schema.SectionItemRow, schema.FollowRow,
-                                schema.PrefRow)  # fmt: skip
+        sec, item, fol = schema.SectionRow, schema.SectionItemRow, schema.FollowRow
         out["sections"] = [
             {"id": r.id, "name": r.name, "mark": r.mark, "position": r.position}
             for r in s.scalars(select(sec).where(sec.principal == OWNER, sec.list_id == lid))
@@ -85,9 +109,6 @@ def read_overlay(lid: int, items: list) -> dict:
              "strike_paise": r.strike_paise, "opt_right": r.opt_right}
             for r in s.scalars(select(fol).where(fol.principal == OWNER, fol.list_id == lid))
         ]  # fmt: skip
-        p = s.scalars(select(pref).where(pref.principal == OWNER, pref.ref == ref)).first()
-        out["pref"] = None if p is None else {"sort": p.sort, "descending": p.descending,
-                                              "basis": p.basis, "held": p.held}  # fmt: skip
     return out
 
 
@@ -98,7 +119,7 @@ def view(ident: str, user: str) -> dict:
     if live is None:
         raise OpError("gone", words.LIST_GONE)
     overlay = read_overlay(lid, live["items"])
-    m = master.Master()
+    m = master.shared()  # the process's one: a request never keeps a master of its own
     return merge_view.merge(live, overlay, m.row, loaded=m.loaded(), isin=m.isin)
 
 

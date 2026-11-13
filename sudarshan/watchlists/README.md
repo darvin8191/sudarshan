@@ -116,15 +116,30 @@ W-10). Vectors: `tests/vectors/ranked.json`.
 
 ## W11 - master access (`master.py`) and the exception's tests (`tests/test_exception.py`)
 
-`master.py` is the one reader of OpenAlgo's symbol master. It keeps one generation of reference
+`master.py` is the one reader of OpenAlgo's symbol master. `master.shared()` is the process's one
+`Master` (made lazily with `utils/lazy`), and every reader uses it: `refs/list.py`, `refs/flag.py`
+and the `symbol` and `expired_clear` ops (W9) now, and the built-in lists, follow rows, search and
+the members route (W12, W13, W15, W17, W23) when they come;
+no module builds a `Master` of its own (a test scans for one). It keeps one generation of reference
 maps (`search.Index`: the snapshot's own rows, never copies) tied to the snapshot it came from,
-builds it in slices that yield to the hub behind a keyed single flight, and drops it when the
-snapshot is replaced or lapses. Symbol, exchange and instrument-key lookups read OpenAlgo's snapshot
-and keep nothing. `tests/test_exception.py` holds the limits that let this feature live inside
-OpenAlgo: no thread, timer, executor, scheduler or event loop anywhere in `sudarshan/watchlists/`
-or the bridge (an AST scan, and a check that no thread starts for any op or master swap); one
-generation, the old rows freed with it; the derived maps under 15 MB on 120,000 rows (about 2 MB
-measured). Do not loosen these tests to land a feature.
+builds it in slices that yield to the hub behind a keyed single flight (the first caller builds,
+the others wait and share it, and the previous generation is let go before the next is built), and
+drops it the moment OpenAlgo frees the snapshot it replaced: the generation holds its snapshot by a
+weak reference whose callback empties the slot, so the old rows never outlive their snapshot
+waiting for the next request. A snapshot that lapses is dropped at the next call. A request in
+flight finishes with the maps it was handed and never builds or keeps a generation of its own.
+Symbol, exchange and instrument-key lookups read OpenAlgo's snapshot and keep nothing.
+`tests/test_exception.py` holds the limits that let this feature live inside OpenAlgo: no thread,
+timer, executor, scheduler or event loop anywhere in `sudarshan/watchlists/` or the bridge (an AST
+scan that follows every import and rename: threads of `threading` and of `utils.real_threading`
+and its hub calls, `_thread`, Flask-SocketIO's `start_background_task`, eventlet and gevent spawns
+and pools, executors, asyncio, schedulers, processes, signal timers, and the same names reached
+through `importlib`, `__import__` or `getattr`; and a check that no thread starts for any op or
+master swap); one generation for the process
+(two requests in flight through the bridge share one build and `generations_alive()` is 1 while
+both run; two greenlets under a real eventlet hub share one build that yields to the hub), the old
+rows freed with it when OpenAlgo publishes the next snapshot; the derived maps under 15 MB on
+120,000 rows (about 2 MB measured). Do not loosen these tests to land a feature.
 
 ## W1 - the store (`schema.py`, `engine.py`, `words/store.py`)
 
@@ -145,9 +160,11 @@ read. Tests: `tests/test_watchlists_store.py` (columns typed by hand from the de
 
 Creates `db/sudarshan_watchlists.db` and its tables from `schema.py` on an upgrade. Listed in
 `migrate_all.py`'s `MIGRATIONS` (beside the risk layer's line), deliberately not in
-`REQUIRED_MIGRATIONS`: an overlay of OpenAlgo's lists is not worth rolling a release back, and with
-the file missing the bridge answers in words while OpenAlgo's lists keep working. A failure still
-shows in the summary. Safe to run again: tables, columns and indexes only when missing, the `schema`
+`REQUIRED_MIGRATIONS`: an overlay of OpenAlgo's lists is not worth rolling a release back. With the
+file missing or older the app's store makes or completes it on first use (`engine.ready()` creates
+whatever is missing, as this script does), so a migration that did not run costs nothing; only a
+file the store cannot open, or one from a newer release, is answered in the owner's words, while
+OpenAlgo's lists keep working. A failure still shows in the summary. Safe to run again: tables, columns and indexes only when missing, the `schema`
 record only when absent or lower, nothing seeded, no row or value ever written over. `--status`
 opens the file read-only and prints the file, its schema, this release's schema and what is pending
 (the file's bytes are unchanged; SQLite may leave its own `-wal` and `-shm` beside a file in WAL
@@ -201,8 +218,12 @@ yet and fails when an op is neither handled nor listed, a handler has no row, or
 request is checked in this order: an OpenAlgo session (`session`, in the envelope, never a redirect),
 the owner (`owner_only` for any other session, reads included), CSRF on every POST, PUT, PATCH and
 DELETE (the blueprint is let go by the app's own check so it runs after the owner check; a lapsed
-token is `session`), and the shared limiter's per-class count (`busy`; it acts as the request
-arrives, so it may answer before the checks above). Then the switch `SUDARSHAN_WATCHLISTS_V2`, read at
+token is `session`), then the shared limiter's per-class count (`busy`). The limit wraps only what
+runs after those three checks, as the alerts and portfolio bridges place theirs, and it is counted
+per owner (the session's user), not per address: a request with no session, another sign-in's
+request and a change without its token are refused before they count, so nobody but the owner can
+spend his budget (behind nginx every request arrives from one address, so an address key would
+have let anyone who reached the paths keep his reads `busy`). Then the switch `SUDARSHAN_WATCHLISTS_V2`, read at
 each request and shipped `off` in `openalgo-env.conf`: off, `state` answers `{"enabled": false}`,
 every other op `off`, and nothing is opened or read. Then the record check (`engine.ready()`, its
 outcome kept five seconds in a `LockedTTLCache`, a newer or unreadable file answers `record` in the
@@ -211,7 +232,8 @@ otherwise; a route's id must equal the same field of the body, else `invalid` wi
 `state` answers the switch, `contract.LIMITS` and the five default flag names; versions and the push
 come with W5, favourites W10, ranked and alerts availability W22. Tests: `tests/test_watchlists_bridge.py`
 (in process, real CSRF, limiter and user table) and `test/test_gthread_watchlists.py` (a real gunicorn
-gthread worker: concurrent reads, the switch off, the limit under a barrier).
+gthread worker: concurrent reads, the switch off, the limit under a barrier, and requests without a
+session released together spending none of the owner's limit).
 
 ## W5 - the version, the push and the hook (`versions.py`, `bridge/push.py`, `store/prune.py`)
 
@@ -221,36 +243,68 @@ store's integers (`wl_meta.favourites_version`, `flags_version`; an absent row r
 the writes of favourites and flags (W9, W10) name the version they were decided on and a stale one
 is a `conflict`, across restarts. `versions.py` keeps an in-memory mirror of the two, loaded once
 from the store on first use and moved forward by a writer right after its commit
-(`advance_favourites` or `advance_flags` inside the write's transaction, one atomic update, then
-`committed(kind, n)`); a store that cannot be read leaves them out of the push and of `state`, never
-raises. A lists bump and the mirror are under a real lock (`utils.real_threading`) whose critical
-section is the increment or one comparison. `versions.bump(why, refs)` bumps the lists version once
-and emits `contract.EVENT_PUSH` (`{v, ref, why}` plus `favourites` and `flags` when known) to the
-room `sudarshan:watchlists:owner` through `extensions.emit_from_any_thread`; `ref` is the one ref
-changed, else `lists`. A push that cannot be sent is logged, never raised. `state` answers
-`versions`. An app joins the room with `contract.EVENT_JOIN` (an ack): the owner's session only, and
-refused in words with the switch off.
+(`advance_favourites` or `advance_flags` inside the write's transaction, one compare-and-set on the
+version the write was decided on, `versions.Stale` when it has moved, the delete prune alone
+advancing the favourites without one; then `committed(kind, n)`); a store that cannot be read leaves
+them out of the push and of `state`, never raises, and is left alone for five seconds
+(`STORE_RETRY_S`, a `LockedTTLCache`), so a run of pushes while it is broken opens it and logs the
+cause once instead of once per write. A lists bump and the mirror are under a real lock
+(`utils.real_threading`) whose critical section is the increment or one comparison.
+`versions.bump(why, refs)` bumps the lists version once and calls `versions.push`, which emits
+`contract.EVENT_PUSH` (`{v, ref, refs, why}` plus `favourites` and `flags` when known) to the room
+`sudarshan:watchlists:owner` through `extensions.emit_from_any_thread`. `refs` is every ref whose
+members the write changed, in the order named and each once: the target and then the source of a
+move, the old and the new flag list of a mark (the design's bump table), so a per-ref sync (lane F's
+`group_sync`, A5) knows every list to follow. It is empty when the change touched no list's members
+(a favourites write, a flag rename, a note alone) or when the hook could not tell which list it was
+(OpenAlgo's answer named none; the alerts' one-minute version check catches that). An open page
+reads its open list again on every push, and `state` or `lists` when `why` names them, whatever
+`refs` says. `ref` is the one ref changed, else `lists`: the phone reads `ref` today, so it stays in
+the push until lane F moves to `refs`, and is then dropped as a contract change of its own. A push
+that cannot be sent is logged, never raised. A write's answer (the `Done`, `CopyDone` and `TvDone`
+records) carries `lists_version`, the lists version its bump produced (the push's `v`), so the phone
+that wrote knows the push of its own write and skips it instead of reading again; a write that
+bumped nothing (a favourites or preference write, a write that changed nothing) answers without it,
+and a refusal answers the error alone (the page reads the list again after any refusal). `state`
+answers `versions`. An app joins the room with `contract.EVENT_JOIN` (an ack): the owner's session
+only, and refused in words with the switch off.
 
 The one rule: every write that changes what a list, a section or a flag list holds bumps the lists
 version once, after its transaction commits, from one of two sources and never both. (1) The hook:
 `bridge/push.py` registers one `after_request`; for a 2xx answer to a non-GET request of OpenAlgo's
 watchlist blueprint, or to the screener's internal watchlist route when its op is `watchlist_apply`
-and it found the list, it bumps and pushes. Every other request pays one membership test of
-`request.blueprint`. A delete also prunes that list's overlay (`store/prune.py`: list guard row,
-sections, section items, follow rows, preferences, and favourite slots naming `list:<id>`, with the
-favourites version raised in the same transaction) in one transaction in the overlay's own file; a
-clear drops section membership only, because /trading cannot see sections or follow rows. A store file that is missing (never
-created by a delete) or newer is skipped and logged, and a failure in the hook is logged and never
-changes OpenAlgo's answer. (2) The bridge's own ops: a handler marked `@ops.bumps(why, refs)` has
-the bridge bump and push after it returns, never after a refusal. The hook starts no thread, timer
-or loop. Tests: `tests/test_watchlists_push.py`; `test/test_gthread_watchlists.py` (twelve bumps at
-once, twelve writes through the hook under a real gthread worker).
+and it found the list, it bumps and pushes. An add of a symbol the list already holds changes
+nothing, and OpenAlgo answers it as a success with the row it had: a look before the add route runs
+(one read of the list's items, for that route only, through OpenAlgo's models) notes that row, and
+an answer naming the same row bumps nothing. Every other request pays one comparison of
+`request.endpoint` before and one membership test of `request.blueprint` after. A delete also
+prunes that list's overlay (`store/prune.py`: list guard row, sections, section items, follow rows,
+preferences, and favourite slots naming `list:<id>`, with the favourites version raised in the same
+transaction) in one transaction in the overlay's own file; a clear drops section membership only,
+because /trading cannot see sections or follow rows. The prune runs whatever the switch, and only
+the bump and the push wait for v2 to be on: the guard's `oa_created_at` has one-second resolution,
+so a list deleted while v2 is off and a new one given its id in the same second would otherwise
+inherit the overlay. A store file that is missing (never created by a delete, so a server that never
+turned v2 on never gets one) or newer is skipped and logged, and a failure in the hook is logged and
+never changes OpenAlgo's answer. (2) The bridge's own ops: a handler marked `@ops.bumps(why, refs)`
+has the bridge bump and push after it returns. After a refusal the bridge bumps only for what the
+refusal names as already committed (`OpError(code, words, changed=refs)`): a write that works in
+steps and commits part of its change before it answers `failed` or `conflict` (a copy that stopped
+part way, an arrange whose OpenAlgo order failed) still bumps the lists version once and pushes the
+refs it changed, so the tablet and the alerts' backstop learn of it; a refusal that committed
+nothing bumps nothing. A write that changed nothing this time (a copy that found every symbol
+already in the target) has its refs function return `ops.UNCHANGED`, and nothing is bumped or
+pushed. The hook starts no thread, timer or loop. Tests: `tests/test_watchlists_push.py`;
+`test/test_gthread_watchlists.py` (twelve bumps at once, twelve writes through the hook under a real
+gthread worker).
 
 ## W6 - own lists and view (`view.py`, `refs/`, `ops/view.py`, `words/view.py`)
 
 `view` (GET, class read) answers the `View` record of a `list:<id>` ref: OpenAlgo's list and the
 overlay merged. `ops/view.py` picks the reader by the ref's kind; `refs/` is found with
-`pkgutil.iter_modules` and each module names its `KIND` and gives `view(ident, user)` and
+`pkgutil.iter_modules` once, when the package is imported, and each reader is imported and kept on
+its first use (`utils/lazy`), so a `view` request lists and imports nothing and importing the
+bridge loads no reader. Each module names its `KIND` and gives `view(ident, user)` and
 `members(ident, user)` (the sealed members route's reader, documented in `refs/__init__.py` and
 implemented in W23; until then it raises `NotImplementedError` and nothing calls it). A kind that
 is not built (preset W12, flag W9, ranked W22), a ref that is not `<kind>:<id>` and a list id that
@@ -258,7 +312,10 @@ is not a whole number answer `invalid` with field `ref`; a list that does not ex
 user's) answers `gone`.
 
 `refs/list.py` reads OpenAlgo's list and items through `database/watchlist_db.py` (read only, its
-scoped session removed after the read) and the overlay in one read-only session of the store: the
+scoped session removed after the read) and the overlay in one read-only session of the store (one
+session, not one transaction: pysqlite begins none for reads, so the rows after the guard row can
+come from a later commit; the guard's version is read first, so a write in between can only make
+the page's next write a `conflict`, never one decided on a wrong merge): the
 `wl_list` guard row (version, `oa_created_at`), `wl_section`, `wl_section_item`, `wl_row` (follow
 rows as the rules they are, never resolved: resolving is W15), each symbol's flag and whether it has
 a note (a length test in the query, the note itself is never read) and `wl_pref`, or the defaults
@@ -283,7 +340,8 @@ writes nothing; the next write that touches the list prunes it (W7). A list with
 nothing to ignore and reads in OpenAlgo's order. A symbol's flag and note belong to the symbol and
 apply in every list.
 
-`version` is the list's stored `wl_list.version` as text ("0" until a write makes the row).
+`version` is the list's stored `wl_list.version` as text ("0" until a write makes the row, then
+the epoch milliseconds of that write, one more for each write after it).
 `Row.key` (`Contract.key`) is `EXCHANGE:SYMBOL`. A row's ISIN is read through `master.py` from the
 instrument key (cash rows carry it, null otherwise), and a symbol the master lacks is `expired`
 and named in `missing` (with the master not loaded nothing is called expired). Prices are never in
@@ -500,12 +558,16 @@ or already used in the list, letter case aside; `invalid` for a mark outside 0 t
 an UPDATE takes SQLite's write lock at once, while a read followed by a write fails under WAL as a
 lock error no retry clears when another writer committed in between (that was a 500 in the first
 write race). A list with no guard row is held as "0": the first write inserts the row (the primary
-key refuses a second one, told `conflict`) with `oa_created_at` as `view.created_key` gives it. A
-guard row whose `oa_created_at` differs belongs to a deleted list whose id was reused: a write
-holding "0" prunes that list's overlay (`prune.drop_overlay`: sections, items, follow rows,
-preference; favourite slots are the delete hook's) in the same transaction and starts a fresh row
-at the epoch milliseconds, which no client of the old overlay can hold; a write holding the old
-version is `conflict` and prunes nothing. A version no list can hold (not a number) is `conflict`.
+key refuses a second one, told `conflict`) with `oa_created_at` as `view.created_key` gives it and
+its version at the epoch milliseconds of that write, never at 1. The delete hook removes a deleted
+list's guard row and SQLite hands its id to the next list made, so a row counted from 1 again would
+let a screen still holding version 1 of the deleted list write to the new one (the claim reads
+`oa_created_at` from the live list, which is the new one's); no screen of an old list holds the new
+number. A guard row whose `oa_created_at` differs belongs to a deleted list whose id was reused and
+whose row was not removed: a write holding "0" prunes that list's overlay (`prune.drop_overlay`:
+sections, items, follow rows, preference; favourite slots are the delete hook's) in the same
+transaction and starts the fresh row the same way; a write holding the old version is `conflict`
+and prunes nothing. A version no list can hold (not a number) is `conflict`.
 
 A new section takes the next position (1 for the first). Removing a section deletes its section
 items and sets its follow rows to No section, so its symbols read under No section in `view`.
@@ -528,8 +590,9 @@ and go after the named ones; symbols it names that the list no longer has are le
 OpenAlgo's item order is written through `watchlist_db.reorder_items` in section-major order (No
 section first, then each section in the new order) so /trading shows the same order flat. If that
 second write fails the answer is `failed` ("Saved here, but the order on /trading is unchanged
-until you arrange the list again."); the overlay is saved, OpenAlgo's order is as it was, and the
-page shows the list again.
+until you arrange the list again."); the overlay is saved, OpenAlgo's order is as it was, the
+lists version is bumped and the list pushed all the same (the overlay changed), and the page shows
+the list again.
 
 `copy` takes `from` (`ref` of an own list, plus `keys` of `EXCHANGE:SYMBOL` or one `section_id`,
 never both) and `to` (an existing `list`, or a new `name`; `section_id` only for an existing list),
@@ -538,20 +601,41 @@ not a list, a symbol the source does not hold and the same list as source and ta
 with the field named. Everything that can be refused is refused first, in words with the numbers:
 a stale `version` when a section is to be set (`conflict`), 250 symbols a list holds ("Swing has
 room for 3 more symbols; this section has 8. Make room in Swing or pick another list."), 50 lists
-("You have 50 lists, the most there can be. Delete one to make a new list."), a name taken. A symbol
+("You have 50 lists, the most there can be. Delete one to make a new list."), a name taken (for a
+new list a count and one name are asked of OpenAlgo's table, never every list with its items, which
+took a fifth of a second on the hub with 49 full lists). A symbol
 already in the target is skipped, never an error (`skipped` in the answer); a move still takes it
 out of the source. Order of writes, one file at a time: OpenAlgo's `add_item` for each symbol (one
 commit each) or `create_watchlist` with all items in one call; then, only when a section is set, one
-overlay transaction that claims the target's version and writes the section rows; then for a move
-OpenAlgo's `remove_item` for each, and one overlay transaction dropping the source's section rows
-(its failure is logged, because rows for symbols the list no longer has are ignored). A failure
-between steps answers `failed` with what was done, and every state it leaves is valid: symbols
-OpenAlgo has and the overlay does not know read as No section. A move is a removal from the
-screener's point of view, which is intended.
+overlay transaction that claims the target's version and writes the section rows of the symbols
+that went in; then for a move OpenAlgo's `remove_item` for each, and one overlay transaction
+dropping the source's section rows (its failure is logged, because rows for symbols the list no
+longer has are ignored). A move is a removal from the screener's point of view, which is intended.
+
+The section rows are written after OpenAlgo's adds, not before as the design orders the two writes
+(overlay first). Decided in the review round of 13 Nov 2026, for this reason: before the adds, the
+rows would be for symbols the list does not hold yet. Every reader ignores such a row, and an
+arrange from another screen in that window rewrites the list's section rows from the symbols it can
+see, deleting them; the copy would then answer done while its symbols landed in No section. After
+the adds, the section step is a claim on the version like every other overlay write, so the only
+thing it can meet is a version another screen moved, and then the answer says so. A stale version
+is still refused before anything is written (a read of the version, before the adds), so a refusal
+that changed nothing is said as before. Every outcome leaves a valid state and its words are true
+whatever ran in between: all added and placed (done); all added but the section step met another
+screen's change (`conflict`: "Added 2 symbols to Long, in No section, because the list was changed
+on another screen meanwhile. The list is shown again.") or could not be written (`failed`, the
+same with "because the section could not be set"); the adds stopped part way (`failed`: how many of
+how many went in, where they are, that the rest were not added and, for a move, that nothing was
+taken out of the source; the ones that went in are placed in the section when the claim holds);
+nothing went in ("Nothing was added to Long. Try again."); a move's removal stopped part way (what
+stayed in the source). A move whose section step missed still takes the symbols out of the source,
+because they are in the target, and says "Moved". Whatever a refusal had committed is named
+(`OpError.changed`), so the lists version is bumped once and the changed lists are pushed (W5).
 
 Bumps (`ops.bumps`), once per write and never also by the hook, because these ops call OpenAlgo's
 functions in process: `arrange` with why `arranged` and `list:<id>`; `copy` and `move` with why
-`items` and the target's ref (a move adds the source's, so the push says `lists`).
+`items` and the target's ref (a move adds the source's: `refs` names both, target first, and `ref`
+says `lists`).
 
 The yield: writes of up to 250 items yield to the hub (`time.sleep(0)`) between OpenAlgo's per-item
 commits, because SQLite's file I/O does not yield under eventlet. It is never done inside an overlay
@@ -561,3 +645,105 @@ Tests: `tests/test_watchlists_arrange.py`, which includes the yield under a real
 subprocess (a second greenlet runs 240+ times during a 250-item copy, and not at all with the yield
 removed).
 
+## W9 - notes, flags and flag lists (`store/symbols.py`, `ops/marks.py`, `refs/flag.py`, `words/marks.py`)
+
+`wl_symbol` holds one flag (1 to 5) and one note (up to 500 characters, trimmed) per symbol across
+every list; a row with neither is deleted. `mark` (PUT, `EXCHANGE:SYMBOL`) names `wl_symbol.version`, an
+integer counter, as its version (absent or null: the symbol has no row), `flags` (rename) and
+`expired_clear` name `wl_meta.flags_version`; a stale one is `conflict` ("Changed on another screen. The list is shown
+again.") and changes nothing. Each is a compare-and-set in SQL and the transaction's first statement,
+a guarded UPDATE that changes nothing but takes SQLite's write lock (W7's reason), so the old row
+read after it cannot have moved; nothing reads a version and writes it back. A field a `mark` leaves
+out stays as it is and `null` clears it; the answer's `version` is the new counter as text (null
+when the row went). The counter is not a time: two writes in one millisecond or a clock stepped
+back cannot give equal versions. Schema 1 had not shipped in a release, so `wl_symbol.version`
+(integer, default 1) was added to `schema.py` and so to the migration's create path, with no new
+step; `updated_at` stays as the time of the write. `flag_at` moves only
+when the flag changes, so re-sending a flag keeps its place in the flag list.
+
+`flags` renames the five flags (1 to 24 letters, each named once). Absent rows read as Watch,
+Breakout, Results, Long term and Avoid and are never written as if chosen: a name that equals its
+default deletes the row. It moves `flags_version` with `versions.advance_flags(s, held)`, itself the
+compare-and-set (the UPDATE matches only the held version, a row count of 0 raises `Stale`, told
+`conflict`; absent reads as 0 and a first write inserts the row), as the transaction's first
+statement, then `versions.committed`. `state` now reads the names from the store (the defaults
+when it cannot).
+
+`flag:<n>` (`refs/flag.py`, found by discovery, so `view` answers it) is every `wl_symbol` row with
+that flag, newest flag first, `locked`, version "0", no sections or follow rows, one line of words,
+the flag's name as its name. It reads `wl_symbol` alone, so a symbol keeps its place after it has
+left every list; `view.merge_flag` is the pure merge. Only `has_note` is ever sent, never a note:
+notes and flags are the owner's alone, and the sealed members route (W23) must not return one
+either (`members` is still W23's).
+
+Expired is decided at read against the master (a loaded master that lacks the contract; with it not
+loaded nothing is called expired), in a list's rows, a flag list's rows and `symbol`. The contract
+has an op for the clear, `expired_clear` (POST, `version` the flags version): it deletes the row of
+every contract the master lacks, and only those, then moves the flags version once. With the master
+not loaded it answers `failed` and clears nothing; with nothing expired it says so and moves
+nothing.
+
+`symbol` answers the flag, its name, the note and when it was written, `expired`, the version
+`mark` must name, and `lists`: the owner's own lists holding it (`refs/list.holding`, read only). The
+built-in lists (W12) join `lists` as more `Held` records after the own ones.
+
+Bumps (`ops.bumps`): `mark` bumps once with why `flags`, naming `flag:<old>` and `flag:<new>` only
+when the flag changed (a note alone changes no membership, so the push says `lists`); `flags` bumps
+once with why `flags` and no refs; `expired_clear` once, naming the flag lists it removed rows from.
+The refs reach the push's `refs` (the old flag list first), so a per-ref sync follows each one. A
+refused write bumps nothing, and so does a write that changes nothing (`ops.UNCHANGED`, review L3):
+a `mark` that sets the flag and the note the symbol already has writes nothing and keeps the
+symbol's version, and a clear that finds nothing expired rolls back. Each of these ops is one
+transaction in one file, so none can commit part of its change (the partial-write rule of W5 never
+applies). Tests: `tests/test_watchlists_marks.py`;
+`test/test_gthread_watchlists.py` (eight threads marking one symbol on one version: one wins, seven
+`conflict`, including the first write to a symbol; eight renames on one flags version).
+
+## W10 - favourites, preferences and lists (`store/favourites.py`, `store/prefs.py`, `ops/favourites.py`, `ops/prefs.py`, `ops/lists.py`, `words/favourites.py`)
+
+`favourites` (PUT) replaces the seven slots as a whole: at most seven entries, each a `slot` and a
+`ref` (`list:<id>`, `preset:<id>`, `ranked:<source>:<asset>:<category>`, `flag:<n>`), on the
+favourites version `state` or `lists` answered. A list, preset or flag that does not exist is `gone`,
+a ref that cannot name anything (a ranking that is not offered, flag 6, text) is `invalid` with
+field `slots`, an eighth slot is `limit` ("Seven favourites at most. Remove one first."), and a ref
+or a slot twice is `invalid`. The transaction's first statement is the version's compare-and-set
+(`store.favourites.claim`: an UPDATE guarded on the held number, then `versions.advance_favourites`),
+so a stale version is `conflict` and changes nothing; after the commit the mirror moves
+(`versions.committed`) and one push goes out. It changes no list's membership, so the lists version
+does not move: `versions.push(why)` is the push without the bump (`versions.bump` now calls it), and
+carries the new favourites version and no `refs` (no list's members changed). Each W10 write is one
+transaction in one file, so the partial-write rule of W5 has nothing to name in it; a favourites
+write always moves the favourites version (its claim), so it is never a write that changed nothing. `pref` (PUT `/prefs/<ref>`) writes only the fields sent, on the
+server, in one UPDATE (a ref with no row gets one, the rest at the table's defaults); it moves no
+version and pushes nothing, and a ref with no row reads as the defaults and is never written as if
+chosen. `refs/list.py` now reads a list's preference even when the overlay has no guard row for it
+yet (before, a preference written before any section would not have shown in `view`).
+
+The suggestion: with no slot stored and the favourites version never moved (0), `state` and `lists`
+offer the first seven own lists in OpenAlgo's order, computed at read and never stored. Once the
+owner has written (even an empty set) the version is above 0 and nothing is suggested. A slot that
+names a deleted list, or a preset or flag that does not exist, is dropped at read and its row is
+left for the delete hook or the next write.
+
+`lists` answers the All lists sheet: own lists in OpenAlgo's order with `count` (symbols plus the
+follow rows of a list whose overlay guard matches) and `room`; `presets` (empty until W12 builds
+the built-in lists, so no `preset:<id>` exists yet); `ranked` (the 44 entries of
+`ranked.catalogue()`, locked; whether Upstox is signed in today is W22's, in `state`); the five
+`flags` with the count of symbols carrying each, read from `wl_symbol` directly so this change does
+not wait for W9, and a renamed flag's name from `wl_flag`; and the favourites resolved. Lists a
+screen feeds are not marked here: the screener is a service of its own, its state is not readable
+in this process, and the page keeps marking them from the screener's state as it does today.
+Tests: `tests/test_watchlists_favourites.py`; `test/test_gthread_watchlists.py` (eight threads on
+one favourites version: one wins, seven `conflict`, one push for each win).
+
+Two decisions from the mid-point review. (1) The favourites advance is a compare-and-set:
+`versions.advance_favourites(s, held)` guards its UPDATE on the held number, checks the row count
+and raises `versions.Stale` (the op answers `conflict`); only the delete prune, which cannot be
+refused, calls it without one. W9's `advance_flags(s, held)` is the same compare-and-set: the two
+branches each made one, and the merge left one exception (`versions.Stale`) and one implementation
+(`versions._advance`, with W9's guard that a concurrent first insert is told `Stale`). (2) A `list:`
+favourite keeps the list's `created_at` in `wl_favourite.oa_created_at`, written as
+`view.created_key` gives it, and a slot whose value differs from the live list's is dropped at read,
+so a favourite never follows another list that was handed a deleted list's id. The column is part
+of schema 1 itself (added in `schema.py`, so the W2 migration's create path makes it) because schema
+1 has not shipped in any release; there is no upgrade step for it.

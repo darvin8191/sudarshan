@@ -9,10 +9,14 @@ writer can invalidate (a read followed by a write fails there as a lock error th
 clears), and the writers of one list are serialised from that statement to the commit. Nothing
 here reads the version and then writes it back.
 
-A guard row whose ``oa_created_at`` differs from the live list's belongs to a deleted list whose
-id SQLite handed out again: the first write after that prunes the stale overlay in the same
-transaction and starts a fresh row at the epoch milliseconds, which no client of the old overlay
-can hold. The functions run inside the caller's ``with open_session() as s, s.begin():``.
+Every guard row starts at the epoch milliseconds of the write that makes it, never at 1. SQLite
+hands a deleted list's id to the next list made, and the delete hook removes the old guard row; a
+row counted from 1 again would let a screen still holding version 1 of the deleted list pass the
+claim on the new one (``created`` is read from the live list at the write, so it matches). A guard
+row whose ``oa_created_at`` differs from the live list's belongs to such a deleted list whose row
+the hook did not remove: the first write prunes the stale overlay in the same transaction and starts
+the fresh row the same way. No client of an old overlay can hold the new number. The functions run
+inside the caller's ``with open_session() as s, s.begin():``.
 """
 
 from __future__ import annotations
@@ -37,8 +41,9 @@ def now_ms() -> int:
 
 def claim(s, list_id: int, created: str, held: int) -> int:
     """Check ``held`` against the list's version and advance it, as one step; the new version.
-    ``held`` 0 is a list with no guard row. Raises ``Stale`` (the caller's transaction rolls
-    back, so a refused claim changes nothing, a prune included)."""
+    ``held`` 0 is a list with no guard row, and the row it makes starts at the epoch milliseconds.
+    Raises ``Stale`` (the caller's transaction rolls back, so a refused claim changes nothing, a
+    prune included)."""
     guard = schema.ListRow
     at = now_ms()
     done = s.execute(update(guard).where(
@@ -50,18 +55,16 @@ def claim(s, list_id: int, created: str, held: int) -> int:
         raise Stale
     row = s.execute(select(guard.oa_created_at).where(
         guard.principal == OWNER, guard.list_id == list_id)).first()  # fmt: skip
-    first = 1
     if row is not None:
         if row[0] == created:
             raise Stale  # the row exists, so "0" is not what the list holds
         prune.drop_overlay(s, list_id)  # a deleted list's id, reused
-        first = at
     try:
-        s.add(guard(list_id=list_id, oa_created_at=created, version=first, updated_at=at))
+        s.add(guard(list_id=list_id, oa_created_at=created, version=at, updated_at=at))
         s.flush()
     except IntegrityError:
         raise Stale from None  # another first write made the row between the two statements
-    return first
+    return at
 
 
 def sections_of(s, list_id: int) -> list:

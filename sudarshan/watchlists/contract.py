@@ -23,7 +23,10 @@ API_PREFIX = "/sudarshan/watchlists/api"
 INTERNAL_PREFIX = "/sudarshan/watchlists/internal"
 SWITCH_ENV = "SUDARSHAN_WATCHLISTS_V2"
 DB_ENV = "SUDARSHAN_WATCHLISTS_DB"
-#: Every open app of the owner joins it with ``EVENT_JOIN``; the push is ``{v, ref, why}``.
+#: Every open app of the owner joins it with ``EVENT_JOIN``; the push is ``{v, ref, refs, why}``:
+#: ``refs`` is every ref whose members the change touched (none for a favourites write, a flag
+#: rename or a note), ``ref`` the one of them or ``lists`` (kept for the phone until it reads
+#: ``refs``).
 ROOM = "sudarshan:watchlists:owner"
 EVENT_PUSH = "sudarshan_watchlists"
 EVENT_JOIN = "sudarshan_watchlists_join"
@@ -160,13 +163,17 @@ RECORDS = {
     "TvPreview": "hash:string, sections:int, symbols:int, matched:int, follow:int, "
     "left_out:Cut[], lists:TvSection[], words:string[]",
     "TvExport": "text:string, filename:string, left_out:Cut[], words:string[]",
-    "Done": "version:string|null, id:int|null, words:string|null",
-    "CopyDone": "list:int, added:int, skipped:int, version:string|null, words:string|null",
-    "TvDone": "lists:int[], added:int, version:string|null, words:string",
+    # A write's answer: ``lists_version`` is the lists version its bump produced (the ``v`` of the
+    # push it sent), so the phone knows the push of its own write and skips it; absent when the
+    # write bumped nothing (it changed no list's members, or nothing at all).
+    "Done": "version:string|null, id:int|null, words:string|null, lists_version?:string",
+    "CopyDone": "list:int, added:int, skipped:int, version:string|null, words:string|null, "
+    "lists_version?:string",
+    "TvDone": "lists:int[], added:int, version:string|null, words:string, lists_version?:string",
     "ArrangeItem": "exchange:string, symbol:string, section_id:int|null",
     "CopySource": "ref:string, section_id?:int, keys?:string[]",
     "CopyTarget": "list?:int, name?:string, section_id?:int|null",
-    "Push": "v:string, ref:string, why:Why, favourites?:int, flags?:int",
+    "Push": "v:string, ref:string, refs:string[], why:Why, favourites?:int, flags?:int",
     "State": "enabled:bool, versions?:Versions, limits?:Limits, flag_names?:FlagName[], "
     "favourites?:Favourite[], ranked?:Availability, alerts?:Availability",
     "Lists": "version:string, own:Entry[], presets:Entry[], ranked:Entry[], flags:Entry[], "

@@ -78,6 +78,9 @@ def screener_stand_in(found: bool = True) -> Blueprint:
 
 
 def build(status: int = 200, found: bool = True):
+    from database import watchlist_db as oa
+
+    oa.Base.metadata.create_all(oa.engine)  # the add's look before it reads OpenAlgo's lists
     reset_users()
     app = make_app(echo_handlers())
     app.register_blueprint(stand_in(status))
@@ -115,12 +118,27 @@ def test_the_lists_version_reads_boot_and_count_and_the_other_two_are_the_stores
     assert first["favourites"] == 0 and first["flags"] == 0  # an absent row reads as 0
     assert stored("favourites_version") is None
     with engine.open_session() as s, s.begin():
-        n = versions.advance_flags(s)
+        n = versions.advance_flags(s, 0)
     versions.committed("flags", n)
     after = versions.snapshot()
     assert after["lists"] == first["lists"] and emitted == []
     assert after["flags"] == 1 and after["favourites"] == 0 and stored("flags_version") == "1"
+    for held in (0, 5):  # a stale or impossible version is refused and moves nothing
+        with pytest.raises(versions.Stale), engine.open_session() as s, s.begin():
+            versions.advance_flags(s, held)
+    assert stored("flags_version") == "1"
     assert versions.bump("items", ["list:1"]) != first["lists"]
+
+
+def test_a_favourites_advance_on_a_held_version_refuses_a_stale_one_and_changes_nothing():
+    engine.ready()
+    with engine.open_session() as s, s.begin():
+        assert versions.advance_favourites(s, 0) == 1  # no row yet: 0 is what it holds
+        assert versions.advance_favourites(s, 1) == 2
+    for held in (0, 1, 3):
+        with engine.open_session() as s, pytest.raises(versions.Stale), s.begin():
+            versions.advance_favourites(s, held)
+    assert stored("favourites_version") == "2"
 
 
 def test_a_writer_adds_one_in_its_own_transaction_and_a_rollback_adds_nothing():
@@ -163,15 +181,51 @@ def test_the_mirror_only_moves_forward_and_a_late_load_cannot_undo_a_commit():
     assert versions.flags() == 5
 
 
+def read_state():
+    """The state op called as the bridge calls it, inside a request (it names the session's user
+    for the favourites) and over OpenAlgo's own lists."""
+    from flask import Flask
+
+    from database import watchlist_db as oa
+
+    oa.Base.metadata.create_all(oa.engine)
+    with Flask("state-for-tests").test_request_context():
+        return state_ops.state({})
+
+
 def test_a_store_that_cannot_be_read_leaves_the_two_out_and_never_raises(emitted, store):
     assert not store.exists()
     assert versions.snapshot() == {"lists": versions.read()}
     versions.bump("items", ["list:1"])
-    assert set(emitted[-1][1]) == {"v", "ref", "why"}
-    assert "versions" not in state_ops.state({})
+    assert set(emitted[-1][1]) == {"v", "ref", "refs", "why"}
+    assert "versions" not in read_state()
     engine.ready()
     assert set(versions.snapshot()) == {"lists", "favourites", "flags"}
-    assert state_ops.state({})["versions"] == versions.snapshot()
+    assert read_state()["versions"] == versions.snapshot()
+
+
+def test_an_unreadable_store_is_opened_and_logged_once_for_a_run_of_pushes(
+    emitted, store, monkeypatch, caplog
+):
+    """Review L6: every OpenAlgo watchlist write pushes and each push loaded the mirror, so a
+    broken store was opened and logged once per write. It is left alone for a few seconds."""
+    from utils.thread_safe_cache import LockedTTLCache
+
+    store.write_bytes(b"this is not a database file")
+    now = [1000.0]
+    memo = LockedTTLCache(maxsize=1, ttl=versions.STORE_RETRY_S, timer=lambda: now[0])
+    monkeypatch.setattr(versions, "_unreadable", memo)
+    looks, real = [], engine.ready
+    monkeypatch.setattr(engine, "ready", lambda: looks.append(1) or real())
+    with caplog.at_level(logging.ERROR):
+        for _ in range(3):
+            versions.bump("items", ["list:1"])
+    assert len(looks) == 1
+    assert sum("could not be opened" in m for m in caplog.messages) == 1
+    assert [set(data) for _, data, _ in emitted] == [{"v", "ref", "refs", "why"}] * 3
+    now[0] += versions.STORE_RETRY_S + 1
+    versions.bump("items", ["list:1"])
+    assert len(looks) == 2  # looked again once the few seconds had passed
 
 
 def test_the_boot_part_changes_at_each_process_start():
@@ -193,9 +247,27 @@ def test_a_bump_pushes_v_ref_why_and_the_other_versions_to_the_owners_room(emitt
     ((event, data, kw),) = emitted
     assert event == contract.EVENT_PUSH == "sudarshan_watchlists"
     assert kw == {"to": contract.ROOM, "namespace": "/"}
-    assert data == {"v": v, "ref": "list:5", "why": "items", "favourites": 0, "flags": 0}
+    assert data == {"v": v, "ref": "list:5", "refs": ["list:5"], "why": "items", "favourites": 0,
+                    "flags": 0}  # fmt: skip
     versions.bump("lists", ["list:1", "list:2"])
-    assert emitted[-1][1]["ref"] == "lists"
+    assert (emitted[-1][1]["ref"], emitted[-1][1]["refs"]) == ("lists", ["list:1", "list:2"])
+
+
+def test_the_push_names_every_ref_once_in_order_and_may_name_none(emitted):
+    """``refs`` carries every ref a write changed (a move's two lists, a mark's two flag lists),
+    which the phone's per-ref sync needs; ``ref`` collapses them and stays for the phone."""
+    engine.ready()
+    versions.bump("flags", ["flag:2", "flag:4", "flag:2"])
+    versions.bump("items", [])
+    first, second = emitted[0][1], emitted[1][1]
+    assert (first["ref"], first["refs"]) == ("lists", ["flag:2", "flag:4"])
+    assert (second["ref"], second["refs"]) == ("lists", [])
+    before = versions.read()
+    versions.push("favourites")  # a push alone never moves the lists version
+    assert versions.read() == before and emitted[-1][1]["v"] == before
+    assert emitted[-1][1]["refs"] == [] and emitted[-1][1]["why"] == "favourites"
+    push_fields = {f.name for f in contract.record("Push")}
+    assert {"v", "ref", "refs", "why"} <= push_fields and set(first) <= push_fields
 
 
 def test_a_push_that_cannot_be_sent_is_logged_and_the_bump_stands(monkeypatch, caplog):
@@ -218,7 +290,7 @@ def test_state_answers_the_three_versions():
     got = client.get(contract.API_PREFIX + "/state").get_json()["data"]["versions"]
     assert got == versions.snapshot() and set(got) == {"lists", "favourites", "flags"}
     assert got["favourites"] == 0 and got["flags"] == 0
-    assert state_ops.state({})["versions"] == versions.snapshot()
+    assert read_state()["versions"] == versions.snapshot()
 
 
 # -- the hook ----------------------------------------------------------------------------------
@@ -232,6 +304,37 @@ def test_each_openalgo_write_bumps_once_and_emits_once(emitted, method, path, wh
     assert int(versions.read("lists").split(":")[1]) == int(before.split(":")[1]) + 1
     ((event, data, _),) = emitted
     assert event == contract.EVENT_PUSH and (data["why"], data["ref"]) == (why, ref)
+    assert data["refs"] == [ref]
+
+
+def test_an_add_of_a_symbol_the_list_already_holds_bumps_nothing(emitted):
+    """OpenAlgo answers an add of a symbol already in the list as a success with the row it had
+    (review L3): nothing changed, so nothing is bumped or pushed; a new symbol is, once."""
+    import blueprints.watchlist as real
+    from database import watchlist_db as oa
+
+    oa.Base.metadata.create_all(oa.engine)
+    oa.db_session.query(oa.WatchlistItem).delete()
+    oa.db_session.query(oa.Watchlist).delete()
+    oa.db_session.commit()
+    made = oa.create_watchlist(OWNER, "Swing", [{"symbol": "INFY", "exchange": "NSE"}])
+    oa.db_session.remove()
+    reset_users()
+    app = make_app(echo_handlers())
+    app.register_blueprint(real.watchlist_bp)
+    client = app.test_client()
+    login_session(client)
+    headers = csrf_headers(client)
+    url = f"/watchlist/api/lists/{made['id']}/items"
+    before = versions.read()
+    for body in ({"symbol": "INFY", "exchange": "NSE"}, {"symbol": " infy ", "exchange": "nse"}):
+        r = client.post(url, json=body, headers=headers)
+        assert r.status_code == 201 and r.get_json()["status"] == "success"  # OpenAlgo's answer
+    assert versions.read() == before and emitted == []
+    r = client.post(url, json={"symbol": "TCS", "exchange": "NSE"}, headers=headers)
+    assert r.status_code == 201
+    ((_, data, _),) = emitted
+    assert (data["why"], data["refs"]) == ("items", [f"list:{made['id']}"])
 
 
 def test_a_get_bumps_nothing(emitted):
@@ -264,19 +367,40 @@ def test_the_screeners_apply_bumps_once_and_its_read_and_a_miss_bump_nothing(emi
     assert emitted == [] and versions.read("lists") == base
     assert client.post("/internal/watchlist?op=watchlist_apply", headers=headers).status_code == 200
     ((_, data, _),) = emitted
-    assert (data["why"], data["ref"]) == ("lists", "list:4")
+    assert (data["why"], data["ref"], data["refs"]) == ("lists", "list:4", ["list:4"])
     app2, client2, headers2 = build(found=False)
     emitted.clear()
     client2.post("/internal/watchlist?op=watchlist_apply", headers=headers2)
     assert emitted == []
 
 
-def test_the_hook_does_nothing_with_the_switch_off(emitted, monkeypatch, store):
+def test_the_hook_pushes_nothing_with_the_switch_off_and_makes_no_store(
+    emitted, monkeypatch, store
+):
     _, client, headers = build()
     monkeypatch.setenv(contract.SWITCH_ENV, "off")
     before = versions.snapshot()
-    assert send(client, headers, "DELETE", "/watchlist/api/lists/7").status_code == 200
+    for method, path, _, _ in WRITES:
+        assert send(client, headers, method, path).status_code == 200
     assert versions.snapshot() == before and emitted == [] and not store.exists()
+
+
+def test_with_the_switch_off_a_delete_and_a_clear_still_prune_the_overlay(emitted, monkeypatch):
+    """Review L1: the guard's ``created_at`` has one-second resolution, so a list deleted while v2
+    is off and a new one given its id in the same second would inherit the overlay. The prune is
+    the overlay following OpenAlgo's own change, whatever the switch; only the push waits."""
+    _, client, headers = build()
+    seed()
+    monkeypatch.setenv(contract.SWITCH_ENV, "off")
+    lists = versions.read()
+    assert send(client, headers, "DELETE", "/watchlist/api/lists/7").status_code == 200
+    assert send(client, headers, "POST", "/watchlist/api/lists/8/clear").status_code == 200
+    assert counts() == {"wl_list": 1, "wl_section": 1, "wl_section_item": 0, "wl_row": 1,
+                        "wl_pref": 1, "wl_favourite": 2}  # fmt: skip
+    with engine.open_session() as s:
+        assert s.scalars(select(schema.ListRow)).one().list_id == 8  # list 8 keeps its sections
+    assert stored("favourites_version") == "1"  # list 7's slot went, in the same transaction
+    assert versions.read() == lists and emitted == []  # and nobody is told while it is off
 
 
 @pytest.mark.parametrize("broken", ["bump", "prune"])
@@ -392,10 +516,61 @@ def test_an_op_that_declares_a_bump_bumps_once_after_it_returns_and_a_refusal_no
     body = {"list": 3, "name": "ok", "version": "v"}
     assert client.open(path, method=op.method, json=body, headers=headers).status_code == 200
     ((_, data, _),) = emitted
-    assert (data["why"], data["ref"]) == ("sections", "list:3")
+    assert (data["why"], data["ref"], data["refs"]) == ("sections", "list:3", ["list:3"])
     body["name"] = "no"
     assert client.open(path, method=op.method, json=body, headers=headers).status_code == 409
     assert len(emitted) == 1
+
+
+def test_a_refusal_after_part_of_the_change_committed_bumps_once_for_what_it_names(emitted):
+    """A write that commits a step and then refuses names what it committed (review M1): the
+    bridge bumps the lists version once and pushes those refs before it answers the refusal."""
+    reset_users()
+
+    @ops.bumps("items", lambda args, data: [f"list:{args['list']}"])
+    def half(args):
+        if args["name"] == "nothing":
+            raise ops.OpError("failed", "Nothing was added to Swing. Try again.")
+        raise ops.OpError("conflict", "Added 2 symbols ...", changed=["list:3", "list:4", "list:3"])
+
+    handlers = echo_handlers()
+    handlers["section_add"] = half
+    client = make_app(handlers).test_client()
+    login_session(client)
+    headers = csrf_headers(client)
+    path = contract.API_PREFIX + "/sections"
+    before = versions.read()
+    r = client.post(path, json={"list": 3, "name": "half", "version": "v"}, headers=headers)
+    assert r.status_code == 409 and r.get_json()["message"] == "Added 2 symbols ..."
+    assert int(versions.read().split(":")[1]) == int(before.split(":")[1]) + 1
+    ((_, data, _),) = emitted
+    assert (data["why"], data["ref"], data["refs"]) == ("items", "lists", ["list:3", "list:4"])
+    r = client.post(path, json={"list": 3, "name": "nothing", "version": "v"}, headers=headers)
+    assert r.status_code == 500 and len(emitted) == 1  # nothing committed: nothing pushed
+
+
+def test_a_write_whose_refs_say_unchanged_bumps_and_pushes_nothing(emitted):
+    """A write that changed nothing this time (review L3) says so from its refs function."""
+    reset_users()
+
+    @ops.bumps("sections", lambda args, data: data["changed"] or ops.UNCHANGED)
+    def maybe(args):
+        return {"changed": [] if args["name"] == "same" else [f"list:{args['list']}"]}
+
+    handlers = echo_handlers()
+    handlers["section_add"] = maybe
+    client = make_app(handlers).test_client()
+    login_session(client)
+    headers = csrf_headers(client)
+    path = contract.API_PREFIX + "/sections"
+    before = versions.read()
+    r = client.post(path, json={"list": 3, "name": "same", "version": "v"}, headers=headers)
+    assert r.status_code == 200 and versions.read() == before and emitted == []
+    assert "lists_version" not in r.get_json()["data"]  # it bumped nothing, so it names nothing
+    r = client.post(path, json={"list": 3, "name": "new", "version": "v"}, headers=headers)
+    assert [d["refs"] for _, d, _ in emitted] == [["list:3"]]
+    # the answer names the push it sent, so the phone that wrote can skip that push
+    assert r.get_json()["data"]["lists_version"] == emitted[0][1]["v"] == versions.read()
 
 
 def test_an_op_that_does_not_declare_a_bump_pushes_nothing(emitted):

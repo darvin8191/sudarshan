@@ -87,6 +87,11 @@ APP = textwrap.dedent(
     listref.read_live = lambda user, lid: {
         "id": lid, "name": "L", "created_at": "2026-01-01 00:00:00", "items": []}
 
+    # W10: the real favourites op; OpenAlgo's lists are not under test, so none are read
+    from sudarshan.watchlists.ops import lists as wl_lists
+
+    wl_lists.own_lists = lambda user: []
+
     @app.route("/emitted")
     def emitted_pushes():
         return jsonify(emitted)
@@ -263,6 +268,7 @@ def test_concurrent_writes_through_the_hook_emit_once_each(server_on):
     _, raw, _ = server_on.request("GET", "/emitted")
     pushes = json.loads(raw)
     assert sorted(p["ref"] for p in pushes) == sorted(f"list:{i + 1}" for i in range(12))
+    assert all(p["refs"] == [p["ref"]] for p in pushes)
     assert len({p["v"] for p in pushes}) == 12 and {p["why"] for p in pushes} == {"items"}
 
 
@@ -326,6 +332,23 @@ def test_the_limit_of_a_class_lets_no_more_through_than_it_allows(server_on):
     assert busy["code"] == "busy" and busy["status"] == "error"
 
 
+def test_requests_without_a_session_released_together_spend_none_of_the_owners_limit(server_on):
+    """The limit counts after the session check: strangers arriving at once (all from one address,
+    as behind nginx) are refused as signed out and leave the owner's whole budget."""
+    from sudarshan.watchlists import contract
+
+    allowed = contract.LIMITS_PER_MIN["preview"]
+    path = "/sudarshan/watchlists/api/tv/preview"
+    strangers = at_once(allowed * 4, lambda i: server_on.request("POST", path, body={"text": "x"}))
+    assert {status for status, _, _ in strangers} == {401}
+    assert {json.loads(raw)["code"] for _, raw, _ in strangers} == {"session"}
+    headers = server_on.login()
+    mine = at_once(
+        allowed, lambda i: server_on.request("POST", path, body={"text": "x"}, headers=headers)
+    )
+    assert [status for status, _, _ in mine] == [200] * allowed
+
+
 # -- W7: the section writes decide on a version, as one compare-and-set -----------------------------
 SECTIONS = "/sudarshan/watchlists/api/sections"
 
@@ -370,6 +393,90 @@ def test_two_first_writes_to_one_list_make_one_row_and_the_other_is_told_conflic
         assert sorted(status for status, _ in got) == [200] + [409] * 7, got  # never a 500
         assert {body["code"] for status, body in got if status == 409} == {"conflict"}
         rows = store_rows(server_on, f"SELECT version FROM wl_list WHERE list_id = {list_id}")
-        assert rows == [(1,)]
+        assert len(rows) == 1 and rows[0][0] > 10**12  # one row, at the epoch ms (review L2)
         sections = store_rows(server_on, f"SELECT 1 FROM wl_section WHERE list_id = {list_id}")
         assert len(sections) == 1
+
+
+FAVOURITES = "/sudarshan/watchlists/api/favourites"
+
+
+def put_favourites(server, headers, ref, version):
+    status, raw, _ = server.request(
+        "PUT", FAVOURITES, {"slots": [{"slot": 1, "ref": ref}], "version": version}, headers
+    )
+    return status, json.loads(raw)
+
+
+def test_two_writers_on_one_favourites_version_one_wins_and_the_other_is_told_conflict(server_on):
+    headers = server_on.login()
+    server_on.request("GET", "/sudarshan/watchlists/api/state", headers=headers)  # makes the store
+    for _ in range(4):  # a race is only seen when the threads really overlap: try again
+        rows = store_rows(server_on, "SELECT value FROM wl_meta WHERE name = 'favourites_version'")
+        held = int(rows[0][0]) if rows else 0  # round 0 is the first write: no row yet
+        got = at_once(
+            8, lambda i, v=held: put_favourites(server_on, headers, f"flag:{i % 5 + 1}", v)
+        )
+        assert sorted(status for status, _ in got) == [200] + [409] * 7, got  # never a 500
+        assert {body["code"] for status, body in got if status == 409} == {"conflict"}
+        (winner,) = (body for status, body in got if status == 200)
+        assert winner["data"]["version"] == str(held + 1)
+        (now,) = store_rows(
+            server_on, "SELECT value FROM wl_meta WHERE name = 'favourites_version'"
+        )
+        assert int(now[0]) == held + 1
+        assert len(store_rows(server_on, "SELECT 1 FROM wl_favourite")) == 1  # one set of slots
+    status, raw, _ = server_on.request("GET", "/emitted")
+    pushed = json.loads(raw)
+    assert [p["favourites"] for p in pushed] == [1, 2, 3, 4]  # one push per win, none for a loss
+    assert {p["why"] for p in pushed} == {"favourites"}
+    assert len({p["v"] for p in pushed}) == 1  # and the lists version never moved
+
+
+# -- W9: a mark decides on the symbol's version, a rename on the flags version ---------------------
+API = "/sudarshan/watchlists/api"
+
+
+def put(server, headers, path, body):
+    status, raw, _ = server.request("PUT", API + path, body, headers)
+    return status, json.loads(raw)
+
+
+def mark_once(server, headers, round_no, i, held):
+    body = {"flag": 1 + i % 5, "note": f"r{round_no}-{i}"}
+    if held is not None:
+        body["version"] = held
+    return put(server, headers, "/symbols/NSE:INFY", body)
+
+
+def test_two_marks_on_one_version_one_wins_and_the_other_is_told_conflict(server_on):
+    headers = server_on.login()
+    sql = "SELECT version FROM wl_symbol WHERE symbol = 'INFY'"
+    for round_no in range(4):  # a race is only seen when the threads really overlap: try again
+        held = store_rows(server_on, sql)[0][0] if round_no else None
+        got = at_once(8, lambda i, r=round_no, v=held: mark_once(server_on, headers, r, i, v))
+        assert sorted(status for status, _ in got) == [200] + [409] * 7, got  # never a 500
+        assert {b["code"] for status, b in got if status == 409} == {"conflict"}
+        (row,) = store_rows(server_on, "SELECT flag, note, version FROM wl_symbol")
+        (won,) = (i for i, (status, _) in enumerate(got) if status == 200)
+        assert row[:2] == (1 + won % 5, f"r{round_no}-{won}") and row[2] != held
+    assert len(store_rows(server_on, "SELECT 1 FROM wl_symbol")) == 1
+    status, raw, _ = server_on.request("GET", "/emitted")
+    assert len(json.loads(raw)) == 4  # one push per successful write, none for a conflict
+
+
+def test_two_renames_on_one_flags_version_one_wins_and_the_version_moves_once(server_on):
+    headers = server_on.login()
+    for round_no in range(3):
+        got = at_once(
+            8,
+            lambda i, r=round_no: put(
+                server_on, headers, "/flags", {"names": [{"mark": 1, "name": f"N{r}{i}"}],
+                                               "version": r},
+            ),
+        )  # fmt: skip
+        assert sorted(status for status, _ in got) == [200] + [409] * 7, got
+        assert store_rows(server_on, "SELECT value FROM wl_meta WHERE name = 'flags_version'") == [
+            (str(round_no + 1),)
+        ]
+    assert len(store_rows(server_on, "SELECT 1 FROM wl_flag")) == 1

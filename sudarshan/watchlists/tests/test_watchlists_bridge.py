@@ -37,6 +37,13 @@ NOT_BUILT = {op.name for op in contract.OPS} - {
     "section_remove",
     "arrange",
     "copy",
+    "favourites",
+    "pref",
+    "lists",
+    "mark",
+    "flags",
+    "symbol",
+    "expired_clear",
 }
 
 BODIES = {
@@ -95,6 +102,13 @@ def test_only_handled_ops_get_a_route():
             "/sections/<int:id>",
             "/copy",
             "/lists/<int:id>/arrange",
+            "/lists",
+            "/favourites",
+            "/prefs/<ref>",
+            "/symbol",
+            "/symbols/<k>",
+            "/flags",
+            "/symbols/expired/clear",
         )
     }
 
@@ -164,6 +178,63 @@ def test_the_limit_of_a_class_answers_busy_in_the_envelope(calls):
     assert len(calls) == contract.LIMITS_PER_MIN["preview"]
 
 
+#: Behind nginx every request reaches the app from the loopback address.
+NGINX = {"REMOTE_ADDR": "127.0.0.1"}
+
+
+def state_path():
+    return path_of(next(op for op in contract.OPS if op.name == "state"))
+
+
+def test_a_caller_without_a_session_cannot_spend_the_owners_budget(calls):
+    """H1: the limit is counted after the checks, never as the request arrives."""
+    reset_users()
+    app = make_app(echo_handlers(calls), rate_limits=True)
+    stranger, owner = app.test_client(), app.test_client()
+    login_session(owner)
+    for _ in range(contract.LIMITS_PER_MIN["read"] + 5):
+        r = stranger.get(state_path(), environ_base=NGINX)
+        assert r.status_code == 401 and r.get_json()["code"] == "session"
+    mine = owner.get(state_path(), environ_base=NGINX)
+    assert mine.status_code == 200, mine.get_json()
+    assert calls == [("state", {})]
+
+
+def test_another_sign_in_and_a_forged_change_cannot_spend_it_either(calls):
+    reset_users()
+    app = make_app(echo_handlers(calls), rate_limits=True)
+    viewer, owner = app.test_client(), app.test_client()
+    login_session(viewer, VIEWER)
+    login_session(owner)
+    for _ in range(contract.LIMITS_PER_MIN["read"] + 5):
+        assert viewer.get(state_path(), environ_base=NGINX).status_code == 403
+    preview = next(op for op in contract.OPS if op.cls == "preview")
+    for _ in range(contract.LIMITS_PER_MIN["preview"] + 2):  # the owner's cookie, no token
+        r = owner.post(path_of(preview), json={"text": "x"}, environ_base=NGINX)
+        assert r.get_json()["code"] == "session"
+    headers = csrf_headers(owner)
+    assert owner.get(state_path(), environ_base=NGINX).status_code == 200
+    codes = [
+        owner.post(path_of(preview), json={"text": "x"}, headers=headers, environ_base=NGINX)
+        .status_code for _ in range(contract.LIMITS_PER_MIN["preview"])
+    ]  # fmt: skip
+    assert codes == [200] * contract.LIMITS_PER_MIN["preview"]
+
+
+def test_the_budget_is_the_owners_from_every_device():
+    """Counted per owner, not per address: the phone and the tablet share one budget, as every
+    request does behind nginx anyway."""
+    reset_users()
+    app = make_app(echo_handlers(), rate_limits=True)
+    phone, tablet = app.test_client(), app.test_client()
+    login_session(phone)
+    login_session(tablet)
+    for _ in range(contract.LIMITS_PER_MIN["read"]):
+        assert phone.get(state_path(), environ_base={"REMOTE_ADDR": "10.0.0.2"}).status_code == 200
+    r = tablet.get(state_path(), environ_base={"REMOTE_ADDR": "10.0.0.3"})
+    assert (r.status_code, r.get_json()["code"]) == (429, "busy")
+
+
 # -- the switch ------------------------------------------------------------------------------------
 @pytest.mark.parametrize("value", ["off", "", "no", "garbage"])
 def test_switched_off_state_says_so_and_every_other_op_says_off(
@@ -194,6 +265,9 @@ def test_the_switch_is_read_at_each_request(monkeypatch):
 
 
 def test_state_answers_only_what_needs_no_later_change():
+    from database import watchlist_db as oa
+
+    oa.Base.metadata.create_all(oa.engine)  # the favourites read OpenAlgo's own lists
     reset_users()
     client = make_app(ops.discover(), real=True).test_client()
     login_session(client)
@@ -201,7 +275,9 @@ def test_state_answers_only_what_needs_no_later_change():
     assert r.status_code == 200 and r.headers["Cache-Control"] == "no-store"
     body = r.get_json()
     assert body["status"] == "ok"
-    assert set(body["data"]) == {"enabled", "limits", "flag_names", "versions"}
+    assert set(body["data"]) == {
+        "enabled", "limits", "flag_names", "versions", "favourites",
+    }  # fmt: skip
     assert body["data"]["enabled"] is True
     assert body["data"]["limits"] == contract.LIMITS
     assert [f["name"] for f in body["data"]["flag_names"]] == [

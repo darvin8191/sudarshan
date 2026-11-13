@@ -160,6 +160,8 @@ class SymbolRow(Base):
     flag_at = Column(BigInteger)
     note = Column(Text)
     note_at = Column(BigInteger)
+    #: A counter, not a time: a write names the one it was decided on (compare-and-set).
+    version = Column(Integer, nullable=False, server_default="1")
     updated_at = Column(BigInteger, nullable=False)
 
     __table_args__ = (
@@ -185,13 +187,18 @@ class FlagNameRow(Base):
 
 class FavouriteRow(Base):
     """One of the seven favourite slots. ``ref`` is ``list:<id>``, ``preset:<id>``,
-    ``ranked:<source>:<asset>:<category>`` or ``flag:<n>``."""
+    ``ranked:<source>:<asset>:<category>`` or ``flag:<n>``. ``oa_created_at`` is, for a ``list:``
+    slot, the list's own ``created_at`` as ``view.created_key`` gives it (null for the other
+    kinds): OpenAlgo hands a deleted list's id to the next list made, and a slot whose value
+    differs from the live list's is dropped at read instead of following the other list. It is a
+    column of schema 1 itself because schema 1 had not shipped in any release when it was added."""
 
     __tablename__ = "wl_favourite"
     principal = _principal()
     slot = Column(Integer, primary_key=True, autoincrement=False)
     ref = Column(String(80), nullable=False)
     updated_at = Column(BigInteger, nullable=False)
+    oa_created_at = Column(String(40))
 
     __table_args__ = (CheckConstraint("slot BETWEEN 1 AND 7", name="ck_wl_favourite_slot"),)
 
