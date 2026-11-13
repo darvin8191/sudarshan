@@ -50,7 +50,7 @@ from . import __version__, loopback, messages
 from .config import ConfigError, Settings, setup_logging, switched_off
 from .health import health_document  # M18.1: the health document (served by the market API)
 from .market.config import MarketSettings, feed_url_of, http_port_of, market_on  # M10.1
-from .notices import NoticeDesk  # M18.x: the server's own notices (deploy, backup)
+from .notices import LanePace, NoticeDesk  # M18.x: the server's own notices (deploy, backup)
 from .orders import Alert, OrderTracker
 from .outbox import OpenAlgoTelegram, Outbox, Pacer, Throttle
 from .owner import Owner, OwnerError, load_openalgo_modules, prepare_openalgo_env, read_owner
@@ -174,9 +174,10 @@ class AlertService:
                 telegram.send,
                 self._owner_ready,
                 self.clock,
-                # Quiet while the market trades (failures excepted). M10.5 hook: add
-                # pace=LanePace(outbox.pacer) once outbox.Pacer is merged (notices.py).
+                # Quiet while the market trades (failures excepted). A notice takes a slot of the
+                # process's one Pacer, after the order alerts (R8, Y18).
                 market_open=self.window.calendar.in_market_hours,
+                pace=LanePace(self.outbox.pacer),
             )
             notices = asyncio.create_task(self.notices.run(), name="order alerts: server notices")
             try:

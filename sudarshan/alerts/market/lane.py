@@ -133,6 +133,9 @@ class MarketLane:
         self._in_flight = 0
         self.throttle = Throttle()
         self.stats = {"messages": 0, "lines": 0, "dropped": 0, "failed": 0, "digests": 0}
+        # The reports lane takes no slot while this lane has messages waiting (Y18).
+        if hasattr(pacer, "set_waiting"):
+            pacer.set_waiting(MARKET, lambda: bool(self._pending))
 
     def __len__(self) -> int:
         return len(self._pending)

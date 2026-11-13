@@ -34,8 +34,10 @@ read when a notice is due and none is loaded.
         out; the rest wait for the close, still inside MAX_AGE_S. The owner's phone is for fills
         and rejections then.
 
-M10.5 hook: once the process has one outbox.Pacer for every lane, pass ``pace=LanePace(pacer)``
-where AlertService builds the desk (marked there); a notice is then the lowest priority in it.
+Slots. The service builds the desk with ``pace=LanePace(pacer)`` (service.py): a notice takes a
+        slot of the process's one outbox.Pacer, in its ``notices`` lane (at most NOTICES_PER_MINUTE
+        a minute), after the order alerts, so it can make a fill wait one gap and no more (R8,
+        Y18). NoticePace is the same rule for a desk built without a Pacer.
 
 SUDARSHAN_ORDER_ALERTS=off stops this service and so the notices with it.
 """
@@ -457,7 +459,7 @@ class Pace(Protocol):
 
 
 class NoticePace:
-    """The notices' own pace, until they share the process's Telegram slots (see LanePace).
+    """The notices' own pace, for a desk built without the process's Pacer (see LanePace).
 
     At least outbox.MIN_GAP_S between two messages and at most NOTICES_PER_MINUTE in any minute.
     The limits are read when asked, so the tests can shrink them. Time is the service clock's,
@@ -484,12 +486,12 @@ class NoticePace:
 
 
 class LanePace:
-    """M10.5 hook, not wired yet: the notices' place in the one outbox.Pacer of the process.
+    """The notices' place in the one outbox.Pacer of the process (R8, Y18).
 
-    The Pacer (alerts/outbox.py, with the market alerts lanes) hands out the send slots of every
-    lane: one gap and one minute budget for all, so a notice can make a fill wait one gap and no
-    more. A notice is the lowest priority there: it takes no slot while order alerts wait. Wire
-    it where AlertService builds the desk: ``pace=LanePace(outbox.pacer)``.
+    The Pacer (alerts/outbox.py) hands out the send slots of every lane: one gap and one minute
+    budget for all, so a notice can make a fill wait one gap and no more. A notice is the lowest
+    priority there: it takes no slot while order alerts wait. Wired where AlertService builds the
+    desk: ``pace=LanePace(self.outbox.pacer)``.
     """
 
     LANE = "notices"
