@@ -242,11 +242,13 @@ def test_report_build_makes_the_day_report_and_the_brief_on_request(rig, a_repor
 
 # ---- settings ----------------------------------------------------------------------------------
 class FakeAlerts(_Server):
-    """sudarshan-alerts' /health."""
+    """sudarshan-alerts' /health, with its report desk's block (``desk``; None leaves it out)."""
 
     def __init__(self):
         super().__init__()
         self.up = True
+        self.desk: dict | None = {"state": "on", "on": True, "reason": None, "waiting": 0,
+                                  "last_delivery_ms": None}  # fmt: skip
 
     def handler(fake):  # noqa: N805 - a closure over the fake
         class Handler(BaseHTTPRequestHandler):
@@ -258,7 +260,10 @@ class FakeAlerts(_Server):
                     self.send_response(503)
                     self.end_headers()
                     return
-                body = json.dumps({"service": "sudarshan-alerts", "state": "running"}).encode()
+                doc = {"service": "sudarshan-alerts", "state": "running"}
+                if fake.desk is not None:
+                    doc["report_desk"] = fake.desk
+                body = json.dumps(doc).encode()
                 self.send_response(200)
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
@@ -301,10 +306,29 @@ def test_settings_carry_the_alerts_the_rate_card_and_the_times(rig, alerts):
     assert settings_of(rig)["alerts_on"] is False
 
 
-def test_a_report_nobody_told_about_means_the_desk_is_off(rig, alerts, a_report):
-    rig.now = a_report["built_ms"] + 31 * 60_000
+@pytest.mark.parametrize(
+    ("state", "on"),
+    [("on", True), ("starting", True), ("journal_off", True), ("journal_down", True),
+     ("off", False), ("something new", False)],
+)  # fmt: skip
+def test_alerts_on_reads_the_report_desks_own_block(rig, alerts, state, on):
+    """M15.7: off on the alerts' side (order alerts off, or SUDARSHAN_JOURNAL=off in alerts.env)
+    is the one state that delivers nothing; the desk's view of this journal does not count, as a
+    journal answering is on and the desk asks it again within a minute."""
+    alerts.desk = {"state": state, "on": state == "on", "reason": None, "waiting": 3,
+                   "last_delivery_ms": None}  # fmt: skip
+    assert settings_of(rig)["alerts_on"] is on
+
+
+def test_an_alerts_health_without_the_block_is_not_read_as_delivering(rig, alerts, a_report):
+    """An alerts service older than the block, or one that answers something else, cannot be
+    taken to deliver; untold reports no longer decide it either way."""
+    alerts.desk = None
     assert settings_of(rig)["alerts_on"] is False
-    call(rig, "delivery", "delivery", report_id=a_report["id"], channel="telegram", status="sent")
+    alerts.desk = ["not", "a", "block"]
+    assert settings_of(rig)["alerts_on"] is False
+    alerts.desk = {"state": "on"}
+    rig.now = a_report["built_ms"] + 31 * 60_000  # a report nobody told about: not a signal now
     assert settings_of(rig)["alerts_on"] is True
 
 

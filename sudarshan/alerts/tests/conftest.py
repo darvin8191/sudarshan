@@ -40,6 +40,15 @@ def _no_proxy(monkeypatch):
         monkeypatch.delenv(name, raising=False)
 
 
+@pytest.fixture(autouse=True)
+def _never_the_machines_journal(monkeypatch):
+    # The report desk follows the journal unless alerts.env says off (M15.7), so a test that runs
+    # the whole service would read the journal's spool and ask its port: never this machine's.
+    # Nothing listens on port 9; a test that wants a journal sets its own.
+    monkeypatch.setenv("SUDARSHAN_JOURNAL_SPOOL", f"{_TMP}/no-journal/events.jsonl")
+    monkeypatch.setenv("SUDARSHAN_JOURNAL_API_URL", "http://127.0.0.1:9")
+
+
 @pytest.fixture
 def settings_for(tmp_path):
     """Settings for a service talking to fakes; ``**overrides`` are environment values."""

@@ -219,7 +219,14 @@ hours; so v0.3.3's own install is told by the next timer run after it.
 
 ## Reports (M15.7)
 
-With `SUDARSHAN_JOURNAL=on` the report desk (`reports_desk.py`) delivers the trade journal's reports.
+The report desk (`reports_desk.py`) delivers the trade journal's reports while the journal says it
+is on. There is one switch, `SUDARSHAN_JOURNAL` in OpenAlgo's `.env`, which a release sets and the
+journal reads; the desk asks the journal's `GET /health` on 127.0.0.1:5586 (`journal_state.enabled`)
+once a minute. While the journal is switched off nothing is delivered and the desk asks again a
+minute later; while it does not answer (not running, its port held by another user's program),
+nothing is delivered, one log line says so and the desk asks again after a growing pause (15 s to
+5 minutes). `SUDARSHAN_JOURNAL=off` in `/etc/sudarshan/alerts.env` takes the desk and the journal's
+nudges away whatever the journal says; any other value there, or none, leaves it to the journal.
 The journal writes one line per report to `/var/lib/sudarshan-journal/events.jsonl` (the report's
 id, its kind and the sha256 of its file; never its text). The desk claims each line once in
 alerts.db, asks the journal for the text and then the file over the journal's sealed local API
@@ -242,7 +249,10 @@ linked", "Telegram did not confirm it after 3 tries").
   after the text sends only the file. A report older than a day that never went is not sent, and
   the journal is told.
 
-With sudarshan-alerts stopped (order alerts off and market alerts off), nothing delivers reports.
+With sudarshan-alerts stopped (order alerts off and market alerts off), nothing delivers reports;
+with order alerts off and market alerts on, the process runs but reports have no Telegram path
+either. The `report_desk` block of `/health` (below) says which, and the Reports page shows "Not
+sent: the alerts service is switched off on the server" for any of them.
 
 ## Health page (M18.1)
 
@@ -266,6 +276,7 @@ message text.
 | `owner_ready`, `owner_problem` | whether the owner's OpenAlgo key was found; if not, why: `no_user`, `no_key`, `unreadable_key` or `database` |
 | `stats` | connections, order updates and alerts of the day's window; counted again from zero when the window closes |
 | `telegram` | messages and lines sent, dropped and failed, over the same period; `null` before the sender starts |
+| `report_desk` | the report desk (Reports, above): `state` `on` (delivering), `journal_off` or `journal_down` (waiting for the journal: it delivers once the journal says it is on), `off` (no desk: order alerts off, `SUDARSHAN_JOURNAL=off` here, or no key to seal with) or `starting`; `on` true only while delivering; `reason` in words; `waiting`, the reports in the journal's file not over yet (`null` without a desk); `last_delivery_ms`, when a report last went to Telegram, since this start. The journal reads it for the Reports page |
 
 The document is built by one plain function, `health_document(service)` in `health.py`
 (synchronous, changes nothing, its only I/O is reading the release record). The market alerts' API
@@ -311,7 +322,7 @@ tool starts ring services again after each release.
 | `SUDARSHAN_ALERTS_STATE_DIR` | systemd's `$STATE_DIRECTORY` | `/var/lib/sudarshan-alerts` |
 | `SUDARSHAN_NOTICE_SPOOLS` | the deploy tool's and the backup job's files | colon-separated files the server's notices are read from (`/var/lib/sudarshan/events.jsonl:/var/lib/sudarshan-backup/events.jsonl`) |
 | `SUDARSHAN_DEPLOYED_TAG_FILE` | `/var/lib/sudarshan/deployed_tag` | where the deploy tool records the installed release; the health page shows it as `release` |
-| `SUDARSHAN_JOURNAL` | `off` | `on`: the journal's reports are delivered (Reports, above) and the journal is nudged after each order update; any other value is off, never an error |
+| `SUDARSHAN_JOURNAL` | (the journal decides) | `off`: no reports are delivered and the journal is not nudged after an order update, whatever the journal says (Reports, above). Any other value, or none, leaves it to the journal's own switch in OpenAlgo's `.env`; never an error |
 | `SUDARSHAN_JOURNAL_SPOOL` | `/var/lib/sudarshan-journal/events.jsonl` | where the journal records the reports it made |
 | `SUDARSHAN_JOURNAL_API_URL` | `http://127.0.0.1:5586` | the journal's local API; plain http on this server only, anything else is ignored |
 | `SUDARSHAN_ALERTS_LOG_LEVEL` | `INFO` | |

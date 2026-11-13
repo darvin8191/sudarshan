@@ -537,18 +537,23 @@ def test_the_loopback_check_can_expect_another_uid(tmp_path):
     assert "another user" in loopback.refusal(url, tables)
 
 
-# ---- off by default --------------------------------------------------------------------------
+# ---- the switches ----------------------------------------------------------------------------
 
 
-def test_both_receivers_are_off_unless_switched_on():
-    assert not Settings.from_env({}).nudge_family and not Settings.from_env({}).nudge_journal
+def test_the_family_is_off_unless_switched_on_and_the_journal_on_unless_switched_off():
+    """M15.7: the journal's own switch (OpenAlgo's .env) decides; alerts.env can only say off."""
+    default = Settings.from_env({})
+    assert not default.nudge_family and default.journal
     on = Settings.from_env({"SUDARSHAN_FAMILY": "on"})
-    assert on.nudge_family and not on.nudge_journal
-    both = Settings.from_env({"SUDARSHAN_FAMILY": "1", "SUDARSHAN_JOURNAL": "ON"})
-    assert both.nudge_family and both.nudge_journal
-    for value in ("off", "0", "", "maybe", "no"):  # a typo is off, and never an error
-        got = Settings.from_env({"SUDARSHAN_FAMILY": value, "SUDARSHAN_JOURNAL": value})
-        assert not got.nudge_family and not got.nudge_journal
+    assert on.nudge_family and on.journal
+    off = Settings.from_env({"SUDARSHAN_FAMILY": "1", "SUDARSHAN_JOURNAL": "OFF"})
+    assert off.nudge_family and not off.journal
+    for value in ("off", "0", "false", "no", " Off "):
+        assert not Settings.from_env({"SUDARSHAN_JOURNAL": value}).journal
+    for value in ("on", "1", "", "maybe"):  # a typo leaves it to the journal, and is never an error
+        assert Settings.from_env({"SUDARSHAN_JOURNAL": value}).journal
+    for value in ("off", "0", "", "maybe", "no"):  # the family's typo is off, and never an error
+        assert not Settings.from_env({"SUDARSHAN_FAMILY": value}).nudge_family
 
 
 def test_with_nothing_switched_on_there_are_no_receivers_and_nothing_is_posted():
@@ -667,7 +672,12 @@ def test_a_service_that_is_not_switched_on_has_no_nudges_and_posts_nothing(setti
     assert svc.nudges is None
 
 
-def test_a_running_service_builds_no_sender_by_default(settings_for, monkeypatch):
+@pytest.mark.parametrize(("journal", "names"), [(None, ["journal"]), ("off", [])])
+def test_a_running_service_nudges_the_journal_unless_alerts_env_says_off(
+    settings_for, monkeypatch, journal, names
+):
+    """By default only the journal is a receiver (its own switch decides what a nudge does);
+    SUDARSHAN_JOURNAL=off in alerts.env leaves none. Nothing is posted without an order update."""
     from alerts_fakes import OWNER, FakeOpenAlgo, RunningClock, ist, wait_until
 
     from sudarshan.alerts import notices
@@ -675,10 +685,11 @@ def test_a_running_service_builds_no_sender_by_default(settings_for, monkeypatch
     from sudarshan.alerts.service import AlertService
 
     monkeypatch.setattr(notices, "POLL_S", 0.05)
+    overrides = {} if journal is None else {"SUDARSHAN_JOURNAL": journal}
 
     async def scenario():
         async with FakeOpenAlgo() as notify:
-            settings = settings_for(None, notify, SUDARSHAN_ALERTS_ALWAYS_ON="0")
+            settings = settings_for(None, notify, SUDARSHAN_ALERTS_ALWAYS_ON="0", **overrides)
             svc = AlertService(
                 settings,
                 owner_reader=lambda: Owner(OWNER, "k"),
@@ -686,7 +697,11 @@ def test_a_running_service_builds_no_sender_by_default(settings_for, monkeypatch
             )
             task = asyncio.create_task(svc.run())
             await wait_until(lambda: svc.nudges is not None, 10)
-            assert not svc.nudges and svc.nudges.stats == {"posted": 0, "failed": 0, "refused": 0}
+            assert [line.receiver.name for line in svc.nudges._lines] == names
+            assert [line.receiver.url for line in svc.nudges._lines] == (
+                [JOURNAL_URL] if names else []
+            )
+            assert svc.nudges.stats == {"posted": 0, "failed": 0, "refused": 0}
             svc.stop("test")
             await asyncio.wait_for(task, 10)
 
