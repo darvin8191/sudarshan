@@ -41,6 +41,10 @@ _close = LockedTTLCache(maxsize=8, ttl=60)
 #: The derivatives exchanges the roll rule (``expiry.py``) covers. Anything else (MCX) has hours
 #: of its own that the rule does not know, so the picker never states an end time for it.
 _RULED = frozenset({"NFO", "BFO"})
+#: The cash exchanges an underlying of each derivatives exchange trades on, in the order preferred
+#: when the master lists the same symbol on more than one (RELIANCE is on NSE and BSE: its options
+#: are on NFO, so NSE). MCX has no cash listing, its underlying is named by its own exchange.
+_CASH_OF = {"NFO": ("NSE_INDEX", "NSE"), "BFO": ("BSE_INDEX", "BSE")}
 
 
 def now_ms() -> int:
@@ -82,6 +86,22 @@ def _index() -> search.Index:
     return ix
 
 
+def underlying_exchange(ix: search.Index, name: str) -> str | None:
+    """The exchange ``strikes`` takes as ``x`` for the underlying ``name``, read from the master's
+    rows and never guessed: the cash listing on the exchange its options trade against, else any
+    cash listing, else (an underlying with no cash row, MCX's) the derivatives exchange itself.
+    None when the master holds no option for it."""
+    by = ix.options.get(name)
+    fo = next((rows[0].exchange for rows in (by or {}).values() if rows), None)
+    if fo is None:
+        return None
+    cash = {r.exchange for r in ix.cash.get(search.key_of(name), ())}
+    for ex in _CASH_OF.get(fo, ()):
+        if ex in cash:
+            return ex
+    return sorted(cash)[0] if cash else fo
+
+
 def _contract(row) -> dict:
     return merge_view.contract(row.exchange, row.symbol, row, search.isin_of(row.token))
 
@@ -114,7 +134,8 @@ def search_op(args: dict) -> dict:
         raise OpError("invalid", strike_words.LIMIT_BAD, "limit")
     segment, price = args.get("seg", "all"), _price(args)
     if not query:
-        return {"understood": "", "hits": [], "underlying": None, "suggestion": None}
+        return {"understood": "", "hits": [], "underlying": None, "underlying_exchange": None,
+                "suggestion": None}  # fmt: skip
     held = _held(args.get("list"))
     ix, now = _index(), now_ms()
     closes = _closes(now)
@@ -130,6 +151,7 @@ def search_op(args: dict) -> dict:
             for g, r in hits
         ],
         "underlying": got.underlying,
+        "underlying_exchange": underlying_exchange(ix, got.underlying) if got.underlying else None,
         "suggestion": None,
     }  # fmt: skip
     if not hits and not got.understood.needs_price:

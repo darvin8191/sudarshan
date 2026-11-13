@@ -309,6 +309,7 @@ export interface Search {
   understood: string
   hits: Hit[]
   underlying: string | null
+  underlying_exchange: string | null
   suggestion: string | null
 }
 

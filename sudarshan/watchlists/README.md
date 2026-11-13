@@ -885,7 +885,12 @@ nothing of its own, starts no thread and makes no Upstox call).
   order, so the page prints one heading a group; each hit is the group, the title ("NIFTY 25,900
   CE"), the detail ("NFO · 24 Nov 2026 · lot 65"), the master's `Contract` and `added` (true when the
   list holds that exchange and symbol; a list that is not the owner's is `gone`). `understood` is the
-  query in one line, `underlying` is set when options exist (Pick a strike) and `suggestion` is
+  query in one line, `underlying` is set when options exist (Pick a strike) and `underlying_exchange`
+  beside it is the exchange `strikes` takes as `x` (`NSE_INDEX`, `NSE`, `BSE_INDEX`, `BSE`, `MCX`),
+  read from the master and never guessed (the cash listing on the exchange the options trade
+  against, so RELIANCE answers `NSE` though BSE lists it too; an underlying with no cash row takes
+  its derivatives exchange); both are null together, and `underlying` keeps the name it always
+  had, so an older page is unaffected. `suggestion` is
   the near miss ("No exact match for RELAINCE. Did you mean RELIANCE?"), also said when the chip
   hides what All would show ("Nothing for RELIANCE under Indices. Try All."); it is null while
   the answer waits for a price (ATM with none sent). A blank query answers empty: Recent is the

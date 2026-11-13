@@ -164,7 +164,8 @@ RECORDS = {
     "Strikes": "underlying:string, exchange:string, expiries:Expiry[], expiry:string|null, "
     "atm:number|null, strikes:Strike[], words:string",
     "Hit": "group:Group, title:string, detail:string, contract:Contract, added:bool",
-    "Search": "understood:string, hits:Hit[], underlying:string|null, suggestion:string|null",
+    "Search": "understood:string, hits:Hit[], underlying:string|null, "
+    "underlying_exchange:string|null, suggestion:string|null",
     "Ranked": "ref:string, state:RankState, made_at:int|null, read_at:int|null, rows:Row[], "
     "left_out:int, words:string",
     "Cut": "token:string, reason:string",

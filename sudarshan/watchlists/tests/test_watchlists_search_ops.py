@@ -221,7 +221,8 @@ def test_the_query_as_understood_and_the_near_miss(client):
     assert waiting["hits"] == [] and waiting["suggestion"] is None
     assert "the price is not known yet" in waiting["understood"]
     blank = find(client, "   ")
-    assert blank == {"understood": "", "hits": [], "underlying": None, "suggestion": None}
+    assert blank == {"understood": "", "hits": [], "underlying": None,
+                     "underlying_exchange": None, "suggestion": None}
 
 
 def words_for(query, seg):
@@ -356,6 +357,50 @@ def mcx_rows():
                                      underlying="CRUDEOIL", expiry=e, strike=float(k),
                                      lotsize=100))  # fmt: skip
     return rows
+
+
+def bse_rows():
+    """SENSEX: a BSE index with its options on BFO."""
+    rows = [PlainRow(symbol="SENSEX", name="Sensex", exchange="BSE_INDEX", token="BSE_INDEX|SENSEX",
+                     instrumenttype="INDEX")]  # fmt: skip
+    for k in (80000, 80100):
+        for t in ("CE", "PE"):
+            rows.append(PlainRow(symbol=f"SENSEX24NOV26{k}{t}", name="SENSEX", exchange="BFO",
+                                 token=f"BSE_FO|SENSEX{k}{t}", instrumenttype=t, underlying="SENSEX",
+                                 expiry="24-NOV-26", strike=float(k), lotsize=20))  # fmt: skip
+    return rows
+
+
+def test_the_answer_names_the_exchange_of_an_index_underlying(client):
+    data = find(client, "nifty 26000 ce")
+    assert data["underlying"] == "NIFTY" and data["underlying_exchange"] == "NSE_INDEX"
+    assert strikes(client, u=data["underlying"], x=data["underlying_exchange"])["strikes"]
+
+
+def test_the_answer_names_the_exchange_of_a_stock_listed_on_two_exchanges(client):
+    data = find(client, "reliance 950 ce")  # NSE and BSE both list it; its options are on NFO
+    assert data["underlying"] == "RELIANCE" and data["underlying_exchange"] == "NSE"
+    assert strikes(client, u=data["underlying"], x=data["underlying_exchange"])["strikes"]
+
+
+def test_the_answer_names_the_exchange_of_a_bse_index_underlying(client, box):
+    box.snap = snap_of(make_rows() + bse_rows())
+    data = find(client, "sensex 80000 ce")
+    assert data["underlying"] == "SENSEX" and data["underlying_exchange"] == "BSE_INDEX"
+    assert strikes(client, u=data["underlying"], x=data["underlying_exchange"])["strikes"]
+
+
+def test_the_answer_names_the_exchange_of_an_mcx_underlying(client, box):
+    box.snap = snap_of(make_rows() + mcx_rows())
+    data = find(client, "crudeoil 6000 ce")
+    assert data["underlying"] == "CRUDEOIL" and data["underlying_exchange"] == "MCX"
+    assert strikes(client, u=data["underlying"], x=data["underlying_exchange"])["strikes"]
+
+
+def test_no_underlying_means_no_exchange(client):
+    data = find(client, "tcs")
+    assert data["underlying_exchange"] == (None if data["underlying"] is None else "NSE")
+    assert find(client, "")["underlying_exchange"] is None
 
 
 def test_an_mcx_expiry_says_no_end_time_and_stays_to_the_end_of_the_day(client, box, monkeypatch):
