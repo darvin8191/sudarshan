@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 import pytest
 from autologin_app import (
@@ -22,6 +22,7 @@ from autologin_fakes import FAKE_PIN, FAKE_TOKEN, FAKE_TOTP_SECRET
 import blueprints.sudarshan_autologin as bp_module
 from database import auth_db
 from sudarshan.autologin.handoff import MAX_SEALED_BYTES, seal
+from sudarshan.autologin.messages import hours_on
 from sudarshan.autologin.schedule import IST, TradingCalendar
 from sudarshan.autologin.worker import EXIT_BUSY, SECRET_PIN, SECRET_TOTP
 from sudarshan.vault import HANDOFF_INFO, fernet_for
@@ -236,7 +237,11 @@ def test_status_shows_the_next_run_and_the_last_result(setup):
     }
     next_run = datetime.fromisoformat(data["next_run"])
     assert next_run > datetime.now(IST) and next_run.strftime("%H:%M") in data["schedule"]
-    assert data["test"] == {"allowed": False, "reason": "The TOTP key or the PIN is not saved yet."}
+    assert data["test"] == {
+        "allowed": False,
+        "reason": "The TOTP key or the PIN is not saved yet.",
+        "hours": hours_on(datetime.now(IST).date()),
+    }
 
 
 # -- Test now -----------------------------------------------------------------------------------
@@ -262,41 +267,49 @@ def test_test_now_refuses_without_secrets(setup, monkeypatch):
     assert response.get_json()["message"] == "The TOTP key or the PIN is not saved yet."
 
 
+FRI_4_DEC, THU_10_DEC = date(2026, 12, 4), date(2026, 12, 10)  # either side of 7 Dec 2026
+
+
 @pytest.mark.parametrize(
-    ("hour", "minute", "refused"),
+    ("day", "hour", "minute", "refused"),
     [
-        (8, 59, False),
-        (9, 0, True),
-        (9, 5, True),
-        (10, 0, True),
-        (15, 30, True),  # the cash close: F&O trades to 15:40 (since 3 Aug 2026)
-        (15, 39, True),
-        (15, 40, False),
+        (FRI_4_DEC, 8, 59, False),
+        (FRI_4_DEC, 9, 0, True),
+        (FRI_4_DEC, 9, 5, True),
+        (FRI_4_DEC, 10, 0, True),
+        (FRI_4_DEC, 15, 30, True),  # the cash close: F&O trades to 15:40 (since 3 Aug 2026)
+        (FRI_4_DEC, 15, 39, True),
+        (FRI_4_DEC, 15, 40, False),
+        (THU_10_DEC, 8, 59, False),
+        (THU_10_DEC, 9, 0, True),
+        (THU_10_DEC, 15, 40, True),  # F&O trades to 15:45 from 7 Dec 2026
+        (THU_10_DEC, 15, 44, True),
+        (THU_10_DEC, 15, 45, False),
     ],
 )
 def test_test_now_refuses_from_the_pre_open_to_the_close_when_connected(
-    setup, monkeypatch, hour, minute, refused
+    setup, monkeypatch, day, hour, minute, refused
 ):
+    """A trading day either side of 7 Dec 2026, logged in since 03:30: the page's status, the
+    refusal and the hours it names all follow the day's F&O close."""
     _, client, vault, calls = setup
     _ready(vault)
-    now = datetime.now(IST)
-    # Any trading day (a weekday off the fake holiday list) at this time, logged in since 03:30.
-    day = next(
-        d
-        for d in (now.date() + timedelta(days=k) for k in range(7))
-        if bp_module._calendar().is_trading_day(d)
-    )
+    assert bp_module._calendar().is_trading_day(day)
     at = datetime(day.year, day.month, day.day, hour, minute, tzinfo=IST)
     monkeypatch.setattr(bp_module, "_now", lambda: at)
     monkeypatch.setattr(bp_module, "_holds_fresh_token", lambda username, now=None: True)
     started = []
     monkeypatch.setattr(bp_module, "run_test_child", lambda run_id: started.append(run_id))
     login_session(client)
+    close = "15:40" if day < date(2026, 12, 7) else "15:45"
+    status = client.get("/sudarshan/autologin/status", headers=JSON).get_json()["data"]
+    assert status["test"]["hours"] == f"from 09:00 to {close} on a trading day"
     response = _call(client, "post", "/sudarshan/autologin/test", None, csrf_headers(client))
     if refused:
         assert response.status_code == 409 and started == []
         message = response.get_json()["message"]
-        assert "Test now replaces today's login" in message and "09:00 to 15:40" in message
+        assert "Test now replaces today's login" in message and f"09:00 to {close}" in message
+        assert message == status["test"]["reason"]
     else:
         assert started
 

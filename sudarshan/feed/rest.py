@@ -79,7 +79,7 @@ PRIORITIES = ("repair", "interactive", "bulk")  # G4: served in this order
 BULK = PRIORITIES.index("bulk")
 MAX_WAITING, MAX_IN_FLIGHT, WAIT_CAP_S = 64, 4, 30.0
 FREEZE_S, HALF_RATE_S = 60.0, 600.0  # G5: after a 429 or UDAPI10005
-MARKET_HOURS = (8 * 60 + 30, 16 * 60)  # G4: no bulk 08:30-16:00 IST on a trading day
+MARKET_HOURS = (8 * 60 + 30, 16 * 60)  # G4: no bulk 08:30-16:00 IST (16:05 from 7 Dec 2026)
 MAX_BODY = 8 << 20
 UPSTREAM_TIMEOUT = httpx.Timeout(25.0, connect=5.0)  # each phase of a call to Upstox
 UPSTREAM_TOTAL_S = 30.0  # the whole call, body included
@@ -219,10 +219,11 @@ def delay(sent: deque[float], limits: tuple[int, ...], now: float, factor: float
 
 
 class MarketHours(MarketWindow):
-    """G4's bulk hours: 08:30-16:00 IST on a trading day, moved onto a special day's own window
-    with the same margins (13:35-16:00 for Muhurat 14:05-15:40) and added to the usual hours on a
-    weekday that trades anyway. It is the feed's own day plan (window.py) with other margins, on
-    the feed's calendar object, so each calendar file is still read once."""
+    """G4's bulk hours: 08:30-16:00 IST on a trading day (its margins kept around the day's
+    session, so 08:30-16:05 from 7 Dec 2026, when F&O trades to 15:45), moved onto a special day's
+    own window with the same margins (13:35-16:00 for Muhurat 14:05-15:40) and added to the usual
+    hours on a weekday that trades anyway. It is the feed's own day plan (window.py) with other
+    margins, on the feed's calendar object, so each calendar file is still read once."""
 
     def __init__(self, calendar):
         self.calendar, (self.start, self.end) = calendar, MARKET_HOURS

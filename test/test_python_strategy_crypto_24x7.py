@@ -183,6 +183,44 @@ def test_exchange_list_follows_the_broker_type(ps, capabilities, expected, defau
     assert body["default"] == default
 
 
+@pytest.mark.parametrize(
+    ("today", "window"),
+    [(datetime(2026, 12, 4, 10, 0), "09:15-15:40"), (datetime(2026, 12, 10, 10, 0), "09:15-15:45")],
+)
+def test_the_exchange_list_names_today_s_f_and_o_close(ps, today, window):
+    """SUDARSHAN: a shipped NFO close reads 15:45 from 7 Dec 2026 (sudarshan/regimes.py) and the
+    selector names the window of the day it is opened; a close the admin set is left alone."""
+    from flask import Flask, session
+
+    from database.market_calendar_db import timing_changes
+
+    shipped = {"exchange": "NFO", "start_time": "09:15", "end_time": "15:40",
+               "start_offset": 33_300_000, "end_offset": 56_400_000}  # fmt: skip
+    shipped["changes"] = timing_changes("NFO", shipped)
+    own = {"exchange": "BFO", "start_time": "09:15", "end_time": "15:35",
+           "start_offset": 33_300_000, "end_offset": 56_100_000, "changes": []}  # fmt: skip
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return tz.localize(today) if tz is not None else today
+
+    app = Flask(__name__)
+    app.secret_key = "test"
+    with (
+        patch("utils.plugin_loader.get_broker_capabilities", return_value=None),
+        patch.object(ps, "get_all_market_timings", return_value=[shipped, own]),
+        patch.object(ps, "datetime", Clock),
+        app.test_request_context("/python/api/exchanges"),
+    ):
+        session["broker"] = "anybroker"
+        body = ps.api_get_exchanges.__wrapped__().get_json()
+
+    found = {item["value"]: item for item in body["exchanges"]}
+    assert found["NFO"]["window"] == window and found["NFO"]["label"].endswith(f"({window})")
+    assert found["BFO"]["window"] == "09:15-15:35"
+
+
 def test_indian_schedule_with_equal_times_is_saved_as_before(ps, monkeypatch):
     """The equal-time refusal is for crypto only; NSE schedules are untouched."""
     scheduler = FakeScheduler()

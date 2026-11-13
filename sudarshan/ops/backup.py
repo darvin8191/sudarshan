@@ -25,14 +25,15 @@ while it is read can never leave a damaged archive.
 
 When it runs, and when it refuses to:
 
-  Never between 08:30 and 16:00 on a trading day. On a listed special day (a Muhurat evening)
-        the hours are the session's own window widened by the usual margins, so 13:35 to 16:00
-        for the one that runs 14:05 to 15:40; the deploy tool is stricter and keeps a listed day
-        for the market all day. A run is not started when those hours begin less than
-        ``START_CLEAR_MIN`` (60) minutes from now either: a morning install restarts the job, and
-        a full backup would still be running when the market opens. The timer fires after the
-        close; a run that a boot or a missed timer starts earlier stops quietly, and one that was
-        still going when the market opened is cleaned up and left for the next time.
+  Never between 08:30 and 16:00 on a trading day (16:05 from 7 Dec 2026, when F&O trades to
+        15:45: the margins are kept around each day's session). On a listed special day (a
+        Muhurat evening) the hours are the session's own window widened by the usual margins, so
+        13:35 to 16:00 for the one that runs 14:05 to 15:40; the deploy tool is stricter and
+        keeps a listed day for the market all day. A run is not started when those hours begin
+        less than ``START_CLEAR_MIN`` (60) minutes from now either: a morning install restarts the
+        job, and a full backup would still be running when the market opens. The timer fires after
+        the close; a run that a boot or a missed timer starts earlier stops quietly, and one that
+        was still going when the market opened is cleaned up and left for the next time.
   Once a night. An archive less than ``min_gap_s`` old (a complete one) ends the run at once, so
         the second timer of the day, and the run the deploy tool starts when it restarts the
         service after an install, cost nothing.
@@ -110,6 +111,7 @@ from sudarshan.autologin.schedule import (
     minute_of_day,
     minutes,
     union,
+    usual_on,
     with_margins,
 )
 
@@ -124,7 +126,8 @@ STATE_DIR = "/var/lib/sudarshan-backup"
 ETC_DIR = "/etc/sudarshan"
 RING_VAR = "/var/lib"
 DEPLOY_LOCK = "/var/lib/sudarshan/deploy.lock"
-#: No run in these hours of a trading day (the deploy tool's install window is the rest).
+#: No run in these hours of a trading day (the deploy tool's install window is the rest), as
+#: margins kept around each day's session: to 16:05 from 7 Dec 2026 (F&O to 15:45).
 BLOCKED = ("08:30", "16:00")
 #: A run does not start when those hours begin less than this many minutes from now: a morning
 #: install restarts the job, and a full backup would be running when the market opens.
@@ -279,14 +282,16 @@ def _command(raw: str | None) -> tuple[str, ...]:
 
 
 def block_spans(calendar: TradingCalendar, day: date) -> tuple[tuple[int, int], ...]:
-    """When the job keeps out on a trading day, in IST minutes: 08:30 to 16:00, or a listed special
-    session's own window with the margins the feed and the alerts keep around it (Muhurat 14:05-15:40
-    gives 13:35-16:00), added to the usual hours on a weekday that trades anyway."""
-    usual = (minutes(BLOCKED[0]), minutes(BLOCKED[1]))
+    """When the job keeps out on a trading day, in IST minutes: 08:30 to 16:00, 20 minutes after
+    the day's F&O close (16:05 from 7 Dec 2026), or a listed special session's own window with the
+    margins the feed and the alerts keep around it (Muhurat 14:05-15:40 gives 13:35-16:00), added
+    to the usual hours on a weekday that trades anyway."""
+    written = (minutes(BLOCKED[0]), minutes(BLOCKED[1]))
+    usual = usual_on(day, written)
     own = calendar.day_window(day)
     if own is None:
         return (usual,)
-    session = with_margins(own, usual)
+    session = with_margins(own, written)
     return union([usual, session]) if calendar.trades_anyway(day) else (session,)
 
 

@@ -90,7 +90,8 @@ class Compiled:
 
 @dataclass(frozen=True, slots=True)
 class Kind:
-    check: Callable[[Any, str, Grain], dict[str, Any]]
+    #: (params, segment, grain, the day the alert is set): the day's own session hours apply.
+    check: Callable[[Any, str, Grain, date | None], dict[str, Any]]
     compile: Callable[[Mapping[str, Any], Grain, str], Compiled]
     #: Words for this kind's check in a sentence ("Every time on '% move' needs ...").
     words: Callable[[Mapping[str, Any]], str]
@@ -179,7 +180,8 @@ def check(fields: Mapping[str, Any], now: int) -> dict[str, Any]:
     kind = KINDS.get(fields.get("kind", "price"))
     if kind is None:
         raise SpecError("kind", "This kind of alert is not available yet.")
-    params = kind.check(fields.get("params"), segment, grain)
+    today = datetime.fromtimestamp(now / 1000, IST).date()
+    params = kind.check(fields.get("params"), segment, grain, today)
     _reachable(kind, params, to_decimal(fields.get("price")), segment)
     frequency = fields.get("frequency") or kind.frequency
     if frequency not in FREQUENCIES:
@@ -237,7 +239,7 @@ def status_after_edit(status: str, condition_changed: bool) -> str:
     return "active" if condition_changed and status == "stopped" else status
 
 
-def _check_price(params, segment: str, grain: Grain) -> dict[str, Any]:
+def _check_price(params, segment: str, grain: Grain, day: date | None = None) -> dict[str, Any]:
     params = params if isinstance(params, Mapping) else {}
     op = params.get("op")
     if op not in PRICE_OPS:
@@ -273,7 +275,7 @@ VWAP_DIRECTIONS = {"above": UP, "below": DOWN, "either": EITHER}
 MAX_RISE = 1000
 
 
-def _check_move(params, segment: str, grain: Grain) -> dict[str, Any]:
+def _check_move(params, segment: str, grain: Grain, day: date | None = None) -> dict[str, Any]:
     params = params if isinstance(params, Mapping) else {}
     base = params.get("base", "close")
     if base not in ("close", "open"):
@@ -298,13 +300,14 @@ def _compile_move(params: Mapping[str, Any], grain: Grain, segment: str) -> Comp
     return Compiled(LEVEL, direction, feed=feed, extra=(1 + share, 1 - share))
 
 
-def _check_break(params, segment: str, grain: Grain) -> dict[str, Any]:
+def _check_break(params, segment: str, grain: Grain, day: date | None = None) -> dict[str, Any]:
     params = params if isinstance(params, Mapping) else {}
     side = params.get("side")
     if side not in ("high", "low"):
         raise SpecError("side", "Pick the break: the day's high or the day's low.")
     after = params.get("after", "09:30")
-    start, end = sessions.SEGMENTS[segment]
+    # The session of the day it is set: F&O to 15:40, and to 15:45 from 7 Dec 2026.
+    start, end = sessions.hours(segment, day=day) if day else sessions.SEGMENTS[segment]
     minute = _minute(after)
     if minute is None or not start <= minute < end:
         raise SpecError("after", f"Pick a start time between {_hhmm(start)} and {_hhmm(end)}.")
@@ -317,7 +320,7 @@ def _compile_break(params: Mapping[str, Any], grain: Grain, segment: str) -> Com
     return Compiled(BREAK, direction, feed="full", extra=(offset,))
 
 
-def _check_vwap(params, segment: str, grain: Grain) -> dict[str, Any]:
+def _check_vwap(params, segment: str, grain: Grain, day: date | None = None) -> dict[str, Any]:
     params = params if isinstance(params, Mapping) else {}
     if segment in sessions.INDEX_SEGMENTS:
         raise SpecError("kind", "An index has no traded volume, so it has no VWAP. Use its future.")

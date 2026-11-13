@@ -1,13 +1,14 @@
 """The Upstox tab's two ops (M7.1 to M7.4, design 3.1 and 3.6, 7.2).
 
 ``upstox_book`` reads the parts asked for through the reader (single flight, five seconds of
-memory, the service's own budget). ``upstox_history`` reads the closing records the 15:55 job
-wrote. Neither writes anything; neither shows a status, a code or a header to the owner.
+memory, the service's own budget). ``upstox_history`` reads the closing records the closing job
+wrote (at the day's last close plus 15 minutes: 15:55, and 16:00 from 7 Dec 2026). Neither
+writes anything; neither shows a status, a code or a header to the owner.
 """
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 
 from sudarshan.alerts.market import sessions
@@ -72,21 +73,58 @@ async def upstox_history(ctx, message):
         return store.read(OWNER, lambda tx: tx.rows("upstox_eod", "day"))
 
     rows = (await work(read))[-limit:]
-    days = [_day(ctx, row, now) for row in rows]
-    note = None if days else "No closing record has been taken yet. The first is taken at 15:55."
+    sched = _schedule(ctx)
+    days = [_day(ctx, row, now, sched) for row in rows]
+    note = None if days else _first_record_note(sched, now)
     return serialize.out(OWNER, {"days": days, "note": note})
 
 
-def _day(ctx, row: dict[str, Any], now: int) -> dict[str, Any]:
-    """One closing record. It stays provisional until the next trading day's settle time; it is
-    late when it was taken more than half an hour after the close time of its day."""
+def _schedule(ctx):
+    from ..eod import schedule
+
+    return schedule(ctx)
+
+
+def _hhmm(epoch_ms: int) -> str:
     from ..upstox import minute_of_day
 
+    minute = minute_of_day(epoch_ms)
+    return f"{minute // 60:02d}:{minute % 60:02d}"
+
+
+def _first_record_note(sched, now: int) -> str:
+    """No record yet: when the first is taken, the time of that day (15:55; 16:00 from 7 Dec
+    2026, when F&O closes at 15:45)."""
+    day = to_date(day_of_instant(now))
+    for _ in range(15):
+        due = sched.eod_at(day)
+        if due is not None and due > now:
+            return f"No closing record has been taken yet. The first is taken at {_hhmm(due)}."
+        day += timedelta(days=1)
+    return "No closing record has been taken yet. The first is taken after the next close."
+
+
+def _late_after_min(sched, day: date) -> int:
+    """The minute after which a record of ``day`` was not taken on time: 45 minutes after the
+    day's last close (16:25 on a day that closes at 15:40, 16:30 from 7 Dec 2026)."""
+    from ..upstox import minute_of_day
+
+    closes = sched.close_at(day)
+    return LATE_AFTER_MIN if closes is None else minute_of_day(closes) + LATE_AFTER_CLOSE_MIN
+
+
+def _day(ctx, row: dict[str, Any], now: int, sched=None) -> dict[str, Any]:
+    """One closing record. It stays provisional until the next trading day's settle time; it is
+    late when it was taken more than half an hour after the time it was due (``due_at``: the day's
+    last close plus 15 minutes)."""
+    from ..upstox import minute_of_day
+
+    sched = sched or _schedule(ctx)
     day = to_date(row["day"])
     settled_at = _next_trading_day(ctx.ensure_calendar(), day)
     settle_ms = _settle_ms(settled_at, ctx.settings.settle_at_min)
     taken = day_of_instant(row["read_at"])
-    late = taken != row["day"] or minute_of_day(row["read_at"]) > LATE_AFTER_MIN
+    late = taken != row["day"] or minute_of_day(row["read_at"]) > _late_after_min(sched, day)
     # A part that was not read is not known: null, never 0, and the day says which.
     value, cost = row["holdings_value_paise"], row["holdings_cost_paise"]
     pnl = row["positions_pnl_paise"]
@@ -104,10 +142,15 @@ def _day(ctx, row: dict[str, Any], now: int) -> dict[str, Any]:
         "not_read": not_read,
         "provisional": now < settle_ms,
         "late": late,
+        # When the record of that day was due (epoch ms): the page names its time.
+        "due_at": sched.eod_at(day),
     }
 
 
-#: A record taken after 16:25 IST (30 minutes after the 15:55 target) was not taken on time.
+#: A record taken more than this long after the day's last close was not taken on time: 30 minutes
+#: after the record's usual time, 15 minutes after the close (16:25 for 15:40; 16:30 from 7 Dec
+#: 2026, when F&O closes at 15:45). LATE_AFTER_MIN when the day has no session (never expected).
+LATE_AFTER_CLOSE_MIN = 45
 LATE_AFTER_MIN = 16 * 60 + 25
 
 

@@ -355,3 +355,24 @@ def test_the_cards_waits_rule_agrees_with_the_engines_count_on_the_futures_sessi
     assert _day_holds(tf, grid) >= need, "the engine judges it on this day"
     assert dash.waits_of({tf: need}, grid.end - grid.start) is None
     assert dash.waits_of({tf: _day_holds(tf, grid) + 1}, grid.end - grid.start) is not None
+
+
+@pytest.mark.parametrize(
+    ("day", "minutes"),
+    [
+        (date(2026, 12, 5), 385),  # a Saturday before 7 Dec 2026: F&O 09:15-15:40
+        (date(2026, 12, 12), 390),  # a Saturday after: F&O 09:15-15:45
+    ],
+)
+def test_a_closed_day_takes_the_regular_futures_hours_of_its_own_date(day, minutes):
+    from sudarshan.alerts.market.sessions import sessions_of
+    from sudarshan.screener.dashboard_ops import _day_span
+
+    screen = {"id": 1, "version": 1, "spec": {"run": {"on": "close", "tf": 5},
+                                              "universe": {"kind": "index_futures"}}}  # fmt: skip
+    closed = sessions_of(day, trading_day=False)
+    assert closed == {}
+    assert _day_span(screen, closed, day) == minutes * 60_000
+    assert _day_span(screen, closed) == 385 * 60_000  # no day: the regular hours as from 3 Aug
+    assert _day_span(screen, sessions_of(day, trading_day=True)) == minutes * 60_000
+

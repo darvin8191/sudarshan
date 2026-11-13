@@ -297,7 +297,7 @@ def status():
             "at": _iso(item.at),
             "kind": item.kind,
             "outcome": item.outcome,
-            "message": messages.message_for(item.code)
+            "message": messages.message_for(item.code, item.at.astimezone(IST).date())
             if item.code != "started"
             else "This attempt did not finish.",
         }
@@ -326,7 +326,9 @@ def status():
                 "schedule": list(SCHEDULE),
                 "test": {
                     "allowed": refusal is None,
-                    "reason": messages.message_for(refusal) if refusal else None,
+                    "reason": messages.message_for(refusal, now.date()) if refusal else None,
+                    # SUDARSHAN: the page's sentence names today's hours (to 15:45 from 7 Dec 2026)
+                    "hours": messages.hours_on(now.date()),
                 },
                 "recent": recent,
             },
@@ -422,7 +424,7 @@ def test_now():
     refusal = _test_refusal(vault, state, now, _holds_fresh_token(owner.username))
     if refusal:
         return jsonify(
-            {"status": "error", "code": refusal, "message": messages.message_for(refusal)}
+            {"status": "error", "code": refusal, "message": messages.message_for(refusal, now.date())}
         ), 409
     run_id = uuid.uuid4().hex
     logger.info("Auto-login: Test now started")

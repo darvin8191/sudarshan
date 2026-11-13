@@ -232,6 +232,31 @@ def test_a_stock_with_futures_closes_by_auction_and_one_without_does_not(tmp_pat
     assert rig.pb.auction({"id": 9999}, DAY) == (False, None, None, None)
 
 
+def test_on_10_december_only_the_stock_with_futures_waits_for_an_auction(tmp_path, feed):
+    """NSE's circulars of 6 Nov 2026: from 7 Dec the auction stays with stocks that have
+    derivatives. RELIANCE's price waits for its auction from 15:30, expected at 15:40; TCS, with
+    no futures, closes at 15:30 with no auction line and keeps its usual close."""
+    from datetime import date
+
+    from sudarshan.alerts.market.sessions import epoch_ms
+
+    resolver = Resolver(make_symtoken(tmp_path / "o.db", futures=("RELIANCE",)))
+    rig = Rig(tmp_path, feed, resolver)
+    day = date(2026, 12, 10)
+    noon = epoch_ms(day, 12 * 60)
+    assert rig.pb.auction_for("RELIANCE", "NSE", noon) == (
+        True, epoch_ms(day, 15 * 60 + 30), epoch_ms(day, 15 * 60 + 40), epoch_ms(day, 15 * 60 + 40)
+    )  # fmt: skip
+    assert rig.pb.auction_for("TCS", "NSE", noon) == (False, None, None, None)
+    friday = epoch_ms(date(2026, 12, 4), 12 * 60)  # before the change: 15:15-15:35, price at 15:30
+    assert rig.pb.auction_for("RELIANCE", "NSE", friday)[1:] == (
+        epoch_ms(date(2026, 12, 4), 15 * 60 + 15),
+        epoch_ms(date(2026, 12, 4), 15 * 60 + 35),
+        epoch_ms(date(2026, 12, 4), 15 * 60 + 30),
+    )
+    assert rig.pb.auction_for("TCS", "NSE", friday) == (False, None, None, None)
+
+
 def test_the_last_session_day_comes_from_the_calendar_not_the_weekdays(tmp_path, feed):
     holidays = tmp_path / "h.json"
     holidays.write_text("2026-10-23\n")

@@ -14,7 +14,7 @@ later parts read, and the pepper is returned by ``read_pepper`` and kept out of 
 | ``SUDARSHAN_PORTFOLIO_FEED_URL`` | ``http://127.0.0.1:5580`` (loopback only) |
 | ``SUDARSHAN_PORTFOLIO_MAX_CLAIMS`` | ``200`` (the feed's ceiling for this client, at most 200) |
 | ``SUDARSHAN_PORTFOLIO_AMFI`` | ``on`` |
-| ``SUDARSHAN_PORTFOLIO_EOD_AFTER_MIN`` | ``15`` (minutes after the close; the record is at 15:55 on a normal day) |
+| ``SUDARSHAN_PORTFOLIO_EOD_AFTER_MIN`` | ``15`` (minutes after the close; the record is at 15:55 on a normal day, 16:00 from 7 Dec 2026) |
 | ``SUDARSHAN_PORTFOLIO_SETTLE_AT`` | ``09:20`` (IST) |
 | ``SUDARSHAN_UPSTOX_TOKEN_FILE`` | ``/etc/sudarshan/upstox_analytics_token`` |
 | ``SUDARSHAN_PORTFOLIO_UPSTOX_URL`` | ``https://api.upstox.com`` (a test points it at a fake on this server) |

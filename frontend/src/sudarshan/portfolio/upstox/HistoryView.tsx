@@ -1,5 +1,6 @@
 // SUDARSHAN M7.4: the Upstox account at each close: value against what went in, then the last
-// 10 days. These are closing records taken at 15:55, not real-time figures, and they say so.
+// 10 days. These are closing records taken after the close (15:55; 16:00 from 7 Dec 2026), not
+// real-time figures, and they say so with the time the server gives for the day.
 import { ChevronRight, Clock } from 'lucide-react'
 import { Link } from 'react-router'
 import { cn } from '@/lib/utils'
@@ -19,6 +20,20 @@ const isRead = (d: UpstoxEodDay): d is ReadDay =>
   d.holdings_value_paise !== null && d.holdings_cost_paise !== null
 
 export const NOT_RECORDED = 'Not recorded at the close'
+
+const IST_MINUTE = new Intl.DateTimeFormat('en-IN', {
+  timeZone: 'Asia/Kolkata',
+  hour: '2-digit',
+  minute: '2-digit',
+  hourCycle: 'h23',
+})
+
+/** The records' line, naming the time the newest one was due, as the server says for its day. */
+export function takenAt(newest: UpstoxEodDay): string {
+  return typeof newest.due_at === 'number'
+    ? `Closing records taken at ${IST_MINUTE.format(newest.due_at)}, not real-time`
+    : 'Closing records taken after the close, not real-time'
+}
 
 /** Value (solid) against invested (dashed) as two lines; the legend says which is which. */
 function ValueChart({ days }: { days: ReadDay[] }) {
@@ -81,7 +96,7 @@ export function HistoryView({ history }: { history: UpstoxHistory }) {
       <div className="flex flex-col gap-3">
         <NoFigures part={undefined}>
           {history.note ??
-            'No closing records yet. The first one is taken at 15:55 on a trading day.'}
+            'No closing records yet. The first one is taken after the close on a trading day.'}
         </NoFigures>
         <Link to="/portfolio-analyzer" className={LINK}>
           Portfolio Analyzer
@@ -105,7 +120,7 @@ export function HistoryView({ history }: { history: UpstoxHistory }) {
       )}
       <p className="flex items-center gap-1.5 text-xs font-semibold text-[color:var(--text-tertiary)]">
         <Clock aria-hidden="true" className="size-3.5" />
-        Closing records taken at 15:55, not real-time
+        {takenAt(newest)}
       </p>
       {read.length >= 2 && <ValueChart days={read} />}
       {read.length < days.length && (

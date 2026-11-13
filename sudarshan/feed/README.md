@@ -123,7 +123,9 @@ and logged as it came, and the frame's segment status is still recorded). A mark
 changes both maps goes out as one health copy carrying both. The phases Upstox documents are `CTS_CLOSE`
 (continuous trading over, about 15:15), `CAS_LM_START` (auction orders, about 15:20),
 `CAS_M_STOP` (limit orders only, about 15:25) and `CAS_STOP` (order entry closed, at a random time
-from 15:28 to 15:30); any other word is passed on as Upstox sends it. Whether Upstox fills this
+from 15:28 to 15:30); from 7 Dec 2026 (SEBI's circular of 15 Oct 2026, para 4.2) the auction runs
+15:30-15:40, so expect them at about 15:30, 15:31 and 15:36, and `CAS_STOP` at a random time from
+15:38 to 15:40. Any other word is passed on as Upstox sends it. Whether Upstox fills this
 map at all is not yet known (on 27 Oct the segment status said nothing at 15:15 or 15:20), so the
 journal tells every session: the first market info on each socket is one line even when the map
 is empty (`closing auction status on connect: none`), and every later change is one line naming
@@ -191,8 +193,9 @@ hour ever holds more.
   class. At most 4 calls are in flight to Upstox and 64 wait; a request waits at most 30 s. When
   64 wait, the last of them in that order is told it is busy: the newcomer, unless it outranks
   that one (a full queue of warm-start calls never turns away a repair or a quote).
-- **Bulk waits for the market to close**: from 08:30 to 16:00 IST on a trading day (around a
-  special session's own window with the same margins, 13:35-16:00 for Muhurat 14:05-15:40) a bulk
+- **Bulk waits for the market to close**: from 08:30 to 16:00 IST on a trading day (16:05 from
+  7 Dec 2026, 20 minutes after the F&O close; around a special session's own window with the same
+  margins, 13:35-16:00 for Muhurat 14:05-15:40) a bulk
   request is answered at once, never held.
 - **Upstox says slow down** (a 429, or `UDAPI10005` in any answer): that API stops for every
   service for 60 s, then runs at half its rates for 10 minutes. **Upstox refuses the token** (a
@@ -303,6 +306,9 @@ about 300 full keys, with or without the candle.
   subscribed when the first data comes, and 10 minutes after the F&O close, so the updates that
   follow the close still arrive. Equity derivatives trade to 15:40 since 3 Aug 2026 (the cash
   market closes at 15:30), so the window ends at 15:50 and the stall watchdog runs 09:15-15:40.
+  From 7 Dec 2026 they trade to 15:45 (`sudarshan/regimes.py`): the margins are kept around each
+  day's session, so the window ends at 15:55 and the watchdog runs 09:15-15:45 from that day, and
+  a window set in `SUDARSHAN_FEED_WINDOW` moves the same way.
   Its 120 seconds are counted from the open and never from before it: a socket that heard nothing
   in the minutes before 09:15 is not reconnected at 09:15:00, only when the open itself brings
   nothing for 120 seconds.
@@ -328,7 +334,7 @@ about 300 full keys, with or without the candle.
   | WebSocket upgrade refused (403/429) | as above but never sooner than 60 s, so a stale socket can expire at Upstox |
   | authorize 401 ("token rejected") | 10 min, 30 min, then hourly; at once when the token file changes |
   | token file missing, empty or malformed | 60 s; at once when the file changes |
-  | no data for 120 s during 09:15-15:40, counted from the open (on a day with its own window: from 15 minutes after its start, the pre-open's length, to its end; on a reopened day without one: only after its first trade) | clean close and reconnect (stall watchdog) |
+  | no data for 120 s from 09:15 to the day's F&O close (15:40; 15:45 from 7 Dec 2026), counted from the open (on a day with its own window: from 15 minutes after its start, the pre-open's length, to its end; on a reopened day without one: only after its first trade) | clean close and reconnect (stall watchdog) |
 
 - **Subscriptions**: `default_keys.txt` (or `SUDARSHAN_FEED_KEYS`) is the base set, one
   `MODE KEY` per line, re-read at every start. API changes are stored as an overlay in
@@ -384,7 +390,7 @@ live service holds 5581):
 | `SUDARSHAN_NSE_HOLIDAYS_FILE` | `/etc/sudarshan/nse_holidays.txt` |
 | `SUDARSHAN_NSE_EXTRA_DAYS_FILE` | `/etc/sudarshan/nse_extra_trading_days.txt` |
 | `SUDARSHAN_FEED_ALWAYS_ON` | `0` |
-| `SUDARSHAN_FEED_WINDOW` | `08:58-15:50` (IST); a value that is not HH:MM-HH:MM (the start first) logs a warning and the usual hours are used |
+| `SUDARSHAN_FEED_WINDOW` | `08:58-15:50` (IST), its margins kept around each day's session (08:58-15:55 from 7 Dec 2026); a value that is not HH:MM-HH:MM (the start first) logs a warning and the usual hours are used |
 | `SUDARSHAN_FEED_HTTP_PORT` / `SUDARSHAN_FEED_ZMQ_PORT` | `5580` / `5581` (always 127.0.0.1) |
 | `SUDARSHAN_FEED_RECORD` | `1` |
 | `SUDARSHAN_FEED_RECORD_MAX_MB` / `SUDARSHAN_FEED_RECORD_KEEP_DAYS` | `1024` / `7` |

@@ -45,9 +45,9 @@ as of the last trade judged, never a later one.
 A stock that closes by auction (``Market.auction``) trades continuously to the continuous end and
 then prints the auction's price once (clock.auction; the frame must carry a volume that rose, as
 Book.on_tick says). The print belongs to the last minute of the cash session, so the 15:15 to 15:30
-candle and the day close at it, and it seals that bar on arrival (from 7 Dec 2026 every stock trades
-to the cash end and has sealed that minute already: the print then becomes its close and adds its
-volume). The frames of one a minute from the auction's book, whose volume does not move, are no
+candle and the day close at it, and it seals that bar on arrival (from 7 Dec 2026 such a stock
+trades to the cash end and has sealed that minute already: the print then becomes its close and
+adds its volume). The frames of one a minute from the auction's book, whose volume does not move, are no
 trade.
 """
 
@@ -720,9 +720,9 @@ class Bars:
     def _print(self, key: str, state: _Key, start: int, trade: tuple, day=None) -> Sealed:
         """The closing auction's price, into the day's last minute, which it seals on arrival.
 
-        A minute that continuous trading has already sealed (every stock from 7 Dec 2026, which
-        trades to the cash end) takes the print as its close, widens its high and low, and gains the
-        rise of the running total; its running total moves with it."""
+        A minute that continuous trading has already sealed (a stock that closes by auction from
+        7 Dec 2026, which trades to the cash end) takes the print as its close, widens its high and
+        low, and gains the rise of the running total; its running total moves with it."""
         at, price, volume, oi, atp = trade
         held = state.sealed.get(start)
         if held is None:

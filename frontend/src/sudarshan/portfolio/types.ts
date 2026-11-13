@@ -635,7 +635,7 @@ export interface PriceInfo {
   at: EpochMs | null
   source: PriceSource | null
   basis: PriceBasis | null
-  /** A closing record taken after its time (the service was down at 15:55). */
+  /** A closing record taken after its time (the service was down at 15:55; 16:00 from 7 Dec 2026). */
   late: boolean
 }
 
@@ -677,7 +677,8 @@ export interface HoldingRow {
   today_mode: TodayMode
   /**
    * A stock that closes by auction: its price waits for the auction from `auction_from`, may come
-   * until `auction_until` and is expected at `auction_close` ("price at about 15:30"). All three
+   * until `auction_until` and is expected at `auction_close` ("price at about 15:30", 15:40 from
+   * 7 Dec 2026). All three
    * are null for a stock that does not close by auction; the phone never computes sessions.
    */
   cas: boolean
@@ -1097,9 +1098,14 @@ export interface UpstoxEodDay {
   positions_pnl_paise: Paise | null
   /** One plain sentence for each part that was not read ("Holdings were not read at the close."). */
   not_read?: string[]
-  /** Taken at 15:55 and not yet settled to the official close. */
+  /** Taken at its time and not yet settled to the official close. */
   provisional: boolean
   late: boolean
+  /**
+   * When that day's record was due: the day's last close plus 15 minutes (15:55; 16:00 from
+   * 7 Dec 2026, when F&O closes at 15:45). Null from a server that does not say.
+   */
+  due_at?: EpochMs | null
 }
 
 export interface UpstoxHistory {

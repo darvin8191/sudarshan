@@ -15,7 +15,8 @@ at 10:16 after a restart").
 A stock that closes by auction has no continuous trade after the cash close until its print
 (X6): a screen whose universe holds such stocks holds its last cash boundary of the day until
 every one has printed, or at the latest until the auction window's end plus the grace (S12:
-15:35:05 on a normal day). ``due`` takes ``printed(screen) -> bool`` for that.
+15:35:05 on a normal day; from 7 Dec 2026, when the auction runs 15:30-15:40 after the cash close,
+15:40:05). ``due`` takes ``printed(screen) -> bool`` for that.
 
 A screen made, resumed or edited during the session starts a new version (``Screen.since``, the
 moment it began), and its run key is new for every boundary of the day. It gets one run, on the
@@ -126,8 +127,12 @@ def _held_until(screen: Screen, sessions: Mapping[str, Session], boundary: Bound
     for name in screen.segments:
         span = sessions.get(name)
         if name.endswith(AUCTION) and span is not None and span.auction_until is not None:
-            # the print lands in the candle ending at the cash close (bars.py), not at 15:15
-            if boundary.end == span.auction_close:
+            # The print lands in the candle ending at the cash close (bars.py), not at 15:15. The
+            # cash close is the plain segment's end: the auction's price comes at it until 6 Dec
+            # 2026 and 10 minutes after it from 7 Dec, so its expected moment cannot stand in.
+            cash = sessions.get(name.removesuffix(AUCTION))
+            closes = cash.end if cash is not None else span.auction_close
+            if boundary.end == closes:
                 return span.auction_until + GRACE_MS
     return None
 

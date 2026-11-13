@@ -1,6 +1,9 @@
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import type { Chart } from 'openalgo-charts'
 import { SessionCalendar } from 'openalgo-charts'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { LiveBarBuilder } from './liveBars'
 import {
   applySessionHours,
   calendarSpec,
@@ -114,6 +117,130 @@ describe('calendarSpec', () => {
     expect(mcx.phaseAt(secs(ist('2026-11-09', 0, 10)))).toBe('regular')
     const crypto = new SessionCalendar(calendarSpec('CRYPTO', TIMINGS, HOLIDAYS))
     expect(crypto.phaseAt(secs(ist('2026-10-04', 3, 0)))).toBe('regular')
+  })
+})
+
+/**
+ * SUDARSHAN: the timings of 7 Dec 2026, from the server's own rows. The vectors file is the
+ * contract with sudarshan/regimes.py and OpenAlgo's calendar (test_regimes*.py run it there):
+ * every day's close as the chart's calendar reads it, built on a day before the change and on
+ * one after it.
+ */
+interface RegimeDay {
+  date: string
+  cash: [string, string]
+  fo: [string, string]
+}
+const VECTORS = JSON.parse(
+  readFileSync(join(process.cwd(), '..', 'sudarshan', 'tests', 'regimes_vectors.json'), 'utf8')
+) as { timings: TimingRow[]; days: RegimeDay[] }
+const at = (date: string, hhmmText: string) => {
+  const [hh, mm] = hhmmText.split(':').map(Number)
+  return ist(date, hh, mm)
+}
+
+describe('the timings of 7 Dec 2026 (regimes_vectors.json)', () => {
+  const built = ['2026-11-13', '2026-12-04', '2026-12-10', '2027-01-15']
+
+  it.each(built)('every vector day opens and closes on its own clock, built on %s', (day) => {
+    expect(VECTORS.days.length).toBeGreaterThanOrEqual(6)
+    for (const exchange of ['NFO', 'BFO', 'NSE', 'BSE']) {
+      const spec = calendarSpec(exchange, VECTORS.timings, [], day)
+      expect(spec).not.toBeNull()
+      const calendar = new SessionCalendar(spec)
+      const fo = exchange.endsWith('FO')
+      // Every vector day is in 2026, inside the years each build covers (January reaches back).
+      for (const vector of VECTORS.days) {
+        const [opens, closes] = fo ? vector.fo : vector.cash
+        const session = calendar.sessionAt(secs(at(vector.date, opens)))
+        expect(session, `${exchange} ${vector.date} at ${opens}`).not.toBeNull()
+        expect(session?.close, `${exchange} ${vector.date} closes`).toBe(
+          secs(at(vector.date, closes))
+        )
+        expect(calendar.sessionAt(secs(at(vector.date, closes)))).toBeNull()
+      }
+    }
+  })
+
+  it('takes the weekly hours of the day it is built for', () => {
+    const before = calendarSpec('NFO', VECTORS.timings, [], '2026-11-13')
+    const after = calendarSpec('NFO', VECTORS.timings, [], '2026-12-10')
+    expect(before?.sessions).toEqual(['0915-1540:23456'])
+    expect(after?.sessions).toEqual(['0915-1545:23456'])
+    expect(before?.exceptions?.['2026-12-07']).toEqual(['0915-1545'])
+    expect(before?.exceptions?.['2026-12-05']).toBeUndefined() // a Saturday stays closed
+    expect(after?.exceptions?.['2026-12-04']).toEqual(['0915-1540'])
+    expect(after?.exceptions?.['2026-12-07']).toBeUndefined()
+    // Rows without a change are built exactly as before.
+    expect(calendarSpec('NSE', VECTORS.timings, [], '2026-12-10')?.exceptions).toEqual({})
+  })
+
+  it('keeps a holiday closed and a special session its own window across the change', () => {
+    const christmas: HolidayRow = {
+      date: '2026-12-25',
+      holiday_type: 'TRADING_HOLIDAY',
+      closed_exchanges: CASH,
+      open_exchanges: [],
+    }
+    const spec = calendarSpec('NFO', VECTORS.timings, [christmas], '2026-11-13')
+    expect(spec?.exceptions?.['2026-12-25']).toEqual([])
+    const calendar = new SessionCalendar(spec)
+    expect(calendar.sessionAt(secs(at('2026-12-25', '10:00')))).toBeNull()
+  })
+
+  it("opens and ends the phone chart's F&O candles on each day's clock", () => {
+    const candle = (time: number) => ({
+      time,
+      open: 100,
+      high: 101,
+      low: 99,
+      close: 100,
+      volume: 0,
+    })
+    for (const [date, close, next] of [
+      ['2026-12-04', '15:40', '2026-12-07'],
+      ['2026-12-08', '15:45', '2026-12-09'], // a NIFTY expiry: its contract stops at 15:30
+      ['2026-12-10', '15:45', '2026-12-11'],
+    ]) {
+      const calendar = new SessionCalendar(calendarSpec('NFO', VECTORS.timings, [], date))
+      const fives = new LiveBarBuilder({ interval: '5m', session: calendar })
+      fives.seed(candle(secs(at(date, '15:35'))))
+      const opened = fives.onClock(secs(at(date, '15:40')) + 0.5)
+      if (close === '15:45') {
+        expect(opened?.bar.time, `${date}: the 15:40 candle opens on time`).toBe(
+          secs(at(date, '15:40'))
+        )
+        // That candle is the day's last: the clock next looks at the next day's open.
+        expect(fives.nextClockAt(secs(at(date, '15:41')))).toBe(secs(at(next, '09:15')))
+      } else {
+        expect(opened, `${date}: nothing opens after the close`).toBeNull()
+      }
+      const hourly = new LiveBarBuilder({ interval: '1h', session: calendar })
+      hourly.seed(candle(secs(at(date, '14:15'))))
+      expect(hourly.countdown(secs(at(date, '15:20')))).toEqual({
+        kind: 'closes',
+        at: secs(at(date, close)),
+      })
+    }
+  })
+
+  it('ignores a change that cannot be read and still builds the hours', () => {
+    const rows: TimingRow[] = [
+      {
+        exchange: 'NFO',
+        start_offset: 33_300_000,
+        end_offset: 56_400_000,
+        changes: [
+          { from: 'soon', end_offset: 56_700_000 },
+          { from: '2026-12-07', end_offset: 99_000_000 },
+        ],
+      },
+    ]
+    expect(calendarSpec('NFO', rows, [], '2026-12-10')).toEqual({
+      timezone: 'Asia/Kolkata',
+      sessions: ['0915-1540:23456'],
+      exceptions: {},
+    })
   })
 })
 

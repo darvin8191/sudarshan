@@ -43,6 +43,7 @@ from database.market_calendar_db import (
     get_all_market_timings,
     get_effective_session_window,
     get_market_hours_status,
+    timing_on,
     get_special_session,
     is_market_holiday,
     is_market_open,
@@ -2931,8 +2932,9 @@ def get_schedule_status(config):
 
 #: Display order and descriptive names for the /python exchange selector. Only
 #: the *name* lives here. The session window shown beside it is read from the
-#: market calendar DB, so a timing change (SEBI's F&O close moving to 15:40, an
-#: admin edit under /admin/timings) reaches this dropdown without a code change.
+#: market calendar DB as it stands today, so a timing change (SEBI's F&O close
+#: moving to 15:40, then to 15:45 from 7 Dec 2026, an admin edit under
+#: /admin/timings) reaches this dropdown without a code change.
 STRATEGY_EXCHANGE_NAMES = [
     ("NSE", "Equity"),
     ("BSE", "Equity"),
@@ -2991,9 +2993,12 @@ def api_get_exchanges():
         offered = [(c, d) for c, d in STRATEGY_EXCHANGE_NAMES if c in SUPPORTED_EXCHANGES]
 
     exchanges = []
+    today = datetime.now(IST).date()
     for code, description in offered:
         is_crypto = code in CRYPTO_EXCHANGES
         timing = timings.get(code)
+        if timing:
+            timing = timing_on(code, timing, today)  # SUDARSHAN: today's close (15:45 from 7 Dec)
         start_time = None if is_crypto else (timing or {}).get("start_time")
         end_time = None if is_crypto else (timing or {}).get("end_time")
 

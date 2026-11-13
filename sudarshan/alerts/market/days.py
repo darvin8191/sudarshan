@@ -13,7 +13,7 @@ Built only from sessions.py through TradingCalendar (review A7.a-c, cross-design
 
 CAS keys (cross-design X6a): the cash stocks among the alerts' keys whose company has stock
 futures in the master contract (``fno_stocks``: NFO futures in OpenAlgo's symtoken, read
-read-only), or every stock from 7 Dec 2026 (sessions.closes_by_auction). The master is read at
+read-only), from 7 Dec 2026 too (sessions.closes_by_auction). The master is read at
 start and each morning at MASTER_AT, after the day's login has downloaded it.
 """
 

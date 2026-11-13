@@ -329,6 +329,8 @@ export default function AutoLogin() {
 
   const data = status.data
   const testBlocked = data.running || !data.test.allowed || test.isPending
+  // Today's hours from the server: the F&O close moves to 15:45 on 7 Dec 2026.
+  const testHours = data.test.hours ?? 'from 09:00 to the F&O close on a trading day'
 
   return (
     <div className="space-y-6 py-6">
@@ -443,8 +445,8 @@ export default function AutoLogin() {
               </Button>
               <p className="text-sm text-muted-foreground">
                 One login now, at any time. Test now replaces today's login, so it is not available
-                during market hours while Upstox is connected (usually from 09:00 to 15:40 on a
-                trading day; a special session has its own hours), or while auto-login is paused.
+                during market hours while Upstox is connected (usually {testHours}; a special
+                session has its own hours), or while auto-login is paused.
               </p>
               {!data.test.allowed && data.test.reason && !test.isPending && (
                 <p className={`inline-flex items-start gap-1.5 text-sm ${WARNING}`}>

@@ -37,7 +37,8 @@ export interface AutoLoginStatus {
   running: boolean
   next_run: string | null
   schedule: string[]
-  test: { allowed: boolean; reason: string | null }
+  /** `hours`: when Test now is refused on a usual trading day, as today has them. */
+  test: { allowed: boolean; reason: string | null; hours?: string }
   recent: AutoLoginAttempt[]
 }
 

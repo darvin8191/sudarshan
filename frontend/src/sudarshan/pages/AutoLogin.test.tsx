@@ -49,7 +49,11 @@ function makeStatus(overrides: Partial<AutoLoginStatus> = {}): AutoLoginStatus {
     running: false,
     next_run: null,
     schedule: ['08:35', '08:45', '08:55'],
-    test: { allowed: false, reason: 'The TOTP key or the PIN is not saved yet.' },
+    test: {
+      allowed: false,
+      reason: 'The TOTP key or the PIN is not saved yet.',
+      hours: 'from 09:00 to 15:40 on a trading day',
+    },
     recent: [],
     ...overrides,
   }
@@ -90,6 +94,18 @@ describe('Auto login page', () => {
     // Before anyone presses it: Test now replaces today's login, hence its hours.
     expect(screen.getByText(/Test now replaces today's login/)).toHaveTextContent(
       /during market hours while Upstox is connected \(usually from 09:00 to 15:40 on a trading day; a special session has its own hours\)/
+    )
+  })
+
+  it("names the day's own hours: to the F&O close, 15:45 from 7 Dec 2026", async () => {
+    api.status.mockResolvedValue(
+      makeStatus({
+        test: { allowed: true, reason: null, hours: 'from 09:00 to 15:45 on a trading day' },
+      })
+    )
+    renderPage()
+    expect(await screen.findByText(/Test now replaces today's login/)).toHaveTextContent(
+      /\(usually from 09:00 to 15:45 on a trading day; a special session has its own hours\)/
     )
   })
 

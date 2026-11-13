@@ -5,15 +5,17 @@ weekdays) and, for "Test now", by OpenAlgo as a child process (``--test``). Ever
 itself whether to act, so a deploy restarting the unit, a catch-up start after a boot, a weekend
 or an NSE holiday costs nothing:
 
-  scheduled  trading day, inside the window (08:30-15:40), switched on, not paused, and Upstox
-             no longer accepts the login OpenAlgo holds (OpenAlgo checks it with one read-only
-             call); during market hours (to the 15:40 F&O close) never without that check
-  test       any day and time, switch on or off, but not while paused; refused 09:00-15:40 on a
-             trading day while the stored login works (Test now replaces today's login)
+  scheduled  trading day, inside the window (08:30 to the F&O close), switched on, not paused,
+             and Upstox no longer accepts the login OpenAlgo holds (OpenAlgo checks it with one
+             read-only call); during market hours (to the F&O close) never without that check
+  test       any day and time, switch on or off, but not while paused; refused from 09:00 to the
+             F&O close on a trading day while the stored login works (Test now replaces today's
+             login)
 
-Market hours are the usual ones on a usual day. A day listed in the extra-days file with its own
-window (a Muhurat or special Saturday session) trades in that window, so both rules above follow
-it: Test now is open that morning and refused through the session (schedule.market_spans).
+Market hours are the usual ones on a usual day, to the day's F&O close: 15:40, and 15:45 from
+7 Dec 2026 (schedule.usual_on). A day listed in the extra-days file with its own window (a Muhurat
+or special Saturday session) trades in that window, so both rules above follow it: Test now is
+open that morning and refused through the session (schedule.market_spans).
 
 A pause begins when Upstox refuses the login for any reason other than "too many requests" and
 ends only when the owner saves the TOTP key or the PIN again: the same refused pair is never sent
@@ -50,7 +52,7 @@ from sudarshan.vault import (
 from . import messages
 from .config import ConfigError, Settings, read_openalgo_env, setup_logging
 from .handoff import LinkError, OpenAlgoLink, call_max_s
-from .schedule import IST, TradingCalendar, minute_of_day, trading_session_start
+from .schedule import IST, TradingCalendar, minute_of_day, trading_session_start, usual_on
 from .totp import InvalidSecret, normalize_secret, seconds_left, totp
 from .upstox import CALL_MAX_S as UPSTOX_CALL_MAX_S
 from .upstox import LoginResult, request_token
@@ -263,8 +265,9 @@ class AutoLoginRun:
 
           scheduled  works: nothing to do. unknown: trust a fresh login; with none on record,
                      log in before 09:15 but never during market hours. dead or none: log in.
-          test       works or unknown, 09:00-15:40 on a trading day: refused, because Test now
-                     replaces today's login. Otherwise it goes ahead.
+          test       works or unknown, from 09:00 to the F&O close on a trading day (15:45
+                     from 7 Dec 2026): refused, because Test now replaces today's login.
+                     Otherwise it goes ahead.
         """
         token = info.get("token", "unknown")
         fresh = bool(info.get("fresh_session"))
@@ -341,7 +344,7 @@ class AutoLoginRun:
     def _finish(
         self, outcome: str, code: str, *, message: str | None = None, status: dict | None = None
     ) -> Outcome:
-        text = message or messages.message_for(code)
+        text = message or messages.message_for(code, self.now().astimezone(IST).date())
         self.vault.update_status(
             last_run_id=self.run_id,
             last_run_at=self.now(),
@@ -441,7 +444,7 @@ def _main(args, env, clock) -> int:
         if not calendar.is_trading_day(now.astimezone(IST).date()):
             log.info("not a trading day: nothing to do")
             return EXIT_OK
-        start, end = settings.window
+        start, end = usual_on(now.astimezone(IST).date(), settings.window)  # to the F&O close
         if not start <= minute_of_day(now) < end:
             log.info("outside the auto-login window: nothing to do")
             return EXIT_OK
