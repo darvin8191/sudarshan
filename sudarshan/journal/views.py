@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from typing import Any
 
-from .core import kinds
+from .core import kinds, money
 
 
 def fields_of(record: str) -> tuple[str, ...]:
@@ -18,6 +18,7 @@ def fields_of(record: str) -> tuple[str, ...]:
 
 
 TRIP = fields_of("Trip")
+FILL = fields_of("Fill")
 NOTE = fields_of("TripNote")
 TAG = fields_of("Tag")
 PLAYBOOK = fields_of("Playbook")
@@ -30,6 +31,31 @@ def pick(row: Mapping[str, Any], names: Iterable[str]) -> dict[str, Any]:
 
 def trip_out(row: Mapping[str, Any]) -> dict[str, Any]:
     return pick(row, TRIP)
+
+
+def row_out(row: Mapping[str, Any], note: Mapping[str, Any] | None) -> dict[str, Any]:
+    """A row of the trades list (``TripRow``): the trip and its mistake tags."""
+    return {**pick(row, TRIP), "mistakes": list((note or {}).get("mistakes") or [])}
+
+
+def fill_out(row: Mapping[str, Any], ref: Mapping[str, Any] | None) -> dict[str, Any]:
+    """A fill as executed (``Fill``), with the surface its order was placed from."""
+    return {**pick(row, FILL), "surface": (ref or {}).get("surface")}
+
+
+def excursion_out(row: Mapping[str, Any]) -> dict[str, Any] | None:
+    """The trip's excursion (``Excursion``); None while it is open. Capture is the net over the
+    MFE, only where the MFE is above 0 (design 5.4)."""
+    if row["status"] != "closed":
+        return None
+    mfe, net = row.get("mfe_paise"), row.get("net_paise")
+    capture = (
+        money.ratio_str(int(net) * 100, int(mfe), 2) if mfe and mfe > 0 and net is not None
+        else None
+    )  # fmt: skip
+    return {"source": row["excursion_source"], "mae_paise": row.get("mae_paise"),
+            "mfe_paise": mfe, "mae_ms": row.get("mae_ms"), "mfe_ms": row.get("mfe_ms"),
+            "capture_pct": capture, "note": row.get("excursion_note")}  # fmt: skip
 
 
 def note_out(row: Mapping[str, Any] | None) -> dict[str, Any] | None:

@@ -271,7 +271,17 @@ RECORDS = {
     "placed_ms:int|null, rtt_ms:int|null, total_latency_ms:int|null",
 }
 #: ``trip_get``'s answer: the trip, its legs, the owner's note and its orders' references.
-RECORDS["TripDetail"] = RECORDS["Trip"] + ", legs:TripLeg[], note:TripNote|null, orders:OrderRef[]"
+# A row of the trades list: the trip and its mistake tags (the ids of its note's ``mistakes``).
+RECORDS["TripRow"] = RECORDS["Trip"] + ", mistakes:int[]"
+# The trade sheet: the trip, its fills (each as executed: a flip's fill is in both trips, its
+# ``legs`` say how much of it is this trip's), the owner's note (its ``checklist`` is JSON text,
+# ``[{"rule": ..., "yes": ...}]``, or empty), the excursion, the charges estimate of its orders,
+# the first entry order's round trip as OpenAlgo's latency record has it (``latency_ms``), and
+# each order's label.
+RECORDS["TripDetail"] = RECORDS["Trip"] + (
+    ", legs:TripLeg[], fills:Fill[], note:TripNote|null, excursion:Excursion|null, "
+    "charges:ChargeEstimate|null, latency_ms:int|null, orders:OrderRef[]"
+)
 
 
 class Field(NamedTuple):
@@ -341,7 +351,7 @@ OPS = (
         "read",
         "mode?:Mode, status?:TripStatus, before?:int, limit?:int, strategy?:string, "
         "tag?:int, playbook?:int, from?:int, to?:int",
-        "Trip[]",
+        "TripRow[]",
     ),
     OpSpec("trip_get", "GET", "/trips/<id>", "read", "id:int", "TripDetail"),
     OpSpec(

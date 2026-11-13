@@ -238,7 +238,8 @@ def test_a_trip_update_writes_the_trip_and_its_note_and_moves_the_version(made, 
     general = made.read(OWNER, lambda tx: tx.rows("playbook"))[0]
     changes = {"strategy_override": "  Breakout  retest ", "setup_id": general["id"],
                "risk_paise": 50_000, "notes": "Entered late.", "mistakes": [tags[0]["id"], tags[0]["id"]],
-               "checklist": json.dumps({"Stop placed": True, "Size within limit": False}),
+               "checklist": json.dumps([{"rule": " Stop  placed", "yes": True},
+                                        {"rule": "Size within limit", "yes": False}]),
                "mood": "calm"}  # fmt: skip
     version = made.write(OWNER, lambda tx: update_trip(tx, trip_id, 1, changes, NOW))
     trip = made.read(OWNER, lambda tx: tx.get("round_trip", trip_id))
@@ -248,7 +249,9 @@ def test_a_trip_update_writes_the_trip_and_its_note_and_moves_the_version(made, 
         "Breakout retest", general["id"], 50_000,
     )  # fmt: skip
     assert note["mistakes"] == [tags[0]["id"]] and note["mood"] == "calm"
-    assert json.loads(note["checklist"]) == {"Size within limit": False, "Stop placed": True}
+    assert note["checklist"] == (
+        '[{"rule":"Stop placed","yes":true},{"rule":"Size within limit","yes":false}]'
+    )  # the trade sheet's own form, as JSON.stringify writes it
     cleared = made.write(OWNER, lambda tx: update_trip(
         tx, trip_id, 2, {"strategy_override": None, "mood": None}, NOW))  # fmt: skip
     trip = made.read(OWNER, lambda tx: tx.get("round_trip", trip_id))
@@ -278,7 +281,10 @@ def test_a_trip_update_from_a_stale_version_writes_nothing(made, trip_id):
         ({"mistakes": [999]}, "mistakes"),
         ({"mistakes": "FOMO"}, "mistakes"),
         ({"checklist": "{not json"}, "checklist"),
-        ({"checklist": json.dumps({"a": "yes"})}, "checklist"),
+        ({"checklist": json.dumps({"a": True})}, "checklist"),
+        ({"checklist": json.dumps([{"rule": "a", "yes": "yes"}])}, "checklist"),
+        ({"checklist": json.dumps([{"rule": " ", "yes": True}])}, "checklist"),
+        ({"checklist": json.dumps([{"rule": "r", "yes": True}] * 41)}, "checklist"),
         ({"mood": "angry"}, "mood"),
     ],
 )
@@ -365,7 +371,8 @@ def test_the_trips_op_lists_open_first_then_newest_closed_with_its_filters(made)
     listed = call("trips", ctx)
     assert [t["status"] for t in listed] == ["open", "closed", "closed"]
     assert [t["symbol"][-7:] for t in listed] == ["25100CE", "25200CE", "25000CE"]
-    assert set(listed[0]) == set(__import__("sudarshan.journal.views", fromlist=["TRIP"]).TRIP)
+    views = __import__("sudarshan.journal.views", fromlist=["TRIP"])
+    assert set(listed[0]) == {*views.TRIP, "mistakes"} and listed[0]["mistakes"] == []
     closed_a = next(t for t in listed if t["symbol"].endswith("25000CE"))
     fomo = made.read(OWNER, lambda tx: tx.rows("tag", name="FOMO"))[0]
     made.write(OWNER, lambda tx: update_trip(
@@ -390,10 +397,61 @@ def test_trip_get_carries_the_legs_the_note_and_the_orders_latency(made, trip_id
     ]  # fmt: skip
     assert detail["note"]["notes"] == "Good one." and detail["version"] == 2
     assert [o["order_id"] for o in detail["orders"]] == ["o-a1"]
-    assert detail["orders"][0]["rtt_ms"] == 412
+    assert detail["orders"][0]["rtt_ms"] == 412 and detail["latency_ms"] == 412
+    assert [(f["trade_id"], f["qty"], f["price_u"]) for f in detail["fills"]] == [
+        ("a1", 65, 1_000_000), ("a2", 65, 1_010_000),
+    ]  # fmt: skip
+    assert detail["fills"][0]["surface"] == "api" and detail["fills"][1]["surface"] is None
+    assert detail["charges"]["orders"] == 2 and detail["charges"]["plan"] == "plus"
+    assert detail["charges"]["parts"]["total_paise"] == detail["charges_est_paise"]
+    assert detail["excursion"] == {"source": "none", "mae_paise": None, "mfe_paise": None,
+                                   "mae_ms": None, "mfe_ms": None, "capture_pct": None,
+                                   "note": None}  # fmt: skip
     with pytest.raises(ApiError) as caught:
         call("trip_get", ctx, id=99)
     assert caught.value.status == 404
+
+
+def test_the_sheet_reads_the_excursion_with_its_capture(made, trip_id):
+    made.write(OWNER, lambda tx: tx.touch("round_trip", trip_id, {
+        "mae_paise": -19_500, "mfe_paise": 97_500, "mae_ms": 1, "mfe_ms": 2,
+        "excursion_source": "recording", "excursion_note": "from 10:01:30"}, NOW))  # fmt: skip
+    found = call("trip_get", Ctx(made), id=trip_id)["excursion"]
+    net = made.read(OWNER, lambda tx: tx.get("round_trip", trip_id))["net_paise"]
+    assert found["mae_paise"] == -19_500 and found["note"] == "from 10:01:30"
+    assert found["capture_pct"] == __import__(
+        "sudarshan.journal.core.money", fromlist=["ratio_str"]
+    ).ratio_str(net * 100, 97_500, 2)
+
+
+def test_an_empty_checklist_clears_it(made, trip_id):
+    made.write(
+        OWNER,
+        lambda tx: update_trip(
+            tx, trip_id, 1, {"checklist": json.dumps([{"rule": "Stop placed", "yes": True}])}, NOW
+        ),
+    )
+    made.write(OWNER, lambda tx: update_trip(tx, trip_id, 2, {"checklist": ""}, NOW))
+    assert made.read(OWNER, lambda tx: tx.note_of(trip_id))["checklist"] == ""
+
+
+def test_later_pages_are_closed_trips_and_orphans_are_listed_only_when_asked(made):
+    put(made, [fill("a1", "BUY", 65, 100, "10:01"), fill("a2", "SELL", 65, 101, "10:20"),
+               fill("b1", "BUY", 65, 50, "09:05", symbol="NIFTY25NOV2625100CE"),
+               fill("c1", "BUY", 65, 60, "11:30", symbol="NIFTY25NOV2625200CE"),
+               fill("c2", "SELL", 65, 59, "12:00", symbol="NIFTY25NOV2625200CE")])  # fmt: skip
+    ctx = Ctx(made)
+    first = call("trips", ctx, limit=2)
+    assert [t["status"] for t in first] == ["open", "closed"]
+    later = call("trips", ctx, before=first[-1]["closed_ms"])
+    assert [t["status"] for t in later] == ["closed"]  # the open trip of 09:05 is not repeated
+    trip = next(t for t in call("trips", ctx) if t["symbol"].endswith("25000CE"))
+    made.write(OWNER, lambda tx: update_trip(tx, trip["id"], 1, {"notes": "kept"}, NOW))
+    # its opening fill withdrawn: the trip it was is no longer made, and the owner wrote on it
+    made.write(OWNER, lambda tx: tx.fills_withdraw("live", 20261109, ["b1", "c1", "c2", "a2"], NOW))
+    made.write(OWNER, lambda tx: replay_tx(tx, "live", {20261109}, NOW, Facts()))
+    assert all(t["status"] != "orphan" for t in call("trips", ctx))
+    assert [t["id"] for t in call("trips", ctx, status="orphan")] == [trip["id"]]
 
 
 def test_the_update_ops_answer_done_and_their_refusals_in_words(made, trip_id):

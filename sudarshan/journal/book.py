@@ -92,10 +92,13 @@ def owned(tx: Tx, trip: Mapping[str, Any]) -> bool:
     return tx.note_of(int(trip["id"])) is not None
 
 
-def _charges(trip: Mapping[str, Any], by_trade: Mapping[str, Mapping[str, Any]],
-             refs: Mapping[str, Mapping[str, Any]], mode: str, plan: str) -> int:  # fmt: skip
+def charges_of(legs: Iterable[Mapping[str, Any]], by_trade: Mapping[str, Mapping[str, Any]],
+               refs: Mapping[str, Mapping[str, Any]], mode: str,
+               plan: str) -> dict[str, Any]:  # fmt: skip
+    """The charges estimate of a trip's orders (``ChargeEstimate``): each leg's part of its fill,
+    priced per executed order by core/charges. ``legs`` carry ``trade_id`` and ``qty``."""
     rows = []
-    for leg in trip["legs"]:
+    for leg in legs:
         fill = by_trade[leg["trade_id"]]
         ref = refs.get(fill["order_id"]) or {}
         rows.append({
@@ -104,7 +107,12 @@ def _charges(trip: Mapping[str, Any], by_trade: Mapping[str, Mapping[str, Any]],
             "exchange": fill["exchange"], "symbol": fill["symbol"], "product": fill["product"],
             "surface": ref.get("surface"),
         })  # fmt: skip
-    return int(charges_core.estimate(rows, plan)["parts"]["total_paise"])
+    return charges_core.estimate(rows, plan)
+
+
+def _charges(trip: Mapping[str, Any], by_trade: Mapping[str, Mapping[str, Any]],
+             refs: Mapping[str, Mapping[str, Any]], mode: str, plan: str) -> int:  # fmt: skip
+    return int(charges_of(trip["legs"], by_trade, refs, mode, plan)["parts"]["total_paise"])
 
 
 def trip_values(trip: Mapping[str, Any], by_trade: Mapping[str, Mapping[str, Any]],
@@ -251,21 +259,29 @@ DESCRIPTION_TEXT = 1_000
 
 
 def checklist_text(value: str) -> str:
-    """The checklist as saved: a JSON object of item to yes or no, at most 40 items."""
+    """The checklist as the trade sheet writes it and as it is kept: JSON text of the rules and
+    their answers, ``[{"rule": "Stop placed", "yes": true}, ...]``, at most 40 of them; empty
+    text clears it."""
     if not isinstance(value, str) or len(value) > CHECKLIST_TEXT:
         raise Invalid(WORDS["checklist"], "checklist")
+    if not value.strip():
+        return ""
     try:
-        found = json.loads(value or "{}")
+        found = json.loads(value)
     except ValueError:
         raise Invalid(WORDS["checklist"], "checklist") from None
-    if (
-        not isinstance(found, dict)
-        or len(found) > CHECKLIST_ITEMS
-        or not all(isinstance(k, str) and len(k) <= RULE_TEXT for k in found)
-        or not all(isinstance(v, bool) for v in found.values())
-    ):
+    if not isinstance(found, list) or len(found) > CHECKLIST_ITEMS:
         raise Invalid(WORDS["checklist"], "checklist")
-    return json.dumps(found, sort_keys=True, ensure_ascii=False)
+    items = []
+    for item in found:
+        rule = item.get("rule") if isinstance(item, dict) else None
+        yes = item.get("yes") if isinstance(item, dict) else None
+        if not isinstance(rule, str) or not rule.strip() or len(rule) > RULE_TEXT:
+            raise Invalid(WORDS["checklist"], "checklist")
+        if not isinstance(yes, bool):
+            raise Invalid(WORDS["checklist"], "checklist")
+        items.append({"rule": " ".join(rule.split()), "yes": yes})
+    return json.dumps(items, ensure_ascii=False, separators=(",", ":")) if items else ""
 
 
 def update_trip(tx: Tx, trip_id: int, version: int, changes: Mapping[str, Any], now: int) -> int:
