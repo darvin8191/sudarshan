@@ -1,0 +1,243 @@
+{
+ "note": "synthetic; money in paise, prices in price_u, instants in epoch ms",
+ "vectors": [
+  {
+   "id": "X1",
+   "note": "P1's long: low 97.00 at 10:04, high 115.00 at 10:15; points outside the span are ignored",
+   "side": "long",
+   "entry_avg_u": 1000000,
+   "qty": 65,
+   "start_ms": 1794198660000,
+   "end_ms": 1794199800000,
+   "net_paise": 81250,
+   "path": [
+    [
+     1794198630000,
+     800000
+    ],
+    [
+     1794198660000,
+     1000000
+    ],
+    [
+     1794198840000,
+     970000
+    ],
+    [
+     1794199200000,
+     1050000
+    ],
+    [
+     1794199500000,
+     1150000
+    ],
+    [
+     1794199800000,
+     1125000
+    ],
+    [
+     1794199860000,
+     1300000
+    ]
+   ],
+   "source": "recording",
+   "expect": {
+    "source": "recording",
+    "mae_paise": -19500,
+    "mae_ms": 1794198840000,
+    "mfe_paise": 97500,
+    "mfe_ms": 1794199500000,
+    "capture_pct": "83.33",
+    "note": null
+   }
+  },
+  {
+   "id": "X2",
+   "note": "P5's short at 100.00: high 104 then low 88",
+   "side": "short",
+   "entry_avg_u": 1000000,
+   "qty": 65,
+   "start_ms": 1794198660000,
+   "end_ms": 1794199260000,
+   "net_paise": 65000,
+   "path": [
+    [
+     1794198660000,
+     1000000
+    ],
+    [
+     1794198780000,
+     1040000
+    ],
+    [
+     1794199080000,
+     880000
+    ],
+    [
+     1794199320000,
+     600000
+    ]
+   ],
+   "source": "recording",
+   "expect": {
+    "source": "recording",
+    "mae_paise": -26000,
+    "mae_ms": 1794198780000,
+    "mfe_paise": 78000,
+    "mfe_ms": 1794199080000,
+    "capture_pct": "83.33",
+    "note": null
+   }
+  },
+  {
+   "id": "X3",
+   "note": "an empty path: not computed",
+   "side": "long",
+   "entry_avg_u": 1000000,
+   "qty": 65,
+   "start_ms": 1794198660000,
+   "end_ms": 1794199800000,
+   "net_paise": 81250,
+   "path": [],
+   "source": "recording",
+   "expect": {
+    "source": "none",
+    "mae_paise": null,
+    "mfe_paise": null,
+    "mae_ms": null,
+    "mfe_ms": null,
+    "capture_pct": null,
+    "note": "the price path was not recorded"
+   }
+  },
+  {
+   "id": "X4",
+   "note": "the path starts 2 s after the entry: still computed, with a note",
+   "side": "long",
+   "entry_avg_u": 1000000,
+   "qty": 65,
+   "start_ms": 1794198660000,
+   "end_ms": 1794199800000,
+   "net_paise": 81250,
+   "path": [
+    [
+     1794198662000,
+     990000
+    ],
+    [
+     1794198840000,
+     970000
+    ],
+    [
+     1794199500000,
+     1150000
+    ]
+   ],
+   "source": "recording",
+   "expect": {
+    "source": "recording",
+    "mae_paise": -19500,
+    "mae_ms": 1794198840000,
+    "mfe_paise": 97500,
+    "mfe_ms": 1794199500000,
+    "capture_pct": "83.33",
+    "note": "from 10:01:02"
+   }
+  },
+  {
+   "id": "X5",
+   "note": "the price never went above the entry: MFE 0, no instant, no capture",
+   "side": "long",
+   "entry_avg_u": 1000000,
+   "qty": 65,
+   "start_ms": 1794198660000,
+   "end_ms": 1794199800000,
+   "net_paise": -32500,
+   "path": [
+    [
+     1794198660000,
+     1000000
+    ],
+    [
+     1794198900000,
+     950000
+    ]
+   ],
+   "source": "recording",
+   "expect": {
+    "source": "recording",
+    "mae_paise": -32500,
+    "mae_ms": 1794198900000,
+    "mfe_paise": 0,
+    "mfe_ms": null,
+    "capture_pct": null,
+    "note": null
+   }
+  },
+  {
+   "id": "X6",
+   "note": "the price never went against the entry: MAE 0, no instant",
+   "side": "short",
+   "entry_avg_u": 1000000,
+   "qty": 65,
+   "start_ms": 1794198660000,
+   "end_ms": 1794199800000,
+   "net_paise": 13000,
+   "path": [
+    [
+     1794198660000,
+     1000000
+    ],
+    [
+     1794198900000,
+     980000
+    ]
+   ],
+   "source": "recording",
+   "expect": {
+    "source": "recording",
+    "mae_paise": 0,
+    "mae_ms": null,
+    "mfe_paise": 13000,
+    "mfe_ms": 1794198900000,
+    "capture_pct": "100.00",
+    "note": null
+   }
+  }
+ ],
+ "candles": {
+  "note": "P1's long from 1-minute candles [ms, low_u, high_u]",
+  "side": "long",
+  "entry_avg_u": 1000000,
+  "qty": 65,
+  "start_ms": 1794198660000,
+  "end_ms": 1794199800000,
+  "net_paise": 81250,
+  "candles": [
+   [
+    1794198780000,
+    970000,
+    1010000
+   ],
+   [
+    1794199440000,
+    1100000,
+    1150000
+   ],
+   [
+    1794199860000,
+    700000,
+    1400000
+   ]
+  ],
+  "expect": {
+   "source": "candles",
+   "mae_paise": -19500,
+   "mae_ms": 1794198780000,
+   "mfe_paise": 97500,
+   "mfe_ms": 1794199440000,
+   "capture_pct": "83.33",
+   "note": "from 10:03:00"
+  }
+ }
+}
