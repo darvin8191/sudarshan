@@ -1,5 +1,5 @@
 import { ArrowDown, ArrowUp, Clock, ListPlus, Plus, StickyNote, Trash2 } from 'lucide-react'
-import { memo } from 'react'
+import { memo, type ReactNode } from 'react'
 import type { WatchlistItem } from '@/api/watchlist'
 import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
@@ -267,9 +267,16 @@ export interface SectionLayout {
   onMenu: (id: number) => void
 }
 
+/** F11: the rows that follow the price, drawn for one section (null: no section); first in their group. */
+export interface FollowSlots {
+  count: number
+  render: (sectionId: number | null) => ReactNode
+}
+
 /** F3: no section first, then each section under its header; a folded one shows only its header. */
 function Sectioned({
   rows,
+  follow,
   layout,
   tags,
   held,
@@ -278,6 +285,7 @@ function Sectioned({
 }: {
   marks?: ReadonlyMap<string, RowMark> // F8
   rows: LiveRow[]
+  follow?: FollowSlots // F11
   layout: SectionLayout
   tags?: ReadonlyMap<string, Chip>
   held?: ReadonlyMap<string, HeldFigures> // F7
@@ -311,6 +319,9 @@ function Sectioned({
               ]
             : []
         })
+        const followed = layout.collapsed.has(section?.id ?? -1)
+          ? null
+          : follow?.render(section?.id ?? null) // F11
         return section
           ? [
               <SectionHeader
@@ -321,9 +332,10 @@ function Sectioned({
                 onToggle={layout.onToggle}
                 onMenu={layout.onMenu}
               />,
+              followed,
               ...open,
             ]
-          : open
+          : [followed, ...open]
       })}
     </ul>
   )
@@ -348,7 +360,10 @@ export function WatchlistRows({
   arrange,
   held,
   marks,
+  follow,
 }: {
+  /** v2 (F11): the rows that follow the price. Absent with the switch off. */
+  follow?: FollowSlots
   /** v2 (F8): the flag, note and expired reading of each row, by EXCHANGE:SYMBOL. Absent with the switch off. */
   marks?: ReadonlyMap<string, RowMark>
   rows: LiveRow[]
@@ -386,7 +401,7 @@ export function WatchlistRows({
     return <ArrangeRows edit={arrange} items={rows.map((row) => row.item)} onRemove={onRemove} />
 
   const sectioned = sections && !editing && sections.groups.length > 1
-  if (rows.length === 0 && !sectioned) {
+  if (rows.length === 0 && !sectioned && !(follow && follow.count > 0)) {
     return (
       <div className="flex flex-col items-center gap-3 px-6 py-10 text-center">
         <span className="flex size-12 items-center justify-center rounded-2xl bg-[color:var(--primary-tint)] text-primary">
@@ -414,6 +429,7 @@ export function WatchlistRows({
     return (
       <Sectioned
         rows={rows}
+        follow={follow} // F11
         layout={sections}
         tags={tags}
         held={held}
@@ -424,6 +440,7 @@ export function WatchlistRows({
 
   return (
     <ul className="divide-y divide-[color:var(--divider)]">
+      {!editing && follow?.render(null) /* F11 */}
       {rows.map((row, index) => {
         const { item } = row
         if (!editing) {

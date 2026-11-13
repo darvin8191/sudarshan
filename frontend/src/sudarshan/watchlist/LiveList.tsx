@@ -7,18 +7,26 @@ import { keyOf, type MarketOpen } from '@/sudarshan/dashboard/live'
 import type { MemberRow } from '@/sudarshan/screener/api'
 import { exitedToday, tagsOf, usePin } from '@/sudarshan/screener/feed'
 import type { ArrangeEdit } from './ArrangeSheet'
+import { FollowRowItem, followNames } from './FollowRows'
 import { FOLLOW_CAP } from './follow'
+import { type FollowForm, followsWords, underlyingKey } from './followRows'
 import { figuresFor, type HeldFigures, HeldSwitch, indexBook, isinsOf } from './HoldingLine'
 import { PresetLine } from './PresetLine'
-import { type ArrangeActions, type OrderRequest, SymbolSheet } from './SymbolSheet'
+import {
+  type ArrangeActions,
+  type FollowSheet,
+  type OrderRequest,
+  SymbolSheet,
+} from './SymbolSheet'
 import { DEFAULT_PREF, isDefaultView } from './sort'
+import { SHEET_BASE, useFollowRows, useFollowTicks } from './useFollowRows'
 import { useHeld } from './useHeld'
 import { type FollowOptions, useLiveRows } from './useLiveRows'
 import { useSortOrder } from './useSortOrder'
 import { ViewLine, type ViewPref, ViewSheet } from './ViewSheet'
 import { marksOf } from './v2/marks'
-import type { FlagName, View } from './v2/types'
-import { type SectionLayout, WatchlistRows } from './WatchlistRows'
+import type { FlagName, FollowRow, View } from './v2/types'
+import { type FollowSlots, type SectionLayout, WatchlistRows } from './WatchlistRows'
 
 /**
  * The part of the watchlist that moves with the market: the line over the
@@ -28,6 +36,25 @@ import { type SectionLayout, WatchlistRows } from './WatchlistRows'
  * redraws only when its own figures change.
  */
 const NO_MEMBERS: MemberRow[] = []
+
+/** F11: what the page gives the list for the rows that follow the price (the open own list's, v2 only). */
+export interface FollowProps {
+  rules: readonly FollowRow[]
+  /** The row whose sheet is open, or null. */
+  openRowId: number | null
+  onOpenRow: (rowId: number) => void
+  /** Open a form: add (from an underlying's sheet), change, or remove. */
+  onForm: (form: FollowForm) => void
+}
+
+/** The contract a follow row's sheet opened with. */
+interface Pin {
+  rowId: number
+  key: string
+  symbol: string
+  exchange: string
+  names: ReturnType<typeof followNames>
+}
 
 export const LiveList = memo(function LiveList({
   items,
@@ -56,7 +83,10 @@ export const LiveList = memo(function LiveList({
   flagNames,
   noRemove,
   preset,
+  followRows,
 }: {
+  /** v2 (F11): the open own list's rows that follow the price; absent for any other list and with the switch off. */
+  followRows?: FollowProps
   /** v2 (F8): the five flag names; present while the switch is on. Rows carry flag and note markers and the sheet its flag and note. */
   flagNames?: readonly FlagName[]
   /** v2 (F10): a built-in list: the server's lines over the rows and Make a copy, which is given the keys as shown. */
@@ -105,20 +135,86 @@ export const LiveList = memo(function LiveList({
   // F9 (v2): the cap and the window. The open sheet's instrument is followed first; a list longer than the
   // cap follows the window over the rows in the order they are shown, which a sort changes.
   const v2 = flagNames !== undefined
+  // F11: the rows that follow the price. Each stands on a contract (an item of the list with a negative
+  // id, so it is never an OpenAlgo item), kept current by `useFollowRows`; the open row's sheet stays
+  // on the contract it opened with, which is followed too while it is open.
+  const followOn = v2 && !readOnly && followRows !== undefined
+  const fr = useFollowRows(followOn ? followRows.rules : undefined, followOn)
+  const openRowId = followOn ? followRows.openRowId : null
+  const current = openRowId === null ? undefined : fr.states.find((each) => each.id === openRowId)
+  const [sheetPin, setSheetPin] = useState<Pin | null>(null)
+  if (openRowId === null) {
+    if (sheetPin !== null) setSheetPin(null)
+  } else if (sheetPin?.rowId !== openRowId && current?.shown) {
+    const { contract } = current.shown
+    setSheetPin({
+      rowId: openRowId,
+      key: keyOf(contract.symbol, contract.exchange),
+      symbol: contract.symbol,
+      exchange: contract.exchange,
+      names: followNames(current),
+    })
+  }
+  const pinnedItem = useMemo<WatchlistItem | null>(() => {
+    if (!sheetPin) return null
+    return current?.item && keyOf(current.item.symbol, current.item.exchange) === sheetPin.key
+      ? null // the row still stands on it: its own item serves
+      : {
+          id: -(SHEET_BASE + sheetPin.rowId),
+          symbol: sheetPin.symbol,
+          exchange: sheetPin.exchange,
+          position: 0,
+        }
+  }, [sheetPin, current?.item])
+  const followItems = useMemo(
+    () => [
+      ...fr.states.flatMap((each) => (each.item ? [each.item] : [])),
+      ...(pinnedItem ? [pinnedItem] : []),
+    ],
+    [fr.states, pinnedItem]
+  )
+  const followKeys = followItems
+    .map((each) => `${each.id}:${keyOf(each.symbol, each.exchange)}`)
+    .join(',')
+  // biome-ignore lint/correctness/useExhaustiveDependencies: followKeys is the identity of the follow items
+  const liveItems = useMemo(
+    () => (followItems.length > 0 ? [...followItems, ...items] : items),
+    [followKeys, items]
+  )
+  const underlyings = useMemo(
+    () => (followOn ? [...new Set(fr.states.map((each) => underlyingKey(each.rule)))] : undefined),
+    [followOn, fr.states]
+  )
   const openKey = useMemo(() => {
+    if (sheetPin) return sheetPin.key
     const open = openItemId === null ? undefined : items.find((item) => item.id === openItemId)
     return open ? keyOf(open.symbol, open.exchange) : null
-  }, [items, openItemId])
+  }, [items, openItemId, sheetPin])
   const [order, setOrder] = useState<string | null>(null)
   const listKey = viewPref?.ref ?? ''
   const follow = useMemo<FollowOptions | undefined>(
-    () => (v2 ? { sheet: openKey ? [openKey] : [], order: order?.split(','), listKey } : undefined),
-    [v2, openKey, order, listKey]
+    () =>
+      v2
+        ? { sheet: openKey ? [openKey] : [], underlyings, order: order?.split(','), listKey }
+        : undefined,
+    [v2, openKey, underlyings, order, listKey]
   )
-  const live = useLiveRows({ items, apiKey, marketOpen: isOpen, basis: pref?.basis, follow })
+  const live = useLiveRows({
+    items: liveItems,
+    apiKey,
+    marketOpen: isOpen,
+    basis: pref?.basis,
+    follow,
+  })
+  useFollowTicks(fr.core, live.lines, live.feed, followOn)
+  // The list's own rows: the follow rows' contracts are drawn by `FollowRowItem`, not sorted with them.
+  const ownRows = useMemo(
+    () => (followItems.length > 0 ? live.rows.filter((row) => row.item.id > 0) : live.rows),
+    [live.rows, followItems.length]
+  )
   // F6: the rows in the snapshot's order; editing arranges the list's own order.
   const sorted = useSortOrder({
-    rows: live.rows,
+    rows: ownRows,
     groups: sections?.groups,
     pref: pref ?? DEFAULT_PREF,
     listKey: viewPref?.ref ?? '',
@@ -126,7 +222,7 @@ export const LiveList = memo(function LiveList({
     active: pref !== undefined && !isDefaultView(pref) && !editing,
     fullRead: live.readAll, // F9
   })
-  const shown = editing ? live.rows : sorted.rows
+  const shown = editing ? ownRows : sorted.rows
   const shownOrder = v2 && items.length > FOLLOW_CAP ? shown.map((row) => row.key).join(',') : null
   useEffect(() => setOrder(shownOrder), [shownOrder])
   // F7: the holdings line, from the books, only when the switch is on and this is not a family render.
@@ -154,12 +250,78 @@ export const LiveList = memo(function LiveList({
     () => (flagNames && !readOnly ? marksOf(view?.rows, flagNames) : undefined),
     [flagNames, readOnly, view]
   )
-  const sheetRow =
-    openItemId === null ? null : (live.rows.find((row) => row.item.id === openItemId) ?? null)
+  const sheetRow = sheetPin
+    ? (live.rows.find((row) => row.key === sheetPin.key) ?? null) // F11: the contract it opened with
+    : openItemId === null
+      ? null
+      : (live.rows.find((row) => row.item.id === openItemId) ?? null)
   const pin = usePin(sheetRow ? byKey.get(sheetRow.key) : undefined)
   const exited = exitedToday(members ?? NO_MEMBERS, live.now)
-  const nothingShown = live.rows.length > 0 && live.rows.every((row) => row.view.ltp === null)
-  const readFailed = apiKey !== null && live.snapshot === 'error' && live.rows.length > 0
+  const nothingShown = ownRows.length > 0 && ownRows.every((row) => row.view.ltp === null)
+  const readFailed = apiKey !== null && live.snapshot === 'error' && ownRows.length > 0
+
+  // F11: the rows that follow the price, by section; a row with no contract opens its form.
+  const liveById = useMemo(() => new Map(live.rows.map((row) => [row.item.id, row])), [live.rows])
+  const onOpenRow = followRows?.onOpenRow
+  const onForm = followRows?.onForm
+  const slots = useMemo<FollowSlots | undefined>(
+    () =>
+      followOn
+        ? {
+            count: fr.states.length,
+            render: (sectionId) =>
+              fr.states
+                .filter((each) => (each.rule.section_id ?? null) === sectionId)
+                .map((each) => (
+                  <FollowRowItem
+                    key={`follow-${each.id}`}
+                    state={each}
+                    live={liveById.get(-each.id) ?? null}
+                    now={live.now}
+                    onOpen={(rowId) =>
+                      each.item ? onOpenRow?.(rowId) : onForm?.({ mode: 'edit', rowId })
+                    }
+                  />
+                )),
+          }
+        : undefined,
+    [followOn, fr.states, liveById, live.now, onOpenRow, onForm]
+  )
+  // A row's sheet that has no contract to show (it went missing meanwhile) opens the row's form instead.
+  const pending = openRowId !== null && current !== undefined && !current.shown && !sheetPin
+  useEffect(() => {
+    if (pending && openRowId !== null) onForm?.({ mode: 'edit', rowId: openRowId })
+  }, [pending, openRowId, onForm])
+  const followSheet = useMemo<FollowSheet | undefined>(() => {
+    if (!sheetPin || !current || openRowId === null) return undefined
+    const moved =
+      current.shown &&
+      keyOf(current.shown.contract.symbol, current.shown.contract.exchange) !== sheetPin.key
+    return {
+      ...sheetPin.names,
+      moved: moved
+        ? { words: followsWords(current.rule, current.shown), onShow: () => setSheetPin(null) }
+        : null,
+      onEdit: () => onForm?.({ mode: 'edit', rowId: openRowId }),
+      onRemove: () => onForm?.({ mode: 'remove', rowId: openRowId }),
+    }
+  }, [sheetPin, current, openRowId, onForm])
+  const offer = useMemo(
+    () =>
+      followOn && symbolActions
+        ? {
+            onAdd: (kind: 'atm_option' | 'month_future', item: WatchlistItem) =>
+              onForm?.({
+                mode: 'add',
+                kind,
+                underlying: item.symbol,
+                exchange: item.exchange,
+                sectionId: view?.rows.find((row) => row.item === item.id)?.section_id ?? null,
+              }),
+          }
+        : undefined,
+    [followOn, symbolActions, onForm, view]
+  )
 
   return (
     <>
@@ -212,6 +374,7 @@ export const LiveList = memo(function LiveList({
           arrange={arrange} // F5
           held={held} // F7
           marks={marks} // F8
+          follow={slots} // F11
         />
       </section>
       {exited.length > 0 && (
@@ -239,6 +402,8 @@ export const LiveList = memo(function LiveList({
         arrange={symbolActions} // F5
         flags={flagNames} // F8
         readOnly={readOnly} // F8
+        follow={followSheet} // F11
+        offer={offer} // F11
       />
 
       {viewPref && pref && (
@@ -248,8 +413,8 @@ export const LiveList = memo(function LiveList({
           pref={pref}
           onChange={(next) => void viewPref.save(next)}
           problem={viewPref.problem}
-          noOpen={live.rows.filter((row) => row.view.openMissing).length}
-          total={live.rows.length}
+          noOpen={ownRows.filter((row) => row.view.openMissing).length}
+          total={ownRows.length}
           extra={readOnly ? undefined : <HeldSwitch on={pref.held} onChange={saveHeld} />} // F7
         />
       )}

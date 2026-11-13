@@ -28,6 +28,8 @@ import { useScreenerPush } from '@/sudarshan/screener/push'
 import { AddSymbolSheet } from '@/sudarshan/watchlist/AddSymbolSheet'
 import { AllListsSheet } from '@/sudarshan/watchlist/AllListsSheet'
 import { ArrangeSheets, useArrange } from '@/sudarshan/watchlist/ArrangeSheet'
+import { FollowRowSheet } from '@/sudarshan/watchlist/FollowRowSheet'
+import type { FollowForm } from '@/sudarshan/watchlist/followRows'
 import { DeleteDialog, NameDialog } from '@/sudarshan/watchlist/ListDialogs'
 import { ListStrip, ownId, ownRef, tabsFor } from '@/sudarshan/watchlist/ListStrip'
 import { LISTS_FULL, ListTabs, PANEL_ID, tabId } from '@/sudarshan/watchlist/ListTabs'
@@ -80,6 +82,8 @@ const OWN_ONLY = new Set([
   'sectionRemove',
   'pickSection',
   'pickList',
+  'followRow', // F11
+  'follow', // F11
 ])
 const actsOnScreen = (kind: string, flag: boolean) =>
   !OWN_ONLY.has(kind) && (kind !== 'rename' || flag)
@@ -152,10 +156,12 @@ export default function Watchlist() {
       (overlay.kind === 'copy' && (presetRef === null || copyKeys === null)) || // F10
       (otherRef !== null && !actsOnScreen(overlay.kind, flagRef !== null)) || // M8.6
       (overlay.kind === 'order' && overlay.order === null) ||
+      (overlay.kind === 'follow' && overlay.form === null) || // F11
       (overlay.kind === 'alert' && overlay.alert === null) ||
       (overlay.kind !== 'item' &&
         overlay.kind !== 'order' &&
         overlay.kind !== 'alert' &&
+        overlay.kind !== 'follow' &&
         overlay.kind !== 'new' &&
         overlay.kind !== 'copy' &&
         !active))
@@ -246,6 +252,39 @@ export default function Watchlist() {
   // F3 (v2): the open own list in sections, read from the `view` op; flat while it is not read.
   const sectionsRef = v2 && active && otherRef === null ? ownRef(active.id) : null
   const view = useListView(sectionsRef).data
+  // F11: a row's sheet or form for a row the list no longer has (removed here or on another screen) is closed.
+  const followGone =
+    (overlay?.kind === 'followRow' ||
+      (overlay?.kind === 'follow' && overlay.form?.mode !== 'add' && overlay.form !== null)) &&
+    view !== undefined &&
+    !view.follow.some(
+      (row) =>
+        row.id ===
+        (overlay.kind === 'followRow' ? overlay.rowId : (overlay.form as { rowId: number }).rowId)
+    )
+  useEffect(() => {
+    if (followGone) close()
+  }, [followGone, close])
+  const openFollowRow = useCallback((rowId: number) => open({ kind: 'followRow', rowId }), [open])
+  // Over a sheet the form takes its place; over the list it opens as a sheet of its own.
+  const hasOverlay = overlay !== null
+  const openFollowForm = useCallback(
+    (form: FollowForm) =>
+      hasOverlay ? swap({ kind: 'follow', form }) : open({ kind: 'follow', form }),
+    [hasOverlay, swap, open]
+  )
+  const followRows = useMemo(
+    () =>
+      view && sectionsRef
+        ? {
+            rules: view.follow,
+            openRowId: overlay?.kind === 'followRow' ? overlay.rowId : null,
+            onOpenRow: openFollowRow,
+            onForm: openFollowForm,
+          }
+        : undefined,
+    [view, sectionsRef, overlay, openFollowRow, openFollowForm]
+  )
   const folds = useCollapsed(sectionsRef)
   // F6; F10: a built-in list has a View of its own (sort and basis), saved under its ref.
   const prefRef = sectionsRef ?? (presetView ? presetRef : null)
@@ -516,6 +555,7 @@ export default function Watchlist() {
               view={flagRef ? flagView : sectionsRef ? view : presetRef ? presetView : undefined} // F7, F8, F10
               flagNames={v2 ? (v2State?.flag_names ?? []) : undefined} // F8
               noRemove={flagRef !== null || presetRef !== null} // F8, F10
+              followRows={flagRef || presetRef ? undefined : followRows} // F11
               preset={
                 presetView
                   ? {
@@ -643,6 +683,15 @@ export default function Watchlist() {
           if (next !== null) select(next)
         }}
       />
+
+      {v2 && (
+        <FollowRowSheet
+          form={overlay?.kind === 'follow' ? overlay.form : null}
+          view={view}
+          onClose={close}
+          onSwap={(form) => swap({ kind: 'follow', form })}
+        />
+      )}
 
       <PlaceOrderDialog
         open={order !== null}

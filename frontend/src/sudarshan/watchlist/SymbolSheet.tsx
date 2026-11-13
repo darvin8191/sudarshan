@@ -6,6 +6,7 @@ import {
   Copy,
   FolderInput,
   Layers,
+  Pencil,
   Pin,
   PinOff,
   Trash2,
@@ -52,6 +53,27 @@ export interface ArrangeActions {
   onSection?: (item: WatchlistItem) => void
   onCopy: (item: WatchlistItem) => void
 }
+
+/** F11: the sheet of a row that follows the price, which stays on the contract it opened with. */
+export interface FollowSheet {
+  title: string
+  detail: string
+  chip: string
+  /** The ATM chip's help text. */
+  help: string | null
+  /** The row has moved on: what it follows now, and Show to switch the sheet to it. */
+  moved: { words: string; onShow: () => void } | null
+  onEdit: () => void
+  onRemove: () => void
+}
+
+/** F11: Add ATM row and Add current-month FUT row, for an underlying with options. */
+export interface FollowOffer {
+  onAdd: (kind: 'atm_option' | 'month_future', item: WatchlistItem) => void
+}
+
+/** The exchanges a row can follow (the server refuses the rest in words). */
+const UNDERLYING_EXCHANGES = new Set(['NSE_INDEX', 'NSE', 'BSE_INDEX', 'BSE'])
 
 const ACTION =
   'inline-flex min-h-12 items-center justify-center gap-2 rounded-[0.875rem] px-4 text-[0.9375rem] font-semibold outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50'
@@ -295,6 +317,8 @@ export function SymbolSheet({
   arrange,
   flags,
   readOnly,
+  follow,
+  offer,
 }: {
   row: LiveRow | null
   listName: string
@@ -317,6 +341,10 @@ export function SymbolSheet({
   flags?: readonly FlagName[]
   /** v2 (F8): a family render. The flag, the note and everything private are absent, not disabled. */
   readOnly?: boolean
+  /** v2 (F11): this is a follow row's sheet. */
+  follow?: FollowSheet
+  /** v2 (F11): the underlying's sheet offers the two follow rows. */
+  offer?: FollowOffer
 }) {
   if (!row) return null
   return (
@@ -336,6 +364,8 @@ export function SymbolSheet({
       arrange={arrange}
       flags={flags}
       readOnly={readOnly}
+      follow={follow}
+      offer={offer}
     />
   )
 }
@@ -355,9 +385,13 @@ function Sheet({
   arrange,
   flags,
   readOnly,
+  follow,
+  offer,
 }: Parameters<typeof SymbolSheet>[0] & { row: LiveRow }) {
   const { item } = row
-  const named = describe(item.symbol, item.exchange)
+  const named = follow
+    ? { title: follow.title, detail: follow.detail }
+    : describe(item.symbol, item.exchange)
   const tradable = !isIndex(item.exchange)
   const chain = useOptionChain(item)
   const [product, setProduct] = useState(() => ticketProduct(item.exchange))
@@ -405,6 +439,29 @@ function Sheet({
     >
       <div className="flex flex-col gap-3">
         <LiveLine line={line} now={now} className="flex" />
+
+        {follow && (
+          <div data-follow-sheet="true" className="flex flex-col gap-2">
+            <p className="flex flex-wrap items-center gap-2 text-sm font-medium text-[color:var(--text-secondary)]">
+              <span className="rounded-md bg-[color:var(--primary-tint)] px-1.5 py-0.5 text-xs font-bold text-primary">
+                {follow.chip}
+              </span>
+              {follow.help}
+            </p>
+            {follow.moved && (
+              <output className="flex items-center justify-between gap-2 rounded-[0.875rem] bg-[color:var(--surface-2)] px-3 py-2">
+                <span className="text-sm font-semibold">{follow.moved.words}</span>
+                <button
+                  type="button"
+                  onClick={follow.moved.onShow}
+                  className={cn(OUTLINED, 'shrink-0')}
+                >
+                  Show
+                </button>
+              </output>
+            )}
+          </div>
+        )}
 
         {tradable && (
           <div className="flex flex-col gap-2">
@@ -482,7 +539,43 @@ function Sheet({
 
         {tradable && apiKey !== null && <Depth item={item} marketOpen={marketOpen} now={now} />}
 
-        {pin && (
+        {offer && !follow && !readOnly && chain && UNDERLYING_EXCHANGES.has(item.exchange) && (
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => offer.onAdd('atm_option', item)}
+              className={OUTLINED}
+            >
+              Add ATM row
+            </button>
+            <button
+              type="button"
+              onClick={() => offer.onAdd('month_future', item)}
+              className={OUTLINED}
+            >
+              Add current-month FUT row
+            </button>
+          </div>
+        )}
+
+        {follow && (
+          <div className="grid grid-cols-2 gap-2">
+            <button type="button" onClick={follow.onEdit} className={OUTLINED}>
+              <Pencil aria-hidden="true" className="size-5" />
+              Edit row
+            </button>
+            <button
+              type="button"
+              onClick={follow.onRemove}
+              className={cn(OUTLINED, 'text-[color:var(--down)]')}
+            >
+              <Trash2 aria-hidden="true" className="size-5" />
+              Remove row
+            </button>
+          </div>
+        )}
+
+        {pin && !follow && (
           <div className="flex flex-col gap-1">
             <button
               type="button"
@@ -505,7 +598,7 @@ function Sheet({
           </div>
         )}
 
-        {arrange && (
+        {arrange && !follow && (
           <div className="grid grid-cols-2 gap-2">
             {arrange.onSection && (
               <button type="button" onClick={() => arrange.onSection?.(item)} className={OUTLINED}>
@@ -520,11 +613,11 @@ function Sheet({
           </div>
         )}
 
-        {flags && !readOnly && (
+        {flags && !readOnly && !follow && (
           <SymbolMarks k={`${item.exchange}:${item.symbol}`.toUpperCase()} names={flags} /> // F8
         )}
 
-        {onRemove && (
+        {onRemove && !follow && (
           <button
             type="button"
             onClick={() => onRemove(item)}
