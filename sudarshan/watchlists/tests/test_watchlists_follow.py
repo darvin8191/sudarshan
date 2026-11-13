@@ -92,6 +92,8 @@ def test_a_normal_day_follows_the_nearest_expiry_to_its_close():
 def test_expiry_day_before_and_after_the_close(now, expiry, words_start):
     got = one(World(), rule(), item(at=None), now)
     assert got["ce"]["expiry"] == expiry and got["words"].startswith(words_start)
+    # the flag is the roll, whatever the words say: true for the 60 s the roll words are sent
+    assert got["rolled"] is words_start.startswith("Rolled to ")
 
 
 def test_a_special_close_on_the_calendar_moves_the_roll():
@@ -461,3 +463,12 @@ def test_a_calendar_that_cannot_be_read_closes_nothing_and_calls_nothing_closed(
     monkeypatch.setattr(cal, "get_effective_session_window", broken)
     assert sessions.closes(["2026-11-24"], "NFO") == {}
     assert sessions.market_open("NSE", ms("2026-11-20T03:00:00")) is True
+
+
+def test_rolled_is_a_flag_for_the_minute_of_the_roll_and_false_for_every_other_answer():
+    on = one(World(), rule(kind="month_future"), item(at=None), "2026-11-24T15:40:30")  # fmt: skip
+    assert on["rolled"] is True and on["words"].startswith("Rolled to ")
+    off = one(World(), rule(kind="month_future"), item(at=None), "2026-11-24T15:41:01")  # fmt: skip
+    assert off["rolled"] is False and not off["words"].startswith("Rolled to ")
+    waiting = one(World(), rule(), item(price=None, at=None), "2026-11-24T11:00:00")
+    assert waiting["rolled"] is False

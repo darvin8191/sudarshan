@@ -96,7 +96,8 @@ connected, its snapshot, the feed's last tick (one `/snapshot` read for every ro
 through the shared httpx client; any failure is an empty answer), then the page's last price when the
 exchange is closed by the calendar, else the row waits. The answer carries the contracts looked up in the
 master (never built), the band of the ATM, `valid_until`, and the words; a side the master lacks is
-named and no contract is answered. For the first minute after a roll the words are "Rolled to ...".
+named and no contract is answered. For the first minute after a roll the words are "Rolled to ..." and the answer row's `rolled` is true
+(false otherwise, for every state): the phone reads the flag, never the prefix of the words, which stay.
 Nothing is written and no thread or timer is started. Tests: `tests/test_watchlists_rows.py`,
 `tests/test_watchlists_follow.py`.
 
@@ -837,6 +838,10 @@ nothing of its own, starts no thread and makes no Upstox call).
   rule, so `words` says nothing about its end time rather than a wrong one, and its expiry drops at
   the end of MCX's own calendar window for the day if the calendar has one, else at the end of the
   day.
+
+The add form's preview of the row a chosen strike or ATM rule would make is `resolve` with `drafts` (W15,
+"Draft rows"): the page sends the underlying and rule it picked from these two answers, never a stored
+id, and reads `words` and `rolled` back.
 
 Both answer `failed` in words while the master is not loaded and `off` with the switch off. Tests:
 `tests/test_watchlists_search_ops.py` (the grammar's vectors through the bridge, grouping, Added, the

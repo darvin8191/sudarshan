@@ -266,6 +266,7 @@ export interface Resolved {
   price: number | null
   price_at: number | null
   words: string
+  rolled: boolean
 }
 
 export interface Resolve {

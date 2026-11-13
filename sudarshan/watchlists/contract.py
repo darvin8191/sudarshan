@@ -157,7 +157,7 @@ RECORDS = {
     "source?:PriceSource|null, held?:number|null",
     "Resolved": "id:int, state:ResolveState, ce:Contract|null, pe:Contract|null, "
     "future:Contract|null, strike:number|null, band:Band|null, valid_until:int|null, "
-    "price:number|null, price_at:int|null, words:string",
+    "price:number|null, price_at:int|null, words:string, rolled:bool",
     "Resolve": "rows:Resolved[], drafts?:Resolved[]",
     "Expiry": "date:string, label:string, month:bool",
     "Strike": "strike:number, atm:bool, ce:Contract|null, pe:Contract|null",

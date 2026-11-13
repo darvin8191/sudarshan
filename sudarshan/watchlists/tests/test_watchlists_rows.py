@@ -394,12 +394,22 @@ def test_resolve_follows_the_rows_through_a_roll_without_a_write(client, world, 
 
     lid, _ = make_list()
     a = add(client, lid, "0").get_json()["data"]["id"]
-    close = ask(client, [page(a)]).get_json()["data"]["rows"][0]["valid_until"]
+    first = ask(client, [page(a)]).get_json()["data"]["rows"][0]
+    close = first["valid_until"]
+    assert first["rolled"] is False
     monkeypatch.setattr(rows_ops, "_now_ms", lambda: close + 1000)
     after = ask(client, [page(a)]).get_json()["data"]["rows"][0]
     assert (
         after["ce"]["expiry"] == "2026-12-01" and after["words"] == "Rolled to 1 Dec 2026 at 15:40"
     )
+    assert after["rolled"] is True  # the flag, so the page need not read the words
+    monkeypatch.setattr(rows_ops, "_now_ms", lambda: close + 61_000)
+    late = ask(client, [page(a)]).get_json()["data"]["rows"][0]
+    assert late["rolled"] is False and not late["words"].startswith("Rolled to ")
+    # a draft that rolls says so in the same way
+    monkeypatch.setattr(rows_ops, "_now_ms", lambda: close + 1000)
+    (preview,) = ask_drafts(client, [draft()]).get_json()["data"]["drafts"]
+    assert preview["rolled"] is True
     assert len(table("wl_row")) == 1
 
 
