@@ -125,7 +125,8 @@ export const sameDraft = (a: Draft, b: Draft) => JSON.stringify(a) === JSON.stri
 
 /**
  * One write, then the lists it touched are read again whatever the answer (after a conflict they
- * are the other screen's). Resolves to what it answered, or the server's sentence and its code;
+ * are the other screen's). Each key is read exactly: `WATCHLISTS_KEY` is a prefix of every v2 key,
+ * and a write re-reads only what it changed. Resolves to what it answered, or the server's sentence and its code;
  * never a status code.
  */
 export async function writeThenRead<T>(
@@ -140,7 +141,7 @@ export async function writeThenRead<T>(
     const problem = problemOf(error)
     out = { done: null, said: problem.message, code: problem.code }
   }
-  await Promise.all(keys.map((queryKey) => client.invalidateQueries({ queryKey })))
+  await Promise.all(keys.map((queryKey) => client.invalidateQueries({ queryKey, exact: true })))
   return out
 }
 

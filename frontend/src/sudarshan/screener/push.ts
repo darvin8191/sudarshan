@@ -198,7 +198,7 @@ export async function catchUp(client: QueryClient): Promise<void> {
  */
 export function onListsPush(client: QueryClient): void {
   void client.invalidateQueries({ queryKey: MEMBERSHIP_KEY })
-  void client.invalidateQueries({ queryKey: WATCHLISTS_KEY })
+  void client.invalidateQueries({ queryKey: WATCHLISTS_KEY, exact: true })
   void client.invalidateQueries({ queryKey: STATE_KEY })
 }
 
