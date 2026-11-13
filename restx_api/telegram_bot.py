@@ -2,6 +2,7 @@ import os
 
 from flask import jsonify, make_response, request
 from flask_restx import Namespace, Resource, fields
+from werkzeug.exceptions import RequestEntityTooLarge
 
 from database.auth_db import verify_api_key
 from database.telegram_db import (
@@ -16,12 +17,17 @@ from database.telegram_db import (
 from limiter import limiter
 from services.telegram_alert_service import TelegramAlertService, alert_executor
 from services.telegram_bot_service import telegram_bot_service
+
+# SUDARSHAN M15.7: the rules for a report file sent through /notify-file.
+from sudarshan.alerts import report_files
 from utils.logging import get_logger
 
 logger = get_logger(__name__)
 
 # Rate limit for telegram operations
 TELEGRAM_RATE_LIMIT = os.getenv("TELEGRAM_RATE_LIMIT", "30 per minute")
+# SUDARSHAN M15.7: /notify-file has a limiter of its own, whatever TELEGRAM_RATE_LIMIT says.
+NOTIFY_FILE_RATE_LIMIT = "30 per minute"
 
 api = Namespace("telegram", description="Telegram Bot API")
 
@@ -564,6 +570,77 @@ class SendNotification(Resource):
             return make_response(
                 jsonify({"status": "error", "message": "Failed to send notification"}), 500
             )
+
+
+# ---- SUDARSHAN M15.7: one report file to a linked user's chat --------------------------------
+# sudarshan-alerts' report desk (sudarshan/alerts/reports_desk.py) posts a report's PDF, CSV or
+# PNG here after its text went through /notify. Multipart fields: apikey, username, caption,
+# wait_for_delivery and the file. The API key and the stopped bot are checked as /notify checks
+# them; the bytes come from this request only, and the bot token stays in OpenAlgo
+# (TelegramAlertService.send_file_sync). The rules for a file: sudarshan/alerts/report_files.py.
+
+
+def _file_answer(code: str, status: int):
+    body = {"status": "error", "code": code, "message": report_files.WORDS[code]}
+    return make_response(jsonify(body), status)
+
+
+def _wants_delivery(value) -> bool:
+    return str(value or "").strip().lower() in ("1", "true", "yes", "on")
+
+
+@api.route("/notify-file", strict_slashes=False)
+class SendFileNotification(Resource):
+    @limiter.limit(NOTIFY_FILE_RATE_LIMIT)
+    @api.doc(security="apikey")
+    def post(self):
+        """Send one report file (PDF, CSV or PNG) to a linked user's chat (SUDARSHAN M15.7)"""
+        try:
+            if (request.content_length or 0) > report_files.MAX_BODY_BYTES:
+                return _file_answer("size", 413)
+            request.max_content_length = report_files.MAX_BODY_BYTES  # a body with no length too
+            try:
+                form, upload = request.form, request.files.get("file")
+            except RequestEntityTooLarge:
+                return _file_answer("size", 413)
+            api_key = form.get("apikey") or request.headers.get("X-API-KEY")
+            if not api_key or not verify_api_key(api_key):
+                return _file_answer("key", 401)
+            if not telegram_alert.is_bot_active():  # as /notify (GitHub issue #1577)
+                logger.info("Telegram bot is stopped; rejecting /notify-file request")
+                return _file_answer("bot_stopped", 409)
+            username = form.get("username")
+            if not username:
+                return _file_answer("username", 400)
+            if upload is None:
+                return _file_answer("no_file", 400)
+            data = upload.stream.read(report_files.MAX_BYTES + 1)
+            name, caption = upload.filename or "", form.get("caption") or ""
+            problem = report_files.problem(name, data, caption)
+            if problem is not None:
+                return _file_answer(problem, 413 if problem == "size" else 400)
+            user = get_telegram_user_by_username(username)
+            telegram_id = user.get("telegram_id") if user else None
+            if not telegram_id:
+                return _file_answer("not_linked", 404)
+            if _wants_delivery(form.get("wait_for_delivery")):
+                if not telegram_alert.send_file_sync(telegram_id, name, data, caption):
+                    return _file_answer("not_taken", 502)
+                logger.info(f"Telegram file sent to user {username} (ID: {telegram_id})")
+                answer = {"status": "success", "message": "File sent successfully"}
+            else:
+                alert_executor.submit(
+                    telegram_alert.send_file_sync, telegram_id, name, data, caption
+                )
+                logger.info(f"Telegram file queued for user {username} (ID: {telegram_id})")
+                answer = {"status": "success", "message": "File queued for delivery"}
+            return make_response(jsonify(answer), 200)
+        except Exception:
+            logger.exception("Error sending a file notification")
+            return _file_answer("failed", 500)
+
+
+# ---- end SUDARSHAN M15.7 ----------------------------------------------------------------------
 
 
 @api.route("/stats", strict_slashes=False)
