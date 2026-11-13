@@ -34,8 +34,9 @@ class _Evening:
 # ---- the port table (L7) ----------------------------------------------------------------------
 
 
-def test_no_port_5585_and_the_health_document_is_served_on_5582():
-    assert "5585" not in RAW_README
+def test_port_5585_is_the_family_view_only_and_the_health_document_is_served_on_5582():
+    rows = [line for line in RAW_README.splitlines() if line.startswith("| 5585 |")]
+    assert len(rows) == 1 and "`sudarshan-family`" in rows[0], rows  # P6, K1 (v0.10.0)
     row = [line for line in RAW_README.splitlines() if line.startswith("| 5582 |")]
     assert len(row) == 1 and "/health" in row[0], row
 
