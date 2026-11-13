@@ -34,8 +34,11 @@ class _Evening:
 # ---- the port table (L7) ----------------------------------------------------------------------
 
 
-def test_no_port_5585_and_the_health_document_is_served_on_5582():
-    assert "5585" not in RAW_README
+def test_5585_is_the_family_service_and_the_health_document_is_served_on_5582():
+    """The alerts' health once had a listener of its own on 5585 (L7); that port is now the family
+    service's (P6), so the README names it there and nowhere else."""
+    rows = [line for line in RAW_README.splitlines() if "5585" in line]
+    assert len(rows) == 1 and rows[0].startswith("| 5585 |") and "sudarshan-family" in rows[0], rows
     row = [line for line in RAW_README.splitlines() if line.startswith("| 5582 |")]
     assert len(row) == 1 and "/health" in row[0], row
 
