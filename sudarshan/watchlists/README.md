@@ -100,6 +100,19 @@ named and no contract is answered. For the first minute after a roll the words a
 Nothing is written and no thread or timer is started. Tests: `tests/test_watchlists_rows.py`,
 `tests/test_watchlists_follow.py`.
 
+**Draft rows (M8.10, the add form's preview).** `resolve` also takes `drafts`, rows the page has not
+stored: the fields of `row_add` without `list` and `version` (`section_id` is accepted and ignored),
+and the page's `price`, `price_at`, `source` and `held` as for a stored row, all optional. Each is
+checked as `row_add` checks a row (the rule, then today's master: `invalid` with the field, `failed`
+with the master not loaded), resolved by the same code, and answered in the same `Resolved` shape,
+in the order sent, under `drafts` with `id` 0 (a stored row's id is above 0). `drafts` is in the
+answer only when the request had it, so the answer to a request without it is as before. A draft
+reads nothing and writes nothing, so the add form can show "Now: NIFTY 25,900 CE, 24 Nov 2026
+(NIFTY at 25,912.35)" before the row exists. Drafts count with the stored `rows` in the limit of
+100 (`invalid`, field `drafts`, when the total is over it; field `rows` when the stored rows alone
+are). Ids for the drafts inside the request sit above every id the page sent, so one is never taken
+for the other.
+
 **One rule for when an expiring contract stops (`expiry.py`).** `expiry.stop_ms(day, index=...,
 exchange=..., window_end_ms=...)` answers the instant a contract stops on its expiry day, and
 `dynamic.close_ms` (so the expiry pick, `valid_until` and the "Rolled to ... at HH:MM" words of

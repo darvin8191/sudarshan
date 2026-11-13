@@ -401,3 +401,71 @@ def test_resolve_follows_the_rows_through_a_roll_without_a_write(client, world, 
         after["ce"]["expiry"] == "2026-12-01" and after["words"] == "Rolled to 1 Dec 2026 at 15:40"
     )
     assert len(table("wl_row")) == 1
+
+
+# -- draft rows (M8.10, the add form's preview) --------------------------------------------------
+def draft(**more):
+    return {"kind": "atm_option", "underlying": "NIFTY", "underlying_exchange": "NSE_INDEX",
+            "opt_right": "CE", "price": 25912.35, "price_at": AT - 500, "source": "tick",
+            **more}  # fmt: skip
+
+
+def ask_drafts(client, drafts, rows=(), connected=True):
+    body = {"rows": list(rows), "connected": connected, "drafts": drafts}
+    return client.post(RESOLVE, json=body, headers=client.headers)
+
+
+def test_a_draft_row_is_previewed_in_the_shape_of_a_stored_one_and_nothing_is_written(
+    client, emitted, world
+):
+    lid, _ = make_list()
+    a = add(client, lid, "0", offset=1).get_json()["data"]["id"]
+    n, before = len(emitted), (table("wl_row"), table("wl_list"))
+    r = ask_drafts(client, [draft(), draft(kind="month_future", price=None), draft(offset=2)],
+                   rows=[page(a)])  # fmt: skip
+    assert r.status_code == 200, r.get_json()
+    data = r.get_json()["data"]
+    assert [x["id"] for x in data["rows"]] == [a]  # the stored row is answered as before
+    atm, fut, two = data["drafts"]
+    assert [d["id"] for d in data["drafts"]] == [0, 0, 0]
+    assert (atm["state"], atm["strike"], atm["ce"]["symbol"], atm["pe"]) == (
+        "ok", 25900.0, "NIFTY24NOV2625900CE", None)  # fmt: skip
+    assert atm["words"] == "Now: NIFTY 25,900 CE, 24 Nov 2026 (NIFTY at 25,912.35)"
+    assert fut["future"]["symbol"] == "NIFTY24NOV26FUT" and fut["strike"] is None
+    assert two["strike"] == 26000.0  # in the order sent, each its own rule
+    assert (len(emitted), (table("wl_row"), table("wl_list"))) == (n, before)
+    assert table("wl_row") == [r_ for r_ in before[0]]  # still the one stored row
+
+
+def test_a_draft_without_stored_rows_and_without_drafts_keeps_the_old_answer(client, world):
+    assert ask(client, []).get_json()["data"] == {"rows": []}  # no drafts key when none were sent
+    only = ask_drafts(client, [draft()]).get_json()["data"]
+    assert only["rows"] == [] and len(only["drafts"]) == 1
+    assert ask_drafts(client, []).get_json()["data"] == {"rows": [], "drafts": []}
+
+
+def test_a_draft_is_checked_as_row_add_checks_a_row(client, world, monkeypatch):
+    refused(ask_drafts(client, [draft(kind="nope")]), 400, "invalid", "drafts")  # not an enum value
+    refused(ask_drafts(client, [draft(offset=99)]), 400, "invalid", "offset")
+    refused(ask_drafts(client, [draft(opt_right=None)]), 400, "invalid", "opt_right")
+    refused(ask_drafts(client, [draft(underlying="GHOSTCO")]), 400, "invalid", "underlying")
+    refused(ask_drafts(client, [draft(), {"underlying": "NIFTY"}]), 400, "invalid", "drafts")
+    monkeypatch.setattr(master, "openalgo_snapshot", lambda: None)
+    assert refused(ask_drafts(client, [draft()]), 500, "failed") == words.NOT_LOADED
+
+
+def test_drafts_count_in_the_limit_of_a_hundred_with_the_stored_rows(client, world):
+    ok = ask_drafts(client, [draft() for _ in range(100)])
+    assert ok.status_code == 200 and len(ok.get_json()["data"]["drafts"]) == 100
+    assert refused(ask_drafts(client, [draft() for _ in range(101)]), 400, "invalid", "drafts") == (
+        words.TOO_MANY)  # fmt: skip
+    rows = [page(i) for i in range(1, 51)]
+    assert ask_drafts(client, [draft() for _ in range(50)], rows).status_code == 200
+    assert refused(ask_drafts(client, [draft() for _ in range(51)], rows), 400, "invalid",
+                   "drafts") == words.TOO_MANY  # fmt: skip
+
+
+def test_a_stored_id_the_page_sent_is_never_taken_for_a_draft(client, world):
+    got = ask_drafts(client, [draft()], rows=[page(2**31), page(-1)]).get_json()["data"]
+    assert [(x["id"], x["state"]) for x in got["rows"]] == [(2**31, "missing"), (-1, "missing")]
+    assert len(got["drafts"]) == 1 and got["drafts"][0]["state"] == "ok"

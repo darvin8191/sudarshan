@@ -192,20 +192,45 @@ def _now_ms() -> int:
     return int(time.time() * 1000)
 
 
+def _drafts(raw: list, base: int) -> tuple[dict, dict]:
+    """``(rules, items)`` of the draft rows, under the ids ``base``, ``base + 1``, ... (above any
+    id the page sent, so none is taken for a stored row), each checked as ``row_add`` checks a row: the rule, then the master. Raises ``OpError`` with
+    the field of the draft that is wrong."""
+    rules, items = {}, {}
+    for n, draft in enumerate(raw, base):
+        rule = _rule(None, draft)
+        _check_master(rule)
+        rules[n] = rule
+        items[n] = {"id": n, **{k: draft.get(k) for k in ("price", "price_at", "source", "held")}}
+    return rules, items
+
+
 def resolve(args: dict) -> dict:
     """Follow rows to contracts, now (a read: it changes nothing and bumps nothing). ``rows`` is
     what the page knows of each row it asks about: its price and where it came from, and the
-    strike the row last showed (``held``); ``connected`` says whether the page's socket is up."""
+    strike the row last showed (``held``); ``connected`` says whether the page's socket is up.
+
+    ``drafts`` are rows the page has not stored yet (its add form): the fields of ``row_add``
+    without ``list`` and ``version``, and the page's price as for a stored row. They are answered
+    in the same shape, in the order sent, under ``drafts`` with ``id`` 0, and nothing is written.
+    They count with the stored rows in the limit of 100."""
     from sudarshan.watchlists import feedsnap, master, resolver, sessions
 
     items = {}
     for item in args["rows"]:
         items.setdefault(item["id"], item)
+    drafts = args.get("drafts")
     if len(items) > MAX_RESOLVE:
         raise OpError("invalid", words.TOO_MANY, "rows")
+    if len(items) + len(drafts or ()) > MAX_RESOLVE:
+        raise OpError("invalid", words.TOO_MANY, "drafts")
     with engine.open_session() as s:
         found = store.find_many(s, list(items))
         rules = {i: store.as_rule(r) for i, r in found.items()}
+    base = max([MAX_ID, *items]) + 1
+    draft_rules, draft_items = _drafts(drafts or [], base)
+    rules.update(draft_rules)
+    items.update(draft_items)
     m = master.shared()
     if rules and not m.loaded():
         raise OpError("failed", words.NOT_LOADED)
@@ -218,7 +243,10 @@ def resolve(args: dict) -> dict:
         row_of=m.row, isin=m.isin, closes_of=lambda fo, dates: sessions.closes(dates, fo),
         is_open=sessions.market_open, feed=feedsnap.read,
     )  # fmt: skip
-    return {"rows": answered}
+    out = {"rows": [r for r in answered if r["id"] < base]}
+    if drafts is not None:
+        out["drafts"] = [{**r, "id": 0} for r in answered if r["id"] >= base]
+    return out
 
 
 HANDLERS = {

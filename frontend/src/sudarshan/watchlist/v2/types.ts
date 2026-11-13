@@ -238,6 +238,22 @@ export interface ResolveItem {
   held: number | null
 }
 
+export interface Draft {
+  section_id?: number | null
+  kind: FollowKind
+  underlying: string
+  underlying_exchange: string
+  expiry_rule?: ExpiryRule
+  strike_rule?: StrikeRule
+  offset?: number
+  strike?: number
+  opt_right?: OptRight | null
+  price?: number | null
+  price_at?: number | null
+  source?: PriceSource | null
+  held?: number | null
+}
+
 export interface Resolved {
   id: number
   state: ResolveState
@@ -254,6 +270,7 @@ export interface Resolved {
 
 export interface Resolve {
   rows: Resolved[]
+  drafts?: Resolved[]
 }
 
 export interface Expiry {
@@ -501,6 +518,7 @@ export interface SymbolReq {
 export interface ResolveReq {
   rows: ResolveItem[]
   connected: boolean
+  drafts?: Draft[]
 }
 
 export interface StrikesReq {
