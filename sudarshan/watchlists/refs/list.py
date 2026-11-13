@@ -17,16 +17,24 @@ is left for the next write that touches the list to prune.
 
 from __future__ import annotations
 
+import time
+
 from sqlalchemy import func, select, tuple_
 
-from sudarshan.watchlists import engine, master, schema
+from sudarshan.watchlists import engine, master, schema, versions
+from sudarshan.watchlists import members as merge_members
 from sudarshan.watchlists import view as merge_view
 from sudarshan.watchlists.ops import OpError
 from sudarshan.watchlists.schema import OWNER
+from sudarshan.watchlists.words import members as members_words
 from sudarshan.watchlists.words import view as words
 
 KIND = "list"
 MAX_ID = 2**31 - 1
+
+
+def now_ms() -> int:
+    return int(time.time() * 1000)
 
 
 def list_id(ident: str) -> int:
@@ -118,11 +126,80 @@ def view(ident: str, user: str) -> dict:
     live = read_live(user, lid)
     if live is None:
         raise OpError("gone", words.LIST_GONE)
-    overlay = read_overlay(lid, live["items"])
+    return merged(live)
+
+
+def merged(live: dict) -> dict:
+    """The ``View`` record of a list already read from OpenAlgo."""
+    overlay = read_overlay(live["id"], live["items"])
     m = master.shared()  # the process's one: a request never keeps a master of its own
     return merge_view.merge(live, overlay, m.row, loaded=m.loaded(), isin=m.isin)
 
 
+def split_ident(ident: str) -> tuple[int, int | None]:
+    """``7`` to ``(7, None)``, ``7/section:3`` to ``(7, 3)``; anything else is not a list ref."""
+    head, sep, tail = ident.partition("/")
+    if not sep:
+        return list_id(head), None
+    name, colon, number = tail.partition(":")
+    if name != "section" or not colon:
+        raise OpError("invalid", field="ref")
+    return list_id(head), list_id(number)  # a section id is a whole number of the same range
+
+
+def month_futures(follow: list[dict]) -> dict[int, dict]:
+    """Each month-future follow row to a contract: ``{row id: Resolved}``, read now. The row's own
+    rule and the master decide (the same code as ``resolve``); no price is needed or asked."""
+    from sudarshan.watchlists import resolver, sessions
+
+    rules = {f["id"]: f for f in follow if f["kind"] == "month_future"}
+    if not rules:
+        return {}
+    m = master.shared()
+    ix = m.index()
+    if ix is None:
+        raise OpError("failed", members_words.NOT_LOADED)
+    got = resolver.resolve_rows(
+        rules, {i: {"id": i} for i in rules}, now_ms=now_ms(), connected=False,
+        ix=ix, row_of=m.row, isin=m.isin, closes_of=lambda fo, dates: sessions.closes(dates, fo),
+        is_open=sessions.market_open, feed=lambda keys: {},
+    )  # fmt: skip
+    return {r["id"]: r for r in got}
+
+
 def members(ident: str, user: str) -> dict:
-    """The contracts the list holds today, follow rows resolved (the sealed route, W23)."""
-    raise NotImplementedError("the members of a list are W23's")
+    """The contracts the list (or one section of it) holds today (the sealed route, W23): fixed
+    symbols the master lists, and the future each month-future row follows now. An at-the-money or
+    a strike row is left out in words, a symbol the master lacks too. Never a flag or a note.
+    ``created_at`` is the list's identity: OpenAlgo gives a deleted list's id to the next one."""
+    lid, sid = split_ident(ident)
+    live = read_live(user, lid)
+    if live is None:
+        raise OpError("gone", words.LIST_GONE)
+    got = merged(live)
+    if sid is not None and sid not in {s["id"] for s in got["sections"]}:
+        raise OpError("gone", words.LIST_GONE)
+    order = (None, *(s["id"] for s in got["sections"])) if sid is None else (sid,)
+    follow = [f for f in got["follow"] if f["section_id"] in order]
+    resolved = month_futures(follow)
+    members, cuts = [], []
+    for where in order:
+        for f in (f for f in follow if f["section_id"] == where):
+            found = merge_members.follow_cut(f)
+            if found is not None:
+                cuts.append(found)
+                continue
+            r = resolved[f["id"]]
+            future = r.get("future")
+            if future is None:
+                cuts.append(
+                    merge_members.cut(f["underlying"], "missing", members_words.NO_CONTRACT)
+                )
+            else:
+                members.append(future)
+        rows = [r for r in got["rows"] if r["section_id"] == where]
+        more, gone = merge_members.from_rows(rows)
+        members += more
+        cuts += gone
+    ref = f"list:{lid}" if sid is None else f"list:{lid}/section:{sid}"
+    return merge_members.record(ref, versions.read(), members, cuts, created_at=live["created_at"])

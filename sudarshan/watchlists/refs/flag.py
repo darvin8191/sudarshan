@@ -11,7 +11,8 @@ from __future__ import annotations
 
 from sqlalchemy import select
 
-from sudarshan.watchlists import engine, master, schema
+from sudarshan.watchlists import engine, master, schema, versions
+from sudarshan.watchlists import members as merge_members
 from sudarshan.watchlists import view as merge_view
 from sudarshan.watchlists.ops import OpError
 from sudarshan.watchlists.schema import OWNER
@@ -46,4 +47,6 @@ def view(ident: str, user: str) -> dict:
 
 def members(ident: str, user: str) -> dict:
     """The contracts carrying the flag (the sealed route, W23); never a note."""
-    raise NotImplementedError("the members of a flag list are W23's")
+    got = view(ident, user)
+    members, cuts = merge_members.from_rows(got["rows"])
+    return merge_members.record(got["ref"], versions.read(), members, cuts)
