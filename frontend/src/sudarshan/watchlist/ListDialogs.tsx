@@ -12,6 +12,7 @@ import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 import { useOpenGuard } from './openGuard'
 import { MAX_NAME_LENGTH } from './useWatchlists'
+import { LIMITS } from './v2/types'
 
 const BUTTON =
   'inline-flex min-h-12 flex-1 items-center justify-center rounded-[0.875rem] px-5 text-[0.9375rem] font-semibold outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-50 sm:flex-none'
@@ -28,8 +29,8 @@ export function NameDialog({
   onSubmit,
   onClose,
 }: {
-  mode: 'create' | 'rename' | 'copy' | null
-  /** The open list's name, for a rename; the copy's own name, for Make a copy (F10). */
+  mode: 'create' | 'rename' | 'copy' | 'flag' | null
+  /** The open list's name, for a rename; the flag's name, for Rename this flag; the copy's own name (F10). */
   current: string
   onSubmit: (name: string) => Promise<void>
   onClose: () => void
@@ -43,7 +44,7 @@ export function NameDialog({
 
   useEffect(() => {
     if (mode !== null) {
-      setValue(mode === 'rename' || mode === 'copy' ? current : '')
+      setValue(mode === null || mode === 'create' ? '' : current)
       setError(null)
     }
   }, [mode, current])
@@ -60,7 +61,7 @@ export function NameDialog({
       setError(
         watchlistError(
           failure,
-          mode === 'copy' && failure instanceof Error
+          (mode === 'copy' || mode === 'flag') && failure instanceof Error
             ? failure.message // F10: the server's own sentence
             : 'The list could not be saved. Try again.'
         )
@@ -81,19 +82,27 @@ export function NameDialog({
         <form onSubmit={submit} className="flex flex-col gap-4">
           <DialogHeader>
             <DialogTitle>
-              {mode === 'rename' ? 'Rename list' : mode === 'copy' ? 'Make a copy' : 'New list'}
+              {mode === 'rename'
+                ? 'Rename list'
+                : mode === 'flag'
+                  ? 'Rename this flag'
+                  : mode === 'copy'
+                    ? 'Make a copy'
+                    : 'New list'}
             </DialogTitle>
             <DialogDescription>
               {mode === 'copy'
                 ? 'The copy is a list of your own that you can change.'
-                : 'Every list needs a name of its own.'}
+                : mode === 'flag'
+                  ? 'Every flag needs a name of its own.'
+                  : 'Every list needs a name of its own.'}
             </DialogDescription>
           </DialogHeader>
           <Input
             autoFocus
-            aria-label="List name"
+            aria-label={mode === 'flag' ? 'Flag name' : 'List name'}
             value={value}
-            maxLength={MAX_NAME_LENGTH}
+            maxLength={mode === 'flag' ? LIMITS.flag_name : MAX_NAME_LENGTH}
             placeholder="For example, Bank stocks"
             onChange={(event) => {
               setValue(event.target.value)

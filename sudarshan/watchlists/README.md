@@ -835,6 +835,22 @@ W12: the page reads whatever `lists.presets` names, so W13's typed lists arrive 
   500 ms guard, the `failed` and `gone` sentences, the alert address with and without a count, the
   switch off), `alerts/useAlertOverlay.test.tsx` (the address with no count).
 
+## F - the list menu acts on the list on screen
+
+Every item of the list menu acts on the list on screen or is absent, decided once in
+`watchlist/v2/menuRules.ts` (`menuFor`, keyed on the ref kind of the open list; a kind not written
+there offers nothing that edits). An own list keeps its menu, a built-in list keeps F10's, a flag list
+offers "Rename this flag" (the `flags` op, the five names with the flag's own as typed and the others as
+the state sent them, on the flags version read, the server's sentence shown on a refusal) and "Alert on
+this list" but no Reorder or remove and no Delete list, and a ranked list offers nothing that edits it.
+Delete list's confirmation names the list and takes its id from the list on screen when it opened; if
+another list comes on screen while it is open it closes and sends nothing. The same rule is held for what
+else used to reach the own list behind another ref: the Add sheet and the header and empty-state Add,
+sections, New section, move, copy to a list and the View of an own list (all now tied to "no other list
+open"), and a ranked or unknown favourite with no tab no longer shows the own list's rows. A sheet opened
+by address that acts on the own list while another list is open is closed. Tests:
+`pages/Watchlist.menu.test.tsx`.
+
 ## W12 - built-in lists from the master (`presets/`, `refs/preset.py`, `ops/presets.py`, `words/presets.py`)
 
 Three built-in lists made from today's master: **Indices**, **F&O stocks** and **Index futures**

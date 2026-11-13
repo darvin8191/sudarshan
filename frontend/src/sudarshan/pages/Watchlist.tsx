@@ -40,9 +40,10 @@ import { MAX_ITEMS, MAX_LISTS, useWatchlists } from '@/sudarshan/watchlist/useWa
 import { useViewPref } from '@/sudarshan/watchlist/ViewSheet'
 import { BUILT_IN } from '@/sudarshan/watchlist/v2/arrange'
 import { useAlertOffers } from '@/sudarshan/watchlist/v2/listAlert'
-import { FLAG_LIST_WORDS, itemsOf } from '@/sudarshan/watchlist/v2/marks'
+import { FLAG_LIST_WORDS, flagName, itemsOf, renameFlag } from '@/sudarshan/watchlist/v2/marks'
+import { kindOfRef } from '@/sudarshan/watchlist/v2/menuRules'
 import { groupsOf, SECTIONS_FULL, useCollapsed } from '@/sudarshan/watchlist/v2/sections'
-import { LIMITS } from '@/sudarshan/watchlist/v2/types'
+import { LIMITS, type RefKind } from '@/sudarshan/watchlist/v2/types'
 import { useListView, useV2State } from '@/sudarshan/watchlist/v2/useListView'
 import { usePush } from '@/sudarshan/watchlist/v2/usePush'
 import { toast } from '@/utils/toast'
@@ -68,6 +69,20 @@ function saveOpenList(id: number): void {
 }
 
 const NO_ITEMS: WatchlistItem[] = []
+const flagNumber = (ref: string) => Number(ref.slice(5))
+
+/** M8.6: while another list is open, only these sheets act on what is on screen; the rest act on the own list. */
+const OWN_ONLY = new Set([
+  'add',
+  'delete',
+  'section',
+  'sectionName',
+  'sectionRemove',
+  'pickSection',
+  'pickList',
+])
+const actsOnScreen = (kind: string, flag: boolean) =>
+  !OWN_ONLY.has(kind) && (kind !== 'rename' || flag)
 
 const HEADER_BUTTON =
   'inline-flex min-h-12 items-center gap-1.5 rounded-[0.875rem] px-4 text-[0.9375rem] font-semibold outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-50'
@@ -135,6 +150,7 @@ export default function Watchlist() {
     settled &&
     ((overlay.kind === 'item' && !shownItems.some((item) => item.id === overlay.itemId)) ||
       (overlay.kind === 'copy' && (presetRef === null || copyKeys === null)) || // F10
+      (otherRef !== null && !actsOnScreen(overlay.kind, flagRef !== null)) || // M8.6
       (overlay.kind === 'order' && overlay.order === null) ||
       (overlay.kind === 'alert' && overlay.alert === null) ||
       (overlay.kind !== 'item' &&
@@ -187,8 +203,19 @@ export default function Watchlist() {
         ]
       : shown
   }, [v2, v2State?.favourites, watchlists.lists, active, otherRef, presetRef, presetView])
+  // M8.6: a favourite that is not an own list is never answered with the own list behind it, tab or no tab.
   const foreign =
-    v2 && otherRef !== null ? (tabs.find((tab) => tab.ref === otherRef) ?? null) : null
+    v2 && otherRef !== null
+      ? (tabs.find((tab) => tab.ref === otherRef) ??
+        (presetRef || flagRef
+          ? null
+          : {
+              ref: otherRef,
+              kind: kindOfRef(otherRef) as RefKind,
+              name: 'this list',
+              count: null,
+            }))
+      : null
   const activeRef =
     flagRef ?? presetRef ?? (foreign ? foreign.ref : active ? ownRef(active.id) : null)
 
@@ -203,19 +230,21 @@ export default function Watchlist() {
         'flag'
       )
     : foreign
-      ? alertFor(
-          foreign.ref,
-          foreign.name,
-          (presetRef ? presetView?.total : undefined) ?? foreign.count ?? undefined, // F10: not known is not 0
-          foreign.kind
-        )
+      ? !tabs.some((tab) => tab.ref === foreign.ref)
+        ? undefined // M8.6: a list whose name is not known has no alert address
+        : alertFor(
+            foreign.ref,
+            foreign.name,
+            (presetRef ? presetView?.total : undefined) ?? foreign.count ?? undefined, // F10: not known is not 0
+            foreign.kind
+          )
       : presetRef
         ? undefined // F10: its tab is not there until the list is read
         : active
           ? alertFor(ownRef(active.id), active.name, items.length)
           : undefined
   // F3 (v2): the open own list in sections, read from the `view` op; flat while it is not read.
-  const sectionsRef = v2 && active && !foreign && !flagRef ? ownRef(active.id) : null
+  const sectionsRef = v2 && active && otherRef === null ? ownRef(active.id) : null
   const view = useListView(sectionsRef).data
   const folds = useCollapsed(sectionsRef)
   // F6; F10: a built-in list has a View of its own (sort and basis), saved under its ref.
@@ -286,15 +315,27 @@ export default function Watchlist() {
     [swap]
   )
   const deleting = overlay?.kind === 'delete'
-  const activeName = active?.name
   const presetPanel = useMemo(
     () => ({ id: PANEL_ID, role: 'tabpanel' as const, 'aria-label': presetView?.name }),
     [presetView?.name]
   )
+  // M8.6: the list to delete is the one on screen when the confirmation opened. If another list
+  // comes on screen while it is open, it closes and nothing is sent.
+  const [doomedId, setDoomedId] = useState<number | null>(null)
+  const doomedList = watchlists.lists.find((list) => list.id === doomedId) ?? null
   const doomed = useMemo(
-    () => (deleting && activeName !== undefined ? { name: activeName, count: items.length } : null),
-    [deleting, activeName, items.length]
+    () =>
+      deleting && doomedList ? { name: doomedList.name, count: doomedList.items.length } : null,
+    [deleting, doomedList]
   )
+  const onScreenId = otherRef === null ? activeId : null
+  useEffect(() => {
+    if (!deleting) setDoomedId(null)
+    else if (doomedId === null) {
+      if (onScreenId === null) close()
+      else setDoomedId(onScreenId) // a link to the confirmation: the list on screen now
+    } else if (doomedList !== null && onScreenId !== doomedId) close()
+  }, [deleting, doomedId, doomedList, onScreenId, close])
   const panel = useMemo(
     () =>
       active
@@ -323,7 +364,7 @@ export default function Watchlist() {
         ) : presetRef ? null /* F10: a built-in list has no Add */ : (
           <button
             type="button"
-            disabled={!active || apiKey === null || full || foreign !== null || flagRef !== null}
+            disabled={!active || apiKey === null || full || otherRef !== null}
             aria-describedby={full ? 'sd-watchlist-full' : undefined}
             onClick={() => open({ kind: 'add' })}
             className={cn(HEADER_BUTTON, 'bg-primary text-primary-foreground hover:bg-primary/90')}
@@ -377,13 +418,16 @@ export default function Watchlist() {
               onCreate={() => open({ kind: 'new' })}
               onRename={() => open({ kind: 'rename' })}
               onEdit={() => setEditing((on) => !on)}
-              onDelete={() => open({ kind: 'delete' })}
+              onDelete={() => {
+                setDoomedId(onScreenId)
+                open({ kind: 'delete' })
+              }}
               fed={fedIds}
               onNewSection={
                 sectionsRef ? () => open({ kind: 'sectionName', sectionId: null }) : undefined
               }
               onView={prefRef ? () => open({ kind: 'view' }) : undefined} // F6, F10
-              locked={presetRef !== null} // F10
+              kind={kindOfRef(otherRef)} // M8.6: the menu follows the list on screen
               alert={listAlert} // F17
               newSectionOff={
                 view && view.sections.length >= LIMITS.sections_per_list ? SECTIONS_FULL : null
@@ -459,7 +503,7 @@ export default function Watchlist() {
               onOpen={openSheet}
               onMove={moveItem}
               onRemove={removeItem}
-              onAdd={flagRef ? undefined : startAdding}
+              onAdd={otherRef ? undefined : startAdding}
               onCloseSheet={close}
               onOrder={placeOrder}
               onAlert={setAlert}
@@ -527,7 +571,7 @@ export default function Watchlist() {
       )}
 
       <AddSymbolSheet
-        open={overlay?.kind === 'add' && active !== null}
+        open={overlay?.kind === 'add' && active !== null && otherRef === null}
         onOpenChange={(next) => {
           if (!next) close()
         }}
@@ -547,11 +591,19 @@ export default function Watchlist() {
             : overlay?.kind === 'new'
               ? 'create'
               : overlay?.kind === 'rename'
-                ? 'rename'
+                ? flagRef
+                  ? 'flag'
+                  : otherRef === null
+                    ? 'rename'
+                    : null
                 : null
         }
         current={
-          overlay?.kind === 'copy' && presetView ? copyName(presetView.name) : (active?.name ?? '')
+          overlay?.kind === 'copy' && presetView
+            ? copyName(presetView.name)
+            : flagRef
+              ? flagName(v2State?.flag_names, flagNumber(flagRef))
+              : (active?.name ?? '')
         }
         onClose={close}
         onSubmit={async (name) => {
@@ -562,7 +614,18 @@ export default function Watchlist() {
             select(copied.done.list)
             return
           }
-          if (overlay?.kind === 'rename' && active) {
+          if (overlay?.kind === 'rename' && flagRef) {
+            // M8.6: the flag on screen, by the existing flag rename op, on the flags version read.
+            await renameFlag(
+              queryClient,
+              v2State?.flag_names,
+              v2State?.versions?.flags ?? 0,
+              flagNumber(flagRef),
+              name
+            )
+            return
+          }
+          if (overlay?.kind === 'rename' && active && otherRef === null) {
             await watchlists.rename(active.id, name)
           } else {
             const created = await watchlists.create(name)
@@ -575,8 +638,8 @@ export default function Watchlist() {
         list={doomed}
         onClose={close}
         onConfirm={async () => {
-          if (!active) return
-          const next = await watchlists.remove(active.id)
+          if (doomedId === null || doomedId !== onScreenId) return
+          const next = await watchlists.remove(doomedId)
           if (next !== null) select(next)
         }}
       />

@@ -23,6 +23,7 @@ import { cn } from '@/lib/utils'
 import { useOpenGuard } from './openGuard'
 import { MAX_LISTS } from './useWatchlists'
 import type { AlertOffer } from './v2/listAlert'
+import { menuFor } from './v2/menuRules'
 
 export const PANEL_ID = 'sd-watchlist-panel'
 export const tabId = (listId: number) => `sd-watchlist-tab-${listId}`
@@ -54,7 +55,7 @@ export function ListTabs({
   newSectionOff,
   onView,
   alert,
-  locked,
+  kind = 'list',
 }: {
   lists: Watchlist[]
   activeId: number | null
@@ -76,8 +77,8 @@ export function ListTabs({
   onView?: () => void
   /** F17: "Alert on this list", for the list on show; off with its reason, never hidden. */
   alert?: AlertOffer
-  /** F10: a built-in list is on show. Rename, Reorder or remove and Delete are absent, not dead. */
-  locked?: boolean
+  /** The ref kind of the list on show: `menuFor` says which of Rename, Reorder or remove and Delete it has. */
+  kind?: string
 }) {
   // F3: with v2 on the menu ignores taps for its first half second (openGuard.ts).
   const [menuOpen, setMenuOpen] = useState(false)
@@ -92,6 +93,7 @@ export function ListTabs({
   }, [activeId])
 
   const full = lists.length >= MAX_LISTS
+  const menu = menuFor(kind)
 
   const step = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
     const count = lists.length
@@ -187,14 +189,14 @@ export function ListTabs({
               {LISTS_FULL}
             </p>
           )}
-          {!locked && (
+          {menu.rename && (
             <DropdownMenuItem
               className={MENU_ITEM}
               disabled={activeId === null}
               onSelect={onRename}
             >
               <Pencil aria-hidden="true" className="size-5" />
-              Rename list
+              {menu.rename === 'flag' ? 'Rename this flag' : 'Rename list'}
             </DropdownMenuItem>
           )}
           {onNewSection && (
@@ -245,20 +247,18 @@ export function ListTabs({
               )}
             </>
           )}
-          {!locked && (
+          {menu.edit && (
+            <DropdownMenuItem className={MENU_ITEM} disabled={activeId === null} onSelect={onEdit}>
+              {editing ? (
+                <Check aria-hidden="true" className="size-5" />
+              ) : (
+                <ArrowUpDown aria-hidden="true" className="size-5" />
+              )}
+              {editing ? 'Done editing' : 'Reorder or remove'}
+            </DropdownMenuItem>
+          )}
+          {menu.remove && (
             <>
-              <DropdownMenuItem
-                className={MENU_ITEM}
-                disabled={activeId === null}
-                onSelect={onEdit}
-              >
-                {editing ? (
-                  <Check aria-hidden="true" className="size-5" />
-                ) : (
-                  <ArrowUpDown aria-hidden="true" className="size-5" />
-                )}
-                {editing ? 'Done editing' : 'Reorder or remove'}
-              </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem
                 className={cn(MENU_ITEM, 'text-[color:var(--down)] focus:text-[color:var(--down)]')}

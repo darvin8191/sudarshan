@@ -88,6 +88,28 @@ export async function readAgain(client: QueryClient, key?: string): Promise<void
   ])
 }
 
+/**
+ * Rename flag `flag` with the one `flags` write: the other four names as the state sent them, the
+ * new one as typed, on the flags version the screen was decided on. A refusal is thrown with the
+ * server's sentence.
+ */
+export async function renameFlag(
+  client: QueryClient,
+  names: readonly FlagName[] | undefined,
+  version: number,
+  flag: number,
+  name: string
+): Promise<void> {
+  try {
+    await callOp('flags', {
+      names: FLAG_IDS.map((mark) => ({ mark, name: mark === flag ? name : flagName(names, mark) })),
+      version,
+    })
+  } finally {
+    await readAgain(client) // after a refusal too: the flags are the other screen's
+  }
+}
+
 /** A note as sent: trimmed, and refused in the server's words when it is over the limit. */
 export function checkNote(raw: string): string | null {
   return raw.trim().length > LIMITS.note ? NOTE_LONG : null
