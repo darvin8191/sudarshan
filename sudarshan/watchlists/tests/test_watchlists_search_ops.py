@@ -221,8 +221,13 @@ def test_the_query_as_understood_and_the_near_miss(client):
     assert waiting["hits"] == [] and waiting["suggestion"] is None
     assert "the price is not known yet" in waiting["understood"]
     blank = find(client, "   ")
-    assert blank == {"understood": "", "hits": [], "underlying": None,
-                     "underlying_exchange": None, "suggestion": None}
+    assert blank == {
+        "understood": "",
+        "hits": [],
+        "underlying": None,
+        "underlying_exchange": None,
+        "suggestion": None,
+    }
 
 
 def words_for(query, seg):

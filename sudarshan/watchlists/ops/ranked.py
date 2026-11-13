@@ -278,7 +278,12 @@ def copy_source(spec: dict) -> tuple[int, dict, list, bool]:
     if not picked:
         raise OpError("invalid", words.copy_nothing(len(wanted)), "from")
     note = words.copy_left_out(len(wanted) - len(picked))
-    return presets_op.BUILTIN, {"name": words.label(*parts), "items": [], "note": note}, picked, False
+    return (
+        presets_op.BUILTIN,
+        {"name": words.label(*parts), "items": [], "note": note},
+        picked,
+        False,
+    )
 
 
 HANDLERS = {"ranked": ranked_op}

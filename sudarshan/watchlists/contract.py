@@ -195,7 +195,6 @@ RECORDS = {
 }
 
 
-
 class Field(NamedTuple):
     """One field of a request or a record."""
 

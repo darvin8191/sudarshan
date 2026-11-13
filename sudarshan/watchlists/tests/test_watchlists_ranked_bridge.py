@@ -586,7 +586,9 @@ def list_named(name):
         oa.db_session.remove()
 
 
-def test_a_ranked_list_is_copied_in_the_order_the_page_sent_with_no_upstox_call(client, upstox, clean):
+def test_a_ranked_list_is_copied_in_the_order_the_page_sent_with_no_upstox_call(
+    client, upstox, clean
+):
     r = copy(client, ["NFO:FUT7" + "25NOVFUT", "NFO:FUT2" + "25NOVFUT", "NFO:FUT5" + "25NOVFUT"])
     assert r.status_code == 200, r.get_json()
     done = r.get_json()["data"]
@@ -600,7 +602,9 @@ def test_keys_not_in_todays_master_are_left_out_and_counted_in_words(client, ups
     r = copy(client, ["NFO:FUT125NOVFUT", "NFO:GONE25NOVFUT", "NFO:ALSO25NOVFUT"])
     done = r.get_json()["data"]
     assert r.status_code == 200 and done["added"] == 1
-    assert done["words"] == "2 symbols are not in today's contract list and were left out of the copy."
+    assert (
+        done["words"] == "2 symbols are not in today's contract list and were left out of the copy."
+    )
     assert list_named("Copied") == [("NFO", "FUT125NOVFUT")]
     r = copy(client, ["NFO:FUT225NOVFUT", "NFO:GONE25NOVFUT"], {"name": "Second"})
     assert r.get_json()["data"]["words"] == (
@@ -614,7 +618,9 @@ def test_a_ranked_copy_that_leaves_everything_out_writes_nothing(client, upstox,
     assert list_named("Copied") is None
 
 
-def test_a_ranked_copy_needs_keys_in_a_shape_and_cannot_be_a_move_or_a_section(client, upstox, clean):
+def test_a_ranked_copy_needs_keys_in_a_shape_and_cannot_be_a_move_or_a_section(
+    client, upstox, clean
+):
     for keys in ([], ["NFO"], [":X"], ["NFO:"]):
         r = copy(client, keys)
         assert r.status_code == 400 and r.get_json()["field"] == "from", keys
