@@ -171,7 +171,8 @@ RECORDS = {
     "TvSection": "name:string, count:int",
     "TvPreview": "hash:string, sections:int, symbols:int, matched:int, follow:int, "
     "left_out:Cut[], lists:TvSection[], words:string[]",
-    "TvExport": "text:string, filename:string, left_out:Cut[], words:string[]",
+    "TvExport": "text:string, filename:string, symbols:int, sections:int, left_out:Cut[], "
+    "words:string[]",
     # A write's answer: ``lists_version`` is the lists version its bump produced (the ``v`` of the
     # push it sent), so the phone knows the push of its own write and skips it; absent when the
     # write bumped nothing (it changed no list's members, or nothing at all).
@@ -242,7 +243,7 @@ OPS = (
            "src:RankSource, asset:RankAsset, cat:RankCategory, size?:int", "Ranked"),
     OpSpec("tv_preview", "POST", "/tv/preview", "preview",
            "text:string, name?:string, list?:int", "TvPreview"),
-    OpSpec("tv_export", "POST", "/tv/export", "read", "list:int", "TvExport"),
+    OpSpec("tv_export", "POST", "/tv/export", "read", "ref:string", "TvExport"),
     OpSpec("section_add", "POST", "/sections", "write",
            "list:int, name:string, mark?:int, version:string", "Done"),
     OpSpec("section_edit", "PATCH", "/sections/<id>", "write",

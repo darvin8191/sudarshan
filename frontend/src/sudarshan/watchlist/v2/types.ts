@@ -346,6 +346,8 @@ export interface TvPreview {
 export interface TvExport {
   text: string
   filename: string
+  symbols: number
+  sections: number
   left_out: Cut[]
   words: string[]
 }
@@ -552,7 +554,7 @@ export interface TvPreviewReq {
 }
 
 export interface TvExportReq {
-  list: number
+  ref: string
 }
 
 export interface SectionAddReq {

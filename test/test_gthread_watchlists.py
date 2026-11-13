@@ -62,8 +62,9 @@ APP = textwrap.dedent(
     # No master is loaded in this server, so the concurrency test of a read with its own fields
     # keeps an echo for ``strikes`` (the real op is tested in-process, test_watchlists_search_ops).
     handlers["strikes"] = echo("strikes")
-    # The preview reads the master too, so the limit tests below keep an echo for it.
+    # The preview and the export read the master too, so the limit tests below keep an echo for them.
     handlers["tv_preview"] = echo("tv_preview")
+    handlers["tv_export"] = echo("tv_export")
     app.register_blueprint(bridge.attach(
         Blueprint("wl_gthread", __name__, url_prefix=contract.API_PREFIX), handlers))
 

@@ -189,6 +189,38 @@ import that finds everything already in the open list bumps nothing. No thread, 
 parse is one pass over at most 64 KiB. Tests: `tests/test_watchlists_tvimport_ops.py`, with
 `vectors/tvimport.json` through both ops.
 
+## W20 - TradingView export (`tvexport.py`, `ops/tvexport.py`, `words/tvexport.py`)
+
+`tv_export` (class `read`, 120 a minute: the bridge's table has a row for it, `tv_export`, so no class
+was invented) takes `ref`, where the contract used to say `list`: `list:7`, `list:7/section:3` (one
+section), `preset:<id>`, `flag:<n>` or `ranked:<source>:<asset>:<category>`, read as `view` reads them
+(a ranked list asks Upstox as `view` does). The answer is `TvExport`: `text`, `filename` (the list's
+name, or `List - Section`, without what a file name cannot hold, ending `.txt`), `symbols` and
+`sections` written, `left_out` (`token`, `reason`: `no_tv_name`, `no_form`, `dated_future`, `expired`,
+`waiting`, `no_contract`) and `words`. Nothing is written, bumped or pushed; no thread is started.
+
+The mapping is W18's in reverse and pure (`tvexport.build`, with the rows read as `Block` and `Entry`
+records): the text is one line of exchange-prefixed symbols separated by commas, `###Name` opening a
+section, rows in no section first, a follow row before the rows of its section; the same symbol
+twice is written once. A cash symbol is `NSE:INFY`, `-` and `&` written `_`; an index is its
+TradingView name through the import's alias table in reverse (an index with none is left out); a
+row that follows a future is `NSE:NIFTY1!` or `NSE:NIFTY2!`, and so is a dated future that is
+today's current-month or next-month contract (found through the follow rows' own resolver); any
+other dated future, and anything on another exchange, is left out with its reason. An at-the-money
+or strike row (or an option contract in a list) is written as the contract it shows today,
+`NSE:NIFTY261124C25800` (underlying, expiry YYMMDD, C or P, strike), found through `resolve`'s
+resolver from the feed's last price; the answer says in words that it will not follow on
+TradingView, and a row with no price is left out in words. The import does not read that form, so
+those rows do not come back; every other row does (`tests/vectors/tvexport.json`, through
+`tvimport.parse`, and each of W18's vectors in reverse). The option form is written from the
+shape TradingView shows and is still to be checked against a real export (design fact W-5).
+
+A comma inside a section name would split it in TradingView's import, so it is dropped from the
+name, and the answer says "2 section names had a comma, which TradingView cannot read; it was left
+out." A name that was only commas becomes `Section`. The master is read only when a row needs it
+(a derivative contract, a rule other than the current or next month, an at-the-money row).
+Tests: `tests/test_watchlists_tvexport.py`, `tests/test_watchlists_tvexport_ops.py`.
+
 ## W21 - ranked rows (`ranked.py`, `words/ranked.py`)
 
 Pure mapping of an Upstox Smartlist answer to rows, through the master by instrument key, in
