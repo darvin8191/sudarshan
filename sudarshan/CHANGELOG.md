@@ -5,6 +5,52 @@ publish. The owner publishes each release on GitHub. The server's deploy timer t
 outside 08:30-16:00 IST on trading days (09:00-15:45 until v0.3.1), keeps backups, and rolls
 back if the app does not come up healthy.
 
+## v0.8.0 (13 Nov 2026)
+
+A logout on one device now signs out every device, and the nightly backup can keep an encrypted
+copy in your own Oracle storage bucket. It includes everything in v0.7.0. **Publish it only after
+v0.7.0 has installed and run one trading day.** Nothing you trade with changes: orders, risk
+limits, the price feed and API-key calls work as before.
+
+### What changes for you
+- **A logout ends every device's session.** A logout, a password change or a password reset on one
+  device signs every other device out at its next page, read or reconnect, a phone that was asleep
+  at the time included. Before, the other devices stayed signed in until 03:00.
+- **A second device's login never signs the first one out** and never touches the price feed, as
+  before. TradingView, Amibroker and the strategy host use the API key and are not affected.
+- **Old rows leave Active Sessions.** Rows of sessions the 03:00 expiry had already ended (the two
+  October rows) go at the next login, or when the Security screen opens.
+- **An offsite copy of the nightly backup, off until you set it up.** After each good backup the
+  server encrypts a copy to your own certificate and uploads it to one Oracle Object Storage bucket
+  (Always Free). The private key stays on your laptop and on one offline copy: a server that is
+  taken over can neither read the copies nor delete them. Your bucket's lifecycle rule (for example
+  30 days) is the only thing that deletes.
+- **Told on Telegram when it matters:** "Tonight's offsite backup did not upload: (the reason). The
+  local backup is fine." once a day per cause, after three tries for a busy or unreachable bucket;
+  and a reminder every day from 14 days before the upload link expires. A good night is one journal
+  line, no message.
+
+### What you must do
+- Nothing when you publish. The install adds one small table for the logout time.
+- Once after the install, after the close: put the phone to sleep, log out on the laptop, then wake
+  the phone. It should show the login page. Log in again on both (a logout also ends the Upstox
+  login, as it always has). The two October rows should be gone from Active Sessions.
+- When you want the offsite copy: the 12 steps in `sudarshan/README.md`, "Setting up the offsite
+  copy" (the Oracle console, a key pair made on the laptop, one `.bat` that sends only the public
+  certificate and asks for the upload link in a hidden prompt). The next morning, look for one file
+  in the bucket.
+
+### What is refused now that used to be accepted
+- A device signed in before a logout, a password change or a password reset elsewhere is sent to the
+  login page at its next page, read or reconnect.
+- The offsite settings refuse a private key: only the public certificate goes to the server.
+
+### Not in this release yet
+- **The offsite copy has not met a real bucket yet**: the first night after your console steps is
+  its first run, and one trial restore into a scratch folder is still to be done.
+- **The logout check on the phone** above is the first check of that change on the real server.
+- The open points listed under v0.7.0 remain.
+
 ## v0.7.0 (12 Nov 2026)
 
 Screener dashboards: a Dashboard tab of cards you choose, six more ready-made screens, and fixes to
