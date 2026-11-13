@@ -41,6 +41,10 @@ WORDS: dict[str, str] = {
         "was changed."
     ),
     "busy": "The family view is busy. Wait a minute, then try again.",
+    "unavailable": (
+        "The family service is not answering. Nothing was changed; try again in a minute."
+    ),
+    "not_confirmed": "Not confirmed: open the Family page again to see whether it was done.",
     # ---- the rest ----
     "expired": "Your sign-in has expired. Sign in again.",
     "removed": "This member was removed by the account owner.",

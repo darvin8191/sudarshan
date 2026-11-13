@@ -21,7 +21,7 @@ def test_every_type_resolves():
     for name, spec in c.RECORDS.items():
         for f in c.parse_fields(spec):
             assert c.known_type(f.type), (name, f)
-    for op in (*c.VIEWER_OPS, *c.ADMIN_OPS, *c.NUDGE_OPS):
+    for op in (*c.VIEWER_OPS, *c.ADMIN_OPS, *c.NUDGE_OPS, *c.INTERNAL_OPS):
         assert c.base_type(op.res) in c.RECORDS, op
         for f in c.parse_fields(op.req):
             assert c.known_type(f.type), (op.name, f)
@@ -35,6 +35,7 @@ def test_names_are_unique_and_the_tables_agree():
     names = [*c.ENUMS, *c.RECORDS, "ErrorCode", "ViewerOpName", "AdminOpName", "ViewerOps"]
     names += [gentypes.pascal(op.name) + "Req" for op in c.VIEWER_OPS]
     names += ["Admin" + gentypes.pascal(op.name) + "Req" for op in (*c.ADMIN_OPS, *c.NUDGE_OPS)]
+    names += ["Internal" + gentypes.pascal(op.name) + "Req" for op in c.INTERNAL_OPS]
     assert len(set(names)) == len(names), "two TypeScript names collide"
 
 
@@ -81,7 +82,27 @@ def test_the_writes_are_every_route_that_is_not_a_get():
 def test_the_purposes_are_the_vaults():
     assert c.PURPOSES["admin"].encode() == keys.FAMILY_ADMIN_INFO
     assert c.PURPOSES["nudge"].encode() == keys.FAMILY_NUDGE_INFO
+    assert c.PURPOSES["internal"].encode() == keys.FAMILY_INTERNAL_INFO
     assert c.ADMIN_PRINCIPAL == "owner" and c.NUDGE_PRINCIPAL == "sudarshan-alerts"
+
+
+def test_the_one_call_out_is_the_internal_watchlist_route():
+    """Lane FB's route as its blueprint serves it (feat/family-b): the path, the purpose, who the
+    family service says it is, at most 4 KiB, 1 to 50 ids, and lists tied to their created_at."""
+    assert c.INTERNAL_PATH == "/sudarshan/family/internal/watchlists"
+    assert c.INTERNAL_PRINCIPAL == c.SERVICE == "sudarshan-family"
+    assert (c.LIMITS["internal_bytes"], c.LIMITS["internal_lists"]) == (4096, 50)
+    (op,) = c.INTERNAL_OPS
+    assert (op.name, c.parse_fields(op.req)) == ("watchlists", (c.Field("list_ids", "int[]"),))
+    assert [f.name for f in c.record("InternalWatchlists")] == ["lists", "gone"]
+    assert [f.name for f in c.record("InternalList")] == ["id", "name", "created_at", "rows"]
+    assert [f.name for f in c.record("InternalRow")] == [
+        "symbol", "exchange", "instrument_key", "name", "tick_size", "lot_size",
+    ]  # fmt: skip
+
+
+def test_the_bridges_two_codes():
+    assert (c.ERROR_STATUS["unavailable"], c.ERROR_STATUS["not_confirmed"]) == (503, 504)
 
 
 def test_the_nudge_op_is_what_the_alerts_send():
