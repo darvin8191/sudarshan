@@ -1,5 +1,5 @@
 import { LogOut } from 'lucide-react'
-import { memo, useCallback, useMemo } from 'react'
+import { memo, useCallback, useEffect, useMemo, useState } from 'react'
 import type { WatchlistItem } from '@/api/watchlist'
 import type { AlertPrefill } from '@/sudarshan/alerts/AlertForm'
 import { LiveLine } from '@/sudarshan/dashboard/LiveLine'
@@ -7,11 +7,12 @@ import { keyOf, type MarketOpen } from '@/sudarshan/dashboard/live'
 import type { MemberRow } from '@/sudarshan/screener/api'
 import { exitedToday, tagsOf, usePin } from '@/sudarshan/screener/feed'
 import type { ArrangeEdit } from './ArrangeSheet'
+import { FOLLOW_CAP } from './follow'
 import { figuresFor, type HeldFigures, HeldSwitch, indexBook, isinsOf } from './HoldingLine'
 import { type ArrangeActions, type OrderRequest, SymbolSheet } from './SymbolSheet'
 import { DEFAULT_PREF, isDefaultView } from './sort'
 import { useHeld } from './useHeld'
-import { useLiveRows } from './useLiveRows'
+import { type FollowOptions, useLiveRows } from './useLiveRows'
 import { useSortOrder } from './useSortOrder'
 import { ViewLine, type ViewPref, ViewSheet } from './ViewSheet'
 import { marksOf } from './v2/marks'
@@ -97,7 +98,20 @@ export const LiveList = memo(function LiveList({
     [members]
   )
   const pref = viewPref?.pref // F6
-  const live = useLiveRows({ items, apiKey, marketOpen: isOpen, basis: pref?.basis })
+  // F9 (v2): the cap and the window. The open sheet's instrument is followed first; a list longer than the
+  // cap follows the window over the rows in the order they are shown, which a sort changes.
+  const v2 = flagNames !== undefined
+  const openKey = useMemo(() => {
+    const open = openItemId === null ? undefined : items.find((item) => item.id === openItemId)
+    return open ? keyOf(open.symbol, open.exchange) : null
+  }, [items, openItemId])
+  const [order, setOrder] = useState<string | null>(null)
+  const listKey = viewPref?.ref ?? ''
+  const follow = useMemo<FollowOptions | undefined>(
+    () => (v2 ? { sheet: openKey ? [openKey] : [], order: order?.split(','), listKey } : undefined),
+    [v2, openKey, order, listKey]
+  )
+  const live = useLiveRows({ items, apiKey, marketOpen: isOpen, basis: pref?.basis, follow })
   // F6: the rows in the snapshot's order; editing arranges the list's own order.
   const sorted = useSortOrder({
     rows: live.rows,
@@ -106,8 +120,11 @@ export const LiveList = memo(function LiveList({
     listKey: viewPref?.ref ?? '',
     ready: live.read,
     active: pref !== undefined && !isDefaultView(pref) && !editing,
+    fullRead: live.readAll, // F9
   })
   const shown = editing ? live.rows : sorted.rows
+  const shownOrder = v2 && items.length > FOLLOW_CAP ? shown.map((row) => row.key).join(',') : null
+  useEffect(() => setOrder(shownOrder), [shownOrder])
   // F7: the holdings line, from the books, only when the switch is on and this is not a family render.
   const heldOn = !readOnly && pref?.held === true
   const book = useHeld({ enabled: heldOn, apiKey, marketOpen: isOpen })
@@ -162,7 +179,9 @@ export const LiveList = memo(function LiveList({
         </output>
       )}
 
-      {pref && !editing && <ViewLine pref={pref} at={sorted.at} onAgain={sorted.again} />}
+      {pref && !editing && (
+        <ViewLine pref={pref} at={sorted.at} readAt={sorted.readAt} onAgain={sorted.again} />
+      )}
 
       <section
         {...panel}

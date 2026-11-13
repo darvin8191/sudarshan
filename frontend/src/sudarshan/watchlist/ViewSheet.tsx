@@ -161,7 +161,7 @@ export function ViewSheet({
   )
 }
 
-const CLOCK = new Intl.DateTimeFormat('en-IN', {
+export const CLOCK = new Intl.DateTimeFormat('en-IN', {
   hour: '2-digit',
   minute: '2-digit',
   hourCycle: 'h23',
@@ -175,10 +175,13 @@ const CLOCK = new Intl.DateTimeFormat('en-IN', {
 export function ViewLine({
   pref,
   at,
+  readAt,
   onAgain,
 }: {
   pref: Pref
   at: number | null
+  /** F9: when the prices of a list longer than the window were read, when that is what it was ranked on. */
+  readAt?: number | null
   onAgain: () => void
 }) {
   if (isDefaultView(pref)) return null
@@ -192,7 +195,7 @@ export function ViewLine({
       {sorted && (
         <span className="flex items-center gap-1.5">
           <ArrowUpDown aria-hidden="true" className="size-3.5" />
-          {`Sorted by ${sortWords(pref)}${prices && at !== null ? `, at ${CLOCK.format(at)}` : ''}`}
+          {`Sorted by ${sortWords(pref)}${prices && at !== null ? `, at ${CLOCK.format(at)}` : ''}${prices && at !== null && readAt != null ? `, from prices read at ${CLOCK.format(readAt)}` : ''}`}
         </span>
       )}
       {sorted && prices && <span aria-hidden="true">&middot;</span>}

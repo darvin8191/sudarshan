@@ -6,9 +6,10 @@
  * its place (`useSortOrder` takes a new snapshot only when the owner asks).
  */
 
-import { describe } from './rows'
+import { FOLLOW_CAP } from './follow'
+import { describe, rowView, type Snapshot } from './rows'
 import type { LiveRow } from './useLiveRows'
-import type { Pref, Sort } from './v2/types'
+import type { Basis, Pref, Sort } from './v2/types'
 
 /** What a list is when nothing was chosen: its own order, change from the previous close. */
 export const DEFAULT_PREF: Pref = { sort: 'list', descending: false, basis: 'close', held: false }
@@ -86,6 +87,16 @@ export function entryOf(row: LiveRow): SortEntry {
   }
 }
 
+/** F9: a row ranked on the one snapshot of the whole list, never on its tick. */
+export function entryFromSnapshot(
+  row: LiveRow,
+  snapshot: Snapshot | undefined,
+  basis: Basis
+): SortEntry {
+  const view = rowView(snapshot, undefined, basis)
+  return { ...entryOf(row), ltp: view.ltp, changePercent: view.changePercent }
+}
+
 const WORDS = new Intl.Collator('en', { sensitivity: 'base', numeric: true })
 
 /**
@@ -135,13 +146,13 @@ export function byRank<T>(
     .map(({ item }) => item)
 }
 
-/** The longest list the page follows whole (F9's window). A longer one reads every row before it sorts. */
-export const LONG_LIST = 250
+/** The longest list the page follows whole. A longer one reads every row before it sorts (F9). */
+export const LONG_LIST = FOLLOW_CAP
 
 /**
- * The seam for F9: a list longer than the window ticks only 120 rows, so a price sort on it first reads
- * one snapshot of every row (one call per 500 keys) and ranks on that instant. Own lists stop at 250,
- * so nothing reaches it yet; `useSortOrder` calls it before it ranks.
+ * A list longer than the cap follows only a window of its rows, so a price sort on it first reads
+ * one snapshot of every row (one call per 500 keys) and ranks on that instant (`entryFromSnapshot`).
+ * `useSortOrder` asks before it ranks.
  */
 export function needsFullSnapshot(count: number): boolean {
   return count > LONG_LIST

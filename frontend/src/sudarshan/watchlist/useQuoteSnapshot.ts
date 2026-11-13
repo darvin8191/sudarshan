@@ -12,6 +12,9 @@ export const RECONNECT_REREAD_MS = 5_000
 /** Back on the page after more than this long away, every quote is read again. */
 export const AWAY_MS = 15_000
 
+/** Upstox quotes take this many keys a call (F9): a longer list is read in several, at once. */
+export const QUOTE_KEYS_PER_CALL = 500
+
 export interface Instrument {
   symbol: string
   exchange: string
@@ -27,6 +30,11 @@ export interface QuoteSnapshot {
   retry: () => void
   /** Read these instruments again if their quotes are older than `maxAgeMs`. */
   resync: (keys: ReadonlySet<string>, maxAgeMs: number) => void
+  /**
+   * F9: read every quote of the list again, in one go, and say what was read when it is all in; null
+   * when any call failed. A sort on a list longer than the window ranks on that one instant.
+   */
+  readAll: () => Promise<ReadonlyMap<string, Snapshot> | null>
 }
 
 /**
@@ -70,6 +78,14 @@ export function useQuoteSnapshot({
   /** What to read once the read in flight is done: the youngest age asked for, per key or for all. */
   const again = useRef<{ maxAgeMs: number; keys: Set<string> | null } | null>(null)
   const alive = useRef(true)
+  /** F9: who is waiting for a full read, and how the last read ended (the quotes, or null for a failure). */
+  const waiters = useRef<Array<(quotes: ReadonlyMap<string, Snapshot> | null) => void>>([])
+  const outcome = useRef<ReadonlyMap<string, Snapshot> | null>(null)
+  const settle = useCallback(() => {
+    const waiting = waiters.current
+    waiters.current = []
+    for (const done of waiting) done(outcome.current)
+  }, [])
 
   useEffect(() => {
     alive.current = true
@@ -80,7 +96,11 @@ export function useQuoteSnapshot({
 
   const read = useCallback(
     async function run(maxAgeMs: number, only: ReadonlySet<string> | null): Promise<void> {
-      if (!apiKey) return
+      if (!apiKey) {
+        outcome.current = null
+        settle()
+        return
+      }
       if (busy.current) {
         const queued = again.current
         again.current = {
@@ -101,28 +121,47 @@ export function useQuoteSnapshot({
         const held = store.current.get(key)
         return !held || at - held.at > maxAgeMs
       })
-      if (due.length === 0) return
+      if (due.length === 0) {
+        outcome.current = store.current
+        settle()
+        return
+      }
 
       busy.current = true
       setStatus((previous) => (previous === 'ready' ? previous : 'loading'))
+      outcome.current = null
       try {
-        const response = await tradingApi.getMultiQuotes(apiKey, due)
+        // F9: one call per 500 keys, all at once, so the whole list is read at one instant.
+        const calls: Instrument[][] = []
+        for (let from = 0; from < due.length; from += QUOTE_KEYS_PER_CALL)
+          calls.push(due.slice(from, from + QUOTE_KEYS_PER_CALL))
+        const responses = await Promise.all(
+          calls.map((call) => tradingApi.getMultiQuotes(apiKey, call).catch(() => null))
+        )
         if (!alive.current) return
-        if (response.status === 'success' && Array.isArray(response.results)) {
-          const wanted = new Set(active.current.map((each) => keyOf(each.symbol, each.exchange)))
-          const next = new Map(store.current)
-          for (const result of response.results) {
-            const key = keyOf(result.symbol, result.exchange)
-            // A symbol the broker could not quote comes back with an error and
-            // no data; one that left the list while the read was out is dropped.
-            if (result?.data && wanted.has(key)) next.set(key, { quote: result.data, at })
+        const wanted = new Set(active.current.map((each) => keyOf(each.symbol, each.exchange)))
+        const next = new Map(store.current)
+        let failed = false
+        let landed = false
+        for (const response of responses) {
+          if (response?.status === 'success' && Array.isArray(response.results)) {
+            landed = true
+            for (const result of response.results) {
+              const key = keyOf(result.symbol, result.exchange)
+              // A symbol the broker could not quote comes back with an error and
+              // no data; one that left the list while the read was out is dropped.
+              if (result?.data && wanted.has(key)) next.set(key, { quote: result.data, at })
+            }
+          } else {
+            failed = true
           }
+        }
+        if (landed) {
           store.current = next
           setQuotes(next)
-          setStatus('ready')
-        } else {
-          setStatus('error')
         }
+        setStatus(failed ? 'error' : 'ready')
+        outcome.current = failed ? null : next
       } catch {
         if (alive.current) setStatus('error')
       } finally {
@@ -130,9 +169,10 @@ export function useQuoteSnapshot({
         const queued = again.current
         again.current = null
         if (alive.current && queued !== null) void run(queued.maxAgeMs, queued.keys)
+        else settle()
       }
     },
-    [apiKey]
+    [apiKey, settle]
   )
 
   // The list opening, growing or changing. A key that left takes its quote with it.
@@ -191,5 +231,13 @@ export function useQuoteSnapshot({
     (keys: ReadonlySet<string>, maxAgeMs: number) => void read(maxAgeMs, keys),
     [read]
   )
-  return { quotes, status, retry, resync }
+  const readAll = useCallback(
+    () =>
+      new Promise<ReadonlyMap<string, Snapshot> | null>((done) => {
+        waiters.current.push(done)
+        void read(0, null)
+      }),
+    [read]
+  )
+  return { quotes, status, retry, resync, readAll }
 }

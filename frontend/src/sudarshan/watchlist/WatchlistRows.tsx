@@ -8,11 +8,13 @@ import { TREND_TEXT, TrendArrow } from '@/sudarshan/dashboard/Trend'
 import { ChipMark } from '@/sudarshan/screener/ChipMark'
 import type { Chip } from '@/sudarshan/screener/types'
 import { type ArrangeEdit, ArrangeRows } from './ArrangeSheet'
+import { FOLLOW_CAP, outsideNote, outsideSpeech } from './follow'
 import { type HeldFigures, HoldingLine } from './HoldingLine'
 import { MarkGlyph } from './marks'
 import { describe, formatChange, OPEN_UNKNOWN, priceDecimals, type TickDirection } from './rows'
 import { SectionHeader } from './SectionHeader'
 import type { LiveRow } from './useLiveRows'
+import { CLOCK } from './ViewSheet'
 import { markWords, type RowMark } from './v2/marks'
 import type { Group } from './v2/sections'
 import type { Section } from './v2/types'
@@ -33,6 +35,10 @@ export interface FigureValues {
   stale: boolean
   /** F6: the change is from today's open and it is not known yet. */
   openMissing?: boolean
+  /** F9: the row is not followed: it shows the last figure it had, grey, with the time of it. */
+  outside?: 'cap' | 'window'
+  /** F9: when that figure was read or ticked, or null when none was. */
+  outsideAt?: number | null
 }
 
 export function figuresOf(row: LiveRow): FigureValues {
@@ -43,6 +49,8 @@ export function figuresOf(row: LiveRow): FigureValues {
     direction: row.direction,
     stale: row.stale,
     openMissing: row.view.openMissing, // F6
+    outside: row.outside, // F9
+    outsideAt: row.outside ? row.view.at : undefined, // F9
   }
 }
 
@@ -120,10 +128,13 @@ export function Figures({
   direction,
   stale,
   openMissing,
+  outside, // F9
+  outsideAt: _outsideAt,
   size = 'row',
   decimals = 2,
 }: FigureValues & { size?: 'row' | 'sheet'; decimals?: number }) {
   const day = change === null ? 'flat' : directionOf(change, decimals)
+  stale = stale || outside !== undefined // F9: a figure that is not followed is grey like a stale one
   return (
     <span className="flex shrink-0 flex-col items-end gap-0.5 text-right">
       <span
@@ -166,7 +177,7 @@ export function Figures({
         {stale && (
           <>
             <Clock aria-hidden="true" className="size-3" />
-            <span className="sr-only">Stale</span>
+            {outside === undefined && <span className="sr-only">Stale</span>}
           </>
         )}
       </span>
@@ -184,8 +195,11 @@ const PriceRow = memo(function PriceRow({
   position,
   mark,
   onOpen,
+  rowIndex,
   ...figures
 }: FigureValues & {
+  /** F9: its place in a list longer than the cap, which the window is worked out from. */
+  rowIndex?: number
   mark?: RowMark // F8
   itemId: number
   symbol: string
@@ -195,24 +209,52 @@ const PriceRow = memo(function PriceRow({
   position?: number // F7
   onOpen: (itemId: number) => void
 }) {
+  const body = (
+    <>
+      <Name
+        symbol={symbol}
+        exchange={exchange}
+        chip={chip}
+        holding={holding}
+        position={position}
+        mark={mark}
+      />
+      <Figures {...figures} decimals={priceDecimals(exchange)} />
+    </>
+  )
+  const { outside, outsideAt } = figures
   return (
-    <li data-stale={figures.stale || undefined}>
-      <button
-        type="button"
-        aria-haspopup="dialog"
-        onClick={() => onOpen(itemId)}
-        className="flex min-h-14 w-full items-center gap-3 px-4 py-2 text-left outline-none active:bg-accent focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-      >
-        <Name
-          symbol={symbol}
-          exchange={exchange}
-          chip={chip}
-          holding={holding}
-          position={position}
-          mark={mark}
-        />
-        <Figures {...figures} decimals={priceDecimals(exchange)} />
-      </button>
+    <li data-stale={figures.stale || undefined} data-row-index={rowIndex /* F9 */}>
+      {outside === undefined ? (
+        <button
+          type="button"
+          aria-haspopup="dialog"
+          onClick={() => onOpen(itemId)}
+          className="flex min-h-14 w-full items-center gap-3 px-4 py-2 text-left outline-none active:bg-accent focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+        >
+          {body}
+        </button>
+      ) : (
+        // F9: not followed. The last figure, grey, and why it is not moving: words and a clock, never colour alone.
+        <button
+          type="button"
+          aria-haspopup="dialog"
+          data-outside={outside}
+          onClick={() => onOpen(itemId)}
+          className="flex min-h-14 w-full flex-col justify-center gap-1 px-4 py-2 text-left outline-none active:bg-accent focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+        >
+          <span className="flex w-full items-center gap-3">{body}</span>
+          <span className="flex items-start gap-1.5 text-xs font-medium text-[color:var(--stale)]">
+            <Clock aria-hidden="true" className="mt-0.5 size-3 shrink-0" />
+            <span>
+              {outsideAt != null ? `Price at ${CLOCK.format(outsideAt)}` : 'No price read yet'}
+              {' · '}
+              {outsideNote(outside)}
+            </span>
+            <span className="sr-only">{outsideSpeech(outside)}</span>
+          </span>
+        </button>
+      )}
     </li>
   )
 })
@@ -396,6 +438,7 @@ export function WatchlistRows({
               position={held?.get(row.key)?.position} // F7
               mark={marks?.get(row.key)} // F8
               onOpen={onOpen}
+              rowIndex={rows.length > FOLLOW_CAP ? index : undefined} // F9
               {...figuresOf(row)}
             />
           )
