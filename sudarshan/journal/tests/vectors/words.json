@@ -1,0 +1,562 @@
+{
+ "note": "synthetic; figures in paise; the texts of W1 and W5 are the design's samples",
+ "vectors": [
+  {
+   "id": "W1",
+   "fn": "eod",
+   "note": "the design's sample, exactly",
+   "args": {
+    "day": 20261109,
+    "realised_paise": 431250,
+    "unrealised_paise": -60000,
+    "charges_est_paise": 48620,
+    "trades": 6,
+    "wins": 3,
+    "losses": 2,
+    "flats": 1,
+    "by_strategy": [
+     {
+      "name": "ORB",
+      "net_paise": 290000,
+      "trades": 2
+     },
+     {
+      "name": "Manual",
+      "net_paise": 81250,
+      "trades": 4
+     }
+    ],
+    "carried": [
+     {
+      "label": "NIFTY 25000 PE",
+      "qty": 65
+     }
+    ],
+    "kill_switch": false,
+    "daily_lock_at": null,
+    "fills_recorded": 12,
+    "check_at": "15:50"
+   },
+   "text": "सुदर्शन · SUDARSHAN\nMon 9 Nov · Day report\nRealised +₹4,312.50 · Unrealised −₹600.00 · Net +₹3,712.50 (before charges, est. ₹486.20)\nTrades 6 · won 3, lost 2, 1 flat\nBy strategy: ORB +₹2,900.00 (2) · Manual +₹812.50 (4)\nCarried overnight: 1 position (NIFTY 25000 PE, 65)\nKill switch off · Daily loss limit not reached\nFills: 12 recorded live; the day's book is checked at 15:50."
+  },
+  {
+   "id": "W2",
+   "fn": "eod",
+   "note": "a day with no trades",
+   "args": {
+    "day": 20261109,
+    "realised_paise": 0,
+    "unrealised_paise": 0,
+    "charges_est_paise": 0,
+    "trades": 0,
+    "wins": 0,
+    "losses": 0,
+    "flats": 0,
+    "carried": [],
+    "kill_switch": false,
+    "fills_recorded": 0,
+    "check_at": "16:05"
+   },
+   "text": "सुदर्शन · SUDARSHAN\nMon 9 Nov · Day report\nRealised ₹0.00 · Unrealised ₹0.00 · Net ₹0.00 (before charges, est. ₹0.00)\nNo trades today\nCarried overnight: none\nKill switch off · Daily loss limit not reached\nFills: 0 recorded live; the day's book is checked at 16:05."
+  },
+  {
+   "id": "W3",
+   "fn": "eod",
+   "note": "a losing day, the daily limit reached, the close check agreed",
+   "args": {
+    "day": 20261110,
+    "realised_paise": -250000,
+    "unrealised_paise": 0,
+    "charges_est_paise": 30000,
+    "trades": 3,
+    "wins": 0,
+    "losses": 3,
+    "flats": 0,
+    "by_strategy": [
+     {
+      "name": "Manual",
+      "net_paise": -250000,
+      "trades": 3
+     }
+    ],
+    "carried": [
+     {
+      "label": "NIFTY 25000 PE",
+      "qty": 65
+     },
+     {
+      "label": "RELIANCE",
+      "qty": 10
+     }
+    ],
+    "kill_switch": true,
+    "daily_lock_at": "13:42",
+    "fills_recorded": 6,
+    "close_check": {
+     "state": "agreed"
+    }
+   },
+   "text": "सुदर्शन · SUDARSHAN\nTue 10 Nov · Day report\nRealised −₹2,500.00 · Unrealised ₹0.00 · Net −₹2,500.00 (before charges, est. ₹300.00)\nTrades 3 · won 0, lost 3\nBy strategy: Manual −₹2,500.00 (3)\nCarried overnight: 2 positions (NIFTY 25000 PE, 65; RELIANCE, 10)\nKill switch on · Daily loss limit reached at 13:42; new orders refused for the day\nFills: 6 recorded live; the close check agreed."
+  },
+  {
+   "id": "W4",
+   "fn": "eod",
+   "note": "the close check found a fill",
+   "args": {
+    "day": 20261111,
+    "realised_paise": 100000,
+    "unrealised_paise": 0,
+    "charges_est_paise": 9000,
+    "trades": 1,
+    "wins": 1,
+    "losses": 0,
+    "flats": 0,
+    "by_strategy": [
+     {
+      "name": "ORB",
+      "net_paise": 100000,
+      "trades": 1
+     }
+    ],
+    "carried": [],
+    "kill_switch": null,
+    "fills_recorded": 2,
+    "close_check": {
+     "state": "found",
+     "more": 1
+    }
+   },
+   "text": "सुदर्शन · SUDARSHAN\nWed 11 Nov · Day report\nRealised +₹1,000.00 · Unrealised ₹0.00 · Net +₹1,000.00 (before charges, est. ₹90.00)\nTrades 1 · won 1, lost 0\nBy strategy: ORB +₹1,000.00 (1)\nCarried overnight: none\nKill switch not read · Daily loss limit not reached\nFills: 2 recorded live; the close check found 1 more fill; the journal is corrected."
+  },
+  {
+   "id": "W5",
+   "fn": "brief",
+   "note": "the design's sample, exactly",
+   "args": {
+    "day": 20261109,
+    "hours": "09:15-15:30",
+    "fno_close": "15:40",
+    "expiry_label": "NIFTY weekly",
+    "holiday_ahead_day": 20261110,
+    "funds_available_paise": 18240000,
+    "funds_used_paise": 0,
+    "overnight": [],
+    "yesterday": {
+     "net_paise": 371250,
+     "trades": 6
+    },
+    "kill_switch": false,
+    "autologin": "see Telegram at 08:35-08:55"
+   },
+   "text": "सुदर्शन · SUDARSHAN\nMon 9 Nov · Morning brief\nMarket open 09:15-15:30 (F&O to 15:40) · NIFTY weekly expiry today (Tue 10 Nov is a holiday)\nFunds available ₹1,82,400.00 · used ₹0.00\nOvernight: none\nYesterday: net +₹3,712.50 · 6 trades\nKill switch off · Auto login: see Telegram at 08:35-08:55"
+  },
+  {
+   "id": "W6",
+   "fn": "brief",
+   "note": "the Muhurat brief",
+   "args": {
+    "day": 20261108,
+    "kind": "muhurat",
+    "session_name": "Muhurat session",
+    "window": "14:05-15:40",
+    "funds_available_paise": 18240000,
+    "funds_used_paise": 0,
+    "overnight": [
+     {
+      "label": "NIFTY 25000 PE",
+      "qty": 65
+     }
+    ],
+    "yesterday": {
+     "net_paise": 0,
+     "trades": 0
+    },
+    "kill_switch": false
+   },
+   "text": "सुदर्शन · SUDARSHAN\nSun 8 Nov · Morning brief\nMuhurat session 14:05-15:40\nFunds available ₹1,82,400.00 · used ₹0.00\nOvernight: 1 position (NIFTY 25000 PE, 65)\nYesterday: no trades\nKill switch off"
+  },
+  {
+   "id": "W7",
+   "fn": "brief",
+   "note": "a holiday brief",
+   "args": {
+    "day": 20261111,
+    "kind": "holiday",
+    "holiday_reason": "Diwali Balipratipada",
+    "next_session_day": 20261112,
+    "next_session_open": "09:15",
+    "overnight": [],
+    "kill_switch": false,
+    "autologin": null
+   },
+   "text": "सुदर्शन · SUDARSHAN\nWed 11 Nov · Morning brief\nMarket closed today: Diwali Balipratipada\nNext session Thu 12 Nov 09:15\nOvernight: none\nKill switch off"
+  },
+  {
+   "id": "W8",
+   "fn": "brief",
+   "note": "funds not read, no yesterday, kill switch not read",
+   "args": {
+    "day": 20261112,
+    "hours": "09:15-15:30",
+    "fno_close": "15:40",
+    "funds_available_paise": null,
+    "overnight": [
+     {
+      "label": "NIFTY 25000 PE",
+      "qty": 65
+     }
+    ],
+    "yesterday": null,
+    "kill_switch": null
+   },
+   "text": "सुदर्शन · SUDARSHAN\nThu 12 Nov · Morning brief\nMarket open 09:15-15:30 (F&O to 15:40)\nFunds not available right now\nOvernight: 1 position (NIFTY 25000 PE, 65)\nKill switch not read"
+  },
+  {
+   "id": "W9",
+   "fn": "weekly",
+   "note": "a full week",
+   "args": {
+    "start_day": 20261102,
+    "end_day": 20261108,
+    "trading_days": 4,
+    "metrics": {
+     "trips": 6,
+     "wins": 3,
+     "losses": 2,
+     "flats": 1,
+     "net_paise": 39750,
+     "charges_paise": 8779,
+     "win_rate": "60.00",
+     "win_rate_state": "ok",
+     "profit_factor": "1.30",
+     "profit_factor_state": "ok"
+    },
+    "best_day": [
+     20261104,
+     250000
+    ],
+    "worst_day": [
+     20261106,
+     -80000
+    ],
+    "by_strategy": [
+     {
+      "name": "ORB",
+      "net_paise": 290000,
+      "trades": 2
+     },
+     {
+      "name": "Manual",
+      "net_paise": 81250,
+      "trades": 4
+     }
+    ],
+    "benchmark": {
+     "account_pct": "1.20",
+     "account_state": "ok",
+     "index_pct": "2.08"
+    },
+    "beta": {
+     "beta": "0.82",
+     "days": 25,
+     "note": null
+    },
+    "drawdown": {
+     "max_drawdown_paise": -70000,
+     "max_drawdown_pct": "-0.70"
+    }
+   },
+   "text": "सुदर्शन · SUDARSHAN\nWeek in review · Mon 2 Nov - 8 Nov 2026\nNet +₹397.50 (after est. charges ₹87.79)\nTrading days 4 · trades 6 · won 3, lost 2, 1 flat\nWin rate 60.00% · Profit factor 1.30\nBest day Wed 4 Nov +₹2,500.00 · worst day Fri 6 Nov −₹800.00\nBy strategy: ORB +₹2,900.00 (2) · Manual +₹812.50 (4)\nAgainst NIFTY 50: you +1.20% · index +2.08%\nBeta 0.82 over 25 days\nDeepest drawdown −₹700.00 (−0.70%)"
+  },
+  {
+   "id": "W10",
+   "fn": "weekly",
+   "note": "a week with no trading day",
+   "args": {
+    "start_day": 20261109,
+    "end_day": 20261115,
+    "trading_days": 0,
+    "metrics": {
+     "trips": 0,
+     "wins": 0,
+     "losses": 0,
+     "flats": 0,
+     "net_paise": 0,
+     "charges_paise": 0,
+     "win_rate": null,
+     "win_rate_state": "no_trades",
+     "profit_factor": null,
+     "profit_factor_state": "no_trades"
+    }
+   },
+   "text": "सुदर्शन · SUDARSHAN\nWeek in review · Mon 9 Nov - 15 Nov 2026\nNo trading day this week."
+  },
+  {
+   "id": "W11",
+   "fn": "weekly",
+   "note": "trading days but no trades; no capital; beta not yet",
+   "args": {
+    "start_day": 20261116,
+    "end_day": 20261122,
+    "trading_days": 5,
+    "metrics": {
+     "trips": 0,
+     "wins": 0,
+     "losses": 0,
+     "flats": 0,
+     "net_paise": 0,
+     "charges_paise": 0,
+     "win_rate": null,
+     "win_rate_state": "no_trades",
+     "profit_factor": null,
+     "profit_factor_state": "no_trades"
+    },
+    "benchmark": {
+     "account_pct": null,
+     "account_state": "no_capital",
+     "index_pct": "-0.42"
+    },
+    "beta": {
+     "beta": null,
+     "note": "shown after 20 trading days (from 9 Dec 2026)",
+     "days": 9
+    }
+   },
+   "text": "सुदर्शन · SUDARSHAN\nWeek in review · Mon 16 Nov - 22 Nov 2026\nNet ₹0.00 (after est. charges ₹0.00)\nTrading days 5 · no trades\nAgainst NIFTY 50: index −0.42% · set your trading capital under Reports to see yours\nBeta: shown after 20 trading days (from 9 Dec 2026)"
+  },
+  {
+   "id": "W12",
+   "fn": "monthly",
+   "note": "a month with no losing trade",
+   "args": {
+    "label": "October 2026",
+    "trading_days": 21,
+    "metrics": {
+     "trips": 2,
+     "wins": 2,
+     "losses": 0,
+     "flats": 0,
+     "net_paise": 12000,
+     "charges_paise": 900,
+     "win_rate": "100.00",
+     "win_rate_state": "ok",
+     "profit_factor": null,
+     "profit_factor_state": "no_losing_trades"
+    }
+   },
+   "text": "सुदर्शन · SUDARSHAN\nMonthly statement · October 2026\nNet +₹120.00 (after est. charges ₹9.00)\nTrading days 21 · trades 2 · won 2, lost 0\nWin rate 100.00% · Profit factor: no losing trades\nOpen the full report: SUDARSHAN > Reports"
+  },
+  {
+   "id": "W13",
+   "fn": "fy",
+   "note": "the tax pack",
+   "args": {
+    "label": "FY 2025-26",
+    "trading_days": 248,
+    "metrics": {
+     "trips": 6,
+     "wins": 3,
+     "losses": 2,
+     "flats": 1,
+     "net_paise": 39750,
+     "charges_paise": 8779,
+     "win_rate": "60.00",
+     "win_rate_state": "ok",
+     "profit_factor": "1.30",
+     "profit_factor_state": "ok"
+    }
+   },
+   "text": "सुदर्शन · SUDARSHAN\nTax pack · FY 2025-26\nNet +₹397.50 (after est. charges ₹87.79)\nTrading days 248 · trades 6 · won 3, lost 2, 1 flat\nWin rate 60.00% · Profit factor 1.30\nA working paper: verify with your CA. The broker's own report is the filing source.\nOpen the full report: SUDARSHAN > Reports"
+  },
+  {
+   "id": "W14",
+   "fn": "monthly",
+   "note": "a month with no trading day",
+   "args": {
+    "label": "October 2026",
+    "trading_days": 0,
+    "metrics": {
+     "trips": 0,
+     "wins": 0,
+     "losses": 0,
+     "flats": 0,
+     "net_paise": 0,
+     "charges_paise": 0,
+     "win_rate": null,
+     "win_rate_state": "no_trades",
+     "profit_factor": null,
+     "profit_factor_state": "no_trades"
+    }
+   },
+   "text": "सुदर्शन · SUDARSHAN\nMonthly statement · October 2026\nNo trading day this month.\nOpen the full report: SUDARSHAN > Reports"
+  },
+  {
+   "id": "F1",
+   "fn": "family_line",
+   "note": "all shown",
+   "args": {
+    "trades": 6,
+    "won": 3,
+    "lost": 2,
+    "categories": {
+     "pnl": true,
+     "qty": true,
+     "funds": true,
+     "orders": true
+    }
+   },
+   "text": "Trades today: 6 · won 3 · lost 2"
+  },
+  {
+   "id": "F2",
+   "fn": "family_line",
+   "note": "orders only",
+   "args": {
+    "trades": 6,
+    "won": 3,
+    "lost": 2,
+    "categories": {
+     "pnl": false,
+     "qty": false,
+     "funds": false,
+     "orders": true
+    }
+   },
+   "text": "Trades today: 6"
+  },
+  {
+   "id": "F3",
+   "fn": "family_line",
+   "note": "orders and qty, no pnl",
+   "args": {
+    "trades": 6,
+    "won": 3,
+    "lost": 2,
+    "categories": {
+     "pnl": false,
+     "qty": true,
+     "funds": true,
+     "orders": true
+    }
+   },
+   "text": "Trades today: 6"
+  },
+  {
+   "id": "F4",
+   "fn": "family_line",
+   "note": "pnl shown without qty counts as hidden",
+   "args": {
+    "trades": 6,
+    "won": 3,
+    "lost": 2,
+    "categories": {
+     "pnl": true,
+     "qty": false,
+     "funds": true,
+     "orders": true
+    }
+   },
+   "text": "Trades today: 6"
+  },
+  {
+   "id": "F5",
+   "fn": "family_line",
+   "note": "orders hidden, pnl shown",
+   "args": {
+    "trades": 6,
+    "won": 3,
+    "lost": 2,
+    "categories": {
+     "pnl": true,
+     "qty": true,
+     "funds": true,
+     "orders": false
+    }
+   },
+   "text": null
+  },
+  {
+   "id": "F6",
+   "fn": "family_line",
+   "note": "everything hidden",
+   "args": {
+    "trades": 6,
+    "won": 3,
+    "lost": 2,
+    "categories": {
+     "pnl": false,
+     "qty": false,
+     "funds": false,
+     "orders": false
+    }
+   },
+   "text": null
+  },
+  {
+   "id": "F7",
+   "fn": "family_line",
+   "note": "no trades",
+   "args": {
+    "trades": 0,
+    "won": 0,
+    "lost": 0,
+    "categories": {
+     "pnl": true,
+     "qty": true,
+     "funds": true,
+     "orders": true
+    }
+   },
+   "text": "Trades today: 0"
+  },
+  {
+   "id": "F8",
+   "fn": "family_line",
+   "note": "one trade",
+   "args": {
+    "trades": 1,
+    "won": 1,
+    "lost": 0,
+    "categories": {
+     "pnl": true,
+     "qty": true,
+     "funds": true,
+     "orders": true
+    }
+   },
+   "text": "Trades today: 1 · won 1 · lost 0"
+  },
+  {
+   "id": "F9",
+   "fn": "family_line",
+   "note": "a missing category is hidden",
+   "args": {
+    "trades": 6,
+    "won": 3,
+    "lost": 2,
+    "categories": {
+     "orders": true,
+     "pnl": true
+    }
+   },
+   "text": "Trades today: 6"
+  },
+  {
+   "id": "F10",
+   "fn": "family_line",
+   "note": "funds alone shows nothing",
+   "args": {
+    "trades": 6,
+    "won": 3,
+    "lost": 2,
+    "categories": {
+     "pnl": false,
+     "qty": false,
+     "funds": true,
+     "orders": false
+    }
+   },
+   "text": null
+  }
+ ]
+}
