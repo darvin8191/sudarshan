@@ -138,6 +138,43 @@ letters, a repeat gets a number, an empty section is kept, duplicates are droppe
 than 250 symbols into lists at section boundaries. The alias table is completed against one real
 export (design fact W-5). Vectors: `tests/vectors/tvimport.json`.
 
+## W19 - TradingView import (`ops/tvimport.py`, `words/tvimport.py`)
+
+`tv_preview` (class `preview`, 6 a minute) takes `text` and, to say more, `name` (the new list's
+name, from the file name) and `list` (the open list); both were added to the contract and
+`types.ts` regenerated. A file over 64 KiB is refused in words before the master is read. It
+answers W18's counts, left-out lines and conversions, then: for the open list "Swing · room for 203"
+(and, when the file's new symbols exceed the room, how many it has), for a new list the split line
+("... Swing (1) with 250 and Swing (2) with 62, split at a section."), OpenAlgo's 50 lists ("You have
+50 lists, the most there can be. Delete one to import."), a name already taken and a list with more
+than 20 sections. `hash` is `tvimport.text_hash(text)`; `lists` is the lists the import would make
+or write into, each with `count` (its symbols plus its follow rows; the sum is `matched`). A follow
+row, or a future past the 20 rows a list holds, for an underlying with no futures on its derivatives
+exchange is left out with reason `no_futures`. Nothing is written and nothing is bumped.
+
+`tv_import` (class `write`) takes the same `text` and the preview's `hash` (a mismatch is `invalid`,
+field `hash`: "The file changed since its preview. Preview it again."), then parses again, so what is
+written is what the preview said. It writes into new lists (`name`; a file over 250 makes `name (1)`,
+`name (2)` split at a section) or into the open list (`list` and the `version` `view` answered,
+refused as `conflict` when stale, before any write; `list` and `name` together are `invalid`).
+Everything refusable is refused first with its numbers: the 50 lists, a name taken, 250 symbols, 20
+sections. A new list goes through `create_watchlist` with its items in one call. Into an existing
+list OpenAlgo's `add_item` runs once per symbol through `ops.copy.add_all`, yielding to the hub
+(`time.sleep(0)`) after each commit, never inside an overlay transaction; `tests/` measure it under
+a real eventlet hub as W8's do. Sections are made as W7 makes them (a section of the open list with
+the same name is used again), follow rows as W15 makes them (`month_future`, rule `month` or
+`next_month`), both in one overlay transaction that claims the version after OpenAlgo's writes (W8's
+order and its reason); a future past the follow-row room is imported as the contract of today found
+through the same resolver as a follow row. The answer is `TvDone`: `lists` (ids), `added` (symbols
+plus follow rows written), `version` (the one list's new version; null for several), `words` ("Swing:
+45 symbols in 2 sections.") and `lists_version`. The bump is `items` with every list changed, once. A
+failure part way says how many went in and where ("Added 2 of 4 symbols to Swing. The rest were not
+added; try again."; "Only Swing (1) was made, with 250 of the file's 312 symbols ...") and names
+what it committed (`OpError.changed`), so the lists version is bumped once with those refs. An
+import that finds everything already in the open list bumps nothing. No thread, timer or loop; the
+parse is one pass over at most 64 KiB. Tests: `tests/test_watchlists_tvimport_ops.py`, with
+`vectors/tvimport.json` through both ops.
+
 ## W21 - ranked rows (`ranked.py`, `words/ranked.py`)
 
 Pure mapping of an Upstox Smartlist answer to rows, through the master by instrument key, in
