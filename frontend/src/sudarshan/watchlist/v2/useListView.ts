@@ -92,7 +92,7 @@ export function keysFor(push: Push): QueryKey[] {
   switch (push.why) {
     case 'flags':
       // Flag names, the flag counts, and the markers every open view carries.
-      return [STATE_KEY, LISTS_KEY, [...V2_KEY, 'view']]
+      return [STATE_KEY, LISTS_KEY, [...V2_KEY, 'view'], [...V2_KEY, 'symbol']]
     case 'favourites':
       return [STATE_KEY, LISTS_KEY]
     case 'lists':

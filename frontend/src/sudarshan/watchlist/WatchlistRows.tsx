@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowUp, Clock, ListPlus, Plus, Trash2 } from 'lucide-react'
+import { ArrowDown, ArrowUp, Clock, ListPlus, Plus, StickyNote, Trash2 } from 'lucide-react'
 import { memo } from 'react'
 import type { WatchlistItem } from '@/api/watchlist'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -9,9 +9,11 @@ import { ChipMark } from '@/sudarshan/screener/ChipMark'
 import type { Chip } from '@/sudarshan/screener/types'
 import { type ArrangeEdit, ArrangeRows } from './ArrangeSheet'
 import { type HeldFigures, HoldingLine } from './HoldingLine'
+import { MarkGlyph } from './marks'
 import { describe, formatChange, OPEN_UNKNOWN, priceDecimals, type TickDirection } from './rows'
 import { SectionHeader } from './SectionHeader'
 import type { LiveRow } from './useLiveRows'
+import { markWords, type RowMark } from './v2/marks'
 import type { Group } from './v2/sections'
 import type { Section } from './v2/types'
 
@@ -50,9 +52,12 @@ function Name({
   chip,
   holding,
   position,
+  mark,
 }: {
   symbol: string
   exchange: string
+  /** F8: the flag, the note and the expired reading. */
+  mark?: RowMark
   /** SUDARSHAN M9 UI7: what a screener says about this row (New, Held, Pinned), an icon and a word. */
   chip?: Chip
   /** F7: the quantity held and the net position, on the second line. */
@@ -63,9 +68,31 @@ function Name({
   return (
     <span className="flex min-w-0 flex-1 flex-col gap-0.5">
       <span className="flex min-w-0 items-center gap-2">
+        {mark?.flag != null && <MarkGlyph mark={mark.flag} /> /* F8 */}
         <span className="truncate text-[0.9375rem] leading-tight font-semibold" title={symbol}>
           {named.title}
         </span>
+        {
+          mark?.note && (
+            <StickyNote
+              aria-hidden="true"
+              data-note="true"
+              className="size-4 shrink-0 text-[color:var(--text-secondary)]"
+            />
+          ) /* F8 */
+        }
+        {mark && <span className="sr-only">{markWords(mark)}</span> /* F8 */}
+        {
+          mark?.expired && (
+            <span
+              data-expired="true"
+              className="inline-flex shrink-0 items-center gap-1 text-xs font-semibold text-[color:var(--warning-text)]"
+            >
+              <Clock aria-hidden="true" className="size-3" />
+              Expired
+            </span>
+          ) /* F8 */
+        }
         {chip && <ChipMark chip={chip} />}
       </span>
       <span className="flex min-w-0 flex-wrap items-center gap-x-2">
@@ -155,9 +182,11 @@ const PriceRow = memo(function PriceRow({
   chip,
   holding,
   position,
+  mark,
   onOpen,
   ...figures
 }: FigureValues & {
+  mark?: RowMark // F8
   itemId: number
   symbol: string
   exchange: string
@@ -180,6 +209,7 @@ const PriceRow = memo(function PriceRow({
           chip={chip}
           holding={holding}
           position={position}
+          mark={mark}
         />
         <Figures {...figures} decimals={priceDecimals(exchange)} />
       </button>
@@ -201,8 +231,10 @@ function Sectioned({
   layout,
   tags,
   held,
+  marks,
   onOpen,
 }: {
+  marks?: ReadonlyMap<string, RowMark> // F8
   rows: LiveRow[]
   layout: SectionLayout
   tags?: ReadonlyMap<string, Chip>
@@ -230,6 +262,7 @@ function Sectioned({
                   chip={tags?.get(row.key)}
                   holding={held?.get(row.key)?.holding} // F7
                   position={held?.get(row.key)?.position} // F7
+                  mark={marks?.get(row.key)} // F8
                   onOpen={onOpen}
                   {...figuresOf(row)}
                 />,
@@ -272,7 +305,10 @@ export function WatchlistRows({
   sections,
   arrange,
   held,
+  marks,
 }: {
+  /** v2 (F8): the flag, note and expired reading of each row, by EXCHANGE:SYMBOL. Absent with the switch off. */
+  marks?: ReadonlyMap<string, RowMark>
   rows: LiveRow[]
   loading: boolean
   editing: boolean
@@ -333,7 +369,16 @@ export function WatchlistRows({
   }
 
   if (sections && sectioned)
-    return <Sectioned rows={rows} layout={sections} tags={tags} held={held} onOpen={onOpen} />
+    return (
+      <Sectioned
+        rows={rows}
+        layout={sections}
+        tags={tags}
+        held={held}
+        marks={marks} // F8
+        onOpen={onOpen}
+      />
+    )
 
   return (
     <ul className="divide-y divide-[color:var(--divider)]">
@@ -349,6 +394,7 @@ export function WatchlistRows({
               chip={tags?.get(row.key)}
               holding={held?.get(row.key)?.holding} // F7
               position={held?.get(row.key)?.position} // F7
+              mark={marks?.get(row.key)} // F8
               onOpen={onOpen}
               {...figuresOf(row)}
             />

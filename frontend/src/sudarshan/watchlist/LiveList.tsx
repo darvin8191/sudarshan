@@ -14,7 +14,8 @@ import { useHeld } from './useHeld'
 import { useLiveRows } from './useLiveRows'
 import { useSortOrder } from './useSortOrder'
 import { ViewLine, type ViewPref, ViewSheet } from './ViewSheet'
-import type { View } from './v2/types'
+import { marksOf } from './v2/marks'
+import type { FlagName, View } from './v2/types'
 import { type SectionLayout, WatchlistRows } from './WatchlistRows'
 
 /**
@@ -50,7 +51,13 @@ export const LiveList = memo(function LiveList({
   viewOpen,
   view,
   readOnly,
+  flagNames,
+  noRemove,
 }: {
+  /** v2 (F8): the five flag names; present while the switch is on. Rows carry flag and note markers and the sheet its flag and note. */
+  flagNames?: readonly FlagName[]
+  /** v2 (F8): a flag list is read-only: no Remove in the sheet. */
+  noRemove?: boolean
   items: WatchlistItem[]
   apiKey: string | null
   isOpen: MarketOpen
@@ -121,6 +128,11 @@ export const LiveList = memo(function LiveList({
     },
     [pref, viewPref]
   )
+  // F8: markers come from the view's rows; never in a family render (notes and flags are the owner's).
+  const marks = useMemo(
+    () => (flagNames && !readOnly ? marksOf(view?.rows, flagNames) : undefined),
+    [flagNames, readOnly, view]
+  )
   const sheetRow =
     openItemId === null ? null : (live.rows.find((row) => row.item.id === openItemId) ?? null)
   const pin = usePin(sheetRow ? byKey.get(sheetRow.key) : undefined)
@@ -168,6 +180,7 @@ export const LiveList = memo(function LiveList({
           sections={sections && { ...sections, groups: sorted.groups ?? sections.groups }} // F6
           arrange={arrange} // F5
           held={held} // F7
+          marks={marks} // F8
         />
       </section>
       {exited.length > 0 && (
@@ -190,9 +203,11 @@ export const LiveList = memo(function LiveList({
         onClose={onCloseSheet}
         onOrder={onOrder}
         onAlert={onAlert}
-        onRemove={onRemove}
+        onRemove={noRemove ? undefined : onRemove} // F8
         pin={pin}
         arrange={symbolActions} // F5
+        flags={flagNames} // F8
+        readOnly={readOnly} // F8
       />
 
       {viewPref && pref && (

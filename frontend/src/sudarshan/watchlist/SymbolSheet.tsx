@@ -35,7 +35,9 @@ import {
 import { type Contract, contractOf } from './api'
 import { BottomSheet } from './BottomSheet'
 import { chainOf, describe, isIndex, priceDecimals, statusLine } from './rows'
+import { SymbolMarks } from './SymbolMarks'
 import type { LiveRow } from './useLiveRows'
+import type { FlagName } from './v2/types'
 import { Figures, figuresOf } from './WatchlistRows'
 
 /** The option chain tool, opened on an underlying. */
@@ -291,6 +293,8 @@ export function SymbolSheet({
   onRemove,
   pin,
   arrange,
+  flags,
+  readOnly,
 }: {
   row: LiveRow | null
   listName: string
@@ -309,6 +313,10 @@ export function SymbolSheet({
   pin?: PinControl | null
   /** v2 (F5): Move to section and Copy to another list; absent where the list is not an own one. */
   arrange?: ArrangeActions
+  /** v2 (F8): the five flag names; present while the switch is on. The flag and note block shows only then. */
+  flags?: readonly FlagName[]
+  /** v2 (F8): a family render. The flag, the note and everything private are absent, not disabled. */
+  readOnly?: boolean
 }) {
   if (!row) return null
   return (
@@ -326,6 +334,8 @@ export function SymbolSheet({
       onRemove={onRemove}
       pin={pin}
       arrange={arrange}
+      flags={flags}
+      readOnly={readOnly}
     />
   )
 }
@@ -343,6 +353,8 @@ function Sheet({
   onRemove,
   pin,
   arrange,
+  flags,
+  readOnly,
 }: Parameters<typeof SymbolSheet>[0] & { row: LiveRow }) {
   const { item } = row
   const named = describe(item.symbol, item.exchange)
@@ -506,6 +518,10 @@ function Sheet({
               Copy to another list
             </button>
           </div>
+        )}
+
+        {flags && !readOnly && (
+          <SymbolMarks k={`${item.exchange}:${item.symbol}`.toUpperCase()} names={flags} /> // F8
         )}
 
         {onRemove && (
