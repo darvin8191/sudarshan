@@ -8,10 +8,15 @@ collected, as on a builder's machine.
 from __future__ import annotations
 
 import os
+import sys
 import zlib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+# sudarshan/ has no __init__.py, so pytest puts this folder itself on sys.path to import this
+# file, and its portfolio/ then shadows OpenAlgo's top-level portfolio package (restx_api
+# imports portfolio.data). Nothing here needs the folder on the path: tests import sudarshan.*.
+sys.path[:] = [entry for entry in sys.path if entry != str(Path(__file__).resolve().parent)]
 
 
 def shard_of(relative_path: str, count: int) -> int:
