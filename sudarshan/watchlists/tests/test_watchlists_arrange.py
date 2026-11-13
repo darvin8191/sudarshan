@@ -45,6 +45,23 @@ def store(tmp_path, monkeypatch):
     bp_module._record.clear()
 
 
+START = 1_700_000_000_000  # the clock a list's first write reads in these tests (``clock``)
+
+
+def v(n: int) -> str:
+    """The list's version after ``n`` writes: "0" before any, then from the first write's epoch ms."""
+    return "0" if n == 0 else str(START + n - 1)
+
+
+@pytest.fixture(autouse=True)
+def clock(monkeypatch):
+    """A list's first write starts its version at the epoch ms (review L2); pinned here so the
+    versions these tests chain read as ``v(n)``."""
+    from sudarshan.watchlists.store import sections as store
+
+    monkeypatch.setattr(store, "now_ms", lambda: START)
+
+
 @pytest.fixture(autouse=True)
 def emitted(monkeypatch):
     sent = []
@@ -125,19 +142,19 @@ def refused(r, status, code, field=None):
 
 def two_sections(client):
     lid = make_list()
-    a, b = sec(client, lid, "Banks", "0"), sec(client, lid, "IT", "1")
-    return lid, a, b  # the list is at version 2
+    a, b = sec(client, lid, "Banks", "0"), sec(client, lid, "IT", v(1))
+    return lid, a, b  # the list is at v(2)
 
 
 # -- arrange -------------------------------------------------------------------------------------
 def test_arrange_writes_the_overlay_then_openalgo_in_section_major_order(client):
     lid, banks, it = two_sections(client)
     items = [pick("TCS", it), pick("SBIN", banks), pick("INFY", it), pick("ITC")]
-    r = arrange(client, lid, "2", [it, banks], items)
-    assert r.get_json()["data"] == {"version": "3", "id": lid, "words": None}
+    r = arrange(client, lid, v(2), [it, banks], items)
+    assert r.get_json()["data"] == {"version": v(3), "id": lid, "words": None}
     assert oa_order(lid) == ["ITC", "TCS", "INFY", "SBIN"]  # no section, IT, Banks
     data = read(client, lid)
-    assert data["version"] == "3"
+    assert data["version"] == v(3)
     assert [(s["id"], s["position"]) for s in data["sections"]] == [(it, 1), (banks, 2)]
     assert [(r["contract"]["symbol"], r["section_id"]) for r in data["rows"]] == [
         ("ITC", None), ("TCS", it), ("INFY", it), ("SBIN", banks)]  # fmt: skip
@@ -145,8 +162,8 @@ def test_arrange_writes_the_overlay_then_openalgo_in_section_major_order(client)
 
 def test_symbols_the_request_leaves_out_keep_their_section_and_go_after(client):
     lid, banks, it = two_sections(client)
-    arrange(client, lid, "2", [banks, it], [pick("TCS", it), pick("INFY", banks)])
-    again = arrange(client, lid, "3", [banks, it], [pick("SBIN", banks), pick("GHOST", it)])
+    arrange(client, lid, v(2), [banks, it], [pick("TCS", it), pick("INFY", banks)])
+    again = arrange(client, lid, v(3), [banks, it], [pick("SBIN", banks), pick("GHOST", it)])
     assert again.status_code == 200
     rows = [(r["contract"]["symbol"], r["section_id"]) for r in read(client, lid)["rows"]]
     assert rows == [("ITC", None), ("SBIN", banks), ("INFY", banks), ("TCS", it)]
@@ -157,7 +174,7 @@ def test_a_stale_version_writes_nothing_to_either_file(client, emitted):
     lid, banks, it = two_sections(client)
     before = (table("wl_list"), table("wl_section"), table("wl_section_item"), oa_order(lid))
     emitted.clear()
-    r = arrange(client, lid, "1", [it, banks], [pick("TCS", it)])
+    r = arrange(client, lid, v(1), [it, banks], [pick("TCS", it)])
     assert refused(r, 409, "conflict") == section_words.CONFLICT
     assert (
         table("wl_list"),
@@ -171,10 +188,10 @@ def test_a_stale_version_writes_nothing_to_either_file(client, emitted):
 def test_sections_and_items_that_do_not_match_the_list_are_refused_and_roll_back(client):
     lid, banks, it = two_sections(client)
     before = (table("wl_list"), table("wl_section"))
-    refused(arrange(client, lid, "2", [banks], []), 400, "invalid", "sections")
-    refused(arrange(client, lid, "2", [banks, it, 99], []), 400, "invalid", "sections")
-    refused(arrange(client, lid, "2", [banks, banks], []), 400, "invalid", "sections")
-    refused(arrange(client, lid, "2", [banks, it], [pick("TCS", 99)]), 400, "invalid", "items")
+    refused(arrange(client, lid, v(2), [banks], []), 400, "invalid", "sections")
+    refused(arrange(client, lid, v(2), [banks, it, 99], []), 400, "invalid", "sections")
+    refused(arrange(client, lid, v(2), [banks, banks], []), 400, "invalid", "sections")
+    refused(arrange(client, lid, v(2), [banks, it], [pick("TCS", 99)]), 400, "invalid", "items")
     assert (table("wl_list"), table("wl_section")) == before
     refused(arrange(client, 999, "0", [], []), 404, "gone")
 
@@ -190,7 +207,7 @@ def test_a_failure_between_the_two_writes_says_so_and_leaves_a_valid_state(
     before = versions.read()
     with monkeypatch.context() as patch:
         patch.setattr(oa, "reorder_items", lambda *a: False)
-        r = arrange(client, lid, "2", [it, banks], [pick("TCS", it), pick("SBIN", banks)])
+        r = arrange(client, lid, v(2), [it, banks], [pick("TCS", it), pick("SBIN", banks)])
     assert refused(r, 500, "failed") == words.ARRANGE_PARTIAL
     # the overlay's change committed, so the phone and the tablet are told once all the same
     assert versions.read() != before
@@ -200,14 +217,14 @@ def test_a_failure_between_the_two_writes_says_so_and_leaves_a_valid_state(
     )
     assert oa_order(lid) == flat
     data = read(client, lid)  # the overlay is saved and the view is whole
-    assert data["version"] == "3" and [s["id"] for s in data["sections"]] == [it, banks]
-    assert arrange(client, lid, "3", [it, banks], [pick("TCS", it)]).status_code == 200
+    assert data["version"] == v(3) and [s["id"] for s in data["sections"]] == [it, banks]
+    assert arrange(client, lid, v(3), [it, banks], [pick("TCS", it)]).status_code == 200
 
 
 def test_arrange_bumps_once_with_why_arranged_and_its_ref(client, emitted):
     lid, banks, it = two_sections(client)
     emitted.clear()
-    arrange(client, lid, "2", [banks, it], [pick("TCS", it)])
+    arrange(client, lid, v(2), [banks, it], [pick("TCS", it)])
     assert [(p["why"], p["ref"], p["refs"]) for p in emitted] == [
         ("arranged", f"list:{lid}", [f"list:{lid}"])]  # fmt: skip
 
@@ -225,12 +242,14 @@ def test_copy_into_another_list_adds_in_order_and_keeps_the_source(client):
 
 def test_copy_a_whole_section_into_a_section_of_another_list(client):
     src, banks, it = two_sections(client)
-    arrange(client, src, "2", [banks, it], [pick("TCS", it), pick("INFY", it), pick("SBIN", banks)])
+    arrange(
+        client, src, v(2), [banks, it], [pick("TCS", it), pick("INFY", it), pick("SBIN", banks)]
+    )
     dst = make_list(("HDFCBANK",), "Other")
-    mine = sec(client, dst, "Picked", "0")  # the list is at 1
+    mine = sec(client, dst, "Picked", "0")  # the list is at v(1)
     r = put(client, {"from": {"ref": f"list:{src}", "section_id": it},
-                     "to": {"list": dst, "section_id": mine}, "version": "1"})  # fmt: skip
-    assert r.get_json()["data"]["added"] == 2 and r.get_json()["data"]["version"] == "2"
+                     "to": {"list": dst, "section_id": mine}, "version": v(1)})  # fmt: skip
+    assert r.get_json()["data"]["added"] == 2 and r.get_json()["data"]["version"] == v(2)
     rows = [(r["contract"]["symbol"], r["section_id"]) for r in read(client, dst)["rows"]]
     assert rows == [("HDFCBANK", None), ("TCS", mine), ("INFY", mine)]
 
@@ -262,7 +281,7 @@ def test_copy_into_a_new_list_in_one_call(client, emitted):
 
 def test_move_adds_then_removes_from_the_source_and_drops_its_section_rows(client, emitted):
     src, banks, it = two_sections(client)
-    arrange(client, src, "2", [banks, it], [pick("TCS", it), pick("SBIN", banks)])
+    arrange(client, src, v(2), [banks, it], [pick("TCS", it), pick("SBIN", banks)])
     dst = make_list(("SBIN",), "Other")
     emitted.clear()
     r = put(client, {"from": {"ref": f"list:{src}", "keys": ["NSE:SBIN", "NSE:TCS"]},
@@ -277,7 +296,7 @@ def test_move_adds_then_removes_from_the_source_and_drops_its_section_rows(clien
 
 def test_a_whole_section_can_be_moved_into_a_new_list(client):
     src, banks, it = two_sections(client)
-    arrange(client, src, "2", [banks, it], [pick("TCS", it), pick("INFY", it)])
+    arrange(client, src, v(2), [banks, it], [pick("TCS", it), pick("INFY", it)])
     r = put(client, {"from": {"ref": f"list:{src}", "section_id": it},
                      "to": {"name": "IT"}, "move": True})  # fmt: skip
     assert r.get_json()["data"]["added"] == 2
@@ -370,7 +389,7 @@ def test_a_copy_that_finds_every_symbol_already_there_bumps_nothing(client, emit
     before = versions.read()
     for to in ({"list": dst}, {"list": dst, "section_id": mine}):
         r = put(client, {"from": {"ref": f"list:{src}", "keys": ["NSE:INFY", "NSE:TCS"]},
-                         "to": to, "version": "1"})  # fmt: skip
+                         "to": to, "version": v(1)})  # fmt: skip
         assert r.get_json()["data"] == {
             "list": dst, "added": 0, "skipped": 2, "version": None, "words": None}  # fmt: skip
     assert versions.read() == before and emitted == []
@@ -419,14 +438,14 @@ def test_a_failure_setting_the_section_leaves_the_symbols_in_no_section(
     with monkeypatch.context() as patch:
         patch.setattr(copy_ops.store_items, "put", boom)
         r = put(client, {"from": {"ref": f"list:{src}", "keys": ["NSE:TCS"]},
-                         "to": {"list": dst, "section_id": mine}, "version": "1"})  # fmt: skip
+                         "to": {"list": dst, "section_id": mine}, "version": v(1)})  # fmt: skip
     said = refused(r, 500, "failed")
     assert said == words.placed_elsewhere(1, "Other", words.LOST, False)
     assert said == "Added 1 symbol to Other, in No section, because the section could not be set."
     data = read(client, dst)
     assert [(r["contract"]["symbol"], r["section_id"]) for r in data["rows"]] == [
         ("HDFCBANK", None), ("TCS", None)]  # fmt: skip
-    assert data["version"] == "1"  # the claim rolled back with the rows
+    assert data["version"] == v(1)  # the claim rolled back with the rows
     assert [(p["why"], p["refs"]) for p in emitted] == [("items", [f"list:{dst}"])]
 
 
@@ -502,11 +521,11 @@ def test_a_section_claim_lost_after_the_adds_says_what_was_added_and_where(
     client, monkeypatch, emitted
 ):
     src, dst = make_list(), make_list(("HDFCBANK",), "Long")
-    mine = sec(client, dst, "Picked", "0")  # the target is at 1
+    mine = sec(client, dst, "Picked", "0")  # the target is at v(1)
     emitted.clear()
-    other_screen_writes_during_the_adds(monkeypatch, dst, created_of(dst), 1)
+    other_screen_writes_during_the_adds(monkeypatch, dst, created_of(dst), int(v(1)))
     r = put(client, {"from": {"ref": f"list:{src}", "keys": ["NSE:TCS", "NSE:ITC"]},
-                     "to": {"list": dst, "section_id": mine}, "version": "1"})  # fmt: skip
+                     "to": {"list": dst, "section_id": mine}, "version": v(1)})  # fmt: skip
     said = refused(r, 409, "conflict")
     assert said == words.placed_elsewhere(2, "Long", words.STALE, False)
     assert said == (
@@ -522,9 +541,9 @@ def test_a_move_whose_section_claim_is_lost_still_moves_and_says_so(client, monk
     src, dst = make_list(), make_list((), "Long")
     mine = sec(client, dst, "Picked", "0")
     emitted.clear()
-    other_screen_writes_during_the_adds(monkeypatch, dst, created_of(dst), 1)
+    other_screen_writes_during_the_adds(monkeypatch, dst, created_of(dst), int(v(1)))
     r = put(client, {"from": {"ref": f"list:{src}", "keys": ["NSE:TCS"]},
-                     "to": {"list": dst, "section_id": mine}, "version": "1", "move": True})  # fmt: skip
+                     "to": {"list": dst, "section_id": mine}, "version": v(1), "move": True})  # fmt: skip
     assert refused(r, 409, "conflict") == (
         "Moved 1 symbol to Long, in No section, because the list was changed on another screen "
         "meanwhile. The list is shown again."
@@ -549,13 +568,13 @@ def test_a_short_add_into_a_section_places_what_went_in_and_says_the_rest(
 
     monkeypatch.setattr(oa, "add_item", add_once)
     r = put(client, {"from": {"ref": f"list:{src}", "keys": ["NSE:TCS", "NSE:ITC"]},
-                     "to": {"list": dst, "section_id": mine}, "version": "1"})  # fmt: skip
+                     "to": {"list": dst, "section_id": mine}, "version": v(1)})  # fmt: skip
     assert refused(r, 500, "failed") == (
         "Added 1 of 2 symbols to Long. The rest were not added; try again."
     )
     data = read(client, dst)
     assert [(r["contract"]["symbol"], r["section_id"]) for r in data["rows"]] == [("TCS", mine)]
-    assert data["version"] == "2"  # the section step claimed the version for what went in
+    assert data["version"] == v(2)  # the section step claimed the version for what went in
     assert [(p["why"], p["refs"]) for p in emitted] == [("items", [f"list:{dst}"])]
 
 
@@ -656,7 +675,7 @@ def test_a_second_greenlet_runs_during_a_250_item_copy_under_eventlet():
 
 def test_the_views_guard_still_reads_what_these_ops_wrote(client):
     lid, banks, it = two_sections(client)
-    arrange(client, lid, "2", [it, banks], [pick("TCS", it)])
+    arrange(client, lid, v(2), [it, banks], [pick("TCS", it)])
     with engine.open_session() as s:
         guard = s.execute(text("SELECT oa_created_at FROM wl_list")).scalar()
     from database import watchlist_db as oa

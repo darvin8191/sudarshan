@@ -40,6 +40,21 @@ def store(tmp_path, monkeypatch):
     bp_module._record.clear()
 
 
+def v(n: int) -> str:
+    """The list's version after ``n`` writes: "0" before any, then from the first write's epoch ms
+    (pinned to ``NOW`` by ``clock``)."""
+    return "0" if n == 0 else str(NOW + n - 1)
+
+
+@pytest.fixture(autouse=True)
+def clock(monkeypatch):
+    """A list's first write starts its version at the epoch ms (review L2); pinned here so the
+    versions these tests chain read as ``v(n)``. The tests of the start itself move the clock."""
+    from sudarshan.watchlists.store import sections as store
+
+    monkeypatch.setattr(store, "now_ms", lambda: NOW)
+
+
 @pytest.fixture(autouse=True)
 def emitted(monkeypatch):
     sent = []
@@ -103,19 +118,23 @@ def test_add_rename_mark_and_remove_each_move_the_version_view_reports(client):
     lid, _ = make_list()
     assert read(client, lid)["version"] == "0"
     done = add(client, lid, "Banks", "0", mark=2).get_json()["data"]
-    assert (done["version"], done["words"]) == ("1", None) and isinstance(done["id"], int)
+    assert (done["version"], done["words"]) == (v(1), None) and isinstance(done["id"], int)
     sid = done["id"]
     data = read(client, lid)
-    assert data["version"] == "1"
+    assert data["version"] == v(1)
     assert data["sections"] == [{"id": sid, "name": "Banks", "mark": 2, "position": 1, "count": 0}]
-    assert edit(client, sid, "1", name="Private banks").get_json()["data"]["version"] == "2"
-    assert edit(client, sid, "2", mark=0).get_json()["data"]["version"] == "3"
-    assert edit(client, sid, "3", name="PSU", mark=5).get_json()["data"]["version"] == "4"
+    assert edit(client, sid, v(1), name="Private banks").get_json()["data"]["version"] == v(2)
+    assert edit(client, sid, v(2), mark=0).get_json()["data"]["version"] == v(3)
+    assert edit(client, sid, v(3), name="PSU", mark=5).get_json()["data"]["version"] == v(4)
     (got,) = read(client, lid)["sections"]
     assert (got["name"], got["mark"]) == ("PSU", 5)
-    other = add(client, lid, "Metals", "4").get_json()["data"]["id"]
+    other = add(client, lid, "Metals", v(4)).get_json()["data"]["id"]
     assert [s["position"] for s in read(client, lid)["sections"]] == [1, 2]
-    assert remove(client, sid, "5").get_json()["data"] == {"version": "6", "id": sid, "words": None}
+    assert remove(client, sid, v(5)).get_json()["data"] == {
+        "version": v(6),
+        "id": sid,
+        "words": None,
+    }
     assert [s["id"] for s in read(client, lid)["sections"]] == [other]
 
 
@@ -124,8 +143,8 @@ def test_the_first_write_stores_the_live_created_at_exactly_as_the_guard_reads_i
     add(client, lid, "Banks", "0")
     with engine.open_session() as s:
         row = s.execute(select(schema.ListRow.oa_created_at, schema.ListRow.version)).one()
-    assert tuple(row) == (created, 1)
-    assert read(client, lid)["version"] == "1"  # the guard accepts it: the overlay is not stale
+    assert tuple(row) == (created, NOW)
+    assert read(client, lid)["version"] == v(1)  # the guard accepts it: the overlay is not stale
 
 
 def test_a_removed_sections_symbols_read_as_no_section_and_its_follow_rows_too(client):
@@ -139,7 +158,7 @@ def test_a_removed_sections_symbols_read_as_no_section_and_its_follow_rows_too(c
                                expiry_rule="month", created_at=NOW, updated_at=NOW))  # fmt: skip
     before = read(client, lid)
     assert [(r["contract"]["symbol"], r["section_id"]) for r in before["rows"]][-1] == ("SBIN", sid)
-    assert remove(client, sid, "1").status_code == 200
+    assert remove(client, sid, v(1)).status_code == 200
     after = read(client, lid)
     assert [(r["contract"]["symbol"], r["section_id"]) for r in after["rows"]] == [
         ("INFY", None), ("TCS", None), ("SBIN", None)]  # fmt: skip
@@ -153,30 +172,30 @@ def test_a_removed_sections_symbols_read_as_no_section_and_its_follow_rows_too(c
 def test_a_name_is_one_to_forty_letters_and_unique_in_its_list(client):
     lid, _ = make_list()
     assert add(client, lid, "a" * 40, "0").status_code == 200
-    said = refused(add(client, lid, "a" * 41, "1"), 400, "invalid", "name")
+    said = refused(add(client, lid, "a" * 41, v(1)), 400, "invalid", "name")
     assert said == words.NAME_LONG == "Section names can be up to 40 letters."
-    refused(add(client, lid, "   ", "1"), 400, "invalid", "name")
+    refused(add(client, lid, "   ", v(1)), 400, "invalid", "name")
     refused(
-        add(client, lid, "A" * 40, "1"), 400, "invalid", "name"
+        add(client, lid, "A" * 40, v(1)), 400, "invalid", "name"
     )  # the same name, letter case aside
-    assert refused(add(client, lid, "a" * 40, "1"), 400, "invalid", "name") == words.NAME_TAKEN
-    sid = add(client, lid, "Banks", "1").get_json()["data"]["id"]
-    refused(edit(client, sid, "2", name="b" * 41), 400, "invalid", "name")
-    refused(edit(client, sid, "2", name="a" * 40), 400, "invalid", "name")
-    assert edit(client, sid, "2", name="BANKS").status_code == 200  # its own name is no duplicate
-    refused(add(client, lid, "x", "2", mark=6), 400, "invalid", "mark")
-    refused(add(client, lid, "x", "2", mark=-1), 400, "invalid", "mark")
-    refused(edit(client, sid, "3"), 400, "invalid", "name")  # nothing to change
-    assert read(client, lid)["version"] == "3"  # every refusal left it where it was
+    assert refused(add(client, lid, "a" * 40, v(1)), 400, "invalid", "name") == words.NAME_TAKEN
+    sid = add(client, lid, "Banks", v(1)).get_json()["data"]["id"]
+    refused(edit(client, sid, v(2), name="b" * 41), 400, "invalid", "name")
+    refused(edit(client, sid, v(2), name="a" * 40), 400, "invalid", "name")
+    assert edit(client, sid, v(2), name="BANKS").status_code == 200  # its own name: no duplicate
+    refused(add(client, lid, "x", v(3), mark=6), 400, "invalid", "mark")
+    refused(add(client, lid, "x", v(3), mark=-1), 400, "invalid", "mark")
+    refused(edit(client, sid, v(3)), 400, "invalid", "name")  # nothing to change
+    assert read(client, lid)["version"] == v(3)  # every refusal left it where it was
 
 
 def test_a_list_holds_twenty_sections_and_the_twenty_first_is_a_limit(client, emitted):
     lid, _ = make_list()
     for n in range(20):
-        assert add(client, lid, f"S{n}", str(n)).status_code == 200
-    said = refused(add(client, lid, "one more", "20"), 422, "limit")
+        assert add(client, lid, f"S{n}", v(n)).status_code == 200
+    said = refused(add(client, lid, "one more", v(20)), 422, "limit")
     assert said == words.SECTIONS_FULL == "A list can have 20 sections."
-    assert read(client, lid)["version"] == "20" and len(table("wl_section")) == 20
+    assert read(client, lid)["version"] == v(20) and len(table("wl_section")) == 20
     assert len(emitted) == 20
     other, _ = make_list(name="Other")
     assert add(client, other, "S0", "0").status_code == 200  # the limit is per list
@@ -188,10 +207,12 @@ def test_a_mark_and_a_name_are_checked_before_the_list_is_touched(client):
 
 
 # -- the version ---------------------------------------------------------------------------------
-@pytest.mark.parametrize("held", ["0", "2", "x", "", "-1", "1.0", "99999999999999999999"])
+@pytest.mark.parametrize(
+    "held", ["0", "1", v(2), "x", "", "-1", "1.0", "99999999999999999999"]
+)  # "1" is what a list counted from 1 would hold: never one of these
 def test_a_stale_version_changes_nothing_and_says_conflict(client, emitted, held):
     lid, _ = make_list()
-    sid = add(client, lid, "Banks", "0").get_json()["data"]["id"]  # the list is at 1
+    sid = add(client, lid, "Banks", "0").get_json()["data"]["id"]  # the list is at v(1)
     before = (table("wl_list"), table("wl_section"))
     emitted.clear()
     for r in (add(client, lid, "New", held), edit(client, sid, held, name="New"),
@@ -256,6 +277,50 @@ def test_a_write_holding_the_old_overlays_version_changes_nothing_and_prunes_not
     assert {t.name: table(t.name) for t in schema.TABLES} == before
 
 
+def test_every_new_guard_row_starts_at_the_epoch_ms_of_its_first_write(client, monkeypatch):
+    """Review L2: a row counted from 1 could be held by a screen of a deleted list."""
+    import time
+
+    from sudarshan.watchlists.store import sections as store
+
+    monkeypatch.setattr(store, "now_ms", lambda: int(time.time() * 1000))  # the real clock
+    lid, _ = make_list()
+    t0 = int(time.time() * 1000)
+    done = add(client, lid, "Banks", "0").get_json()["data"]
+    assert t0 <= int(done["version"]) <= int(time.time() * 1000)
+    assert edit(client, done["id"], done["version"], mark=1).get_json()["data"]["version"] == str(
+        int(done["version"]) + 1
+    )
+
+
+def test_a_screen_of_a_deleted_list_cannot_write_to_the_list_given_its_id(client, monkeypatch):
+    """The tablet still shows Swing at its version when Swing is deleted on the phone and
+    Momentum is made, taking Swing's id; the phone's first write starts Momentum's guard row.
+    The tablet's write, decided on Swing, must be refused, not land on Momentum."""
+    import blueprints.watchlist as real
+    from database import watchlist_db as oa
+    from sudarshan.watchlists.store import sections as store
+
+    ticks = iter(range(NOW, NOW + 10**9, 1000))  # the clock moves between requests, as it does
+    monkeypatch.setattr(store, "now_ms", lambda: next(ticks))
+    app = make_app(ops.discover(), real=True)
+    app.register_blueprint(real.watchlist_bp)  # OpenAlgo's own delete route, through the hook
+    phone = app.test_client()
+    login_session(phone)
+    phone.headers = csrf_headers(phone)
+    swing, _ = make_list(name="Swing")
+    held_by_tablet = add(phone, swing, "Banks", "0").get_json()["data"]["version"]
+    assert phone.delete(f"/watchlist/api/lists/{swing}", headers=phone.headers).status_code == 200
+    momentum, _ = make_list(name="Momentum")
+    assert momentum == swing  # SQLite handed the deleted list's id to the next list
+    oa.db_session.remove()
+    fresh = add(phone, momentum, "Fresh", "0").get_json()["data"]
+    assert fresh["version"] != held_by_tablet and int(fresh["version"]) > 10**12
+    for held in (held_by_tablet, "1"):
+        refused(add(phone, momentum, "Ghost", held), 409, "conflict")
+    assert [s["name"] for s in read(phone, momentum)["sections"]] == ["Fresh"]
+
+
 # -- gone ----------------------------------------------------------------------------------------
 def test_a_list_or_section_that_does_not_exist_is_gone(client, emitted):
     lid, _ = make_list()
@@ -293,21 +358,21 @@ def test_another_users_list_is_gone(client):
 def test_each_write_bumps_and_pushes_once_and_a_refusal_not_at_all(client, emitted):
     lid, _ = make_list()
     sid = add(client, lid, "Banks", "0").get_json()["data"]["id"]
-    edit(client, sid, "1", mark=2)
-    remove(client, sid, "2")
+    edit(client, sid, v(1), mark=2)
+    remove(client, sid, v(2))
     assert [(p["why"], p["ref"], p["refs"]) for p in emitted] == [
         ("sections", f"list:{lid}", [f"list:{lid}"])] * 3  # fmt: skip
     assert len({p["v"] for p in emitted}) == 3
     emitted.clear()
     for r in (
         add(client, lid, "A", "1"),
-        add(client, lid, "a" * 41, "3"),
-        edit(client, 77, "3", mark=1),
+        add(client, lid, "a" * 41, v(3)),
+        edit(client, 77, v(3), mark=1),
     ):
         assert r.status_code >= 400
     assert emitted == []
     seen = versions.read()
-    add(client, lid, "Banks", "3")
+    add(client, lid, "Banks", v(3))
     assert versions.read() != seen and len(emitted) == 1
 
 
@@ -325,7 +390,7 @@ def test_the_overlay_is_the_only_file_written(client):
     event.listen(oa.engine, "before_cursor_execute", spy)
     try:
         assert add(client, lid, "Banks", "0").status_code == 200
-        assert edit(client, 1, "1", mark=1).status_code == 200
+        assert edit(client, 1, v(1), mark=1).status_code == 200
     finally:
         event.remove(oa.engine, "before_cursor_execute", spy)
     assert not any(q.lstrip().upper().startswith(("INSERT", "UPDATE", "DELETE")) for q in sql)

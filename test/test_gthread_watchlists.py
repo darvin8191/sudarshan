@@ -388,6 +388,6 @@ def test_two_first_writes_to_one_list_make_one_row_and_the_other_is_told_conflic
         assert sorted(status for status, _ in got) == [200] + [409] * 7, got  # never a 500
         assert {body["code"] for status, body in got if status == 409} == {"conflict"}
         rows = store_rows(server_on, f"SELECT version FROM wl_list WHERE list_id = {list_id}")
-        assert rows == [(1,)]
+        assert len(rows) == 1 and rows[0][0] > 10**12  # one row, at the epoch ms (review L2)
         sections = store_rows(server_on, f"SELECT 1 FROM wl_section WHERE list_id = {list_id}")
         assert len(sections) == 1

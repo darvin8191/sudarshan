@@ -287,7 +287,8 @@ writes nothing; the next write that touches the list prunes it (W7). A list with
 nothing to ignore and reads in OpenAlgo's order. A symbol's flag and note belong to the symbol and
 apply in every list.
 
-`version` is the list's stored `wl_list.version` as text ("0" until a write makes the row).
+`version` is the list's stored `wl_list.version` as text ("0" until a write makes the row, then
+the epoch milliseconds of that write, one more for each write after it).
 `Row.key` (`Contract.key`) is `EXCHANGE:SYMBOL`. A row's ISIN is read through `master.py` from the
 instrument key (cash rows carry it, null otherwise), and a symbol the master lacks is `expired`
 and named in `missing` (with the master not loaded nothing is called expired). Prices are never in
@@ -307,12 +308,16 @@ or already used in the list, letter case aside; `invalid` for a mark outside 0 t
 an UPDATE takes SQLite's write lock at once, while a read followed by a write fails under WAL as a
 lock error no retry clears when another writer committed in between (that was a 500 in the first
 write race). A list with no guard row is held as "0": the first write inserts the row (the primary
-key refuses a second one, told `conflict`) with `oa_created_at` as `view.created_key` gives it. A
-guard row whose `oa_created_at` differs belongs to a deleted list whose id was reused: a write
-holding "0" prunes that list's overlay (`prune.drop_overlay`: sections, items, follow rows,
-preference; favourite slots are the delete hook's) in the same transaction and starts a fresh row
-at the epoch milliseconds, which no client of the old overlay can hold; a write holding the old
-version is `conflict` and prunes nothing. A version no list can hold (not a number) is `conflict`.
+key refuses a second one, told `conflict`) with `oa_created_at` as `view.created_key` gives it and
+its version at the epoch milliseconds of that write, never at 1. The delete hook removes a deleted
+list's guard row and SQLite hands its id to the next list made, so a row counted from 1 again would
+let a screen still holding version 1 of the deleted list write to the new one (the claim reads
+`oa_created_at` from the live list, which is the new one's); no screen of an old list holds the new
+number. A guard row whose `oa_created_at` differs belongs to a deleted list whose id was reused and
+whose row was not removed: a write holding "0" prunes that list's overlay (`prune.drop_overlay`:
+sections, items, follow rows, preference; favourite slots are the delete hook's) in the same
+transaction and starts the fresh row the same way; a write holding the old version is `conflict`
+and prunes nothing. A version no list can hold (not a number) is `conflict`.
 
 A new section takes the next position (1 for the first). Removing a section deletes its section
 items and sets its follow rows to No section, so its symbols read under No section in `view`.
