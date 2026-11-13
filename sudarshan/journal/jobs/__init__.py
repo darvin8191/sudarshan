@@ -10,7 +10,7 @@ def register_all() -> None:
     """Register every job of the service, each from its own module. Called once by the entry
     point, before the service starts."""
     from .. import feedlink, nudge, reports
-    from . import catchup, check, day, excursion
+    from . import catchup, check, day, digest, excursion, fypack, statement
 
     nudge.register_jobs()
     feedlink.register_jobs()
@@ -19,3 +19,6 @@ def register_all() -> None:
     check.register_jobs()
     excursion.register_jobs()
     catchup.register_jobs()
+    digest.register_jobs()
+    statement.register_jobs()
+    fypack.register_jobs()
