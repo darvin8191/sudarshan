@@ -17,6 +17,14 @@ Continuous trading in IST on a trading day, the end not included:
 
 The cash market's pre-open starts at 09:00 (``PRE_OPEN``) in both.
 
+What SEBI's circular of 15 Oct 2026 states (para 4.2, read 13 Nov 2026): the auction 15:30-15:40
+with its random close from 15:38, index derivatives to 15:45 and an expiring one to 15:30 on its
+expiry day, stock derivatives to 15:45 on every day, the post-close session 15:50-16:00. It does not
+say which stocks the auction covers. Reports of NSE's two circulars of 6 Nov 2026 say it stays with
+stocks that have derivatives on an exchange (not on the ex-date of a scheme of arrangement); NSE's
+own text was not reached. ``every_stock`` of the second regime follows the owner's reading (every
+stock); if NSE's circular says otherwise, setting it to False is the whole change.
+
 Every reader takes its times from here, never from a constant of its own:
 
     sudarshan/alerts/market/sessions.py  each segment's session, a stock's closing auction and a
