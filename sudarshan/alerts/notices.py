@@ -107,6 +107,26 @@ _BECAUSE = {
 }
 
 
+#: Why an offsite upload failed (ops/offsite.py REASONS), in the owner's words.
+_OFFSITE_REASON = {
+    "openssl": "the server has no encryption tool installed",
+    "encrypt": "the backup could not be encrypted",
+    "space": "the server's disk is too full to prepare the copy",
+    "network": "the server could not reach Oracle's storage",
+    "refused": "Oracle's storage refused the file, so the access link may have been removed",
+    "busy": "Oracle's storage was not accepting files",
+    "expired": "the access link for the bucket has expired; make a new one (steps are in the README)",
+    "config": "the offsite settings on the server cannot be used",
+}
+_ISO_DATE = re.compile(r"(20[0-9]{2})-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])")
+
+
+def _date(value: str) -> str:
+    """'2026-11-26' as '26 Nov 2026'; '' when it is not a date."""
+    found = _ISO_DATE.fullmatch(value)
+    return f"{int(found[3])} {MONTHS[int(found[2]) - 1]} {found[1]}" if found else ""
+
+
 def _release(value: str) -> str | None:
     return value if TAG.fullmatch(value) else None
 
@@ -209,9 +229,16 @@ def _backup_failed(event: Event) -> list[str]:
             "so that copy may be damaged. Earlier backups are kept. Have the server looked at soon."
         ]
     elif why == "offsite":
+        reason = _OFFSITE_REASON.get(event.fact("reason"), "the offsite copy did not work")
+        return [f"Tonight's offsite backup did not upload: {reason}. The local backup is fine."]
+    elif why == "offsite_soon":
+        days, when = event.fact("days"), _date(event.fact("date"))
+        if not (_HOURS.fullmatch(days) and when):
+            return []
+        left = "today" if days == "0" else f"in {days} day{'s' if days != '1' else ''}"
         return [
-            "The nightly backup is safe on the server, but copying it offsite did not work. "
-            "It tries again with the next backup."
+            f"The access link for the offsite backup expires {left}, on {when}. Make a new one "
+            "before then (steps are in the README), or the offsite copies will stop."
         ]
     elif why == "settings":
         return [
