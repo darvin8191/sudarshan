@@ -369,6 +369,23 @@ def test_fifty_lists_is_the_most_and_a_new_list_says_so(client):
     assert len(oa_lists()) == 50
 
 
+def test_a_copy_to_a_new_list_counts_lists_without_reading_their_items(client, monkeypatch):
+    """Review L5: the room check read every list with every item (a fifth of a second for 49 full
+    lists, on the hub). It asks for a count and one name instead; the refusals are unchanged."""
+    from database import watchlist_db as oa
+
+    src = make_list(("INFY", "TCS"), "L0")
+    for n in range(1, 49):
+        make_list(many(5, f"X{n}_"), f"L{n}")
+    monkeypatch.setattr(oa, "get_watchlists", lambda *a: pytest.fail("read every list"))
+    body = {"from": {"ref": f"list:{src}", "keys": ["NSE:INFY"]}, "to": {"name": "L7"}}
+    assert refused(put(client, body), 400, "invalid", "name") == words.name_taken("L7")
+    body["to"] = {"name": "Fresh"}
+    assert put(client, body).status_code == 200  # the 50th list
+    body["to"] = {"name": "One more"}
+    assert refused(put(client, body), 422, "limit") == words.LISTS_FULL
+
+
 def test_a_duplicate_symbol_in_the_target_is_not_added_twice_and_is_no_error(client):
     src = make_list()
     dst = make_list(("TCS", "INFY"), "Other")

@@ -351,7 +351,9 @@ not a list, a symbol the source does not hold and the same list as source and ta
 with the field named. Everything that can be refused is refused first, in words with the numbers:
 a stale `version` when a section is to be set (`conflict`), 250 symbols a list holds ("Swing has
 room for 3 more symbols; this section has 8. Make room in Swing or pick another list."), 50 lists
-("You have 50 lists, the most there can be. Delete one to make a new list."), a name taken. A symbol
+("You have 50 lists, the most there can be. Delete one to make a new list."), a name taken (for a
+new list a count and one name are asked of OpenAlgo's table, never every list with its items, which
+took a fifth of a second on the hub with 49 full lists). A symbol
 already in the target is skipped, never an error (`skipped` in the answer); a move still takes it
 out of the source. Order of writes, one file at a time: OpenAlgo's `add_item` for each symbol (one
 commit each) or `create_watchlist` with all items in one call; then, only when a section is set, one

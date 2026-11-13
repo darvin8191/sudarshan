@@ -29,6 +29,7 @@ from __future__ import annotations
 import time
 
 from flask import session
+from sqlalchemy import func
 
 from sudarshan.watchlists import contract, engine, refs
 from sudarshan.watchlists.ops import UNCHANGED, OpError, bumps
@@ -129,10 +130,25 @@ def _source(spec: dict) -> tuple[int, dict, list, bool]:
     )
 
 
+def _own_lists(user: str, name: str) -> tuple[int, bool]:
+    """How many lists the user has, and whether one is called ``name`` (as OpenAlgo's own create
+    compares it): two small queries through OpenAlgo's models, never every list with its items,
+    which with 49 full lists took a fifth of a second on the hub."""
+    from database import watchlist_db as oa
+
+    lists = oa.Watchlist
+    try:
+        have = oa.db_session.query(func.count(lists.id)).filter(lists.user_id == user).scalar()
+        taken = (oa.db_session.query(lists.id)
+                 .filter(lists.user_id == user, lists.name == name).first()) is not None  # fmt: skip
+    finally:
+        oa.db_session.remove()
+    return int(have or 0), taken
+
+
 def _target(to: dict, picked: list, from_section: bool, src: int) -> tuple[dict | None, list]:
     """``(live target or None for a new list, the keys it does not hold yet)``, refused with the
     numbers when it cannot take them."""
-    from database import watchlist_db as oa
     from sudarshan.watchlists.refs import list as listref
 
     if ("list" in to) == ("name" in to):
@@ -143,13 +159,10 @@ def _target(to: dict, picked: list, from_section: bool, src: int) -> tuple[dict 
             raise OpError("invalid", words.NAME_EMPTY if not name else words.NAME_LONG, "name")
         if to.get("section_id") is not None:
             raise OpError("invalid", words.NEW_LIST_SECTION, "to")
-        try:
-            have = oa.get_watchlists(_user())
-        finally:
-            oa.db_session.remove()
-        if len(have) >= contract.LIMITS["lists"]:
+        have, taken = _own_lists(_user(), name)
+        if have >= contract.LIMITS["lists"]:
             raise OpError("limit", words.LISTS_FULL)
-        if any(w["name"] == name for w in have):
+        if taken:
             raise OpError("invalid", words.name_taken(name), "name")
         if len(picked) > contract.LIMITS["list_items"]:
             raise OpError("limit", words.too_many(len(picked)))
