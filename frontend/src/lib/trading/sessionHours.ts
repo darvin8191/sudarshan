@@ -16,9 +16,10 @@
  * SUDARSHAN: a timing row may carry `changes`, the days its close moves on by
  * itself (the server derives them from sudarshan/regimes.py: an NFO or BFO row
  * holding a shipped close ends at 15:45 from 7 Dec 2026). The weekly hours are
- * the ones of the day the calendar is built for, and every weekday of the
- * years the holiday list covers whose close differs gets its own window, so a
- * candle before and after the change opens and ends on that day's clock.
+ * the ones of the day the calendar is built for, and every weekday within a
+ * year either side of it whose close differs gets its own window (review L6:
+ * not only the years the holiday list covers), so a candle before and after
+ * the change opens and ends on that day's clock.
  * sudarshan/tests/regimes_vectors.json pins this against the server.
  */
 import {
@@ -98,13 +99,16 @@ function isWeekday(date: string): boolean {
   return weekday >= 1 && weekday <= 5
 }
 
-/** Every ISO date of the given years, in order. */
-function datesOf(years: readonly number[]): string[] {
+/** Days either side of the build day whose own close the calendar carries (review L6). */
+const CHANGE_SPAN_DAYS = 366
+
+/** Every ISO date from `span` days before `day` to `span` days after it, in order. */
+function datesAround(day: string, span: number): string[] {
+  const [y, m, d] = day.split('-').map(Number)
+  const middle = Date.UTC(y, m - 1, d)
   const found: string[] = []
-  for (const year of years) {
-    for (let at = Date.UTC(year, 0, 1); new Date(at).getUTCFullYear() === year; at += DAY_MS)
-      found.push(new Date(at).toISOString().slice(0, 10))
-  }
+  for (let at = middle - span * DAY_MS; at <= middle + span * DAY_MS; at += DAY_MS)
+    found.push(new Date(at).toISOString().slice(0, 10))
   return found
 }
 
@@ -158,7 +162,7 @@ export function calendarSpec(
     }
     // SUDARSHAN: a weekday whose close differs from the weekly one opens on its own window.
     if (changes.length && ISO_DATE.test(day)) {
-      for (const date of datesOf(yearsAround(day))) {
+      for (const date of datesAround(day, CHANGE_SPAN_DAYS)) {
         if (date in exceptions || !isWeekday(date)) continue
         const own = windowTo(endOn(date))
         if (own !== window) exceptions[date] = [own]

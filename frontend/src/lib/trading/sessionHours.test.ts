@@ -176,6 +176,20 @@ describe('the timings of 7 Dec 2026 (regimes_vectors.json)', () => {
     expect(calendarSpec('NSE', VECTORS.timings, [], '2026-12-10')?.exceptions).toEqual({})
   })
 
+  it('carries each day its own close a year either side of the build day (review L6)', () => {
+    // Built on 1 Feb 2027 the weekly close is 15:45, and 4 Dec 2026 still closes at 15:40.
+    const later = new SessionCalendar(calendarSpec('NFO', VECTORS.timings, [], '2027-02-01'))
+    expect(later.sessionAt(secs(at('2026-12-04', '15:39')))?.close).toBe(
+      secs(at('2026-12-04', '15:40'))
+    )
+    expect(later.sessionAt(secs(at('2026-12-04', '15:42')))).toBeNull()
+    // Built on 13 Nov 2026 the weekly close is 15:40, and 4 Jan 2027 already closes at 15:45.
+    const earlier = new SessionCalendar(calendarSpec('NFO', VECTORS.timings, [], '2026-11-13'))
+    expect(earlier.sessionAt(secs(at('2027-01-04', '15:42')))?.close).toBe(
+      secs(at('2027-01-04', '15:45'))
+    )
+  })
+
   it('keeps a holiday closed and a special session its own window across the change', () => {
     const christmas: HolidayRow = {
       date: '2026-12-25',
