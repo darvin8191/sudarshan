@@ -11,8 +11,12 @@
 Description=SUDARSHAN family view (view only, its own account)
 After=network-online.target
 Wants=network-online.target
-# The account's egress allow-list (loaded at boot by the owner's one-time set-up): never run without it.
-Requires=nft-sudarshan-family.service
+# The account's egress allow-list (loaded at boot by the owner's one-time set-up), started first. Wants=,
+# not Requires=: before the set-up that unit does not exist, and Requires= would make every start fail
+# ("unit not found") instead of being skipped by the condition below. The deploy's check, run as this
+# account at every deploy run (every ten minutes), proves the allow-list refuses the owner's ports and
+# stops this service, removing the provisioned file, when it does not.
+Wants=nft-sudarshan-family.service
 After=nft-sudarshan-family.service
 # Written by the deploy only after python -m sudarshan.family.check passed as this account.
 ConditionPathExists=/etc/sudarshan-family/provisioned
