@@ -173,6 +173,27 @@ export function calendarSpec(
   }
 }
 
+/**
+ * SUDARSHAN (review M3): the exchange's calendar with one contract's own stop:
+ * an expiring index contract stops at 15:30 on its expiry day from 7 Dec 2026
+ * while the exchange trades to 15:45. `stopsAt` (epoch ms) comes from the
+ * server. That day's windows end at it, so the clock opens no candle after
+ * it, the countdown ends at it and the marker reads closed; a day that does
+ * not trade stays closed.
+ */
+export function withStop(spec: SessionCalendarSpec, stopsAt: number): SessionCalendarSpec {
+  const { date, minutes } = istClock(stopsAt)
+  const weekly = spec.sessions[0]?.split(':')[0]
+  const day = spec.exceptions?.[date] ?? (weekly && isWeekday(date) ? [weekly] : [])
+  const stop = hhmm(minutes)
+  const own = day
+    .filter((window) => window === '0000-0000' || window.slice(0, 4) < stop)
+    .map((window) =>
+      window === '0000-0000' || window.slice(5) > stop ? `${window.slice(0, 4)}-${stop}` : window
+    )
+  return { ...spec, exceptions: { ...(spec.exceptions ?? {}), [date]: own } }
+}
+
 interface Book {
   day: string
   timings: TimingRow[] | null
@@ -246,28 +267,39 @@ function currentBook(apiKey: string, now = Date.now()): Book {
   return book
 }
 
-function calendarOf(source: Book, exchange: string): SessionCalendar | null {
+function calendarOf(
+  source: Book,
+  exchange: string,
+  stopsAt?: number | null
+): SessionCalendar | null {
   if (source.timings === null || source.holidays === null) return null
-  const cached = source.calendars.get(exchange)
+  const key = stopsAt ? `${exchange}@${stopsAt}` : exchange
+  const cached = source.calendars.get(key)
   if (cached !== undefined) return cached
   let calendar: SessionCalendar | null = null
   try {
     const spec = calendarSpec(exchange, source.timings, source.holidays, source.day)
-    calendar = spec ? new SessionCalendar(spec) : null
+    calendar = spec ? new SessionCalendar(stopsAt ? withStop(spec, stopsAt) : spec) : null
   } catch {
     calendar = null
   }
-  source.calendars.set(exchange, calendar)
+  source.calendars.set(key, calendar)
   return calendar
 }
 
 /**
- * Give a freshly built chart its exchange's hours and the session shading.
+ * Give a freshly built chart its exchange's hours and the session shading
+ * (with a contract's own stop on its expiry day, when the host knows it).
  * Synchronous when today's calendar is already here; otherwise the chart is
  * left as it is and gets its hours when they arrive, unless it has been
  * replaced or torn down by then.
  */
-export function applySessionHours(chart: Chart, exchange: string, apiKey: string): void {
+export function applySessionHours(
+  chart: Chart,
+  exchange: string,
+  apiKey: string,
+  stopsAt?: number | null
+): void {
   if (!exchange) return
   // Hours are a refinement: whatever fails here, the chart draws as it did without them.
   try {
@@ -278,7 +310,7 @@ export function applySessionHours(chart: Chart, exchange: string, apiKey: string
   const source = currentBook(apiKey)
   const apply = () => {
     try {
-      const calendar = calendarOf(source, exchange)
+      const calendar = calendarOf(source, exchange, stopsAt)
       if (calendar && !chart.isDestroyed) chart.setSessionCalendar(calendar)
     } catch {
       /* no calendar on this chart */
@@ -292,17 +324,19 @@ export function applySessionHours(chart: Chart, exchange: string, apiKey: string
  * SUDARSHAN M4.1: the exchange's calendar on its own, for the live bar and its
  * status marker: the same hours the chart gets, from the same once-a-day
  * fetch. Resolves to null when the hours cannot be had, which leaves a chart
- * live but without a clock, never broken.
+ * live but without a clock, never broken. `stopsAt` (epoch ms) is a contract's
+ * own stop on its expiry day, from the server (review M3, `withStop`).
  */
 export function sessionCalendarFor(
   exchange: string,
-  apiKey: string
+  apiKey: string,
+  stopsAt?: number | null
 ): Promise<SessionCalendar | null> {
   if (!exchange) return Promise.resolve(null)
   const source = currentBook(apiKey)
   const read = () => {
     try {
-      return calendarOf(source, exchange)
+      return calendarOf(source, exchange, stopsAt)
     } catch {
       return null
     }

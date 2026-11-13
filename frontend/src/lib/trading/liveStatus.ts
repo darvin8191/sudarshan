@@ -133,6 +133,8 @@ export function liveDetail(status: LiveStatus, now = Date.now()): string {
         ? `No price update since ${clockSeconds.format(new Date(line.at))}. The last price shown may be out of date.`
         : `Prices shown are from ${clockSeconds.format(new Date(line.at))}.`
     case 'closed':
+      if (line.stoppedAt !== undefined)
+        return `This contract stopped trading at ${clock.format(new Date(line.stoppedAt))}, its expiry day's stop. The last price shown is its last trade.`
       return status.opensAt === null
         ? 'Prices are from the last session.'
         : `Opens ${opensAtWords(status.opensAt, now)}. Prices are from the last session.`
@@ -187,6 +189,8 @@ export class LiveStatusTracker {
   private timer: unknown = null
   private shown: FeedLine | null = null
   private destroyed = false
+  /** SUDARSHAN (review M3): when this contract stops trading on its expiry day, UTC seconds. */
+  private stopsAt: number | null = null
 
   constructor(options: LiveStatusTrackerOptions) {
     this.opts = options
@@ -200,6 +204,7 @@ export class LiveStatusTracker {
   /** A new instrument, just loaded from history: nothing has ticked for it yet. */
   reset(exchange: string): void {
     this.exchange = exchange
+    this.stopsAt = null
     this.lastTickAt = null
     this.lastTickTime = null
     this.lastTradeTime = null
@@ -210,6 +215,16 @@ export class LiveStatusTracker {
 
   setCalendar(calendar: StatusCalendar | null): void {
     this.calendar = calendar
+    this.update()
+  }
+
+  /**
+   * SUDARSHAN (review M3): the contract's own stop on its expiry day, in UTC
+   * seconds, from the server. From then on the marker says it has stopped
+   * trading, never "Stale", and no next open is promised.
+   */
+  setStop(stopsAt: number | null): void {
+    this.stopsAt = stopsAt
     this.update()
   }
 
@@ -255,17 +270,20 @@ export class LiveStatusTracker {
     const staleMs = staleAfterMs(this.exchange)
     const calendarOpen = this.calendar ? this.calendar.sessionAt(now / 1000) !== null : null
     const marketOpen = this.flowing(now, staleMs) ? true : calendarOpen
-    const line = feedLine({
-      now,
-      marketOpen,
-      lastTickAt: this.lastTickAt,
-      lastUpdateAt: this.lastUpdateAt,
-      connected: this.transport === 'live',
-      polling: this.transport === 'polling',
-      staleMs,
-    })
+    const stopped = this.stopsAt !== null && now >= this.stopsAt * 1000
+    const line: FeedLine = stopped
+      ? { kind: 'closed', stoppedAt: (this.stopsAt as number) * 1000 }
+      : feedLine({
+          now,
+          marketOpen,
+          lastTickAt: this.lastTickAt,
+          lastUpdateAt: this.lastUpdateAt,
+          connected: this.transport === 'live',
+          polling: this.transport === 'polling',
+          staleMs,
+        })
     let opensAt: number | null = null
-    if (line.kind === 'closed' && this.calendar) {
+    if (line.kind === 'closed' && !stopped && this.calendar) {
       const next = this.calendar.sessionFrom?.(now / 1000)
       opensAt = next ? next.open : null
     }
@@ -323,6 +341,7 @@ export class LiveStatusTracker {
     const changesAt = this.calendar?.marketStatusAt?.(now / 1000)?.changesAt
     if (typeof changesAt === 'number' && Number.isFinite(changesAt))
       waits.push(changesAt * 1000 - now + 1)
+    if (this.stopsAt !== null) waits.push(this.stopsAt * 1000 - now + 1)
     const pending = waits.filter((ms) => ms > 0)
     if (!pending.length) return
     const wait = Math.min(MAX_WAIT_MS, ...pending)

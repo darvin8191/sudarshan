@@ -16,10 +16,12 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 // The market's hours, which a test hands in; null, as with no hours to be had, otherwise.
-const hours = vi.hoisted(() => ({ calendar: null as unknown }))
+const hours = vi.hoisted(() => ({ calendar: null as unknown, stopped: null as unknown }))
 vi.mock('./sessionHours', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./sessionHours')>()),
-  sessionCalendarFor: async () => hours.calendar,
+  // SUDARSHAN (review M3): asked with a contract's own stop, the contract's calendar.
+  sessionCalendarFor: async (_exchange: string, _key: string, stopsAt?: number | null) =>
+    stopsAt ? (hours.stopped ?? hours.calendar) : hours.calendar,
 }))
 
 import { quietVolumeStyle } from './chartTheme'
@@ -131,6 +133,7 @@ beforeEach(() => {
 
 afterEach(() => {
   hours.calendar = null
+  hours.stopped = null
   for (const terminal of terminals.splice(0)) terminal.destroy()
   vi.clearAllTimers()
   vi.useRealTimers()
@@ -2095,7 +2098,10 @@ describe('the closing print after the cash close (review M1, M2)', () => {
       onDepth?.(state.sym.symbol, state.sym.exchange, { bids: [], asks: [], ltp, timeSec })
   }
 
-  function answerFacts(closing: { from: number; until: number } | null) {
+  function answerFacts(
+    closing: { from: number; until: number } | null,
+    stopsAt: number | null = null
+  ) {
     resetInstrumentSessions()
     vi.stubGlobal(
       'fetch',
@@ -2106,7 +2112,7 @@ describe('the closing print after the cash close (review M1, M2)', () => {
               status: 200,
               json: async () => ({
                 status: 'success',
-                data: { day: '2026-12-10', stops_at: null, closing },
+                data: { day: '2026-12-10', stops_at: stopsAt, closing },
               }),
             }
           : { ok: false, status: 404, json: async () => ({}) }
@@ -2147,5 +2153,42 @@ describe('the closing print after the cash close (review M1, M2)', () => {
     const found = await lastCandleAfterPrint(null)
     expect(found).toHaveLength(2)
     expect(found.at(-1)?.close).toBe(100.5)
+  })
+
+  it("ends an expiring contract's candles and status at its own stop (review M3)", async () => {
+    const dec8 = (h: number, mi: number, sec = 0) =>
+      Date.UTC(2026, 11, 8, h, mi, sec) / 1000 - 19_800
+    const { state } = mount()
+    const live = state as unknown as {
+      liveStatus: { status(): { line: { kind: string; stoppedAt?: number } } }
+      liveClock: { start(): void; stop(): void }
+    }
+    hours.calendar = new SessionCalendar({
+      timezone: 'Asia/Kolkata',
+      sessions: ['0915-1545:23456'],
+      exceptions: {},
+    })
+    hours.stopped = new SessionCalendar({
+      timezone: 'Asia/Kolkata',
+      sessions: ['0915-1545:23456'],
+      exceptions: { '2026-12-08': ['0915-1530'] },
+    })
+    answerFacts(null, dec8(15, 30) * 1000)
+    state.sym = { ...state.sym, symbol: 'NIFTY08DEC2625900CE', exchange: 'NFO' }
+    state.interval = '5m'
+    state.rawBars = [bar(dec8(15, 20), 100), bar(dec8(15, 25), 100.5)]
+    state.setPriceData()
+    const depth = wiredDepth(state)
+    vi.setSystemTime(dec8(15, 29, 50) * 1000)
+    state.connectLive()
+    for (let i = 0; i < 5; i++) await vi.advanceTimersByTimeAsync(0)
+    depth(100.75, dec8(15, 29, 59))
+    await vi.advanceTimersByTimeAsync(60_000) // 15:30:50
+    expect(state.rawBars.map((b) => b.time)).toEqual([dec8(15, 20), dec8(15, 25)])
+    expect(live.liveStatus.status().line).toEqual({
+      kind: 'closed',
+      stoppedAt: dec8(15, 30) * 1000,
+    })
+    live.liveClock.stop()
   })
 })

@@ -153,6 +153,8 @@ export class PhoneChart {
   private loadState: ChartStateView = CHART_READY
   /** A price has come off the stream for this instrument since it loaded. */
   private streamed = false
+  /** SUDARSHAN (review M3): when the loaded contract stops trading today, epoch ms, from the server. */
+  private stopsAt: number | null = null
   private destroyed = false
   private readonly offs: Array<() => void> = []
 
@@ -237,6 +239,7 @@ export class PhoneChart {
     if (!same) {
       this.unsubscribe()
       this.streamed = false
+      this.stopsAt = null
     }
     this.sym = { symbol, exchange }
     this.interval = apiInterval(chip)
@@ -245,7 +248,7 @@ export class PhoneChart {
     this.chart.destroy()
     ;({ chart: this.chart, price: this.price, volume: this.volume } = this.buildChart(exchange))
     this.chart.setDataContext({ symbol, exchange, interval: this.interval })
-    applySessionHours(this.chart, exchange, this.apiKey)
+    applySessionHours(this.chart, exchange, this.apiKey, this.stopsAt)
     const to = this.frames.clock.nowSec()
     const request = {
       symbol,
@@ -301,7 +304,7 @@ export class PhoneChart {
       exchange: sym.exchange,
       interval: this.interval,
     })
-    applySessionHours(this.chart, sym.exchange, this.apiKey)
+    applySessionHours(this.chart, sym.exchange, this.apiKey, this.stopsAt)
     if (!this.bars.length) return
     this.draw()
     if (range) this.chart.setVisibleLogicalRange(range)
@@ -583,6 +586,19 @@ export class PhoneChart {
         if (this.destroyed || ticket !== this.ticket || !found) return
         // A closing print after the cash close goes to the day's last candle.
         if (builder && this.builder === builder) builder.setClosing(found.closing)
+        if (found.stopsAt === null) return
+        // An expiring contract's own stop (review M3): no candle, countdown or "Stale" after it.
+        this.stopsAt = found.stopsAt
+        this.status.setStop(found.stopsAt / 1000)
+        return sessionCalendarFor(exchange, this.apiKey, found.stopsAt).then((own) => {
+          if (this.destroyed || ticket !== this.ticket || !own) return
+          this.status.setCalendar(own)
+          if (!this.chart.isDestroyed) this.chart.setSessionCalendar(own)
+          if (!builder || this.builder !== builder) return
+          builder.setSession(own)
+          this.clock.start()
+          this.syncCountdown()
+        })
       })
   }
 

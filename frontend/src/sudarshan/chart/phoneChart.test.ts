@@ -10,12 +10,15 @@ import type { LiveStatus } from '@/lib/trading/liveStatus'
 
 const mocks = vi.hoisted(() => ({
   calendar: null as unknown,
+  /** The calendar asked for with a contract's own stop (review M3), when a test sets one. */
+  stopped: null as unknown,
   previousClose: vi.fn(async (..._args: unknown[]) => null as number | null),
 }))
 
 vi.mock('@/lib/trading/sessionHours', () => ({
   applySessionHours: () => {},
-  sessionCalendarFor: async () => mocks.calendar,
+  sessionCalendarFor: async (_exchange: string, _key: string, stopsAt?: number | null) =>
+    stopsAt ? (mocks.stopped ?? mocks.calendar) : mocks.calendar,
 }))
 vi.mock('@/lib/trading/previousClose', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/trading/previousClose')>()),
@@ -196,6 +199,7 @@ beforeEach(() => {
   calls.length = 0
   visibility = 'visible'
   mocks.calendar = nse()
+  mocks.stopped = null
   mocks.previousClose.mockReset()
   mocks.previousClose.mockResolvedValue(null)
   Object.defineProperty(document, 'visibilityState', {
@@ -778,5 +782,64 @@ describe('the closing print after the cash close (review M1, M2)', () => {
     socket.receive(depthFrame('TCS', 'NSE', 100.5, dec10(15, 29, 59), 1_000_000))
     socket.receive(depthFrame('TCS', 'NSE', 103.25, dec10(15, 39, 40), 1_250_000))
     expect(internals(chart).bars.at(-1)?.close).toBe(100.5)
+  })
+})
+
+/**
+ * SUDARSHAN review M3: on Tue 8 Dec 2026 the expiring NIFTY contract stops at
+ * 15:30 while F&O runs to 15:45. The clock invented a flat candle at 15:30 and
+ * the marker said Stale; the server's stop ends the contract's own session.
+ */
+describe("an expiring contract's own stop (review M3)", () => {
+  const dec8 = (h: number, mi: number, s = 0) => Date.UTC(2026, 11, 8, h, mi, s) / 1000 - 19_800
+  const contract = 'NIFTY08DEC2625900CE'
+
+  it('opens no candle after 15:30 and says the contract stopped trading, never Stale', async () => {
+    vi.setSystemTime(dec8(15, 29, 40) * 1000)
+    mocks.calendar = new SessionCalendar({
+      timezone: 'Asia/Kolkata',
+      sessions: ['0915-1545:23456'],
+      exceptions: {},
+    })
+    mocks.stopped = new SessionCalendar({
+      timezone: 'Asia/Kolkata',
+      sessions: ['0915-1545:23456'],
+      exceptions: { '2026-12-08': ['0915-1530'] },
+    })
+    historyReply = () => ({
+      status: 'success',
+      data: [15, 20, 25].map((mi) => ({
+        time: dec8(15, mi),
+        timestamp: dec8(15, mi),
+        open: 100,
+        high: 101,
+        low: 99,
+        close: 100,
+        volume: 500,
+      })),
+    })
+    factsReply = (query) => ({
+      status: 'success',
+      data: {
+        day: '2026-12-08',
+        stops_at: query.get('symbol') === contract ? dec8(15, 30) * 1000 : null,
+        closing: null,
+      },
+    })
+    const { chart, heard } = mount()
+    const socket = latestSocket()
+    socket.accept()
+    await chart.load(contract, 'NFO', '5m')
+    await vi.advanceTimersByTimeAsync(0)
+    await vi.advanceTimersByTimeAsync(19_000)
+    socket.receive(depthFrame(contract, 'NFO', 100.5, dec8(15, 29, 59), 50_000)) // the last trade
+    expect(lastLine(heard)?.kind).toBe('live')
+    const shown = heard.statuses.length
+    await vi.advanceTimersByTimeAsync(90_000) // to 15:31:29: F&O trades on, this contract does not
+    expect(internals(chart).bars.some((bar) => bar.time >= dec8(15, 30))).toBe(false)
+    expect(lastLine(heard)).toEqual({ kind: 'closed', stoppedAt: dec8(15, 30) * 1000 })
+    const after = heard.statuses.slice(shown)
+    expect(after.some(({ line }) => 'stale' in line && line.stale)).toBe(false)
+    expect(heard.statuses.at(-1)?.opensAt).toBeNull()
   })
 })

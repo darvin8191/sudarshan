@@ -201,7 +201,12 @@ export type FeedLine =
    * late: no line at all. "Waiting for prices" there would never end.
    */
   | { kind: 'idle' }
-  | { kind: 'closed' }
+  /**
+   * The market is shut. `stoppedAt` (epoch ms): this contract itself has
+   * stopped trading (an expiring index contract at 15:30 on its expiry day
+   * from 7 Dec 2026, review M3), whatever the exchange's hours say.
+   */
+  | { kind: 'closed'; stoppedAt?: number }
 
 /**
  * The live line for a set of instruments: "Live" only while WebSocket ticks

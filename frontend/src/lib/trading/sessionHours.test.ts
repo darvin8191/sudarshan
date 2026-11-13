@@ -10,6 +10,7 @@ import {
   type HolidayRow,
   resetSessionHours,
   type TimingRow,
+  withStop,
 } from './sessionHours'
 
 /** Epoch milliseconds of an IST wall-clock time, whatever zone the test runs in. */
@@ -343,5 +344,77 @@ describe('applySessionHours', () => {
     ;(a as { isDestroyed: boolean }).isDestroyed = true
     await settle()
     expect(a.setSessionCalendar).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * SUDARSHAN review M3: an expiring index contract stops at 15:30 on its expiry
+ * day from 7 Dec 2026 while F&O trades to 15:45 (15:40 for every contract
+ * before). The server sends the stop (regimes_vectors.json `expiries`); the
+ * contract's calendar ends that day at it.
+ */
+describe("an expiring contract's own stop (review M3)", () => {
+  interface Expiry {
+    symbol: string
+    exchange: string
+    expiry: string
+    index: boolean
+    stop: string
+  }
+  const EXPIRIES = (
+    JSON.parse(
+      readFileSync(join(process.cwd(), '..', 'sudarshan', 'tests', 'regimes_vectors.json'), 'utf8')
+    ) as { expiries: Expiry[] }
+  ).expiries
+  const candle = (time: number) => ({ time, open: 100, high: 101, low: 99, close: 100, volume: 0 })
+
+  it.each(EXPIRIES)('$symbol stops at $stop on $expiry', (contract) => {
+    const spec = calendarSpec(contract.exchange, VECTORS.timings, [], contract.expiry)
+    expect(spec).not.toBeNull()
+    const stopsAt = at(contract.expiry, contract.stop)
+    const calendar = new SessionCalendar(withStop(spec as NonNullable<typeof spec>, stopsAt))
+    const stop = secs(stopsAt)
+    expect(calendar.sessionAt(stop - 1)?.close).toBe(stop)
+    expect(calendar.sessionAt(stop)).toBeNull()
+    // The next day trades as the exchange does.
+    const next = new Date(`${contract.expiry}T00:00:00Z`)
+    next.setUTCDate(next.getUTCDate() + (next.getUTCDay() === 5 ? 3 : 1))
+    const day = next.toISOString().slice(0, 10)
+    expect(calendar.sessionAt(secs(at(day, '10:00')))).not.toBeNull()
+  })
+
+  it('Tue 8 Dec: no candle after 15:30, the hourly countdown ends at it, the day after is whole', () => {
+    const date = '2026-12-08'
+    const spec = calendarSpec('NFO', VECTORS.timings, [], date) as NonNullable<
+      ReturnType<typeof calendarSpec>
+    >
+    const calendar = new SessionCalendar(withStop(spec, at(date, '15:30')))
+    const fives = new LiveBarBuilder({ interval: '5m', session: calendar })
+    fives.seed(candle(secs(at(date, '15:25'))))
+    expect(fives.onClock(secs(at(date, '15:30')) + 0.5)).toBeNull()
+    expect(fives.nextClockAt(secs(at(date, '15:31')))).toBe(secs(at('2026-12-09', '09:15')))
+    const hourly = new LiveBarBuilder({ interval: '1h', session: calendar })
+    hourly.seed(candle(secs(at(date, '14:15'))))
+    expect(hourly.countdown(secs(at(date, '15:20')))).toEqual({
+      kind: 'closes',
+      at: secs(at(date, '15:30')),
+    })
+    // The exchange's own calendar runs on to 15:45 that day: the 15:30 candle opens there.
+    const plain = new LiveBarBuilder({ interval: '5m', session: new SessionCalendar(spec) })
+    plain.seed(candle(secs(at(date, '15:25'))))
+    expect(plain.onClock(secs(at(date, '15:30')) + 0.5)?.bar.time).toBe(secs(at(date, '15:30')))
+  })
+
+  it('keeps a holiday closed and a stop at the close changes nothing', () => {
+    const spec = calendarSpec('NFO', VECTORS.timings, [], '2026-12-10') as NonNullable<
+      ReturnType<typeof calendarSpec>
+    >
+    expect(withStop(spec, at('2026-12-12', '15:30')).exceptions?.['2026-12-12']).toEqual([])
+    expect(withStop(spec, at('2026-12-29', '15:45')).exceptions?.['2026-12-29']).toEqual([
+      '0915-1545',
+    ])
+    expect(withStop(spec, at('2026-12-29', '15:30')).exceptions?.['2026-12-29']).toEqual([
+      '0915-1530',
+    ])
   })
 })
