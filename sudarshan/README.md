@@ -593,7 +593,8 @@ wording in `sudarshan/alerts/tests/test_alerts_notices.py`.
 ## Server notices on Telegram (M18.x)
 
 After an install, a rollback, a service file the unit policy refused, a release that waits for
-the market to close, or a nightly backup that failed, the owner gets one short message on Telegram
+the market to close, a nightly backup that failed, or (once the family set-up below has been run) a
+family check that failed, the owner gets one short message on Telegram
 in trader language (examples in `sudarshan/alerts/README.md`). The deploy tool runs as root, so it
 holds no Telegram or OpenAlgo secret and cannot be made to send anything:
 
@@ -621,6 +622,90 @@ Tests: `sudarshan/ops/tests/test_deploy_notices.py` (the whole tool on a fake se
 `test_ops_events.py`, and `sudarshan/alerts/tests/test_alerts_notices.py`.
 
 Tests: `sudarshan/ops/tests/test_ops_docs.py`.
+
+## The family view's one-time set-up (P6)
+
+The family view (family members see the books, view only, with no way to place an order) runs as
+its own account on the server, `sudarshan-family`, which can read none of the owner's secrets:
+not OpenAlgo's `.env`, `db/` or `log/`, not the sealed vault and not `/etc/sudarshan`. Its own
+release comes later, switched off. This release (v0.10.0) only puts the pieces in place, and on a
+server where the set-up below has not been run none of them does anything:
+
+- `ops/family/bootstrap.sh`, the set-up the owner runs once (below);
+- `python -m sudarshan.family.derive`, which the deploy tool runs as `sudarshan` to get the family
+  account's seal keys (root never runs the app's Python: it checks each key it is handed and writes
+  it itself);
+- `python -m sudarshan.family.check`, which the deploy tool runs as `sudarshan-family`: it passes
+  only when that account cannot open OpenAlgo's `.env`, any file in `db/`, `log/` or the vault,
+  anything in `/etc/sudarshan`, the alerts' or the portfolio's state, or the feed's claims; can open
+  every file in `/etc/sudarshan-family`; and is refused by the firewall when it tries OpenAlgo's
+  market-data bus (port 5555) or its WebSocket proxy (port 8765), while the portfolio's port (5583)
+  stays open to it. One line per check, PASS or FAIL, never a secret;
+- in the deploy tool: the unit policy lets the family view's own service run as that account (and
+  no other service, and only once its check has passed); the ring's databases are copied and put
+  back by the account that owns their folder; and the provision step below;
+- in the nightly backup: the family view's own folder is passed over, and the copy of its store it
+  will leave for the backup is taken.
+
+**The price feed's client tokens (every server, from this release).** The deploy tool makes one
+token per ring client of the price feed, once, in `/etc/sudarshan/feed-clients/` (folder root,
+group `sudarshan`, mode 750; each file mode 640): `sudarshan-alerts`, `sudarshan-screener`,
+`sudarshan-portfolio`, `sudarshan-journal`, `sudarshan-family` and `sudarshan-protect`. Each holds
+32 random bytes as 43 characters on one line. They are what a ring client shows the feed when it
+changes the instruments the feed follows for it, so one client can no longer drop or replace
+another's (the feed starts asking for them with its own change). A token that is there is never
+written again; one that is deleted is made again, new, at the next run. The feed reads them all;
+the family account reads only its own copy in `/etc/sudarshan-family/feed-token`. They are the
+only new files a server without the family set-up gets, and making them is not logged.
+
+### Running the set-up, once this release is installed
+
+1. On the laptop, open the SSH session to the server, as for the offsite set-up.
+2. Paste this line and press Enter (`sudo` asks for your password on the server). It fetches the
+   set-up from GitHub at the release installed on the server, as the deploy tool fetches its own
+   code, into a folder only root can read, runs it as root and removes it. It never runs a copy
+   from the app's folder, which the service account can change.
+
+   ```sh
+   sudo bash -c 'd="$(mktemp -d)" && . /etc/sudarshan/deploy.env && curl -fsSL "https://raw.githubusercontent.com/${REPO#https://github.com/}/$(cat /var/lib/sudarshan/deployed_tag)/sudarshan/ops/family/bootstrap.sh" -o "$d/bootstrap.sh" && bash "$d/bootstrap.sh"; rc=$?; rm -rf "$d"; exit $rc'
+   ```
+
+   To see first what it would do, without changing anything, put ` --dry-run` after
+   `"$d/bootstrap.sh"`.
+3. What it does, saying each step: makes the account `sudarshan-family` (no home, no login shell,
+   not in the group `sudarshan`); makes `/etc/sudarshan-family` (root, group `sudarshan-family`,
+   750) and `/var/lib/sudarshan-family-export` (`sudarshan-family`, group `sudarshan`, 2750);
+   installs the account's allow-list of outgoing connections, an nftables table of its own
+   (`sudarshan_family`) loaded at every boot by `nft-sudarshan-family.service` (the account may
+   reach this server only on the ports the family view uses and the local name resolver, and
+   elsewhere only HTTPS); then runs the deploy tool's provision step (`sudarshan-deploy
+   --family-provision`): the seal keys, a storage key and a Web Push key pair made once, copies of
+   the NSE day files and of its feed token, and then the check, as the account itself. Nothing else
+   on the server is touched: no other firewall table, not nginx, no other service.
+4. What you should see: lines starting `changed:` (or `in place:` on a later run), the provision
+   step's lines starting `family:`, and at the end `PASS.`. If it lists `chmod o-rwx ...` lines,
+   other accounts can read some of OpenAlgo's files: run those lines yourself (nothing that runs
+   needs those files open to others), then the set-up again. A line starting `FAIL` says what is
+   wrong; fix it and run the set-up again. `an install was running` means wait ten minutes and run
+   it again.
+5. Running it again is safe at any time: a second run changes nothing and says so (`PASS. Nothing
+   was changed`).
+
+From then on the deploy tool keeps the keys and copies in place at every run (every ten minutes)
+and runs the check again; a check that fails stops the family view until it passes again and is
+told on Telegram once. The install backup keeps a copy of `/etc/sudarshan-family` (a rollback never
+puts it back, as for the vault). The family view itself, its bot and its nginx lines come in a later
+release, switched off; nothing more is needed until then.
+
+To take it out again: `systemctl disable --now nft-sudarshan-family.service`, `nft delete table
+inet sudarshan_family`, remove `/etc/systemd/system/nft-sudarshan-family.service`,
+`/etc/nftables-sudarshan-family.nft` and the folder `/etc/sudarshan-family` (the deploy tool then
+stops at once), and `userdel sudarshan-family`.
+
+Tests: `sudarshan/ops/tests/test_family_bootstrap.py` (the set-up, and its allow-list loaded in a
+network namespace of its own), `test_deploy_family.py` (the deploy tool's side, and that a server
+without the set-up gets nothing but the tokens), `test_backup_family.py`, and
+`sudarshan/family/tests/`.
 
 ## The risk layer's confirm phrase, if it is forgotten (M5.13)
 
