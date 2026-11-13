@@ -17,6 +17,7 @@ vi.mock('@/api/risk', async (original) => {
   return { ...actual, riskApi: { ...actual.riskApi, saveSettings } }
 })
 
+import { PHRASE_FORGOTTEN, PHRASE_HINT } from './phrase'
 import {
   BandCard,
   BRAKE_COUNTS,
@@ -92,6 +93,7 @@ describe('a settings card', () => {
     fireEvent.change(screen.getByLabelText('F&O order'), { target: { value: '5' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save the size limit' }))
     expect(await screen.findByText(PHRASE_FOR_LOOSENING)).toBeInTheDocument()
+    expect(screen.getByTestId('phrase-hint')).toHaveTextContent(PHRASE_HINT) // what to type
     const confirm = screen.getByRole('button', { name: 'Confirm with your phrase' })
     expect(confirm).toBeDisabled() // until the phrase is typed
     fireEvent.change(screen.getByLabelText('F&O order'), { target: { value: '9' } })
@@ -227,13 +229,22 @@ describe('orders per second and the phrase', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Change the phrase' }))
     expect(await screen.findByText(PHRASE_FOR_CHANGE)).toBeInTheDocument()
     expect(screen.queryByText(PHRASE_FOR_LOOSENING)).toBeNull() // not "more risk"
-    expect(screen.getByTestId('phrase-card')).not.toHaveTextContent('STOP') // never the phrase
+    expect(screen.getByTestId('phrase-card')).not.toHaveTextContent('Kesari') // never the new one
+    expect(screen.getByTestId('phrase-hint')).toHaveTextContent(PHRASE_HINT) // and what to type
     fireEvent.change(await screen.findByLabelText('Confirm phrase'), { target: { value: 'STOP' } })
     fireEvent.click(screen.getByRole('button', { name: 'Confirm with your phrase' }))
     await waitFor(() =>
       expect(saveSettings).toHaveBeenLastCalledWith({ confirm_phrase: 'Kesari' }, 'STOP')
     )
     await waitFor(() => expect(screen.getByLabelText('New phrase')).toHaveValue(''))
+  })
+})
+
+describe('the phrase card', () => {
+  it('says what to type and how a forgotten phrase is set back', () => {
+    wrap(<PhraseCard />)
+    expect(PHRASE_FORGOTTEN).toBe('If you forget it, it can be set back to STOP on the server.')
+    expect(screen.getByTestId('phrase-card')).toHaveTextContent(PHRASE_FORGOTTEN)
   })
 })
 
@@ -336,5 +347,20 @@ describe("the daily limit, typed at or below the day's loss", () => {
     await waitFor(() =>
       expect(saveSettings).toHaveBeenCalledWith({ daily_loss_limit: 5000 }, undefined)
     )
+  })
+
+  it('stops warning once the limit typed is the limit saved', () => {
+    saveSettings.mockResolvedValue(answer())
+    const days = { live: today({}) }
+    const { unmount } = wrap(
+      <DailyLimitEditor settings={{ ...SETTINGS, daily_loss_limit: 4000 }} days={days} />
+    )
+    // Saved at 4000 with 4,100 lost: nothing is being asked, so nothing is warned.
+    expect(screen.queryByTestId('daily-locks-today')).toBeNull()
+    fireEvent.change(screen.getByLabelText('Limit for the day'), { target: { value: '3500' } })
+    expect(screen.getByTestId('daily-locks-today')).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('Limit for the day'), { target: { value: '4000' } })
+    expect(screen.queryByTestId('daily-locks-today')).toBeNull()
+    unmount()
   })
 })

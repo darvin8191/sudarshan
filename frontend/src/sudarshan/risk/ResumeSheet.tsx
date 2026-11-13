@@ -9,7 +9,7 @@ import { BottomSheet } from '@/sudarshan/watchlist/BottomSheet'
 import { showToast } from '@/utils/toast'
 import { noteKillSwitch } from './killSwitch'
 import { clockOf, RISK_AUDIT_KEY, RISK_STATUS_KEY, surfaceOf } from './parts'
-import { PHRASE_HINT } from './TurnOnSheet'
+import { PHRASE_HINT } from './phrase'
 
 const count = new Intl.NumberFormat('en-IN')
 

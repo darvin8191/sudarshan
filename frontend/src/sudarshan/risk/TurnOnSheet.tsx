@@ -13,9 +13,8 @@ import { BottomSheet } from '@/sudarshan/watchlist/BottomSheet'
 import { type Book, turnOnHeld } from './holds'
 import { actsOn, noteKillSwitch } from './killSwitch'
 import { RISK_AUDIT_KEY, RISK_STATUS_KEY, StepList } from './parts'
+import { PHRASE_HINT } from './phrase'
 
-/** The phrase's hint: R3 ships STOP, which the owner may change in Settings > Risk. */
-export const PHRASE_HINT = 'Type your confirm phrase. It is STOP unless you changed it.'
 export const NO_ANSWER =
   'No answer came back. The kill switch may still be turning on: this page shows it in a few seconds. Check Orders and Positions.'
 
