@@ -22,6 +22,7 @@ vi.mock('@/lib/trading/previousClose', async (importOriginal) => ({
   previousClose: mocks.previousClose,
 }))
 
+import { resetInstrumentSessions } from '@/lib/trading/instrumentSession'
 import { PROBE_TIMEOUT_MS } from '@/lib/trading/liveTicks'
 import { PhoneChart, type PhoneTick, QUOTE_FALLBACK_MS, WAKE_RECONNECT_MS } from './phoneChart'
 
@@ -107,6 +108,8 @@ const latestSocket = () => FakeSocket.all[FakeSocket.all.length - 1]
 type Reply = { status?: string; data?: unknown; message?: string }
 let historyReply: (body: Record<string, unknown>) => Reply | 'fail'
 let quoteReply: (body: Record<string, unknown>) => Reply
+/** SUDARSHAN: the instrument's own session facts (GET /sudarshan/session/instrument). */
+let factsReply: (query: URLSearchParams) => Reply
 const calls: Array<{ path: string; body: Record<string, unknown> }> = []
 
 function respond(reply: Reply | 'fail') {
@@ -204,10 +207,17 @@ beforeEach(() => {
     data: fiveMinuteBars().map((bar) => ({ ...bar, timestamp: bar.time })),
   })
   quoteReply = () => ({ status: 'success', data: { ltp: 109.4, prev_close: 98.5, volume: 12_000 } })
+  factsReply = () => ({
+    status: 'success',
+    data: { day: '2026-10-20', stops_at: null, closing: null },
+  })
+  resetInstrumentSessions()
   vi.stubGlobal('WebSocket', FakeSocket)
   vi.stubGlobal(
     'fetch',
     vi.fn(async (url: string, init?: { body?: string }) => {
+      if (String(url).startsWith('/sudarshan/session/instrument?'))
+        return respond(factsReply(new URL(String(url), 'http://test.invalid').searchParams))
       const body = JSON.parse(init?.body ?? '{}') as Record<string, unknown>
       const path = String(url).replace(/^.*\/api\/v1\//, '')
       calls.push({ path, body })
@@ -702,5 +712,71 @@ describe('the rest of its life', () => {
     chart.destroy()
     await vi.advanceTimersByTimeAsync(60_000)
     expect(vi.getTimerCount()).toBe(0)
+  })
+})
+
+/**
+ * SUDARSHAN review M1 and M2: from Thu 10 Dec 2026 a stock with futures prints
+ * its closing auction after the cash close, and the server says when it may
+ * (the instrument's facts). The print goes to the day's last candle.
+ */
+describe('the closing print after the cash close (review M1, M2)', () => {
+  /** UTC seconds for a time of day in India on Thursday 10 December 2026. */
+  const dec10 = (h: number, mi: number, s = 0) => Date.UTC(2026, 11, 10, h, mi, s) / 1000 - 19_800
+  const lateBars = (): Bar[] =>
+    Array.from({ length: 4 }, (_, i) => ({
+      time: dec10(15, 10 + i * 5),
+      open: 100,
+      high: 100.75,
+      low: 99.5,
+      close: 100.25,
+      volume: 5000,
+    })).slice(1)
+
+  it('takes the auction print into the 15:25 candle, opens none after it, and moves the header', async () => {
+    vi.setSystemTime(dec10(15, 35) * 1000)
+    historyReply = () => ({
+      status: 'success',
+      data: lateBars().map((bar) => ({ ...bar, timestamp: bar.time })),
+    })
+    factsReply = (query) => ({
+      status: 'success',
+      data: {
+        day: '2026-12-10',
+        stops_at: null,
+        closing:
+          query.get('symbol') === 'RELIANCE'
+            ? { from: dec10(15, 30) * 1000, until: dec10(15, 45) * 1000 }
+            : null,
+      },
+    })
+    const { chart, heard } = mount()
+    const socket = latestSocket()
+    socket.accept()
+    await chart.load('RELIANCE', 'NSE', '5m')
+    await vi.advanceTimersByTimeAsync(0)
+    socket.receive(depthFrame('RELIANCE', 'NSE', 100.5, dec10(15, 29, 59), 1_000_000))
+    socket.receive(depthFrame('RELIANCE', 'NSE', 103.25, dec10(15, 39, 40), 1_250_000))
+    const bars = internals(chart).bars
+    expect(bars.at(-1)?.time).toBe(dec10(15, 25))
+    expect(bars.at(-1)?.close).toBe(103.25)
+    expect(bars.some((bar) => bar.time > dec10(15, 25))).toBe(false)
+    expect(heard.ticks.at(-1)?.ltp).toBe(103.25)
+  })
+
+  it('leaves a stock without the window as it was: its trade after 15:30 moves no candle', async () => {
+    vi.setSystemTime(dec10(15, 35) * 1000)
+    historyReply = () => ({
+      status: 'success',
+      data: lateBars().map((bar) => ({ ...bar, timestamp: bar.time })),
+    })
+    const { chart } = mount()
+    const socket = latestSocket()
+    socket.accept()
+    await chart.load('TCS', 'NSE', '5m')
+    await vi.advanceTimersByTimeAsync(0)
+    socket.receive(depthFrame('TCS', 'NSE', 100.5, dec10(15, 29, 59), 1_000_000))
+    socket.receive(depthFrame('TCS', 'NSE', 103.25, dec10(15, 39, 40), 1_250_000))
+    expect(internals(chart).bars.at(-1)?.close).toBe(100.5)
   })
 })

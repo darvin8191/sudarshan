@@ -36,6 +36,7 @@ import {
   chartNoData,
 } from '@/lib/trading/chartState'
 import { buildChartTheme, quietVolumeStyle } from '@/lib/trading/chartTheme'
+import { instrumentSessionFor } from '@/lib/trading/instrumentSession'
 import { lookbackDays } from '@/lib/trading/intervals'
 import {
   HistoryResync,
@@ -566,14 +567,23 @@ export class PhoneChart {
       this.status.reset(exchange)
     }
     const ticket = this.ticket
-    void sessionCalendarFor(exchange, this.apiKey).then((calendar) => {
-      if (this.destroyed || ticket !== this.ticket || !calendar) return
-      this.status.setCalendar(calendar)
-      if (!builder || this.builder !== builder) return
-      builder.setSession(calendar)
-      this.clock.start()
-      this.syncCountdown()
-    })
+    // SUDARSHAN (review M1, M2): the instrument's own facts, asked beside the hours.
+    const facts = instrumentSessionFor(this.sym?.symbol ?? '', exchange)
+    void sessionCalendarFor(exchange, this.apiKey)
+      .then((calendar) => {
+        if (this.destroyed || ticket !== this.ticket || !calendar) return facts
+        this.status.setCalendar(calendar)
+        if (!builder || this.builder !== builder) return facts
+        builder.setSession(calendar)
+        this.clock.start()
+        this.syncCountdown()
+        return facts
+      })
+      .then((found) => {
+        if (this.destroyed || ticket !== this.ticket || !found) return
+        // A closing print after the cash close goes to the day's last candle.
+        if (builder && this.builder === builder) builder.setClosing(found.closing)
+      })
   }
 
   private stopLive(): void {

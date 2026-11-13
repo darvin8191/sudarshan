@@ -110,6 +110,7 @@ import {
   readStoredIndicators,
   type StoredIndicatorRecord,
 } from './indicatorTemplates'
+import { instrumentSessionFor } from './instrumentSession' // SUDARSHAN: review M1-M3
 // SUDARSHAN M4.1: the live-bar pipeline shared with the phone chart.
 import {
   HistoryResync,
@@ -6752,14 +6753,24 @@ export class TradingTerminal {
     this.syncCountdown()
     if (!exchange) return
     const ticket = this.loadTicket
-    void sessionCalendarFor(exchange, this.apiKey).then((calendar) => {
-      if (this.destroyed || ticket !== this.loadTicket || !calendar) return
-      this.liveStatus.setCalendar(calendar)
-      if (!builder || this.builder !== builder) return
-      builder.setSession(calendar)
-      this.liveClock.start()
-      this.syncCountdown()
-    })
+    // SUDARSHAN (review M1, M2): the instrument's own facts, asked beside the hours.
+    const sym = this.sym
+    const facts = sym && !sym.synthetic ? instrumentSessionFor(sym.symbol, exchange) : null
+    void sessionCalendarFor(exchange, this.apiKey)
+      .then((calendar) => {
+        if (this.destroyed || ticket !== this.loadTicket || !calendar) return facts
+        this.liveStatus.setCalendar(calendar)
+        if (!builder || this.builder !== builder) return facts
+        builder.setSession(calendar)
+        this.liveClock.start()
+        this.syncCountdown()
+        return facts
+      })
+      .then((found) => {
+        if (this.destroyed || ticket !== this.loadTicket || !found) return
+        // A closing print after the cash close goes to the day's last candle.
+        if (builder && this.builder === builder) builder.setClosing(found.closing)
+      })
     if (builder) void this.foldTodayFromQuote(builder, exchange)
   }
 
