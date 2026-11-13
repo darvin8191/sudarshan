@@ -43,10 +43,10 @@ from database.market_calendar_db import (
     get_all_market_timings,
     get_effective_session_window,
     get_market_hours_status,
-    timing_on,
     get_special_session,
     is_market_holiday,
     is_market_open,
+    timing_on,
 )
 from utils import runtime, stream_registry
 from utils.constants import CRYPTO_EXCHANGES
