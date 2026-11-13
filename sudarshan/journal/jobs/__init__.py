@@ -10,5 +10,9 @@ def register_all() -> None:
     """Register every job of the service, each from its own module. Called once by the entry
     point, before the service starts."""
     from .. import nudge
+    from . import catchup, check, day
 
     nudge.register_jobs()
+    day.register_jobs()
+    check.register_jobs()
+    catchup.register_jobs()

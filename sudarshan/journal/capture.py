@@ -342,9 +342,20 @@ class Capture:
         log.info("sandbox fills read: %s", out.line())
         return out
 
+    # ---- history ------------------------------------------------------------------------------
+    async def record_history(self, fills: list[dict[str, Any]],
+                             labels: Mapping[str, Mapping[str, Any]]) -> Outcome:  # fmt: skip
+        """Fills rebuilt from Upstox's trade history (the 22:00 catch-up), with their orders'
+        labels written in the same transaction, so no label pass ever asks about them."""
+        async with self.locks["live"]:
+            out = Outcome(read=len(fills))
+            await self._write("live", fills, self.service.clock(), out, labels=labels)
+            return out
+
     # ---- writing and labelling ---------------------------------------------------------------
     async def _write(self, mode: str, fills: list[dict[str, Any]], now: int, out: Outcome,
-                     withdraw_day: int | None = None, listed: Iterable[str] = ()) -> None:  # fmt: skip
+                     withdraw_day: int | None = None, listed: Iterable[str] = (),
+                     labels: Mapping[str, Mapping[str, Any]] | None = None) -> None:  # fmt: skip
         store = self.service.store
         firsts: dict[str, int] = {}
         for f in fills:
@@ -355,6 +366,8 @@ class Capture:
             counts = tx.fills_upsert(fills, now)
             for order_id, first in firsts.items():
                 tx.order_ref_note(mode, order_id, first, now)
+            for order_id, values in (labels or {}).items():
+                tx.order_ref_set(mode, order_id, values, now)
             gone = tx.fills_withdraw(mode, withdraw_day, listed, now) if withdraw_day else 0
             return counts, gone
 

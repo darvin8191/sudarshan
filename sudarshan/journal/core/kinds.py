@@ -102,6 +102,9 @@ SURFACES = (
     "strategy_module",
     "python",
     "upstox_app",
+    # An order rebuilt from Upstox's trade history (the 22:00 catch-up of a day no check marked):
+    # where it was placed is not known, and it is never asked about again.
+    "history",
     "unknown",
 )
 EXCURSION_SOURCES = ("recording", "candles", "none")

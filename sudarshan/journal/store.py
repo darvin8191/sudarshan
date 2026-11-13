@@ -653,6 +653,65 @@ class Tx:
             )
         return self.settings()
 
+    # ---- the day's close and Upstox's own P&L report (JB5) ----
+    def day_close_get(self, mode: str, day: int) -> dict[str, Any] | None:
+        t = self._t("day_close")
+        row = (
+            self.conn.execute(select(t).where(self._mine(t), t.c.mode == mode, t.c.day == day))
+            .mappings()
+            .first()
+        )
+        return self.out(row)
+
+    def day_close_put(
+        self, mode: str, day: int, values: Mapping[str, Any], now: int
+    ) -> dict[str, Any]:
+        """Write the day's close; a column not named keeps what an earlier write put."""
+        t = self._t("day_close")
+        if self.day_close_get(mode, day) is None:
+            self.conn.execute(
+                insert(t).values(
+                    **self.encode(values),
+                    principal=self.who,
+                    mode=mode,
+                    day=day,
+                    created_at=now,
+                    updated_at=now,
+                )  # fmt: skip
+            )
+        else:
+            self.conn.execute(
+                update(t)
+                .where(self._mine(t), t.c.mode == mode, t.c.day == day)
+                .values(**self.encode(values), updated_at=now)
+            )
+        return self.day_close_get(mode, day)  # type: ignore[return-value]
+
+    def upstox_pairs_put(self, rows: Iterable[Mapping[str, Any]], now: int) -> int:
+        """Upstox's matched pairs, each once by its ``raw_hash``; returns how many were new."""
+        t = self._t("upstox_pair")
+        added = 0
+        for row in rows:
+            seen = self.conn.execute(
+                select(t.c.id).where(self._mine(t), t.c.raw_hash == row["raw_hash"])
+            ).first()
+            if seen is None:
+                self.conn.execute(
+                    insert(t).values(**row, principal=self.who, created_at=now, updated_at=now)
+                )
+                added += 1
+        return added
+
+    def upstox_charges_put(self, row: Mapping[str, Any], now: int) -> None:
+        """Upstox's charges for one segment and period; a later read of the period replaces it."""
+        t = self._t("upstox_charges")
+        where = (self._mine(t), t.c.segment == row["segment"],
+                 t.c.period_from == row["period_from"], t.c.period_to == row["period_to"])  # fmt: skip
+        self.conn.execute(delete(t).where(*where))
+        self.conn.execute(
+            insert(t).values(**row, principal=self.who, created_at=now, updated_at=now)
+        )
+
     # ---- the job log (shared: belongs to no one) ----
     def job_get(self, name: str, day: int) -> dict[str, Any] | None:
         t = self._t("job_run")

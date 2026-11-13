@@ -101,6 +101,7 @@ export type Surface =
   | 'strategy_module'
   | 'python'
   | 'upstox_app'
+  | 'history'
   | 'unknown'
 export type ExcursionSource = 'recording' | 'candles' | 'none'
 export type Mood = 'planned' | 'calm' | 'rushed' | 'fomo' | 'revenge' | 'tired'

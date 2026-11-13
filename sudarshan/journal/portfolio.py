@@ -153,8 +153,12 @@ class PortfolioLink:
             "historical_trades", segment=segment, page=page, **{"from": start, "to": end}
         )
 
-    async def pnl_report(self, segment: str, fy: int, part: str, page: int = 1):
-        return await self.call("pnl_report", segment=segment, fy=fy, part=part, page=page)
+    async def pnl_report(self, segment: str, fy: int, part: str, page: int = 1,
+                         page_size: int | None = None):  # fmt: skip
+        args: dict[str, Any] = {"segment": segment, "fy": fy, "part": part, "page": page}
+        if page_size is not None:
+            args["page_size"] = page_size
+        return await self.call("pnl_report", **args)
 
     async def benchmark_closes(self, index: str, start: int, end: int) -> dict[str, Any]:
         return await self.call("benchmark_closes", index=index, **{"from": start, "to": end})

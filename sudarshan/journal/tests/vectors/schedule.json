@@ -1,0 +1,108 @@
+{
+  "note": "The journal's job times (design 8.1 S1-S6 as amended by cross-design Y21 and Y22). Times are IST HH:MM on the vector's day and null means the job does not run that day; a runner case gives the job, the moment it is asked, what job_run already holds and the status it writes (null: it does not run). The calendar files are synthetic.",
+  "vectors": [
+    {
+      "id": "S1",
+      "note": "a normal trading day: brief 08:45, day report 15:45, close check 16:05 (after the cash post-close session), excursions 17:00, catch-up 22:00",
+      "day": 20261110,
+      "holidays": [],
+      "extra_days": [],
+      "due": {"brief": "08:45", "eod": "15:45", "check": "16:05", "excursion": "17:00", "catchup": "22:00", "weekly": null, "monthly": null, "fy": null}
+    },
+    {
+      "id": "S2",
+      "note": "the Muhurat session of Sunday 8 Nov 2026 (window 14:05-15:40): the brief at its own start less 30 minutes, 13:50, never 08:45 (mutation target 19); the Sunday digest too",
+      "day": 20261108,
+      "holidays": [],
+      "extra_days": ["2026-11-08 14:05-15:40"],
+      "due": {"brief": "13:50", "eod": "15:45", "check": "16:05", "excursion": "17:00", "catchup": "22:00", "weekly": "18:00", "monthly": null, "fy": null}
+    },
+    {
+      "id": "S3",
+      "note": "a weekday holiday: no trading job runs (mutation target 20); the catch-up does",
+      "day": 20261124,
+      "holidays": ["2026-11-24"],
+      "extra_days": [],
+      "due": {"brief": null, "eod": null, "check": null, "excursion": null, "catchup": "22:00", "weekly": null, "monthly": null, "fy": null}
+    },
+    {
+      "id": "S3b",
+      "note": "a Sunday without a session: the weekly digest still runs",
+      "day": 20261115,
+      "holidays": [],
+      "extra_days": [],
+      "due": {"brief": null, "eod": null, "check": null, "excursion": null, "catchup": "22:00", "weekly": "18:00", "monthly": null, "fy": null}
+    },
+    {
+      "id": "S5",
+      "note": "1 April 2027: the FY pack and the monthly statement both at 07:00; F&O closes at 15:45 from 7 Dec 2026, so the day report is at 15:50",
+      "day": 20270401,
+      "holidays": [],
+      "extra_days": [],
+      "due": {"brief": "08:45", "eod": "15:50", "check": "16:05", "excursion": "17:00", "catchup": "22:00", "weekly": null, "monthly": "07:00", "fy": "07:00"}
+    },
+    {
+      "id": "S4",
+      "note": "the service down at 15:45 and up at 17:00: the day report runs at 17:00, marked late",
+      "day": 20261110,
+      "job": "eod",
+      "now": "17:00",
+      "ran": [],
+      "status": "late"
+    },
+    {
+      "id": "S6",
+      "note": "a job_run row of the day stops a second run",
+      "day": 20261110,
+      "job": "eod",
+      "now": "15:50",
+      "ran": [{"name": "eod", "status": "ok", "at": "15:45"}],
+      "status": null
+    },
+    {
+      "id": "S6b",
+      "note": "a failed run is asked again 15 minutes after it, not before",
+      "day": 20261110,
+      "job": "check",
+      "now": "16:19",
+      "ran": [{"name": "check", "status": "failed", "at": "16:05"}],
+      "status": null
+    },
+    {
+      "id": "S6c",
+      "note": "a failed run is asked again 15 minutes after it",
+      "day": 20261110,
+      "job": "check",
+      "now": "16:20",
+      "ran": [{"name": "check", "status": "failed", "at": "16:05"}],
+      "status": "late"
+    },
+    {
+      "id": "S6d",
+      "note": "on time: the day report at 15:45",
+      "day": 20261110,
+      "job": "eod",
+      "now": "15:45",
+      "ran": [],
+      "status": "ok"
+    },
+    {
+      "id": "S6e",
+      "note": "the brief missed until the day's last close does not run",
+      "day": 20261110,
+      "job": "brief",
+      "now": "15:40",
+      "ran": [],
+      "status": null
+    },
+    {
+      "id": "S6f",
+      "note": "before its time a job does not run",
+      "day": 20261110,
+      "job": "check",
+      "now": "16:04",
+      "ran": [],
+      "status": null
+    }
+  ]
+}
