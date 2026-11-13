@@ -700,7 +700,9 @@ async def test_a_journal_port_nobody_or_another_user_holds_is_not_asked(monkeypa
 
 
 @contextlib.asynccontextmanager
-async def wired(tmp_path):
+async def wired(tmp_path, *, watch: bool = False):
+    """The desk with the real links over HTTP; ``watch`` asks the journal's /health as well, on
+    the same client, as the running service's desk does."""
     async with FakeOpenAlgo() as openalgo, FakeJournalApi() as journal_api, httpx.AsyncClient(
         trust_env=False, follow_redirects=False
     ) as client:  # fmt: skip
@@ -714,6 +716,7 @@ async def wired(tmp_path):
             telegram.send_with_reason,
             OpenAlgoFiles(openalgo.url, client, lambda: owner, lambda: owner),
             lambda: True, lambda: datetime.now(IST), outbox.Pacer(),
+            watch=JournalWatch(journal_api.url, client) if watch else None,
         )  # fmt: skip
         yield types.SimpleNamespace(openalgo=openalgo, journal=journal_api, desk=desk,
                                     spool=desk.spool)  # fmt: skip
@@ -897,9 +900,11 @@ def test_the_running_service_delivers_reports_while_the_journal_says_it_is_on(
 
 @sync
 async def test_deliveries_leave_no_descriptor_behind(tmp_path, monkeypatch):
-    """Spool reads, alerts.db rows, the journal's and OpenAlgo's sockets: all closed again."""
+    """Spool reads, alerts.db rows, the journal's and OpenAlgo's sockets, and the journal's
+    /health asked before every look (M15.7): all closed again."""
     monkeypatch.setattr(outbox, "MINUTE_S", 0.2)
-    async with wired(tmp_path) as wire:
+    monkeypatch.setattr(reports_desk, "ASK_EVERY_S", 0.0)
+    async with wired(tmp_path, watch=True) as wire:
         for report_id in range(1, 8):
             wire.journal.reports[report_id] = report_record(report_id)
         write_report(wire.spool, 1)
@@ -910,4 +915,5 @@ async def test_deliveries_leave_no_descriptor_behind(tmp_path, monkeypatch):
         for _ in range(6):
             await wire.desk.sweep()
         assert len(wire.journal.deliveries) == 7 and len(wire.openalgo.files) == 7
+        assert wire.journal.health_asks == 7  # one before each look
         await watch.aassert_clean()
