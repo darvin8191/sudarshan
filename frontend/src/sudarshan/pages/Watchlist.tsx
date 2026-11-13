@@ -36,6 +36,7 @@ import { SectionSheets } from '@/sudarshan/watchlist/SectionMenus'
 import type { OrderRequest } from '@/sudarshan/watchlist/SymbolSheet'
 import { useOverlay } from '@/sudarshan/watchlist/useOverlay'
 import { MAX_ITEMS, MAX_LISTS, useWatchlists } from '@/sudarshan/watchlist/useWatchlists'
+import { useViewPref } from '@/sudarshan/watchlist/ViewSheet'
 import { BUILT_IN } from '@/sudarshan/watchlist/v2/arrange'
 import { groupsOf, SECTIONS_FULL, useCollapsed } from '@/sudarshan/watchlist/v2/sections'
 import { LIMITS } from '@/sudarshan/watchlist/v2/types'
@@ -168,6 +169,7 @@ export default function Watchlist() {
   const sectionsRef = v2 && active && !foreign ? ownRef(active.id) : null
   const view = useListView(sectionsRef).data
   const folds = useCollapsed(sectionsRef)
+  const viewPref = useViewPref(sectionsRef, view) // F6
   const sectionLayout = useMemo(
     () =>
       view && sectionsRef
@@ -316,6 +318,7 @@ export default function Watchlist() {
               onNewSection={
                 sectionsRef ? () => open({ kind: 'sectionName', sectionId: null }) : undefined
               }
+              onView={sectionsRef ? () => open({ kind: 'view' }) : undefined} // F6
               newSectionOff={
                 view && view.sections.length >= LIMITS.sections_per_list ? SECTIONS_FULL : null
               }
@@ -364,6 +367,8 @@ export default function Watchlist() {
               sections={sectionLayout}
               arrange={arrange.edit} // F5
               symbolActions={symbolActions} // F5
+              viewPref={sectionsRef ? viewPref : undefined} // F6
+              viewOpen={overlay?.kind === 'view'} // F6
             />
           )}
         </>

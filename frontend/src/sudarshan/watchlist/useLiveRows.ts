@@ -19,6 +19,7 @@ import {
   type TickDirection,
 } from './rows'
 import { type SnapshotStatus, useQuoteSnapshot } from './useQuoteSnapshot'
+import type { Basis } from './v2/types'
 
 /** A quiet row whose quote was read this recently is left out of its re-sync. */
 const QUIET_FRESH_MS = 5_000
@@ -58,10 +59,13 @@ export function useLiveRows({
   items,
   apiKey,
   marketOpen,
+  basis = 'close', // F6
 }: {
   items: WatchlistItem[]
   apiKey: string | null
   marketOpen: MarketOpen
+  /** F6: what the change is measured from. */
+  basis?: Basis
 }): {
   rows: LiveRow[]
   /** What the line above the list says; null for an empty list. */
@@ -69,6 +73,8 @@ export function useLiveRows({
   now: number
   feed: FeedState
   snapshot: SnapshotStatus
+  /** F6: a REST read has landed, or failed: the prices a sort ranks on are there to be had. */
+  read: boolean
   retry: () => void
 } {
   const itemsKey = useMemo(
@@ -104,7 +110,7 @@ export function useLiveRows({
   const rows = items.map((item) => {
     const key = keyOf(item.symbol, item.exchange)
     const line = lines.get(key)
-    const view = rowView(snapshot.quotes.get(key), line)
+    const view = rowView(snapshot.quotes.get(key), line, basis) // F6
     const tick = priceOf(line)
     return {
       item,
@@ -139,6 +145,28 @@ export function useLiveRows({
     resync(new Set(quietKeys.split(',')), QUIET_FRESH_MS)
   }, [quietKeys, now, apiKey, resync])
 
+  // F6: from today's open, a row whose open is not known gets one more read at its first tick
+  // after the opening, once; the market opening resets it (the snapshot reads on that event itself).
+  const noOpen =
+    basis === 'open'
+      ? rows
+          .filter(
+            (row) =>
+              row.view.openMissing && row.tickAt !== null && openOf(row.item.exchange) === true
+          )
+          .map((row) => row.key)
+          .join(',')
+      : ''
+  const asked = useRef({ open: false, keys: new Set<string>() })
+  const isOpenNow = anyOpen(MAIN_EXCHANGES.map(openOf)) === true
+  useEffect(() => {
+    if (asked.current.open !== isOpenNow) asked.current = { open: isOpenNow, keys: new Set() }
+    const keys = noOpen.split(',').filter((key) => key !== '' && !asked.current.keys.has(key))
+    if (keys.length === 0 || apiKey === null) return
+    for (const key of keys) asked.current.keys.add(key)
+    resync(new Set(keys), 0)
+  }, [noOpen, isOpenNow, apiKey, resync])
+
   let line: FeedLine | null = null
   if (items.length > 0) {
     const exchanges = [...new Set(items.map((item) => item.exchange))]
@@ -152,5 +180,13 @@ export function useLiveRows({
     })
   }
 
-  return { rows, line, now, feed, snapshot: snapshot.status, retry: snapshot.retry }
+  return {
+    rows,
+    line,
+    now,
+    feed,
+    snapshot: snapshot.status,
+    read: snapshot.quotes.size > 0 || snapshot.status === 'error', // F6
+    retry: snapshot.retry,
+  }
 }

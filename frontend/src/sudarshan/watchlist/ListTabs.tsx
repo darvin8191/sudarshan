@@ -5,6 +5,7 @@ import {
   MoreVertical,
   Pencil,
   Plus,
+  SlidersHorizontal,
   Trash2,
   Zap,
 } from 'lucide-react'
@@ -49,6 +50,7 @@ export function ListTabs({
   strip,
   onNewSection,
   newSectionOff,
+  onView,
 }: {
   lists: Watchlist[]
   activeId: number | null
@@ -66,6 +68,8 @@ export function ListTabs({
   onNewSection?: () => void
   /** Why New section is off (the list has 20), or null. */
   newSectionOff?: string | null
+  /** F6 (v2): opens the View sheet; absent for a list the sheet does not apply to. */
+  onView?: () => void
 }) {
   // F3: with v2 on the menu ignores taps for its first half second (openGuard.ts).
   const [menuOpen, setMenuOpen] = useState(false)
@@ -199,6 +203,12 @@ export function ListTabs({
                 </p>
               )}
             </>
+          )}
+          {onView && (
+            <DropdownMenuItem className={MENU_ITEM} disabled={activeId === null} onSelect={onView}>
+              <SlidersHorizontal aria-hidden="true" className="size-5" />
+              View
+            </DropdownMenuItem>
           )}
           <DropdownMenuItem className={MENU_ITEM} disabled={activeId === null} onSelect={onEdit}>
             {editing ? (

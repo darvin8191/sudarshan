@@ -8,7 +8,10 @@ import type { MemberRow } from '@/sudarshan/screener/api'
 import { exitedToday, tagsOf, usePin } from '@/sudarshan/screener/feed'
 import type { ArrangeEdit } from './ArrangeSheet'
 import { type ArrangeActions, type OrderRequest, SymbolSheet } from './SymbolSheet'
+import { DEFAULT_PREF, isDefaultView } from './sort'
 import { useLiveRows } from './useLiveRows'
+import { useSortOrder } from './useSortOrder'
+import { ViewLine, type ViewPref, ViewSheet } from './ViewSheet'
 import { type SectionLayout, WatchlistRows } from './WatchlistRows'
 
 /**
@@ -40,6 +43,8 @@ export const LiveList = memo(function LiveList({
   sections,
   arrange,
   symbolActions,
+  viewPref,
+  viewOpen,
 }: {
   items: WatchlistItem[]
   apiKey: string | null
@@ -66,13 +71,27 @@ export const LiveList = memo(function LiveList({
   /** v2 (F5): edit mode as a draft, and what the symbol sheet adds. */
   arrange?: ArrangeEdit
   symbolActions?: ArrangeActions
+  /** v2 (F6): the list's saved View and its sheet; absent with the switch off, and for a list it does not apply to. */
+  viewPref?: ViewPref
+  viewOpen?: boolean
 }) {
   const tags = useMemo(() => tagsOf(members ?? NO_MEMBERS), [members])
   const byKey = useMemo(
     () => new Map((members ?? NO_MEMBERS).map((row) => [keyOf(row.symbol, row.exchange), row])),
     [members]
   )
-  const live = useLiveRows({ items, apiKey, marketOpen: isOpen })
+  const pref = viewPref?.pref // F6
+  const live = useLiveRows({ items, apiKey, marketOpen: isOpen, basis: pref?.basis })
+  // F6: the rows in the snapshot's order; editing arranges the list's own order.
+  const sorted = useSortOrder({
+    rows: live.rows,
+    groups: sections?.groups,
+    pref: pref ?? DEFAULT_PREF,
+    listKey: viewPref?.ref ?? '',
+    ready: live.read,
+    active: pref !== undefined && !isDefaultView(pref) && !editing,
+  })
+  const shown = editing ? live.rows : sorted.rows
   const sheetRow =
     openItemId === null ? null : (live.rows.find((row) => row.item.id === openItemId) ?? null)
   const pin = usePin(sheetRow ? byKey.get(sheetRow.key) : undefined)
@@ -102,12 +121,14 @@ export const LiveList = memo(function LiveList({
         </output>
       )}
 
+      {pref && !editing && <ViewLine pref={pref} at={sorted.at} onAgain={sorted.again} />}
+
       <section
         {...panel}
         className="overflow-hidden rounded-[1.125rem] border bg-card shadow-[var(--shadow-card)]"
       >
         <WatchlistRows
-          rows={live.rows}
+          rows={shown}
           loading={loading}
           editing={editing}
           onOpen={onOpen}
@@ -115,7 +136,7 @@ export const LiveList = memo(function LiveList({
           onRemove={onRemove}
           onAdd={onAdd}
           tags={tags}
-          sections={sections}
+          sections={sections && { ...sections, groups: sorted.groups ?? sections.groups }} // F6
           arrange={arrange} // F5
         />
       </section>
@@ -143,6 +164,18 @@ export const LiveList = memo(function LiveList({
         pin={pin}
         arrange={symbolActions} // F5
       />
+
+      {viewPref && pref && (
+        <ViewSheet
+          open={viewOpen === true}
+          onClose={onCloseSheet}
+          pref={pref}
+          onChange={(next) => void viewPref.save(next)}
+          problem={viewPref.problem}
+          noOpen={live.rows.filter((row) => row.view.openMissing).length}
+          total={live.rows.length}
+        />
+      )}
     </>
   )
 })

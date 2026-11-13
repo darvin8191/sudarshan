@@ -8,7 +8,7 @@ import { TREND_TEXT, TrendArrow } from '@/sudarshan/dashboard/Trend'
 import { ChipMark } from '@/sudarshan/screener/ChipMark'
 import type { Chip } from '@/sudarshan/screener/types'
 import { type ArrangeEdit, ArrangeRows } from './ArrangeSheet'
-import { describe, formatChange, priceDecimals, type TickDirection } from './rows'
+import { describe, formatChange, OPEN_UNKNOWN, priceDecimals, type TickDirection } from './rows'
 import { SectionHeader } from './SectionHeader'
 import type { LiveRow } from './useLiveRows'
 import type { Group } from './v2/sections'
@@ -28,6 +28,8 @@ export interface FigureValues {
   changePercent: number | null
   direction: TickDirection | null
   stale: boolean
+  /** F6: the change is from today's open and it is not known yet. */
+  openMissing?: boolean
 }
 
 export function figuresOf(row: LiveRow): FigureValues {
@@ -37,6 +39,7 @@ export function figuresOf(row: LiveRow): FigureValues {
     changePercent: row.view.changePercent,
     direction: row.direction,
     stale: row.stale,
+    openMissing: row.view.openMissing, // F6
   }
 }
 
@@ -79,6 +82,7 @@ export function Figures({
   changePercent,
   direction,
   stale,
+  openMissing,
   size = 'row',
   decimals = 2,
 }: FigureValues & { size?: 'row' | 'sheet'; decimals?: number }) {
@@ -114,6 +118,13 @@ export function Figures({
       >
         {change !== null && changePercent !== null && (
           <span>{`${formatChange(change, decimals)} (${formatPercent(changePercent)})`}</span>
+        )}
+        {/* F6: from today's open, which is not known yet: a dash and the words. */}
+        {change === null && openMissing && ltp !== null && (
+          <>
+            <span aria-hidden="true">&mdash;</span>
+            <span className="sr-only">{OPEN_UNKNOWN}</span>
+          </>
         )}
         {stale && (
           <>

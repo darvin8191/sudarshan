@@ -19,6 +19,7 @@ import type { OrderRequest } from './SymbolSheet'
  * - `?sheet=lists` (M8.5, v2 only): the All lists sheet. A sheet of v2 is
  *   known to the address only while v2 is on (`useOverlay(true)`), so with the
  *   switch off the page reads its address exactly as it did.
+ * - `?sheet=view` (M8.7 F6, v2 only): the View sheet: sort and change basis.
  * - `?sheet=to-section&ci=<item>` and `?sheet=to-list&ci=<item>` or `&section=<id>`, with `&move=1`
  *   for a move (M8.4 F5, v2 only): the section picker and the list picker.
  * - `?sheet=section&section=<id>` (M8.4 F3, v2 only): a section's menu; `?sheet=section-name`
@@ -34,6 +35,7 @@ export type Overlay =
   | { kind: 'order'; order: OrderRequest | null }
   | { kind: 'alert'; alert: AlertPrefill | null }
   | { kind: 'lists' }
+  | { kind: 'view' } // F6
   | { kind: 'section'; sectionId: number }
   | { kind: 'sectionName'; sectionId: number | null }
   | { kind: 'sectionRemove'; sectionId: number }
@@ -49,6 +51,7 @@ const SHEETS = new Set(['add', 'new', 'rename', 'delete', 'order', 'alert'])
 /** The sheets only v2 opens; later v2 sheets are added here. */
 const V2_SHEETS = new Set([
   'lists',
+  'view', // F6
   'section',
   'section-name',
   'section-remove',

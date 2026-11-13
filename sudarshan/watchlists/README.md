@@ -357,6 +357,27 @@ cannot be changed. Make a copy to arrange it." where its rows would be. With the
 and the F5 sheets are unknown to the address. Follow rows are F11's and are not moved. Tests:
 `v2/arrange.test.tsx`.
 
+## F6 - the View sheet and sorting
+
+With v2 on and an own list open, the list menu gains "View" (`?sheet=view`, `ViewSheet.tsx`): Sort by (List
+order, % change, Price, Name, Exchange), High first or Low first (A to Z or Z to A for names) and Change from
+(Previous close, Today's open). A pick is shown at once and saved per list with one `pref` (`sort`,
+`descending`, `basis`; `held` is F7's and is never sent), so phone and tablet agree, and is read back from
+`view`'s `pref`; a refusal puts the pick back and shows the server's sentence. When the choice is not the
+default one line under the tabs says what applies: "Sorted by % change, high first, at 10:42" with
+"Sort again" (48 dp), and "Change from today's open". A sort is a snapshot (`sort.ts` ranks, `useSortOrder.ts`
+keeps the ranks): rows are ordered when the list opens (once its first prices have been read, for a price
+sort), when the owner picks a sort or basis and when he taps Sort again, never on a tick; name and exchange
+sorts show no Sort again. Rows sort inside each section, a row with no price goes last in both directions, a
+tie keeps list order, a row added since stays at the end of its group until the next snapshot, and editing
+shows the list's own order. Change from today's open is `ltp - open` from the snapshot's `open` field
+(`rowView(..., 'open')`; zero or missing is not known, never the first trade the page saw): the row shows a
+dash with "Open not known yet", the sheet says how many rows lack it, and a row without one is read once more
+at its first tick after the opening (`useLiveRows.ts`; the snapshot already reads on the market-open event).
+The list stays in LTP mode. The seam for a list longer than 250 rows is `needsFullSnapshot` in `sort.ts`
+(F9 reads one snapshot of every row there before ranking); own lists stop at 250, so it is shut. With the
+switch off the page is as it was. Tests: `sort.test.ts`, `sort.view.test.tsx`.
+
 ## W7 - sections (`store/sections.py`, `ops/sections.py`, `words/sections.py`)
 
 `section_add`, `section_edit` and `section_remove` act on own lists only (`list:<id>`): a list or a
