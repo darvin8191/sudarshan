@@ -210,19 +210,37 @@ def session_ended_elsewhere() -> bool:
     return cutoff is not None and login < cutoff
 
 
-def end_every_session(username) -> None:
+def end_every_session(username, *, keep_server_logins: bool = False) -> bool:
     """SUDARSHAN (review HIGH-2): end every session of ``username`` on every device, now.
 
     First the record every check reads, so each other device's next request (a page, a read, a
     socket's reconnect) is refused; then the rows, so Active Sessions lists none of them. For a
     logout and a password change or reset, each of which does its own broker, Socket.IO and
     cookie work as before.
+
+    Returns whether the record was written. It is tried once more, for the same moment, when the
+    first write fails (review L6); when both fail the rows are still cleared, every other device
+    stays signed in until the daily expiry, and the caller says so in its answer.
+
+    ``keep_server_logins`` (a password change or reset, review L7) keeps the auto-login's row,
+    which is no device's session: database.auth_db.clear_browser_sessions. A logout clears every
+    row, as it revokes the Upstox login anyway.
     """
-    from database.auth_db import clear_user_sessions, set_sessions_valid_after
+    from database.auth_db import (
+        clear_browser_sessions,
+        clear_user_sessions,
+        set_sessions_valid_after,
+    )
 
     now_ist = datetime.now(pytz.timezone("UTC")).astimezone(pytz.timezone("Asia/Kolkata"))
-    set_sessions_valid_after(username, now_ist)
-    clear_user_sessions(username)
+    recorded = set_sessions_valid_after(username, now_ist) or set_sessions_valid_after(
+        username, now_ist
+    )
+    if keep_server_logins:
+        clear_browser_sessions(username)
+    else:
+        clear_user_sessions(username)
+    return bool(recorded)
 
 
 def last_daily_expiry(now_ist):

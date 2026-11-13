@@ -24,8 +24,10 @@ export const authApi = {
   /**
    * Logout current user
    */
-  logout: async (): Promise<void> => {
-    await authClient.post('/auth/logout')
+  // SUDARSHAN (review L6): the answer, which says when the other devices were not signed out.
+  logout: async (): Promise<{ status?: string; message?: string } | undefined> => {
+    const response = await authClient.post('/auth/logout')
+    return response?.data
   },
 
   /**

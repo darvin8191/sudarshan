@@ -218,3 +218,103 @@ def test_the_readme_gives_the_exact_command_the_owner_types():
         "cd /opt/sudarshan/apps/openalgo && sudo -u sudarshan .venv/bin/python "
         "-m sudarshan.guard.phrase --reset"
     ) in readme
+
+
+# -- History counts every wrong phrase the same way (release review v0.8.0, L9) -------------------
+
+
+def test_an_empty_phrase_to_turn_the_kill_switch_on_is_asked_for_not_recorded(two, monkeypatch):
+    """Before: Telegram /killswitch on with no phrase wrote "A wrong confirm phrase was refused
+    when asked to turn the kill switch on", while an empty box for a settings change wrote nothing."""
+    from sudarshan.guard import flag
+
+    app, _cli = two
+    monkeypatch.setenv(flag.ENV, "on")
+    owner = killswitch.Owner("o", "telegram", "telegram:1", None, None, None)
+    for empty in ("", "   ", None):
+        answer = killswitch.activate(owner, exit_all=False, phrase=empty)
+        assert (answer.status, answer.message) == (400, words.PHRASE_WRONG)
+    assert _history(app, "phrase_refused") == []
+
+
+def test_wrong_phrases_to_turn_the_kill_switch_off_share_one_line_counted_up(two, monkeypatch):
+    """Before: each wrong phrase on resume wrote a line of its own ("Resume refused. ..."), so five
+    tries in a minute were five lines and no count, unlike turning it on or changing a limit."""
+    app, _cli = two
+    monkeypatch.setattr(killswitch.risk_gate.GATE, "state", lambda: None)
+    owner = killswitch.Owner("o", "app", "o", None, None, None)
+    for _ in range(5):
+        answer = killswitch.resume(owner, phrase="nope-text")
+        assert (answer.status, answer.message) == (400, words.PHRASE_WRONG)
+    killswitch.resume(owner, phrase="")  # an empty box is asked for again, not recorded
+
+    (row,) = _history(app, "phrase_refused")
+    assert (row.summary, row.count, row.surface) == (
+        words.phrase_refused(words.PHRASE_ASKED_KS_OFF),
+        5,
+        "app",
+    )
+    assert _history(app, "resume_refused") == []
+    assert "nope-text" not in repr(row)
+
+
+# -- a failed save never writes the phrase into the log (release review v0.8.0, L10) --------------
+
+
+def test_a_phrase_that_cannot_be_saved_is_not_written_into_the_log(two, caplog):
+    """Before: SQLAlchemy's error text carried the statement's parameters, the new phrase among
+    them, and logger.exception wrote it into log/errors.jsonl; the redaction there only knows
+    key=value shapes."""
+    from sqlalchemy import text
+
+    app, _cli = two
+    app.settings()  # the engine is made
+    with app._engine.begin() as connection:  # the disk fills up between the check and the save
+        connection.execute(text(
+            "CREATE TRIGGER no_room BEFORE UPDATE ON risk_settings "
+            "BEGIN SELECT RAISE(ABORT, 'database or disk is full'); END"
+        ))  # fmt: skip
+    caplog.set_level("DEBUG")
+
+    status, message, _saved = settings_rules.change(
+        {"confirm_phrase": TYPED}, phrase="STOP", by="owner"
+    )
+
+    assert (status, message) == (503, words.SETTINGS_NOT_SAVED)
+    assert "could not be saved" in caplog.text  # logged, with its cause
+    assert TYPED not in caplog.text
+
+
+def test_the_owner_vault_hides_statement_parameters_too(tmp_path):
+    """L10's rule for every store of the owner's secrets: the vault's sealed TOTP key and PIN
+    never reach a log through a failed statement either."""
+    from sudarshan.vault.store import Vault
+
+    vault = Vault(tmp_path / "vault.db", pepper="test-only-pepper-" + "0" * 32)
+    vault._session().close()
+    engine = vault._sessionmaker.kw["bind"]
+    try:
+        assert engine.hide_parameters is True
+    finally:
+        engine.dispose()
+
+
+def test_the_release_notes_name_the_reset_its_history_line_and_its_notice():
+    """Release review v0.8.0 M3: the S2b fixes joined v0.8.0 without a word in its notes, so a new
+    server command that resets a safety control, its History line and its Telegram notice would
+    have reached the server unnamed."""
+    from datetime import UTC, datetime
+    from pathlib import Path
+
+    changelog = (Path(__file__).resolve().parents[2] / "CHANGELOG.md").read_text()
+    stanza = " ".join(changelog.split("\n## ")[1].split())
+    assert stanza.startswith("v0.8.0")
+    assert '"The risk layer\'s confirm phrase, if it is forgotten"' in stanza
+    assert (
+        "cd /opt/sudarshan/apps/openalgo && sudo -u sudarshan .venv/bin/python "
+        "-m sudarshan.guard.phrase --reset"
+    ) in stanza
+    assert f'"{words.PHRASE_RESET_AUDIT}"' in stanza
+    notice = phrase.told_words(datetime(2026, 11, 13, 9, 0, tzinfo=UTC))
+    assert notice.replace("at 14:30.", "at (the time).") in stanza
+    assert words.phrase_refused("...").removesuffix("....") in stanza

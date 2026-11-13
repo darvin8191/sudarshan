@@ -349,7 +349,7 @@ one). The causes: `source` (a file could not be copied, or was not taken for the
 partial archive is made without it; a database that fails SQLite's check is kept, called out and
 also makes the archive partial, cause `integrity`),
 `space`, `cap`, `write` (the disk refused the archive or it did not read back whole), `offsite`
-(the offsite copy failed, or its command did; the archive is safe on the server), `offsite_soon` (not a failure: the offsite upload link expires within 14 days), `lock` (the deploy tool's lock
+(the offsite copy failed, or its command did; the archive is safe on the server), `offsite_soon` (not a failure: the offsite upload link's expiry date is 15 days away or less), `lock` (the deploy tool's lock
 cannot be opened, so an install cannot be told from none: nothing is saved until it can),
 `overdue` (a run stood aside and the newest complete archive is more than 30 hours old) and
 `settings` (a setting in `backup.env` cannot be used: the job exits with status 2 and changes
@@ -374,21 +374,24 @@ value that cannot be used is refused by name and the owner is told):
 
 **Offsite (from M18.11 part 2; does nothing until the owner has done the console steps below).**
 After each good archive the job encrypts a copy on the server and uploads it to one OCI Object
-Storage bucket (Always Free). Code: `ops/offsite.py`.
+Storage bucket of the owner's, which keeps every version (what that costs is in the table). Code:
+`ops/offsite.py`.
 
 | Choice | What and why |
 | --- | --- |
 | Encryption | `openssl cms -encrypt` to the owner's public X.509 certificate: AES-256-CBC, key wrapped with RSA-OAEP. openssl is on every Ubuntu, so nothing is installed and nothing can be "missing" but openssl itself (then the notice says so). It streams: a 300 MB archive takes about 13 MB of memory. |
-| The key | The private key is made on the owner's laptop and never reaches the server (a second copy offline). A server that is taken over can neither read the offsite copies nor delete them. |
+| The key | The private key is made on the owner's laptop and never reaches the server (a second copy offline), so a server that is taken over cannot read the offsite copies. |
+| A taken-over server | It holds the upload link, so it can still upload: new objects under any name, junk or a forged archive (the certificate is public, so a forged copy decrypts with the owner's key and passes `--verify`), and also under the name of a copy already there. With versioning on (step 2), such an upload becomes the newest version and the copy that was there stays, as a previous version, for 30 days after it was replaced (step 3). The link cannot read, list or delete anything, so it cannot remove or replace a copy already uploaded. A restore takes a version by the time Oracle shows it was uploaded, from before anything suspicious happened, and so ignores whatever was uploaded later ("Restoring from the offsite copy"). |
 | What is inside | The same archive as the local one, `.env` included. A restore needs OpenAlgo's `APP_KEY` and `API_KEY_PEPPER`: without them `openalgo.db`'s encrypted columns and the vault cannot be read, and a second secret kept elsewhere is one more thing to lose. The copy that leaves the server can only be opened with the private key. The upload link itself (`offsite.json`) is not in any archive: it is a write credential, and a restore makes a new one. |
-| Integrity | CBC does not authenticate by itself; after decrypting, `backup --verify` checks every file against the archive's SHA-256 manifest. |
+| Integrity | CBC does not authenticate by itself; after decrypting, `backup --verify` checks every file against the archive's SHA-256 manifest. That catches a damaged file, not a forged one: whoever holds the upload link can make an archive whose manifest matches. The upload time Oracle shows is what tells your copies from one uploaded later. |
 | Upload | One `PUT` to a write-only pre-authenticated request (PAR) address for one bucket. The server holds no OCI credential. The address is in `/etc/sudarshan/offsite.json` only, never in a log, a notice, `status.json`, a process argument or an archive. |
-| The file | `/etc/sudarshan/offsite.json`, mode 600, owner `sudarshan` (not root: the job runs as `sudarshan`, because the unit policy refuses root units, so a root-only file could not be read by it; no group or other can). It holds `par_url`, `expires` (`YYYY-MM-DD`) and `certificate` (public, PEM). A private key in it is refused. |
+| The file | `/etc/sudarshan/offsite.json`, mode 600, owner `sudarshan` (not root: the job runs as `sudarshan`, because the unit policy refuses root units, so a root-only file could not be read by it; no group or other can). It holds `par_url`, `expires` (`YYYY-MM-DD`) and `certificate` (public, PEM). A private key in it is refused. The set-up (step 9) has root make it empty with `install`, a standard system tool, and then `sudarshan` writes the settings into it in place, never replacing it or changing its owner or mode. Root never runs Python from the app folder for this: `sudarshan`, and anything that runs as it, can change what is there. A file that is there but cannot be used (another owner, a link, a folder, settings that cannot be read) is told as a failure, never taken for "not set up". |
 | Names | `sudarshan-backup-YYYYMMDD-HHMMSS-<release>.tar.gz.cms`: the date and the release, no host name. |
-| Retention | An OCI lifecycle rule the owner sets (for example 30 days). The job never deletes an object, and a write-only link could not. |
-| Expiry | A PAR stops working on its date. From 14 days before it, the owner is told once a day on Telegram (cause `offsite_soon`) and the copies still go. After the date nothing is tried and the owner is told why (cause `offsite`, "the access link ... has expired"). The date is the last day it works. |
-| Failure | One notice: "Tonight's offsite backup did not upload: <reason>. The local backup is fine." The reasons are in words (no encryption tool, could not reach Oracle's storage, storage refused the file, storage busy, link expired, settings unusable). A busy or unreachable bucket is tried 3 times, 30 seconds apart; the local archive is never touched, and the next night uploads the next archive (the missed night's archive stays on the server for the local retention). Success is one journal line. |
-| Not set up | Without the file the step is off: one journal line a day says so, and the local backup is unaffected. `--check` prints `offsite: not set`. |
+| Retention | Two OCI lifecycle rules the owner sets (step 3): the newest version of a copy becomes a previous version after 30 days, and a previous version is deleted 30 days after it stopped being the newest, so a copy is kept about 60 days in all. The job never deletes an object, and the upload link could not. |
+| What it costs | About 60 nights of copies are stored at a time (above). Oracle's Always Free allowance is 20 GB of Object Storage. On a Pay As You Go account that is an allowance, not a cap: storage past it is billed, and so is whatever someone holding the upload link uploads. Set a budget alert at a small amount (console: Billing, Budgets), look at the bucket's size after the first weeks, and shorten both rules of step 3 if about 60 nights of copies would pass 20 GB. |
+| Expiry | The date in the file is the expiry date the console shows for the link. The console gives it a time of day, so the link may stop at any time on that date: the job takes that date as the first day the link is not used, and the last copy goes the day before. From 15 days before the date, the owner is told once a day on Telegram (cause `offsite_soon`) and the copies still go. From the date on, nothing is tried and the owner is told why (cause `offsite`, "the upload link has reached its expiry date"). |
+| Failure | One notice: "Tonight's offsite backup did not upload: <reason>. The local backup is fine." The reasons are in words, with the next step where there is one: no encryption tool; could not reach Oracle's storage; storage refused the file (if the upload link is no longer listed in the bucket, make a new one with steps 4, 5 and 9); storage busy; the link has reached its expiry date (steps 4, 5 and 9); settings unusable or the backup could not be encrypted (run step 9 again). An answer the storage gives before it has read the whole file counts as what it says, so a link that is gone is told as a refusal and tried once. A busy or unreachable bucket is tried 3 times, 30 seconds apart; the local archive is never touched, and the next night uploads the next archive (the missed night's archive stays on the server for the local retention). Success is one journal line. |
+| Not set up | Without the file, or with the empty file the set-up makes before the settings are typed in, the step is off: one journal line a day says so, and the local backup is unaffected. `--check` prints `offsite: not set`. |
 
 `SUDARSHAN_BACKUP_OFFSITE_CMD` (the older hook below) still works for anyone who prefers their own
 tool; when it is set it is used instead of the built-in upload, not as well as it. It is a command
@@ -400,47 +403,141 @@ folder, under the same shared deploy lock as the copy; its output goes to `offsi
 
 ### Setting up the offsite copy: the owner's steps
 
-There is no console `.bat` helper in this repository (the one the owner uses for keys lives on his
-laptop). Step 9 is the smallest safe way: the PAR address is typed into a hidden prompt on the
-server over SSH, so it never appears on a screen, in a file on the laptop or in the shell history.
+You need the OCI console in a browser, PowerShell on the laptop with Git for Windows (it brings
+openssl) or OpenSSL for Windows, and the SSH login you already use for the server. Step 9 is one
+`.bat` file that does the server's part: it sends only the public certificate, shows its
+fingerprint on the laptop and again on the server, saves nothing until you type `yes`, and asks
+for the upload link (the PAR address) in a hidden prompt on the server, so the link never appears
+on a screen, in a file on the laptop or in the shell history. On the server, root only makes the
+empty settings file, with `install`; the settings are written by `sudarshan`, the job's own user.
 
-1. In the OCI console, open Storage, then Object Storage, in the region the server uses.
-2. Choose Create Bucket. Any name, Standard tier, Private. Leave versioning off.
-3. Open the bucket, then Lifecycle Policy Rules, then Create Rule: action Delete, object age 30
-   days (or what you like), all objects, enabled. This is the only thing that ever deletes.
-4. Open Pre-Authenticated Requests, then Create: type Bucket, access "Permit object writes" (not
-   reads, not listing), and an expiry date. Pick the furthest date the console allows.
-5. Copy the PAR address the console shows, into a password manager, and write the expiry date
-   beside it. The console shows the address once.
+1. In the OCI console, open Storage, then Object Storage (Buckets), in the region the server uses.
+2. Choose Create Bucket: any name, Standard tier, Private, and tick **Enable object versioning**.
+   Versioning is what keeps the copies safe if the server is ever taken over: an upload under a
+   name already in the bucket then becomes a new version and the copy that was there stays, so
+   whoever holds the upload link cannot replace or remove a copy already uploaded. Open the
+   bucket: under Features, Object versioning must read Enabled. (For a bucket made earlier,
+   choose Enable there, then Enable versioning.)
+3. In the bucket, open Policies, then Lifecycle policy rules, and make two rules with Create rule.
+   Each has Lifecycle action Delete, Number of days 30 (or what you like, the same in both), and
+   the State switch on:
+   - Target **Latest version of objects**: after 30 days the newest version of a copy becomes a
+     previous version;
+   - Target **Previous versions of objects**: a previous version is deleted 30 days after it
+     stopped being the newest.
+
+   These two rules are the only thing that ever deletes. A copy is kept about 60 days in all, and
+   a copy that a later upload under its name replaced is kept 30 days after that upload. Then set
+   a budget alert in the console (Billing, Budgets) at a small amount: see "What it costs" above.
+4. In the bucket, open Management, then Pre-authenticated requests, and choose Create
+   pre-authenticated request: target Bucket, access type **Permit object writes** (not reads; leave
+   Enable object listing off), and an expiration date. Pick the furthest date the console allows.
+5. Copy the address the console shows (the pre-authenticated request URL) into your password
+   manager, and write the expiration date beside it as year-month-day, for example 2027-11-12.
+   The console shows the address only once.
 6. On the laptop, open PowerShell and make a folder for the key: `mkdir $HOME\sudarshan-backup-key`
    then `cd $HOME\sudarshan-backup-key`.
-7. Make the key pair (Git for Windows ships openssl; or `winget install ShiningLight.OpenSSL.Light`):
+7. Make the key pair. Git for Windows ships openssl at `C:\Program Files\Git\usr\bin\openssl.exe`;
+   OpenSSL for Windows (`winget install ShiningLight.OpenSSL.Light`) puts it at
+   `C:\Program Files\OpenSSL-Win64\bin\openssl.exe`, and then that path goes in the line below
+   (and in the restore steps) instead:
    `& "C:\Program Files\Git\usr\bin\openssl.exe" req -x509 -newkey rsa:4096 -keyout sudarshan-backup.key -out sudarshan-backup.crt -days 36500 -subj "/CN=sudarshan-backup"`
-   It asks for a passphrase twice: choose one and keep it with the key.
+   It asks for a passphrase twice. Choose one and keep it in your password manager, not with the
+   key: a passphrase kept beside the key protects nothing if the USB stick is lost.
 8. Copy `sudarshan-backup.key` to a second place that is not the server and not this laptop (a
    USB stick kept offline). Without the key no backup in the bucket can ever be opened. Never copy
    it to the server.
-9. Save this as `sudarshan-offsite.bat` next to the files (change `USER@SERVER` to the login you
-   already use), and double-click it. It asks for the expiry date, then the PAR address (hidden):
+9. In the same folder, save the lines below as `sudarshan-offsite.bat` (in Notepad: Save as, then
+   Save as type "All files"). Change `USER@SERVER` in its fourth line to the login you already use
+   for the server, then double-click the file:
 
    ```bat
    @echo off
-   scp sudarshan-backup.crt USER@SERVER:/tmp/sudarshan-backup.crt
-   ssh -t USER@SERVER "cd /opt/sudarshan/apps/openalgo && sudo .venv/bin/python -m sudarshan.ops.offsite --configure /tmp/sudarshan-backup.crt && rm /tmp/sudarshan-backup.crt"
+   setlocal
+   cd /d "%~dp0"
+   set "SERVER=USER@SERVER"
+   set "OPENSSL=C:\Program Files\Git\usr\bin\openssl.exe"
+   if not exist "%OPENSSL%" set "OPENSSL=C:\Program Files\OpenSSL-Win64\bin\openssl.exe"
+   if not exist "%OPENSSL%" (
+     echo openssl was not found. Install Git for Windows, or OpenSSL as step 7 says. Nothing was changed.
+     goto stop
+   )
+   if not exist sudarshan-backup.crt (
+     echo sudarshan-backup.crt is not in this folder. Save this file next to it. Nothing was changed.
+     goto stop
+   )
+   echo The certificate on this laptop:
+   "%OPENSSL%" x509 -noout -fingerprint -sha256 -in sudarshan-backup.crt
+   if errorlevel 1 (
+     echo sudarshan-backup.crt is not a certificate. Make the key pair again, step 7. Nothing was changed.
+     goto stop
+   )
+   scp sudarshan-backup.crt %SERVER%:sudarshan-backup.crt
+   if errorlevel 1 (
+     echo The certificate was not copied to the server. Nothing was changed.
+     goto stop
+   )
+   ssh -t %SERVER% "cd /opt/sudarshan/apps/openalgo && { sudo test -e /etc/sudarshan/offsite.json || sudo install -o sudarshan -g sudarshan -m 600 /dev/null /etc/sudarshan/offsite.json; } && sudo -u sudarshan .venv/bin/python -m sudarshan.ops.offsite --configure < ~/sudarshan-backup.crt; code=$?; rm -f ~/sudarshan-backup.crt; exit $code"
+   if errorlevel 1 (
+     echo The set-up did not finish: read the lines above, fix what they name and run this file again.
+     goto stop
+   )
    pause
+   exit /b 0
+   :stop
+   pause
+   exit /b 1
    ```
+
+   It stops at the first step that fails and says so. The certificate goes to your home folder on
+   the server, is read from there by your own login, and is removed at the end, whatever happened.
+   What you should see, in this order:
+   - `The certificate on this laptop:` and a line that starts `sha256 Fingerprint=`, then 32 pairs
+     of letters and digits such as `4D:E1:53:...`.
+   - scp and ssh may first ask for your SSH password or key passphrase, as when you log in; then
+     `[sudo] password for ...:` from the server: your own password there, typed once.
+   - `The certificate the server received has this SHA-256 fingerprint:` and 32 pairs, then
+     `Type yes if the two are the same, or press Enter to stop:`. The pairs must be the same as
+     the laptop's line. If they are, type `yes` and press Enter. If they are not, press Enter:
+     nothing is saved. Then do not go on, and have the server looked at, because the file was
+     changed on its way.
+   - `Expiry date of the upload link, as the console shows it (YYYY-MM-DD):` type the date you
+     wrote down in step 5, for example `2027-11-12`.
+   - `Upload link (nothing shows as you paste or type it; press Enter after it):` paste the address
+     from step 5 (a right-click pastes in this window) and press Enter. Nothing shows as you paste;
+     that is how it should be.
+   - `Saved.`, the command for step 10, then `Press any key to continue . . .`.
+
+   A line that starts with `Not saved:` says why and what to do, and nothing was changed: fix what
+   it names and double-click the file again.
 10. On the server, check it as the job's own user: `cd /opt/sudarshan/apps/openalgo && sudo -u
     sudarshan .venv/bin/python -m sudarshan.ops.backup --check`. The last line should say
-    `offsite: set (the link works N more days)`.
-11. The next night's backup uploads one object. Look for it in the bucket the next morning.
-12. Before the PAR expires, the owner is told on Telegram 14 days ahead: repeat steps 4, 5 and 9 (the
-    certificate stays the same).
+    `offsite: set (the link stops working in N days, on <the date you typed>)`. If it says
+    `not set`, step 9 did not save: double-click the `.bat` again and read its last lines.
+11. The next night's backup uploads one object. Look for it in the bucket the next morning
+    (Objects: one `sudarshan-backup-...-v0.8.0.tar.gz.cms`), and check that Object versioning
+    still reads Enabled.
+12. From 15 days before the link's expiry date you are told on Telegram, every day until it is
+    renewed: repeat steps 4, 5 and 9 (the certificate stays the same, and the `.bat` writes the
+    new link over the old one). Then delete the old link in the console (Management,
+    Pre-authenticated requests): until its date, anyone who copied it could still upload with it.
 
 ### Restoring from the offsite copy
 
-1. In the console, open the bucket and download the object for the day wanted
-   (`...-v0.7.0.tar.gz.cms`).
-2. On the laptop, decrypt it with the private key (it asks for the passphrase):
+1. In the console, open the bucket, then Objects. Each copy's name carries its date and release
+   (`sudarshan-backup-YYYYMMDD-HHMMSS-v0.8.0.tar.gz.cms`), but a name proves nothing: whoever
+   holds the upload link can upload under any name. Pick the copy by the time Oracle shows it was
+   uploaded (Oracle's clock, not the name and not the server's):
+   - If the server may have been taken over, or anything about it looks wrong, first delete the
+     upload link (Management, Pre-authenticated requests, then Delete from its menu), so nothing
+     more can be uploaded. Then, from the copy's Actions menu (the three dots), choose View
+     versions: the newest version is at the top. Download a version uploaded before anything
+     suspicious happened. A copy uploaded after that may have been made by whoever had the upload
+     link, even if it decrypts and passes `--verify`. A copy that an upload replaced stays there
+     30 days after that upload (step 3), so do this within that time.
+   - Otherwise, download the copy for the day wanted.
+2. On the laptop, decrypt it with the private key (it asks for the passphrase). Decrypting needs
+   free memory of about three times the file's size:
    `& "C:\Program Files\Git\usr\bin\openssl.exe" cms -decrypt -inform DER -in <the .cms file> -inkey sudarshan-backup.key -recip sudarshan-backup.crt -out sudarshan-backup-restore.tar.gz`
 3. Copy the `.tar.gz` to the server into a private folder (mode 700), and `--verify` it there
    (`python -m sudarshan.ops.backup --verify FILE`).
@@ -535,6 +632,40 @@ cd /opt/sudarshan/apps/openalgo && sudo -u sudarshan .venv/bin/python -m sudarsh
 - Change it again afterwards from Settings > Risk. A phrase that is already the default is left
   alone: the command says so and writes and sends nothing.
 - Every wrong phrase is in History as well (turning the kill switch on or off, changing a limit),
-  with what was being asked and how many tries, never with what was typed.
+  with what was being asked and how many tries, never with what was typed: tries in a row within
+  a minute, from one place (the app or Telegram), share one line, counted up. A box left empty
+  is asked for again and not recorded.
 
 Tests: `sudarshan/guard/tests/test_guard_phrase.py`.
+
+## Signing out every device, and a lost phone (M2.3)
+
+A logout, a password change or a password reset on one device signs every device out at its next
+page, read or reconnect, a phone that was asleep at the time included (v0.8.0). The server keeps
+that moment (`session_cutoffs`) and refuses a session that logged in before it. A second device's
+login never signs the first one out.
+
+What they do not change:
+
+- **The API key.** TradingView, Amibroker and the strategy host place orders with it, and those
+  orders go out from the server's own registered address, so the static IP rule does not stop
+  them. A logout or a password change leaves the key working, and every signed-in screen could
+  read it. The app keeps a copy in the browser and removes it as soon as a screen learns that its
+  session has ended (a logout, a read the server refuses, a live connection refused after a
+  logout elsewhere).
+- **The Upstox login**, on a password change or a reset: orders keep working. A logout ends it,
+  as it always has.
+
+If a phone is lost, or a session may have been copied:
+
+1. On another device, change your password: Profile, Account, Change Password. Every device is
+   signed out; log in again with the new password.
+2. Open API Key in the profile menu, choose Regenerate and confirm, then Copy the new key.
+3. Put the new key into every TradingView alert (and into Amibroker and your strategies, if you
+   use them). From now on an alert that still carries the old key is refused.
+
+If the answer to a logout, a password change or a reset says that your other devices could not be
+signed out, the server could not record the time: log in and log out once more.
+
+Tests: `sudarshan/alerts/tests/test_sessions_valid_after.py`, `test/test_gthread_sessions_valid_after.py`
+and `frontend/src/sudarshan/signout.test.tsx`.

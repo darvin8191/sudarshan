@@ -46,6 +46,22 @@ from utils.session import (
 # Initialize logger
 logger = get_logger(__name__)
 
+#: SUDARSHAN (review L6): the answers when the logout time could not be recorded (end_every_session
+#: returned False after its second try): this device is signed out, every other device stays
+#: signed in until 03:00, and the next logout records it.
+_OTHERS_STILL_IN = "but your other devices could not be signed out."
+LOGOUT_NOT_EVERYWHERE = (
+    f"You are logged out here, {_OTHERS_STILL_IN} Log in and log out once more to sign them out."
+)
+CHANGE_NOT_EVERYWHERE = (
+    f"Your password was changed, {_OTHERS_STILL_IN} Log in with the new password and log out "
+    "once to sign them out."
+)
+RESET_NOT_EVERYWHERE = (
+    f"Your password was reset, {_OTHERS_STILL_IN} Log in with the new password and log out "
+    "once to sign them out."
+)
+
 # Access environment variables
 LOGIN_RATE_LIMIT_MIN = os.getenv("LOGIN_RATE_LIMIT_MIN", "5 per minute")
 LOGIN_RATE_LIMIT_HOUR = os.getenv("LOGIN_RATE_LIMIT_HOUR", "25 per hour")
@@ -729,8 +745,9 @@ def reset_password():
             # operator (or attacker) chose the reset path because they
             # could prove control of the email/TOTP, not because every
             # logged-in browser is theirs. Force re-login everywhere.
-            # SUDARSHAN (review HIGH-2): every device's cookie too, not only the rows.
-            end_every_session(user.username)
+            # SUDARSHAN (review HIGH-2): every device's cookie too, not only the rows; the
+            # auto-login's row stays (review L7) and a failed write is said (review L6).
+            ended = end_every_session(user.username, keep_server_logins=True)
             socketio.emit("force_logout", {
                 "message": "Your password was reset. Please log in again with the new password.",
             })
@@ -747,6 +764,8 @@ def reset_password():
             session.pop("reset_method", None)
             session.pop("email_reset_token", None)
 
+            if not ended:  # SUDARSHAN: review L6
+                return jsonify({"status": "error", "message": RESET_NOT_EVERYWHERE})
             return jsonify(
                 {"status": "success", "message": "Your password has been reset successfully."}
             )
@@ -839,8 +858,9 @@ def change_password():
             # devices — including the current one — and let the user log
             # in again with the new password. This prevents an attacker
             # who already has a valid cookie from continuing to hold it.
-            # SUDARSHAN (review HIGH-2): every device's cookie too, not only the rows.
-            end_every_session(username)
+            # SUDARSHAN (review HIGH-2): every device's cookie too, not only the rows; the
+            # auto-login's row stays (review L7) and a failed write is said (review L6).
+            ended = end_every_session(username, keep_server_logins=True)
             socketio.emit("force_logout", {
                 "message": "Your password was changed. Please log in again with the new password.",
             })
@@ -852,6 +872,8 @@ def change_password():
                 logger.exception("Could not close the owner's alerts room")
             session.clear()
 
+            if not ended:  # SUDARSHAN: review L6
+                return jsonify({"status": "error", "message": CHANGE_NOT_EVERYWHERE})
             return jsonify(
                 {"status": "success", "message": "Your password has been changed successfully."}
             )
@@ -1325,6 +1347,7 @@ def logout():
 
     was_logged_in = bool(session.get("logged_in"))
     username = session.get("user")
+    ended_everywhere = True  # SUDARSHAN: review L6, set by end_every_session below
 
     # Wipe the browser session before teardown so a revocation or notification
     # failure cannot leave the user stuck in a half-logged-in state.
@@ -1358,8 +1381,9 @@ def logout():
 
         # Clear ALL sessions for this user (logout means all devices). SUDARSHAN (review
         # HIGH-2): every device's cookie as well as the rows, before the sockets close below,
-        # so each reconnect and each device's next request is refused.
-        end_every_session(username)
+        # so each reconnect and each device's next request is refused; a failed write of the
+        # logout time is said in the answer (review L6).
+        ended_everywhere = end_every_session(username)
 
         # Notify all connected devices to logout immediately
         socketio.emit("force_logout", {
@@ -1383,6 +1407,8 @@ def logout():
 
     # For POST requests (AJAX from React), return JSON
     if request.method == "POST":
+        if was_logged_in and username and not ended_everywhere:  # SUDARSHAN: review L6
+            return jsonify({"status": "error", "message": LOGOUT_NOT_EVERYWHERE})
         return jsonify({"status": "success", "message": "Logged out successfully"})
 
     # For GET requests (traditional), redirect to login page
@@ -1493,8 +1519,9 @@ def change_password_api():
         # for this account, including the current browser. The user logs in
         # again with the new password — typical 5-second flow — and any
         # attacker holding a stolen cookie is kicked out at the same moment.
-        # SUDARSHAN (review HIGH-2): every device's cookie too, not only the rows.
-        end_every_session(username)
+        # SUDARSHAN (review HIGH-2): every device's cookie too, not only the rows; the
+        # auto-login's row stays (review L7) and a failed write is said (review L6).
+        ended = end_every_session(username, keep_server_logins=True)
         socketio.emit("force_logout", {
             "message": "Your password was changed. Please log in again with the new password.",
         })
@@ -1506,6 +1533,8 @@ def change_password_api():
             logger.exception("Could not close the owner's alerts room")
         session.clear()
 
+        if not ended:  # SUDARSHAN: review L6
+            return jsonify({"status": "error", "message": CHANGE_NOT_EVERYWHERE})
         return jsonify({"status": "success", "message": "Password changed successfully"})
     except Exception as e:
         logger.exception(f"Error changing password: {e}")

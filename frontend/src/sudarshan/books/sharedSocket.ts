@@ -1,4 +1,5 @@
 import type { Socket } from 'socket.io-client'
+import { forgetApiKey } from '@/sudarshan/signout'
 import { claimTrip } from '@/sudarshan/trips'
 
 /**
@@ -205,8 +206,12 @@ function keepConnected(socket: Socket): () => void {
     }
     void withinTimeLimit(handlers.askSession()).then((state) => {
       if (stopped || socket.connected) return
-      if (state !== 'ended') retryLater()
-      else if (claimTrip('login')) handlers.toLogin()
+      if (state !== 'ended') {
+        retryLater()
+        return
+      }
+      forgetApiKey() // SUDARSHAN (review M2): the session has ended, so its API key goes too
+      if (claimTrip('login')) handlers.toLogin()
       else setSignInNeeded(true) // it went less than a minute ago: the line asks instead
     })
   }

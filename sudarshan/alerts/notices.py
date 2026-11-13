@@ -107,16 +107,24 @@ _BECAUSE = {
 }
 
 
-#: Why an offsite upload failed (ops/offsite.py REASONS), in the owner's words.
+#: Where the README's offsite set-up makes a new upload link (steps 4, 5 and 9) and where it saves
+#: the settings (step 9). sudarshan/ops/tests/test_ops_docs.py holds the steps to these numbers.
+NEW_LINK_STEPS = "(offsite set-up steps 4, 5 and 9 in the README)"
+SET_UP_AGAIN = "Run the offsite set-up again (step 9 in the README)"
+#: Why an offsite upload failed (ops/offsite.py REASONS), in the owner's words, with the next step
+#: where the owner has one (review L4). Each ends without a full stop; the sentence adds it.
 _OFFSITE_REASON = {
     "openssl": "the server has no encryption tool installed",
-    "encrypt": "the backup could not be encrypted",
+    "encrypt": f"the backup could not be encrypted. {SET_UP_AGAIN}",
     "space": "the server's disk is too full to prepare the copy",
     "network": "the server could not reach Oracle's storage",
-    "refused": "Oracle's storage refused the file, so the access link may have been removed",
+    "refused": (
+        "Oracle's storage refused the file. If the upload link is no longer listed in the bucket, "
+        f"make a new one {NEW_LINK_STEPS}"
+    ),
     "busy": "Oracle's storage was not accepting files",
-    "expired": "the access link for the bucket has expired; make a new one (steps are in the README)",
-    "config": "the offsite settings on the server cannot be used",
+    "expired": f"the upload link has reached its expiry date. Make a new one {NEW_LINK_STEPS}",
+    "config": f"the offsite settings on the server cannot be used. {SET_UP_AGAIN}",
 }
 _ISO_DATE = re.compile(r"(20[0-9]{2})-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])")
 
@@ -235,10 +243,10 @@ def _backup_failed(event: Event) -> list[str]:
         days, when = event.fact("days"), _date(event.fact("date"))
         if not (_HOURS.fullmatch(days) and when):
             return []
-        left = "today" if days == "0" else f"in {days} day{'s' if days != '1' else ''}"
+        left = {"0": "today", "1": "tomorrow"}.get(days, f"in {days} days")
         return [
-            f"The access link for the offsite backup expires {left}, on {when}. Make a new one "
-            "before then (steps are in the README), or the offsite copies will stop."
+            f"The upload link for the offsite backup expires {left}, on {when}. Make a new one "
+            f"before then {NEW_LINK_STEPS}, or the offsite copies will stop."
         ]
     elif why == "settings":
         return [

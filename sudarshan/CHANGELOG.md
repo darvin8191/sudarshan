@@ -18,26 +18,50 @@ feed and API-key calls work as before.
   device signs every other device out at its next page, read or reconnect, a phone that was asleep
   at the time included. Before, the other devices stayed signed in until 03:00.
 - **A second device's login never signs the first one out** and never touches the price feed, as
-  before. TradingView, Amibroker and the strategy host use the API key and are not affected.
+  before. TradingView, Amibroker and the strategy host place orders with the API key, and none of
+  this changes it: a logout or a password change does not change the API key (after a lost phone,
+  see What you must do).
+- **The app forgets the API key at every sign-out.** The copy the app keeps in the browser is
+  removed as soon as a screen learns that its session has ended (a logout, a read the server
+  refuses, a live connection refused after a logout elsewhere), before it goes to the login page.
+  Before, it stayed until the next page load.
+- **A logout that could not sign the other devices out says so.** If the server could not record
+  the time, a logout, a password change or a reset tells you, instead of "Logged out
+  successfully"; log in and log out once more. A password change or reset also keeps the
+  auto-login's entry in Active Sessions, so an old session's next page no longer ends the Upstox
+  login the change kept.
 - **Old rows leave Active Sessions.** Rows of sessions the 03:00 expiry had already ended (the two
   October rows) go at the next login, or when the Security screen opens.
 - **An offsite copy of the nightly backup, off until you set it up.** After each good backup the
   server encrypts a copy to your own certificate and uploads it to one Oracle Object Storage bucket
-  (Always Free). The private key stays on your laptop and on one offline copy: a server that is
-  taken over can neither read the copies nor delete them. Your bucket's lifecycle rule (for example
-  30 days) is the only thing that deletes.
+  of yours, which keeps every version. The private key stays on your laptop and on one offline
+  copy, so a server that is taken over cannot read the copies. It can still upload new ones, junk
+  or forged, even under the name of a copy already there: the bucket then keeps the earlier copy
+  as a previous version, and a restore takes a copy by the time Oracle shows it was uploaded, from
+  before anything suspicious happened, so it ignores them. Your bucket's two lifecycle rules (30
+  days, then 30 more for a copy that is no longer the newest) are the only thing that deletes.
+- **What the bucket costs.** It holds about 60 nights of copies. Oracle's Always Free allowance is
+  20 GB; on a Pay As You Go account storage past it is billed, so set a budget alert and look at
+  the bucket's size after the first weeks (README, "What it costs").
 - **Told on Telegram when it matters:** "Tonight's offsite backup did not upload: (the reason). The
   local backup is fine." once a day per cause, after three tries for a busy or unreachable bucket;
-  and a reminder every day from 14 days before the upload link expires. A good night is one journal
-  line, no message.
+  and a reminder every day from 15 days before the upload link's expiry date. That date is the
+  one the console shows, and the last copy goes the day before it, because the console's expiry
+  has a time of day. A refusal names the next step (a new upload link, or the set-up again). A
+  good night is one journal line, no message.
 - **The Risk page, from the sandbox test of the daily loss lock:**
   - every box that asks for the confirm phrase now says "Type your confirm phrase. It is STOP unless
     you changed it.", with its own reason beside it;
   - a forgotten phrase can be set back to STOP on the server (the command is in `sudarshan/README.md`,
-    "The risk layer's confirm phrase, if it is forgotten"). It writes a History line, tells you on
-    Telegram and works at the next try, with no restart. The phrase card says so;
+    "The risk layer's confirm phrase, if it is forgotten", and under What you must do). It works at
+    the next try, with no restart, and the phrase card says so. Every reset writes the History line
+    "The confirm phrase was set back to the default on the server." and tells you on Telegram: "The
+    confirm phrase was set back to the default on the server at (the time). If this was not you,
+    change it in Settings > Risk and check who can reach the server.";
   - a wrong phrase is now written in History, from the app or Telegram, for a settings change and
-    for turning the kill switch on: what was asked and how many tries in a row, never what was typed;
+    for turning the kill switch on or off: "A wrong confirm phrase was refused when asked to ..."
+    with what was asked and how many tries in a row (one line, counted up), never what was typed;
+    a box left empty is asked for again, not recorded;
   - after saving a daily limit at or below the day's loss, the warning "saving locks new orders until
     tomorrow" no longer stays on the card; the day card's chip says the rest;
   - in Analyze mode a refused order's message reads "NIFTY17NOV2825200CE: Daily loss limit reached:
@@ -45,22 +69,40 @@ feed and API-key calls work as before.
 
 ### What you must do
 - Nothing when you publish. The install adds one small table for the logout time.
+- **If a phone is lost, or you change your password because a session may have been copied:**
+  also open API Key in the profile menu, choose Regenerate, and put the new key into your
+  TradingView alerts (and Amibroker and your strategies, if you use them). A logout or a password
+  change does not change the API key, every signed-in screen could read it, and orders sent with
+  it go out from the server's own address. Alerts that still carry the old key are refused from
+  then on. The steps are in `sudarshan/README.md`, "Signing out every device, and a lost phone".
+- **If you forget the confirm phrase:** on the server, run
+  `cd /opt/sudarshan/apps/openalgo && sudo -u sudarshan .venv/bin/python -m sudarshan.guard.phrase --reset`,
+  then set a new phrase in Settings > Risk. History and Telegram show every reset. A reset you did
+  not make means someone can run commands on the server: change the phrase and have the server
+  looked at.
 - Once after the install, after the close: put the phone to sleep, log out on the laptop, then wake
   the phone. It should show the login page. Log in again on both (a logout also ends the Upstox
   login, as it always has). The two October rows should be gone from Active Sessions.
 - When you want the offsite copy: the 12 steps in `sudarshan/README.md`, "Setting up the offsite
-  copy" (the Oracle console, a key pair made on the laptop, one `.bat` that sends only the public
-  certificate and asks for the upload link in a hidden prompt). The next morning, look for one file
-  in the bucket.
+  copy": the Oracle console (a bucket with versioning on, two lifecycle rules, a budget alert), a
+  key pair made on the laptop, and one `.bat`. The `.bat` sends only the public certificate, shows
+  its fingerprint on the laptop and again on the server, and saves nothing until you type yes; then
+  it asks for the link's expiry date and, in a hidden prompt, the upload link. On the server, root
+  only makes the empty settings file; the settings are written by the job's own user, and no
+  program from the app folder runs as root. The next morning, look for one file in the bucket.
 
 ### What is refused now that used to be accepted
 - A device signed in before a logout, a password change or a password reset elsewhere is sent to the
   login page at its next page, read or reconnect.
-- The offsite settings refuse a private key: only the public certificate goes to the server.
+- The offsite set-up refuses a private key (only the public certificate goes to the server), a
+  certificate the nightly encryption cannot use, a run as root, and a settings file it did not
+  make; each says what to do instead.
 
 ### Not in this release yet
 - **The offsite copy has not met a real bucket yet**: the first night after your console steps is
-  its first run, and one trial restore into a scratch folder is still to be done.
+  its first run, and one trial restore into a scratch folder is still to be done. The versioning
+  and lifecycle steps follow Oracle's documentation; when you look for the first copy, check that
+  the bucket's Object versioning reads Enabled.
 - **The logout check on the phone** above is the first check of that change on the real server.
 - The open points listed under v0.7.0 remain.
 

@@ -4,6 +4,7 @@ import { Link } from 'react-router'
 import { fetchCSRFToken } from '@/api/client'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
+import { useAuthStore } from '@/stores/authStore'
 import { showToast } from '@/utils/toast'
 
 export default function ServerError() {
@@ -23,12 +24,14 @@ export default function ServerError() {
       })
 
       if (response.ok) {
+        useAuthStore.getState().logout() // SUDARSHAN (review M2): the stored API key goes too
         window.location.href = '/login'
       } else {
         showToast.error('Failed to logout. Please try again.')
       }
     } catch {
       // If logout fails, redirect to login anyway
+      useAuthStore.getState().logout() // SUDARSHAN (review M2)
       window.location.href = '/login'
     } finally {
       setIsLoggingOut(false)

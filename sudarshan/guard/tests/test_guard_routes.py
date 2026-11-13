@@ -200,9 +200,11 @@ def test_resume_needs_the_phrase_and_the_minute(world):
     assert store.state().on
     refused = [row for row in store.history() if row.kind == "resume_refused"]
     assert [row.summary for row in refused] == [
-        words.ks_resume_refused(words.PHRASE_WRONG),
         words.ks_resume_refused(early.get_json()["message"]),
     ]
+    # a wrong phrase is a line of its own kind, as on turning it on (release review v0.8.0, L9)
+    (phrase,) = [row for row in store.history() if row.kind == "phrase_refused"]
+    assert phrase.summary == words.phrase_refused(words.PHRASE_ASKED_KS_OFF)
 
     held = store.state()
     gate.GATE.set_state(KillSwitchState(**{

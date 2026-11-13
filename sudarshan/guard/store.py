@@ -210,7 +210,9 @@ class RiskStore:
     def _prepare(self):
         path = self.path
         path.parent.mkdir(parents=True, exist_ok=True)
-        engine = create_db_engine(f"sqlite:///{path}")
+        # The confirm phrase is a value here: a failed statement's error text must not carry it
+        # into log/errors.jsonl (release review v0.8.0, L10).
+        engine = create_db_engine(f"sqlite:///{path}", hide_parameters=True)
         try:
             create_missing(engine)  # safe beside another first use (a thread, a process)
             factory = sessionmaker(bind=engine, expire_on_commit=False)
