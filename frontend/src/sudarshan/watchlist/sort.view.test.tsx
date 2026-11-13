@@ -256,7 +256,7 @@ describe('change from today\u2019s open', () => {
 })
 
 describe('the View sheet and the saved preference', () => {
-  it('sends the pick with pref, for its own list, and nothing of F7\u2019s', async () => {
+  it('sends the pick with pref, for its own list, with the holdings switch as it was saved', async () => {
     const user = userEvent.setup()
     setFeed(rowsOf([101, 110, 105, 103, 108]))
     await mount(pref())
@@ -273,6 +273,7 @@ describe('the View sheet and the saved preference', () => {
       sort: 'change',
       descending: true,
       basis: 'close',
+      held: false,
     })
     await user.click(within(sheet).getByRole('button', { name: 'Low first' }))
     await user.click(within(sheet).getByRole('button', { name: 'Today\u2019s open' }))
@@ -286,6 +287,7 @@ describe('the View sheet and the saved preference', () => {
       sort: 'change',
       descending: false,
       basis: 'open',
+      held: false,
     })
   })
 

@@ -48,3 +48,15 @@ def test_transform_holdings_handles_zero_average_price():
     assert out[0]["average_price"] == 0.0
     assert out[0]["ltp"] == 50.0
     assert out[0]["pnlpercent"] == 0.0
+
+
+def test_transform_holdings_passes_the_isin_only_when_there_is_one():
+    out = transform_holdings_data(
+        [
+            {"tradingsymbol": "A", "exchange": "BSE", "quantity": 1, "isin": "INE002A01018"},
+            {"tradingsymbol": "B", "exchange": "NSE", "quantity": 1},
+        ]
+    )
+
+    assert out[0]["isin"] == "INE002A01018"
+    assert "isin" not in out[1]

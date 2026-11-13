@@ -369,6 +369,7 @@ export default function Watchlist() {
               symbolActions={symbolActions} // F5
               viewPref={sectionsRef ? viewPref : undefined} // F6
               viewOpen={overlay?.kind === 'view'} // F6
+              view={sectionsRef ? view : undefined} // F7
             />
           )}
         </>

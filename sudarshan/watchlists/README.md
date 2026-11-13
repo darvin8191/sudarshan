@@ -378,6 +378,27 @@ The list stays in LTP mode. The seam for a list longer than 250 rows is `needsFu
 (F9 reads one snapshot of every row there before ranking); own lists stop at 250, so it is shut. With the
 switch off the page is as it was. Tests: `sort.test.ts`, `sort.view.test.tsx`.
 
+## F7 - the holdings line
+
+The View sheet's slot (`extra`) now holds "Show what I hold" (`HeldSwitch` in `HoldingLine.tsx`): a 48 dp
+switch whose state is the word On or Off, saved per list with `pref` (`held`, sent with `sort`,
+`descending` and `basis`) and read back from `view.pref`; a refusal puts it back with the server's sentence.
+Off is the default, and with it off the page is as it was and nothing is read. With it on, a row's second line
+adds "Holding 25" (the quantity held, with a briefcase) and "Position +65" or "Position −30" (the net,
+signed, the word kept), in ink and not in the up or down colour; nothing shows for zero. Matching
+(`HoldingLine.tsx`): a cash symbol (NSE, BSE) takes its holding by ISIN, so a BSE holding shows on the NSE
+row (the view row carries the ISIN; a holding the broker gave without one, as the sandbox does, is matched by
+exchange and symbol); a contract (any other exchange) never takes a holding and is never matched by ISIN. A
+position is matched exactly by exchange and symbol and summed over its products. Data (`useHeld.ts`):
+OpenAlgo's `/holdings` and `/positionbook` through `useBookSync` and nothing else: once when the switch turns
+on, after an order event (holdings only after one that can change them), on a reconnect, on coming back to the
+page and at the books' own 45 s interval while a market is open; no timer of its own and nothing stored; with
+the switch off, or in a family render, nothing is read. `LiveList` takes `readOnly` (a family render): it never
+reads the books, never draws the line and shows no switch, so the family view is a prop and not a fork. One
+edit outside the page: Upstox's holdings mapping (`broker/upstox/mapping/order_data.py`) now passes the
+`isin` it already receives, only when it is there, because the holdings payload dropped it. Tests:
+`held.test.ts`, `held.view.test.tsx`.
+
 ## W7 - sections (`store/sections.py`, `ops/sections.py`, `words/sections.py`)
 
 `section_add`, `section_edit` and `section_remove` act on own lists only (`list:<id>`): a list or a

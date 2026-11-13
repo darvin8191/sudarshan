@@ -1,5 +1,5 @@
 import { LogOut } from 'lucide-react'
-import { memo, useMemo } from 'react'
+import { memo, useCallback, useMemo } from 'react'
 import type { WatchlistItem } from '@/api/watchlist'
 import type { AlertPrefill } from '@/sudarshan/alerts/AlertForm'
 import { LiveLine } from '@/sudarshan/dashboard/LiveLine'
@@ -7,11 +7,14 @@ import { keyOf, type MarketOpen } from '@/sudarshan/dashboard/live'
 import type { MemberRow } from '@/sudarshan/screener/api'
 import { exitedToday, tagsOf, usePin } from '@/sudarshan/screener/feed'
 import type { ArrangeEdit } from './ArrangeSheet'
+import { figuresFor, type HeldFigures, HeldSwitch, indexBook, isinsOf } from './HoldingLine'
 import { type ArrangeActions, type OrderRequest, SymbolSheet } from './SymbolSheet'
 import { DEFAULT_PREF, isDefaultView } from './sort'
+import { useHeld } from './useHeld'
 import { useLiveRows } from './useLiveRows'
 import { useSortOrder } from './useSortOrder'
 import { ViewLine, type ViewPref, ViewSheet } from './ViewSheet'
+import type { View } from './v2/types'
 import { type SectionLayout, WatchlistRows } from './WatchlistRows'
 
 /**
@@ -45,6 +48,8 @@ export const LiveList = memo(function LiveList({
   symbolActions,
   viewPref,
   viewOpen,
+  view,
+  readOnly,
 }: {
   items: WatchlistItem[]
   apiKey: string | null
@@ -74,6 +79,10 @@ export const LiveList = memo(function LiveList({
   /** v2 (F6): the list's saved View and its sheet; absent with the switch off, and for a list it does not apply to. */
   viewPref?: ViewPref
   viewOpen?: boolean
+  /** v2 (F7): the list's `view`, for each row's ISIN. */
+  view?: View
+  /** v2 (F7): a family render. It never shows the holdings line and never reads the books. */
+  readOnly?: boolean
 }) {
   const tags = useMemo(() => tagsOf(members ?? NO_MEMBERS), [members])
   const byKey = useMemo(
@@ -92,6 +101,26 @@ export const LiveList = memo(function LiveList({
     active: pref !== undefined && !isDefaultView(pref) && !editing,
   })
   const shown = editing ? live.rows : sorted.rows
+  // F7: the holdings line, from the books, only when the switch is on and this is not a family render.
+  const heldOn = !readOnly && pref?.held === true
+  const book = useHeld({ enabled: heldOn, apiKey, marketOpen: isOpen })
+  const isins = useMemo(() => isinsOf(view?.rows), [view])
+  const held = useMemo(() => {
+    if (!heldOn || !book) return undefined
+    const index = indexBook(book)
+    return new Map<string, HeldFigures>(
+      items.map((item) => {
+        const key = `${item.exchange.toUpperCase()}:${item.symbol.toUpperCase()}`
+        return [key, figuresFor(index, item.exchange, item.symbol, isins.get(key))]
+      })
+    )
+  }, [heldOn, book, items, isins])
+  const saveHeld = useCallback(
+    (next: boolean) => {
+      if (pref) void viewPref?.save({ ...pref, held: next })
+    },
+    [pref, viewPref]
+  )
   const sheetRow =
     openItemId === null ? null : (live.rows.find((row) => row.item.id === openItemId) ?? null)
   const pin = usePin(sheetRow ? byKey.get(sheetRow.key) : undefined)
@@ -138,6 +167,7 @@ export const LiveList = memo(function LiveList({
           tags={tags}
           sections={sections && { ...sections, groups: sorted.groups ?? sections.groups }} // F6
           arrange={arrange} // F5
+          held={held} // F7
         />
       </section>
       {exited.length > 0 && (
@@ -174,6 +204,7 @@ export const LiveList = memo(function LiveList({
           problem={viewPref.problem}
           noOpen={live.rows.filter((row) => row.view.openMissing).length}
           total={live.rows.length}
+          extra={readOnly ? undefined : <HeldSwitch on={pref.held} onChange={saveHeld} />} // F7
         />
       )}
     </>

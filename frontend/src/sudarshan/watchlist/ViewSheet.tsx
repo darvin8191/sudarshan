@@ -21,8 +21,8 @@ import { viewKey } from './v2/useListView'
 /**
  * The saved View of a list (M8.7, F6): what `view` answered, and the `pref` op that changes it.
  * The page takes a pick at once (the view in the cache is patched) and puts it back, with the
- * server's sentence, if the server refuses it, so phone and tablet end up agreeing. `held` is F7's
- * and is never sent from here.
+ * server's sentence, if the server refuses it, so phone and tablet end up agreeing. `held` (F7's
+ * "Show what I hold") travels in the same `pref`.
  */
 export function useViewPref(ref: string | null, view: View | undefined) {
   const client = useQueryClient()
@@ -41,6 +41,7 @@ export function useViewPref(ref: string | null, view: View | undefined) {
           sort: next.sort,
           descending: next.descending,
           basis: next.basis,
+          held: next.held, // F7
         })
         void client.invalidateQueries({ queryKey: key })
       } catch (error) {
@@ -91,7 +92,7 @@ function Group({ title, children }: { title: string; children: ReactNode }) {
   )
 }
 
-/** The View sheet: Sort by, High first or A to Z, Change from. F7 adds its switch where `extra` goes. */
+/** The View sheet: Sort by, High first or A to Z, Change from. F7's switch goes where `extra` does. */
 export function ViewSheet({
   open,
   onClose,

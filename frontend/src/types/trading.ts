@@ -46,6 +46,7 @@ export interface Holding {
   pnlpercent: number
   ltp?: number
   average_price?: number
+  isin?: string // F7: the watchlist's holdings line matches a BSE holding to an NSE row by it
 }
 
 export interface PortfolioStats {

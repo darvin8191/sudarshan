@@ -8,6 +8,7 @@ import { TREND_TEXT, TrendArrow } from '@/sudarshan/dashboard/Trend'
 import { ChipMark } from '@/sudarshan/screener/ChipMark'
 import type { Chip } from '@/sudarshan/screener/types'
 import { type ArrangeEdit, ArrangeRows } from './ArrangeSheet'
+import { type HeldFigures, HoldingLine } from './HoldingLine'
 import { describe, formatChange, OPEN_UNKNOWN, priceDecimals, type TickDirection } from './rows'
 import { SectionHeader } from './SectionHeader'
 import type { LiveRow } from './useLiveRows'
@@ -47,11 +48,16 @@ function Name({
   symbol,
   exchange,
   chip,
+  holding,
+  position,
 }: {
   symbol: string
   exchange: string
   /** SUDARSHAN M9 UI7: what a screener says about this row (New, Held, Pinned), an icon and a word. */
   chip?: Chip
+  /** F7: the quantity held and the net position, on the second line. */
+  holding?: number
+  position?: number
 }) {
   const named = describe(symbol, exchange)
   return (
@@ -62,8 +68,12 @@ function Name({
         </span>
         {chip && <ChipMark chip={chip} />}
       </span>
-      <span className="truncate text-xs leading-tight font-medium text-[color:var(--text-tertiary)]">
-        {named.detail}
+      <span className="flex min-w-0 flex-wrap items-center gap-x-2">
+        <span className="min-w-0 truncate text-xs leading-tight font-medium text-[color:var(--text-tertiary)]">
+          {named.detail}
+        </span>
+        {/* F7: "Holding 25" and "Position +65", in ink; nothing for zero. */}
+        <HoldingLine holding={holding} position={position} />
       </span>
     </span>
   )
@@ -143,6 +153,8 @@ const PriceRow = memo(function PriceRow({
   symbol,
   exchange,
   chip,
+  holding,
+  position,
   onOpen,
   ...figures
 }: FigureValues & {
@@ -150,6 +162,8 @@ const PriceRow = memo(function PriceRow({
   symbol: string
   exchange: string
   chip?: Chip
+  holding?: number // F7
+  position?: number // F7
   onOpen: (itemId: number) => void
 }) {
   return (
@@ -160,7 +174,13 @@ const PriceRow = memo(function PriceRow({
         onClick={() => onOpen(itemId)}
         className="flex min-h-14 w-full items-center gap-3 px-4 py-2 text-left outline-none active:bg-accent focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
       >
-        <Name symbol={symbol} exchange={exchange} chip={chip} />
+        <Name
+          symbol={symbol}
+          exchange={exchange}
+          chip={chip}
+          holding={holding}
+          position={position}
+        />
         <Figures {...figures} decimals={priceDecimals(exchange)} />
       </button>
     </li>
@@ -180,11 +200,13 @@ function Sectioned({
   rows,
   layout,
   tags,
+  held,
   onOpen,
 }: {
   rows: LiveRow[]
   layout: SectionLayout
   tags?: ReadonlyMap<string, Chip>
+  held?: ReadonlyMap<string, HeldFigures> // F7
   onOpen: (itemId: number) => void
 }) {
   const byId = new Map(rows.map((row) => [row.item.id, row]))
@@ -206,6 +228,8 @@ function Sectioned({
                   symbol={row.item.symbol}
                   exchange={row.item.exchange}
                   chip={tags?.get(row.key)}
+                  holding={held?.get(row.key)?.holding} // F7
+                  position={held?.get(row.key)?.position} // F7
                   onOpen={onOpen}
                   {...figuresOf(row)}
                 />,
@@ -247,6 +271,7 @@ export function WatchlistRows({
   tags,
   sections,
   arrange,
+  held,
 }: {
   rows: LiveRow[]
   loading: boolean
@@ -262,6 +287,8 @@ export function WatchlistRows({
   sections?: SectionLayout
   /** v2 (F5): edit mode as a draft with sections. Absent with the switch off. */
   arrange?: ArrangeEdit
+  /** v2 (F7): what is held and open per row, by EXCHANGE:SYMBOL. Absent with the switch off. */
+  held?: ReadonlyMap<string, HeldFigures>
 }) {
   if (loading) {
     return (
@@ -306,7 +333,7 @@ export function WatchlistRows({
   }
 
   if (sections && sectioned)
-    return <Sectioned rows={rows} layout={sections} tags={tags} onOpen={onOpen} />
+    return <Sectioned rows={rows} layout={sections} tags={tags} held={held} onOpen={onOpen} />
 
   return (
     <ul className="divide-y divide-[color:var(--divider)]">
@@ -320,6 +347,8 @@ export function WatchlistRows({
               symbol={item.symbol}
               exchange={item.exchange}
               chip={tags?.get(row.key)}
+              holding={held?.get(row.key)?.holding} // F7
+              position={held?.get(row.key)?.position} // F7
               onOpen={onOpen}
               {...figuresOf(row)}
             />
