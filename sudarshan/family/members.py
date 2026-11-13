@@ -84,7 +84,9 @@ def cards(tx: Tx, now: int) -> list[dict[str, Any]]:
     return [card(tx, m, now) for m in tx.members_live()]
 
 
-def create(tx: Tx, args: dict[str, Any], now: int) -> dict[str, Any]:
+def create(
+    tx: Tx, args: dict[str, Any], now: int, max_members: int = LIMITS["max_members"]
+) -> dict[str, Any]:
     request_id = args.get("request_id")
     if request_id is not None:
         if not isinstance(request_id, str) or not 1 <= len(request_id) <= 64:
@@ -96,7 +98,7 @@ def create(tx: Tx, args: dict[str, Any], now: int) -> dict[str, Any]:
     role = _choice(args.get("role"), ROLES, "role")
     privacy = clean_privacy(args.get("privacy"), role)
     language = _choice(args.get("language", "en"), LANGUAGES, "language")
-    if len(tx.members_live()) >= LIMITS["max_members"]:
+    if len(tx.members_live()) >= max_members:
         raise LimitReached("member_limit")
     made = tx.member_add(
         {"display_name": name, "role": role, "status": "invited", "privacy": privacy,
