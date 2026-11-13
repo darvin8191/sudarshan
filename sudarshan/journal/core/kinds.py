@@ -260,7 +260,15 @@ RECORDS = {
     "Limits": ", ".join(f"{k}:int" for k in LIMITS),
     "Done": "id:int|null, version:int|null, words:string|null",
     "Version": "version:int",
+    # One leg of a trip on the trade sheet: its fill's time, side, price, source and order.
+    "TripLeg": "trade_id:string, order_id:string, role:LegRole, action:Action, qty:int, "
+    "price_u:int, exch_ts_ms:int, day:int, source:FillSource",
+    # What OpenAlgo's records say about one order of a trip (M12.12: latency in ms, no broker's).
+    "OrderRef": "order_id:string, strategy:string|null, surface:Surface, pricetype:string|null, "
+    "placed_ms:int|null, rtt_ms:int|null, total_latency_ms:int|null",
 }
+#: ``trip_get``'s answer: the trip, its legs, the owner's note and its orders' references.
+RECORDS["TripDetail"] = RECORDS["Trip"] + ", legs:TripLeg[], note:TripNote|null, orders:OrderRef[]"
 
 
 class Field(NamedTuple):
@@ -332,7 +340,7 @@ OPS = (
         "tag?:int, playbook?:int, from?:int, to?:int",
         "Trip[]",
     ),
-    OpSpec("trip_get", "GET", "/trips/<id>", "read", "id:int", "Trip"),
+    OpSpec("trip_get", "GET", "/trips/<id>", "read", "id:int", "TripDetail"),
     OpSpec(
         "trip_update",
         "PATCH",

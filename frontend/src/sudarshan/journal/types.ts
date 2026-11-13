@@ -468,6 +468,70 @@ export interface Version {
   version: number
 }
 
+export interface TripLeg {
+  trade_id: string
+  order_id: string
+  role: LegRole
+  action: Action
+  qty: number
+  price_u: number
+  exch_ts_ms: number
+  day: number
+  source: FillSource
+}
+
+export interface OrderRef {
+  order_id: string
+  strategy: string | null
+  surface: Surface
+  pricetype: string | null
+  placed_ms: number | null
+  rtt_ms: number | null
+  total_latency_ms: number | null
+}
+
+export interface TripDetail {
+  id: number
+  mode: Mode
+  exchange: string
+  symbol: string
+  instrument_key: string
+  product: string
+  product_class: ProductClass
+  side: Side
+  qty_max: number
+  entry_qty: number
+  exit_qty: number
+  entry_avg_u: number
+  exit_avg_u: number | null
+  opened_ms: number
+  closed_ms: number | null
+  open_day: number
+  close_day: number | null
+  status: TripStatus
+  gross_paise: number | null
+  charges_est_paise: number | null
+  charges_actual_paise: number | null
+  net_paise: number | null
+  hold_s: number | null
+  strategy: string
+  strategy_override: string | null
+  setup_id: number | null
+  own_expiry_day: boolean
+  index_expiry_day: boolean
+  risk_paise: number | null
+  mae_paise: number | null
+  mfe_paise: number | null
+  mae_ms: number | null
+  mfe_ms: number | null
+  excursion_source: ExcursionSource
+  excursion_note: string | null
+  version: number
+  legs: TripLeg[]
+  note: TripNote | null
+  orders: OrderRef[]
+}
+
 export interface OpSpec {
   name: OpName
   method: string
@@ -631,7 +695,7 @@ export interface NudgeReq {
 export interface JournalOps {
   state: { req: StateReq; res: State }
   trips: { req: TripsReq; res: Trip[] }
-  trip_get: { req: TripGetReq; res: Trip }
+  trip_get: { req: TripGetReq; res: TripDetail }
   trip_update: { req: TripUpdateReq; res: Done }
   tags_list: { req: TagsListReq; res: Tag[] }
   tag_create: { req: TagCreateReq; res: Done }

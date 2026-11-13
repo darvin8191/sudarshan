@@ -499,6 +499,128 @@ class Tx:
             ).rowcount
         )
 
+    # ---- round trips, their legs and notes (JB4) ----
+    def trips_of_key(
+        self, mode: str, exchange: str, symbol: str, product_class: str, from_ms: int
+    ) -> list[dict[str, Any]]:
+        """The trips of one instrument and product class that reach ``from_ms`` or later: open,
+        orphaned, opened on or after it, or closed on or after it."""
+        t = self._t("round_trip")
+        query = select(t).where(
+            self._mine(t),
+            t.c.mode == mode,
+            t.c.exchange == exchange,
+            t.c.symbol == symbol,
+            t.c.product_class == product_class,
+            (t.c.status != "closed") | (t.c.opened_ms >= from_ms) | (t.c.closed_ms >= from_ms),
+        )
+        return [self.out(r) for r in self.conn.execute(query.order_by(t.c.opened_ms)).mappings()]
+
+    def trip_insert(self, values: Mapping[str, Any], now: int) -> int:
+        """A new trip the pairing made; returns its id."""
+        t = self._t("round_trip")
+        row = {**self.encode(values), "principal": self.who, "created_at": now, "updated_at": now}
+        return int(self.conn.execute(insert(t).values(**row)).inserted_primary_key[0])
+
+    def legs_replace(self, trip_id: int, legs: Iterable[tuple[int, str, int]], now: int) -> None:
+        """A trip's legs as the pairing made them: (fill id, role, qty)."""
+        t = self._t("fill_leg")
+        self.conn.execute(delete(t).where(self._mine(t), t.c.round_trip_id == trip_id))
+        rows = [
+            {"fill_id": fill_id, "round_trip_id": trip_id, "principal": self.who, "role": role,
+             "qty": qty, "created_at": now, "updated_at": now}
+            for fill_id, role, qty in legs
+        ]  # fmt: skip
+        if rows:
+            self.conn.execute(insert(t), rows)
+
+    def legs_of(self, trip_id: int) -> list[dict[str, Any]]:
+        """A trip's legs with their fills, in time order."""
+        legs, fills = self._t("fill_leg"), self._t("fill")
+        query = (
+            select(legs.c.role.label("leg_role"), legs.c.qty.label("leg_qty"), fills)
+            .join(fills, fills.c.id == legs.c.fill_id)
+            .where(self._mine(legs), legs.c.round_trip_id == trip_id, fills.c.principal == self.who)
+            .order_by(fills.c.exch_ts_ms, fills.c.trade_id)
+        )
+        return [self.out(row) for row in self.conn.execute(query).mappings()]
+
+    def trip_forget(self, trip_id: int) -> None:
+        """A trip the pairing no longer makes and nobody wrote on: it goes with its legs and
+        its price path."""
+        for name, column in (("fill_leg", "round_trip_id"), ("trip_track", "round_trip_id"),
+                             ("trade_note", "round_trip_id")):  # fmt: skip
+            t = self._t(name)
+            self.conn.execute(delete(t).where(self._mine(t), t.c[column] == trip_id))
+        self.remove("round_trip", trip_id)
+
+    def note_of(self, trip_id: int) -> dict[str, Any] | None:
+        t = self._t("trade_note")
+        row = self.conn.execute(
+            select(t).where(self._mine(t), t.c.round_trip_id == trip_id)
+        ).mappings().first()  # fmt: skip
+        return self.out(row)
+
+    def notes_of(self, trip_ids: Iterable[int]) -> dict[int, dict[str, Any]]:
+        t = self._t("trade_note")
+        out: dict[int, dict[str, Any]] = {}
+        for batch in chunks(sorted(set(trip_ids))):
+            for row in self.conn.execute(
+                select(t).where(self._mine(t), t.c.round_trip_id.in_(batch))
+            ).mappings():
+                out[row["round_trip_id"]] = self.out(row)
+        return out
+
+    def note_put(self, trip_id: int, values: Mapping[str, Any], now: int) -> None:
+        """The owner's note on a trip, made or changed (the trip's own version guards it)."""
+        t = self._t("trade_note")
+        if self.note_of(trip_id) is None:
+            row = {"round_trip_id": trip_id, **self.encode(values), "principal": self.who,
+                   "created_at": now, "updated_at": now}  # fmt: skip
+            self.conn.execute(insert(t).values(**row))
+            return
+        self.conn.execute(
+            update(t)
+            .where(self._mine(t), t.c.round_trip_id == trip_id)
+            .values(**self.encode(values), updated_at=now, version=t.c.version + 1)
+        )
+
+    def trips_page(
+        self, mode: str, *, status: str | None = None, before_ms: int | None = None,
+        from_day: int | None = None, to_day: int | None = None, limit: int = 100,
+        setup_id: int | None = None,
+    ) -> list[dict[str, Any]]:  # fmt: skip
+        """Trips newest first: open ones by their opening, closed ones by their close; ``before``
+        an instant the page ends before. A day range is the close day of a closed trip and the
+        opening day of an open one."""
+        t = self._t("round_trip")
+        moment = func.coalesce(t.c.closed_ms, t.c.opened_ms)
+        day = func.coalesce(t.c.close_day, t.c.open_day)
+        query = select(t).where(self._mine(t), t.c.mode == mode)
+        if status is not None:
+            query = query.where(t.c.status == status)
+        if before_ms is not None:
+            query = query.where(moment < before_ms)
+        if from_day is not None:
+            query = query.where(day >= from_day)
+        if to_day is not None:
+            query = query.where(day <= to_day)
+        if setup_id is not None:
+            query = query.where(t.c.setup_id == setup_id)
+        query = query.order_by((t.c.status != "open"), moment.desc(), t.c.id.desc()).limit(limit)
+        return [self.out(r) for r in self.conn.execute(query).mappings()]
+
+    def fills_by_trade(self, mode: str, trade_ids: Iterable[str]) -> dict[str, dict[str, Any]]:
+        """Fills of a mode by trade id."""
+        t = self._t("fill")
+        out: dict[str, dict[str, Any]] = {}
+        for batch in chunks(sorted(set(trade_ids))):
+            for row in self.conn.execute(
+                select(t).where(self._mine(t), t.c.mode == mode, t.c.trade_id.in_(batch))
+            ).mappings():
+                out[row["trade_id"]] = self.out(row)
+        return out
+
     # ---- the settings: one document per principal, one version ----
     def settings(self) -> dict[str, Any]:
         """The principal's report settings with their version (the seeded defaults filled in

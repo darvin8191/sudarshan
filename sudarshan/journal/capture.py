@@ -247,12 +247,18 @@ class Capture:
     def __init__(self, service: Any):
         self.service = service
         self.locks = {mode: asyncio.Lock() for mode in kinds.MODES}
-        #: Called after a read wrote fills: ``hook(mode, days)``. The day replay (JB4) and the
-        #: feed's claims (JB6) add theirs.
-        self.hooks: list[Hook] = []
+        #: Called after a read wrote fills or labelled orders: ``hook(mode, days)``. The day
+        #: replay comes first; the feed's claims (JB6) add theirs.
+        self.hooks: list[Hook] = [self._replay]
         self.last: dict[str, Outcome] = {}
         #: The strategy each sandbox order's trades carry, from the last read of sandbox.db.
         self._sandbox_strategy: dict[str, Any] = {}
+
+    async def _replay(self, mode: str, days: set[int]) -> None:
+        """The first hook: pair the touched days again (JB4, ``book.replay``)."""
+        from .book import replay
+
+        await replay(self.service, mode, days)
 
     async def _thread(self, fn: Callable[[], Any]) -> Any:
         return await asyncio.get_running_loop().run_in_executor(None, fn)
