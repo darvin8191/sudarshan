@@ -3,8 +3,8 @@
 // (src/sudarshan/alerts/marketAlerts.ts), with each card's price from the tab's own tick stream.
 // At /market-alerts because upstream owns /alerts, for the /trading chart's own alerts.
 import { AlertTriangle, LoaderCircle, Plus, RefreshCw, Settings2 } from 'lucide-react'
-import { useCallback, useEffect, useMemo } from 'react'
-import type { AlertRow } from '@/api/marketAlerts'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import type { AlertRow, GroupRow } from '@/api/marketAlerts'
 import { cn } from '@/lib/utils'
 import { AccessNotice } from '@/sudarshan/AccessNotice'
 import { usePriceAccess } from '@/sudarshan/access'
@@ -12,6 +12,7 @@ import { AlertCard } from '@/sudarshan/alerts/AlertCard'
 import { AlertFormSheet } from '@/sudarshan/alerts/AlertForm'
 import { AlertSheet } from '@/sudarshan/alerts/AlertSheet'
 import { droppedHere } from '@/sudarshan/alerts/actions'
+import { GroupCard } from '@/sudarshan/alerts/GroupCard'
 import { HistoryList } from '@/sudarshan/alerts/HistoryList'
 import { ListAlertFormSheet } from '@/sudarshan/alerts/ListAlertForm'
 import { LineText } from '@/sudarshan/alerts/lines'
@@ -35,6 +36,7 @@ import { toast } from '@/utils/toast'
 export const LIVE_CAP = 100
 
 const NO_ROWS: AlertRow[] = []
+const NO_GROUPS: GroupRow[] = []
 
 /** In place of the engine line while this screen is not in the owner's room. */
 const NOT_RECEIVING = {
@@ -61,6 +63,19 @@ function tabsOf(alerts: AlertRow[]): Record<'active' | 'stopped', AlertRow[]> {
     .sort((a, b) => b.updated_at - a.updated_at || newestFirst(a, b))
   return { active: [...active, ...paused], stopped }
 }
+
+/** The list alerts' cards by tab, ahead of the ordinary alerts: the same order of statuses. */
+function groupTabsOf(groups: GroupRow[]): Record<'active' | 'stopped', GroupRow[]> {
+  const byNewest = (a: GroupRow, b: GroupRow) => b.id - a.id
+  const of = (status: GroupRow['status']) =>
+    groups.filter((g) => g.status === status).sort(byNewest)
+  return {
+    active: [...of('active'), ...of('paused')],
+    stopped: of('stopped').sort((a, b) => b.updated_at - a.updated_at || byNewest(a, b)),
+  }
+}
+
+const bySymbol = (a: AlertRow, b: AlertRow) => a.symbol.localeCompare(b.symbol) || a.id - b.id
 
 interface Followed {
   /** Instruments whose alerts need the bid, ask, open, high, low or VWAP: the Quote stream. */
@@ -110,8 +125,36 @@ export default function MarketAlerts() {
   const now = useNow()
 
   const alerts = state?.alerts ?? NO_ROWS
-  const tabs = useMemo(() => tabsOf(alerts), [alerts])
+  // Member alerts of a list alert are not cards of their own: they show inside its card.
+  const loose = useMemo(() => alerts.filter((row) => row.group_id == null), [alerts])
+  const tabs = useMemo(() => tabsOf(loose), [loose])
+  const groupTabs = useMemo(() => groupTabsOf(state?.groups ?? NO_GROUPS), [state?.groups])
+  const groupCards = tab === 'history' ? NO_GROUPS : groupTabs[tab]
   const rows = tab === 'history' ? NO_ROWS : tabs[tab]
+  // The cards the owner has opened, whose member alerts show and have their prices followed.
+  const [opened, setOpened] = useState<ReadonlySet<number>>(new Set())
+  const toggleGroup = useCallback(
+    (id: number) =>
+      setOpened((now) => {
+        const next = new Set(now)
+        if (!next.delete(id)) next.add(id)
+        return next
+      }),
+    []
+  )
+  const membersOf = useMemo(() => {
+    const out = new Map<number, AlertRow[]>()
+    for (const row of alerts) {
+      if (row.group_id == null) continue
+      out.set(row.group_id, [...(out.get(row.group_id) ?? []), row])
+    }
+    for (const list of out.values()) list.sort(bySymbol)
+    return out
+  }, [alerts])
+  const shownMembers = useMemo(
+    () => groupCards.filter((g) => opened.has(g.id)).flatMap((g) => membersOf.get(g.id) ?? []),
+    [groupCards, opened, membersOf]
+  )
   const shownId = overlay?.kind === 'alert' || overlay?.kind === 'edit' ? overlay.id : null
   const selected = shownId === null ? null : (alerts.find((row) => row.id === shownId) ?? null)
 
@@ -121,9 +164,13 @@ export default function MarketAlerts() {
   const formOpen = overlay?.kind === 'new' || overlay?.kind === 'edit'
   const cap = formOpen ? LIVE_CAP - 1 : LIVE_CAP
   const followed = useMemo(
-    () => followedOf(selected ? [selected, ...rows] : rows, cap),
-    [selected, rows, cap]
+    () =>
+      followedOf(selected ? [selected, ...rows, ...shownMembers] : [...rows, ...shownMembers], cap),
+    [selected, rows, shownMembers, cap]
   )
+  const membersCut = shownMembers.filter(
+    (row) => !followed.keys.has(keyOf(row.symbol, row.exchange))
+  ).length
   const quoted = useFrameLines({
     instruments: followed.quote,
     mode: 'Quote',
@@ -162,6 +209,7 @@ export default function MarketAlerts() {
 
   const openAlert = useCallback((id: number) => open({ kind: 'alert', id }), [open])
   const editAlert = useCallback((id: number) => open({ kind: 'edit', id }), [open])
+  const editGroup = useCallback((id: number) => open({ kind: 'group', id }), [open])
   // Saved: the alert's own sheet takes the form's place, so the owner sees what was saved.
   const saved = useCallback((row: AlertRow) => open({ kind: 'alert', id: row.id }), [open])
   const live = (row: AlertRow) => ({
@@ -254,7 +302,10 @@ export default function MarketAlerts() {
 
       <Tabs
         tab={tab}
-        counts={{ active: tabs.active.length, stopped: tabs.stopped.length }}
+        counts={{
+          active: tabs.active.length + groupTabs.active.length,
+          stopped: tabs.stopped.length + groupTabs.stopped.length,
+        }}
         onSelect={setTab}
       />
 
@@ -275,7 +326,7 @@ export default function MarketAlerts() {
             title="No alerts are checked"
             hint="Market alerts are switched off on the server."
           />
-        ) : rows.length === 0 ? (
+        ) : rows.length + groupCards.length === 0 ? (
           <EmptyCard
             title={tab === 'active' ? 'No alerts set' : 'No stopped alerts'}
             hint={
@@ -286,6 +337,20 @@ export default function MarketAlerts() {
           />
         ) : (
           <ul className="flex flex-col gap-2">
+            {groupCards.map((group) => (
+              <li key={`group-${group.id}`}>
+                <GroupCard
+                  group={group}
+                  members={membersOf.get(group.id) ?? NO_ROWS}
+                  expanded={opened.has(group.id)}
+                  onToggle={toggleGroup}
+                  onEdit={editGroup}
+                  renderMember={(row) => (
+                    <AlertCard row={row} {...live(row)} engine={state.engine} onOpen={openAlert} />
+                  )}
+                />
+              </li>
+            ))}
             {rows.map((row) => (
               <li key={row.id}>
                 <AlertCard row={row} {...live(row)} engine={state.engine} onOpen={openAlert} />
@@ -296,6 +361,8 @@ export default function MarketAlerts() {
         {followed.capped && (
           <p className="px-1 text-xs font-medium text-muted-foreground">
             Prices follow the first {cap} instruments on this tab.
+            {membersCut > 0 &&
+              ` ${membersCut} ${membersCut === 1 ? 'symbol' : 'symbols'} of the list alerts you opened ${membersCut === 1 ? 'shows' : 'show'} no price.`}
           </p>
         )}
       </section>

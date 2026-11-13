@@ -590,6 +590,40 @@ The morning build runs on the first tick of a day, before the day's contract mas
 knows when it has read the master at or after 09:00 (`master_loaded`), so the groups are synced
 once more on the first tick after that, on the same clock job and without a timer.
 
+### The Alerts page: list mode and the group card (A6)
+
+The page draws each list alert (a group) as one card, ahead of the ordinary alerts of its tab:
+"Swing · % move 2% · 24 symbols · Active · follows the list", with the service's words as sent
+(`status_reason`, `follow`, `left_out`) and Pause or Resume, Edit and Delete for the whole group.
+Its member alerts (rows with `group_id`) are not cards of their own: they show inside the card
+when it is expanded, and their prices are followed only then, counted inside the page's 100
+instruments (the page says how many symbols of the opened lists show no price when the cap stops
+some). Pause and Resume send the group's `version`; a stale version, a refusal at the limits and a
+group already gone are shown in the service's words and the state is read again; Delete asks first,
+names how many alerts go and sends once (their history stays). A push's changed group cards and
+`removed_groups` are applied in place (`stateCache.applyStatePush`); a card the page does not hold,
+or a newer version, is read again.
+
+The form in list mode (`ListAlertForm.tsx`) offers a % move (from the previous close or the open),
+a Day high or low break and a VWAP cross; a price level is per symbol and is not offered. Telegram
+is "Alerts that follow within 5 minutes go as one message" (`first_then_digest`, the default) or
+"Each alert at once" (`each`). After Save the form shows what the service answered, as it came: the
+fit sentence with both numbers, the card's words and what is left out; a refusal (409 `limit`, a
+ranked list, a stale version) is shown as sent and nothing is made. Editing opens on the group's own
+settings and keeps its kind.
+
+The address contract the watchlist's menus use (`useAlertOverlay.ts`; build it with
+`listAlertAddress`):
+
+- `/market-alerts?sheet=list&ref=<ref>&name=<list or section name>&count=<rows>` opens the form for
+  a new list alert; `&fed=1` adds "A screen feeds this list. Its own alerts may suit better." The
+  name and count are only the form's heading ("Every symbol of Swing (24)"); the service's answer
+  is the truth.
+- `/market-alerts?sheet=group&group=<id>` opens a group's own form.
+
+Both follow the Back rules of the other overlays: opening pushes an entry, closing goes back, and
+one the page did not open is closed by replacing the entry.
+
 ## Tests
 
 `uv run pytest -q sudarshan/alerts` (no network: a fake WebSocket proxy and a fake OpenAlgo on
