@@ -201,7 +201,8 @@ def test_arrange_bumps_once_with_why_arranged_and_its_ref(client, emitted):
     lid, banks, it = two_sections(client)
     emitted.clear()
     arrange(client, lid, "2", [banks, it], [pick("TCS", it)])
-    assert [(p["why"], p["ref"]) for p in emitted] == [("arranged", f"list:{lid}")]
+    assert [(p["why"], p["ref"], p["refs"]) for p in emitted] == [
+        ("arranged", f"list:{lid}", [f"list:{lid}"])]  # fmt: skip
 
 
 # -- copy and move -------------------------------------------------------------------------------
@@ -264,6 +265,7 @@ def test_move_adds_then_removes_from_the_source_and_drops_its_section_rows(clien
     assert oa_order(dst) == ["SBIN", "TCS"] and oa_order(src) == ["INFY", "ITC"]
     assert table("wl_section_item") == []
     assert [(p["why"], p["ref"]) for p in emitted] == [("items", "lists")]  # two refs: the lists
+    assert [p["refs"] for p in emitted] == [[f"list:{dst}", f"list:{src}"]]  # target, then source
 
 
 def test_a_whole_section_can_be_moved_into_a_new_list(client):

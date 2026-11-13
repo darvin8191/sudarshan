@@ -263,6 +263,7 @@ def test_concurrent_writes_through_the_hook_emit_once_each(server_on):
     _, raw, _ = server_on.request("GET", "/emitted")
     pushes = json.loads(raw)
     assert sorted(p["ref"] for p in pushes) == sorted(f"list:{i + 1}" for i in range(12))
+    assert all(p["refs"] == [p["ref"]] for p in pushes)
     assert len({p["v"] for p in pushes}) == 12 and {p["why"] for p in pushes} == {"items"}
 
 

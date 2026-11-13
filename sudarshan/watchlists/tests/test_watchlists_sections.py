@@ -295,7 +295,8 @@ def test_each_write_bumps_and_pushes_once_and_a_refusal_not_at_all(client, emitt
     sid = add(client, lid, "Banks", "0").get_json()["data"]["id"]
     edit(client, sid, "1", mark=2)
     remove(client, sid, "2")
-    assert [(p["why"], p["ref"]) for p in emitted] == [("sections", f"list:{lid}")] * 3
+    assert [(p["why"], p["ref"], p["refs"]) for p in emitted] == [
+        ("sections", f"list:{lid}", [f"list:{lid}"])] * 3  # fmt: skip
     assert len({p["v"] for p in emitted}) == 3
     emitted.clear()
     for r in (

@@ -12,8 +12,9 @@ and never raises) and updated by a writer right after its commit: ``advance_favo
 once it has committed. The push and ``state`` read the mirror, so a request opens a store session
 only for its own write (and for that first load). Every lock's critical section is bookkeeping and
 nothing else, so it is correct under eventlet, gthread and the dev server. The push is emitted
-after the bump, outside the lock, through ``extensions.emit_from_any_thread``; a push that cannot
-be sent is logged and never raised, because the write it follows has already committed.
+after the bump, outside the lock, through ``extensions.emit_from_any_thread``, and names every ref
+the write changed (``refs``); a push that cannot be sent is logged and never raised, because the
+write it follows has already committed.
 
 Every write that changes what a list, a section or a flag list holds bumps the lists version once
 and pushes once, from one of two places and never both: the hook (``bridge/push.py``) for requests
@@ -129,23 +130,36 @@ def advance_flags(s) -> int:
     return _advance(s, "flags")
 
 
+def push(why: str, refs: Iterable[str] = (), version: str | None = None) -> None:
+    """Tell the owner's open apps what changed: ``{v, ref, refs, why}`` (with the favourites and
+    flags versions when the store gives them) to the owner's room.
+
+    ``refs`` is every ref the change touched (the target and the source of a move, the old and the
+    new flag list of a mark), in the order named, each once; it is empty when the change cannot be
+    pinned to a ref (OpenAlgo's answer did not name its list), which means "read everything again".
+    ``ref`` is the one of them, or ``lists`` when there are none or several: the phone reads it until
+    it moves to ``refs``. ``v`` is the lists version, ``version`` when the caller has just bumped it.
+    A push that cannot be sent is logged and never raised: the change it follows has committed."""
+    named = list(dict.fromkeys(refs))
+    payload = {"v": version or read(), "ref": named[0] if len(named) == 1 else "lists",
+               "refs": named, "why": why}  # fmt: skip
+    for kind, got in (("favourites", favourites()), ("flags", flags())):
+        if got is not None:
+            payload[kind] = got
+    try:
+        emit_from_any_thread(contract.EVENT_PUSH, payload, to=contract.ROOM, namespace="/")
+    except Exception:
+        logger.exception("Watchlists: the change push could not be sent")
+
+
 def bump(why: str, refs: Iterable[str] = ()) -> str:
-    """Bump the lists version once and push ``{v, ref, why}`` (with the other two versions when
-    the store gives them) to the owner's room. ``ref`` is the one ref changed, or ``lists`` when
-    none or several were."""
+    """Bump the lists version once and push it with every ref the change touched (``push``); the
+    new version."""
     global _lists
     with _lock:  # the increment and nothing else
         _lists += 1
         version = f"{BOOT}:{_lists}"
-    refs = list(refs)
-    push = {"v": version, "ref": refs[0] if len(refs) == 1 else "lists", "why": why}
-    for kind, got in (("favourites", favourites()), ("flags", flags())):
-        if got is not None:
-            push[kind] = got
-    try:
-        emit_from_any_thread(contract.EVENT_PUSH, push, to=contract.ROOM, namespace="/")
-    except Exception:
-        logger.exception("Watchlists: the change push could not be sent")
+    push(why, refs, version)
     return version
 
 

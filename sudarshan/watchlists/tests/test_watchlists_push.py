@@ -167,7 +167,7 @@ def test_a_store_that_cannot_be_read_leaves_the_two_out_and_never_raises(emitted
     assert not store.exists()
     assert versions.snapshot() == {"lists": versions.read()}
     versions.bump("items", ["list:1"])
-    assert set(emitted[-1][1]) == {"v", "ref", "why"}
+    assert set(emitted[-1][1]) == {"v", "ref", "refs", "why"}
     assert "versions" not in state_ops.state({})
     engine.ready()
     assert set(versions.snapshot()) == {"lists", "favourites", "flags"}
@@ -193,9 +193,27 @@ def test_a_bump_pushes_v_ref_why_and_the_other_versions_to_the_owners_room(emitt
     ((event, data, kw),) = emitted
     assert event == contract.EVENT_PUSH == "sudarshan_watchlists"
     assert kw == {"to": contract.ROOM, "namespace": "/"}
-    assert data == {"v": v, "ref": "list:5", "why": "items", "favourites": 0, "flags": 0}
+    assert data == {"v": v, "ref": "list:5", "refs": ["list:5"], "why": "items", "favourites": 0,
+                    "flags": 0}  # fmt: skip
     versions.bump("lists", ["list:1", "list:2"])
-    assert emitted[-1][1]["ref"] == "lists"
+    assert (emitted[-1][1]["ref"], emitted[-1][1]["refs"]) == ("lists", ["list:1", "list:2"])
+
+
+def test_the_push_names_every_ref_once_in_order_and_none_means_read_everything(emitted):
+    """``refs`` carries every ref a write changed (a move's two lists, a mark's two flag lists),
+    which the phone's per-ref sync needs; ``ref`` collapses them and stays for the phone."""
+    engine.ready()
+    versions.bump("flags", ["flag:2", "flag:4", "flag:2"])
+    versions.bump("items", [])
+    first, second = emitted[0][1], emitted[1][1]
+    assert (first["ref"], first["refs"]) == ("lists", ["flag:2", "flag:4"])
+    assert (second["ref"], second["refs"]) == ("lists", [])
+    before = versions.read()
+    versions.push("favourites")  # a push alone never moves the lists version
+    assert versions.read() == before and emitted[-1][1]["v"] == before
+    assert emitted[-1][1]["refs"] == [] and emitted[-1][1]["why"] == "favourites"
+    push_fields = {f.name for f in contract.record("Push")}
+    assert {"v", "ref", "refs", "why"} <= push_fields and set(first) <= push_fields
 
 
 def test_a_push_that_cannot_be_sent_is_logged_and_the_bump_stands(monkeypatch, caplog):
@@ -232,6 +250,7 @@ def test_each_openalgo_write_bumps_once_and_emits_once(emitted, method, path, wh
     assert int(versions.read("lists").split(":")[1]) == int(before.split(":")[1]) + 1
     ((event, data, _),) = emitted
     assert event == contract.EVENT_PUSH and (data["why"], data["ref"]) == (why, ref)
+    assert data["refs"] == [ref]
 
 
 def test_a_get_bumps_nothing(emitted):
@@ -264,7 +283,7 @@ def test_the_screeners_apply_bumps_once_and_its_read_and_a_miss_bump_nothing(emi
     assert emitted == [] and versions.read("lists") == base
     assert client.post("/internal/watchlist?op=watchlist_apply", headers=headers).status_code == 200
     ((_, data, _),) = emitted
-    assert (data["why"], data["ref"]) == ("lists", "list:4")
+    assert (data["why"], data["ref"], data["refs"]) == ("lists", "list:4", ["list:4"])
     app2, client2, headers2 = build(found=False)
     emitted.clear()
     client2.post("/internal/watchlist?op=watchlist_apply", headers=headers2)
@@ -392,7 +411,7 @@ def test_an_op_that_declares_a_bump_bumps_once_after_it_returns_and_a_refusal_no
     body = {"list": 3, "name": "ok", "version": "v"}
     assert client.open(path, method=op.method, json=body, headers=headers).status_code == 200
     ((_, data, _),) = emitted
-    assert (data["why"], data["ref"]) == ("sections", "list:3")
+    assert (data["why"], data["ref"], data["refs"]) == ("sections", "list:3", ["list:3"])
     body["name"] = "no"
     assert client.open(path, method=op.method, json=body, headers=headers).status_code == 409
     assert len(emitted) == 1

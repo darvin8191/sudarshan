@@ -23,7 +23,9 @@ API_PREFIX = "/sudarshan/watchlists/api"
 INTERNAL_PREFIX = "/sudarshan/watchlists/internal"
 SWITCH_ENV = "SUDARSHAN_WATCHLISTS_V2"
 DB_ENV = "SUDARSHAN_WATCHLISTS_DB"
-#: Every open app of the owner joins it with ``EVENT_JOIN``; the push is ``{v, ref, why}``.
+#: Every open app of the owner joins it with ``EVENT_JOIN``; the push is ``{v, ref, refs, why}``:
+#: ``refs`` is every ref the change touched, ``ref`` the one of them or ``lists`` (kept for the
+#: phone until it reads ``refs``).
 ROOM = "sudarshan:watchlists:owner"
 EVENT_PUSH = "sudarshan_watchlists"
 EVENT_JOIN = "sudarshan_watchlists_join"
@@ -166,7 +168,7 @@ RECORDS = {
     "ArrangeItem": "exchange:string, symbol:string, section_id:int|null",
     "CopySource": "ref:string, section_id?:int, keys?:string[]",
     "CopyTarget": "list?:int, name?:string, section_id?:int|null",
-    "Push": "v:string, ref:string, why:Why, favourites?:int, flags?:int",
+    "Push": "v:string, ref:string, refs:string[], why:Why, favourites?:int, flags?:int",
     "State": "enabled:bool, versions?:Versions, limits?:Limits, flag_names?:FlagName[], "
     "favourites?:Favourite[], ranked?:Availability, alerts?:Availability",
     "Lists": "version:string, own:Entry[], presets:Entry[], ranked:Entry[], flags:Entry[], "

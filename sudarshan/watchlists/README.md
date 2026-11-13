@@ -209,9 +209,15 @@ from the store on first use and moved forward by a writer right after its commit
 `committed(kind, n)`); a store that cannot be read leaves them out of the push and of `state`, never
 raises. A lists bump and the mirror are under a real lock (`utils.real_threading`) whose critical
 section is the increment or one comparison. `versions.bump(why, refs)` bumps the lists version once
-and emits `contract.EVENT_PUSH` (`{v, ref, why}` plus `favourites` and `flags` when known) to the
-room `sudarshan:watchlists:owner` through `extensions.emit_from_any_thread`; `ref` is the one ref
-changed, else `lists`. A push that cannot be sent is logged, never raised. `state` answers
+and calls `versions.push`, which emits `contract.EVENT_PUSH` (`{v, ref, refs, why}` plus
+`favourites` and `flags` when known) to the room `sudarshan:watchlists:owner` through
+`extensions.emit_from_any_thread`. `refs` is every ref the write changed, in the order named and
+each once: the target and then the source of a move, the old and the new flag list of a mark (the
+design's bump table), so a per-ref sync (lane F's `group_sync`, A5) knows every list to follow; it
+is empty when the change cannot be pinned to a ref (OpenAlgo's answer named no list), which means
+read everything again. `ref` is the one ref changed, else `lists`: the phone reads `ref` today, so
+it stays in the push until lane F moves to `refs`, and is then dropped as a contract change of its
+own. A push that cannot be sent is logged, never raised. `state` answers
 `versions`. An app joins the room with `contract.EVENT_JOIN` (an ack): the owner's session only, and
 refused in words with the switch off.
 
@@ -338,7 +344,8 @@ screener's point of view, which is intended.
 
 Bumps (`ops.bumps`), once per write and never also by the hook, because these ops call OpenAlgo's
 functions in process: `arrange` with why `arranged` and `list:<id>`; `copy` and `move` with why
-`items` and the target's ref (a move adds the source's, so the push says `lists`).
+`items` and the target's ref (a move adds the source's: `refs` names both, target first, and `ref`
+says `lists`).
 
 The yield: writes of up to 250 items yield to the hub (`time.sleep(0)`) between OpenAlgo's per-item
 commits, because SQLite's file I/O does not yield under eventlet. It is never done inside an overlay

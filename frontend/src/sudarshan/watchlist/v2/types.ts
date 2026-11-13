@@ -374,6 +374,7 @@ export interface CopyTarget {
 export interface Push {
   v: string
   ref: string
+  refs: string[]
   why: Why
   favourites?: number
   flags?: number
