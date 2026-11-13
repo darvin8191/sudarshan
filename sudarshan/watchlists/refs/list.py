@@ -162,7 +162,7 @@ def month_futures(follow: list[dict]) -> dict[int, dict]:
     got = resolver.resolve_rows(
         rules, {i: {"id": i} for i in rules}, now_ms=now_ms(), connected=False,
         ix=ix, row_of=m.row, isin=m.isin, closes_of=lambda fo, dates: sessions.closes(dates, fo),
-        is_open=sessions.market_open, feed=lambda keys: {},
+        is_open=sessions.market_open, feed=lambda keys: {}, indices=sessions.index_underlyings(),
     )  # fmt: skip
     return {r["id"]: r for r in got}
 

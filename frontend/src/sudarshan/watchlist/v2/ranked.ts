@@ -97,11 +97,18 @@ export const timesLine = (madeMs: number, readMs: number) =>
 export const readAgo = (gotMs: number, nowMs: number) =>
   `Read ${Math.max(0, Math.floor((nowMs - gotMs) / 1000))} s ago`
 
-/** The server's left-out sentence, which it sends at the end of `words`; else one of the page's own. */
-export function leftOutSentence(words: string, n: number): string | null {
+/**
+ * The left-out sentence under a ranking: the server's own (`left_out_words`), shown as sent, and
+ * null when nothing was left out. Nothing is cut out of `words`. An answer from a server that
+ * predates the field has none, and gets the same sentence written here from the count.
+ */
+export function leftOutSentence(answer: {
+  left_out: number
+  left_out_words?: string | null
+}): string | null {
+  if (answer.left_out_words !== undefined) return answer.left_out_words || null
+  const n = answer.left_out
   if (n <= 0) return null
-  const found = /\d+ contracts? from Upstox .*$/.exec(words)
-  if (found) return found[0]
   const one = n === 1
   return `${n} contract${one ? '' : 's'} from Upstox ${one ? 'is' : 'are'} not in today's contract list and ${one ? 'is' : 'are'} left out.`
 }

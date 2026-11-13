@@ -166,8 +166,10 @@ RECORDS = {
     "Hit": "group:Group, title:string, detail:string, contract:Contract, added:bool",
     "Search": "understood:string, hits:Hit[], underlying:string|null, "
     "underlying_exchange:string|null, suggestion:string|null",
+    # ``left_out_words`` is the left-out sentence for ``left_out`` (null when nothing was left
+    # out); the ok and stale states' ``words`` do not carry it, a closed state's do.
     "Ranked": "ref:string, state:RankState, made_at:int|null, read_at:int|null, rows:Row[], "
-    "left_out:int, words:string",
+    "left_out:int, left_out_words:string|null, words:string",
     "Cut": "token:string, reason:string",
     "TvSection": "name:string, count:int",
     "TvPreview": "hash:string, sections:int, symbols:int, matched:int, follow:int, "

@@ -2,8 +2,8 @@
 calendar's closes and the best price there is.
 
 Every outside fact is an argument (the master's ``Index``, ``row_of`` for the underlying's own row,
-and the calendar and the feed as callables), so a test hands in its own and nothing here has a
-clock, a thread or I/O of its own. The contract of a row is looked up in the master, never built
+the index underlyings the master lists, and the calendar and the feed as callables), so a test
+hands in its own and nothing here has a clock, a thread or I/O of its own. The contract of a row is looked up in the master, never built
 from a name; a side the master lacks is said (for a strike row, which one). The price is, in
 order: the page's own tick while its socket is connected (however old), the page's snapshot, the
 feed's last tick (asked once for every row that needs it), and for a closed market the last price
@@ -12,7 +12,7 @@ the page kept, said so; none means the row waits.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from typing import Any
 
 from sudarshan.watchlists import dynamic, numfmt, view
@@ -124,9 +124,12 @@ def resolve_rows(
     closes_of: Callable[[str, list[str]], dict[str, int]],
     is_open: Callable[[str, int], bool],
     feed: Callable[[list[str]], dict[str, tuple[float, int | None]]],
+    indices: Collection[str],
 ) -> list[dict]:
     """One ``Resolved`` per id of ``items`` (in its order). ``rules`` is the stored rule of each id
-    (a missing one is a row that is gone); ``items`` is what the page sent."""
+    (a missing one is a row that is gone); ``items`` is what the page sent. ``indices`` are the
+    index underlyings the master lists (``sessions.index_underlyings``, review M1): an index's
+    contract stops at 15:30 on its expiry day from 7 Dec 2026, a stock's at 15:45."""
     book, out = Book(ix), []
     pages = {i: _page_price(items[i], connected) for i in items}
     # one asking of the feed for every option row that has no price of the page's to use
@@ -157,7 +160,7 @@ def resolve_rows(
         futures = rule["kind"] == "month_future"
         listed = book.futures(name, fo) if futures else book.options(name, fo)
         expiries = sorted(listed)
-        regime = {"index": stops.is_index(name), "exchange": fo}
+        regime = {"index": stops.is_index(name, indices), "exchange": fo}
         closes = _closes(expiries, now_ms, lambda d, fo=fo: closes_of(fo, d), **regime)
         expiry = dynamic.pick_expiries(expiries, now_ms, closes, **regime)[rule["expiry_rule"]]
         rows = listed.get(expiry, []) if not futures and expiry else []

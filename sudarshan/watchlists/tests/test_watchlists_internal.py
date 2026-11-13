@@ -254,6 +254,33 @@ def test_a_special_session_close_moves_valid_until(client, monkeypatch):
     assert data_of(ask(client, ref=f"list:{lid}"))["valid_until"] == early  # before it: the 24th
 
 
+def test_a_future_on_an_index_the_master_names_stops_at_1530_from_7_dec(client, monkeypatch):
+    """Review M1: the route asks OpenAlgo's one rule (``index_contracts``) which underlyings are
+    an index's. The old tuple did not name NEWINDEX, so a list alert kept its expiring future to
+    15:45 while the chart and the sandbox stopped it at 15:30."""
+    from watchlists_follow_master import new_index_rows
+
+    from sudarshan import index_contracts
+
+    use(build_master(more=new_index_rows(("29-DEC-26", "26-JAN-27"))), monkeypatch)
+    day = int(datetime.fromisoformat("2026-12-29T11:00:00+05:30").timestamp() * 1000)
+    monkeypatch.setattr(internal, "reader_now", lambda: day)
+    monkeypatch.setattr(list_reader, "now_ms", lambda: day)
+    lid, _ = make_list(("SBIN",))
+    follow(lid, "0", kind="month_future", underlying="NEWINDEX", expiry_rule="nearest")
+    known = index_contracts.KNOWN
+    monkeypatch.setattr(
+        index_contracts, "underlyings", lambda: known._replace(indices=known.indices | {"NEWINDEX"})
+    )
+    got = data_of(ask(client, ref=f"list:{lid}"))
+    assert got["rows"][0]["symbol"] == "NEWINDEX29DEC26FUT"
+    at_1530 = int(datetime.fromisoformat("2026-12-29T15:30:00+05:30").timestamp() * 1000)
+    assert got["rows"][0]["valid_until"] == at_1530 == got["valid_until"]
+    monkeypatch.setattr(index_contracts, "underlyings", lambda: known)  # the master unread
+    held = data_of(ask(client, ref=f"list:{lid}"))
+    assert held["rows"][0]["valid_until"] == at_1530 + 15 * 60_000  # a stock's 15:45: no guess
+
+
 def test_a_section_answers_its_rows_and_the_lists_identity(client):
     lid, created = make_list(("SBIN",))
     c = make_app(ops.discover(), real=True).test_client()
@@ -284,6 +311,31 @@ def test_a_built_in_list_answers_its_futures_with_each_ones_stop_and_no_list_key
     stocks = data_of(ask(client, ref="preset:fno_stocks"))
     assert all("valid_until" not in r for r in stocks["rows"])
     assert [c["why"] for c in stocks["left_out"]] == ["missing"]
+
+
+def test_a_bse_future_expiring_today_takes_bses_calendar_not_nses(client, monkeypatch):
+    """Review L2: the route asked NSE's calendar ("NFO") whatever the row's exchange, so a BFO
+    future expiring on a BSE special session day took NSE's close, or none."""
+    from sudarshan.watchlists import sessions
+
+    snap, _ = snapshot_of(PRESETS["master"] + indices_rows(), datetime(2026, 11, 9, 8, 40))
+    use(snap, monkeypatch)
+    day = int(datetime.fromisoformat("2026-11-26T11:00:00+05:30").timestamp() * 1000)
+    monkeypatch.setattr(preset_reader, "now_ms", lambda: day)
+    monkeypatch.setattr(internal, "reader_now", lambda: day)
+    bse_end = int(datetime.fromisoformat("2026-11-26T18:30:00+05:30").timestamp() * 1000)
+    asked = []
+
+    def closes(dates, exchange):
+        asked.append((exchange, tuple(dates)))
+        return dict.fromkeys(dates, bse_end) if exchange == "BFO" else {}
+
+    monkeypatch.setattr(sessions, "closes", closes)
+    got = data_of(ask(client, ref="preset:index_futures"))
+    (sensex,) = [r for r in got["rows"] if r["exchange"] == "BFO"]
+    assert sensex["expiry"] == "2026-11-26" and sensex["valid_until"] == bse_end
+    assert asked == [("BFO", ("2026-11-26",))]  # only the exchange a row expires today on
+    assert all(r["valid_until"] > bse_end for r in got["rows"] if r["exchange"] == "NFO")
 
 
 def test_a_flag_list_answers_its_rows_and_never_a_flag_or_a_note(client):

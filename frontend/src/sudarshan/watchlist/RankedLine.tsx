@@ -111,9 +111,7 @@ export function RankedLine({ ranking, name }: { ranking: Ranking; name: string }
       ? ageLine(data.made_at, now)
       : null
   const left =
-    data && (data.state === 'ok' || data.state === 'stale')
-      ? leftOutSentence(data.words, data.left_out)
-      : null
+    data && (data.state === 'ok' || data.state === 'stale') ? leftOutSentence(data) : null
   // The server's words for every state but ok and stale, whose line is the age line drawn here.
   const said =
     data && data.state !== 'ok' && data.state !== 'stale' && data.words.trim() ? data.words : null

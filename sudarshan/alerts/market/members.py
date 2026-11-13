@@ -7,8 +7,9 @@ transport in this one module.
 
 The contract this was written against (a stub until the route exists, tests/groups_fakes.py):
 
-    members {ref} -> ok:  {status: "ok", data: {version, created_at, rows: [{symbol, exchange, instrument_key,
-                          tick_size, expiry, lot, valid_until?}], left_out: [{symbol?, why, reason}]}}
+    members {ref} -> ok:  {status: "ok", data: {version, ref_version, created_at, rows: [{symbol, exchange,
+                          instrument_key, tick_size, expiry, lot, valid_until?}],
+                          left_out: [{symbol?, why, reason}]}}
     version       -> ok:  {status: "ok", data: {version}}
     the watchlist feature switched off -> {status: "error", code: "off", ...}   (a freeze)
     the list is not there (deleted)    -> {status: "error", code: "gone", ...}  (a stop)
@@ -52,6 +53,9 @@ class Answer(NamedTuple):
     left_out: tuple[Mapping[str, Any], ...] = ()
     #: The list's own created_at text: a reused list id is told apart by it (review M4).
     list_key: str | None = None
+    #: The ref's own digest of what it holds (the route's ``ref_version``): it moves when this
+    #: list's members move and not when another list does (v0.9.0 review L1).
+    ref_version: str | None = None
 
 
 class MembersSource(Protocol):
@@ -104,6 +108,7 @@ def read(payload: Mapping[str, Any], status: int = 200) -> Answer:
         raise Unavailable("rows could not be read") from exc
     if version is not None and not isinstance(version, str | int):
         raise Unavailable("version could not be read")
-    key = data.get("created_at")
+    key, digest = data.get("created_at"), data.get("ref_version")
     return Answer(groups.OK, None if version is None else str(version), rows, left_out,
-                  None if key is None else str(key))  # fmt: skip
+                  None if key is None else str(key),
+                  digest if isinstance(digest, str) else None)  # fmt: skip

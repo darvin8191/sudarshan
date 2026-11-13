@@ -343,6 +343,39 @@ def test_a_stock_expiry_runs_to_the_fo_close_before_and_after_7_dec(client, monk
     assert strikes(client, u="RELIANCE", x="NSE", p=950, n=0)["expiries"] == []
 
 
+def test_an_index_the_master_names_beyond_the_known_ones_stops_at_1530(client, box, monkeypatch):
+    """Review M1: the strike picker and search ask OpenAlgo's one rule (``index_contracts``) which
+    underlyings are an index's. The old tuple did not name NEWINDEX and kept its expiry to 15:45."""
+    from test_watchlists_search import Row
+
+    from sudarshan import index_contracts
+
+    extra = [Row("NEWINDEX", "NEWINDEX", "NSE_INDEX", "NSE_INDEX|NEWINDEX", instrumenttype="INDEX")]
+    for k in (1000, 1050, 1100):
+        for t in ("CE", "PE"):
+            extra.append(Row(f"NEWINDEX29DEC26{k}{t}", "NEWINDEX", "NFO", f"NSE_FO|NEWINDEX{k}{t}",
+                             "29-DEC-26", float(k), 25, t, "NEWINDEX"))  # fmt: skip
+    extra.append(Row("NEWINDEX29DEC26FUT", "NEWINDEX", "NFO", "NSE_FO|NEWINDEXF", "29-DEC-26",
+                     None, 25, "FUT", "NEWINDEX"))  # fmt: skip
+    box.snap = snap_of(make_rows() + extra)
+    master.shared().drop()
+    known = index_contracts.KNOWN
+    named = known._replace(indices=known.indices | {"NEWINDEX"})
+    monkeypatch.setattr(index_contracts, "underlyings", lambda: named)
+    at(monkeypatch, "2026-12-29T15:29:00+05:30")
+    data = strikes(client, u="NEWINDEX", p=1050, n=0)
+    assert data["expiry"] == "2026-12-29" and data["words"] == "This expiry ends today at 15:30."
+    at(monkeypatch, "2026-12-29T15:31:00+05:30")
+    assert strikes(client, u="NEWINDEX", p=1050, n=0)["expiries"] == []
+    assert [h["contract"]["symbol"] for h in find(client, "newindex fut")["hits"]] == []
+    monkeypatch.setattr(index_contracts, "underlyings", lambda: known)  # the master unread
+    held = strikes(client, u="NEWINDEX", p=1050, n=0)
+    assert held["expiry"] == "2026-12-29" and held["words"] == "This expiry ends today at 15:45."
+    assert [h["contract"]["symbol"] for h in find(client, "newindex fut")["hits"]] == [
+        "NEWINDEX29DEC26FUT"
+    ]
+
+
 def test_a_special_session_day_takes_its_close_from_the_calendar(client, monkeypatch):
     monkeypatch.setattr(preset_reader, "calendar_close", lambda iso: ist(f"{iso}T19:15:00+05:30"))
     at(monkeypatch, "2026-11-24T18:00:00+05:30")  # the regime's 15:40 has passed

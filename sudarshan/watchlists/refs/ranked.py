@@ -34,7 +34,7 @@ def view(ident: str, user: str) -> dict:
     got, _ = op.answer(src, asset, cat, ranked.DEFAULT_SIZE, user)
     return {
         "ref": got["ref"], "kind": KIND, "name": words.label(src, asset, cat), "version": "0",
-        "locked": True, "as_of": None, "lines": [got["words"]], "total": len(got["rows"]),
+        "locked": True, "as_of": None, "lines": op.lines_of(got), "total": len(got["rows"]),
         "missing": [], "sections": [], "rows": got["rows"], "follow": [],
         "pref": merge_view._pref(None),
     }  # fmt: skip

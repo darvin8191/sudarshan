@@ -20,13 +20,26 @@ What each row becomes:
   ``NSE:NIFTY261124C25800`` (underlying, expiry as YYMMDD, C or P, strike). The row does not follow
   the price on TradingView, and the answer says so. The form is TradingView's as far as the
   owner's files show; the import does not read it back, so it is left out on the way in.
+
+Until one real TradingView file confirms the form (design fact W-5), the futures of an index
+other than NIFTY and BANKNIFTY (written with the index's chart name they would read
+``NSE:CNXFINANCE1!``, which TradingView most likely does not), every BSE future and every BSE option
+are left out, counted and named in the answer's words (``unchecked_future``, ``unchecked_option``;
+v0.9.0 review M3). Which futures are an index's is the master's answer, passed in ``Entry.index``.
+NSE stock and index options and stock futures keep their forms.
 """
 
 from __future__ import annotations
 
 from typing import NamedTuple
 
-from sudarshan.watchlists.tvimport import INDEX_ALIASES, SECTION_NAME  # noqa: F401
+from sudarshan.watchlists.tvimport import (  # noqa: F401
+    CHECKED_INDEX_FUTURES,
+    INDEX_ALIASES,
+    SECTION_NAME,
+    UNCHECKED_FUTURE,
+    UNCHECKED_OPTION,
+)
 
 #: The TradingView name of each index of the master (the alias table of the import, reversed).
 TV_INDEX = {target: alias for alias, target in INDEX_ALIASES.items()}
@@ -41,7 +54,8 @@ class Entry(NamedTuple):
     underlying on ``exchange``, with its expiry rule in ``rule``) or ``row`` (a contract or symbol
     of the master: ``instrument`` CE, PE, FUT or None, ``expiry`` as ``2026-11-24``, ``strike``,
     ``underlying`` its name). ``cont`` is ``month`` or ``next_month`` for a future that is that
-    contract today; ``today`` is true for a contract an at-the-money or strike row shows now."""
+    contract today; ``today`` is true for a contract an at-the-money or strike row shows now;
+    ``index`` is true for a contract whose underlying the master lists as an index's."""
 
     kind: str
     exchange: str
@@ -53,6 +67,7 @@ class Entry(NamedTuple):
     underlying: str | None = None
     cont: str | None = None
     today: bool = False
+    index: bool = False
 
 
 class Block(NamedTuple):
@@ -65,7 +80,8 @@ class Block(NamedTuple):
 
 
 class Cut(NamedTuple):
-    """A row left out and why: no_tv_name, no_form, dated_future, expired, waiting, no_contract."""
+    """A row left out and why: no_tv_name, no_form, dated_future, expired, waiting, no_contract,
+    unchecked_future, unchecked_option."""
 
     token: str
     reason: str
@@ -109,9 +125,9 @@ def tv_symbol(e: Entry) -> tuple[str | None, str | None]:
         ex = _INDEX_EXCHANGE.get(e.exchange, e.exchange)
         if bang is None or ex not in ("NSE", "BSE"):
             return None, "no_form"
-        if index and e.symbol not in TV_INDEX:
-            return None, "no_tv_name"
-        return f"{ex}:{_under(e.symbol, index)}{bang}", None
+        if ex == "BSE" or (index and e.symbol not in CHECKED_INDEX_FUTURES):
+            return None, UNCHECKED_FUTURE
+        return f"{ex}:{_under(e.symbol, False)}{bang}", None
     if e.exchange in _INDEX_EXCHANGE:
         if e.symbol not in TV_INDEX:
             return None, "no_tv_name"
@@ -121,8 +137,13 @@ def tv_symbol(e: Entry) -> tuple[str | None, str | None]:
         if e.instrument == "FUT":
             if e.cont not in _RULE_BANG:
                 return None, "dated_future"
-            return f"{ex}:{_under(name, name in TV_INDEX)}{_RULE_BANG[e.cont]}", None
+            index = e.index or name in TV_INDEX
+            if ex == "BSE" or (index and name not in CHECKED_INDEX_FUTURES):
+                return None, UNCHECKED_FUTURE
+            return f"{ex}:{_under(name, False)}{_RULE_BANG[e.cont]}", None
         if e.instrument in ("CE", "PE") and e.expiry and e.strike is not None and name:
+            if ex == "BSE":
+                return None, UNCHECKED_OPTION
             y, m, d = e.expiry.split("-")
             return (
                 f"{ex}:{_under(name, False)}{y[2:]}{m}{d}{e.instrument[0]}{_strike(e.strike)}",

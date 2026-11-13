@@ -31,6 +31,23 @@ def _names(tokens: list[str]) -> str:
     return ", ".join(tokens)
 
 
+def unchecked_line(futures: list[str], options: list[str]) -> str | None:
+    """What waits for a real TradingView file (design fact W-5), counted and named, on the way in
+    and out: ``Left out until their TradingView form is checked: 2 index futures (A, B) and 1 BSE
+    option (C).`` None when nothing does."""
+    parts = []
+    if futures:
+        parts.append(
+            f"{_plural(len(futures), 'index future', 'index futures')} ({_names(futures)})"
+        )
+    if options:
+        parts.append(f"{_plural(len(options), 'BSE option', 'BSE options')} ({_names(options)})")
+    if not parts:
+        return None
+    its = "its" if len(futures) + len(options) == 1 else "their"
+    return f"Left out until {its} TradingView form is checked: {' and '.join(parts)}."
+
+
 def preview(plan: Plan) -> list[str]:
     """The sentences under the file picker, in order; empty when nothing matched is ``NO_INDIAN``."""
     if plan.matched == 0:
@@ -63,6 +80,9 @@ def preview(plan: Plan) -> list[str]:
         out.append(
             f"Rows that follow a commodity future are not offered yet: {_names(by['mcx_follow'])}."
         )
+    held = unchecked_line(by.get("unchecked_future", []), by.get("unchecked_option", []))
+    if held:
+        out.append(held)
     for sec in plan.sections:
         for it in sec.items:
             if it.kind == "follow":

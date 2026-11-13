@@ -10,7 +10,10 @@ The read is made by the bridge with OpenAlgo's daily Upstox access token for the
   asking us to wait, or the plugin's own limiter, is ``wait``; no usable answer is ``unavailable``
   and the last ranking read with this token stays, labelled with its time; an answer is ``ok``,
   ``stale`` after ten minutes and ``closed`` while the exchange is shut (Upstox's own last ranking
-  and time).
+  and time). An answer Upstox calls a success whose rows cannot be read (no list of rows, or no
+  row naming an ``instrument_key``: ``ranked.unusable``) is no usable answer: it is never cached
+  as a ranking, never replaces the last good one and is logged once by its key names (v0.9.0
+  review M2). With no time from Upstox the line says the read's age, never the ranking's.
 
 The cache holds Upstox's answer for the 50-row page, so 20 rows and 50 rows are one read, and it
 is dropped whenever the session's token changes (each entry also carries a digest of its token, so
@@ -49,6 +52,9 @@ _last = LockedTTLCache(maxsize=64, ttl=LAST_S)  # the last ok, by category
 _flight = KeyedLocks(name="watchlists-ranked")
 _token_lock = real_threading.Lock()
 _token_seen: list[str | None] = [None]  # the digest of the token the caches belong to
+#: The unreadable answer shapes already logged (their key names), each once; at most 16 kept.
+_shapes_logged: set[str] = set()
+SHAPES_KEPT = 16
 
 
 class Reading(NamedTuple):
@@ -112,6 +118,23 @@ def _usable(got: Reading | None, fp: str) -> Reading | None:
     return got if got is not None and got.fp == fp else None
 
 
+def _unreadable(answer: Any, why: str, category: str) -> None:
+    """Log, once for each shape, that Upstox answered a ranking in a shape this version cannot
+    read: its key names only (never a value, never the token), for design facts W-1 and W-2."""
+    shape = ranked.shape_of(answer)
+    text = repr(sorted(shape.items()))
+    with _token_lock:  # a set's bookkeeping only
+        first = text not in _shapes_logged and len(_shapes_logged) < SHAPES_KEPT
+        if first:
+            _shapes_logged.add(text)
+    if first:
+        logger.warning(
+            "Watchlists: Upstox answered the %s ranking in a shape this version cannot read (%s); "
+            "key names: answer %s, data %s, first row %s",
+            category, why, shape["answer"], shape["data"], shape["row"],
+        )  # fmt: skip
+
+
 def reading_of(token: str, source: str, asset: str, category: str) -> Reading:
     """The cached or freshly read answer of one category: one call for any number of callers."""
     fp = digest(token)
@@ -128,19 +151,34 @@ def reading_of(token: str, source: str, asset: str, category: str) -> Reading:
                 return got
         gens = (_fresh.generation, _shared.generation, _last.generation)
         out = smartlist.fetch(token, source, asset, category, ranked.MAX_SIZE)
+        if out.kind == "ok" and (why := ranked.unusable(out.answer)) is not None:
+            _unreadable(out.answer, why, category)
+            out = smartlist.Outcome("failed")  # not a ranking: never cached as one, never last
         got = Reading(out.kind, out.answer, now_ms(), fp)
         if out.kind == "failed":
             _shared.fill(key, got, gens[1])
         else:
             _fresh.fill(key, got, gens[0])
-            if out.kind == "ok":
-                _last.fill(key, got, gens[2])
+            if out.kind == "ok" and ranked.extract(out.answer).rows:
+                _last.fill(key, got, gens[2])  # an empty ranking never replaces one with rows
         return got
 
 
-def _record(ref, state, made, read_at, rows, left_out, said) -> dict:
+def _record(ref, state, made, read_at, rows, left_out, said, left_words=None) -> dict:
+    """The ``Ranked`` record. ``left_out_words`` is the left-out sentence for ``left_out`` (None
+    when nothing was left out); the words of the ok and stale states do not repeat it, a closed
+    state's do (the phone shows those words whole)."""
     return {"ref": ref, "state": state, "made_at": made, "read_at": read_at, "rows": rows,
-            "left_out": left_out, "words": said}  # fmt: skip
+            "left_out": left_out, "left_out_words": left_words, "words": said}  # fmt: skip
+
+
+def lines_of(record: dict) -> list[str]:
+    """The lines a view shows over a ranking: its words, then the left-out sentence where the
+    words do not carry it (the ok and stale states)."""
+    out = [record["words"]]
+    if record["left_out_words"] and record["state"] in ("ok", "stale"):
+        out.append(record["left_out_words"])
+    return out
 
 
 def _marks() -> dict:
@@ -155,7 +193,7 @@ def _marks() -> dict:
 
 def _mapped(got: Reading, category: str, size: int, m):
     """``(ranking, missing keys, rows as the contract says)`` for the first ``size`` rows."""
-    rows, stamp, metric_key = ranked.extract(got.answer)
+    rows, stamp, metric_key, _ = ranked.extract(got.answer)
     cut = rows[:size]
     body = {"data": {"rows": cut, "time_stamp": stamp, "metric_key": metric_key}}
     ranking = ranked.map_rows(body, category, m.by_token)
@@ -184,8 +222,9 @@ def _line(ranking: ranked.Ranking, got: Reading, asset: str, now: int) -> tuple[
     exchange = "MCX" if asset == "COMMODITY" else "NFO"
     if not sessions.market_open(exchange, now):
         return "closed", (words.closed_line(made, now) if made else words.CLOSED_NO_TIME)
-    stale = made is not None and words.is_stale(made, now)
-    return ("stale" if stale else "ok"), words.age_line(made or got.read_at, now)
+    if made is None:  # no age is counted from the read as if it were the ranking's (review M2)
+        return "ok", words.no_time_line(got.read_at, now)
+    return ("stale" if words.is_stale(made, now) else "ok"), words.age_line(made, now)
 
 
 def shaped(got: Reading, ref: str, asset: str, category: str, size: int,
@@ -200,8 +239,10 @@ def shaped(got: Reading, ref: str, asset: str, category: str, size: int,
         ranking, missing, rows = _mapped(got, category, size, m)
         state, said = _line(ranking, got, asset, now)
         cut = words.left_out(ranking.left_out)
-        return _record(ref, state, ranking.made_at, got.read_at, rows, ranking.left_out,
-                       said + (" " + cut if cut else "")), missing  # fmt: skip
+        if state == "closed" and cut:  # shown whole by the phone, so one sentence after another
+            said = f"{said}. {cut}"
+        return _record(ref, state, ranking.made_at, got.read_at, rows, ranking.left_out, said,
+                       cut), missing  # fmt: skip
     old = _mapped(last, category, size, m) if last is not None else None
     made = old[0].made_at if old else None
     rows, missing = (old[2], old[1]) if old else ([], [])
@@ -210,9 +251,11 @@ def shaped(got: Reading, ref: str, asset: str, category: str, size: int,
     if got.kind == "token":
         said = words.expired_line(made, now) if made else words.EXPIRED
         return _record(ref, "signin", made, read, [], 0, said), []
+    cut = words.left_out(left)
     if got.kind == "wait":
-        return _record(ref, "wait", made, read, rows, left, words.WAIT), missing
-    return _record(ref, "unavailable", made, read, rows, left, words.unavailable(made)), missing
+        return _record(ref, "wait", made, read, rows, left, words.WAIT, cut), missing
+    return _record(ref, "unavailable", made, read, rows, left, words.unavailable(made),
+                   cut), missing  # fmt: skip
 
 
 def answer(source: str, asset: str, category: str, size: int | None, user: str,

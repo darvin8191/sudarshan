@@ -13,11 +13,14 @@ from pathlib import Path
 
 import pytest
 
+from sudarshan import regimes
 from sudarshan.watchlists import search
 from sudarshan.watchlists.words import search as words
 
 V = json.loads((Path(__file__).parent / "vectors" / "search.json").read_text(encoding="utf-8"))
 NOW = int(datetime.fromisoformat(V["now"]).timestamp() * 1000)
+#: The index underlyings the master lists (review M1): here the names every reader knows.
+KNOWN = frozenset(regimes.INDEX_UNDERLYINGS)
 
 
 @dataclass
@@ -57,7 +60,9 @@ def shown(hit):
 
 
 def run(c):
-    return search.search(IX, c["q"], price=c.get("price"), now_ms=NOW, segment=c.get("seg", "all"))
+    return search.search(
+        IX, c["q"], price=c.get("price"), now_ms=NOW, indices=KNOWN, segment=c.get("seg", "all")
+    )
 
 
 @pytest.mark.parametrize(
@@ -103,14 +108,14 @@ def test_a_bare_small_number_is_part_of_the_name():
 
 
 def test_the_price_is_only_asked_for_by_atm():
-    assert search.search(IX, "nifty atm ce", now_ms=NOW).understood.needs_price
-    assert not search.search(IX, "nifty 25900 ce", now_ms=NOW).understood.needs_price
+    assert search.search(IX, "nifty atm ce", now_ms=NOW, indices=KNOWN).understood.needs_price
+    assert not search.search(IX, "nifty 25900 ce", now_ms=NOW, indices=KNOWN).understood.needs_price
 
 
 def test_at_most_fifty_hits():
-    r = search.search(IX, "nifty ce", price=25900, now_ms=NOW, limit=500)
+    r = search.search(IX, "nifty ce", price=25900, now_ms=NOW, indices=KNOWN, limit=500)
     assert len(r.hits) <= 50
-    assert len(search.search(IX, "nifty 26000", now_ms=NOW, limit=2).hits) == 2
+    assert len(search.search(IX, "nifty 26000", now_ms=NOW, indices=KNOWN, limit=2).hits) == 2
 
 
 def test_typo_vocabulary_rules():
@@ -124,8 +129,27 @@ def test_typo_vocabulary_rules():
 
 
 def test_expired_futures_are_not_offered():
-    r = search.search(IX, "crudeoil fut", now_ms=NOW)
+    r = search.search(IX, "crudeoil fut", now_ms=NOW, indices=KNOWN)
     assert [words.title(h[1]) for h in r.hits] == ["CRUDEOIL FUT, 18 Dec 2026"]
+
+
+def test_an_index_the_master_lists_beyond_the_known_names_ends_by_the_index_rule():
+    """Review M1: from 7 Dec 2026 an expiring index contract stops at 15:30 and a stock's at 15:45;
+    which underlyings are an index's is the master's answer, passed in, never a list of search's."""
+    rows = [Row("NEWINDEX", "NEWINDEX", "NSE_INDEX", "NSE_INDEX|NEWINDEX", instrumenttype="INDEX")]
+    for e in ("29-DEC-26", "26-JAN-27"):
+        rows.append(Row(f"NEWINDEX{e.replace('-', '')}FUT", "NEWINDEX", "NFO", f"NSE_FO|N{e}", e,
+                        None, 25, "FUT", "NEWINDEX"))  # fmt: skip
+    ix = search.build_index(rows)
+    at = int(datetime.fromisoformat("2026-12-29T15:35:00+05:30").timestamp() * 1000)
+
+    def futures(indices):
+        return [
+            h[1].symbol for h in search.search(ix, "newindex fut", now_ms=at, indices=indices).hits
+        ]
+
+    assert futures(KNOWN | {"NEWINDEX"}) == ["NEWINDEX26JAN27FUT"]  # 29 Dec stopped at 15:30
+    assert futures(KNOWN) == ["NEWINDEX29DEC26FUT", "NEWINDEX26JAN27FUT"]  # read as a stock's
 
 
 def test_the_index_holds_the_rows_themselves_never_copies():
@@ -141,7 +165,7 @@ def test_after_the_master_is_replaced_the_old_rows_are_gone():
     rows = make_rows()
     ref = weakref.ref(rows[0])
     ix = search.build_index(rows)
-    assert search.search(ix, "reliance", now_ms=NOW).hits
+    assert search.search(ix, "reliance", now_ms=NOW, indices=KNOWN).hits
     del rows, ix
     gc.collect()
     assert ref() is None
@@ -175,7 +199,7 @@ def test_build_and_query_times_on_a_full_size_master():
         builds.append(time.perf_counter() - t0)
     assert min(builds) < 0.3, builds
     t0 = time.perf_counter()
-    r = search.search(ix, "u7 25500 ce", now_ms=NOW)
+    r = search.search(ix, "u7 25500 ce", now_ms=NOW, indices=KNOWN)
     assert time.perf_counter() - t0 < 0.02 and len(r.hits) == 3
 
 
@@ -186,6 +210,7 @@ def test_the_module_is_pure():
         names |= {n.module for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)}
         assert names <= {
             "__future__",
+            "collections.abc",
             "re",
             "typing",
             "sudarshan.watchlists",

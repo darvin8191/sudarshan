@@ -447,6 +447,36 @@ def test_a_draft_row_is_previewed_in_the_shape_of_a_stored_one_and_nothing_is_wr
     assert table("wl_row") == before[0] and len(before[0]) == 1  # still the one stored row
 
 
+def test_resolve_asks_the_master_which_underlyings_are_an_indexs(client, world, monkeypatch):
+    """Review M1: the op passes OpenAlgo's one rule (``index_contracts``, the master's answer) to
+    the resolver. NEWINDEX is an index the old tuple did not name, which read it as a stock's: its
+    future then stopped at 15:45 on its expiry day from 7 Dec 2026 instead of 15:30."""
+    from watchlists_follow_master import new_index_rows
+
+    from sudarshan import index_contracts
+    from sudarshan.watchlists import numfmt
+    from sudarshan.watchlists.ops import rows as rows_ops
+
+    snap = build_master(more=new_index_rows(("29-DEC-26", "26-JAN-27")))
+    monkeypatch.setattr(master, "openalgo_snapshot", lambda: snap)
+    master.shared().drop()
+    monkeypatch.setattr(rows_ops, "_now_ms", lambda: AT + 39 * 86_400_000)  # 29 Dec, 11:00
+    known = index_contracts.KNOWN
+    named = known._replace(indices=known.indices | {"NEWINDEX"})
+    fut = draft(kind="month_future", underlying="NEWINDEX", price=None, source=None)
+
+    def stop() -> str:
+        (got,) = ask_drafts(client, [fut]).get_json()["data"]["drafts"]
+        assert got["future"]["symbol"] == "NEWINDEX29DEC26FUT"
+        return numfmt.hm(got["valid_until"])
+
+    monkeypatch.setattr(index_contracts, "underlyings", lambda: named)
+    assert stop() == "15:30"
+    # the master unread: the names every reader knows, no guess
+    monkeypatch.setattr(index_contracts, "underlyings", lambda: known)
+    assert stop() == "15:45"
+
+
 def test_a_draft_without_stored_rows_and_without_drafts_keeps_the_old_answer(client, world):
     assert ask(client, []).get_json()["data"] == {"rows": []}  # no drafts key when none were sent
     only = ask_drafts(client, [draft()]).get_json()["data"]

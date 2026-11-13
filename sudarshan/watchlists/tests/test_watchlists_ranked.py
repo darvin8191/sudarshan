@@ -56,6 +56,35 @@ def test_a_rank_counts_unknown_rows_too():
     assert [x.rank for x in r.rows] == [2] and r.left_out == 1
 
 
+@pytest.mark.parametrize("c", V["shapes"], ids=lambda c: c["name"])
+def test_an_answer_says_whether_its_rows_can_be_read(c):
+    """Review M2: rows under another name read as an empty ranking, and rows whose key field has
+    another name as every contract missing from the master; both are unusable answers now."""
+    assert ranked.extract(c["answer"]).found is c["found"]
+    assert ranked.unusable(c["answer"]) == c["why"]
+
+
+@pytest.mark.parametrize(("value", "want"), V["numbers"], ids=repr)
+def test_a_figure_is_a_finite_number_or_nothing(value, want):
+    assert ranked.number(value) == want
+
+
+def test_the_shape_of_an_unreadable_answer_is_key_names_only():
+    answer = {"status": "success", "data": {"time_stamp": 1, "entries": [{"instrumentKey": "S3"}]}}
+    assert ranked.shape_of(answer) == {
+        "answer": ["data", "status"],
+        "data": ["entries", "time_stamp"],
+        "row": [],
+    }
+    rows = {"data": {"data": [{"instrumentKey": "NSE_FO|35003", "secret": "do-not-log"}]}}
+    got = ranked.shape_of(rows)
+    assert got["row"] == ["instrumentKey", "secret"]
+    assert "do-not-log" not in repr(got) and "NSE_FO|35003" not in repr(got)
+    many = {"data": {f"k{i:02}": i for i in range(50)}}
+    assert len(ranked.shape_of(many)["data"]) == 20  # bounded
+    assert ranked.shape_of("nonsense") == {"answer": [], "data": [], "row": []}
+
+
 @pytest.mark.parametrize("c", V["times"], ids=str)
 def test_time_stamp(c):
     want = None if c["iso"] is None else ms(c["iso"])
@@ -94,6 +123,10 @@ def test_lines():
     assert words.unavailable(ms("2026-11-09T10:41:00+05:30")) == (
         "Upstox's ranking could not be read just now. Showing the ranking from 10:41."
     )
+    assert words.no_time_line(made, made + 30_000) == (
+        "Read just now · Upstox gave no time for this ranking"
+    )
+    assert words.no_time_line(made, made + 125_000).startswith("Read 2 min ago · ")
     assert (
         words.left_out(2)
         == "2 contracts from Upstox are not in today's contract list and are left out."
@@ -174,7 +207,7 @@ def test_the_modules_are_pure():
         tree = ast.parse(Path(mod.__file__).read_text(encoding="utf-8"))
         names = {a.name for n in ast.walk(tree) if isinstance(n, ast.Import) for a in n.names}
         names |= {n.module for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)}
-        assert names <= {"__future__", "typing", "datetime", "collections.abc", "sudarshan.watchlists",
-                         "sudarshan.watchlists.words"}  # fmt: skip
+        assert names <= {"__future__", "typing", "datetime", "collections.abc", "math",
+                         "sudarshan.watchlists", "sudarshan.watchlists.words"}  # fmt: skip
         attrs = {n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute)}
         assert not attrs & {"now", "utcnow", "monotonic", "sleep", "time"}
