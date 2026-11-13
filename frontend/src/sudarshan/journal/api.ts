@@ -1,0 +1,250 @@
+// SUDARSHAN M14, JD1: the journal, through OpenAlgo's bridge (/sudarshan/journal/api/*).
+// One function carries every op: the route, the method and the class of op come from the
+// contract's table (OPS in types.ts), so a later op never means editing this file. A success is
+// the contract's envelope; switched off is a success that says so; an error carries a sentence
+// for the owner, shown as the bridge wrote it. Nothing here shows a status code or a class name.
+import axios from 'axios'
+import { webClient } from '@/api/client'
+import {
+  API_PREFIX,
+  type ChargeEstimate,
+  type Cls,
+  type Done,
+  type Excursion,
+  type Fill,
+  type JournalOps,
+  OPS,
+  type OpName,
+  type OpSpec,
+  type Trip,
+  type TripNote,
+} from './types'
+
+/** The detail the trade sheet draws. The contract's `Trip` is the row; the rest rides beside it. */
+export interface TripDetail extends Trip {
+  fills?: Fill[]
+  note?: TripNote | null
+  excursion?: Excursion | null
+  charges?: ChargeEstimate | null
+  /** "order answered in 412 ms": the order's own latency, when the platform recorded one. */
+  latency_ms?: number | null
+}
+
+/** What a trip's detail answers: the contract says `Trip`; the detail is a superset of it. */
+export type JournalAnswers = Omit<JournalOps, 'trip_get'> & {
+  trip_get: { req: JournalOps['trip_get']['req']; res: TripDetail }
+}
+
+/** The words of this module, in one place (design 6.4): every one a sentence with a next step. */
+export const WORDS = {
+  off: 'The journal is switched off on the server.',
+  unavailable: 'The journal service is not answering. Your trades are safe; try again in a minute.',
+  notReady: 'This part of the journal is not ready yet.',
+  noAnswer: 'No answer came from OpenAlgo. Check the connection, then try again.',
+  notSent: 'The request could not be sent. Reload the page, then try again.',
+  unreadable: 'OpenAlgo’s answer could not be read. Try again in a minute.',
+  signedOut: 'Your session has ended. Sign in again, then come back to the journal.',
+  conflict: 'This trade’s notes were changed on another screen. Nothing was saved; open it again.',
+} as const
+
+export type ProblemCode =
+  | 'unauthorized'
+  | 'forbidden'
+  | 'conflict'
+  | 'busy'
+  | 'unanswered'
+  | 'unsent'
+  | 'unreadable'
+  | 'unavailable'
+  | 'refused'
+
+/** A sentence for the owner and the code the page acts on. */
+export interface JournalProblem {
+  code: ProblemCode
+  message: string
+}
+
+export class JournalError extends Error {
+  readonly code: ProblemCode
+  constructor(problem: JournalProblem) {
+    super(problem.message)
+    this.name = 'JournalError'
+    this.code = problem.code
+  }
+}
+
+/** What an op returned: its data, or that the journal is switched off (with the sentence). */
+export type JournalResult<T> =
+  | { enabled: true; data: T }
+  | { enabled: false; data: null; message: string }
+
+/** Waits with room for the bridge's own waits and the trip. */
+const WAIT_MS: Record<Cls, number> = {
+  read: 15_000,
+  write: 20_000,
+  download: 30_000,
+  reconcile: 30_000,
+}
+
+const SPECS = new Map<OpName, OpSpec>(OPS.map((spec) => [spec.name, spec]))
+
+const text = (value: unknown): string | null =>
+  typeof value === 'string' && value.trim() ? value.trim() : null
+
+/** The words of a status the bridge answered without a sentence of its own. */
+function problemForStatus(status: number): JournalProblem {
+  if (status === 401) return { code: 'unauthorized', message: WORDS.signedOut }
+  if (status === 403) {
+    return {
+      code: 'forbidden',
+      message: 'The journal is for the owner’s sign-in only. Sign in as the owner to see it.',
+    }
+  }
+  if (status === 409) return { code: 'conflict', message: WORDS.conflict }
+  if (status === 429) {
+    return {
+      code: 'busy',
+      message: 'That was too many requests in a minute. Wait a little, then try again.',
+    }
+  }
+  if (status === 404 || status === 501) return { code: 'unavailable', message: WORDS.notReady }
+  return { code: 'unavailable', message: WORDS.unavailable }
+}
+
+function problemFrom(body: unknown): JournalProblem | null {
+  if (!body || typeof body !== 'object') return null
+  const raw = (body as { error?: unknown }).error
+  const message =
+    typeof raw === 'string'
+      ? text(raw)
+      : raw && typeof raw === 'object'
+        ? text((raw as { message?: unknown }).message)
+        : text((body as { message?: unknown }).message)
+  if (!message) return null
+  const code = raw && typeof raw === 'object' ? text((raw as { code?: unknown }).code) : null
+  const known: ProblemCode =
+    code === 'conflict' || code === 'busy' || code === 'unauthorized' || code === 'forbidden'
+      ? code
+      : 'refused'
+  return { code: known, message }
+}
+
+const asText = (data: unknown): string =>
+  typeof data === 'string' ? data : data && typeof data === 'object' ? JSON.stringify(data) : ''
+
+function onLoginPage(url?: string): boolean {
+  if (!url) return false
+  try {
+    return /^\/(auth\/)?login\/?$/.test(new URL(url, window.location.origin).pathname)
+  } catch {
+    return false
+  }
+}
+
+/** Whether an answer says the login is over: a 401, a CSRF refusal, or a redirect to the login. */
+export function sessionEnded(status: number | undefined, data: unknown, url?: string): boolean {
+  if (status === 401) return true
+  if (onLoginPage(url)) return true
+  if (status === 400 || status === 403) return /csrf/i.test(asText(data))
+  return false
+}
+
+/** The problem in an error a request threw, in the owner's words. */
+export function problemOf(error: unknown): JournalProblem {
+  if (error instanceof JournalError) return { code: error.code, message: error.message }
+  if (!axios.isAxiosError(error)) return { code: 'unsent', message: WORDS.notSent }
+  if (!error.response) return { code: 'unanswered', message: WORDS.noAnswer }
+  const { status, data, request } = error.response as {
+    status: number
+    data: unknown
+    request?: { responseURL?: string }
+  }
+  const coded = problemFrom(data)
+  if (coded === null && sessionEnded(status, data, request?.responseURL)) {
+    return { code: 'unauthorized', message: WORDS.signedOut }
+  }
+  if (coded) {
+    // A conflict is always said in the one sentence the owner learns.
+    return status === 409 ? { code: 'conflict', message: WORDS.conflict } : coded
+  }
+  return problemForStatus(status)
+}
+
+function pathOf(spec: OpSpec, args: Record<string, unknown>): string {
+  return `${API_PREFIX}${spec.route.replace('<id>', encodeURIComponent(String(args.id ?? '')))}`
+}
+
+function queryOf(args: Record<string, unknown>): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const [name, value] of Object.entries(args)) {
+    if (name === 'id' || value === undefined || value === null || value === '') continue
+    out[name] = String(value)
+  }
+  return out
+}
+
+function bodyOf(args: Record<string, unknown>): Record<string, unknown> {
+  const { id: _target, ...rest } = args
+  return rest
+}
+
+/** The address a download is opened from (the bridge's file route); the session is the key. */
+export function reportFileUrl(id: number): string {
+  const spec = SPECS.get('report_file')
+  return spec ? pathOf(spec, { id }) : ''
+}
+
+/** One op at the bridge. Throws a `JournalError` in the owner's words. */
+export async function journalCall<N extends Exclude<OpName, 'delivery' | 'family_day'>>(
+  name: N,
+  args?: JournalAnswers[N]['req'],
+  signal?: AbortSignal
+): Promise<JournalResult<JournalAnswers[N]['res']>> {
+  const spec = SPECS.get(name)
+  if (!spec) throw new JournalError({ code: 'unsent', message: WORDS.notSent })
+  const given = (args ?? {}) as Record<string, unknown>
+  const url = pathOf(spec, given)
+  const timeout = WAIT_MS[spec.cls]
+  let body: unknown
+  try {
+    const response =
+      spec.method === 'GET'
+        ? await webClient.get(url, { params: queryOf(given), timeout, signal })
+        : await webClient.request({
+            url,
+            method: spec.method,
+            data: bodyOf(given),
+            timeout,
+            signal,
+          })
+    if (sessionEnded(undefined, null, response.request?.responseURL)) {
+      throw new JournalError({ code: 'unauthorized', message: WORDS.signedOut })
+    }
+    body = response.data
+  } catch (error) {
+    throw new JournalError(problemOf(error))
+  }
+  const answer = body as { status?: unknown; enabled?: unknown; data?: unknown; message?: unknown }
+  if (answer && typeof answer === 'object' && answer.status === 'success') {
+    if (answer.enabled === false) {
+      return { enabled: false, data: null, message: text(answer.message) ?? WORDS.off }
+    }
+    if (answer.data !== undefined && answer.data !== null) {
+      return { enabled: true, data: answer.data as JournalAnswers[N]['res'] }
+    }
+  }
+  throw new JournalError(problemFrom(body) ?? { code: 'unreadable', message: WORDS.unreadable })
+}
+
+/** The data of an op, or a thrown sentence: for a read that cannot go on while the journal is off. */
+export async function journalData<N extends Exclude<OpName, 'delivery' | 'family_day'>>(
+  name: N,
+  args?: JournalAnswers[N]['req'],
+  signal?: AbortSignal
+): Promise<JournalAnswers[N]['res']> {
+  const result = await journalCall(name, args, signal)
+  if (!result.enabled) throw new JournalError({ code: 'unavailable', message: result.message })
+  return result.data
+}
+
+export type { Done }
