@@ -550,6 +550,19 @@ class MarketStore:
                 else row.status_reason))  # fmt: skip
         return self.group(principal, group_id)
 
+    def mark_synced(
+        self, principal: str, group_id: int, synced_version: str | None, now: int
+    ) -> bool:
+        """The group's list holds what it held when the lists version moved for another list: only
+        the version it is in step with, and when, are written (v0.9.0 review L1). The group's own
+        version and ``updated_at`` stay. False when the group is not there."""
+        who = self._who(principal)
+        with self._tx() as conn:
+            done = conn.execute(update(alert_group).where(
+                alert_group.c.id == group_id, alert_group.c.principal == who).values(
+                synced_version=synced_version, synced_at=now)).rowcount  # fmt: skip
+        return bool(done)
+
     def group(self, principal: str, group_id: int) -> dict[str, Any] | None:
         query = select(alert_group).where(
             alert_group.c.id == group_id, alert_group.c.principal == self._who(principal)

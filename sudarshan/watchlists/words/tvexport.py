@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from sudarshan.watchlists import numfmt
-from sudarshan.watchlists.tvexport import Export
+from sudarshan.watchlists.tvexport import UNCHECKED_FUTURE, UNCHECKED_OPTION, Export
+from sudarshan.watchlists.words.tvimport import unchecked_line
 
 NOTHING = "Nothing in {name} can be exported to TradingView."
 NO_FILE_NAME = "TradingView"
@@ -72,7 +73,9 @@ def left_out(out: Export) -> list[str]:
     by: dict[str, list[str]] = {}
     for c in out.cuts:
         by.setdefault(c.reason, []).append(c.token)
-    return [text.format(tokens=", ".join(by[r])) for r, text in REASONS.items() if r in by]
+    said = [text.format(tokens=", ".join(by[r])) for r, text in REASONS.items() if r in by]
+    held = unchecked_line(by.get(UNCHECKED_FUTURE, []), by.get(UNCHECKED_OPTION, []))
+    return said + ([held] if held else [])
 
 
 def all_words(name: str, out: Export) -> list[str]:

@@ -99,6 +99,21 @@ def test_fno_stocks_equals_the_screeners_rule_on_the_same_master():
     assert set(master_lists.INDEX_UNDERLYINGS) == set(INDEX_UNDERLYINGS)
 
 
+def test_the_index_underlyings_are_the_shared_list_imported_in_the_order_shown():
+    """Review M1: a copy of the list here missed NIFTYFPI when v0.8.1 added it to the shared one.
+    The list is imported now, so a name added there is in Index futures and out of F&O stocks."""
+    from sudarshan import regimes
+
+    assert set(master_lists.INDEX_UNDERLYINGS) == set(regimes.INDEX_UNDERLYINGS)
+    assert len(master_lists.INDEX_UNDERLYINGS) == len(set(master_lists.INDEX_UNDERLYINGS))
+    assert master_lists.INDEX_UNDERLYINGS[: len(master_lists.SHOWN_FIRST)] == (
+        master_lists.SHOWN_FIRST
+    )
+    assert "NIFTYFPI" in master_lists.INDEX_UNDERLYINGS
+    source = (ROOT / "presets" / "master_lists.py").read_text(encoding="utf-8")
+    assert "regimes.INDEX_UNDERLYINGS" in source  # the list is read, not typed again
+
+
 @pytest.mark.parametrize("case", V["index_futures"], ids=lambda c: c["name"][:50])
 def test_index_futures_roll_at_the_close_of_expiry_day(case):
     entry = presets.entry("index_futures")

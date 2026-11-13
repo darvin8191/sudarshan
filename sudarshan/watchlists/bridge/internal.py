@@ -151,23 +151,29 @@ def _tick(tick) -> str:
     return "" if tick is None else f"{tick:g}"
 
 
-def _closes(rows: list, now_ms: int) -> dict[str, int]:
-    """The calendar's close of today's expiry when a future of the answer expires today (any other
-    day closes before or after now whatever the calendar says: it is not asked)."""
+def _closes(rows: list, now_ms: int) -> dict[tuple[str, str], int]:
+    """``{(exchange, date): epoch ms}``: the calendar's close of today on each derivatives exchange
+    a contract of the answer expires today on, asked of that exchange's own calendar (review L2: a
+    BFO future read NFO's). Any other day closes before or after now whatever the calendar says:
+    it is not asked."""
     from sudarshan.watchlists import sessions
 
     today = datetime.fromtimestamp(now_ms / 1000, UTC).astimezone(IST).date().isoformat()
-    if not any(c["expiry"] == today for c in rows):
-        return {}
-    return sessions.closes([today], "NFO")
+    out: dict[tuple[str, str], int] = {}
+    for exchange in sorted({c["exchange"] for c in rows if c["expiry"] == today}):
+        out.update({(exchange, d): end for d, end in sessions.closes([today], exchange).items()})
+    return out
 
 
 def wire(got: dict, now_ms: int) -> dict:
     """A reader's ``Members`` record as the route answers it (see the module's note)."""
+    from sudarshan.watchlists import sessions
+
     m = master.shared()
     if not m.loaded():
         raise _Failed(words.NOT_LOADED)
     closes = _closes(got["members"], now_ms)
+    indices = None  # the master's index underlyings (review M1), read once for the first future
     rows, left_out, seen = [], [], set()
     for c in got["members"]:
         row = m.row(c["exchange"], c["symbol"])
@@ -180,9 +186,11 @@ def wire(got: dict, now_ms: int) -> dict:
         out = {"symbol": c["symbol"], "exchange": c["exchange"], "instrument_key": row.token,
                "tick_size": _tick(c["tick"]), "expiry": c["expiry"], "lot": c["lot"]}  # fmt: skip
         if row.instrumenttype == "FUT" and c["expiry"]:
+            if indices is None:
+                indices = sessions.index_underlyings()
             out["valid_until"] = stops.stop_ms(
-                c["expiry"], index=stops.is_index(row.underlying or row.name or ""),
-                exchange=row.exchange, window_end_ms=closes.get(c["expiry"]),
+                c["expiry"], index=stops.is_index(row.underlying or row.name or "", indices),
+                exchange=row.exchange, window_end_ms=closes.get((c["exchange"], c["expiry"])),
             )  # fmt: skip
         rows.append(out)
     left_out += [{"symbol": c["token"], "why": c.get("why", "missing"), "reason": c["reason"]}

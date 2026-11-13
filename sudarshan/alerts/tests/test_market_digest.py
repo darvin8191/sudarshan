@@ -328,3 +328,34 @@ def test_the_digest_words_for_a_trader():
     )
     assert words.group_title("Swing", "day_break", {"side": "high", "after": "09:30"}) == (
         "Swing list · Breaks today's high after 09:30")  # fmt: skip
+
+
+def test_a_window_whose_waiting_lines_all_went_too_old_ends_and_sends_its_buffer():
+    """Review L5: a group whose first 15 waiting lines were all dropped as too old (Telegram
+    unreachable for 5 minutes) left a window with a buffer and no end; its lines went out only
+    after the group's next fire plus a window, however old by then."""
+    now = [AT]
+    market, _, results = make(clock=lambda: now[0])
+    market.add([fire(n) for n in range(1, 16)])  # the queue's first message of the group
+    market.add([fire(16)])  # past the first 15: waits in the group's window
+    window = market._windows[7]
+    assert window.end is None and [line.event_id for line in window.buffer] == [16]
+    now[0] = AT + lane.MAX_AGE + timedelta(seconds=1)
+    market._expire()  # Telegram never answered: the 15 are too old
+    assert results.ids("not_sent") == list(range(1, 16))
+    assert window.end is not None and window.end <= time.monotonic()  # it ends now
+    market._tick()
+    assert window.buffer == []
+    assert [list(line.ids) for line in market._pending.values()] == [[16]]  # one digest waits
+
+
+def test_a_window_whose_waiting_lines_were_dropped_for_room_ends_too():
+    market, _, results = make()
+    market.add([fire(n) for n in range(1, 16)])
+    market.add([fire(16)])
+    others = [Line(1000 + n, f"Alert: X{n} up", AT) for n in range(lane.MAX_PENDING)]
+    market.add(others)  # the oldest, the group's 15, give way
+    assert set(range(1, 16)) <= set(results.ids("not_sent"))
+    assert market._windows[7].end is not None
+    market._tick()
+    assert any(list(line.ids) == [16] for line in market._pending.values())

@@ -13,6 +13,7 @@ import shutil
 import tempfile
 
 import dotenv
+import pytest
 
 _TMP = tempfile.mkdtemp(prefix="sudarshan-watchlists-tests-")
 atexit.register(shutil.rmtree, _TMP, ignore_errors=True)
@@ -24,3 +25,14 @@ os.environ.setdefault("LOG_DIR", f"{_TMP}/log")
 
 dotenv.load_dotenv = lambda *args, **kwargs: False
 dotenv.main.load_dotenv = dotenv.load_dotenv
+
+
+@pytest.fixture(autouse=True)
+def known_index_underlyings(monkeypatch):
+    """Which underlyings are an index's is the master contract's answer (``index_contracts``,
+    review M1), read from OpenAlgo's symbol table and kept ten minutes for the whole process. Each
+    test starts from the names every reader knows, whatever another suite left in that table or in
+    that cache; a test that needs the master to name more sets it itself."""
+    from sudarshan import index_contracts
+
+    monkeypatch.setattr(index_contracts, "underlyings", lambda: index_contracts.KNOWN)
