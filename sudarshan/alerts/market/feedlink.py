@@ -25,6 +25,8 @@ import httpx
 import zmq
 import zmq.asyncio
 
+from sudarshan.feed.client_auth import auth_headers  # FL1
+
 log = logging.getLogger("sudarshan.alerts.market")
 
 HEALTH = "__health__"
@@ -86,6 +88,8 @@ def parse_health(payload: bytes, heard_at: int) -> Health | None:
 
 class FeedLink:
     """One ZMQ SUB and the service's HTTP client to the feed. Close it once (``close``)."""
+
+    NAME = CLIENT  # FL1: whose token the feed's write API is shown (a subclass names its own)
 
     def __init__(self, zmq_endpoint: str, http_url: str, client: httpx.AsyncClient):
         self.http_url, self.client = http_url.rstrip("/"), client
@@ -153,7 +157,12 @@ class FeedLink:
                     timeout: float = HTTP_TIMEOUT_S) -> dict:  # fmt: skip
         try:
             answer = await self.client.request(
-                method, self.http_url + path, json=body, params=params, timeout=timeout
+                method,
+                self.http_url + path,
+                json=body,
+                params=params,
+                timeout=timeout,
+                headers=auth_headers(self.NAME),
             )
         except httpx.HTTPError as exc:
             raise FeedUnreachable(str(exc)) from exc

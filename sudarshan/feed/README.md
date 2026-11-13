@@ -90,6 +90,31 @@ header get 403). JSON in and out; use `127.0.0.1`, not `localhost` (which may re
 | `DELETE /claims/<client>` | drops the client's set |
 | `GET /claims` | every client: renewed_at, keys, by_mode |
 
+**Client tokens (FL1).** The writes (`PUT` and `DELETE /claims/<client>`, `POST /subscribe`,
+`POST /unsubscribe`, and every `/upstox/` call) carry `Authorization: Bearer <token>` of the
+client they name: the path for `/claims/<client>`, `X-Sudarshan-Client` for the rest. Reads
+(`/health`, `/snapshot`, `/snapshot/all`, `/subscriptions`, `GET /claims`) stay open. A token is
+one line (43 characters, urlsafe base64 without padding) in `/etc/sudarshan/feed-clients/<client>`
+(folder root:sudarshan 750, files 640), made once at every deploy for `sudarshan-alerts`,
+`sudarshan-screener`, `sudarshan-portfolio`, `sudarshan-journal`, `sudarshan-family` and
+`sudarshan-protect`; the folder is `SUDARSHAN_FEED_CLIENTS_DIR`. The feed reads the folder at
+start and again whenever a file in it changes (looked at most once a second, on a request: no
+thread), compares in constant time, and never logs a token.
+
+- **No token files at all** (a dev box, or a server before the deploy made them): writes stay
+  open as before and the journal says so once, `writes to the price feed are open to every local
+  process`.
+- **As soon as one token exists**, a write for a client with no token file, or with a missing,
+  wrong or another client's token, is answered 401 with a sentence for the owner ("the part of
+  SUDARSHAN sending it did not show its key ... a fault in SUDARSHAN itself"). The journal has
+  the client's name and a count (the 1st, 10th, 100th and 1000th refusal), never the token.
+- **Each client** gets its header from `sudarshan/feed/client_auth.py`, `auth_headers(name)`:
+  it reads its own file, caches it and reads it again when it changes; an absent file sends no
+  header.
+- The state folder is closed to other accounts: the unit says `StateDirectoryMode=0750` and
+  `UMask=0027` (Y25.1), so `subscriptions.json`, which holds every client's claimed keys, is not
+  readable beyond the `sudarshan` group.
+
 `last_error` and `last_disconnect` describe the most recent such event and stay after recovery
 (history, not current health): `state` says what is happening now, and comparing their `at` with
 `connected_since` tells whether they came before the current socket.
@@ -226,6 +251,7 @@ hour ever holds more.
 | 503 | `restarting`, `off` | the feed is stopping; the governor is switched off (the default, until `SUDARSHAN_FEED_REST=on`) | 60 |
 | 502 | `too-large` | Upstox's answer is over 8 MiB | - |
 | 502, 504 | `no-answer` | Upstox could not be reached, or did not answer within 30 s | - |
+| 401 | (none: the HTTP API answers before the governor) | no key, a wrong key, or another client's key, once any client key exists | - |
 | 403 | `client`, `not-allowed` | an unknown `X-Sudarshan-Client`; a path or method outside the list | - |
 | 400 | `bad-request` | a missing priority, a bad key, a missing or extra query parameter | - |
 
@@ -395,6 +421,7 @@ live service holds 5581):
 | `SUDARSHAN_FEED_RECORD` | `1` |
 | `SUDARSHAN_FEED_RECORD_MAX_MB` / `SUDARSHAN_FEED_RECORD_KEEP_DAYS` | `1024` / `7` |
 | `SUDARSHAN_FEED_LOG_LEVEL` | `INFO` |
+| `SUDARSHAN_FEED_CLIENTS_DIR` | `/etc/sudarshan/feed-clients`: one token file per client (FL1); no file at all keeps writes open |
 | `SUDARSHAN_DEPLOYED_TAG_FILE` | `/var/lib/sudarshan/deployed_tag` (where the deploy tool records the installed release; `/health` shows it as `release`) |
 | `SUDARSHAN_FEED_REST` | `off`: every `/upstox/` request is answered 503 `off`; the owner sets `on` in `/etc/sudarshan/feed.env` at G7, when the ring's REST callers start |
 | `SUDARSHAN_UPSTOX_API_BASE` | `https://api.upstox.com` (tests point it at a local fake; https is required otherwise) |
