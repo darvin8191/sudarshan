@@ -1,10 +1,10 @@
-import type { Report, ReportKind, Settings } from '../journal/types'
+import type { Report, ReportKind, ReportTimes, Settings } from '../journal/types'
 import { REPORT_TITLES } from '../journal/types'
 
 /**
- * Two things the contract's Report and Settings do not carry yet, read when the bridge sends
- * them: why a report was not sent, whether the alerts service runs, and the rate card in use.
- * Without them the page says what it knows and no more.
+ * What a service older than this page may leave out of its answers, read when the bridge sends
+ * it: why a report was not sent; whether the alerts deliver, the rate card in use and when each
+ * report is built. Without one the page says what it knows and no more, never a guess.
  */
 export interface ReportExtra {
   reason?: string | null
@@ -12,48 +12,71 @@ export interface ReportExtra {
 export interface SettingsExtra {
   alerts_on?: boolean
   rate_card?: { version?: string | null; from_day?: number | null } | null
+  times?: Partial<ReportTimes> | null
 }
 
 export type ReportRow = Report & ReportExtra
-export type SettingsRead = Settings & SettingsExtra
+export type SettingsRead = Omit<Settings, keyof SettingsExtra> & SettingsExtra
 
 export const ALERTS_OFF = 'the alerts service is switched off on the server'
 
 export const KIND_ORDER: ReportKind[] = ['eod', 'brief', 'weekly', 'monthly', 'fy']
 
-/** The report switches with the time each is built at, and the rule the time follows. */
+/**
+ * The report switches: the field of the server's `times` that says when each is built (the day
+ * ones for today, or the next trading day), and the rule that time follows.
+ */
 export const SWITCHES: ReadonlyArray<{
   kind: ReportKind
   key: 'eod_on' | 'brief_on' | 'weekly_on' | 'monthly_on' | 'fy_on'
-  time: string
+  at: 'eod' | 'brief' | 'weekly' | 'monthly' | 'fy'
   rule: string
 }> = [
   {
     kind: 'eod',
     key: 'eod_on',
-    time: '15:45',
+    at: 'eod',
     rule: '5 minutes after the F&O close; a special day follows its own close',
   },
   {
     kind: 'brief',
     key: 'brief_on',
-    time: '08:45',
+    at: 'brief',
     rule: '30 minutes before the first session; a special day follows its own session',
   },
-  { kind: 'weekly', key: 'weekly_on', time: 'Sunday 18:00', rule: 'every week' },
-  {
-    kind: 'monthly',
-    key: 'monthly_on',
-    time: '1st of the month 07:00',
-    rule: 'for the month just ended',
-  },
-  {
-    kind: 'fy',
-    key: 'fy_on',
-    time: '1 April 07:00',
-    rule: 'for the year just ended; on request any time',
-  },
+  { kind: 'weekly', key: 'weekly_on', at: 'weekly', rule: 'every week' },
+  { kind: 'monthly', key: 'monthly_on', at: 'monthly', rule: 'for the month just ended' },
+  { kind: 'fy', key: 'fy_on', at: 'fy', rule: 'for the year just ended; on request any time' },
 ]
+
+/** Where the server gave no time, the page says so: it never prints a time of its own. */
+export const TIME_NOT_SAID = 'The server has not said the time yet.'
+
+/** The time the server gave for `at` ("15:45", "Sunday 18:00"), or null when it gave none. */
+export function timeOf(times: SettingsExtra['times'], at: keyof ReportTimes): string | null {
+  const value = times?.[at]
+  return typeof value === 'string' && value.trim() !== '' ? value.trim() : null
+}
+
+/** A rule as a sentence of its own, for when no time stands before it. */
+export const ruleSentence = (rule: string): string => `${rule[0].toUpperCase()}${rule.slice(1)}.`
+
+/** The close check, when the server says its time: the day's fills read again after the close. */
+export function checkWords(times: SettingsExtra['times']): string | null {
+  const at = timeOf(times, 'check')
+  return at
+    ? `Close check at ${at}: the day's fills are read again and the journal corrected.`
+    : null
+}
+
+/** What an empty archive means: when the next Day report comes, as the server says. */
+export function emptyWords(times: SettingsExtra['times']): string {
+  const eod = timeOf(times, 'eod')
+  const when = eod
+    ? `The Day report is built at ${eod} on each trading day`
+    : "The Day report is built after each trading day's close; the server has not said the time yet"
+  return `No reports yet. ${when}. You can also build the tax pack or this month's statement above.`
+}
 
 export const kindTitle = (kind: ReportKind): string => REPORT_TITLES[kind]
 

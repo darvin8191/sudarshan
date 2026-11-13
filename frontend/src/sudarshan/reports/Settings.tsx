@@ -6,7 +6,15 @@ import { Problem } from '../journal/parts'
 import { parseRupees, riskText } from '../journal/sheetForm'
 import type { SettingsSetReq } from '../journal/types'
 import { REPORTS_KEY, useReportSettings } from './queries'
-import { kindTitle, periodWords, SWITCHES } from './words'
+import {
+  checkWords,
+  kindTitle,
+  periodWords,
+  ruleSentence,
+  SWITCHES,
+  TIME_NOT_SAID,
+  timeOf,
+} from './words'
 
 const CARD = 'rounded-[1.125rem] border bg-card px-4 py-3 shadow-[var(--shadow-card)]'
 const BUTTON =
@@ -81,17 +89,30 @@ export function Settings() {
       <section aria-label="Reports" className={`${CARD} flex flex-col divide-y`}>
         {SWITCHES.map((row) => {
           const on = settings[row.key]
+          const time = timeOf(settings.times, row.at)
+          const check = row.kind === 'eod' ? checkWords(settings.times) : null
           return (
             <div key={row.key} className="flex items-center justify-between gap-3 py-2">
               <div className="min-w-0">
                 <p className="text-base font-bold">{kindTitle(row.kind)}</p>
-                <p className="text-sm text-[color:var(--text-secondary)]">
-                  <span className="font-semibold [font-variant-numeric:tabular-nums]">
-                    {row.time}
-                  </span>
-                  {', '}
-                  {row.rule}
+                <p className="text-sm text-[color:var(--text-secondary)]" data-testid="when">
+                  {time ? (
+                    <>
+                      <span className="font-semibold [font-variant-numeric:tabular-nums]">
+                        {time}
+                      </span>
+                      {', '}
+                      {row.rule}
+                    </>
+                  ) : (
+                    `${ruleSentence(row.rule)} ${TIME_NOT_SAID}`
+                  )}
                 </p>
+                {check && (
+                  <p className="text-sm text-[color:var(--text-secondary)] [font-variant-numeric:tabular-nums]">
+                    {check}
+                  </p>
+                )}
               </div>
               <button
                 type="button"

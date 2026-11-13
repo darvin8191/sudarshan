@@ -41,7 +41,16 @@ const SETTINGS = {
   version: 3,
   alerts_on: true,
   rate_card: { version: 'Card 2026-04', from_day: 20260401 },
+  times: {
+    brief: '08:45',
+    eod: '15:45',
+    check: '16:05',
+    weekly: 'Sunday 18:00',
+    monthly: 'the 1st at 07:00',
+    fy: '1 April 07:00',
+  },
 }
+const NOT_SAID = 'The server has not said the time yet.'
 
 function serve(
   rows: Report[] = [
@@ -125,10 +134,24 @@ describe('Archive', () => {
     )
   })
 
-  it('says what an empty archive means', async () => {
+  it('says what an empty archive means, with the day report’s time as the server says it', async () => {
     serve([])
     renderBook('/reports', <Reports />)
-    expect(await screen.findByText(/No reports yet/)).toBeTruthy()
+    const empty =
+      "No reports yet. The Day report is built at 15:45 on each trading day. You can also build the tax pack or this month's statement above."
+    expect(await screen.findByText(empty)).toBeTruthy()
+  })
+
+  it('never guesses the time of an empty archive’s first report', async () => {
+    const { times: _times, ...older } = SETTINGS
+    serve([], older)
+    renderBook('/reports', <Reports />)
+    const words = await screen.findByText(/No reports yet/)
+    await waitFor(() => expect(calls('settings_get').length).toBeGreaterThan(0))
+    expect(words.textContent).toContain(
+      "The Day report is built after each trading day's close; the server has not said the time yet."
+    )
+    expect(words.textContent).not.toMatch(/\d\d:\d\d/)
   })
 
   it('opens the text in a sheet kept in the address, and Back closes it first', async () => {
@@ -186,9 +209,18 @@ describe('Settings', () => {
     const user = userEvent.setup()
     serve()
     await settingsTab(user)
-    expect(await screen.findByText(/15:45/)).toBeTruthy()
+    await screen.findAllByTestId('when')
+    expect(screen.getAllByTestId('when').map((line) => line.textContent)).toEqual([
+      '15:45, 5 minutes after the F&O close; a special day follows its own close',
+      '08:45, 30 minutes before the first session; a special day follows its own session',
+      'Sunday 18:00, every week',
+      'the 1st at 07:00, for the month just ended',
+      '1 April 07:00, for the year just ended; on request any time',
+    ])
     expect(
-      screen.getByText(/5 minutes after the F&O close; a special day follows its own close/)
+      screen.getByText(
+        "Close check at 16:05: the day's fills are read again and the journal corrected."
+      )
     ).toBeTruthy()
     expect(
       (screen.getByRole('switch', { name: 'Day report' }) as HTMLElement).getAttribute(
@@ -202,6 +234,49 @@ describe('Settings', () => {
     expect(screen.getByText('English only for now.')).toBeTruthy()
     expect(screen.getByText(/Card 2026-04, in force from/)).toBeTruthy()
     expect(screen.getByTestId('where').textContent).toContain('view=settings')
+  })
+
+  it('prints the times the server says, 15:50 for the day report from 7 Dec', async () => {
+    const user = userEvent.setup()
+    serve(undefined, { ...SETTINGS, times: { ...SETTINGS.times, eod: '15:50' } })
+    await settingsTab(user)
+    const lines = await screen.findAllByTestId('when')
+    expect(lines[0].textContent).toBe(
+      '15:50, 5 minutes after the F&O close; a special day follows its own close'
+    )
+    expect(screen.queryByText(/15:45/)).toBeNull()
+  })
+
+  it('says the server has not said a time it did not send, and guesses none', async () => {
+    const user = userEvent.setup()
+    const { times: _times, ...older } = SETTINGS
+    serve(undefined, older)
+    await settingsTab(user)
+    const lines = await screen.findAllByTestId('when')
+    expect(lines.map((line) => line.textContent)).toEqual([
+      `5 minutes after the F&O close; a special day follows its own close. ${NOT_SAID}`,
+      `30 minutes before the first session; a special day follows its own session. ${NOT_SAID}`,
+      `Every week. ${NOT_SAID}`,
+      `For the month just ended. ${NOT_SAID}`,
+      `For the year just ended; on request any time. ${NOT_SAID}`,
+    ])
+    expect(screen.queryByText(/Close check/)).toBeNull()
+    expect(screen.queryByText(/\d\d:\d\d/)).toBeNull()
+  })
+
+  it('a day with no session ahead leaves the day times unsaid', async () => {
+    const user = userEvent.setup()
+    serve(undefined, {
+      ...SETTINGS,
+      times: { ...SETTINGS.times, brief: null, eod: null, check: null },
+    })
+    await settingsTab(user)
+    const lines = await screen.findAllByTestId('when')
+    expect(lines[0].textContent).toBe(
+      `5 minutes after the F&O close; a special day follows its own close. ${NOT_SAID}`
+    )
+    expect(lines[2].textContent).toBe('Sunday 18:00, every week')
+    expect(screen.queryByText(/Close check/)).toBeNull()
   })
 
   it('saves a switch with the version it read', async () => {
