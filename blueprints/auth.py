@@ -37,9 +37,10 @@ from utils.ip_helper import get_real_ip
 from utils.logging import get_logger
 from utils.session import (
     check_session_validity,
+    end_every_session,  # SUDARSHAN: review HIGH-2
     is_session_valid,
     revoke_user_tokens,
-    session_row_gone,  # SUDARSHAN: SIO1
+    session_ended_elsewhere,  # SUDARSHAN: review HIGH-2
 )
 
 # Initialize logger
@@ -728,8 +729,8 @@ def reset_password():
             # operator (or attacker) chose the reset path because they
             # could prove control of the email/TOTP, not because every
             # logged-in browser is theirs. Force re-login everywhere.
-            from database.auth_db import clear_user_sessions
-            clear_user_sessions(user.username)
+            # SUDARSHAN (review HIGH-2): every device's cookie too, not only the rows.
+            end_every_session(user.username)
             socketio.emit("force_logout", {
                 "message": "Your password was reset. Please log in again with the new password.",
             })
@@ -838,8 +839,8 @@ def change_password():
             # devices — including the current one — and let the user log
             # in again with the new password. This prevents an attacker
             # who already has a valid cookie from continuing to hold it.
-            from database.auth_db import clear_user_sessions
-            clear_user_sessions(username)
+            # SUDARSHAN (review HIGH-2): every device's cookie too, not only the rows.
+            end_every_session(username)
             socketio.emit("force_logout", {
                 "message": "Your password was changed. Please log in again with the new password.",
             })
@@ -1030,12 +1031,13 @@ def _touch_session_heartbeat():
 @auth_bp.route("/session-status", methods=["GET"])
 def get_session_status():
     """Return current session status for React SPA."""
-    # SUDARSHAN: SIO1. The login page asks with ?for=login. A cookie whose session row the
-    # server removed (a logout, a password change or reset) is signed out and cleared here, as
-    # /auth/active-sessions does: the page then shows the form instead of sending the device to
-    # the dashboard, whose guard sent it straight back (a loop). Other callers do not ask, since
-    # a same-IP login also replaces a row (utils.session.session_row_gone).
-    if request.args.get("for") == "login" and session_row_gone():
+    # SUDARSHAN: review HIGH-2 (SIO1 asked about the session row, and on ?for=login only). A
+    # cookie from before a logout of every device is signed out and cleared here for every
+    # caller, as every route behind the session check refuses it: a page load and the login page
+    # (?for=login, now answered the same) then show the login form, never the dashboard, whose
+    # guard sent the device straight back (a loop). A same-IP login that replaced this device's
+    # row no longer signs it out.
+    if session_ended_elsewhere():
         session.clear()
     if "user" not in session:
         # Return 200 with authenticated: false instead of 401
@@ -1120,17 +1122,8 @@ def active_sessions():
     """Return the list of active sessions for the current user."""
     if "user" not in session:
         return jsonify({"status": "error", "message": "Not authenticated"}), 401
-    # SUDARSHAN: SIO1. The same answer the login page gets (session-status?for=login): a session
-    # whose row the server removed has ended, and its cookie is cleared.
-    if session_row_gone():
-        session.clear()
-        return jsonify(
-            {
-                "status": "error",
-                "error": "session_expired",
-                "message": "Your session has ended. Please log in again.",
-            }
-        ), 401
+    # SUDARSHAN: a session a logout of every device ended gets the 401 of the check above (review
+    # HIGH-2), which a refused socket's read relies on (SIO1, sudarshan/books/sharedSocket.ts).
 
     from database.auth_db import get_active_sessions
     sessions = get_active_sessions(session["user"])
@@ -1363,9 +1356,10 @@ def logout():
         else:
             logger.error(f"Failed to upsert auth token for user: {username}")
 
-        # Clear ALL sessions for this user (logout means all devices)
-        from database.auth_db import clear_user_sessions
-        clear_user_sessions(username)
+        # Clear ALL sessions for this user (logout means all devices). SUDARSHAN (review
+        # HIGH-2): every device's cookie as well as the rows, before the sockets close below,
+        # so each reconnect and each device's next request is refused.
+        end_every_session(username)
 
         # Notify all connected devices to logout immediately
         socketio.emit("force_logout", {
@@ -1499,8 +1493,8 @@ def change_password_api():
         # for this account, including the current browser. The user logs in
         # again with the new password — typical 5-second flow — and any
         # attacker holding a stolen cookie is kicked out at the same moment.
-        from database.auth_db import clear_user_sessions
-        clear_user_sessions(username)
+        # SUDARSHAN (review HIGH-2): every device's cookie too, not only the rows.
+        end_every_session(username)
         socketio.emit("force_logout", {
             "message": "Your password was changed. Please log in again with the new password.",
         })

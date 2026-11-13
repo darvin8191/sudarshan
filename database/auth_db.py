@@ -331,6 +331,21 @@ class ActiveSession(Base):
     )
 
 
+class SessionCutoff(Base):
+    """SUDARSHAN (review HIGH-2): when every session of a user was last ended at once.
+
+    A logout (which signs the broker out too) and a password change or reset end the session of
+    every device. Flask's session is a signed cookie the server cannot reach, so the server keeps
+    this moment instead, and a cookie that logged in before it is refused on its next request
+    (utils.session.session_ended_elsewhere). A later login is untouched, so a second device's
+    login never ends the first. One row per user, written over by each such ending.
+    """
+
+    __tablename__ = "session_cutoffs"
+    username = Column(String(255), primary_key=True)
+    valid_after = Column(DateTime(timezone=True), nullable=False)  # IST, as active_sessions
+
+
 class LoginAttempt(Base):
     """Records all login attempts (successful and failed) for security auditing."""
     __tablename__ = "login_attempts"
@@ -424,6 +439,9 @@ def register_session(username, session_id, device_info=None, ip_address=None, br
     Enforces a maximum of MAX_SESSIONS_PER_USER sessions per user.
     """
     try:
+        now = _now_ist()
+        remove_expired_sessions(username, now)  # SUDARSHAN: review HIGH-2
+
         # Remove stale sessions from the same device (same user + IP)
         if ip_address:
             ActiveSession.query.filter_by(username=username, ip_address=ip_address).delete()
@@ -437,7 +455,6 @@ def register_session(username, session_id, device_info=None, ip_address=None, br
             if oldest:
                 db_session.delete(oldest)
 
-        now = _now_ist()
         active = ActiveSession(
             username=username,
             session_id=session_id,
@@ -508,6 +525,79 @@ def clear_user_sessions(username):
     except Exception as e:
         db_session.rollback()
         logger.error(f"Error clearing user sessions: {e}")
+
+
+def remove_expired_sessions(username, now=None):
+    """SUDARSHAN (review HIGH-2): remove the rows of ``username``'s sessions that logged in before
+    the last daily expiry, which has ended them. A phone whose cookie lapsed in its browser never
+    comes back to remove its own row, and before this only a logout cleared such rows. Does
+    nothing when session expiry is disabled. Never raises."""
+    from utils.session import last_daily_expiry
+
+    try:
+        boundary = last_daily_expiry(now or _now_ist())
+        if boundary is None:
+            return
+        ActiveSession.query.filter(
+            ActiveSession.username == username, ActiveSession.login_time < boundary
+        ).delete(synchronize_session=False)
+        db_session.commit()
+    except Exception:
+        db_session.rollback()
+        logger.exception("Could not remove the expired session rows")
+
+
+#: SUDARSHAN (review HIGH-2): each user's SessionCutoff time (None for none), asked by every
+#: signed-in request. set_sessions_valid_after drops the entry after its commit, so a read that
+#: overlapped the write cannot store the old answer; the TTL bounds a write made elsewhere.
+session_cutoff_cache = LockedTTLCache(maxsize=64, ttl=60)
+
+
+def _as_ist(value):
+    """A stored time as an aware IST datetime: SQLite keeps the IST wall-clock time without its
+    zone, as it does for active_sessions; other databases keep the zone."""
+    import pytz
+
+    ist = pytz.timezone("Asia/Kolkata")
+    return ist.localize(value) if value.tzinfo is None else value.astimezone(ist)
+
+
+def _load_sessions_valid_after(username):
+    try:
+        row = SessionCutoff.query.filter_by(username=username).first()
+    except Exception:
+        db_session.rollback()  # or the request's later reads fail on an aborted transaction
+        raise
+    return _as_ist(row.valid_after) if row is not None else None
+
+
+def get_sessions_valid_after(username):
+    """SUDARSHAN (review HIGH-2): when every session of ``username`` was last ended at once, as an
+    aware IST datetime, or None. Cached. Raises when it cannot be read; that is not cached, so the
+    next request reads again."""
+    return session_cutoff_cache.get_or_load(username, lambda: _load_sessions_valid_after(username))
+
+
+def set_sessions_valid_after(username, when):
+    """SUDARSHAN (review HIGH-2): record that every session of ``username`` that logged in before
+    ``when`` (an aware datetime) has ended. Returns False, logged, when it could not be stored."""
+    import pytz
+
+    when = when.astimezone(pytz.timezone("Asia/Kolkata"))
+    try:
+        row = SessionCutoff.query.filter_by(username=username).first()
+        if row is None:
+            db_session.add(SessionCutoff(username=username, valid_after=when))
+        else:
+            row.valid_after = when
+        db_session.commit()
+        return True
+    except Exception:
+        db_session.rollback()
+        logger.exception("Could not record the end of every session")
+        return False
+    finally:
+        session_cutoff_cache.invalidate(username)  # after the commit, never before
 
 
 def init_db():

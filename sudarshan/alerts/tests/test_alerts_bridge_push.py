@@ -20,7 +20,15 @@ from pathlib import Path
 
 import httpx
 import pytest
-from bridge_app import OWNER, VIEWER, csrf_headers, login_session, make_app, reset_users
+from bridge_app import (
+    OWNER,
+    VIEWER,
+    csrf_headers,
+    login_session,
+    make_app,
+    reset_session_cutoffs,
+    reset_users,
+)
 
 import blueprints.sudarshan_alerts as bp_module
 from extensions import socketio
@@ -63,7 +71,8 @@ def room(monkeypatch):
         ack = sio.emit("sudarshan_alerts_join", callback=True) if joinable else None
         return http, sio, ack
 
-    return app, client
+    yield app, client
+    reset_session_cutoffs()  # a logout here must not end a later test's sessions
 
 
 def received(sio, event: str = ALERT_EVENT) -> list[dict]:

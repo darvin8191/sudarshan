@@ -41,7 +41,14 @@ import flask
 import httpx
 import pytest
 import pytz
-from bridge_app import OWNER, VIEWER, csrf_headers, make_app, reset_users
+from bridge_app import (
+    OWNER,
+    VIEWER,
+    csrf_headers,
+    make_app,
+    reset_session_cutoffs,
+    reset_users,
+)
 from socketio import packet
 
 # Imported here, before any test binds Socket.IO to an app: a handler registered after that is
@@ -169,7 +176,8 @@ def world(monkeypatch):
     def connect(http, namespace: str | None = None):
         return socketio.test_client(app, flask_test_client=http, namespace=namespace)
 
-    return app, browser, connect
+    yield app, browser, connect
+    reset_session_cutoffs()  # a logout here must not end a later test's sessions
 
 
 def test_a_client_without_a_session_is_refused_and_hears_no_order(world):
@@ -451,8 +459,8 @@ def test_after_a_logout_elsewhere_the_login_page_and_the_session_read_sign_the_d
     """Re-review, the loop: after a logout on the laptop the phone's cookie still read as signed in
     to the login page's check and to /auth/active-sessions (200), though the logout had removed
     every session row. The login page sent the phone to the dashboard, whose guard sent it back,
-    about 300 reads in 2 s. Both now take a cookie whose row the server removed as signed out, and
-    clear it."""
+    about 300 reads in 2 s. Both now take a cookie the logout ended as signed out, and clear it
+    (since review HIGH-2 by its login time, test_sessions_valid_after.py, no longer by its row)."""
     import blueprints.auth as auth_module
 
     monkeypatch.setattr(auth_module, "upsert_auth", lambda *a, **k: 1)
@@ -472,11 +480,10 @@ def test_after_a_logout_elsewhere_the_login_page_and_the_session_read_sign_the_d
 
 def test_a_page_load_s_own_check_still_ignores_a_row_a_same_ip_login_replaced(world, monkeypatch):
     """register_session replaces the row of an earlier login from the same IP (a laptop and a phone
-    on one Wi-Fi), so only the login page asks about the row: the laptop's page loads and its live
-    connection carry on. Those checks pass before and after: they pin that the row is asked about
-    nowhere else. The login page's own check does ask, and signs such a laptop out (on 3c75d18 it
-    did not ask): the accepted edge until the server keeps a "sessions valid after" time, since the
-    row is its only record of a logout."""
+    on one Wi-Fi), so no check may read the row as a logout: the laptop's page loads and its live
+    connection carry on. The login page's own check asked about the row and signed such a laptop
+    out (on a2695a1), the edge accepted until the server kept a "sessions valid after" time. It
+    keeps one now (review HIGH-2, test_sessions_valid_after.py), and no check reads the row."""
     import blueprints.auth as auth_module
 
     app, browser, connect = world
@@ -486,7 +493,7 @@ def test_a_page_load_s_own_check_still_ignores_a_row_a_same_ip_login_replaced(wo
     status = laptop.get("/auth/session-status").get_json()
     assert status["authenticated"] is True and status["logged_in"] is True
     assert connect(laptop).is_connected()
-    assert laptop.get("/auth/session-status?for=login").get_json()["authenticated"] is False
+    assert laptop.get("/auth/session-status?for=login").get_json()["authenticated"] is True
 
 
 def test_an_admitted_market_socket_s_request_is_answered(world):

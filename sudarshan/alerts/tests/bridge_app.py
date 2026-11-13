@@ -59,6 +59,23 @@ def reset_users() -> None:
     user_db.db_session.remove()
     user_db.add_user(OWNER, "owner@example.invalid", OWNER_PASSWORD, is_admin=True)
     user_db.db_session.remove()
+    reset_session_cutoffs()
+
+
+def reset_session_cutoffs() -> None:
+    """No logout of every device on record (review HIGH-2). A test that logs out leaves one, and
+    it would end the sessions a later test signs in with an earlier clock (test_socketio_owner's
+    Clock). Written to run on the code before that change too, which has no such record."""
+    from database import auth_db
+
+    model = getattr(auth_db, "SessionCutoff", None)
+    if model is None:
+        return
+    model.__table__.create(auth_db.engine, checkfirst=True)
+    model.query.delete()
+    auth_db.db_session.commit()
+    auth_db.db_session.remove()
+    auth_db.session_cutoff_cache.invalidate()
 
 
 def login_session(client, username: str = OWNER) -> None:

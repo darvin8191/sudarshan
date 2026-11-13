@@ -41,6 +41,10 @@ Logout removes the current active-session row, clears the Flask session, and fol
 - Password reset and setup-sensitive flows clear or revoke session state according to their route logic.
 - Active-session APIs under auth and security are read-only; there is no documented endpoint for remotely revoking one selected device.
 
+## Ending Every Session (SUDARSHAN, review HIGH-2)
+
+The Flask session is a signed cookie the server cannot reach, so removing rows ends nothing by itself. Logout, password change and password reset call `utils.session.end_every_session()`, which records the moment in `session_cutoffs` (one row per user) and then clears the rows. `is_session_valid()` refuses a cookie whose `login_time` is earlier, so the daily-expiry request guard, every `check_session_validity` route and the Socket.IO connect check refuse it on its next request, and `/auth/session-status` clears it for every caller. `revoke_user_tokens()` only signs such a cookie out, with no broker teardown; a cookie also past the daily expiry takes the expiry path. A later login is never affected, so a second device cannot sign the first out. The cutoff is read through a `LockedTTLCache` invalidated after each write. Each login and the Security screen's list also remove rows of sessions the daily expiry has ended.
+
 ## Frontend Behavior
 
 `AuthSync` restores user, broker, API key, app mode, capabilities, and active-session count. A normal unauthenticated response clears the Zustand stores. Network errors preserve existing state for the current render rather than forcing a false logout.
