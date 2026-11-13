@@ -83,8 +83,12 @@ export default function Watchlist() {
 
   const watchlists = useWatchlists()
   // M8.5: the favourite tabs and the All lists sheet, only once the server says v2 is on.
-  const v2State = useV2State().data
+  const v2Read = useV2State()
+  const v2State = v2Read.data
   const v2 = v2State?.enabled === true
+  // The store is newer than this app or cannot be read: the server's sentence is shown, so the
+  // page never quietly becomes today's page without saying why the new features are missing.
+  const recordSaid = v2Read.error?.code === 'record' ? v2Read.error.message : null
   usePush(v2)
   // SUDARSHAN M9 UI7: the lists a screener feeds, who it put in the open one, and its pushes.
   const queryClient = useQueryClient()
@@ -292,6 +296,15 @@ export default function Watchlist() {
       )}
 
       <AccessNotice access={access} />
+
+      {recordSaid && (
+        <section
+          role="alert"
+          className="rounded-[1.125rem] border border-[color:var(--down)] bg-card px-4 py-3.5"
+        >
+          <p className="text-sm font-semibold">{recordSaid}</p>
+        </section>
+      )}
 
       {watchlists.error && watchlists.lists.length === 0 ? (
         <section
