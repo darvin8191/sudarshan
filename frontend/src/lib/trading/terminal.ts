@@ -110,6 +110,7 @@ import {
   readStoredIndicators,
   type StoredIndicatorRecord,
 } from './indicatorTemplates'
+import { instrumentSessionFor } from './instrumentSession' // SUDARSHAN: review M1-M3
 // SUDARSHAN M4.1: the live-bar pipeline shared with the phone chart.
 import {
   HistoryResync,
@@ -1217,6 +1218,8 @@ export class TradingTerminal {
   private trade: TradeFeedInstance | null = null
   /** SUDARSHAN M4.1: the forming bar, from ticks and the clock. Shared with the phone chart (liveBars.ts). */
   private builder: LiveBarBuilder | null = null
+  /** SUDARSHAN (review M3): an expiring contract's own stop today, from the server. */
+  private stopsAt: { symbol: string; exchange: string; at: number } | null = null
   /**
    * SUDARSHAN M4.1: opens a bar at each boundary while the session is open,
    * when no tick has, by the server's clock rather than the machine's.
@@ -2672,7 +2675,7 @@ export class TradingTerminal {
         : { interval: this.interval }
     )
     // Trading hours for the axis past the last bar and the bottom bar's status.
-    applySessionHours(this.chart, this.sym?.exchange ?? '', this.apiKey)
+    applySessionHours(this.chart, this.sym?.exchange ?? '', this.apiKey, this.ownStop()) // SUDARSHAN M3
     this.offBranding = this.chart.on('branding:changed', () => {
       this.cb.onBrandingChange?.(this.brandingLink())
     })
@@ -6752,15 +6755,45 @@ export class TradingTerminal {
     this.syncCountdown()
     if (!exchange) return
     const ticket = this.loadTicket
-    void sessionCalendarFor(exchange, this.apiKey).then((calendar) => {
-      if (this.destroyed || ticket !== this.loadTicket || !calendar) return
-      this.liveStatus.setCalendar(calendar)
-      if (!builder || this.builder !== builder) return
-      builder.setSession(calendar)
-      this.liveClock.start()
-      this.syncCountdown()
-    })
+    // SUDARSHAN (review M1, M2): the instrument's own facts, asked beside the hours.
+    const sym = this.sym
+    const facts = sym && !sym.synthetic ? instrumentSessionFor(sym.symbol, exchange) : null
+    void sessionCalendarFor(exchange, this.apiKey)
+      .then((calendar) => {
+        if (this.destroyed || ticket !== this.loadTicket || !calendar) return facts
+        this.liveStatus.setCalendar(calendar)
+        if (!builder || this.builder !== builder) return facts
+        builder.setSession(calendar)
+        this.liveClock.start()
+        this.syncCountdown()
+        return facts
+      })
+      .then((found) => {
+        if (this.destroyed || ticket !== this.loadTicket || !found) return
+        // A closing print after the cash close goes to the day's last candle.
+        if (builder && this.builder === builder) builder.setClosing(found.closing)
+        if (found.stopsAt === null || !sym) return
+        // An expiring contract's own stop (review M3): no candle, countdown or "Stale" after it.
+        this.stopsAt = { symbol: sym.symbol, exchange, at: found.stopsAt }
+        this.liveStatus.setStop(found.stopsAt / 1000)
+        return sessionCalendarFor(exchange, this.apiKey, found.stopsAt).then((own) => {
+          if (this.destroyed || ticket !== this.loadTicket || !own) return
+          this.liveStatus.setCalendar(own)
+          if (this.chart && !this.chart.isDestroyed) this.chart.setSessionCalendar(own)
+          if (!builder || this.builder !== builder) return
+          builder.setSession(own)
+          this.liveClock.start()
+          this.syncCountdown()
+        })
+      })
     if (builder) void this.foldTodayFromQuote(builder, exchange)
+  }
+
+  /** SUDARSHAN (review M3): the loaded contract's own stop today, epoch ms, when the server gave one. */
+  private ownStop(): number | null {
+    const own = this.stopsAt
+    const sym = this.sym
+    return own && sym && own.symbol === sym.symbol && own.exchange === sym.exchange ? own.at : null
   }
 
   /** SUDARSHAN M4.1: stop the forming bar: a load is about to replace what it belongs to. */

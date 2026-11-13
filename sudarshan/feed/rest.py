@@ -232,6 +232,8 @@ class MarketHours(MarketWindow):
     hours on a weekday that trades anyway. It is the feed's own day plan (window.py) with other
     margins, on the feed's calendar object, so each calendar file is still read once."""
 
+    WRITTEN = None  # the governor's own hours: always the day's session's
+
     def __init__(self, calendar):
         self.calendar, (self.start, self.end) = calendar, MARKET_HOURS
 

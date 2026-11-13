@@ -1,12 +1,13 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { ChevronDown, ChevronUp, Flag, Lock, Plus, Star, TrendingUp } from 'lucide-react'
-import { type ReactNode, useState } from 'react'
+import { Fragment, type ReactNode, useState } from 'react'
 import { cn } from '@/lib/utils'
 import { BottomSheet } from './BottomSheet'
 import { FlagTools } from './FlagTools'
 import { ownId } from './ListStrip'
 import { MarkGlyph } from './marks'
 import { callOp } from './v2/api'
+import { ASSET_WORDS, CATEGORY_WORDS, parseRankedRef, SOURCE_WORDS } from './v2/ranked' // F16
 import type { Entry, Favourite, FavSlot } from './v2/types'
 import { LIMITS } from './v2/types'
 import { LISTS_KEY, STATE_KEY, useLists, useV2State } from './v2/useListView'
@@ -22,6 +23,50 @@ const KIND_WORDS = {
   ranked: 'Ranked by Upstox',
   flag: 'Flag list',
 } as const
+
+/**
+ * F16: the ranked lists the server offers, in the design's order: Futures then Options, each by
+ * Index, Stock, Commodity, each with its categories. A combination the server does not offer (MTF,
+ * a commodity premium) is not shown; the server's catalogue is read as it stands.
+ */
+export function rankedGroups(entries: readonly Entry[]) {
+  const groups: {
+    title: string
+    entries: { entry: Entry; shown: { name: string; words: string } }[]
+  }[] = []
+  for (const src of Object.keys(SOURCE_WORDS) as (keyof typeof SOURCE_WORDS)[]) {
+    for (const asset of Object.keys(ASSET_WORDS) as (keyof typeof ASSET_WORDS)[]) {
+      const here = entries.flatMap((entry) => {
+        const parts = parseRankedRef(entry.ref)
+        return parts?.src === src && parts.asset === asset
+          ? [
+              {
+                entry,
+                shown: {
+                  name: CATEGORY_WORDS[parts.cat],
+                  words: `Ranked by Upstox · ${ASSET_WORDS[asset]} ${src}`,
+                },
+              },
+            ]
+          : []
+      })
+      if (here.length > 0)
+        groups.push({ title: `${SOURCE_WORDS[src]} · ${ASSET_WORDS[asset]}`, entries: here })
+    }
+  }
+  // Anything the page cannot place is still shown, under its own name, after the groups.
+  const placed = new Set(groups.flatMap((group) => group.entries.map(({ entry }) => entry.ref)))
+  const rest = entries.filter((entry) => !placed.has(entry.ref))
+  if (rest.length > 0)
+    groups.push({
+      title: 'Other rankings',
+      entries: rest.map((entry) => ({
+        entry,
+        shown: { name: entry.name, words: KIND_WORDS.ranked },
+      })),
+    })
+  return groups
+}
 
 function Block({ title, note, children }: { title: string; note?: string; children: ReactNode }) {
   return (
@@ -106,12 +151,14 @@ export function AllListsSheet({
 
   const row = (
     entry: Pick<Entry, 'ref' | 'kind' | 'name' | 'count'> & { note?: string | null },
-    extra?: ReactNode
+    extra?: ReactNode,
+    shown?: { name: string; words: string } // F16: a ranked list under its Futures or Options group
   ) => {
     const on = pinnedRefs.has(entry.ref)
     const Glyph = entry.kind === 'preset' ? Lock : entry.kind === 'ranked' ? TrendingUp : Flag
     const flagNo = entry.kind === 'flag' ? Number(entry.ref.slice(5)) : 0 // F8
-    const words = fed.has(ownId(entry.ref) ?? 0) ? 'Fed by a screen' : KIND_WORDS[entry.kind]
+    const words =
+      shown?.words ?? (fed.has(ownId(entry.ref) ?? 0) ? 'Fed by a screen' : KIND_WORDS[entry.kind])
     return (
       <li key={entry.ref} className="flex min-h-14 items-center">
         <button
@@ -126,7 +173,7 @@ export function AllListsSheet({
               entry.ref === activeRef ? 'font-bold' : 'font-semibold'
             )}
           >
-            {entry.name}
+            {shown?.name ?? entry.name}
             {entry.kind === 'flag' && entry.count !== null && ` · ${entry.count}`}
             {entry.ref === activeRef && <span className="sr-only"> (open)</span>}
           </span>
@@ -237,7 +284,16 @@ export function AllListsSheet({
             <Block title="Built-in (locked)">{data.presets.map((entry) => row(entry))}</Block>
           )}
           {data.ranked.length > 0 && (
-            <Block title="Ranked by Upstox">{data.ranked.map((entry) => row(entry))}</Block>
+            <Block title="Ranked by Upstox">
+              {rankedGroups(data.ranked).map((group) => (
+                <Fragment key={group.title}>
+                  <li className="bg-muted/40 px-3 py-1 text-xs font-bold text-[color:var(--text-secondary)]">
+                    {group.title}
+                  </li>
+                  {group.entries.map(({ entry, shown }) => row(entry, undefined, shown))}
+                </Fragment>
+              ))}
+            </Block>
           )}
           {!readOnly && (
             <Block title="Flags">

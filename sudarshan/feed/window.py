@@ -82,6 +82,11 @@ class DayPlan:
 
 
 class MarketWindow:
+    #: The feed's usual window (config.DEFAULT_WINDOW, 08:58-15:50), written against SESSION: a
+    #: setting that ends at 15:50 moves with the F&O close, any other keeps its end (review L3).
+    #: None for hours that are always the session's (the governor's MarketHours).
+    WRITTEN: Span | None = (538, 950)
+
     def __init__(
         self,
         holidays_file: Path,
@@ -115,7 +120,8 @@ class MarketWindow:
         if not calendar.is_trading_day(day):
             return DayPlan(closed="weekend" if day.weekday() >= 5 else "NSE holiday")
         core = regime_on(day).fo  # to the day's F&O close
-        usual = DayPlan(spans=(usual_on(day, (self.start, self.end)),), cores=(core,))
+        hours = usual_on(day, (self.start, self.end), self.WRITTEN)
+        usual = DayPlan(spans=(hours,), cores=(core,))
         if day not in calendar.extra_days():
             return usual
         trades_anyway = calendar.trades_anyway(day)

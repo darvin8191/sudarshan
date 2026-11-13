@@ -61,13 +61,14 @@ def test_each_day_s_sessions_and_auction_as_sessions_py_gives_them(case):
 def test_on_10_december_a_stock_with_derivatives_closes_by_auction_and_one_without_does_not():
     """NSE's circulars of 6 Nov 2026: from 7 Dec the auction stays with stocks that have
     derivatives. Such a stock trades to 15:30, then its auction runs to 15:40 with the price
-    expected at 15:40; a stock without derivatives ends at 15:30 with no auction to wait for."""
+    expected at 15:40 and taken until 15:45 (L4: five minutes after the auction's latest close,
+    as the first regime keeps); a stock without derivatives ends at 15:30 with no auction."""
     day = date(2026, 12, 10)
     assert sessions.closes_by_auction("NSE_EQ", day, derivatives=True)
     cas = sessions.session("NSE_EQ", day, trading_day=True, auction=True)
     assert cas.segment == "NSE_EQ+auction"
     assert [clock(cas.start, day), clock(cas.end, day)] == ["09:15", "15:30"]
-    assert clock(cas.auction_until, day) == "15:40" and clock(cas.auction_close, day) == "15:40"
+    assert clock(cas.auction_until, day) == "15:45" and clock(cas.auction_close, day) == "15:40"
     assert not sessions.closes_by_auction("NSE_EQ", day, derivatives=False)
     assert not sessions.closes_by_auction("BSE_EQ", day, derivatives=False)
     plain = sessions.session("NSE_EQ", day, trading_day=True)
@@ -99,3 +100,88 @@ def test_sessions_py_reads_the_one_table():
     assert sessions.INDEX_UNDERLYINGS is regimes.INDEX_UNDERLYINGS
     assert sessions.SEGMENTS["NSE_FO"] == regimes.REGIMES[0].fo
     assert sessions.SEGMENTS["NSE_EQ"] == regimes.REGIMES[0].cash
+
+
+# ---- which contracts are an index's (review L1) ---------------------------------------------------
+@pytest.mark.parametrize(
+    ("symbol", "underlying", "index"),
+    [
+        ("NIFTY08DEC2625900CE", "NIFTY", True),
+        ("NIFTYFPI29DEC2618000CE", "NIFTYFPI", True),  # read as NIFTY's before L1
+        ("NIFTYFPI27OCT26FUT", "NIFTYFPI", True),
+        ("NIFTYNXT5029DEC26FUT", "NIFTYNXT50", True),
+        ("MIDCPNIFTY29DEC2613000PE", "MIDCPNIFTY", True),
+        ("FINNIFTY29DEC2627000CE", "FINNIFTY", True),
+        ("BANKNIFTY29DEC26FUT", "BANKNIFTY", True),
+        ("SENSEX10DEC2682000PE", "SENSEX", True),
+        ("SENSEX5029DEC26FUT", "SENSEX50", True),
+        ("BANKEX29DEC2660000CE", "BANKEX", True),
+        ("RELIANCE29DEC261400CE", "RELIANCE", False),
+        ("BANKBARODA29DEC26FUT", "BANKBARODA", False),
+        ("BANKINDIA29DEC26120CE", "BANKINDIA", False),
+        ("M&M29DEC263000CE", "M&M", False),
+        ("BAJAJ-AUTO29DEC269000PE", "BAJAJ-AUTO", False),
+        ("360ONE29DEC26FUT", "360ONE", False),
+        ("VEDL25APR24292.5CE", "VEDL", False),
+        ("NIFTY", None, False),  # the index itself, or a cash symbol
+        ("NIFTYBEES", None, False),
+        ("NIFTYIT", None, False),
+        ("NIFTY08DEC26", None, False),  # no FUT, no strike: not a contract
+    ],
+)
+def test_an_index_contract_is_told_by_its_whole_underlying(symbol, underlying, index):
+    assert regimes.underlying_of(symbol) == underlying
+    assert regimes.index_derivative(symbol) is index
+    names = regimes.index_underlyings([(symbol, "FUT")], cash={"RELIANCE", "BANKBARODA",
+                                      "BANKINDIA", "M&M", "BAJAJ-AUTO", "360ONE", "VEDL"})  # fmt: skip
+    assert regimes.index_derivative(symbol, names) is index
+
+
+def test_the_master_says_which_futures_are_an_index_s():
+    """Upstox marks every future FUT: an underlying listed as an index, or not listed as a cash
+    stock, is an index's. A master that marks FUTIDX and FUTSTK says it outright."""
+    upstox = [
+        ("NIFTY29DEC26FUT", "FUT"), ("NIFTYFPI29DEC26FUT", "FUT"), ("FOCIT29DEC26FUT", "FUT"),
+        ("NEWINDEX29DEC26FUT", "FUT"), ("RELIANCE29DEC26FUT", "FUT"), ("M&M29DEC26FUT", "FUT"),
+        ("360ONE29DEC26FUT", "FUT"), ("BANKINDIA29DEC26FUT", "FUT"), ("NIFTY50X29DEC26FUT", "FUT"),
+    ]  # fmt: skip
+    cash = {"RELIANCE", "M&M", "360ONE", "BANKINDIA"}
+    names = regimes.index_underlyings(upstox, cash=cash, indices={"NIFTY", "NIFTY50X"})
+    assert {"FOCIT", "NEWINDEX", "NIFTYFPI", "NIFTY50X"} <= names
+    assert not names & cash
+    assert regimes.index_derivative("FOCIT31DEC2640000CE", names)
+    assert not regimes.index_derivative("BANKINDIA29DEC26120CE", names)
+    marked = [
+        ("NIFTYFPI29DEC26FUT", "FUTIDX"),
+        ("XYZ29DEC26FUT", "FUTSTK"),
+        ("ABC29DEC26FUT", "FUTSTK"),
+    ]
+    assert regimes.index_underlyings(marked) == frozenset(regimes.INDEX_UNDERLYINGS) | {"NIFTYFPI"}
+
+
+def test_a_master_with_no_cash_stocks_makes_no_guess():
+    """Read while the morning's download refills the table: a stock is never taken for an index."""
+    rows = [("RELIANCE29DEC26FUT", "FUT"), ("NIFTYFPI29DEC26FUT", "FUT")]
+    assert regimes.index_underlyings(rows) == frozenset(regimes.INDEX_UNDERLYINGS)
+    assert regimes.index_underlyings([]) == frozenset(regimes.INDEX_UNDERLYINGS)
+
+
+@pytest.mark.parametrize("case", DAYS, ids=[case["date"] for case in DAYS])
+def test_each_day_s_closing_window_after_the_cash_close(case):
+    """Review M1, M2: from 7 Dec a stock's auction print and an index's closing value may come after
+    the cash close, until the print's last moment; they belong to the day's last candle. None before
+    7 Dec, when the print came inside the cash session, and none for F&O."""
+    day = date.fromisoformat(case["date"])
+    for segment in ("NSE_EQ", "BSE_EQ", "NSE_INDEX", "BSE_INDEX"):
+        found = sessions.closing_window(segment, day, trading_day=True)
+        expected = case["closing"]
+        assert (found and [clock(found[0], day), clock(found[1], day)]) == expected, segment
+    assert sessions.closing_window("NSE_FO", day, trading_day=True) is None
+    assert sessions.closing_window("NSE_INDEX", day, trading_day=False) is None
+    index = sessions.session("NSE_INDEX", day, trading_day=True)
+    late = sessions.closing_window("NSE_INDEX", day, trading_day=True)
+    assert index.close_until == (late[1] if late else None)
+    assert index.auction_until is None  # an index has no auction: "Closing auction" never shows
+    if late:  # a stock's print and an index's closing value share the window's end
+        cas = sessions.session("NSE_EQ", day, trading_day=True, auction=True)
+        assert (cas.end, cas.auction_until) == late

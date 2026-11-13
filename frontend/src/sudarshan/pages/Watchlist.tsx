@@ -28,24 +28,29 @@ import { useScreenerPush } from '@/sudarshan/screener/push'
 import { AddSymbolSheet } from '@/sudarshan/watchlist/AddSymbolSheet'
 import { AllListsSheet } from '@/sudarshan/watchlist/AllListsSheet'
 import { ArrangeSheets, useArrange } from '@/sudarshan/watchlist/ArrangeSheet'
+import { ExportSheet } from '@/sudarshan/watchlist/ExportSheet' // F15
 import { FollowRowSheet } from '@/sudarshan/watchlist/FollowRowSheet'
 import type { FollowForm } from '@/sudarshan/watchlist/followRows'
+import { ImportSheet } from '@/sudarshan/watchlist/ImportSheet' // F15
 import { DeleteDialog, NameDialog } from '@/sudarshan/watchlist/ListDialogs'
 import { ListStrip, ownId, ownRef, tabsFor } from '@/sudarshan/watchlist/ListStrip'
 import { LISTS_FULL, ListTabs, PANEL_ID, tabId } from '@/sudarshan/watchlist/ListTabs'
 import { LiveList } from '@/sudarshan/watchlist/LiveList'
 import { OPEN_LIST_KEY } from '@/sudarshan/watchlist/openList'
 import { copyName, copyPreset } from '@/sudarshan/watchlist/PresetLine'
+import { RankedLine } from '@/sudarshan/watchlist/RankedLine' // F16
 import { SearchSheet } from '@/sudarshan/watchlist/SearchSheet' // F13
 import { SectionSheets } from '@/sudarshan/watchlist/SectionMenus'
 import type { OrderRequest } from '@/sudarshan/watchlist/SymbolSheet'
 import { useOverlay } from '@/sudarshan/watchlist/useOverlay'
+import { useRanked } from '@/sudarshan/watchlist/useRanked' // F16
 import { MAX_ITEMS, MAX_LISTS, useWatchlists } from '@/sudarshan/watchlist/useWatchlists'
 import { useViewPref } from '@/sudarshan/watchlist/ViewSheet'
 import { BUILT_IN } from '@/sudarshan/watchlist/v2/arrange'
 import { useAlertOffers } from '@/sudarshan/watchlist/v2/listAlert'
 import { FLAG_LIST_WORDS, flagName, itemsOf, renameFlag } from '@/sudarshan/watchlist/v2/marks'
-import { kindOfRef } from '@/sudarshan/watchlist/v2/menuRules'
+import { kindOfRef, tvFor } from '@/sudarshan/watchlist/v2/menuRules'
+import { parseRankedRef, rankedLabel } from '@/sudarshan/watchlist/v2/ranked' // F16
 import { groupsOf, SECTIONS_FULL, useCollapsed } from '@/sudarshan/watchlist/v2/sections'
 import { LIMITS, type RefKind } from '@/sudarshan/watchlist/v2/types'
 import { useListView, useV2State } from '@/sudarshan/watchlist/v2/useListView'
@@ -137,7 +142,18 @@ export default function Watchlist() {
   const presetView = presetRead.data
   const presetItems = useMemo(() => itemsOf(presetView), [presetView])
   const [copyKeys, setCopyKeys] = useState<readonly string[] | null>(null)
-  const shownItems = flagRef ? flagItems : presetRef ? presetItems : items
+  // F16 (v2): a ranked list is read from the `ranked` op alone: locked, in Upstox's order, moving only at a read.
+  const rankedRef =
+    v2 && otherRef?.startsWith('ranked:') && parseRankedRef(otherRef) ? otherRef : null
+  const ranking = useRanked(rankedRef)
+  const rankedName = rankedRef ? rankedLabel(rankedRef) : ''
+  const shownItems = flagRef
+    ? flagItems
+    : presetRef
+      ? presetItems
+      : rankedRef
+        ? ranking.items
+        : items
 
   // What is open over the list lives in the address, so Back closes it.
   const { overlay, open, swap, close } = useOverlay(v2)
@@ -154,7 +170,9 @@ export default function Watchlist() {
     overlay !== null &&
     settled &&
     ((overlay.kind === 'item' && !shownItems.some((item) => item.id === overlay.itemId)) ||
-      (overlay.kind === 'copy' && (presetRef === null || copyKeys === null)) || // F10
+      (overlay.kind === 'copy' &&
+        ((presetRef === null && rankedRef === null) || copyKeys === null)) || // F10, F16
+      (overlay.kind === 'export' && !tvFor(kindOfRef(otherRef)).export) || // F15
       (otherRef !== null && !actsOnScreen(overlay.kind, flagRef !== null)) || // M8.6
       (overlay.kind === 'order' && overlay.order === null) ||
       (overlay.kind === 'follow' && overlay.form === null) || // F11
@@ -203,18 +221,31 @@ export default function Watchlist() {
         ...shown,
         { ref: presetRef, kind: 'preset' as const, name: presetView.name, count: presetView.total },
       ]
+    // F16: a ranked list opened from All lists has a tab too, named as the server names it.
+    if (rankedRef && !shown.some((tab) => tab.ref === rankedRef))
+      return [...shown, { ref: rankedRef, kind: 'ranked' as const, name: rankedName, count: null }]
     return open && !otherRef && !shown.some((tab) => tab.ref === open) && active
       ? [
           ...shown,
           { ref: open, kind: 'list' as const, name: active.name, count: active.items.length },
         ]
       : shown
-  }, [v2, v2State?.favourites, watchlists.lists, active, otherRef, presetRef, presetView])
+  }, [
+    v2,
+    v2State?.favourites,
+    watchlists.lists,
+    active,
+    otherRef,
+    presetRef,
+    presetView,
+    rankedRef,
+    rankedName,
+  ])
   // M8.6: a favourite that is not an own list is never answered with the own list behind it, tab or no tab.
   const foreign =
     v2 && otherRef !== null
       ? (tabs.find((tab) => tab.ref === otherRef) ??
-        (presetRef || flagRef
+        (presetRef || flagRef || rankedRef // F16
           ? null
           : {
               ref: otherRef,
@@ -356,8 +387,12 @@ export default function Watchlist() {
   )
   const deleting = overlay?.kind === 'delete'
   const presetPanel = useMemo(
-    () => ({ id: PANEL_ID, role: 'tabpanel' as const, 'aria-label': presetView?.name }),
-    [presetView?.name]
+    () => ({
+      id: PANEL_ID,
+      role: 'tabpanel' as const,
+      'aria-label': presetView?.name ?? (rankedName || undefined), // F16
+    }),
+    [presetView?.name, rankedName]
   )
   // M8.6: the list to delete is the one on screen when the confirmation opened. If another list
   // comes on screen while it is open, it closes and nothing is sent.
@@ -401,7 +436,7 @@ export default function Watchlist() {
             <Check aria-hidden="true" className="size-5" />
             Done
           </button>
-        ) : presetRef ? null /* F10: a built-in list has no Add */ : (
+        ) : presetRef || rankedRef ? null /* F10, F16: no Add on a built-in or ranked list */ : (
           <button
             type="button"
             disabled={!active || apiKey === null || full || otherRef !== null}
@@ -415,7 +450,7 @@ export default function Watchlist() {
         )}
       </div>
 
-      {full && !editing && !presetRef && (
+      {full && !editing && !presetRef && !rankedRef && (
         <p id="sd-watchlist-full" className="px-1 text-xs font-medium text-muted-foreground">
           {LIST_FULL}
         </p>
@@ -468,6 +503,8 @@ export default function Watchlist() {
               }
               onView={prefRef ? () => open({ kind: 'view' }) : undefined} // F6, F10
               kind={kindOfRef(otherRef)} // M8.6: the menu follows the list on screen
+              onImport={v2 ? () => open({ kind: 'import' }) : undefined} // F15
+              onExport={v2 ? () => open({ kind: 'export' }) : undefined} // F15
               alert={listAlert} // F17
               newSectionOff={
                 view && view.sections.length >= LIMITS.sections_per_list ? SECTIONS_FULL : null
@@ -493,6 +530,9 @@ export default function Watchlist() {
               </p>
             ) /* F8 */
           }
+          {rankedRef && (
+            <RankedLine ranking={ranking} name={rankedName} /> // F16
+          )}
           {presetRef && !presetView ? (
             <section
               id={PANEL_ID}
@@ -520,7 +560,7 @@ export default function Watchlist() {
                 <output>Reading the list.</output>
               )}
             </section>
-          ) : foreign && !flagRef && !presetRef ? (
+          ) : foreign && !flagRef && !presetRef && !rankedRef ? (
             <section
               id={PANEL_ID}
               role="tabpanel"
@@ -530,16 +570,18 @@ export default function Watchlist() {
               The rows of {foreign.name} are not shown on this screen yet.
               {foreign.kind !== 'list' && <span className="mt-2 block">{BUILT_IN}</span>}
             </section>
-          ) : (
+          ) : rankedRef && shownItems.length === 0 ? null /* F16: the line above says why */ : (
             <LiveList
               items={shownItems}
               apiKey={apiKey}
               isOpen={isOpen}
               loading={watchlists.loading}
               editing={editing && !flagRef}
-              listName={(presetRef ? presetView?.name : active?.name) ?? 'the list'}
+              listName={
+                (presetRef ? presetView?.name : rankedRef ? rankedName : active?.name) ?? 'the list'
+              }
               openItemId={openItemId}
-              panel={presetRef ? presetPanel : panel}
+              panel={presetRef || rankedRef ? presetPanel : panel}
               onOpen={openSheet}
               onMove={moveItem}
               onRemove={removeItem}
@@ -547,7 +589,7 @@ export default function Watchlist() {
               onCloseSheet={close}
               onOrder={placeOrder}
               onAlert={setAlert}
-              members={flagRef || presetRef ? undefined : members}
+              members={flagRef || presetRef || rankedRef ? undefined : members}
               sections={sectionLayout}
               arrange={arrange.edit} // F5
               symbolActions={symbolActions} // F5
@@ -555,8 +597,9 @@ export default function Watchlist() {
               viewOpen={overlay?.kind === 'view'} // F6
               view={flagRef ? flagView : sectionsRef ? view : presetRef ? presetView : undefined} // F7, F8, F10
               flagNames={v2 ? (v2State?.flag_names ?? []) : undefined} // F8
-              noRemove={flagRef !== null || presetRef !== null} // F8, F10
-              followRows={flagRef || presetRef ? undefined : followRows} // F11
+              noRemove={flagRef !== null || presetRef !== null || rankedRef !== null} // F8, F10, F16
+              followRows={flagRef || presetRef || rankedRef ? undefined : followRows} // F11
+              metrics={rankedRef ? ranking.metrics : undefined} // F16
               picker={
                 v2 && overlay?.kind === 'strikes' && overlay.pick && active && otherRef === null
                   ? {
@@ -580,7 +623,15 @@ export default function Watchlist() {
                         open({ kind: 'copy' })
                       },
                     }
-                  : undefined
+                  : rankedRef
+                    ? {
+                        lines: [], // F16: the age line above is the ranking's own
+                        onCopy: (keys) => {
+                          setCopyKeys(keys)
+                          open({ kind: 'copy' })
+                        },
+                      }
+                    : undefined
               } // F10
             />
           )}
@@ -600,6 +651,29 @@ export default function Watchlist() {
           onNew={() => swap({ kind: 'new' })}
           newOff={watchlists.lists.length >= MAX_LISTS ? LISTS_FULL : null}
         />
+      )}
+
+      {v2 && (
+        // F15: Import from TradingView; "this list" only for the own list on screen, on the version read.
+        <ImportSheet
+          open={overlay?.kind === 'import'}
+          onClose={close}
+          here={
+            active && otherRef === null
+              ? { id: active.id, name: active.name, version: view?.version ?? null }
+              : null
+          }
+          onDone={(done, opened) => {
+            toast.success(done.words)
+            select(opened)
+            close()
+          }}
+        />
+      )}
+
+      {v2 && (
+        // F15: Export for TradingView, for the list on screen.
+        <ExportSheet open={overlay?.kind === 'export'} onClose={close} listRef={activeRef} />
       )}
 
       {v2 && (
@@ -662,7 +736,7 @@ export default function Watchlist() {
 
       <NameDialog
         mode={
-          overlay?.kind === 'copy' && presetView && copyKeys
+          overlay?.kind === 'copy' && (presetView || rankedRef) && copyKeys // F16
             ? 'copy'
             : overlay?.kind === 'new'
               ? 'create'
@@ -675,17 +749,22 @@ export default function Watchlist() {
                 : null
         }
         current={
-          overlay?.kind === 'copy' && presetView
-            ? copyName(presetView.name)
+          overlay?.kind === 'copy' && (presetView || rankedRef)
+            ? copyName(presetView?.name ?? rankedName) // F16
             : flagRef
               ? flagName(v2State?.flag_names, flagNumber(flagRef))
               : (active?.name ?? '')
         }
         onClose={close}
         onSubmit={async (name) => {
-          if (overlay?.kind === 'copy' && presetRef && copyKeys) {
+          if (overlay?.kind === 'copy' && (presetRef ?? rankedRef) && copyKeys) {
             // F10: every key in the order shown; the server's words (the 250 cut) are shown as sent.
-            const copied = await copyPreset(queryClient, presetRef, copyKeys, name)
+            const copied = await copyPreset(
+              queryClient,
+              (presetRef ?? rankedRef) as string,
+              copyKeys,
+              name
+            ) // F16
             toast.success(copied.words)
             select(copied.done.list)
             return
