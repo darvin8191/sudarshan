@@ -37,6 +37,8 @@ Every reader takes its times from here, never from a constant of its own:
                                          a close OpenAlgo or SUDARSHAN shipped; the chart's hours
                                          read it from there
     sandbox/position_manager.py          when the sandbox settles an expiring NFO or BFO contract
+    sudarshan/index_contracts.py         which contracts are an index's, from OpenAlgo's master
+                                         (``index_underlyings``), for every reader inside OpenAlgo
 
 ``sudarshan/tests/regimes_vectors.json`` pins the table, the calendar the server derives from it and
 the phone chart's hours built from the server's answer (frontend/src/lib/trading/sessionHours.ts).
@@ -46,6 +48,8 @@ Pure: dates in, minutes out. No I/O, no clock, no logging.
 
 from __future__ import annotations
 
+import re
+from collections.abc import Collection, Iterable
 from dataclasses import dataclass
 from datetime import date
 
@@ -64,7 +68,9 @@ class Regime:
     fo: tuple[int, int]
     #: An expiring index contract stops at this minute on its expiry day.
     index_expiry_end: int
-    #: The auction's print may come until this many minutes after the cash close.
+    #: The auction's print may come until this many minutes after the cash close: five minutes
+    #: after the auction's latest close in both regimes (15:35, and from 7 Dec 2026 15:45), so a
+    #: print stamped a moment after a random close in its last second is still the auction's.
     print_after_cash: int
     #: The auction's price is expected this many minutes after the cash close (X6j).
     close_after_cash: int
@@ -76,11 +82,20 @@ class Regime:
 #: Each regime from its first day; the first one also covers earlier days.
 REGIMES: tuple[Regime, ...] = (
     Regime(date(2026, 8, 3), (555, 930), (555, 915), (555, 940), 940, 5, 0, False),
-    Regime(date(2026, 12, 7), (555, 930), (555, 930), (555, 945), 930, 10, 10, False),
+    Regime(date(2026, 12, 7), (555, 930), (555, 930), (555, 945), 930, 15, 10, False),
 )
-#: Underlyings of index derivatives: an OpenAlgo derivative symbol starts with one, then DDMMMYY.
-INDEX_UNDERLYINGS = ("NIFTYNXT50", "MIDCPNIFTY", "BANKNIFTY", "FINNIFTY", "SENSEX50", "BANKEX",
-                     "SENSEX", "NIFTY")  # fmt: skip
+#: Underlyings of index derivatives every reader knows without the master contract: an OpenAlgo
+#: derivative symbol is the underlying, then DDMMMYY. The master adds any other one
+#: (``index_underlyings``), BSE's Focused IT under whatever name Upstox gives it among them.
+INDEX_UNDERLYINGS = ("NIFTYNXT50", "MIDCPNIFTY", "BANKNIFTY", "FINNIFTY", "NIFTYFPI", "SENSEX50",
+                     "BANKEX", "SENSEX", "NIFTY")  # fmt: skip
+#: An OpenAlgo derivative symbol: <underlying><DDMMMYY>FUT or <underlying><DDMMMYY><strike><CE|PE>.
+_DERIVATIVE = re.compile(
+    r"(?P<under>[A-Z0-9&-]+?)\d{2}(?:JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\d{2}"
+    r"(?:FUT|\d+(?:\.\d+)?(?:CE|PE))"
+)
+#: How a master contract marks its futures, where it tells an index's from a stock's.
+_INDEX_FUTURES, _STOCK_FUTURES = frozenset({"FUTIDX", "OPTIDX"}), frozenset({"FUTSTK", "OPTSTK"})
 
 
 def regime_on(day: date | None) -> Regime:
@@ -105,18 +120,45 @@ def fo_changes() -> tuple[tuple[date, tuple[int, int]], ...]:
     return tuple((regime.since, regime.fo) for regime in REGIMES[1:])
 
 
-def index_derivative(symbol: str) -> bool:
-    """True for an OpenAlgo derivative symbol on an index: NIFTY25NOV2625900CE, BANKNIFTY...FUT."""
-    for name in INDEX_UNDERLYINGS:
-        rest = symbol[len(name) :]
-        if (
-            symbol.startswith(name)
-            and len(rest) >= 7
-            and rest[:2].isdigit()
-            and rest[2:5].isalpha()
-        ):
-            return rest[5:7].isdigit()
-    return False
+def underlying_of(symbol: str) -> str | None:
+    """The underlying of an OpenAlgo derivative symbol (NIFTYFPI for NIFTYFPI29DEC2618000CE,
+    360ONE for 360ONE29DEC26FUT), or None for anything else (a cash symbol, an index)."""
+    found = _DERIVATIVE.fullmatch(symbol.strip().upper())
+    return found["under"] if found else None
+
+
+def index_derivative(symbol: str, underlyings: Collection[str] = INDEX_UNDERLYINGS) -> bool:
+    """True for an OpenAlgo derivative symbol on an index: NIFTY25NOV2625900CE, BANKNIFTY...FUT.
+    ``underlyings`` are the index underlyings the master contract lists (``index_underlyings``);
+    without it the ones every reader knows. The whole underlying is compared, so NIFTYFPI is not
+    read as NIFTY nor BANKINDIA as an index."""
+    underlying = underlying_of(symbol)
+    return underlying is not None and underlying in underlyings
+
+
+def index_underlyings(
+    futures: Iterable[tuple[str, str]],
+    *,
+    cash: Collection[str] = (),
+    indices: Collection[str] = (),
+) -> frozenset[str]:
+    """The underlyings of the index derivatives a master contract lists, from its F&O future rows
+    as (symbol, instrument type), and the symbols it lists as cash stocks (``cash``: NSE, BSE)
+    and as indices (``indices``: NSE_INDEX, BSE_INDEX). Every index with derivatives has futures.
+
+    A master that marks its futures says it (FUTIDX an index's, FUTSTK a stock's). Upstox's marks
+    every one FUT: an underlying listed as an index, or not listed as a cash stock, is an index's.
+    A master holding no cash stock at all (read while it is being downloaded) makes no such guess.
+    The underlyings every reader knows (INDEX_UNDERLYINGS) are always in."""
+    found = set(INDEX_UNDERLYINGS)
+    for symbol, kind in futures:
+        underlying = underlying_of(symbol)
+        mark = str(kind or "").upper()
+        if underlying is None or mark in _STOCK_FUTURES:
+            continue
+        if mark in _INDEX_FUTURES or underlying in indices or (cash and underlying not in cash):
+            found.add(underlying)
+    return frozenset(found)
 
 
 def expiry_stop(expiry: date, *, index: bool) -> int:

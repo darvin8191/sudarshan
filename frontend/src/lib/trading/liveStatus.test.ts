@@ -268,3 +268,67 @@ describe('the sentence behind a marker', () => {
     expect(words).not.toMatch(/\b(websocket|socket|http|api|paper|arm|armed|arming)\b/i)
   })
 })
+
+/**
+ * SUDARSHAN review M3: on Tue 8 Dec 2026 NIFTY08DEC2625900CE stops trading at
+ * 15:30 while F&O runs to 15:45. Its marker said "Stale" from 15:30:15 to
+ * 15:45; with the stop the server sends it says the contract has stopped.
+ */
+describe("an expiring contract's own stop (review M3)", () => {
+  const nfo = () =>
+    new SessionCalendar({ timezone: 'Asia/Kolkata', sessions: ['0915-1545:23456'], exceptions: {} })
+
+  it('says it stopped trading at 15:30, never Stale, and promises no next open', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(ist(2026, 12, 8, 15, 29, 50))
+    const seen: LiveStatus[] = []
+    const tracker = new LiveStatusTracker({ exchange: 'NFO', onChange: (s) => seen.push(s) })
+    tracker.reset('NFO')
+    tracker.setCalendar(nfo())
+    tracker.setTransport('live')
+    tracker.setStop(ist(2026, 12, 8, 15, 30) / 1000)
+    tracker.noteTick()
+    expect(tracker.status().line.kind).toBe('live')
+    vi.advanceTimersByTime(9_000) // 15:29:59, the last trade
+    tracker.noteTick()
+    vi.advanceTimersByTime(60_000) // 15:30:59: no tick, the exchange still open
+    const line = tracker.status().line
+    expect(line).toEqual({ kind: 'closed', stoppedAt: ist(2026, 12, 8, 15, 30) })
+    // Never "Stale": the figures stopped because the contract did.
+    expect(seen.some(({ line: seenLine }) => 'stale' in seenLine && seenLine.stale)).toBe(false)
+    const status = tracker.status()
+    expect(status.opensAt).toBeNull()
+    expect(liveDetail(status)).toBe(
+      "This contract stopped trading at 15:30, its expiry day's stop. The last price shown is its last trade."
+    )
+    expect(needsMarker(line)).toBe(true)
+    // The timer that turned it was aimed at the stop itself.
+    expect(seen.at(-1)?.line).toEqual({ kind: 'closed', stoppedAt: ist(2026, 12, 8, 15, 30) })
+    tracker.destroy()
+  })
+
+  it('without a stop the same silence is Stale until the exchange closes, as before', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(ist(2026, 12, 8, 15, 29, 59))
+    const tracker = new LiveStatusTracker({ exchange: 'NFO', onChange: () => {} })
+    tracker.reset('NFO')
+    tracker.setCalendar(nfo())
+    tracker.setTransport('live')
+    tracker.noteTick()
+    vi.advanceTimersByTime(61_000)
+    expect(tracker.status().line).toMatchObject({ kind: 'delayed', stale: true })
+    tracker.destroy()
+  })
+
+  it('a new instrument forgets the stop of the last one', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(ist(2026, 12, 8, 15, 35))
+    const tracker = new LiveStatusTracker({ exchange: 'NFO', onChange: () => {} })
+    tracker.setCalendar(nfo())
+    tracker.setStop(ist(2026, 12, 8, 15, 30) / 1000)
+    expect(tracker.status().line.kind).toBe('closed')
+    tracker.reset('NFO')
+    expect(tracker.status().line.kind).not.toBe('closed')
+    tracker.destroy()
+  })
+})

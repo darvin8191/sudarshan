@@ -424,6 +424,7 @@ export function PlaceOrderDialog({
           {!isLoading && mergedData.ltp !== undefined && quoteFeed && quoteCalendar && (
             <QuoteStatus
               exchange={exchange_}
+              symbol={symbol}
               feed={quoteFeed}
               calendar={quoteCalendar}
               className="-mt-2"

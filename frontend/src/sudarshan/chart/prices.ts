@@ -77,7 +77,8 @@ export function tickLine(
   now = Date.now(),
   traded = true
 ): string {
-  if (status?.line.kind === 'closed')
+  // A contract that stopped on its expiry day opens no more: its last trade stays named (M3).
+  if (status?.line.kind === 'closed' && status.line.stoppedAt === undefined)
     return status.opensAt === null
       ? 'Prices from the last session'
       : `Opens ${opensAtWords(status.opensAt, now)}`

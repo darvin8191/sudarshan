@@ -244,7 +244,7 @@ The document is built by one plain function, `health_document(service)` in `heal
 (synchronous, changes nothing, its only I/O is reading the release record). The market alerts' API
 serves the same document with its own fields beside it (its state is `market_state`, so no name is
 shared). That API is the only listener on 5582; there is no separate health listener (a test pins
-that nothing listens on 5585).
+that the alerts service never listens on 5585, the family service's port).
 
 | market field | meaning |
 |---|---|

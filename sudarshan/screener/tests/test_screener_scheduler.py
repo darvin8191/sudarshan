@@ -122,13 +122,14 @@ def test_the_last_cash_boundary_waits_for_the_auction_prints_until_15_35_05():
     [
         (date(2026, 12, 4), "15:30", "15:35"),  # the Friday before: auction to 15:35
         (date(2026, 12, 3), "15:30", "15:35"),  # a SENSEX expiry before the change
-        (date(2026, 12, 8), "15:30", "15:40"),  # auction stocks: 15:30-15:40 (a NIFTY expiry)
-        (date(2026, 12, 10), "15:30", "15:40"),
+        (date(2026, 12, 8), "15:30", "15:45"),  # auction 15:30-15:40, prints to 15:45 (L4)
+        (date(2026, 12, 10), "15:30", "15:45"),
     ],
 )
 def test_the_last_cash_boundary_waits_for_the_prints_on_both_sides_of_7_december(day, close, latest):
     """From 7 Dec 2026 a stock that closes by auction trades to the cash end and prints 10 minutes
-    later: its 15:15-15:30 candle still waits for the print, now to 15:40:05."""
+    later: its 15:15-15:30 candle still waits for the print, now to 15:45:05 (the print may come
+    until five minutes after the auction's latest close, 15:40)."""
     found = sessions_of(day, trading_day=True)
     last = sch.boundaries(CAS, found)[-1]
     assert times(day, [last]) == [close]
@@ -247,3 +248,32 @@ def test_an_edit_in_the_evening_runs_the_days_last_candle_once_on_time():
     screen = sch.Screen(7, 2, "close", 3, frozenset({"NSE_EQ"}), since=edited)
     found = sch.due([screen], NORMAL, edited + 1_000, lambda key: False)
     assert ends(found) == [("15:30", False)]
+
+
+INDICES = sch.Screen(6, 1, "close", 15, frozenset({"NSE_INDEX"}))
+WATCH = sch.Screen(7, 1, "close", 15, frozenset({"NSE_EQ", "NSE_EQ+auction", "NSE_INDEX"}))
+
+
+@pytest.mark.parametrize(
+    ("day", "latest"),
+    [(date(2026, 12, 4), None), (date(2026, 12, 10), "15:45")],
+)
+def test_an_index_screen_waits_for_the_closing_value_from_7_december(day, latest):
+    """Review M2: from 7 Dec an index's closing value may come after the cash close, until 15:45.
+    A screen of indices holds its 15:15-15:30 candle until 15:45:05, prints or not (a closing value
+    cannot be told from a later one); before 7 Dec it runs at 15:30:05, as it did."""
+    found = sessions_of(day, trading_day=True)
+    last = sch.boundaries(INDICES, found)[-1]
+    assert times(day, [last]) == ["15:30"]
+    at_close = hm(day, "15:30") + 5_000
+    for screen in (INDICES, WATCH):
+        due = sch.due([screen], found, at_close, lambda k: False, printed=lambda s: True)
+        ran = last.k in [d.boundary.k for d in due]
+        assert ran is (latest is None), screen.segments
+        if latest is not None:
+            for at, runs in ((hm(day, latest) + 4_999, False), (hm(day, latest) + 5_000, True)):
+                due = sch.due([screen], found, at, lambda k: False, printed=lambda s: True)
+                assert (last.k in [d.boundary.k for d in due]) is runs
+    # A screen without indices is not held for them.
+    plain = sch.due([CASH], found, at_close, lambda k: False)
+    assert [d.boundary.end for d in plain][-1] == last.end

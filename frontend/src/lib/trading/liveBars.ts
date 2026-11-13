@@ -72,6 +72,20 @@ export interface SessionWindow {
 }
 
 /**
+ * SUDARSHAN (review M1, M2): a day's closing print that comes after the cash
+ * close, in UTC seconds, both ends included: from 7 Dec 2026 a stock with
+ * derivatives closes by auction after 15:30 and its print comes by 15:45, and
+ * an index's closing value may come then too. The server sends it for the day
+ * (sudarshan/alerts/market/sessions.py); the chart never works it out.
+ */
+export interface ClosingWindow {
+  /** The cash session's close, where the window starts. */
+  from: number
+  /** The last moment the closing print may carry. */
+  until: number
+}
+
+/**
  * The part of a session calendar the live bar reads. The engine's
  * `SessionCalendar` satisfies it, and a test can hand in two lines instead.
  */
@@ -233,6 +247,8 @@ export interface LiveBarOptions {
   session?: SessionHours | null
   /** The calendar's zone, for day, week and month buckets. */
   zone?: string
+  /** SUDARSHAN: today's closing print after the close, when the server gives one. */
+  closing?: ClosingWindow | null
 }
 
 /**
@@ -248,6 +264,8 @@ export class LiveBarBuilder {
   private readonly zone: string
   private anchor: number | null
   private session: SessionHours | null
+  /** SUDARSHAN: where a closing print after the cash close may fall today. */
+  private closing: ClosingWindow | null
   private cur: Bar | null = null
   /** The current bar is a flat bar the clock opened, and no trade has reached it yet. */
   private empty = false
@@ -311,6 +329,7 @@ export class LiveBarBuilder {
     this.zone = options.zone ?? LIVE_ZONE
     this.anchor = options.anchorSec ?? null
     this.session = options.session ?? null
+    this.closing = options.closing ?? null
   }
 
   /** Whether an interval has a live bar at all. */
@@ -325,6 +344,11 @@ export class LiveBarBuilder {
 
   hasSession(): boolean {
     return this.session !== null
+  }
+
+  /** SUDARSHAN (review M1, M2): today's closing print window, or none. */
+  setClosing(closing: ClosingWindow | null): void {
+    this.closing = closing
   }
 
   /**
@@ -449,9 +473,13 @@ export class LiveBarBuilder {
     const price = tick.price
     if (!Number.isFinite(price) || price <= 0 || !Number.isFinite(tick.time)) return null
     if (tick.polled && !this.tradedSince(tick)) return null
+    // SUDARSHAN (review M1, M2): after the cash close only the closing print
+    // moves a bar, and it goes to the day's last candle, never a new one.
+    const closing = this.closingAt(tick)
+    if (closing === false) return null
     const flowing = this.flowing(tick)
     this.noteStamp(tick)
-    const bucket = this.bucketStart(tick.time)
+    const bucket = closing ?? this.bucketStart(tick.time)
     const cur = this.cur
     if (cur && bucket < cur.time) return this.onLateTick(tick, bucket)
     if (cur && bucket === cur.time) {
@@ -464,7 +492,7 @@ export class LiveBarBuilder {
       this.echo = { ...bar }
       return { bar: { ...bar }, isNew: false, provisional: this.provisional, placeholder: false }
     }
-    if (this.session && !this.session.sessionAt(tick.time) && !flowing) {
+    if (closing === null && this.session && !this.session.sessionAt(tick.time) && !flowing) {
       // A trade while the calendar says the exchange is shut opens no bar (the
       // pre-open auction, a snapshot at night). Its price is the one the
       // session's first bar starts flat at, and its count is today's.
@@ -638,6 +666,26 @@ export class LiveBarBuilder {
     }
     if (previous) update.previous = previous
     return update
+  }
+
+  /**
+   * SUDARSHAN (review M1, M2): where a tick stamped inside today's closing
+   * window goes. The bucket of the cash session's last minute (the 15:29
+   * minute, the 15:25 five-minute candle, the 15:15 hourly one) for the
+   * closing print: a stock's is a trade, so its day count rose, and the
+   * auction's book, sent meanwhile with the count unchanged, is not (false:
+   * it moves no bar). A feed without a count (an index) cannot tell them
+   * apart, and its value then is the closing value. Null outside the window.
+   */
+  private closingAt(tick: LiveTick): number | false | null {
+    const window = this.closing
+    if (!window || this.bucketing.kind !== 'intraday') return null
+    if (!(tick.time >= window.from && tick.time <= window.until)) return null
+    const count = tick.dayVolume
+    const sameDay =
+      this.lastDayIndex !== null && zonedDayIndex(tick.time, this.zone) === this.lastDayIndex
+    if (isCount(count) && sameDay && this.lastDay !== null && count <= this.lastDay) return false
+    return this.bucketStart(window.from - 1)
   }
 
   /** A late stream tick's own count, from the same IST day as the day's highest. */

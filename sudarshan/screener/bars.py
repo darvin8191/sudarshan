@@ -49,6 +49,10 @@ candle and the day close at it, and it seals that bar on arrival (from 7 Dec 202
 trades to the cash end and has sealed that minute already: the print then becomes its close and
 adds its volume). The frames of one a minute from the auction's book, whose volume does not move, are no
 trade.
+
+From 7 Dec 2026 an index's closing value may come after the cash close too (clock.closing, review
+M2): each such value becomes the close of the day's last minute (widening its high or low), so its
+last candles and the day close at it. With no such value nothing changes.
 """
 
 from __future__ import annotations
@@ -60,12 +64,14 @@ from sudarshan.alerts.market.book import BAD_VALUE, NOT_A_TRADE, NOTHING_NEW
 from sudarshan.alerts.market.clock import (
     ARRIVAL_GRACE_MS,
     AUCTION_PRINT,
+    CLOSING_VALUE,
     OK,
     OUTSIDE_HOURS,
     Market,
     Pause,
     auction,
     candle,
+    closing,
     gate,
     paused_during,
     within,
@@ -73,7 +79,14 @@ from sudarshan.alerts.market.clock import (
 from sudarshan.alerts.market.conditions import todays
 from sudarshan.alerts.market.engine import CLOSE_CHECK_MS
 from sudarshan.alerts.market.grain import paise
-from sudarshan.alerts.market.sessions import AUCTION, Session, epoch_ms, key_day, segment_of
+from sudarshan.alerts.market.sessions import (
+    AUCTION,
+    INDEX_SEGMENTS,
+    Session,
+    epoch_ms,
+    key_day,
+    segment_of,
+)
 from sudarshan.screener.types import FROM_I1, REPAIRED, UNVERIFIED, Candle
 from sudarshan.screener.types import LATE as LATE_BAR
 
@@ -118,8 +131,9 @@ class Sealed(NamedTuple):
 
 
 class Tick(NamedTuple):
-    #: OK or AUCTION_PRINT when the frame's trade is in a bar; LATE_TRADE when it came too late;
-    #: otherwise why not (a gate code, NOT_A_TRADE, BAD_VALUE or NOTHING_NEW), for the counters.
+    #: OK, AUCTION_PRINT or CLOSING_VALUE when the frame's trade is in a bar; LATE_TRADE when it
+    #: came too late; otherwise why not (a gate code, NOT_A_TRADE, BAD_VALUE or NOTHING_NEW), for
+    #: the counters.
     check: str
     #: Bars this frame sealed: the auction's print seals its bar at once.
     sealed: tuple[Sealed, ...] = ()
@@ -682,7 +696,9 @@ class Bars:
             rose = item.volume is not None and item.last is not None and item.volume > item.last
             if check == AUCTION_PRINT and not rose:
                 check = NOT_A_TRADE  # its volume did not move: the auction's book
-        if check != OK and check != AUCTION_PRINT:
+        elif check == OUTSIDE_HOURS and item.segment in INDEX_SEGMENTS:  # its closing value?
+            check = closing(market, item.segment, at, item.recv, item.now)
+        if check != OK and check != AUCTION_PRINT and check != CLOSING_VALUE:
             if grid is not None and at < grid.start:
                 self._before_open(state, at, item.volume, market.today)
             return check
@@ -694,15 +710,17 @@ class Bars:
         if printed and self.printed(item.key, market.today):
             state.late += 1  # the day's print is taken once
             return LATE_TRADE
-        start = candle(grid, 1, grid.end - 1 if printed else at)[1]
+        last = printed or check == CLOSING_VALUE  # the day's last minute takes it
+        start = candle(grid, 1, grid.end - 1 if last else at)[1]
         end = start + MINUTE_MS
-        if not printed and (start in state.sealed or item.recv > end + ARRIVAL_GRACE_MS):
+        if not last and (start in state.sealed or item.recv > end + ARRIVAL_GRACE_MS):
             state.late += 1
             return LATE_TRADE
         oi, atp = _count(item.frame.get("oi")), paise(item.frame.get("atp"))
         day = _exchange_day(item.frame, market, item.segment)
-        if printed:
-            state.printed, state.printed_at = market.today, item.now
+        if last:
+            if printed:
+                state.printed, state.printed_at = market.today, item.now
             trade = (at, price, item.volume, oi, atp)
             sealed.append(self._print(item.key, state, start, trade, day))
             return check
@@ -718,7 +736,8 @@ class Bars:
         return check
 
     def _print(self, key: str, state: _Key, start: int, trade: tuple, day=None) -> Sealed:
-        """The closing auction's price, into the day's last minute, which it seals on arrival.
+        """The closing auction's price, or an index's closing value (each one that comes), into
+        the day's last minute, which it seals on arrival.
 
         A minute that continuous trading has already sealed (a stock that closes by auction from
         7 Dec 2026, which trades to the cash end) takes the print as its close, widens its high and

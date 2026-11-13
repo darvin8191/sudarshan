@@ -92,7 +92,7 @@ def test_the_closing_auction_and_the_7_december_timings(segment, day, auction, h
     [
         (WED, None, ("15:15", "15:35"), "15:30"),  # 27 Oct 2026: printed at 15:28:09 (X6j)
         (MUHURAT, "14:05-15:40", ("15:15", "15:35"), "15:30"),  # also on 8 Nov 2026 (X6b)
-        (DEC7, None, ("15:30", "15:40"), "15:40"),  # a stock with derivatives: 15:30-15:40
+        (DEC7, None, ("15:30", "15:45"), "15:40"),  # auction 15:30-15:40, its print to 15:45
     ],
 )
 def test_the_auction_window_a_cas_key_carries(day, window, expected, close):

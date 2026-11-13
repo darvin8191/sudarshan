@@ -147,6 +147,14 @@ class OrderManager:
                         400,
                     )
 
+            # SUDARSHAN (v0.8.1 review L5): a contract past its expiry day's stop (15:30 for an
+            # index's from 7 Dec 2026) is refused, as the exchange would, never filled.
+            from sandbox.position_manager import stopped_contract_words
+
+            stopped = stopped_contract_words(symbol, exchange, getattr(symbol_obj, "expiry", None))
+            if stopped:
+                return False, {"status": "error", "message": stopped, "mode": "analyze"}, 400
+
             # Validate MIS orders - reject if after square-off time but before market open
             # Exception: Allow orders that reduce/close existing positions
             if product == "MIS":
