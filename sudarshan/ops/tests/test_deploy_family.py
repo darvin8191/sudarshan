@@ -325,6 +325,27 @@ def test_a_half_made_tokens_folder_a_killed_run_left_is_made_again_whole(tmp_pat
 
 
 @whole_tool
+def test_a_temporary_file_a_killed_run_left_is_removed_whatever_its_age(tmp_path):
+    """L3: every writer of the family folder and the tokens folder is this tool, which holds
+    deploy.lock, so a temporary file found there is a killed run's. One kept for ten minutes was a
+    file the family check cannot open: the next run took provisioned away and told the owner."""
+    box = quiet_box(tmp_path)
+    bootstrapped(box)
+    box.feed_tokens_in_place()
+    left = [
+        fam_dir(box) / ".seal-admin.key.Ab12Cd",
+        fam_dir(box) / ".provisioned.Zx98Yw",
+        feed_dir(box) / ".sudarshan-alerts.Qw34Er",
+    ]
+    for path in left:
+        path.write_text("cut off\n")
+        path.chmod(0o600)
+    assert box.run().returncode == 0
+    assert [path for path in left if path.exists()] == []
+    assert (fam_dir(box) / "provisioned").exists()
+
+
+@whole_tool
 def test_a_tokens_folder_others_could_write_is_left_alone_and_said_once(tmp_path):
     box = quiet_box(tmp_path)
     folder = feed_dir(box)

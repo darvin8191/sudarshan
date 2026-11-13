@@ -865,7 +865,7 @@ feed_tokens() (
         fi
         rm -rf -- "${new}" 2>/dev/null   # gone after the rename; what a failure left
     else
-        find "${FEED_DIR}" -maxdepth 1 -type f -name '.sudarshan-*.??????' -mmin +10 -delete 2>/dev/null   # left by a killed run
+        find "${FEED_DIR}" -maxdepth 1 -type f -name '.sudarshan-*.??????' -delete 2>/dev/null   # left by a killed run (stale: the lock)
         for name in "${FEED_CLIENTS[@]}"; do
             dest="${FEED_DIR}/${name}"
             if [[ -e "${dest}" || -L "${dest}" ]]; then continue; fi
@@ -983,9 +983,12 @@ fam_provision() (   # $1 = run or setup. 0 = the check passed and provisioned is
         exit 1
     fi
     if [[ -f "${FAM_DIR}/provisioned" ]]; then had=1; fi
+    # Left by a run that was killed. Any is stale, whatever its age: every writer here is this tool, which
+    # holds deploy.lock (review L3: one kept for ten minutes was a file the check cannot open, so the next
+    # run took provisioned away and stopped the family view).
     find "${FAM_DIR}" -maxdepth 1 -type f \( -name '.seal-*.key.??????' -o -name '.store.key.??????' \
         -o -name '.vapid_*.??????' -o -name '.feed-token.??????' -o -name '.nse_*.txt.??????' \
-        -o -name '.provisioned.??????' \) -mmin +10 -delete 2>/dev/null   # left by a run that was killed
+        -o -name '.provisioned.??????' \) -delete 2>/dev/null
     # 1. The seal keys: derived by sudarshan, checked and written by root, which runs none of the app's code.
     out="$(cd -- "${APP_DIR}" && timeout 60 sudo -u "${RING_USER}" -H -- "${APP_DIR}/.venv/bin/python" -m sudarshan.family.derive 2>/dev/null)"; rc=$?
     if [[ ${rc} -ne 0 ]]; then
