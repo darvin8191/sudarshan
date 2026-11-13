@@ -142,6 +142,23 @@ export default function MarketAlerts() {
       }),
     []
   )
+  // A7: "Open the list alert" on a member's sheet closes it and opens that group's card, on the
+  // tab the card is on (the tab changes once the sheet has closed, so the two do not collide).
+  const [showTab, setShowTab] = useState<AlertTab | null>(null)
+  const openGroup = useCallback(
+    (id: number) => {
+      const found = (state?.groups ?? NO_GROUPS).find((g) => g.id === id)
+      setOpened((now) => new Set(now).add(id))
+      if (found) setShowTab(found.status === 'stopped' ? 'stopped' : 'active')
+      close()
+    },
+    [state?.groups, close]
+  )
+  useEffect(() => {
+    if (showTab === null || overlay !== null) return
+    if (showTab !== tab) setTab(showTab)
+    setShowTab(null)
+  }, [showTab, overlay, tab, setTab])
   const membersOf = useMemo(() => {
     const out = new Map<number, AlertRow[]>()
     for (const row of alerts) {
@@ -372,6 +389,12 @@ export default function MarketAlerts() {
         live={selected ? live(selected) : NO_LIVE}
         onClose={close}
         onEdit={editAlert}
+        group={
+          selected?.group_id == null
+            ? null
+            : ((state?.groups ?? NO_GROUPS).find((g) => g.id === selected.group_id) ?? null)
+        }
+        onOpenGroup={openGroup}
       />
       {overlay?.kind === 'new' && enabled && <AlertFormSheet onClose={close} onSaved={saved} />}
       {overlay?.kind === 'list' && enabled && (

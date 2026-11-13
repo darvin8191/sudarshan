@@ -624,6 +624,21 @@ The address contract the watchlist's menus use (`useAlertOverlay.ts`; build it w
 Both follow the Back rules of the other overlays: opening pushes an entry, closing goes back, and
 one the page did not open is closed by replacing the entry.
 
+### Members change only through their group (A7)
+
+A member alert (a row with `group_id`) is changed only through its group. A member changed alone
+would be undone by the group's next edit or sync, and a deleted member would come back at the next
+sync while the list still holds its symbol, which reads as the app ignoring the owner. So the
+desk's single-alert ops that write a row the owner chose (`update` with edit, pause, resume or
+restart, and `delete`) refuse a member in one sentence naming its group: "This alert is part of the
+list alert Swing. Change it from the list alert's card." The answer is a 409 with the code
+`group_member` (the bridge passes it through as it does the other codes) and nothing is changed.
+The group ops, the sync, the engine's own transitions (a once-only alert firing and stopping,
+expiry, a member removed by the sync) and history are untouched, and an alert with no group works
+as before. On the phone a member's sheet shows "Part of the list alert Swing" and a button "Open the
+list alert" that closes the sheet and expands that group's card (on the tab the card is on), and
+hides Edit, Pause, Resume, Restart and Delete; its condition, last trigger, chart and history stay.
+
 ## Tests
 
 `uv run pytest -q sudarshan/alerts` (no network: a fake WebSocket proxy and a fake OpenAlgo on

@@ -119,6 +119,8 @@ WORDS = {
     "delivery": "Pick how the list alert goes to Telegram: the first at once and the rest in one "
     "message, or each at once.",
     "same_kind": "A list alert keeps its kind. Make a new alert to watch for something else.",
+    "group_member": "This alert is part of the list alert {name}. Change it from the list alert's "
+    "card.",
 }
 
 
@@ -618,6 +620,7 @@ class OwnerDesk:
             current = await self._write(rt.store.alert, OWNER, alert_id)
             if current is None:
                 raise ApiError(404, "gone", str(NotFound()))
+            await self._not_a_member(current)
             if action == "edit":
                 row = await self._edit(current, version, _draft(message.get("alert")), now,
                                        deadline)  # fmt: skip
@@ -625,6 +628,16 @@ class OwnerDesk:
                 row = await self._move(current, version, action, now, deadline)
         log.info("market alert %d: %s by the owner", alert_id, action)
         return self._pushed(self._view(row, now), now)
+
+    async def _not_a_member(self, current: Mapping[str, Any]) -> None:
+        """A member of a list alert changes only through its group (A7): the group's next edit or
+        sync would undo a change made alone, so the owner's single-alert ops refuse it, naming
+        the group. The engine's own transitions and the group ops do not come through here."""
+        if current.get("group_id") is None:
+            return
+        group = await self._write(self.rt.store.group, OWNER, current["group_id"])
+        name = group["name"] if group else "it belongs to"
+        raise ApiError(409, "group_member", WORDS["group_member"].format(name=name))
 
     async def _edit(self, current: dict, version: int, fields: dict, now: int,
                     deadline: float) -> dict:  # fmt: skip
@@ -671,6 +684,9 @@ class OwnerDesk:
         rt = self._running()
         alert_id = _whole(message, "id")
         async with self._changes:
+            current = await self._write(rt.store.alert, OWNER, alert_id)
+            if current is not None:
+                await self._not_a_member(current)
             if not await self._write(rt.store.delete, OWNER, alert_id):
                 raise ApiError(404, "gone", str(NotFound()))
             rt.owner_drop(alert_id)

@@ -307,6 +307,32 @@ describe('the forms from the address', () => {
   })
 })
 
+describe('a member alert opened from its address (A7)', () => {
+  it('shows its group, and Open the list alert closes the sheet and expands that card', async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    renderPage(['/elsewhere', '/market-alerts?alert=22'])
+    await settle()
+    const sheet = screen.getByRole('dialog')
+    expect(within(sheet).getByText('Part of the list alert Swing')).toBeInTheDocument()
+    expect(within(sheet).queryByRole('button', { name: 'Delete' })).toBeNull()
+    expect(card(22)).toBeNull() // the group is not expanded yet
+
+    await user.click(within(sheet).getByRole('button', { name: 'Open the list alert' }))
+    await settle()
+    expect(screen.queryByRole('dialog')).toBeNull()
+    for (const row of members) expect(card(row.id)).not.toBeNull()
+    expect(screen.getByRole('button', { name: 'Hide the alerts' })).toBeInTheDocument()
+  })
+
+  it('leaves the sheet of an alert with no group with its actions', async () => {
+    renderPage(['/elsewhere', '/market-alerts?alert=12'])
+    await settle()
+    const sheet = screen.getByRole('dialog')
+    expect(within(sheet).queryByText(/Part of/)).toBeNull()
+    expect(within(sheet).getByRole('button', { name: 'Delete' })).toBeInTheDocument()
+  })
+})
+
 describe('without list alerts', () => {
   it('is the page it was: every alert a card, no group card, no extra note', async () => {
     api.state.mockResolvedValue(

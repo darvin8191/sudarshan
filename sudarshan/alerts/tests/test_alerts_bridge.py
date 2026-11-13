@@ -532,3 +532,18 @@ def test_creating_is_limited_to_thirty_a_minute(service, desk, monkeypatch):
     finally:
         http.close()
     assert codes == [200] * 30 + [429]
+
+
+def test_a_member_alert_refusal_is_a_409_with_its_code_and_sentence(bridge, service, desk):
+    words = "This alert is part of the list alert Swing. Change it from the list alert's card."
+    desk.answers["update"] = ApiError(409, "group_member", words)
+    desk.answers["delete"] = ApiError(409, "group_member", words)
+    headers = as_owner(bridge)
+    answers = [
+        call(bridge, "patch", "/sudarshan/alerts/api/alerts/1", {"version": 1, "action": "pause"},
+             headers),
+        call(bridge, "delete", "/sudarshan/alerts/api/alerts/1", None, headers),
+    ]
+    for answer in answers:
+        assert answer.status_code == 409
+        assert answer.get_json() == {"status": "error", "code": "group_member", "message": words}

@@ -104,7 +104,7 @@ TIMEOUTS = {
 CODES = frozenset({
     "invalid", "instrument", "draft", "gone", "conflict", "refused", "limit", "feed", "off",
     "broker", "starting", "stopping", "stopped", "record", "not_answering", "held", "sealed",
-    "busy", "failed",
+    "busy", "failed", "group_member",
 })  # fmt: skip
 #: What the page may set; the instrument's key, tick size and expiry come from the master.
 DRAFT = ("kind", "params", "frequency", "candle", "cooldown_s", "ends", "note", "channels",
