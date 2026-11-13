@@ -11,15 +11,21 @@ the repository, never in a log line, a notice or the archive itself):
     certificate  the public X.509 certificate (PEM) the archive is encrypted to
 
 The server holds no OCI credential and no decryption key. The private key is made on the owner's
-laptop and never reaches the server, so a server that is taken over can neither read the offsite
-copies nor delete them (the PAR can only write; retention is a lifecycle rule in the console and
-this code never deletes an object).
+laptop and never reaches the server, so a server that is taken over cannot read the offsite
+copies. It can still upload with the PAR: new objects under any name, junk or a forged archive
+(the certificate is public, so a forged copy decrypts and passes ``backup --verify``), also under
+the name of a copy already there. The bucket keeps versions (README, step 2), so such an upload
+becomes the newest version and the copy already uploaded stays, as a previous version, until the
+owner's lifecycle rule deletes it 30 days after it was replaced (step 3); the PAR cannot read, list
+or delete anything. A restore takes a version by the upload time Oracle shows, from before anything
+suspicious happened, which ignores whatever was uploaded later. This code never deletes an object.
 
 Why openssl CMS and not ``age``: it is on every Ubuntu already, so there is nothing to install and
 nothing for the job to refuse over. The cipher is AES-256-CBC with an RSA-OAEP wrapped key. CBC does
 not authenticate by itself; the archive inside carries a manifest of SHA-256 sums that
-``backup --verify`` checks after the owner decrypts it, which is what catches a damaged or altered
-file.
+``backup --verify`` checks after the owner decrypts it, which catches a damaged file. It cannot tell
+a forged one (whoever holds the PAR can make an archive whose manifest matches): the bucket's
+versions and their upload times do that.
 
 A PAR expires. From 14 days before the date in the file the owner is told once a day; after it the
 job does not try, and says so. Without the file the step is off: one line in the journal a day.

@@ -116,3 +116,41 @@ def test_the_limits_and_modes_the_readme_gives_for_an_install_are_the_tools():
     assert "if (( n > 10 )); then" in DEPLOY and "keeps the newest ten" in README
     assert "trap on_signal TERM INT HUP" in DEPLOY
     assert "a stop by the system, `^C` or a hangup" in README
+
+
+# ---- the offsite copy against a taken-over server (release review v0.8.0, H1) -------------------
+
+CHANGELOG = (SUDARSHAN / "CHANGELOG.md").read_text()
+STANZA = " ".join(CHANGELOG.split("\n## ")[1].split())  # the newest release's stanza, one line
+
+
+def test_no_claim_says_a_taken_over_server_cannot_upload_and_each_says_what_it_can():
+    """The bucket keeps versions, so a copy already uploaded cannot be replaced or removed with the
+    upload link; the server can still upload new objects, junk or forged, and a restore picks a
+    version by the upload time Oracle shows. Before: the README told the owner to leave versioning
+    off, and the README, the module and the stanza said a taken-over server could not delete the
+    copies, while about 30 uploads under the logged names would have replaced every one."""
+    from sudarshan.ops import offsite
+
+    module = " ".join(offsite.__doc__.split())
+    for text in (README, STANZA, module):
+        for wrong in ("neither read", "nor delete", "Leave versioning off"):
+            assert wrong not in text, wrong
+        assert "previous version" in text
+        assert "upload" in text and "before anything suspicious" in text
+        assert "forged" in text
+    assert "tick **Enable object versioning**" in README
+    assert "Object versioning must read Enabled" in README
+    assert "Target **Latest version of objects**" in README
+    assert "Target **Previous versions of objects**" in README
+    assert "choose View versions" in README
+    assert "That catches a damaged file, not a forged one" in README
+    assert "delete the upload link" in README  # before restoring after a takeover
+
+
+def test_the_readme_says_what_a_restore_needs_and_what_the_bucket_can_cost():
+    """Release review v0.8.0 L5: decrypting does not stream, and the free allowance is not a cap
+    on a Pay As You Go account."""
+    assert "Decrypting needs free memory of about three times the file's size" in README
+    assert "Billing, Budgets" in README and "20 GB" in README
+    assert "Always Free)" not in STANZA  # the free allowance is not the whole story

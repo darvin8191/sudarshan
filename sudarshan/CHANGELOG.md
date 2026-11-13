@@ -23,9 +23,15 @@ feed and API-key calls work as before.
   October rows) go at the next login, or when the Security screen opens.
 - **An offsite copy of the nightly backup, off until you set it up.** After each good backup the
   server encrypts a copy to your own certificate and uploads it to one Oracle Object Storage bucket
-  (Always Free). The private key stays on your laptop and on one offline copy: a server that is
-  taken over can neither read the copies nor delete them. Your bucket's lifecycle rule (for example
-  30 days) is the only thing that deletes.
+  of yours, which keeps every version. The private key stays on your laptop and on one offline
+  copy, so a server that is taken over cannot read the copies. It can still upload new ones, junk
+  or forged, even under the name of a copy already there: the bucket then keeps the earlier copy
+  as a previous version, and a restore takes a copy by the time Oracle shows it was uploaded, from
+  before anything suspicious happened, so it ignores them. Your bucket's two lifecycle rules (30
+  days, then 30 more for a copy that is no longer the newest) are the only thing that deletes.
+- **What the bucket costs.** It holds about 60 nights of copies. Oracle's Always Free allowance is
+  20 GB; on a Pay As You Go account storage past it is billed, so set a budget alert and look at
+  the bucket's size after the first weeks (README, "What it costs").
 - **Told on Telegram when it matters:** "Tonight's offsite backup did not upload: (the reason). The
   local backup is fine." once a day per cause, after three tries for a busy or unreachable bucket;
   and a reminder every day from 14 days before the upload link expires. A good night is one journal
@@ -49,7 +55,8 @@ feed and API-key calls work as before.
   the phone. It should show the login page. Log in again on both (a logout also ends the Upstox
   login, as it always has). The two October rows should be gone from Active Sessions.
 - When you want the offsite copy: the 12 steps in `sudarshan/README.md`, "Setting up the offsite
-  copy": the Oracle console, a key pair made on the laptop, and one `.bat`. The `.bat` sends only
+  copy": the Oracle console (a bucket with versioning on, two lifecycle rules, a budget alert), a
+  key pair made on the laptop, and one `.bat`. The `.bat` sends only
   the public certificate, shows its fingerprint on the laptop and again on the server, and saves
   nothing until you type yes; then it asks for the link's expiry date and, in a hidden prompt, the
   upload link. On the server, root only makes the empty settings file; the settings are written by
@@ -65,7 +72,9 @@ feed and API-key calls work as before.
 
 ### Not in this release yet
 - **The offsite copy has not met a real bucket yet**: the first night after your console steps is
-  its first run, and one trial restore into a scratch folder is still to be done.
+  its first run, and one trial restore into a scratch folder is still to be done. The versioning
+  and lifecycle steps follow Oracle's documentation; when you look for the first copy, check that
+  the bucket's Object versioning reads Enabled.
 - **The logout check on the phone** above is the first check of that change on the real server.
 - The open points listed under v0.7.0 remain.
 

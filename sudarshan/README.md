@@ -374,18 +374,21 @@ value that cannot be used is refused by name and the owner is told):
 
 **Offsite (from M18.11 part 2; does nothing until the owner has done the console steps below).**
 After each good archive the job encrypts a copy on the server and uploads it to one OCI Object
-Storage bucket (Always Free). Code: `ops/offsite.py`.
+Storage bucket of the owner's, which keeps every version (what that costs is in the table). Code:
+`ops/offsite.py`.
 
 | Choice | What and why |
 | --- | --- |
 | Encryption | `openssl cms -encrypt` to the owner's public X.509 certificate: AES-256-CBC, key wrapped with RSA-OAEP. openssl is on every Ubuntu, so nothing is installed and nothing can be "missing" but openssl itself (then the notice says so). It streams: a 300 MB archive takes about 13 MB of memory. |
-| The key | The private key is made on the owner's laptop and never reaches the server (a second copy offline). A server that is taken over can neither read the offsite copies nor delete them. |
+| The key | The private key is made on the owner's laptop and never reaches the server (a second copy offline), so a server that is taken over cannot read the offsite copies. |
+| A taken-over server | It holds the upload link, so it can still upload: new objects under any name, junk or a forged archive (the certificate is public, so a forged copy decrypts with the owner's key and passes `--verify`), and also under the name of a copy already there. With versioning on (step 2), such an upload becomes the newest version and the copy that was there stays, as a previous version, for 30 days after it was replaced (step 3). The link cannot read, list or delete anything, so it cannot remove or replace a copy already uploaded. A restore takes a version by the time Oracle shows it was uploaded, from before anything suspicious happened, and so ignores whatever was uploaded later ("Restoring from the offsite copy"). |
 | What is inside | The same archive as the local one, `.env` included. A restore needs OpenAlgo's `APP_KEY` and `API_KEY_PEPPER`: without them `openalgo.db`'s encrypted columns and the vault cannot be read, and a second secret kept elsewhere is one more thing to lose. The copy that leaves the server can only be opened with the private key. The upload link itself (`offsite.json`) is not in any archive: it is a write credential, and a restore makes a new one. |
-| Integrity | CBC does not authenticate by itself; after decrypting, `backup --verify` checks every file against the archive's SHA-256 manifest. |
+| Integrity | CBC does not authenticate by itself; after decrypting, `backup --verify` checks every file against the archive's SHA-256 manifest. That catches a damaged file, not a forged one: whoever holds the upload link can make an archive whose manifest matches. The upload time Oracle shows is what tells your copies from one uploaded later. |
 | Upload | One `PUT` to a write-only pre-authenticated request (PAR) address for one bucket. The server holds no OCI credential. The address is in `/etc/sudarshan/offsite.json` only, never in a log, a notice, `status.json`, a process argument or an archive. |
 | The file | `/etc/sudarshan/offsite.json`, mode 600, owner `sudarshan` (not root: the job runs as `sudarshan`, because the unit policy refuses root units, so a root-only file could not be read by it; no group or other can). It holds `par_url`, `expires` (`YYYY-MM-DD`) and `certificate` (public, PEM). A private key in it is refused. The set-up (step 9) has root make it empty with `install`, a standard system tool, and then `sudarshan` writes the settings into it in place, never replacing it or changing its owner or mode. Root never runs Python from the app folder for this: `sudarshan`, and anything that runs as it, can change what is there. A file that is there but cannot be used (another owner, a link, a folder, settings that cannot be read) is told as a failure, never taken for "not set up". |
 | Names | `sudarshan-backup-YYYYMMDD-HHMMSS-<release>.tar.gz.cms`: the date and the release, no host name. |
-| Retention | An OCI lifecycle rule the owner sets (for example 30 days). The job never deletes an object, and a write-only link could not. |
+| Retention | Two OCI lifecycle rules the owner sets (step 3): the newest version of a copy becomes a previous version after 30 days, and a previous version is deleted 30 days after it stopped being the newest, so a copy is kept about 60 days in all. The job never deletes an object, and the upload link could not. |
+| What it costs | About 60 nights of copies are stored at a time (above). Oracle's Always Free allowance is 20 GB of Object Storage. On a Pay As You Go account that is an allowance, not a cap: storage past it is billed, and so is whatever someone holding the upload link uploads. Set a budget alert at a small amount (console: Billing, Budgets), look at the bucket's size after the first weeks, and shorten both rules of step 3 if about 60 nights of copies would pass 20 GB. |
 | Expiry | A PAR stops working on its date. From 14 days before it, the owner is told once a day on Telegram (cause `offsite_soon`) and the copies still go. After the date nothing is tried and the owner is told why (cause `offsite`, "the access link ... has expired"). The date is the last day it works. |
 | Failure | One notice: "Tonight's offsite backup did not upload: <reason>. The local backup is fine." The reasons are in words (no encryption tool, could not reach Oracle's storage, storage refused the file, storage busy, link expired, settings unusable). A busy or unreachable bucket is tried 3 times, 30 seconds apart; the local archive is never touched, and the next night uploads the next archive (the missed night's archive stays on the server for the local retention). Success is one journal line. |
 | Not set up | Without the file, or with the empty file the set-up makes before the settings are typed in, the step is off: one journal line a day says so, and the local backup is unaffected. `--check` prints `offsite: not set`. |
@@ -408,14 +411,29 @@ for the upload link (the PAR address) in a hidden prompt on the server, so the l
 on a screen, in a file on the laptop or in the shell history. On the server, root only makes the
 empty settings file, with `install`; the settings are written by `sudarshan`, the job's own user.
 
-1. In the OCI console, open Storage, then Object Storage, in the region the server uses.
-2. Choose Create Bucket. Any name, Standard tier, Private. Leave versioning off.
-3. Open the bucket, then Lifecycle Policy Rules, then Create Rule: action Delete, object age 30
-   days (or what you like), all objects, enabled. This is the only thing that ever deletes.
-4. Open Pre-Authenticated Requests, then Create: type Bucket, access "Permit object writes" (not
-   reads, not listing), and an expiry date. Pick the furthest date the console allows.
-5. Copy the PAR address the console shows, into a password manager, and write the expiry date
-   beside it. The console shows the address once.
+1. In the OCI console, open Storage, then Object Storage (Buckets), in the region the server uses.
+2. Choose Create Bucket: any name, Standard tier, Private, and tick **Enable object versioning**.
+   Versioning is what keeps the copies safe if the server is ever taken over: an upload under a
+   name already in the bucket then becomes a new version and the copy that was there stays, so
+   whoever holds the upload link cannot replace or remove a copy already uploaded. Open the
+   bucket: under Features, Object versioning must read Enabled. (For a bucket made earlier,
+   choose Enable there, then Enable versioning.)
+3. In the bucket, open Policies, then Lifecycle policy rules, and make two rules with Create rule.
+   Each has Lifecycle action Delete, Number of days 30 (or what you like, the same in both), and
+   the State switch on:
+   - Target **Latest version of objects**: after 30 days the newest version of a copy becomes a
+     previous version;
+   - Target **Previous versions of objects**: a previous version is deleted 30 days after it
+     stopped being the newest.
+
+   These two rules are the only thing that ever deletes. A copy is kept about 60 days in all, and
+   a copy that a later upload under its name replaced is kept 30 days after that upload. Then set
+   a budget alert in the console (Billing, Budgets) at a small amount: see "What it costs" above.
+4. In the bucket, open Management, then Pre-authenticated requests, and choose Create
+   pre-authenticated request: target Bucket, access type **Permit object writes** (not reads; leave
+   Enable object listing off), and an expiration date. Pick the furthest date the console allows.
+5. Copy the address the console shows (the pre-authenticated request URL) into your password
+   manager, and write the expiration date beside it. The console shows the address only once.
 6. On the laptop, open PowerShell and make a folder for the key: `mkdir $HOME\sudarshan-backup-key`
    then `cd $HOME\sudarshan-backup-key`.
 7. Make the key pair. Git for Windows ships openssl at `C:\Program Files\Git\usr\bin\openssl.exe`;
@@ -493,15 +511,30 @@ empty settings file, with `install`; the settings are written by `sudarshan`, th
 10. On the server, check it as the job's own user: `cd /opt/sudarshan/apps/openalgo && sudo -u
     sudarshan .venv/bin/python -m sudarshan.ops.backup --check`. The last line should say
     `offsite: set (the link works N more days)`.
-11. The next night's backup uploads one object. Look for it in the bucket the next morning.
+11. The next night's backup uploads one object. Look for it in the bucket the next morning
+    (Objects: one `sudarshan-backup-...-v0.8.0.tar.gz.cms`), and check that Object versioning
+    still reads Enabled.
 12. Before the PAR expires, the owner is told on Telegram 14 days ahead: repeat steps 4, 5 and 9 (the
-    certificate stays the same, and the `.bat` writes the new link over the old one).
+    certificate stays the same, and the `.bat` writes the new link over the old one). Then delete
+    the old link in the console (Management, Pre-authenticated requests): until its date, anyone
+    who copied it could still upload with it.
 
 ### Restoring from the offsite copy
 
-1. In the console, open the bucket and download the object for the day wanted
-   (`...-v0.7.0.tar.gz.cms`).
-2. On the laptop, decrypt it with the private key (it asks for the passphrase):
+1. In the console, open the bucket, then Objects. Each copy's name carries its date and release
+   (`sudarshan-backup-YYYYMMDD-HHMMSS-v0.8.0.tar.gz.cms`), but a name proves nothing: whoever
+   holds the upload link can upload under any name. Pick the copy by the time Oracle shows it was
+   uploaded (Oracle's clock, not the name and not the server's):
+   - If the server may have been taken over, or anything about it looks wrong, first delete the
+     upload link (Management, Pre-authenticated requests, then Delete from its menu), so nothing
+     more can be uploaded. Then, from the copy's Actions menu (the three dots), choose View
+     versions: the newest version is at the top. Download a version uploaded before anything
+     suspicious happened. A copy uploaded after that may have been made by whoever had the upload
+     link, even if it decrypts and passes `--verify`. A copy that an upload replaced stays there
+     30 days after that upload (step 3), so do this within that time.
+   - Otherwise, download the copy for the day wanted.
+2. On the laptop, decrypt it with the private key (it asks for the passphrase). Decrypting needs
+   free memory of about three times the file's size:
    `& "C:\Program Files\Git\usr\bin\openssl.exe" cms -decrypt -inform DER -in <the .cms file> -inkey sudarshan-backup.key -recip sudarshan-backup.crt -out sudarshan-backup-restore.tar.gz`
 3. Copy the `.tar.gz` to the server into a private folder (mode 700), and `--verify` it there
    (`python -m sudarshan.ops.backup --verify FILE`).
