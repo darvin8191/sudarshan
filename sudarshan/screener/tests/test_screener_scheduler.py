@@ -5,6 +5,8 @@ from __future__ import annotations
 
 from datetime import date
 
+import pytest
+
 from sudarshan.alerts.market.sessions import epoch_ms, sessions_of
 from sudarshan.screener import scheduler as sch
 from sudarshan.screener.types import RunKey
@@ -113,6 +115,33 @@ def test_the_last_cash_boundary_waits_for_the_auction_prints_until_15_35_05():
             [CAS], NORMAL, hm(DAY, "15:35") + 4_999, lambda k: False, printed=lambda s: False
         )
     ][-1] == 23
+
+
+@pytest.mark.parametrize(
+    ("day", "close", "latest"),
+    [
+        (date(2026, 12, 4), "15:30", "15:35"),  # the Friday before: auction to 15:35
+        (date(2026, 12, 3), "15:30", "15:35"),  # a SENSEX expiry before the change
+        (date(2026, 12, 8), "15:30", "15:40"),  # every stock's auction 15:30-15:40 (a NIFTY expiry)
+        (date(2026, 12, 10), "15:30", "15:40"),
+    ],
+)
+def test_the_last_cash_boundary_waits_for_the_prints_on_both_sides_of_7_december(day, close, latest):
+    """From 7 Dec 2026 a stock that closes by auction trades to the cash end and prints 10 minutes
+    later: its 15:15-15:30 candle still waits for the print, now to 15:40:05."""
+    found = sessions_of(day, trading_day=True)
+    last = sch.boundaries(CAS, found)[-1]
+    assert times(day, [last]) == [close]
+    at_close = hm(day, close) + 5_000
+    plain = sch.due([CASH], found, at_close, lambda k: False)
+    assert [d.boundary.end for d in plain][-1] == last.end, "without auction stocks: on time"
+    held = sch.due([CAS], found, at_close, lambda k: False, printed=lambda s: False)
+    assert last.k not in [d.boundary.k for d in held], "the last candle waits for the prints"
+    printed = sch.due([CAS], found, at_close, lambda k: False, printed=lambda s: True)
+    assert [d.boundary.k for d in printed][-1] == last.k
+    for at, runs in ((hm(day, latest) + 4_999, False), (hm(day, latest) + 5_000, True)):
+        due = sch.due([CAS], found, at, lambda k: False, printed=lambda s: False)
+        assert (last.k in [d.boundary.k for d in due]) is runs
 
 
 def test_next_at_is_the_next_run_today_or_the_first_of_a_later_day():

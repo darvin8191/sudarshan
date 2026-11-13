@@ -196,3 +196,52 @@ async def test_history_is_the_closing_records_newest_last_with_late_and_provisio
     limited = (await rig.call("upstox_history", limit=2))["data"]["days"]
     assert [d["day"] for d in limited] == [20261022, DAY]
     assert (await rig.call("upstox_history", limit=0))["code"] == "bad_request"
+
+
+def ist(day: str, hhmm: str) -> int:
+    """Epoch ms of ``hhmm`` IST on the ISO date ``day``."""
+    from datetime import date
+
+    from sudarshan.alerts.market.sessions import epoch_ms
+
+    hours, minutes = map(int, hhmm.split(":"))
+    return epoch_ms(date.fromisoformat(day), hours * 60 + minutes)
+
+
+def clock_of(epoch_ms: int) -> str:
+    from sudarshan.portfolio.upstox import minute_of_day
+
+    minute = minute_of_day(epoch_ms)
+    return f"{minute // 60:02d}:{minute % 60:02d}"
+
+
+@scenario_of
+async def test_the_history_names_the_times_of_the_day_in_question(rig):
+    """Either side of 7 Dec 2026 (F&O to 15:45): the first record is taken at 15:55 before and
+    16:00 after; each day's record is due at its own time, and late 45 minutes after its close
+    (16:25 on 4 Dec, 16:30 on 8 and 10 Dec, a NIFTY and a SENSEX expiry)."""
+
+    async def note() -> str:
+        return (await rig.call("upstox_history"))["data"]["note"]
+
+    rig.now = ist("2026-12-04", "10:00")
+    assert await note() == "No closing record has been taken yet. The first is taken at 15:55."
+    rig.now = ist("2026-12-04", "15:56")  # Friday's has passed: Monday 7 Dec's is next
+    assert await note() == "No closing record has been taken yet. The first is taken at 16:00."
+    rig.now = ist("2026-12-10", "10:00")
+    assert (await note()).endswith("taken at 16:00.")
+    eod(rig, 20261204, ist("2026-12-04", "16:26"), 1_000_000, 900_000, 0)  # after 16:25: late
+    eod(rig, 20261203, ist("2026-12-03", "16:25"), 1_000_000, 900_000, 0)  # 16:25: on time
+    eod(rig, 20261208, ist("2026-12-08", "16:31"), 1_000_000, 900_000, 0)  # after 16:30: late
+    eod(rig, 20261210, ist("2026-12-10", "16:28"), 1_000_000, 900_000, 0)  # on time
+    rig.now = ist("2026-12-11", "12:00")
+    data = (await rig.call("upstox_history"))["data"]
+    shown = {d["day"]: d for d in data["days"]}
+    assert data["note"] is None
+    assert {day: d["late"] for day, d in shown.items()} == {
+        20261203: False, 20261204: True, 20261208: True, 20261210: False
+    }  # fmt: skip
+    assert {day: clock_of(d["due_at"]) for day, d in shown.items()} == {
+        20261203: "15:55", 20261204: "15:55", 20261208: "16:00", 20261210: "16:00"
+    }  # fmt: skip
+

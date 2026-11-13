@@ -6,7 +6,8 @@ Every time comes from ``sudarshan/alerts/market/sessions.py`` through the exchan
 special day (Muhurat trading on Sunday 8 November 2026) has its own window, and the same code
 gives its own times.
 
-* The closing record is due at the day's last close plus ``eod_after_min`` (15:40 + 15 = 15:55).
+* The closing record is due at the day's last close plus ``eod_after_min`` (15:40 + 15 = 15:55;
+  from 7 Dec 2026, when F&O closes at 15:45, 16:00).
 * The settle is due at the day's first session start plus 5 minutes (09:15 + 5 = 09:20).
 * A job runs once a day: ``job_run`` holds one row per (job, day), written when it ran.
 
@@ -56,7 +57,8 @@ class Schedule:
         return max(s.end for s in found) + self.eod_after_min * MS_PER_MIN if found else None
 
     def close_at(self, day: date) -> int | None:
-        """The day's last close (15:30 cash, 15:40 F&O; a special day's own)."""
+        """The day's last close (15:30 cash, 15:40 F&O, 15:45 from 7 Dec 2026; a special day's
+        own)."""
         found = self._sessions(day)
         return max(s.end for s in found) if found else None
 

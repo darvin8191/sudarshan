@@ -4,8 +4,9 @@ Which clock a value uses: a new trade its own time (ltt), a quote the moment it 
 
 Candles are anchored at the session's start (09:15 on a usual day): candle k of N minutes covers
 [start + kN, start + (k+1)N), as the charts bucket them, and the last one ends at the segment's
-session end. So a 15-minute F&O candle from 15:30 is a short one that ends at 15:40, and a cash
-one from 15:15 ends at 15:30. "Day" is the whole session.
+session end. So a 15-minute F&O candle from 15:30 is a short one that ends at 15:40 (from 7 Dec
+2026, when F&O trades to 15:45, a whole one), and a cash one from 15:15 ends at 15:30. "Day" is
+the whole session.
 
 The gate: a value is judged only when every check passes, and the first that fails is the reason
 the page shows (words.py says it in the owner's words):
@@ -22,13 +23,15 @@ the page shows (words.py says it in the owner's words):
 A stock that closes by auction (a CAS key, sessions.py) has its own session, so its continuous
 trading ends before the auction, and its quotes after that (the auction's order book) never pass.
 The auction's print is no trade of that session: ``auction`` lets it through on its own terms
-(cross-design X6c: made from the continuous end up to ``Session.auction_until``, 15:35, arrived
-within the 5 s grace after it, on a healthy feed, fresh, whatever the exchange's status then
-says), so a crossing it alone makes is told as the closing auction's, never as an ordinary trade.
+(cross-design X6c: made from the continuous end up to ``Session.auction_until``, 15:35 and
+15:40 from 7 Dec 2026, arrived within the 5 s grace after it, on a healthy feed, fresh, whatever
+the exchange's status then says), so a crossing it alone makes is told as the closing auction's,
+never as an ordinary trade.
 Only a trade can be the print: the Book passes a frame here only when its volume rose (X6i); the
 auction book's frames of one a minute are not. The window comes from the clock alone, never from
 the exchange's status, which does not show the auction (X6l). Until the print, the page says so
-(``status``: CLOSING_AUCTION, "price at about 15:30"), never "Real-time" or "Stale".
+(``status``: CLOSING_AUCTION, "price at about 15:30"; 15:40 from 7 Dec 2026), never "Real-time"
+or "Stale".
 
 A pause is a stretch longer than GAP_S in which market alerts were not checking: the price feed
 reconnecting, or the service not running. A crossing first seen after one may have happened

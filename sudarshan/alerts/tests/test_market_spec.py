@@ -191,6 +191,45 @@ def test_a_contract_is_refused_once_it_has_expired():
         )
 
 
+def test_a_day_break_s_start_time_is_checked_against_the_day_s_own_session():
+    """F&O trades to 15:40 until 6 Dec 2026 and to 15:45 from 7 Dec: an alert set on each side
+    may start its watch until that day's close, and the refusal names the day's hours."""
+    dec = {**FUT, "symbol": "NIFTY29DEC26FUT", "expiry": "2026-12-29"}
+
+    def breaks(after: str) -> dict:
+        return {"kind": "day_break", "params": {"side": "high", "after": after}}
+
+    friday, thursday = ms("2026-12-04T10:00"), ms("2026-12-10T10:00")
+    with pytest.raises(SpecError) as caught:
+        spec.check(dec | breaks("15:42"), friday)
+    assert (caught.value.field, caught.value.message) == (
+        "after",
+        "Pick a start time between 09:15 and 15:40.",
+    )
+    assert spec.check(dec | breaks("15:39"), friday)["params"]["after"] == "15:39"
+    assert spec.check(dec | breaks("15:42"), thursday)["params"]["after"] == "15:42"
+    with pytest.raises(SpecError) as caught:
+        spec.check(dec | breaks("15:45"), thursday)
+    assert caught.value.message == "Pick a start time between 09:15 and 15:45."
+    with pytest.raises(SpecError) as caught:  # cash closes at 15:30 on both sides
+        spec.check(SBIN | breaks("15:35"), thursday)
+    assert caught.value.message == "Pick a start time between 09:15 and 15:30."
+
+
+def test_an_index_contract_s_alerts_stop_at_15_30_on_its_expiry_day_from_7_december():
+    """Tue 8 Dec 2026, a NIFTY expiry: the contract stops at 15:30; Thu 3 Dec, a SENSEX one
+    before the change, at 15:40."""
+    nifty = {**FUT, "symbol": "NIFTY08DEC2625900CE", "expiry": "2026-12-08"}
+    sensex = {"instrument_key": "BSE_FO|1155", "symbol": "SENSEX03DEC2682000PE",
+              "exchange": "BFO", "tick_size": "0.05", "expiry": "2026-12-03"}  # fmt: skip
+    assert spec.check(nifty | price(level="26000"), ms("2026-12-08T15:29"))["expiry"]
+    with pytest.raises(SpecError):
+        spec.check(nifty | price(level="26000"), ms("2026-12-08T15:30"))
+    assert spec.check(sensex | price(level="300"), ms("2026-12-03T15:39"))["expiry"]
+    with pytest.raises(SpecError):
+        spec.check(sensex | price(level="300"), ms("2026-12-03T15:40"))
+
+
 def test_a_fall_below_a_paisa_is_refused_when_the_form_sends_the_price():
     move = {"kind": "move", "params": {"direction": "down", "percent": "99.5"}}
     assert spec.check(SBIN | move | {"price": 2.0}, NOW)["params"]["percent"] == "99.5"  # 0.01

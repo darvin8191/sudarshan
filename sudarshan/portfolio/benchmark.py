@@ -9,9 +9,9 @@ date of any tab, so that "the same money in the index" has a level for every flo
   governor ships switched off: then it is said once in the journal and the closing record's top-up
   goes on alone.
 * One-year requests, newest first, one request every 2 seconds, at most 30 in a run.
-* Only after the day's last close plus 5 minutes (15:45 on a normal day) on trading days, or at
-  any hour on a day the exchange is closed, so market-hours candle calls of other services never
-  share the moment (sessions.py through the calendar).
+* Only after the day's last close plus 5 minutes (15:45 on a normal day, 15:50 from 7 Dec 2026)
+  on trading days, or at any hour on a day the exchange is closed, so market-hours candle calls
+  of other services never share the moment (sessions.py through the calendar).
 * It stops where the data ends: a year with no candle is the end, and the day it ends at is kept
   in the job's note so that the next run does not ask again.
 * NIFTY 500's key is looked up in the master contract. If it is not there, NIFTY 50 goes on alone,

@@ -1,7 +1,8 @@
 """The closing record, the settle and the catch-up (M7.12, design 3.6 and 5.3).
 
-**Closing record**, once on each trading day at the day's last close plus 15 minutes (15:55; on
-Muhurat day 8 Nov 2026 the same rule gives 15:55 of its own window):
+**Closing record**, once on each trading day at the day's last close plus 15 minutes (15:55, and
+16:00 from 7 Dec 2026 when F&O closes at 15:45; on Muhurat day 8 Nov 2026 the same rule gives 15:55
+of its own window):
 
 * ``price_eod`` for every listed asset the price book has a price of today, ``basis = last``;
 * the newest NAV of held funds (amfi.py), ``basis = nav``;
