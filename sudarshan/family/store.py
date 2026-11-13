@@ -260,9 +260,10 @@ class Tx:
         query = select(func.count()).select_from(t).where(self._where(t, where))
         return int(self.conn.execute(query).scalar() or 0)
 
-    def insert(self, table: str, values: Mapping[str, Any]) -> int:
+    def insert(self, table: str, values: Mapping[str, Any]) -> Any:
+        """Insert one row; its primary key (the new id of a table with one)."""
         done = self.conn.execute(insert(self.t(table)).values(**_json_in(values)))
-        return int(done.inserted_primary_key[0]) if done.inserted_primary_key else 0
+        return done.inserted_primary_key[0] if done.inserted_primary_key else None
 
     def update(self, table: str, where: Mapping[str, Any], values: Mapping[str, Any]) -> int:
         t = self.t(table)
