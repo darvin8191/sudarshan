@@ -10,9 +10,12 @@ back if the app does not come up healthy.
 The market's timings change on **Monday 7 Dec 2026** (SEBI's circular of 15 Oct 2026, NSE's of
 6 Nov 2026): F&O trades to 15:45, an expiring index contract stops at 15:30 on its expiry day, and
 a stock with derivatives closes by auction from 15:30 to 15:40. SUDARSHAN switches to them that
-morning by itself; nothing changes before 7 Dec. It includes everything in v0.8.0. **Publish it
-only after v0.8.0 has installed and run one trading day, and no later than Friday 4 Dec**, so it is
-installed before the Monday it is for.
+morning by itself. Before 7 Dec the hours stay as they are. Two things change from the day you
+install it: what you see once an expiring contract stops at 15:40 on its expiry day (the second
+item below), and a screen's 15:30 check that waits for an auction price that has not come is not
+marked late and keeps the screen's later checks behind it (the fourth). It includes everything in
+v0.8.0. **Publish it only after v0.8.0 has installed and run one trading day, and no later than
+Friday 4 Dec**, so it is installed before the Monday it is for.
 
 ### What changes for you on 7 Dec 2026
 - **F&O runs to 15:45 everywhere:** the charts on the phone and on /trading (the 15:40 five-minute
@@ -25,20 +28,33 @@ installed before the Monday it is for.
   NIFTYFPI and the others; a stock contract trades to 15:45). Its chart opens no candle after
   15:30 and its countdown ends at 15:30; the chart's marker and the order ticket say "Stopped
   trading at 15:30", never "Stale". The scalping terminal moves to the next expiry by itself at
-  15:30. Until 6 Dec every expiring contract stops at 15:40, and the same happens then.
+  15:30 and says so ("The 08DEC26 expiry stopped trading at 15:30. Now showing 15DEC26."). Until
+  6 Dec every expiring contract stops at 15:40, and from the day you install this the same happens
+  then: the chart's marker and the order ticket say "Stopped trading at 15:40" where they said
+  "Market closed", the scalping terminal moves on and says so, and Analyze mode refuses the
+  contract's orders (see below).
 - **Analyze mode settles an expiring index contract** at 15:30 on its expiry day, and a stock
   contract at 15:45. Until 6 Dec every expiring contract settles at 15:40. Your MIS square-off time
   does not change. An index contract is told from the master contract, so NIFTYFPI's and BSE's
   Focused IT's contracts settle at 15:30 too.
 - **A stock with derivatives** trades to 15:30, then closes by auction. It shows "Closing auction ·
-  price at about 15:40" until its price comes, and alerts and screens wait for it until 15:45 at
-  the latest (a price stamped a moment after 15:40 still counts). On the charts its auction price
-  becomes the close of the day's last candle (the 15:29 minute, the 15:25 five-minute candle, the
-  15:15 hourly candle), on every timeframe, and never opens a candle after 15:30.
+  price at about 15:40" until its price comes, and alerts wait for it until 15:45 at the latest (a
+  price stamped a moment after 15:40 still counts). A screen holding such stocks (F&O stocks, a
+  NIFTY list, a watchlist with one) makes its 15:30 check when their prices are all in, at about
+  15:40, and at 15:45:05 at the latest. The check is on time, not marked late, and a watchlist
+  screen's later checks (15:35 and 15:40 on a short timeframe) wait for it and come after it, in
+  order. Before 7 Dec the same wait ends at 15:35:05 when a price has not come by 15:30:05, with
+  the same rules. On the charts its auction price becomes the close of the day's last candle (the
+  15:29 minute, the 15:25 five-minute candle, the 15:15 hourly candle), on every timeframe, and
+  never opens a candle after 15:30.
 - **An index's closing value**, if NSE sends it after 15:30 with the auction's prices, is taken
   until 15:45 as the day's last value: price and % move alerts judge it, the screener's index
-  candles and the charts close at it. An index alert at candle close judges its last candle at
-  15:45:05, and a screen with indices runs its 15:30 check at 15:45:05, whether or not it comes.
+  candles and the charts close at it. Whether or not it comes, a price or % move alert on an index
+  at candle close judges the day's last candle (the one ending at 15:30) at 15:45:05, and a screen
+  of indices makes its 15:30 check at 15:45:05 (on time, not marked late). **That is after F&O
+  closes at 15:45, so that day such an alert or check cannot be acted on in F&O**; until 6 Dec it
+  came at 15:30:05, with 10 minutes of F&O left. A screen with no index among its instruments, a
+  watchlist screen included, does not wait for it.
 - **A stock without derivatives** closes at 15:30 with no auction and keeps its usual close.
 - **Auto-login** may log in until 15:45. Test now is refused from 09:00 to 15:45 while Upstox is
   connected, and the page names the day's hours.
@@ -58,8 +74,8 @@ installed before the Monday it is for.
   8 Dec an expiring NIFTY, BANKNIFTY or SENSEX contract cannot be traded after 15:30 on its expiry
   day. Check any exit you set for after 15:30: a strategy's exit time, a Python strategy's stop
   time, a Flow time window, an NRML position you meant to close near the old 15:40. From 15:30 the
-  scalping terminal shows the next expiry by itself, and its Close cannot close a position in the
-  expiring contract either.
+  scalping terminal shows the next expiry by itself and says so, and its Close cannot close a
+  position in the expiring contract either.
 - **If you set your own NFO or BFO close** on the timings page, it stays as you set it on every
   date. Set it back to 15:40 to let it follow by itself, or to 15:45.
 - **If you set your own window** in `SUDARSHAN_FEED_WINDOW`, `SUDARSHAN_ALERTS_WINDOW` or
@@ -69,11 +85,17 @@ installed before the Monday it is for.
   timings page shows NFO today as 09:15-15:45; the feed's health shows hours 08:58-15:55.
 - **That afternoon, check:** after 15:40 a NIFTY future's phone chart still forms candles (the 15:40
   candle opens); after about 15:40 RELIANCE's 15:25 five-minute candle closes at its auction price;
-  in the feed's record, what NIFTY 50 and SENSEX send from 15:30 to 15:45; after 16:05 the
-  portfolio's index history runs.
-- **On Tue 8 Dec (NIFTY expiry), check:** after 15:30 the expiring NIFTY contract's chart opens no
-  candle and says "Stopped trading at 15:30", the scalping terminal shows the next expiry, and an
-  Analyze order on the contract is refused; its Analyze position settles at 15:30.
+  from 15:30 to 15:45, NIFTY 50's and SENSEX's prices on their phone charts: whether they stay at
+  their 15:29 value, change once at about 15:40 (the closing value), or keep changing (see "Still
+  to check" below). Note which, for the next release.
+- **Left to the server session that evening:** whether the portfolio's index history for the
+  benchmarks ran after 16:05. Nothing on the phone shows it; the session reads
+  `sudo journalctl -u sudarshan-portfolio -n 200 --no-pager`, where the day's line after 16:05 says
+  "index history ok" (or "skipped" with nothing to fetch), never "failed".
+- **On Tue 8 Dec (NIFTY expiry), check,** on charts and a scalping page opened that day: after 15:30
+  the expiring NIFTY contract's chart opens no candle and says "Stopped trading at 15:30", the
+  scalping terminal shows the next expiry and a notice saying so, and an Analyze order on the
+  contract is refused; its Analyze position settles at 15:30.
 
 ### What is refused now that used to be accepted
 - **In Analyze mode, an order on an expiring contract after its stop on its expiry day** (15:40
@@ -86,9 +108,15 @@ installed before the Monday it is for.
   line. Which stocks close by auction comes from reports of NSE's circulars of 6 Nov 2026 (stocks
   with derivatives on any exchange); NSE's own text was not read.
 - **An index's closing value after 15:30 is not confirmed.** Whether NSE sends NIFTY 50's and
-  SENSEX's closing value with the auction's prices is to be seen on 7 Dec in the feed's record. If
-  nothing comes, nothing changes, apart from the index alerts at candle close and the index screens
-  being judged at 15:45:05.
+  SENSEX's closing value with the auction's prices is to be seen on 7 Dec (the afternoon check
+  above). If nothing comes, nothing changes, apart from the index alerts at candle close and the
+  screens of indices being judged at 15:45:05.
+- **Every index value from 15:30 to 15:45 counts as the closing value.** If NSE sends values during
+  the auction (as it does in the pre-open), each one is judged as it comes: a price alert can fire
+  on one that is not the close, and the day's last candle on the charts and in the screener takes
+  its high or low (one at 26,100 at 15:31 and the close at 26,020 at 15:40 leave the 15:25
+  five-minute candle with a high of 26,100 and a close of 26,020). If the 7 Dec check shows values
+  during the auction, only the last one should count; that needs a fix.
 - **Upstox's intraday history after 7 Dec is not seen yet.** If it gives the auction's price a
   candle of its own after 15:30, that candle shows on a chart loaded later; the live chart puts the
   price in the day's last candle. An hourly candle from 15:15 (and a 30-minute one) spans the close
@@ -96,8 +124,17 @@ installed before the Monday it is for.
 - **BSE's Focused IT index contracts** are told from the master in Analyze mode, the charts and the
   scalping terminal. Market alerts and the screener know index contracts by name (NIFTYFPI added),
   so a market alert on a Focused IT contract runs to 15:45 on its expiry day.
+- **A stock is told from an index by the master contract**: an F&O name the master does not list
+  as a cash stock reads as an index's. A stock whose F&O and cash names differ for a while (during
+  a rename, say) would stop at 15:30 on its expiry day in Analyze mode, on the charts and in the
+  scalping terminal. The app's log names every such name once a day (FOCIT, BSE's Focused IT, is
+  expected there), so the server session can spot one.
 - **The charts and the order ticket ask the server for an instrument's own hours when they open**;
   if the server cannot answer, they keep the exchange's hours, as before.
+- **A chart, order ticket or scalping page left open from the previous day keeps that day's hours
+  until you reload it.** On an expiry day such a chart does not know its contract stops at 15:30:
+  it opens flat candles after 15:30 and says "Stale", and such a scalping page stays on the
+  expiring contract. Reload them, or open them again, each morning.
 - **Deploy gate:** installs are still kept out only until 16:00, as your rules say. From 7 Dec an
   install between 16:01 and 16:05 can restart the order alerts while they are connected; they read
   the order book again afterwards.
