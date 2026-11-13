@@ -27,6 +27,8 @@ import type { OrderRequest } from './SymbolSheet'
  * - `?sheet=follow-row&fr=<row id>` (M8.10 F11, v2 only): the sheet of a row that follows the price;
  *   `?sheet=follow` is its form (add, change or remove), which rides in the entry's state as the
  *   ticket's order does, so a form is never reopened by a reload.
+ * - `?sheet=strikes` (M8.18 F14, v2 only): the strike picker of an underlying, which rides in the entry's
+ *   state like the form, so a picker is never reopened by a reload.
  * - `?sheet=section&section=<id>` (M8.4 F3, v2 only): a section's menu; `?sheet=section-name`
  *   names a new section, or renames the one in `&section=<id>`; `?sheet=section-remove&section=<id>`
  *   asks before removing it.
@@ -45,16 +47,27 @@ export type Overlay =
   | { kind: 'section'; sectionId: number }
   | { kind: 'followRow'; rowId: number } // F11
   | { kind: 'follow'; form: FollowForm | null } // F11
+  | { kind: 'strikes'; pick: StrikePick | null } // F14
   | { kind: 'sectionName'; sectionId: number | null }
   | { kind: 'sectionRemove'; sectionId: number }
   | { kind: 'pickSection'; item: number }
   | { kind: 'pickList'; item: number | null; section: number | null; move: boolean }
 
 export type OverlayRequest =
-  | Exclude<Overlay, { kind: 'order' } | { kind: 'alert' } | { kind: 'follow' }>
+  | Exclude<
+      Overlay,
+      { kind: 'order' } | { kind: 'alert' } | { kind: 'follow' } | { kind: 'strikes' }
+    >
   | { kind: 'order'; order: OrderRequest }
   | { kind: 'alert'; alert: AlertPrefill }
   | { kind: 'follow'; form: FollowForm }
+  | { kind: 'strikes'; pick: StrikePick }
+
+/** F14: the underlying the strike picker is for, and its own exchange. */
+export interface StrikePick {
+  underlying: string
+  exchange: string
+}
 
 const SHEETS = new Set(['add', 'new', 'rename', 'delete', 'order', 'alert'])
 /** The sheets only v2 opens; later v2 sheets are added here. */
@@ -64,6 +77,7 @@ const V2_SHEETS = new Set([
   'copy', // F10
   'follow-row', // F11
   'follow', // F11
+  'strikes', // F14
   'section',
   'section-name',
   'section-remove',
@@ -87,6 +101,7 @@ interface EntryState {
   order?: OrderRequest
   alert?: AlertPrefill
   follow?: FollowForm
+  pick?: StrikePick
 }
 
 function entryState(state: unknown): EntryState {
@@ -101,6 +116,7 @@ export function overlayOf(params: URLSearchParams, state: unknown, v2 = false): 
   if (!sheet || !(SHEETS.has(sheet) || (v2 && V2_SHEETS.has(sheet)))) return null
   if (sheet === 'order') return { kind: 'order', order: entryState(state).order ?? null }
   if (sheet === 'alert') return { kind: 'alert', alert: entryState(state).alert ?? null }
+  if (sheet === 'strikes') return { kind: 'strikes', pick: entryState(state).pick ?? null }
   if (sheet === 'follow') return { kind: 'follow', form: entryState(state).follow ?? null }
   if (sheet === 'follow-row') {
     const row = Number(params.get('fr'))
@@ -132,6 +148,7 @@ function stateFor(next: OverlayRequest, own: boolean): EntryState {
     ...(next.kind === 'order' ? { order: next.order } : {}),
     ...(next.kind === 'alert' ? { alert: next.alert } : {}),
     ...(next.kind === 'follow' ? { follow: next.form } : {}),
+    ...(next.kind === 'strikes' ? { pick: next.pick } : {}),
   }
 }
 
@@ -232,7 +249,10 @@ export function useOverlay(v2 = false): {
   // A ticket or an alert form restored with the page (a reload, the phone
   // bringing the app back) is not reopened: each opens only from a tap.
   const restoredTicket = useRef(
-    overlay?.kind === 'order' || overlay?.kind === 'alert' || overlay?.kind === 'follow'
+    overlay?.kind === 'order' ||
+      overlay?.kind === 'alert' ||
+      overlay?.kind === 'follow' ||
+      overlay?.kind === 'strikes'
   )
   useEffect(() => {
     if (!restoredTicket.current) return

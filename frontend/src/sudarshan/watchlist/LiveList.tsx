@@ -21,6 +21,7 @@ import {
 import { figuresFor, type HeldFigures, HeldSwitch, indexBook, isinsOf } from './HoldingLine'
 import { PresetLine } from './PresetLine'
 import { chainOf } from './rows'
+import { StrikePicker } from './StrikePicker' // F14
 import { StrikeRowItem, strikeNames } from './StrikeRow'
 import { StrikeSheet } from './StrikeSheet'
 import {
@@ -30,6 +31,7 @@ import {
   SymbolSheet,
 } from './SymbolSheet'
 import { DEFAULT_PREF, isDefaultView } from './sort'
+import { PICKER_ITEM } from './strikePicker' // F14
 import {
   EXTRA_BASE,
   PE_BASE,
@@ -42,6 +44,7 @@ import { useHeld } from './useHeld'
 import { type FollowOptions, useLiveRows } from './useLiveRows'
 import { useSameStrike } from './useSameStrike'
 import { useSortOrder } from './useSortOrder'
+import { useStrikeLadder } from './useStrikeLadder' // F14
 import { ViewLine, type ViewPref, ViewSheet } from './ViewSheet'
 import { marksOf } from './v2/marks'
 import type { Contract, FlagName, FollowRow, View } from './v2/types'
@@ -77,6 +80,17 @@ interface Pin {
   pair?: { ce: Contract; pe: Contract; strike: number | null }
 }
 
+/** F14: the strike picker the list holds open (v2 only): its underlying's price and the strikes' prices tick while it is. */
+export interface PickerProps {
+  underlying: string
+  exchange: string
+  listName: string
+  full: boolean
+  onAdd: (symbol: string, exchange: string) => Promise<void>
+  onFollow: (form: FollowForm) => void
+  onClose: () => void
+}
+
 export const LiveList = memo(function LiveList({
   items,
   apiKey,
@@ -105,7 +119,10 @@ export const LiveList = memo(function LiveList({
   noRemove,
   preset,
   followRows,
+  picker,
 }: {
+  /** v2 (F14): the strike picker, open or absent. */
+  picker?: PickerProps
   /** v2 (F11): the open own list's rows that follow the price; absent for any other list and with the switch off. */
   followRows?: FollowProps
   /** v2 (F8): the five flag names; present while the switch is on. Rows carry flag and note markers and the sheet its flag and note. */
@@ -226,6 +243,29 @@ export const LiveList = memo(function LiveList({
       ),
     [same.rows]
   )
+  // F14: the picker's ladder; the underlying is read like a row, and the strikes' CE and PE are followed
+  // (first in the cap) only while the picker is open and this tab's strikes are the ones on screen.
+  const pickOn = v2 && !readOnly && picker !== undefined
+  const ladder = useStrikeLadder(
+    pickOn ? { underlying: picker.underlying, exchange: picker.exchange } : null
+  )
+  const pickKey = pickOn ? keyOf(picker.underlying, picker.exchange) : null
+  const pickItems = useMemo<WatchlistItem[]>(
+    () =>
+      pickOn
+        ? [{ id: PICKER_ITEM, symbol: picker.underlying, exchange: picker.exchange, position: 0 }]
+        : [],
+    [pickOn, picker?.underlying, picker?.exchange]
+  )
+  const pickKeys = useMemo(
+    () => [
+      ...(pickKey ? [pickKey] : []),
+      ...(ladder.data?.strikes ?? [])
+        .flatMap((each) => [each.ce?.key, each.pe?.key])
+        .flatMap((key) => (key ? [key] : [])),
+    ],
+    [pickKey, ladder.data]
+  )
   const followItems = useMemo(
     () => [
       ...fr.states.flatMap((each) => [
@@ -234,8 +274,9 @@ export const LiveList = memo(function LiveList({
       ]),
       ...pinnedItems,
       ...extraItems, // F12
+      ...pickItems, // F14
     ],
-    [fr.states, pinnedItems, extraItems]
+    [fr.states, pinnedItems, extraItems, pickItems]
   )
   // F12: a strike row counts 2 in the cap (its CE and its PE) and follows both in Quote mode (open interest).
   const strikeKeys = useMemo(() => {
@@ -267,9 +308,10 @@ export const LiveList = memo(function LiveList({
       const legs = sheetPin.pair ? [sheetPin.pair.ce.key, sheetPin.pair.pe.key] : [sheetPin.key]
       return [...legs, ...extraItems.map((each) => keyOf(each.symbol, each.exchange))]
     }
+    if (pickKeys.length > 0) return pickKeys // F14: the picker is the open sheet
     const open = openItemId === null ? undefined : items.find((item) => item.id === openItemId)
     return open ? [keyOf(open.symbol, open.exchange)] : []
-  }, [items, openItemId, sheetPin, extraItems])
+  }, [items, openItemId, sheetPin, extraItems, pickKeys])
   const [order, setOrder] = useState<string | null>(null)
   const listKey = viewPref?.ref ?? ''
   const follow = useMemo<FollowOptions | undefined>(
@@ -337,6 +379,10 @@ export const LiveList = memo(function LiveList({
     () => (flagNames && !readOnly ? marksOf(view?.rows, flagNames) : undefined),
     [flagNames, readOnly, view]
   )
+  const heldKeys = useMemo(
+    () => new Set(items.map((item) => keyOf(item.symbol, item.exchange))),
+    [items]
+  ) // F14
   const sheetRow = sheetPin?.pair
     ? null // F12: a strike row's sheet is the strike sheet
     : sheetPin
@@ -410,6 +456,12 @@ export const LiveList = memo(function LiveList({
   }, [sheetPin, current, openRowId, onForm])
   // F12: the sheet of a strike row, on the legs it opened with.
   const liveByKey = useMemo(() => new Map(live.rows.map((row) => [row.key, row])), [live.rows])
+  // F14: the underlying's price as it moves tells the ladder whether the ATM has moved to a neighbour.
+  const pickPrice = pickKey ? (liveByKey.get(pickKey)?.view.ltp ?? null) : null
+  const observe = ladder.observe
+  const ladderData = ladder.data
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a new answer is a new moment to compare the price with it
+  useEffect(() => observe(pickPrice), [observe, pickPrice, ladderData])
   const names = current ? strikeNames(current) : null
   const strikeSheet = (() => {
     if (!current || !isPair || openRowId === null || !names) return null
@@ -560,6 +612,28 @@ export const LiveList = memo(function LiveList({
       />
 
       {strikeSheet}
+
+      {pickOn && (
+        <StrikePicker // F14
+          underlying={picker.underlying}
+          exchange={picker.exchange}
+          ladder={ladder}
+          under={pickKey ? (liveByKey.get(pickKey) ?? null) : null}
+          lines={live.lines}
+          feed={live.feed}
+          now={live.now}
+          marketOpen={isOpen(
+            ladderData?.strikes.find((each) => each.ce ?? each.pe)?.ce?.exchange ?? 'NFO'
+          )}
+          held={heldKeys}
+          full={picker.full}
+          listName={picker.listName}
+          onAdd={picker.onAdd}
+          onFollow={picker.onFollow}
+          chain={chainOf(picker.underlying, picker.exchange)}
+          onClose={picker.onClose}
+        />
+      )}
 
       {viewPref && pref && (
         <ViewSheet

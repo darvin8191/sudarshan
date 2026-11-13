@@ -1260,6 +1260,48 @@ grammar is written here once; `refs.split` and the readers of `refs/` are its co
 A ranked list changes with every read, so it has rows but no members: the members route and the
 alerts refuse it in words. A section ref is only for members (a list alert on one section).
 
+## F14 - the strike picker
+
+With the switch on, Pick a strike in the search sheet (`onPickStrike(underlying, exchange)`, F13's seam) swaps
+`?sheet=add` for `?sheet=strikes` (`useOverlay`: the pick rides in the history entry's state like the follow
+form, so a reload never reopens it). `StrikePicker.tsx` is the sheet, `useStrikeLadder.ts` its reads of the
+`strikes` op, `strikePicker.ts` the pure parts (`atmOf`, `ruleFor`), and `LiveList` holds it because the page's
+socket is there. With the switch off nothing changes: the address is not known and `LiveList` takes no picker.
+- **What it shows.** The underlying's price with its feed line ("Real-time" only while ticks arrive, as
+  every other line), the expiry tabs as the server labels them (the chosen one with a tick as well as a tint),
+  the server's `words` as sent, and the 21 strikes of ATM plus or minus 10 (`n` 10), each with its CE and PE
+  price ticking, Add CE, Add PE and Add as one row; the ATM strike carries the word "ATM" and a tint. Add ATM row
+  opens F11's form and Open option chain is the page's `chainPath`. Every control is `min-h-12`; the sheet is
+  the existing `BottomSheet`, so its 500 ms open guard covers the first taps.
+- **What it follows.** The underlying is an item of the live list (read once over REST like a row, so a closed
+  market still shows its last price), and the CE and PE of the strikes on screen are followed in LTP mode with
+  no snapshot of their own. All 43 are `follow.sheet`, counted first in the 250. They are released when the
+  picker closes and the moment a tab is left (the new tab's follow from the answer that names them). A strike's
+  price shows a dash until its first tick.
+- **When it asks.** `strikes` is asked on opening without `p` (the tabs, the middle of the ladder and the
+  server's words), then with `p` from the underlying's own price (the newer of its tick and its read, as a
+  row's) as soon as there is one; again only when that price's nearest strike (a tie to the lower, the server's
+  rule) is no longer the ATM of the answer on screen, and on a tab change. One read at a time (a tab change
+  takes the place of the one in flight), and at most one in 2 s: a move that comes inside the gap waits for it
+  with one timeout, set only while there is such a need. A price that stays inside its band asks nothing, and a
+  price already asked with is not asked again, so a server and a page that disagree on a tie cannot loop. Thirty
+  minutes with a still price ask nothing (tested).
+- **An expiry that ended.** `invalid` on `exp` re-reads the ladder without `exp` and shows the server's sentence
+  above it, and the tab on screen is the one the server then names.
+- **Add CE and Add PE** use the page's own add (`watchlists.addItem`, as a search result does) and mark the
+  strike "Added" with a tick; a symbol the list already holds is Added from the start, a full list disables the
+  adds and says so, and a refused add toasts the server's words and stays addable.
+- **Add as one row** opens F12's form through the page's `swap` with `fixed: { strike, expiry }`. The form keeps
+  a rule, not a date, so the tab maps to one: the first tab is Nearest, the second Next, a monthly expiry in
+  this calendar month (IST) This month's, one in the next month Next month's. **A tab no rule says** (a weekly
+  from the third on, a month after next) disables Add as one row and says why under the tabs; Add CE and Add PE
+  work there. This is the one place the picker offers less than the design's wording.
+- **Tests.** `strikePicker.test.ts` (the ATM tie, the rules), `strike.picker.test.tsx` (the tabs and the word
+  ATM, the price and its feed line, ATM moving only past the midpoint with ten ticks inside it asking nothing,
+  the 2 s gap, 30 minutes asking nothing, a tab change, an ended expiry, every subscription released on close
+  and on a tab change, the cap, Add CE and Add PE and Added, the form's seam, 48 dp, the 500 ms guard, the
+  switch off) and `Watchlist.search.test.tsx` (from the search to the picker to the form, and a reload).
+
 ## W17 - the search and strikes ops (`ops/search.py`, `words/strikes.py`)
 
 Two read ops over the one master generation (`master.shared().index()`: built once per snapshot in

@@ -557,6 +557,20 @@ export default function Watchlist() {
               flagNames={v2 ? (v2State?.flag_names ?? []) : undefined} // F8
               noRemove={flagRef !== null || presetRef !== null} // F8, F10
               followRows={flagRef || presetRef ? undefined : followRows} // F11
+              picker={
+                v2 && overlay?.kind === 'strikes' && overlay.pick && active && otherRef === null
+                  ? {
+                      ...overlay.pick,
+                      listName: active.name,
+                      full,
+                      onAdd: async (symbol, exchange) => {
+                        await watchlists.addItem(active.id, symbol, exchange)
+                      },
+                      onFollow: openFollowForm,
+                      onClose: close,
+                    }
+                  : undefined
+              } // F14
               preset={
                 presetView
                   ? {
@@ -626,6 +640,9 @@ export default function Watchlist() {
             await watchlists.addItem(active.id, symbol, exchange)
           }}
           onFollow={openFollowForm}
+          onPickStrike={(underlying, exchange) =>
+            swap({ kind: 'strikes', pick: { underlying, exchange } })
+          } // F14
         />
       )}
 

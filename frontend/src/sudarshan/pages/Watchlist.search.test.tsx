@@ -188,6 +188,55 @@ describe('?sheet=add', () => {
     expect(await screen.findByText('Follows NIFTY')).toBeInTheDocument()
   })
 
+  it('opens the strike picker from Pick a strike, and Add as one row opens F12’s form on that strike', async () => {
+    b().on('state', () => stateOf(true))
+    const pair = (strike: number, right: string) => ({
+      exchange: 'NFO',
+      symbol: `NIFTY24NOV26${strike}${right}`,
+      key: `NFO:NIFTY24NOV26${strike}${right}`,
+      name: 'NIFTY',
+      lot: 65,
+      tick: 0.05,
+      expiry: '2026-11-24',
+      isin: null,
+    })
+    b().on('strikes', () => ({
+      underlying: 'NIFTY',
+      exchange: 'NSE_INDEX',
+      expiries: [{ date: '2026-11-24', label: 'Nearest 24 Nov', month: false }],
+      expiry: '2026-11-24',
+      atm: null,
+      strikes: [{ strike: 25900, atm: false, ce: pair(25900, 'CE'), pe: pair(25900, 'PE') }],
+      words: 'NIFTY’s price is not known yet.',
+    }))
+    const user = userEvent.setup()
+    mount()
+    await user.type(await screen.findByRole('searchbox'), 'NIFTY')
+    await user.click(await screen.findByRole('button', { name: 'Pick a strike' }))
+    expect(await screen.findByRole('button', { name: 'Nearest 24 Nov' })).toBeInTheDocument()
+    expect(
+      b()
+        .calls.filter((c) => c.op === 'strikes')
+        .at(0)?.params
+    ).toMatchObject({
+      u: 'NIFTY',
+      x: 'NSE_INDEX',
+    })
+    await user.click(await screen.findByRole('button', { name: 'Add as one row at 25,900' }))
+    expect(await screen.findByText(/kept for good/)).toBeInTheDocument()
+  })
+
+  it('does not reopen a picker that came back with a reload, and knows no picker with the switch off', async () => {
+    b().on('state', () => stateOf(true))
+    b().on('strikes', () => {
+      throw new Error('must not be asked')
+    })
+    mount('/watchlist?sheet=strikes')
+    await screen.findByText('SBIN')
+    expect(screen.queryByRole('button', { name: 'Add ATM row' })).toBeNull()
+    expect(b().count('strikes')).toBe(0)
+  })
+
   it('is today’s Add sheet with the switch off', async () => {
     b().on('state', () => stateOf(false))
     vi.mocked(searchSymbols).mockResolvedValue([])
