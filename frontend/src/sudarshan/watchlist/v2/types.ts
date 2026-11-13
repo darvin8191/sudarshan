@@ -516,6 +516,7 @@ export interface SearchReq {
   seg?: Segment
   limit?: number
   p?: number
+  list?: number
 }
 
 export interface RankedReq {

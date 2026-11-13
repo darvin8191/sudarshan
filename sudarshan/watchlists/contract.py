@@ -233,7 +233,7 @@ OPS = (
     OpSpec("strikes", "GET", "/strikes", "read",
            "u:string, x:string, exp?:string, n?:int, p?:number", "Strikes"),
     OpSpec("search", "GET", "/search", "search",
-           "q:string, seg?:Segment, limit?:int, p?:number", "Search"),
+           "q:string, seg?:Segment, limit?:int, p?:number, list?:int", "Search"),
     OpSpec("ranked", "GET", "/ranked", "ranked",
            "src:RankSource, asset:RankAsset, cat:RankCategory, size?:int", "Ranked"),
     OpSpec("tv_preview", "POST", "/tv/preview", "preview", "text:string", "TvPreview"),
