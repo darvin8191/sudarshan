@@ -22,6 +22,7 @@ import type { OrderRequest } from './SymbolSheet'
  *   switch off the page reads its address exactly as it did.
  * - `?sheet=view` (M8.7 F6, v2 only): the View sheet: sort and change basis.
  * - `?sheet=copy` (M8.8 F10, v2 only): the name dialog of Make a copy on a built-in list.
+ * - `?sheet=import` and `?sheet=export` (M8.12 F15, v2 only): Import from and Export for TradingView.
  * - `?sheet=to-section&ci=<item>` and `?sheet=to-list&ci=<item>` or `&section=<id>`, with `&move=1`
  *   for a move (M8.4 F5, v2 only): the section picker and the list picker.
  * - `?sheet=follow-row&fr=<row id>` (M8.10 F11, v2 only): the sheet of a row that follows the price;
@@ -44,6 +45,8 @@ export type Overlay =
   | { kind: 'lists' }
   | { kind: 'view' } // F6
   | { kind: 'copy' } // F10
+  | { kind: 'import' } // F15
+  | { kind: 'export' } // F15
   | { kind: 'section'; sectionId: number }
   | { kind: 'followRow'; rowId: number } // F11
   | { kind: 'follow'; form: FollowForm | null } // F11
@@ -75,6 +78,8 @@ const V2_SHEETS = new Set([
   'lists',
   'view', // F6
   'copy', // F10
+  'import', // F15
+  'export', // F15
   'follow-row', // F11
   'follow', // F11
   'strikes', // F14
