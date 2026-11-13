@@ -11,8 +11,11 @@ passes. It passes (exit 0) only when, as the account running it:
   enter but not list fails as well, since its files could still be opened by name;
 - it can list ``/etc/sudarshan-family`` and open every file in it, and it runs the app's Python and
   imports ``sudarshan.family`` (it is running, so it does);
-- a connection to 127.0.0.1:5555 (OpenAlgo's market-data bus) and to 127.0.0.1:8765 (its WebSocket
-  proxy) is refused by the firewall the family set-up installs. That firewall rejects the packet as
+- a connection to 127.0.0.1:5555 (OpenAlgo's market-data bus), to 127.0.0.1:8765 (its WebSocket
+  proxy), to 127.0.0.1:5582 (the alerts service, a ring port not on the account's list) and to
+  127.0.0.1:1 (a port nothing uses) is refused by the firewall the family set-up installs. The last
+  two prove the firewall's default refusal, not only rules for the two named ports (review L10).
+  That firewall rejects the packet as
   "administratively prohibited", so the connection fails at once with EHOSTUNREACH (EACCES over
   IPv6; EPERM is taken too, as some kernels report a dropped packet that way). "Connection refused"
   there means no rule stopped it, and fails; so do an answer and no answer at all. (A rule that only
@@ -49,8 +52,14 @@ RING_ETC = "/etc/sudarshan"
 FAMILY_ETC = "/etc/sudarshan-family"
 RING_VAR = "/var/lib"
 LOOPBACK = "127.0.0.1"
-#: Ports the family account must not reach, and the one it must.
-BLOCKED = ((5555, "OpenAlgo's market-data bus"), (8765, "OpenAlgo's WebSocket proxy"))
+#: Ports the family account must not reach, and the one it must. The alerts' port and a port nothing
+#: uses are not named by any rule of the set-up: only its default refusal stops them.
+BLOCKED = (
+    (5555, "OpenAlgo's market-data bus"),
+    (8765, "OpenAlgo's WebSocket proxy"),
+    (5582, "the alerts service"),
+    (1, "a port nothing uses"),
+)
 OPEN = (5583, "the portfolio service")
 CONNECT_TIMEOUT_S = 3.0
 #: What a firewall's refusal looks like to the connecting program (see the module's docstring).
