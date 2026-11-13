@@ -113,6 +113,12 @@ def age_line(made_ms: int, now_ms: int) -> str:
     return line + " · Pull down to read it again" if is_stale(made_ms, now_ms) else line
 
 
+def no_time_line(read_ms: int, now_ms: int) -> str:
+    """Upstox sent no time for its ranking: the age of the read, said as the read's, never as the
+    ranking's (``Read just now · Upstox gave no time for this ranking``)."""
+    return f"Read {age(read_ms, now_ms)} · Upstox gave no time for this ranking"
+
+
 def times_line(made_ms: int, read_ms: int) -> str:
     """A tap on the line: ``Ranking made 10:42:05, read 10:43:10``."""
     return f"Ranking made {numfmt.hms(made_ms)}, read {numfmt.hms(read_ms)}"

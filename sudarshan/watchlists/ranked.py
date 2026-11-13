@@ -5,11 +5,16 @@ no clock, no logging. Smartlist ranks futures, options and MTF only (there is no
 movers list) and MTF is not offered. A ranking has no stream: it is read when the owner opens it,
 returns to it or pulls to refresh, and always carries the time Upstox made it. The answer's exact
 envelope is checked on a real read (design fact W-1), so ``extract`` accepts the rows where the
-docs put them and says so when it finds none.
+docs put them and says whether it found a list of rows at all; ``unusable`` names an answer whose
+rows cannot be read (no list of rows, or no row carrying an ``instrument_key``), which the op
+treats as no answer rather than as an empty or a fully left-out ranking (v0.9.0 review M2). A
+figure that is not a finite number (text that is not a number, a NaN) is left out of its row; a
+number sent as text is read.
 """
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable
 from datetime import datetime
 from typing import Any, NamedTuple
@@ -28,6 +33,16 @@ CATEGORIES = {
 DEFAULT_SIZE = 20
 MAX_SIZE = 50
 _ROW_KEYS = ("data", "rows", "items", "list", "results")
+#: How many key names ``shape_of`` keeps of each level, and how much of each name.
+_SHAPE_KEYS, _SHAPE_NAME = 20, 40
+NO_ROWS_LIST, NO_KEYS = "no list of rows", "no row names an instrument_key"
+
+
+class Extracted(NamedTuple):
+    rows: list[dict]
+    stamp: Any
+    metric_key: str | None
+    found: bool  # whether a list of rows was there at all (an empty one counts)
 
 
 class Entry(NamedTuple):
@@ -113,30 +128,79 @@ def parse_time(value: Any) -> int | None:
     return int(n if n > 1e11 else n * 1000)
 
 
-def extract(answer: Any) -> tuple[list[dict], Any, str | None]:
-    """``(rows, time_stamp, metric_key)`` from an answer, wherever the rows sit one level down."""
+def extract(answer: Any) -> Extracted:
+    """``(rows, time_stamp, metric_key, found)`` from an answer, wherever the rows sit one level
+    down; ``found`` is False when no list of rows is there at all."""
     body = answer.get("data", answer) if isinstance(answer, dict) else {}
     if isinstance(body, list):
-        return [r for r in body if isinstance(r, dict)], None, None
+        return Extracted([r for r in body if isinstance(r, dict)], None, None, True)
     if not isinstance(body, dict):
-        return [], None, None
+        return Extracted([], None, None, False)
     rows: list = []
+    found = False
     for k in _ROW_KEYS:
         if isinstance(body.get(k), list):
             rows = [r for r in body[k] if isinstance(r, dict)]
+            found = True
             break
     stamp = body.get("time_stamp", answer.get("time_stamp") if isinstance(answer, dict) else None)
-    return rows, stamp, body.get("metric_key")
+    return Extracted(rows, stamp, body.get("metric_key"), found)
+
+
+def unusable(answer: Any) -> str | None:
+    """Why an answer Upstox gave as a success cannot be shown as a ranking, or None when it can:
+    no list of rows anywhere the docs put one, or rows of which none names an ``instrument_key``
+    (a key under another name would otherwise read as every contract missing from the master).
+    An empty list of rows is a ranking with no rows, not an unusable answer."""
+    got = extract(answer)
+    if not got.found:
+        return NO_ROWS_LIST
+    if got.rows and not any(isinstance(r.get("instrument_key"), str) for r in got.rows):
+        return NO_KEYS
+    return None
+
+
+def _names(value: Any) -> list[str]:
+    if not isinstance(value, dict):
+        return []
+    return sorted(str(k)[:_SHAPE_NAME] for k in value)[:_SHAPE_KEYS]
+
+
+def shape_of(answer: Any) -> dict[str, list[str]]:
+    """The key names of an answer, for a log line about one this version cannot read: the top
+    level, ``data`` and the first row. Names only, never a value."""
+    data = answer.get("data") if isinstance(answer, dict) else None
+    first = extract(answer).rows[:1]
+    return {
+        "answer": _names(answer),
+        "data": _names(data),
+        "row": _names(first[0] if first else None),
+    }
+
+
+def number(value: Any) -> float | None:
+    """A finite number from an answer's field: a number, or a number written as text; None for
+    anything else (a word, a NaN, an infinity, a true or false)."""
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, str):
+        try:
+            value = float(value.strip().replace(",", ""))
+        except ValueError:
+            return None
+    if not isinstance(value, int | float):
+        return None
+    return float(value) if math.isfinite(value) else None
 
 
 def _block(raw: Any, names: tuple[str, ...]) -> dict:
     raw = raw if isinstance(raw, dict) else {}
-    return {n: raw.get(n) for n in names}
+    return {n: number(raw.get(n)) for n in names}
 
 
 def map_rows(answer: Any, category: str, by_key: Callable[[str], Any]) -> Ranking:
     """Upstox rows to symbols through the master, in Upstox's order; unknown keys are counted."""
-    rows, stamp, metric_key = extract(answer)
+    rows, stamp, metric_key, _ = extract(answer)
     out: list[RankRow] = []
     gone = 0
     for i, r in enumerate(rows, 1):
