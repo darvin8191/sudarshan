@@ -177,6 +177,30 @@ def test_a_store_that_cannot_be_read_leaves_the_two_out_and_never_raises(emitted
     assert state_ops.state({})["versions"] == versions.snapshot()
 
 
+def test_an_unreadable_store_is_opened_and_logged_once_for_a_run_of_pushes(
+    emitted, store, monkeypatch, caplog
+):
+    """Review L6: every OpenAlgo watchlist write pushes and each push loaded the mirror, so a
+    broken store was opened and logged once per write. It is left alone for a few seconds."""
+    from utils.thread_safe_cache import LockedTTLCache
+
+    store.write_bytes(b"this is not a database file")
+    now = [1000.0]
+    memo = LockedTTLCache(maxsize=1, ttl=versions.STORE_RETRY_S, timer=lambda: now[0])
+    monkeypatch.setattr(versions, "_unreadable", memo)
+    looks, real = [], engine.ready
+    monkeypatch.setattr(engine, "ready", lambda: looks.append(1) or real())
+    with caplog.at_level(logging.ERROR):
+        for _ in range(3):
+            versions.bump("items", ["list:1"])
+    assert len(looks) == 1
+    assert sum("could not be opened" in m for m in caplog.messages) == 1
+    assert [set(data) for _, data, _ in emitted] == [{"v", "ref", "refs", "why"}] * 3
+    now[0] += versions.STORE_RETRY_S + 1
+    versions.bump("items", ["list:1"])
+    assert len(looks) == 2  # looked again once the few seconds had passed
+
+
 def test_the_boot_part_changes_at_each_process_start():
     import subprocess
     import sys

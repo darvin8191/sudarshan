@@ -207,7 +207,8 @@ is a `conflict`, across restarts. `versions.py` keeps an in-memory mirror of the
 from the store on first use and moved forward by a writer right after its commit
 (`advance_favourites` or `advance_flags` inside the write's transaction, one atomic update, then
 `committed(kind, n)`); a store that cannot be read leaves them out of the push and of `state`, never
-raises. A lists bump and the mirror are under a real lock (`utils.real_threading`) whose critical
+raises, and is left alone for five seconds (`STORE_RETRY_S`, a `LockedTTLCache`), so a run of
+pushes while it is broken opens it and logs the cause once instead of once per write. A lists bump and the mirror are under a real lock (`utils.real_threading`) whose critical
 section is the increment or one comparison. `versions.bump(why, refs)` bumps the lists version once
 and calls `versions.push`, which emits `contract.EVENT_PUSH` (`{v, ref, refs, why}` plus
 `favourites` and `flags` when known) to the room `sudarshan:watchlists:owner` through

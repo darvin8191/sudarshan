@@ -33,15 +33,21 @@ from sudarshan.watchlists import contract, engine
 from sudarshan.watchlists.schema import MetaRow
 from utils.logging import get_logger
 from utils.real_threading import Lock
+from utils.thread_safe_cache import LockedTTLCache
 
 logger = get_logger(__name__)
 
 BOOT = secrets.token_hex(4)
 #: The two versions the store holds, by name, and the ``wl_meta`` row of each.
 STORED = {"favourites": "favourites_version", "flags": "flags_version"}
+#: How long a store that could not be read is left alone before the mirror's load tries again.
+STORE_RETRY_S = 5
 _lock = Lock()
 _lists = 0
 _mirror: dict[str, int | None] = dict.fromkeys(STORED)
+#: Set while the store is remembered as unreadable: every OpenAlgo watchlist write pushes, and
+#: without this each push would open the broken file again and log the failure again.
+_unreadable = LockedTTLCache(maxsize=1, ttl=STORE_RETRY_S)
 
 
 def read(kind: str = "lists") -> str:
@@ -53,8 +59,10 @@ def read(kind: str = "lists") -> str:
 
 def _load() -> None:
     """Fill the mirror from the store, once. A store that is missing, newer or unreadable leaves it
-    empty (the next call looks again) and is not an error here: the bridge answers for it."""
-    if all(v is not None for v in _mirror.values()):
+    empty and is not an error here: the bridge answers for it. A missing file is looked for again
+    at the next call (it costs one ``stat``); a newer or unreadable one is left alone for
+    ``STORE_RETRY_S`` seconds, so a run of pushes while it is broken opens it and logs it once."""
+    if all(v is not None for v in _mirror.values()) or _unreadable.get("store", False):
         return
     try:
         if not engine.store_path().exists():
@@ -64,9 +72,11 @@ def _load() -> None:
             rows = dict(s.execute(select(MetaRow.name, MetaRow.value).where(
                 MetaRow.name.in_(STORED.values()))).all())  # fmt: skip
     except (engine.RecordTooNew, engine.RecordUnreadable):
+        _unreadable["store"] = True  # the cause is in the error log once, from engine.ready()
         return
     except Exception:
         logger.exception("Watchlists: the favourites and flags versions could not be read")
+        _unreadable["store"] = True
         return
     for kind, name in STORED.items():
         try:
@@ -168,3 +178,4 @@ def forget() -> None:
     with _lock:
         for kind in _mirror:
             _mirror[kind] = None
+    _unreadable.clear()
