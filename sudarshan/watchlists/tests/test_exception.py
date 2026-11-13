@@ -19,26 +19,95 @@ import pytest
 from sudarshan.watchlists import dynamic, master, search, tvimport
 
 ROOT = Path(__file__).resolve().parents[3]
-BANNED_MODULES = ("concurrent", "asyncio", "apscheduler", "sched", "multiprocessing", "subprocess")
-BANNED_ATTRS = {("threading", "Thread"), ("threading", "Timer")}
+#: Modules whose import alone means starting, scheduling or running work off the request, or a
+#: loop of its own: executors, asyncio, schedulers, processes, signal timers and green threads.
+BANNED_MODULES = frozenset({
+    "_thread", "apscheduler", "asyncio", "concurrent", "eventlet", "gevent", "greenlet",
+    "multiprocessing", "sched", "signal", "subprocess",
+})  # fmt: skip
+#: What starts a thread, a green thread, a timer or a process, by the module it comes from, however
+#: it is imported or renamed (``utils.real_threading`` is the helper CLAUDE.md sends people to).
+STARTERS = {
+    "threading": {"Thread", "Timer"},
+    "utils.real_threading": {"Thread", "run_on_hub", "submit_to_hub", "start_hub_worker"},
+    "os": {"fork", "forkpty", "system", "popen", "posix_spawn", "posix_spawnp", "spawnl",
+           "spawnle", "spawnlp", "spawnlpe", "spawnv", "spawnve", "spawnvp", "spawnvpe"},
+}  # fmt: skip
+#: Methods that start a task whatever they are called on: Flask-SocketIO's background task (on
+#: ``extensions.socketio`` or any other name for it) and eventlet's and gevent's spawns and pools.
+STARTER_METHODS = frozenset({
+    "start_background_task", "spawn", "spawn_n", "spawn_after", "spawn_after_local", "spawn_raw",
+    "greenthread", "GreenPool", "GreenPile",
+})  # fmt: skip
+#: Modules whose wildcard import would bring a starter in under its own name.
+STARRED = frozenset({"threading", "utils.real_threading", "os"})
+
+
+def _dotted(node, aliases: dict) -> str | None:
+    """``t.Timer`` as ``threading.Timer`` when ``t`` is ``threading`` renamed; None for anything
+    that is not a chain of names."""
+    parts = []
+    while isinstance(node, ast.Attribute):
+        parts.append(node.attr)
+        node = node.value
+    if not isinstance(node, ast.Name):
+        return None
+    return ".".join([aliases.get(node.id, node.id), *reversed(parts)])
+
+
+def _text(args: list, at: int) -> str | None:
+    node = args[at] if len(args) > at else None
+    return node.value if isinstance(node, ast.Constant) and isinstance(node.value, str) else None
+
+
+def _dynamic(call: ast.Call, aliases: dict) -> list[str]:
+    """A banned module imported by name at run time, or a starter fetched with ``getattr``."""
+    fn = _dotted(call.func, aliases) or ""
+    if fn in ("importlib.import_module", "__import__"):
+        name = _text(call.args, 0)
+        if name and (name.split(".")[0] in BANNED_MODULES or name in STARTERS):
+            return [f"{fn}({name!r})"]
+    elif fn == "getattr":
+        name = _text(call.args, 1)
+        if name and (name in STARTER_METHODS or any(name in n for n in STARTERS.values())):
+            return [f"getattr(..., {name!r})"]
+    return []
 
 
 def scan(source: str) -> list[str]:
-    """What a source file does that the exception forbids."""
-    found = []
-    for node in ast.walk(ast.parse(source)):
+    """What a source file does that the exception forbids: every import, rename, attribute and
+    dynamic import that starts a thread, a green thread, a timer, a task or a process."""
+    tree = ast.parse(source)
+    found, aliases = [], {}
+    for node in ast.walk(tree):  # first every name the file binds to a module or a name in one
         if isinstance(node, ast.Import):
-            found += [a.name for a in node.names if a.name.split(".")[0] in BANNED_MODULES]
-        elif isinstance(node, ast.ImportFrom) and node.module:
+            for a in node.names:
+                top = a.name.split(".")[0]
+                aliases[a.asname or top] = a.name if a.asname else top
+                if top in BANNED_MODULES:
+                    found.append(f"import {a.name}")
+        elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
             if node.module.split(".")[0] in BANNED_MODULES:
-                found.append(node.module)
-            if node.module == "threading":
-                found += [
-                    f"threading.{a.name}" for a in node.names if a.name in ("Thread", "Timer")
-                ]
-        elif isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
-            if (node.value.id, node.attr) in BANNED_ATTRS:
-                found.append(f"{node.value.id}.{node.attr}")
+                found.append(f"from {node.module} import")
+            for a in node.names:
+                if a.name == "*":
+                    if node.module in STARRED:
+                        found.append(f"from {node.module} import *")
+                    continue
+                full = f"{node.module}.{a.name}"
+                aliases[a.asname or a.name] = full
+                if a.name in STARTERS.get(node.module, ()):
+                    found.append(full)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Attribute):
+            dotted = _dotted(node, aliases)
+            module, _, name = (dotted or "").rpartition(".")
+            if node.attr in STARTER_METHODS:
+                found.append(dotted or f".{node.attr}")
+            elif name in STARTERS.get(module, ()):
+                found.append(dotted)
+        elif isinstance(node, ast.Call):
+            found += _dynamic(node, aliases)
     return found
 
 
@@ -48,19 +117,75 @@ def watched_files():
     return files + ([bridge] if bridge.exists() else [])
 
 
-def test_the_scanner_catches_each_forbidden_thing():
-    for bad in (
-        "import threading\nthreading.Thread(target=f).start()",
-        "from threading import Timer",
-        "import asyncio",
-        "from concurrent.futures import ThreadPoolExecutor",
-        "import apscheduler.schedulers.background",
-        "import sched",
-        "import multiprocessing",
-        "import subprocess",
-    ):
-        assert scan(bad), bad
-    assert not scan("import threading\nlock = threading.Lock()\nimport time")
+#: Each way to start something the exception forbids, the review's five among them.
+FORBIDDEN = {
+    "threading.Thread": "import threading\nthreading.Thread(target=f).start()",
+    "threading.Timer by name": "from threading import Timer",
+    "threading.Thread renamed": "from threading import Thread as Worker\nWorker(target=f)",
+    "threading renamed": "import threading as t\nt.Timer(5, f).start()",
+    "threading wildcard": "from threading import *",
+    "a Thread subclass": "import threading\nclass W(threading.Thread):\n    pass",
+    "_thread": "import _thread\n_thread.start_new_thread(f, ())",
+    "real_threading.Thread": "from utils import real_threading\nreal_threading.Thread(target=f)",
+    "real_threading Thread by name": "from utils.real_threading import Thread\nThread(target=f)",
+    "real_threading renamed": "import utils.real_threading as rt\nrt.Thread(target=f)",
+    "real_threading dotted": "import utils.real_threading\nutils.real_threading.Thread()",
+    "run_on_hub by name": "from utils.real_threading import run_on_hub",
+    "submit_to_hub": "from utils import real_threading\nreal_threading.submit_to_hub(f)",
+    "start_hub_worker": "from utils.real_threading import start_hub_worker as go",
+    "socketio task": "from extensions import socketio\nsocketio.start_background_task(f)",
+    "extensions task": "import extensions\nextensions.socketio.start_background_task(f)",
+    "renamed socketio task": "from extensions import socketio as sio\nsio.start_background_task(f)",
+    "eventlet timer": "import eventlet\neventlet.spawn_after(5, f)",
+    "eventlet spawn by name": "from eventlet import spawn_n",
+    "eventlet greenthread": "from eventlet.greenthread import spawn_after",
+    "eventlet greenthread renamed": "import eventlet.greenthread as gt",
+    "eventlet greenthread module": "from eventlet import greenthread",
+    "a pool's spawn": "pool.spawn(f)",
+    "gevent": "import gevent",
+    "greenlet": "import greenlet",
+    "asyncio": "import asyncio",
+    "asyncio renamed": "import asyncio as aio",
+    "asyncio by name": "from asyncio import get_event_loop",
+    "an executor": "from concurrent.futures import ThreadPoolExecutor",
+    "an executor renamed": "import concurrent.futures as cf",
+    "concurrent by name": "from concurrent import futures",
+    "apscheduler": "import apscheduler.schedulers.background",
+    "sched": "import sched",
+    "multiprocessing": "import multiprocessing",
+    "subprocess": "import subprocess",
+    "signal timers": "import signal",
+    "os.fork": "import os\nos.fork()",
+    "os.system": "import os\nos.system('x')",
+    "os.popen by name": "from os import popen",
+    "importlib": "import importlib\nimportlib.import_module('asyncio')",
+    "__import__": "__import__('threading').Thread(target=f)",
+    "getattr": "import threading\ngetattr(threading, 'Timer')(5, f)",
+    "getattr with a default": "import threading\ngetattr(threading, 'Thread', None)",
+}
+#: What the feature does use, and must stay allowed.
+ALLOWED = (
+    "import threading\nlock = threading.Lock()\nimport time",
+    "from utils.real_threading import Lock",
+    "from utils import real_threading\nreal_threading.Lock()",
+    "from utils.lazy import LazyInit\nfrom utils.keyed_locks import KeyedLocks",
+    "import time\ntime.sleep(0)",
+    "import importlib\nimportlib.import_module(f'{__name__}.{name}')",
+    "from extensions import emit_from_any_thread, socketio\n@socketio.on('x')\ndef f():\n    pass",
+    "import os\nos.environ.get('X')",
+    "import weakref\nweakref.ref(x, callback)",
+    "getattr(module, 'KIND', None)\ngetattr(module, 'HANDLERS', {})",
+)
+
+
+@pytest.mark.parametrize("name", sorted(FORBIDDEN))
+def test_the_scanner_catches_each_forbidden_thing(name):
+    assert scan(FORBIDDEN[name]), f"not caught: {name}"
+
+
+@pytest.mark.parametrize("source", ALLOWED)
+def test_the_scanner_lets_the_features_own_tools_through(source):
+    assert scan(source) == []
 
 
 def test_no_thread_timer_executor_loop_or_scheduler_in_the_module():

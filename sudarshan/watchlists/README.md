@@ -130,7 +130,11 @@ flight finishes with the maps it was handed and never builds or keeps a generati
 Symbol, exchange and instrument-key lookups read OpenAlgo's snapshot and keep nothing.
 `tests/test_exception.py` holds the limits that let this feature live inside OpenAlgo: no thread,
 timer, executor, scheduler or event loop anywhere in `sudarshan/watchlists/` or the bridge (an AST
-scan, and a check that no thread starts for any op or master swap); one generation for the process
+scan that follows every import and rename: threads of `threading` and of `utils.real_threading`
+and its hub calls, `_thread`, Flask-SocketIO's `start_background_task`, eventlet and gevent spawns
+and pools, executors, asyncio, schedulers, processes, signal timers, and the same names reached
+through `importlib`, `__import__` or `getattr`; and a check that no thread starts for any op or
+master swap); one generation for the process
 (two requests in flight through the bridge share one build and `generations_alive()` is 1 while
 both run; two greenlets under a real eventlet hub share one build that yields to the hub), the old
 rows freed with it when OpenAlgo publishes the next snapshot; the derived maps under 15 MB on
