@@ -97,6 +97,40 @@ def test_a_new_file_is_private_unless_a_mode_is_asked_for(tmp_path):
     assert mode_of(shared) == 0o640
 
 
+def test_a_spool_for_another_account_is_0640_under_the_family_units_umask(tmp_path):
+    """M3: the family unit runs with UMask=0077. The mode os.open is given loses the group bits to
+    it, and the notice desk reads a spool it cannot open as no family service at all."""
+    spool = tmp_path / "export" / "events.jsonl"
+    os.umask(0o077)  # the autouse fixture puts the old one back
+    assert record(spool, kind="lockout", event_id="a", at=NOW, run="r", src="family",
+                  file_mode=0o640)  # fmt: skip
+    assert mode_of(spool) == 0o640
+    for number in range(events.COMPACT_ABOVE + 5):
+        assert record(spool, kind="lockout", event_id=f"e{number}", at=NOW, run="r", src="family",
+                      file_mode=0o640)  # fmt: skip
+    assert len(spool.read_text().splitlines()) <= events.COMPACT_ABOVE  # compaction ran
+    assert mode_of(spool) == 0o640  # its new file, made under the same umask
+    assert not list(spool.parent.glob(".*.new"))
+
+
+def test_a_file_that_exists_keeps_its_mode_even_when_it_is_empty(tmp_path):
+    spool = tmp_path / "events.jsonl"
+    spool.touch()
+    spool.chmod(0o600)
+    assert record(spool, kind="lockout", event_id="a", at=NOW, run="r", src="family",
+                  file_mode=0o640)  # fmt: skip
+    assert mode_of(spool) == 0o600
+
+
+def test_a_link_in_place_of_the_spool_is_refused(tmp_path):
+    target = tmp_path / "elsewhere"
+    spool = tmp_path / "events.jsonl"
+    spool.symlink_to(target)
+    assert not record(spool, kind="lockout", event_id="a", at=NOW, run="r", src="family",
+                      file_mode=0o640)  # fmt: skip
+    assert not target.exists()
+
+
 def test_compaction_keeps_the_files_mode(tmp_path):
     spool = tmp_path / "events.jsonl"
     for number in range(events.COMPACT_ABOVE + 5):
