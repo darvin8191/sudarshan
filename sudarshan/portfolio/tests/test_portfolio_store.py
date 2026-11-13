@@ -205,7 +205,7 @@ def test_the_steps_run_once_in_all_even_when_the_second_opener_takes_the_later_o
     finally:
         event.remove(Engine, "before_cursor_execute", hold)
     assert not [r for r in results if isinstance(r, BaseException)], results
-    assert [r[0] for r in results] == [[1], [2, 3]]
+    assert [r[0] for r in results] == [ALL_STEPS[:1], ALL_STEPS[1:]]
     assert raw(path, "PRAGMA user_version") == [(migrations.LATEST,)]
     assert raw(path, "SELECT count(*) FROM tab") == [(1,)]
 

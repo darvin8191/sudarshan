@@ -351,6 +351,67 @@ CHARGES = {
 }  # fmt: skip
 
 
+# Typed from the field lists Upstox documents for the order book and the day's trades (never a
+# captured answer); the ids, symbols and prices are made up.
+ORDERS = {
+    "status": "success",
+    "data": [
+        {
+            "exchange": "NSE", "product": "D", "price": 3500.55, "quantity": 10,
+            "status": "complete", "guid": None, "tag": "demo", "instrument_token": "NSE_EQ|INE467B01029",
+            "placed_by": "ZZ9999", "trading_symbol": "TCS", "order_type": "LIMIT",
+            "validity": "DAY", "trigger_price": 0.0, "disclosed_quantity": 0,
+            "transaction_type": "BUY", "average_price": 3499.995, "filled_quantity": 10,
+            "pending_quantity": 0, "status_message": None, "status_message_raw": None,
+            "exchange_order_id": "1100000000001", "parent_order_id": None,
+            "order_id": "261026000000001", "variety": "SIMPLE",
+            "order_timestamp": "2026-10-26 09:16:02", "exchange_timestamp": "2026-10-26 09:16:03",
+            "is_amo": False, "order_request_id": "1", "order_ref_id": "r1",
+        },
+        {
+            "exchange": "NFO", "product": "I", "price": 0, "quantity": 65, "status": "trigger pending",
+            "instrument_token": "NSE_FO|12345", "placed_by": "ZZ9999",
+            "trading_symbol": "NIFTY26NOVFUT", "order_type": "SL-M", "validity": "DAY",
+            "trigger_price": 24100.5, "disclosed_quantity": 0, "transaction_type": "SELL",
+            "average_price": 0, "filled_quantity": 0, "pending_quantity": 65,
+            "status_message": "Trigger pending", "exchange_order_id": None,
+            "parent_order_id": None, "order_id": "261026000000002", "variety": "SIMPLE",
+            "order_timestamp": "2026-10-26 10:01:00", "exchange_timestamp": None, "is_amo": False,
+        },
+    ],
+}  # fmt: skip
+DAY_TRADES = {
+    "status": "success",
+    "data": [
+        {
+            "exchange": "NSE", "product": "D", "trading_symbol": "TCS",
+            "instrument_token": "NSE_EQ|INE467B01029", "order_type": "LIMIT",
+            "transaction_type": "BUY", "quantity": 4, "exchange_order_id": "1100000000001",
+            "order_id": "261026000000001", "exchange_timestamp": "2026-10-26 09:16:03",
+            "average_price": 3499.995, "trade_id": "T-1", "order_ref_id": "r1",
+            "order_timestamp": "2026-10-26 09:16:02",
+        },
+        {
+            "exchange": "NSE", "product": "D", "trading_symbol": "TCS",
+            "instrument_token": "NSE_EQ|INE467B01029", "order_type": "LIMIT",
+            "transaction_type": "BUY", "quantity": 6, "exchange_order_id": "1100000000001",
+            "order_id": "261026000000001", "exchange_timestamp": "2026-10-26 09:16:04",
+            "average_price": 3500.0, "trade_id": "T-2", "order_ref_id": "r1",
+            "order_timestamp": "2026-10-26 09:16:02",
+        },
+    ],
+}  # fmt: skip
+
+
+ORDER_HISTORY = {
+    "status": "success",
+    "data": [
+        {**ORDERS["data"][1], "status": "put order req received"},
+        ORDERS["data"][1],
+    ],
+}
+
+
 class FakeUpstox:
     """Upstox's read paths on loopback. ``status`` and ``bodies`` are set per part; a report
     path may hold a list of bodies, one per page asked for (``page_number``)."""
@@ -360,6 +421,9 @@ class FakeUpstox:
         "/v2/portfolio/short-term-positions": "positions",
         "/v3/portfolio/mtf-positions": "mtf",
         "/v3/user/get-funds-and-margin": "funds",
+        "/v2/order/retrieve-all": "day_orders",
+        "/v2/order/trades/get-trades-for-day": "day_trades",
+        "/v2/order/history": "order_history",
         "/v2/charges/historical-trades": "trades",
         "/v2/trade/profit-loss/metadata": "pnl_meta",
         "/v2/trade/profit-loss/data": "pnl",
@@ -369,7 +433,8 @@ class FakeUpstox:
     def __init__(self):
         self.status = {}
         self.bodies = {"holdings": HOLDINGS, "positions": POSITIONS, "mtf": {"status": "success", "data": []},
-                       "funds": FUNDS, "trades": TRADES, "pnl_meta": PNL_META, "pnl": PNL,
+                       "funds": FUNDS, "trades": TRADES, "day_orders": ORDERS, "day_trades": DAY_TRADES,
+                       "order_history": ORDER_HISTORY, "pnl_meta": PNL_META, "pnl": PNL,
                        "charges": CHARGES}  # fmt: skip
         self.raw: dict[str, bytes] = {}
         self.delay = 0.0

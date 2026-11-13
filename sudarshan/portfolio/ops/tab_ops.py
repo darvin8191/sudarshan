@@ -11,7 +11,7 @@ from typing import Any
 from .. import __version__, layout, serialize
 from ..store import NotFound, Refused, VersionConflict
 from . import op
-from .common import OWNER, answer, given, maybe_whole, parts, warmed, whole
+from .common import OWNER, answer, caller, given, maybe_whole, parts, scope_now, warmed, whole
 
 log = logging.getLogger(__name__)
 
@@ -25,11 +25,12 @@ UPSTOX_READING = "Upstox is slow to answer. SUDARSHAN is still reading your acco
 UPSTOX_WAIT_S = 1.0
 
 
-async def _upstox_row(ctx) -> dict[str, Any]:
+async def _upstox_row(ctx, scope=OWNER, principal: str = "owner") -> dict[str, Any]:
     """The Upstox row as the reader gives it; a failure is the row saying it was not read."""
     try:
-        book = await ctx.ensure_upstox().book(["holdings"])
-        part = serialize.out(OWNER, book)["holdings"]
+        extra = {} if principal == "owner" else {"principal": principal}
+        book = await ctx.ensure_upstox().book(["holdings"], **extra)
+        part = serialize.out(scope, book)["holdings"]
         return {
             "state": part["state"],
             "read_at": part["read_at"],
@@ -42,18 +43,23 @@ async def _upstox_row(ctx) -> dict[str, Any]:
         return {"state": "unavailable", "read_at": None, "note": UPSTOX_NOT_READ, "holdings": []}
 
 
-async def _upstox_within(ctx) -> dict[str, Any]:
+async def _upstox_within(ctx, scope=OWNER, principal: str = "owner") -> dict[str, Any]:
     """The Upstox row, or a row that says it is still being read once ``UPSTOX_WAIT_S`` has gone.
     The read itself goes on (the reader keeps its answer for the phone's next ask), so a slow
     Upstox costs the card one line and never the owner's own tabs."""
     # The reads that went on past the wait are held (one at a time) so that nothing drops them
     # half way, and a summary asked while one is out joins it instead of starting another.
-    out: set = ctx.part("summary_reads", lambda _store: set())
-    task = next(iter(out), None)
+    # One read per scope: a family member's row is masked, the owner's is not, and they never
+    # share a task (the reader's own memory still makes them one Upstox call).
+    key = (scope.principal, scope.tab_ids, scope.mask, principal)
+    out: dict = ctx.part("summary_reads", lambda _store: {})
+    task = out.get(key)
     if task is None or task.done():
-        task = asyncio.ensure_future(_upstox_row(ctx))
-        out.add(task)
-        task.add_done_callback(out.discard)
+        task = asyncio.ensure_future(_upstox_row(ctx, scope, principal))
+        out[key] = task
+        task.add_done_callback(
+            lambda done, key=key: out.pop(key, None) if out.get(key) is done else None
+        )
     try:
         return await asyncio.wait_for(asyncio.shield(task), UPSTOX_WAIT_S)
     except TimeoutError:
@@ -64,8 +70,8 @@ async def _upstox_within(ctx) -> dict[str, Any]:
 @op("state")
 async def state(ctx, message):
     _, views = parts(ctx)
-    now = ctx.clock()
-    return await answer(lambda: views.state(OWNER, now=now, version=__version__))
+    now, scope = ctx.clock(), scope_now()
+    return await answer(lambda: views.state(scope, now=now, version=__version__))
 
 
 @op("summary")
@@ -78,11 +84,11 @@ async def summary(ctx, message):
     asks ``upstox_book`` (which has its own, longer time) for the figures."""
     await warmed(ctx)
     _, views = parts(ctx)
-    now = ctx.clock()
-    found = await answer(lambda: views.summary(OWNER, now=now))
+    now, scope, who = ctx.clock(), scope_now(), caller()
+    found = await answer(lambda: views.summary(scope, now=now))
     entries = found.get("entries") if isinstance(found, dict) else None
     if entries and any(e["tab"]["system"] for e in entries):
-        row = await _upstox_within(ctx)
+        row = await _upstox_within(ctx, scope, who.principal)
         for entry in entries:
             if entry["tab"]["system"]:
                 entry["upstox"] = row
@@ -107,11 +113,11 @@ async def tab_create(ctx, message):
 async def tab_get(ctx, message):
     await warmed(ctx)
     _, views = parts(ctx)
-    now = ctx.clock()
+    now, scope = ctx.clock(), scope_now()
     args = given(message, "as_of", "accounts", "classes", "tags", "held")
     args["view"] = maybe_whole(message, "view")
     tab_id = whole(message, "id")
-    return await answer(lambda: views.tab_view(OWNER, tab_id, args, now=now))
+    return await answer(lambda: views.tab_view(scope, tab_id, args, now=now))
 
 
 @op("tab_update")
@@ -150,7 +156,8 @@ async def performance(ctx, message):
     await warmed(ctx)
     _, views = parts(ctx)
     now = ctx.clock()
-    return await answer(lambda: views.performance(OWNER, whole(message, "id"), now=now))
+    scope = scope_now()
+    return await answer(lambda: views.performance(scope, whole(message, "id"), now=now))
 
 
 # ---- layout --------------------------------------------------------------------------------------

@@ -10,6 +10,11 @@ bucket (``wait_s``, under a second); the minute and 30-minute buckets are stops.
 
 A 429 (or Upstox's own rate code) pauses that API for 60 seconds.
 
+**Reserve for the owner** (cross-design Y5). A principal other than ``owner`` (a family viewer, the
+journal) takes a token only while the API's 30-minute bucket holds at least ``RESERVE_30MIN`` and
+its minute bucket at least ``RESERVE_MINUTE``: a burst of order activity read for the family can
+never empty the budget of the owner's own Upstox tab.
+
 The surface is small on purpose, ``take`` and ``pause``, so that this can become the client of the
 platform's one governor later (M18.9) without a change in the reader.
 """
@@ -21,6 +26,10 @@ from collections.abc import Callable
 
 #: (tokens, seconds in which they refill): per second, per minute, per 30 minutes.
 LIMITS = ((2, 1.0), (30, 60.0), (200, 1800.0))
+#: The owner's principal, and what a different principal leaves in the minute bucket and the
+#: 30-minute bucket (by their position in ``LIMITS``) for the owner.
+OWNER = "owner"
+RESERVE = {1: 10, 2: 100}
 #: How long an API rests after Upstox said to slow down.
 PAUSE_S = 60.0
 #: The longest a read waits for a bucket to refill before it stops: the per-second bucket only.
@@ -95,15 +104,25 @@ class Budget:
         worst = max(bucket.wait(now) for bucket in self._of(api))
         return worst + 0.01 if worst <= longest else None
 
-    def take(self, api: str) -> bool:
-        """Spend one read of ``api`` if every bucket has one and the API is not paused. All or
-        nothing: a refusal spends nothing."""
+    def can_take(self, api: str, principal: str = OWNER) -> bool:
+        """Whether ``take`` would succeed now, spending nothing."""
         if self.paused_for(api):
             return False
         now = self._clock()
-        buckets = self._of(api)
-        if not all(bucket.ready(now) for bucket in buckets):
+        for index, bucket in enumerate(self._of(api)):
+            if not bucket.ready(now):
+                return False
+            if principal != OWNER and bucket.tokens < RESERVE.get(index, 0):
+                return False
+        return True
+
+    def take(self, api: str, principal: str = OWNER) -> bool:
+        """Spend one read of ``api`` if every bucket has one and the API is not paused. All or
+        nothing: a refusal spends nothing. A principal other than the owner also leaves the
+        reserve (``RESERVE``) in the minute and 30-minute buckets."""
+        if not self.can_take(api, principal):
             return False
+        buckets = self._of(api)
         for bucket in buckets:
             bucket.spend()
         return True

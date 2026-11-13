@@ -15,23 +15,25 @@ from sudarshan.alerts.market import sessions
 
 from .. import serialize
 from ..core.days import day_of_instant, to_date
-from ..core.kinds import REPORT_SEGMENTS, UPSTOX_HISTORY_DAYS, UPSTOX_PARTS
+from ..core.kinds import REPORT_SEGMENTS, UPSTOX_HISTORY_DAYS, UPSTOX_PAGE_PARTS, UPSTOX_PARTS
 from ..errors import ApiError
 from ..upstox import MAX_AGE_S
 from . import op
-from .common import OWNER, answer, need, work
+from .common import OWNER, answer, caller, need, scope_now, work
 
 ASK = "The request was incomplete. Reload the page."
 MAX_AGE_LIMIT_S = 3600
 
 
-def _parts(message) -> list[str]:
+def _parts(message, allowed=UPSTOX_PAGE_PARTS, default=...) -> list[str] | None:
+    """The parts asked for, in contract order. The owner's page reads the four of the Upstox tab
+    (``UPSTOX_PAGE_PARTS``); orders and trades are read for the family and the journal only."""
     asked = message.get("parts")
     if asked is None:
-        return list(UPSTOX_PARTS)
-    if not isinstance(asked, list) or not asked or not all(a in UPSTOX_PARTS for a in asked):
+        return list(allowed) if default is ... else default
+    if not isinstance(asked, list) or not asked or not all(a in allowed for a in asked):
         raise ApiError(400, "bad_request", ASK)
-    return [a for a in UPSTOX_PARTS if a in asked]
+    return [a for a in allowed if a in asked]
 
 
 def _max_age(message) -> int:
@@ -45,10 +47,15 @@ def _max_age(message) -> int:
 
 @op("upstox_book")
 async def upstox_book(ctx, message):
-    parts, age = _parts(message), _max_age(message)
-    reader = ctx.ensure_upstox()
-    book = await reader.book(parts, age)
-    return serialize.out(OWNER, book)
+    who = caller()
+    if who.purpose == "family":
+        parts = who.access.book_parts(_parts(message, UPSTOX_PARTS, default=None))
+    else:
+        parts = _parts(message)
+    age = _max_age(message)
+    extra = {} if who.principal == "owner" else {"principal": who.principal}
+    book = await ctx.ensure_upstox().book(parts, age, **extra)
+    return serialize.out(who.scope, book)
 
 
 def _next_trading_day(calendar, day: date) -> date:
@@ -67,16 +74,18 @@ async def upstox_history(ctx, message):
         limit = UPSTOX_HISTORY_DAYS
     if limit.__class__ is not int or not 1 <= limit <= UPSTOX_HISTORY_DAYS:
         raise ApiError(400, "bad_request", ASK)
-    now = ctx.clock()
+    now, who = ctx.clock(), caller()
+    if who.purpose == "family":
+        who.access.need_upstox_tab()
 
     def read() -> list[dict[str, Any]]:
-        return store.read(OWNER, lambda tx: tx.rows("upstox_eod", "day"))
+        return store.read(who.scope, lambda tx: tx.rows("upstox_eod", "day"))
 
     rows = (await work(read))[-limit:]
     sched = _schedule(ctx)
     days = [_day(ctx, row, now, sched) for row in rows]
     note = None if days else _first_record_note(sched, now)
-    return serialize.out(OWNER, {"days": days, "note": note})
+    return serialize.out(who.scope, {"days": days, "note": note})
 
 
 def _schedule(ctx):

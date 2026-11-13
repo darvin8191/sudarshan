@@ -69,6 +69,8 @@ PATHS = {
     "pnl_meta": "/v2/trade/profit-loss/metadata",
     "pnl": "/v2/trade/profit-loss/data",
     "charges": "/v2/trade/profit-loss/charges",
+    # The journal's order history (PJ); its own API, its own bucket.
+    "order_history": "/v2/order/history",
 }
 #: The P&L report has no mutual-fund segment: Upstox lists MF trades in the history alone.
 PNL_SEGMENTS = tuple(s for s in REPORT_SEGMENTS if s != "MF")
@@ -473,8 +475,11 @@ class ReportReader:
         return done
 
     # ---- one call ---------------------------------------------------------------------------
-    async def _call(self, api: str, params: Mapping[str, str]) -> tuple[str, Any]:
-        """``("ok", payload)`` or ``("<words key>", None)``; spends one read of the budget."""
+    async def _call(
+        self, api: str, params: Mapping[str, str], principal: str = "owner"
+    ) -> tuple[str, Any]:
+        """``("ok", payload)`` or ``("<words key>", None)``; spends one read of the budget. A
+        principal other than the owner (the journal) leaves the owner's reserve (budget.RESERVE)."""
         upstox = self.upstox
         if upstox._refused:
             if _signature(upstox.token_file) == upstox._refused_at:
@@ -486,14 +491,14 @@ class ReportReader:
         token = upstox._token()
         if token is None:
             return "no_token", None
-        if not upstox.budget.take(api):
+        if not upstox.budget.take(api, principal):
             # Only the per-second bucket is short: a fraction of a second, so wait it out and
             # carry on. A minute or 30-minute bucket is a stop the words explain.
             wait = upstox.budget.wait_s(api)
             if wait is None:
                 return "busy", None
             await asyncio.sleep(wait)
-            if not upstox.budget.take(api):
+            if not upstox.budget.take(api, principal):
                 return "busy", None
         headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
         try:
