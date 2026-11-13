@@ -1,7 +1,7 @@
 """The ``view`` op (M8.4, W6): one ref's rows, sections, follow rows and preference. A read.
 
-The ref's kind picks the reader found in ``refs/``; a kind that is not built yet (preset and ranked
-come later) is ``invalid`` with field ``ref``, and so is a ref that is not ``<kind>:<id>``.
+The ref's kind picks the reader found in ``refs/``; a kind that is not built yet (ranked
+comes later) is ``invalid`` with field ``ref``, and so is a ref that is not ``<kind>:<id>``.
 A list that does not exist is ``gone``. Prices are never in the answer: the page streams them.
 """
 

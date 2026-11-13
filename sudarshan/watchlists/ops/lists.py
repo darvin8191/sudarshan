@@ -15,7 +15,8 @@ Not read here, on purpose:
 
 * Lists a screen feeds. The screener is a service of its own (``sudarshan-screener``), so its state
   is not readable in this process; the page marks them from the screener's state as it does today.
-* Built-in lists. There are none until W12, so ``presets`` is empty and no ``preset:<id>`` exists.
+* Built-in lists are catalogued by name only (``presets()``); their counts and dates are read by
+  ``lists`` alone, from the one master generation, and are null while the master is not loaded.
 * Whether a ranked list is available today (the Upstox sign-in) is W22's: ``state`` will say.
 """
 
@@ -25,17 +26,45 @@ from flask import session
 from sqlalchemy import func
 
 from sudarshan.watchlists import contract, engine, ranked, versions
+from sudarshan.watchlists import presets as catalogue
 from sudarshan.watchlists import view as merge_view
+from sudarshan.watchlists.ops import OpError
 from sudarshan.watchlists.ops import state as state_ops
 from sudarshan.watchlists.store import favourites as store
+from sudarshan.watchlists.words import presets as preset_words
 from sudarshan.watchlists.words import ranked as ranked_words
+from utils.logging import get_logger
+
+logger = get_logger(__name__)
 
 FLAGS = range(1, 6)
 
 
 def presets() -> dict[str, str]:
-    """The built-in lists by id. Empty until W12 builds them (so no ``preset:<id>`` exists yet)."""
-    return {}
+    """The built-in lists by id and name, in catalogue order (``presets/``). Names only: the
+    catalogue needs no master, so ``state`` and the favourites read it without building one."""
+    return {e.id: e.name for e in catalogue.CATALOGUE}
+
+
+def preset_figures() -> dict[str, tuple[int | None, str | None]]:
+    """``{id: (symbols now, "As of 9 Nov 2026")}`` for each built-in list; ``(None, None)`` while
+    the master is not loaded (nothing is called empty that is only not known)."""
+    from sudarshan.watchlists.refs import preset as reader
+
+    out: dict[str, tuple[int | None, str | None]] = {}
+    for e in catalogue.CATALOGUE:
+        try:
+            built, as_of = reader.built_now(e)
+        except OpError:  # no master today: not known
+            out[e.id] = (None, None)
+            continue
+        except Exception:  # the sheet still answers; a count is a convenience
+            logger.exception("Watchlists: a built-in list could not be counted for the sheet")
+            out[e.id] = (None, None)
+            continue
+        when = preset_words.date_words(as_of)
+        out[e.id] = (len(built.rows), f"As of {when}" if when else None)
+    return out
 
 
 def own_lists(user: str) -> list[tuple[int, str, str, int]]:
@@ -143,6 +172,7 @@ def favourites_of(user: str) -> list[dict]:
 def lists(args: dict) -> dict:
     found = gather(session.get("user") or "")
     room = contract.LIMITS["list_items"]
+    figures = preset_figures()
     own = [
         {"ref": f"list:{lid}", "kind": "list", "name": name, "count": count,
          "room": max(0, room - found["symbols"][lid]), "locked": False, "note": None}
@@ -156,10 +186,10 @@ def lists(args: dict) -> dict:
                 "ref": f"preset:{i}",
                 "kind": "preset",
                 "name": name,
-                "count": None,
+                "count": figures[i][0],
                 "room": None,
                 "locked": True,
-                "note": None,
+                "note": figures[i][1],
             }
             for i, name in found["presets"].items()
         ],  # fmt: skip

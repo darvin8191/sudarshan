@@ -745,8 +745,8 @@ names a deleted list, or a preset or flag that does not exist, is dropped at rea
 left for the delete hook or the next write.
 
 `lists` answers the All lists sheet: own lists in OpenAlgo's order with `count` (symbols plus the
-follow rows of a list whose overlay guard matches) and `room`; `presets` (empty until W12 builds
-the built-in lists, so no `preset:<id>` exists yet); `ranked` (the 44 entries of
+follow rows of a list whose overlay guard matches) and `room`; `presets` (the built-in lists
+of W12, with their count and date); `ranked` (the 44 entries of
 `ranked.catalogue()`, locked; whether Upstox is signed in today is W22's, in `state`); the five
 `flags` with the count of symbols carrying each, read from `wl_symbol` directly so this change does
 not wait for W9, and a renamed flag's name from `wl_flag`; and the favourites resolved. Lists a
@@ -793,3 +793,65 @@ page its offers.
   500 ms guard on the section sheet), `pages/MarketAlerts.listAlert.test.tsx` (the address opens
   lane A's form, headed "Every symbol of Swing (24)").
 
+
+## W12 - built-in lists from the master (`presets/`, `refs/preset.py`, `ops/presets.py`, `words/presets.py`)
+
+Three built-in lists made from today's master: **Indices**, **F&O stocks** and **Index futures**
+(`preset:indices`, `preset:fno_stocks`, `preset:index_futures`). The catalogue
+(`presets/__init__.py`: id, name, kind, rule or file, and the two pure functions that build a list)
+is found by discovery like the other registries: a source is a module with `ENTRIES`, so W13's typed
+files add `presets/typed_lists.py` (kind `typed`, an `ORDER` below `master_lists`' 20 puts them
+first) and edit nothing here. `presets/master_lists.py` holds the pure builders over the master's
+rows as `search.Index` keeps them (references to the snapshot's own rows, never copies).
+
+- **Indices** are a typed list of the 24 OpenAlgo index symbols of design 3.5, in code, checked
+  against today's master. A name the master lacks (or lists on another exchange) is left out and
+  said: "2 names in this list are not in today's contract list: ABC, XYZ. The list is checked at
+  each index review."
+- **F&O stocks** are the screener's rule: the NSE cash listing of every stock with an NFO future at
+  any expiry, index underlyings excluded. It is mirrored, not imported: the screener's function
+  reads its own `Listing` copies of the master, and making those for 100,000 rows is the copy this
+  feature promises not to make. `test_fno_stocks_equals_the_screeners_rule_on_the_same_master` runs
+  both on one synthetic master, and the index underlyings are held equal to
+  `sudarshan.alerts.market.sessions.INDEX_UNDERLYINGS`. The one difference is a report: an
+  underlying with futures and no cash row is named ("1 stock has futures but no stock listing
+  today: ABC.") where the screener drops it without a word.
+- **Index futures** are, per index underlying (NFO and BFO, so SENSEX and BANKEX are in; the
+  screener's index futures read NFO only), the first future whose expiry close is still ahead
+  (3.7's roll): at the close of expiry day the row is the next month's. The close is OpenAlgo's
+  market calendar's for NFO, asked for only when an expiry falls today (any other day closes before
+  or after now whatever the calendar says), and 15:30 IST when the calendar has no window
+  (`dynamic.close_ms`). Note that OpenAlgo's default NFO window ends at 15:40, so on a normal
+  expiry day the calendar's close, not 15:30, rolls the row. An underlying with no future left is
+  not listed. The list depends on the clock, so only what the master fixes is cached.
+
+**One generation.** `refs/preset.py` builds from `master.shared()` and keeps each prepared list
+(references and the names the master lacks) in a `WeakKeyDictionary` keyed by the master's
+`Generation`: it goes the moment the generation does, a test asserts one generation alive and that
+no row of a replaced master is kept. No thread, timer or loop, no Upstox call and nothing downloaded
+(a test scans the new files' imports). The date in the words is the master's own, the day OpenAlgo's
+session for the snapshot began (`session_start`); without one the line says "date not recorded".
+
+**On the wire.** `view?ref=preset:<id>` answers the `View` record: `locked` true, version "0", no
+sections or follow rows, `as_of` the master's ISO date, `lines` = ["Built-in list, locked. F&O
+stocks: 213 symbols.", "From the Upstox contract list of 9 Nov 2026: every stock with futures.
+Updated each morning after the day's login.", then the 120-row window line when the list is over
+250, then the missing-names line], `missing` as `EXCHANGE:SYMBOL`, each row with the owner's flag and
+whether a note exists (never the note). Rows are in the list's own order; the page sorts. With the
+master not loaded the answer is `failed` in words ("Today's contract list is not loaded yet. It
+loads after the day's login; open this list again then."). `lists` now names the three lists with
+`count` (the rows now, null while the master is not loaded: not known is never 0) and `note` ("As of
+9 Nov 2026"). `symbol` adds the built-in lists that hold a symbol after the own ones. `pref` and
+favourites already took a `preset:<id>` ref and now find it. `refs/preset.members` is the sealed
+route's reader (W23): contracts, `valid_until` for Index futures (the close at which a row becomes
+the next month's), the names left out; no flag or note.
+
+**Locked.** No write op takes a ref (they take a list's number), so none can be pointed at a
+built-in list; the one write that names one is `copy`, as its source. A `move` out of one is
+`invalid` with field `from` and "This is a built-in list, locked. Make a copy of it to change it."
+and changes nothing; a `section_id` source is refused ("A built-in list has no sections..."). View,
+sort, flags, notes and copy work. `copy {from: {ref: "preset:<id>", keys?}, to}` makes an OpenAlgo
+list. `keys` are taken in the order sent (the order shown: the server cannot know a sort by price
+or change); with none the whole list in its own order. Over 250 it copies the first 250 and the
+answer's `words` say "Copied the first 250 of 500, in the order shown. A list holds 250." The
+contract did not change.

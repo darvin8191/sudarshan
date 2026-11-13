@@ -12,6 +12,7 @@ from watchlists_bridge_app import OWNER, csrf_headers, login_session, make_app, 
 
 import blueprints.sudarshan_watchlists as bp_module
 from sudarshan.watchlists import contract, engine, master, ops, ranked, schema, versions
+from sudarshan.watchlists import presets as catalogue
 from sudarshan.watchlists.ops import lists as lists_op
 from sudarshan.watchlists.words import favourites as words
 
@@ -364,7 +365,8 @@ def test_lists_answers_the_catalogues_the_flags_and_the_favourites(client):
         s.commit()
     put(client, [(1, RANKED)], 0)
     data = client.get(API + "/lists").get_json()["data"]
-    assert data["presets"] == []  # none until the built-in lists are built (W12)
+    assert [e["ref"] for e in data["presets"]] == [f"preset:{e.id}" for e in catalogue.CATALOGUE]
+    assert all(e["locked"] and e["count"] is None for e in data["presets"])  # master not loaded
     assert [e["ref"] for e in data["ranked"]] == [e.ref for e in ranked.catalogue()]
     assert len(data["ranked"]) == 44 and all(e["locked"] for e in data["ranked"])
     assert [(e["ref"], e["name"], e["count"]) for e in data["flags"]] == [

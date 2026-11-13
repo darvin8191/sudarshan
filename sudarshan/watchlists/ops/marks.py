@@ -164,6 +164,7 @@ def expired_clear(args: dict) -> dict:
 def symbol(args: dict) -> dict:
     from sudarshan.watchlists import master
     from sudarshan.watchlists.refs import list as listref
+    from sudarshan.watchlists.refs import preset as presetref
 
     exchange, name = _key(args["k"])
     with engine.open_session() as s:
@@ -172,9 +173,10 @@ def symbol(args: dict) -> dict:
         found = None if row is None else (row.flag, row.note, row.note_at, row.version)
     flag, note, note_at, version = found or (None, None, None, None)
     m = master.shared()  # the process's one master: a request never builds its own
-    # Own lists only. Built-in lists (W12) join this answer as `Held` records after them.
+    # Own lists first, then the built-in lists that hold it now (W12).
     held = [{"ref": f"list:{i}", "name": n}
             for i, n in listref.holding(session.get("user") or "", exchange, name)]  # fmt: skip
+    held += [{"ref": ref, "name": n} for ref, n in presetref.holding(exchange, name)]
     return {
         "key": f"{exchange}:{name}",
         "flag": flag,

@@ -309,7 +309,6 @@ def test_other_sources_targets_and_picks_are_refused_in_place(client):
     src = make_list()
     ref = {"ref": f"list:{src}"}
     for source in (
-        {"ref": "preset:nifty", "keys": ["NSE:INFY"]},
         {"ref": "ranked:x", "keys": []},
         {"ref": "flag:1", "keys": []},
         {"ref": "list:abc", "keys": []},
