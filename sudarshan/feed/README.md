@@ -86,7 +86,7 @@ header get 403). JSON in and out; use `127.0.0.1`, not `localhost` (which may re
 | `GET /upstox/<Upstox path>` | the REST governor (M18.9, below): Upstox's market-data reads for the other SUDARSHAN services |
 | `POST /subscribe` `{"mode": "ltpc", "keys": [...]}` | 200 with counts; 400 bad mode or key; 409 over an Upstox cap |
 | `POST /unsubscribe` `{"keys": [...]}` | 200 with counts; a key a client claims stays on the socket |
-| `PUT /claims/<client>` `{"keys": {"NSE_EQ|INE002A01018": "full"}}` | replaces that client's whole set and renews it: 200 `{ok, claimed, subscribed, applied_live}`; 400 bad client id, key or mode; 409 over the client's quota, the ring's 1,400 or an Upstox cap (nothing changes; the message names the client and gives the numbers) |
+| `PUT /claims/<client>` `{"keys": {"NSE_EQ|INE002A01018": "full"}}` | replaces that client's whole set and renews it: 200 `{ok, claimed, subscribed, applied_live}`; 400 bad client id, key or mode; 409 over the client's quota, the ring's 1,450 or an Upstox cap (nothing changes; the message names the client and gives the numbers) |
 | `DELETE /claims/<client>` | drops the client's set |
 | `GET /claims` | every client: renewed_at, keys, by_mode |
 
@@ -181,7 +181,7 @@ curl -s -H 'X-Sudarshan-Client: sudarshan-portfolio' -H 'X-Sudarshan-Priority: i
 ```
 
 Every request names its service in `X-Sudarshan-Client` (`sudarshan-screener`,
-`sudarshan-portfolio` or `sudarshan-alerts`; anything else is 403) and its class in
+`sudarshan-portfolio`, `sudarshan-alerts` or `sudarshan-journal`; anything else is 403) and its class in
 `X-Sudarshan-Priority`: `repair` (a gap after a feed pause), `interactive` (the owner is waiting,
 a morning snapshot) or `bulk` (warm starts, backfills, the 16:10 option chains).
 
@@ -213,7 +213,13 @@ hour ever holds more.
 | `sudarshan-screener` (30%) | 15 | 150 | 600 |
 | `sudarshan-portfolio` (5%) | 2 | 25 | 100 |
 | `sudarshan-alerts` (5%) | 2 | 25 | 100 |
+| `sudarshan-journal` | 1 | 10 | 50 |
 
+- **The ceilings may sum above SUDARSHAN's total** (G3b): with the journal they come to 20 a
+  second, 210 a minute and 850 per 30 minutes. SUDARSHAN's 20, 200 and 800 bind first come
+  within a priority, so one service cannot take more than its ceiling and all of them together
+  never pass the total. The journal's candle calls are bulk (after 16:00); the family service
+  gets the same share when the phone chart arrives (M4.15), not before.
 - **Order of service**: repair, then interactive, then bulk; first come first served within a
   class. At most 4 calls are in flight to Upstox and 64 wait; a request waits at most 30 s. When
   64 wait, the last of them in that order is told it is busy: the newcomer, unless it outranks
@@ -374,9 +380,10 @@ about 300 full keys, with or without the candle.
   up, then `sub` for keys new to it. Caps are checked on that effective set when a change adds
   a key or raises a mode; a change that only takes keys away or lowers modes is never refused,
   so a client can always let go of its keys. Each client has a quota (`sudarshan-screener` 700,
-  `sudarshan-alerts` 300, `sudarshan-portfolio` 200, any other client 50), at most 4 other
-  clients hold claims at once (their 200 keys are the ring's headroom over the named quotas),
-  and every client's claims together hold at most 1,400 keys, a key two clients hold counting
+  `sudarshan-alerts` 300, `sudarshan-portfolio` 200, `sudarshan-family` 100, `sudarshan-journal`
+  50, `sudarshan-protect` 50, any other client 50), at most 1 other client holds claims at once
+  (its 50 keys are the ring's headroom over the named quotas, 1,400), and every client's claims
+  together hold at most 1,450 keys (with the 12 base keys, under Upstox's 1,500 combined cap), a key two clients hold counting
   once; a claim over any of these is refused with 409 and the message names the client. A
   client that has not renewed its claims for 7 days loses them (checked at start and at each
   day's close); a stored claim over its quota, or claims that would break a cap or the ceiling

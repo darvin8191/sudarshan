@@ -76,8 +76,11 @@ the base file subscribes.
 | `sudarshan-alerts` | 200 | 300 | 300 |
 | `sudarshan-portfolio` | 200 (ltpc) | - | 200 |
 | `sudarshan-screener` | 320 (full, option_greeks) | 700 | 700 |
-| any other client | - | - | 50 |
-| the ring in all | 732 at worst | 1,212 | 1,400 |
+| `sudarshan-family` (P6) | - | 100 | 100 |
+| `sudarshan-journal` (P7) | - | 50 | 50 |
+| `sudarshan-protect` (P7, later) | - | 50 | 50 |
+| any other client (one slot) | - | - | 50 |
+| the ring in all | 732 at worst | 1,412 | 1,450 |
 
 U9 is the open Upstox report of drops near 600 s with 500 or more keys. It is judged on the
 socket's total (`/health` `subscribed.total`), never on one client's count, and the first session

@@ -149,17 +149,23 @@ def test_each_window_slides_and_a_half_rate_halves_all_three():
     assert delay(deque(), portfolio, 0.0) <= 0
 
 
-def test_the_shares_are_40_percent_and_the_ceilings_fit_inside_them():
+def test_the_shares_are_40_percent_and_each_ceiling_fits_inside_it():
     assert rest.TOTAL == (20, 200, 800)  # of Upstox's 50/s, 500/min, 2,000 per 30 min per API
     assert rest.CEILINGS == {
         "sudarshan-screener": (15, 150, 600),
         "sudarshan-portfolio": (2, 25, 100),
         "sudarshan-alerts": (2, 25, 100),
+        "sudarshan-journal": (1, 10, 50),  # Y19; the family joins with M4.15, not yet
     }
-    for factor in (1.0, 0.5):  # also at half rate, the clients' sum never passes the total
+    assert "sudarshan-family" not in rest.CEILINGS
+    for factor in (1.0, 0.5):
         for i, total in enumerate(rest.TOTAL):
-            shares = sum(max(1, int(c[i] * factor)) for c in rest.CEILINGS.values())
-            assert shares <= max(1, int(total * factor))
+            for ceiling in rest.CEILINGS.values():  # no one client passes the total
+                assert max(1, int(ceiling[i] * factor)) <= max(1, int(total * factor))
+    # G3b: the ceilings may sum above the total (the minute and 30-minute windows do now); the
+    # total then binds, first come within a priority
+    sums = [sum(c[i] for c in rest.CEILINGS.values()) for i in range(3)]
+    assert sums == [20, 210, 850] and sums[1] > rest.TOTAL[1] and sums[2] > rest.TOTAL[2]
     assert (rest.MAX_WAITING, rest.MAX_IN_FLIGHT, rest.WAIT_CAP_S) == (64, 4, 30.0)
     assert (rest.FREEZE_S, rest.HALF_RATE_S, rest.MAX_BODY) == (60.0, 600.0, 8 << 20)
 
@@ -833,10 +839,9 @@ def test_the_whole_call_has_its_own_limit_beyond_each_phases(feed_env, monkeypat
 
 
 def test_sudarshans_40_percent_holds_even_if_the_ceilings_sum_above_it(feed_env, monkeypatch):
-    """Mutation survivors #7 and #12: the ceilings as shipped sum to the 40% total at most, so
-    the total never binds by itself. It is kept as the guard should a ceiling be raised: here
-    two services may each send 15 a "second" (stretched to 3 s) on one API, and SUDARSHAN's 20
-    holds."""
+    """Mutation survivors #7 and #12: here two services may each send 15 a "second" (stretched
+    to 3 s) on one API, and SUDARSHAN's 20 holds. Since G3b (Y19) the shipped ceilings sum above
+    the total in the minute and 30-minute windows, so the total binds there on its own too."""
     monkeypatch.setattr(rest, "CEILINGS", rest.CEILINGS | {"sudarshan-portfolio": (15, 150, 600)})
     monkeypatch.setattr(rest, "WINDOWS_S", (3.0, 60.0, 1800.0))
 
@@ -1423,3 +1428,70 @@ def test_a_warm_start_in_flight_adds_no_tick_lag(feed_env, tmp_path):
     # every answer a long step would show 90 of them.
     assert sum(cpu >= 5.0 for cpu in governor) <= 2, seen
     assert share < 0.15, seen  # and it holds the loop a small part of the time
+
+
+def test_the_total_binds_first_come_when_clients_race_for_what_is_left(feed_env):
+    """G3b (Y19): the screener, the portfolio and the alerts have used 195 of SUDARSHAN's 200 a
+    minute, each within its own share. The screener has 5 of its 150 left and the journal all of
+    its 10, but the total has 5 left in all. Seven calls arrive in turn: the first five go at
+    once, whoever sent them, and the sixth (the screener's, with room of its own) and the seventh
+    (the journal's) wait for the minute to free places, in arrival order."""
+
+    async def scenario():
+        async with running(feed_env) as (svc, fake, http):
+            now = time.monotonic()  # after the feed is up: the oldest send is 59 s old, no more
+            sends = [now - 59.0 + 0.2 * n for n in range(195)]  # no second or half hour is full
+            held = {"sudarshan-screener": sends[:145], "sudarshan-portfolio": sends[145:170],
+                    "sudarshan-alerts": sends[170:]}  # fmt: skip
+            assert all(len(held[c]) <= rest.CEILINGS[c][1] for c in held)  # within each share
+            assert sum(map(len, held.values())) == 195
+            api = svc.rest.apis["ltp"]
+            for client, times in held.items():
+                api.by_client[client].extend(times)
+            api.sent.extend(sorted(sends))
+            order = ["sudarshan-screener", "sudarshan-journal", "sudarshan-screener",
+                     "sudarshan-screener", "sudarshan-screener", "sudarshan-screener",
+                     "sudarshan-journal"]  # fmt: skip
+            tasks = []
+            for client in order:  # arrival order is the order of creation
+                tasks.append(asyncio.create_task(ask(http, LTP, client)))
+                await asyncio.sleep(0.02)
+            got = await asyncio.gather(*tasks)
+            assert {r.status_code for r in got} == {200}
+            waits = [waited(r) for r in got]
+            assert max(waits[:5]) < 300  # the five places that were left
+            assert min(waits[5:]) > 500 and max(waits[5:]) < 3000  # the rest wait for the minute
+            minute_ago = time.monotonic() - 60.0
+            assert sum(1 for t in api.sent if t > minute_ago) <= 200  # the total held
+            for client, limits in rest.CEILINGS.items():
+                assert sum(1 for t in api.by_client[client] if t > minute_ago) <= limits[1]
+
+    asyncio.run(scenario())
+
+
+def test_the_journal_has_its_own_share_and_asks_in_bulk_after_the_close(feed_env):
+    now = [ff.ist(2026, 10, 27, 10, 0)]  # Tuesday 10:00, market hours
+
+    async def scenario():
+        async with running(feed_env, now) as (svc, fake, http):
+            r = await ask(http, DAYS, "sudarshan-journal", priority="bulk")
+            assert (r.status_code, r.headers["X-Sudarshan-Reason"]) == (503, "bulk-hours")
+            assert fake.rest_calls == []  # bulk waits for 16:00, as Y19.3 says of its candles
+            now[0] = ff.ist(2026, 10, 27, 16, 20)  # the journal's 16:20 candle calls
+            first, second = await asyncio.gather(
+                ask(http, DAYS, "sudarshan-journal", priority="bulk"),
+                ask(http, DAYS, "sudarshan-journal", priority="bulk"),
+            )
+            assert first.status_code == second.status_code == 200
+            assert sorted([waited(first), waited(second)])[1] > 800  # its 1 a second
+            # a trade sheet the owner opens may ask as interactive, in market hours
+            now[0] = ff.ist(2026, 10, 28, 10, 0)
+            assert (await ask(http, DAYS, "sudarshan-journal")).status_code == 200
+            # the family has no share until the phone chart (M4.15)
+            family = await ask(http, DAYS, "sudarshan-family")
+            assert (family.status_code, family.headers["X-Sudarshan-Reason"]) == (403, "client")
+            clients = svc.health()["rest"]["apis"]["historical-candle"]["clients"]
+            assert clients["sudarshan-journal"]["calls"] == 3
+            assert clients["sudarshan-journal"]["refusals"] == 1
+
+    asyncio.run(scenario())

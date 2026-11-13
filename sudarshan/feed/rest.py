@@ -1,7 +1,8 @@
 """SUDARSHAN's REST governor (M18.9): the ring services' Upstox market-data GETs, on one share.
 
     GET http://127.0.0.1:5580/upstox/<Upstox path>?<query>
-        X-Sudarshan-Client:   sudarshan-screener | sudarshan-portfolio | sudarshan-alerts
+        X-Sudarshan-Client:   sudarshan-screener | sudarshan-portfolio | sudarshan-alerts |
+                              sudarshan-journal
         X-Sudarshan-Priority: repair | interactive | bulk
 
 The feed holds the Analytics Token and re-reads it when its file changes; the other services
@@ -15,6 +16,11 @@ rules G1-G8 (27 Oct 2026):
   SUDARSHAN takes at most 40% (TOTAL) and each client at most its own ceiling (CEILINGS); the
   other 60% stays for OpenAlgo's daily token and TRINETRA. The windows slide: no second, minute
   or half hour ever holds more than the share.
+- G3b (Y19): the clients' ceilings may sum above TOTAL (with the journal they do, in the minute
+  and 30-minute windows); TOTAL binds first come within a priority, and the ceilings stop any one
+  client from taking it all. The journal's candle calls are bulk (after 16:00, Y19.3); a trade
+  sheet the owner opens may ask as interactive. The family service joins with the phone chart
+  (M4.15), not before.
 - G4: repair first, then interactive, then bulk, first come first served within a class. Bulk
   (warm starts, backfills, the 16:10 option chains) is refused at once from 08:30 to 16:00 IST on
   a trading day, and around a special day's own window with the same margins. A request waits at
@@ -74,6 +80,7 @@ CEILINGS = {
     "sudarshan-screener": (15, 150, 600),  # 30%
     "sudarshan-portfolio": (2, 25, 100),  # 5%
     "sudarshan-alerts": (2, 25, 100),  # 5%
+    "sudarshan-journal": (1, 10, 50),  # 2.5% a second, 5% a minute, 6.25% per 30 min (Y19, G3b)
 }
 PRIORITIES = ("repair", "interactive", "bulk")  # G4: served in this order
 BULK = PRIORITIES.index("bulk")
