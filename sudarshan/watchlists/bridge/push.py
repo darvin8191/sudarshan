@@ -4,7 +4,8 @@ The room is joined with ``contract.EVENT_JOIN`` by an open app whose session is 
 the alerts room is. The hook is one ``after_request`` that turns a successful change made through
 OpenAlgo's own watchlist routes (any device, /trading's panel included) or the screener's internal
 watchlist route into a lists bump and a push, and prunes what the overlay held for a list that was
-deleted or cleared. An add of a symbol the list already holds, which OpenAlgo answers as a
+deleted or cleared (the prune whatever the switch, the push only while v2 is on). An add of a
+symbol the list already holds, which OpenAlgo answers as a
 success with the row it had, bumps nothing: a look before the add notes that row (one read of the
 list's items, for that route only), and the answer naming the same row means nothing changed. It
 runs on the request's thread and starts nothing; a failure in it is logged and never changes the
@@ -152,20 +153,21 @@ def _prune(endpoint: str, listed: int | None) -> None:
 
 
 def after_watchlist_request(response):
-    """Bump the lists version and push for a 2xx change; prune for a delete or a clear."""
+    """Prune for a 2xx delete or clear whatever the switch; with v2 on, bump the lists version
+    and push for a 2xx change. The overlay follows OpenAlgo's lists even while v2 is off, so a
+    list deleted then and a new one given its id in the same second (the guard's ``created_at``
+    has one-second resolution) inherit nothing; only the push waits for the switch."""
     if request.blueprint not in WATCHED:
         return response
     if request.method in ("GET", "HEAD", "OPTIONS") or not 200 <= response.status_code < 300:
         return response
     try:
-        if not enabled():
-            return response
         change = _change(response)
         if change is None:
             return response
         why, listed = change
-        _prune(request.endpoint, listed)
-        if _unchanged(response):  # a symbol the list already held: OpenAlgo's answer is a success
+        _prune(request.endpoint, listed)  # a store that was never made is not made here
+        if not enabled() or _unchanged(response):  # off; or a symbol the list already held
             return response
         versions.bump(why, [f"list:{listed}"] if listed is not None else [])
     except Exception:

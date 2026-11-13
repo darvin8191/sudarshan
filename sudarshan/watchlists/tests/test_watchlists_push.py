@@ -323,12 +323,33 @@ def test_the_screeners_apply_bumps_once_and_its_read_and_a_miss_bump_nothing(emi
     assert emitted == []
 
 
-def test_the_hook_does_nothing_with_the_switch_off(emitted, monkeypatch, store):
+def test_the_hook_pushes_nothing_with_the_switch_off_and_makes_no_store(
+    emitted, monkeypatch, store
+):
     _, client, headers = build()
     monkeypatch.setenv(contract.SWITCH_ENV, "off")
     before = versions.snapshot()
-    assert send(client, headers, "DELETE", "/watchlist/api/lists/7").status_code == 200
+    for method, path, _, _ in WRITES:
+        assert send(client, headers, method, path).status_code == 200
     assert versions.snapshot() == before and emitted == [] and not store.exists()
+
+
+def test_with_the_switch_off_a_delete_and_a_clear_still_prune_the_overlay(emitted, monkeypatch):
+    """Review L1: the guard's ``created_at`` has one-second resolution, so a list deleted while v2
+    is off and a new one given its id in the same second would inherit the overlay. The prune is
+    the overlay following OpenAlgo's own change, whatever the switch; only the push waits."""
+    _, client, headers = build()
+    seed()
+    monkeypatch.setenv(contract.SWITCH_ENV, "off")
+    lists = versions.read()
+    assert send(client, headers, "DELETE", "/watchlist/api/lists/7").status_code == 200
+    assert send(client, headers, "POST", "/watchlist/api/lists/8/clear").status_code == 200
+    assert counts() == {"wl_list": 1, "wl_section": 1, "wl_section_item": 0, "wl_row": 1,
+                        "wl_pref": 1, "wl_favourite": 2}  # fmt: skip
+    with engine.open_session() as s:
+        assert s.scalars(select(schema.ListRow)).one().list_id == 8  # list 8 keeps its sections
+    assert stored("favourites_version") == "1"  # list 7's slot went, in the same transaction
+    assert versions.read() == lists and emitted == []  # and nobody is told while it is off
 
 
 @pytest.mark.parametrize("broken", ["bump", "prune"])

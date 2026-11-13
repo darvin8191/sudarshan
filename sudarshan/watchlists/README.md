@@ -229,22 +229,26 @@ and it found the list, it bumps and pushes. An add of a symbol the list already 
 nothing, and OpenAlgo answers it as a success with the row it had: a look before the add route runs
 (one read of the list's items, for that route only, through OpenAlgo's models) notes that row, and
 an answer naming the same row bumps nothing. Every other request pays one comparison of
-`request.endpoint` before and one membership test of `request.blueprint` after. A delete also prunes that list's overlay (`store/prune.py`: list guard row,
-sections, section items, follow rows, preferences, and favourite slots naming `list:<id>`, with the
-favourites version raised in the same transaction) in one transaction in the overlay's own file; a
-clear drops section membership only, because /trading cannot see sections or follow rows. A store file that is missing (never
-created by a delete) or newer is skipped and logged, and a failure in the hook is logged and never
-changes OpenAlgo's answer. (2) The bridge's own ops: a handler marked `@ops.bumps(why, refs)` has
-the bridge bump and push after it returns. After a refusal the bridge bumps only for what the
+`request.endpoint` before and one membership test of `request.blueprint` after. A delete also
+prunes that list's overlay (`store/prune.py`: list guard row, sections, section items, follow rows,
+preferences, and favourite slots naming `list:<id>`, with the favourites version raised in the same
+transaction) in one transaction in the overlay's own file; a clear drops section membership only,
+because /trading cannot see sections or follow rows. The prune runs whatever the switch, and only
+the bump and the push wait for v2 to be on: the guard's `oa_created_at` has one-second resolution,
+so a list deleted while v2 is off and a new one given its id in the same second would otherwise
+inherit the overlay. A store file that is missing (never created by a delete, so a server that never
+turned v2 on never gets one) or newer is skipped and logged, and a failure in the hook is logged and
+never changes OpenAlgo's answer. (2) The bridge's own ops: a handler marked `@ops.bumps(why, refs)`
+has the bridge bump and push after it returns. After a refusal the bridge bumps only for what the
 refusal names as already committed (`OpError(code, words, changed=refs)`): a write that works in
 steps and commits part of its change before it answers `failed` or `conflict` (a copy that stopped
 part way, an arrange whose OpenAlgo order failed) still bumps the lists version once and pushes the
 refs it changed, so the tablet and the alerts' backstop learn of it; a refusal that committed
 nothing bumps nothing. A write that changed nothing this time (a copy that found every symbol
 already in the target) has its refs function return `ops.UNCHANGED`, and nothing is bumped or
-pushed. The hook starts no thread, timer
-or loop. Tests: `tests/test_watchlists_push.py`; `test/test_gthread_watchlists.py` (twelve bumps at
-once, twelve writes through the hook under a real gthread worker).
+pushed. The hook starts no thread, timer or loop. Tests: `tests/test_watchlists_push.py`;
+`test/test_gthread_watchlists.py` (twelve bumps at once, twelve writes through the hook under a real
+gthread worker).
 
 ## W6 - own lists and view (`view.py`, `refs/`, `ops/view.py`, `words/view.py`)
 
