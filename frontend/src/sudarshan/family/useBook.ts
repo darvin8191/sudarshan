@@ -7,7 +7,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect } from 'react'
 import { RESYNC_MS } from '@/sudarshan/dashboard/live'
 import { familyApi } from './api'
-import { onFamilyBook, setFamilyScreen, useFamilyFeed } from './familyManager'
+import { getFamilyManager, onFamilyBook, setFamilyScreen, useFamilyFeed } from './familyManager'
 import type { BookPart, Screen } from './types'
 
 export const bookKey = (part: BookPart) => ['family', 'book', part] as const
@@ -33,9 +33,15 @@ export function useFamilyBook(part: BookPart) {
   return query
 }
 
-/** Tell the service which screen is open: what it claims from the feed follows the screens. */
+/**
+ * Tell the service which screen is open: what it claims from the feed follows the screens. An
+ * open screen also holds the socket up, because the service tells a screen on that socket that
+ * its books were read again (Y11): a screen with no price to follow (Trades, Orders with nothing
+ * working) would otherwise never open one, and would only learn of a fill at the 45 s re-read.
+ */
 export function useFamilyScreen(name: Screen): void {
   useEffect(() => {
+    void getFamilyManager().connect()
     setFamilyScreen(name)
     return () => setFamilyScreen(null)
   }, [name])
