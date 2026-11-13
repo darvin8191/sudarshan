@@ -25,6 +25,7 @@ import {
   indexView,
   STALE_MS,
 } from '@/sudarshan/dashboard/live'
+import type { Basis } from './v2/types'
 
 /** One instrument's REST quote, and when the read that brought it was sent. */
 export interface Snapshot {
@@ -32,12 +33,19 @@ export interface Snapshot {
   at: number
 }
 
+/** What a row says while the day's open is not known yet (F6). */
+export const OPEN_UNKNOWN = 'Open not known yet'
+
 /** One row as the list shows it. */
 export interface RowView extends IndexView {
-  /** The level less the previous close, in rupees. Null without both. */
+  /** The level less the previous close (F6: or today's open), in rupees. Null without both. */
   change: number | null
-  /** The same as a percentage of the previous close. */
+  /** The same as a percentage of what it is measured from. */
   changePercent: number | null
+  /** F6: the change is from today's open and the open is not known yet. */
+  openMissing: boolean
+  /** F6: the words for it, or null. */
+  note: string | null
 }
 
 /**
@@ -46,14 +54,30 @@ export interface RowView extends IndexView {
  * holds one (a missing, zero or non-numeric one does not count), and the
  * snapshot's otherwise.
  */
-export function rowView(snapshot: Snapshot | undefined, data: SymbolData | undefined): RowView {
+export function rowView(
+  snapshot: Snapshot | undefined,
+  data: SymbolData | undefined,
+  basis: Basis = 'close' // F6
+): RowView {
   const view = indexView(snapshot?.quote, snapshot?.at ?? null, data)
-  const { ltp, prevClose } = view
-  const change = ltp !== null && prevClose !== null ? ltp - prevClose : null
+  const { ltp } = view
+  // F6: from today's open, which is the snapshot's `open` and nothing else: a missing, zero or
+  // non-numeric one is not known, and the first trade the page saw is never taken for it.
+  const open = snapshot?.quote.open
+  const from =
+    basis === 'open'
+      ? typeof open === 'number' && Number.isFinite(open) && open > 0
+        ? open
+        : null
+      : view.prevClose
+  const change = ltp !== null && from !== null ? ltp - from : null
+  const openMissing = basis === 'open' && from === null
   return {
     ...view,
     change,
-    changePercent: change !== null && prevClose !== null ? (change / prevClose) * 100 : null,
+    changePercent: change !== null && from !== null ? (change / from) * 100 : null,
+    openMissing,
+    note: openMissing ? OPEN_UNKNOWN : null,
   }
 }
 

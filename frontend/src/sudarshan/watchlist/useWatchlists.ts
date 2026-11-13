@@ -71,14 +71,15 @@ export function useWatchlists() {
   })
 
   const refresh = useCallback(
-    () => client.invalidateQueries({ queryKey: WATCHLISTS_KEY }),
+    // Exact: the v2 reads live under this key as a prefix, and a change here is not theirs.
+    () => client.invalidateQueries({ queryKey: WATCHLISTS_KEY, exact: true }),
     [client]
   )
 
   /** Change the lists on screen at once, past any read in flight. */
   const patch = useCallback(
     async (change: (lists: Watchlist[]) => Watchlist[]) => {
-      await client.cancelQueries({ queryKey: WATCHLISTS_KEY })
+      await client.cancelQueries({ queryKey: WATCHLISTS_KEY, exact: true })
       client.setQueryData<Watchlist[]>(WATCHLISTS_KEY, (lists) => lists && change(lists))
     },
     [client]

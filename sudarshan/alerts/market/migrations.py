@@ -137,8 +137,51 @@ def _v1(conn: Connection) -> None:
         conn.exec_driver_sql(sql)
 
 
+#: ``list_key`` is the OpenAlgo list's own created_at text, taken at creation: OpenAlgo hands a deleted
+#: list's id to the next list made, so ``ref`` alone could name another list (review M4).
+#: Step 2 (M8.14, list alerts): a group is one definition over a watchlist; its members are
+#: ordinary alert rows that point back with ``group_id``. Nothing is backfilled: every existing
+#: alert has no group (NULL), and no CHECK constraint is written (SQLite cannot alter one later;
+#: the store and groups.py hold the allowed values).
+V2 = (
+    """CREATE TABLE IF NOT EXISTS alert_group (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        principal TEXT NOT NULL,
+        ref TEXT NOT NULL,
+        name TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        params TEXT NOT NULL,
+        frequency TEXT NOT NULL,
+        candle_min INTEGER,
+        cooldown_s INTEGER NOT NULL DEFAULT 0,
+        ends_at INTEGER,
+        status TEXT NOT NULL,
+        status_reason TEXT NOT NULL DEFAULT '',
+        delivery TEXT NOT NULL DEFAULT 'first_then_digest',
+        digest_min INTEGER NOT NULL DEFAULT 5,
+        note TEXT NOT NULL DEFAULT '',
+        covered INTEGER NOT NULL DEFAULT 0,
+        left_out TEXT NOT NULL DEFAULT '[]',
+        synced_version TEXT,
+        synced_at INTEGER,
+        list_key TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        version INTEGER NOT NULL DEFAULT 1
+    )""",
+    "CREATE INDEX IF NOT EXISTS alert_group_principal ON alert_group (principal, ref)",
+)
+
+
+def _v2(conn: Connection) -> None:
+    for sql in V2:
+        conn.exec_driver_sql(sql)
+    add_column(conn, "alert", "group_id", "INTEGER")
+    conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS alert_group_id ON alert (group_id)")
+
+
 Step = tuple[int, Callable[[Connection], None]]
-STEPS: tuple[Step, ...] = ((1, _v1),)
+STEPS: tuple[Step, ...] = ((1, _v1), (2, _v2))
 LATEST = STEPS[-1][0]
 
 

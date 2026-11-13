@@ -360,6 +360,41 @@ mode). A file from a newer release is refused untouched, in the owner's sentence
 `tests/test_watchlists_migration.py` (missing, populated copy forced back, newer, the app store
 opening the result).
 
+## F1 - the v2 client (`frontend/src/sudarshan/watchlist/v2/`)
+
+The phone's half of the contract, with no screen yet. `api.ts` calls any op by name through the
+route `types.ts` gives it (`callOp`), unwraps the envelope and throws `WatchlistsError` with the
+server's own sentence, or the page's words when there was no answer or the answer was not the
+bridge's; a status code or an address never reaches a screen. `useListView.ts` holds the query keys
+and the reads: `useV2State` is the only read made while the switch is off, and `useListView` and
+`useLists` wait for it to say `enabled`. The two versions and what each is used for are
+under "F fixes after the mid-point review" below. `usePush.ts` joins the owner's
+room after each connect with an ack, collects pushes for 200 ms into one read (`applyPushes`),
+and reads everything again after a reconnect;
+nothing is read on a timer. `useOverlay(v2)` knows `?sheet=lists` only when v2 is on, so Back closes
+a sheet first as before and a bookmarked address reads as nothing while it is off. Tests run against
+`mockBridge.ts`, a stand-in that answers the contract's routes and reads a request as the bridge
+does (see the fixes below). A write sends its path fields in the body as well as the path.
+
+
+## F2 - seven favourite tabs and the All lists sheet
+
+With v2 on, `Watchlist.tsx` hands `ListTabs` a `ListStrip` in place of its tab row (the options menu
+stays): the favourites in slot order, up to seven, numbered by position, each at 48 dp, the open one
+bold with a tick as well as tinted, a lock, a ranking glyph or a flag with words for a built-in,
+ranked or flag list, and the All lists button outside the scrolling part so it is reachable at every
+width. Until anything is pinned the strip shows the first seven own lists in OpenAlgo's order
+(`tabsFor`, computed, never stored); an own list opened from the sheet that is not a favourite gets
+a last tab so the open list always has one. `AllListsSheet` (`?sheet=lists` through
+`useOverlay(true)`, so Back closes it first) reads the `lists` op only while open and has the blocks
+Favourites (move up and down), Your lists, Fed by a screen, Built-in (locked), Ranked by Upstox and
+Flags, each row 56 dp with its kind in words and a star (`aria-pressed`) that writes the slots with
+the `favourites` version it read and reads state and lists again after, a refusal shown in the
+server's words. At seven the star is off and the sheet says so. The 500 ms tap guard is
+`BottomSheet`'s. While v2 is off nothing renders and only the state is read. Tests:
+`v2/favourites.test.tsx` against `mockBridge.ts`, and one in `Watchlist.test.tsx` for the off state.
+Not yet: opening the rows of a non-own favourite (placeholder), Import from TradingView (F15).
+
 ## W4 - the bridge (`blueprints/sudarshan_watchlists.py`, `ops/`, `refs/`, `bridge/`, `words/base.py`)
 
 The owner's routes under `contract.API_PREFIX`, built from `contract.OPS`, one for each op that has a
@@ -499,6 +534,222 @@ the epoch milliseconds of that write, one more for each write after it).
 instrument key (cash rows carry it, null otherwise), and a symbol the master lacks is `expired`
 and named in `missing` (with the master not loaded nothing is called expired). Prices are never in
 `view`: the page streams them. Tests: `tests/test_watchlists_view.py`.
+
+## F4 - marks
+
+Five marks, used by sections now and by flags later, each a shape and a colour and always drawn with
+its name: 1 `--mark-1` #B0246B circle, 2 `--mark-2` #5E7800 square, 3 `--mark-3` #7A3B1D triangle,
+4 `--mark-4` #00796B diamond, 5 `--mark-5` #8E2F8E star; mark 0 is no mark. `watchlist/marks.tsx`
+draws the glyph (`MarkGlyph`, an SVG hidden from a screen reader because the name is beside it) and
+holds the names. The five mark tokens are pinned in `theme.test.ts` and are not in the rules file's
+token table (`.claude/rules/sudarshan.md` is unchanged). That test computes, and does not hard-code,
+that each reads at 3:1 or better as a graphic on white and on the page colour #F4F6F8, and that each
+is at least 20 CIELAB (CIE76) units from every other colour in `theme.css` and from the other marks.
+The upstream `--chart-*` series colours are left out of that comparison: they draw chart lines only
+and are not in the D look's table (`--mark-4` is 9.6 from `--chart-4` and `--mark-5` 16.3 from
+`--chart-3`). The colour-blind mode (`data-cvd`) changes none of them; a test fails if its block
+names a mark.
+
+## F3 - sections on the phone
+
+With v2 on and an own list open, `Watchlist.tsx` reads the `view` op for it (`useListView`) and hands
+`LiveList` a section layout (`v2/sections.ts`: `groupsOf`, `useCollapsed`, `writeSection`). The rows
+are the OpenAlgo items as before, so prices stream exactly as they did, but `WatchlistRows` draws
+them in the view's order: the symbols with no section first, then each section by position under its
+header. An item the view does not list yet (the two reads crossed) is shown with the unsectioned;
+follow rows are F11's and render nothing. Editing (Reorder or remove) stays the flat list until W8's
+`arrange` has an F-side. With the switch off, a built-in or ranked favourite, or no `view` yet, the
+page draws the flat rows it always did. `SectionHeader.tsx` is a 48 dp row in the card: a 4 px stripe
+and the glyph of its mark (none for mark 0), "Banks · 8", a chevron whose accessible name is Collapse
+or Expand, and a 48 dp menu button. Folded sections are kept per list in `localStorage`
+(`sudarshan-watchlist-collapsed`), every read and write inside try/catch, so a refused store costs
+only the memory.
+
+The section menu, the name box (New section, Rename) and the remove confirmation are bottom sheets
+(`SectionMenus.tsx`) opened through `useOverlay` as `?sheet=section`, `section-name` and
+`section-remove` with `&section=<id>`, so Back closes them first and `BottomSheet`'s 500 ms guard
+covers them. The menu has Rename, Mark (None and the five, each 48 dp with glyph and name, the current
+one ticked and `aria-pressed`) and Remove section. The list menu gains New section for an own list
+only (off with its words at 20 sections; a built-in list is offered none of it) and, with v2 on, its
+Radix menu takes the open guard too. Every write sends the `version` the last `view` answered and the
+list is read again whatever the answer; a refusal shows the server's sentence (a `conflict` says the
+list is shown again), never a status code; a name over 40 letters and a 21st section are refused
+before sending with "Section names can be up to 40 letters." and "A list can have 20 sections.", and
+the second is also shown when the server answers `limit`. Moving or copying symbols and sections
+between lists is F5's. Tests: `v2/sections.test.tsx` against `mockBridge.ts`.
+Not covered: Back does not close the list menu itself (a Radix dropdown, not an address entry); the
+sheets it opens do.
+
+## F5 - arranging, copying and moving on the phone
+
+With v2 on and an own list open, "Reorder or remove" edits a draft (`ArrangeSheet.tsx`, `useArrange`; the
+pure parts in `v2/arrange.ts`). Symbols keep their 48 dp up and down, now inside their section; each
+symbol gains "Move to section" (a sheet of No section and the list's sections, `?sheet=to-section&ci=<item>`)
+and each section gains up and down for the whole section. "Save order" sends one `arrange` with the draft's
+section order, every symbol's section and the item order (No section first, then each section), on the
+version the last `view` answered; Remove stays an immediate write as before, and the draft drops that
+symbol. A `conflict` shows its sentence, reads the list again and starts the draft over from it; the
+`failed` sentence is shown as it comes and Save stays on for another try. The symbol sheet gains "Move to
+section" (written at once, one `arrange`) and "Copy to another list"; a section's menu gains "Move to
+another list" and "Copy to another list". All four open the list picker (`ListPicker.tsx`,
+`?sheet=to-list&ci=<item>` or `&section=<id>`, `&move=1` for a move): the owner's other lists as "Swing
+- 24 of 250", and New list (off at 50 lists, with the server's sentence). A list picked asks for an optional
+section of it (read through `view`, whose version is then sent as `version`) and sends one `copy`, with `move`
+only for a move. The 250-symbol room is checked before sending from the target's own rows when read (so
+symbols it already holds do not count), in W8's sentence. After every write the affected lists and the
+page's lists are read again whatever the answer. A built-in, ranked or flag list shows "A built-in list
+cannot be changed. Make a copy to arrange it." where its rows would be. With the switch off the page is as it was
+and the F5 sheets are unknown to the address. Follow rows are F11's and are not moved. Tests:
+`v2/arrange.test.tsx`.
+
+## F6 - the View sheet and sorting
+
+With v2 on and an own list open, the list menu gains "View" (`?sheet=view`, `ViewSheet.tsx`): Sort by (List
+order, % change, Price, Name, Exchange), High first or Low first (A to Z or Z to A for names) and Change from
+(Previous close, Today's open). A pick is shown at once and saved per list with one `pref` (`sort`,
+`descending`, `basis`; `held` is F7's and is never sent), so phone and tablet agree, and is read back from
+`view`'s `pref`; a refusal puts the pick back and shows the server's sentence. When the choice is not the
+default one line under the tabs says what applies: "Sorted by % change, high first, at 10:42" with
+"Sort again" (48 dp), and "Change from today's open". A sort is a snapshot (`sort.ts` ranks, `useSortOrder.ts`
+keeps the ranks): rows are ordered when the list opens (once its first prices have been read, for a price
+sort), when the owner picks a sort or basis and when he taps Sort again, never on a tick; name and exchange
+sorts show no Sort again. Rows sort inside each section, a row with no price goes last in both directions, a
+tie keeps list order, a row added since stays at the end of its group until the next snapshot, and editing
+shows the list's own order. Change from today's open is `ltp - open` from the snapshot's `open` field
+(`rowView(..., 'open')`; zero or missing is not known, never the first trade the page saw): the row shows a
+dash with "Open not known yet", the sheet says how many rows lack it, and a row without one is read once more
+at its first tick after the opening (`useLiveRows.ts`; the snapshot already reads on the market-open event).
+The list stays in LTP mode. The seam for a list longer than 250 rows is `needsFullSnapshot` in `sort.ts`
+(F9 reads one snapshot of every row there before ranking); own lists stop at 250, so it stays shut for them. With the
+switch off the page is as it was. Tests: `sort.test.ts`, `sort.view.test.tsx`.
+
+## F7 - the holdings line
+
+The View sheet's slot (`extra`) now holds "Show what I hold" (`HeldSwitch` in `HoldingLine.tsx`): a 48 dp
+switch whose state is the word On or Off, saved per list with `pref` (`held`, sent with `sort`,
+`descending` and `basis`) and read back from `view.pref`; a refusal puts it back with the server's sentence.
+Off is the default, and with it off the page is as it was and nothing is read. With it on, a row's second line
+adds "Holding 25" (the quantity held, with a briefcase) and "Position +65" or "Position −30" (the net,
+signed, the word kept), in ink and not in the up or down colour; nothing shows for zero. Matching
+(`HoldingLine.tsx`): a cash symbol (NSE, BSE) takes its holding by ISIN, so a BSE holding shows on the NSE
+row (the view row carries the ISIN; a holding the broker gave without one, as the sandbox does, is matched by
+exchange and symbol); a contract (any other exchange) never takes a holding and is never matched by ISIN. A
+position is matched exactly by exchange and symbol and summed over its products. Data (`useHeld.ts`):
+OpenAlgo's `/holdings` and `/positionbook` through `useBookSync` and nothing else: once when the switch turns
+on, after an order event (holdings only after one that can change them), on a reconnect, on coming back to the
+page and at the books' own 45 s interval while a market is open; no timer of its own and nothing stored; with
+the switch off, or in a family render, nothing is read. `LiveList` takes `readOnly` (a family render): it never
+reads the books, never draws the line and shows no switch, so the family view is a prop and not a fork. One
+edit outside the page: Upstox's holdings mapping (`broker/upstox/mapping/order_data.py`) now passes the
+`isin` it already receives, only when it is there, because the holdings payload dropped it. Tests:
+`held.test.ts`, `held.view.test.tsx`.
+
+## F8 - flags and notes on the phone
+
+With v2 on, a row shows its flag's glyph (the F4 marks) before the name and a note icon after it when a note
+exists; a screen reader hears "Flag: Breakout. Has a note." (the glyph is decorative, the words are in the
+row). Markers come from the `view` rows (`flag`, `has_note`, `expired`; `v2/marks.ts`, `marksOf`) and the
+names from `state.flag_names`; the note itself is never in a view. The symbol sheet (`SymbolMarks.tsx`) reads
+`symbol` when it opens and adds Flag (`FlagPicker.tsx`: a radio group of the five flags and None, each 48 dp
+with its glyph and name), Note (`NoteField.tsx`: a text field, "123 of 500", Save, "Saved"; a 501st character
+is refused before anything is sent with the server's sentence, "A note can be up to 500 characters.") and In
+lists ("Swing, Momentum, NIFTY 50 (built-in)", the `symbol` answer's `lists`, a built-in one gets the suffix).
+Every write is one `mark` carrying the symbol's `version` as `symbol` answered it (null when the symbol has no
+row); a refusal puts its own sentence on the sheet, a `conflict` included, and the symbol, the flag lists
+and every open view are read again either way, so the next write names the version the last one made.
+"Notes and flags are yours: the family never sees them." stands under the Note. In All lists the Flags block
+lists each flag as "Breakout · 7" (the shape and the name), says "Flagged across your lists. Flag or unflag a
+symbol from its sheet.", and holds Rename flags (five fields of up to 24 letters, one `flags` write on
+`versions.flags`) and Clear expired (`expired_clear` on the same version; the answer's own words, "Cleared 2
+expired contracts." or "There are no expired contracts to clear.", are shown). Picking a flag list opens it
+(`pages/Watchlist.tsx`): its rows are `view`'s, newest flag first, read live like any list but with no Add,
+no edit mode and no Remove. A flag or note on a contract no longer in the master shows "Expired" with a clock
+on the row and in the sheet; nothing is deleted until Clear expired. A family render (`readOnly` on `LiveList`,
+`SymbolSheet` and `AllListsSheet`) has no markers, no flag picker, no note field, no rename, no Clear expired and
+no Flags block at all, and reads no `symbol`: the block's rows are the owner's alone, a step past the design,
+which names only rename. With the switch off nothing here is drawn or read. Tests: `flags.view.test.tsx`,
+`pages/Watchlist.flags.test.tsx`.
+
+## F fixes after the mid-point review
+
+Five findings of the mid-point review (H2, M2, M3, L11, L12) and its W5 bullet, all in the phone.
+
+- **Where fields travel (H2).** `callOp` follows the contract and the bridge: a GET or DELETE
+  sends its fields (the path's own excluded) in the query string, every other method sends the whole
+  request as a JSON body. `mockBridge.ts` reads a request the same way and refuses what the bridge
+  would not see (a body on a GET or DELETE, a query on any other method, a non-primitive query
+  value), and hands its handlers query values as text, as the wire does. `api.test.ts` drives every
+  op in `OPS` through it. Remove section no longer answers `invalid`.
+- **Two versions (M3).** The lists version (`state.versions.lists`, `lists.version`, every push's `v`)
+  is `"<boot>:<n>"` and is compared for equality only; it decides whether a push says anything new
+  (`applyPushes` skips a push whose `v` is the last one seen, from a `state` or `lists` answer or a
+  push; never a flags or favourites push, whose lists version does not move; never while a read is in
+  flight, which may not have seen the change). A list's own version in `view` is a whole number as
+  text ("0", then epoch milliseconds, one more per write): the page uses it as the version a write is
+  decided on, and `keepNewer` orders two view answers by it as numbers ("0" is never taken for older,
+  because a list made anew after its id was reused starts there). A write's own push is skipped since lane W sends `lists_version` in the answer (see
+  "F - the push's refs and the write's lists version").
+- **A push refreshes what the page shows (M2).** The rows and tabs come from OpenAlgo's lists
+  (`WATCHLISTS_KEY`), so a push of why `items`, `lists` or `arranged` that names an own list (or
+  `lists`) reads them again beside the views it names; a symbol added on /trading shows on the
+  phone. A push names every list it changed: `refs` when present, else `ref`, and "lists" alone reads
+  every open view. The generated `Push` carries `refs` now (the local `PushNames` is gone). A
+  reconnect reads `WATCHLISTS_KEY` too. Sections, rows and preferences read the named views only.
+- **A record refusal (L11).** When `state` answers `record` (the store is newer than this app, or
+  cannot be read) the page shows the server's sentence above the lists, which keep working as
+  before; the switch off, an unreachable bridge or a busy one say nothing.
+- **Exact keys (L12).** `WATCHLISTS_KEY` is a prefix of every v2 key, so every invalidation and
+  cancel of it is `exact` (`writeThenRead`, `useWatchlists`, the screener push): a write re-reads
+  only what it changed. `V2_KEY` stays where it is.
+- **W5 decision.** "`ref` is the one ref changed, else `lists`" is no longer all a push says: the
+  phone reads `refs` and falls back to `ref` only for a bridge that does not send it.
+
+## F - the push's refs and the write's lists version
+
+Lane W is merged into lane F (no conflicts; the duplicate M8.4 to M8.8 rows of `STATUS.md` are one row each).
+- **`refs`.** The local `PushNames` type is replaced by the generated `Push`. `refsOf(push)` returns
+  `push.refs` when it is an array: every ref the write changed, each once, in order. An empty one is
+  lane W's two cases (a change that touched no list's members, or one whose list the hook could not
+  tell), so a push from another screen with an empty `refs` reads every open view as the "lists"
+  fallback did, except a push whose `why` is `favourites` or `prefs`, which reads no list view (flags
+  and favourites still read their own state and counts by `why`). Only where `refs` is absent (an older
+  server) it reads the single `ref`; `isPush` accepts both shapes. A move's push names the target and
+  the source and each is read, and no other.
+- **`lists_version`.** Every write goes through `callOp`, which counts a write in flight and, when its
+  answer (`Done`, `CopyDone`, `TvDone`) carries `lists_version`, notes it (`v2/ownWrites.ts`). A push
+  with that `v` is the push of this page's own write: `applyPushes` skips it and reads nothing more
+  (the write already re-read what it changed), whichever of the two arrives first. A push is held
+  while a write of this page is in flight (at most 3 s) so the answer can be noted first, then read
+  if it is not ours. A push from another screen has another `v` and is read as before; an answer
+  without `lists_version` notes nothing. A flags or favourites push is never skipped (their own
+  versions). Noted versions are dropped when matched or after 30 s.
+- **Tests:** `useListView.test.tsx` (the refs and the fallback), `ownWrites.test.tsx` (own push after
+  and before the answer, another screen's push, no `lists_version`, the bound, two refs, empty refs).
+
+## F9 - the cap, the window and last ticks
+
+With v2 on (`LiveList` passes `flagNames`), the page follows at most 250 instruments on the pooled socket, and
+`follow.ts` (pure) counts them in this order, stopping at 250: the open sheet's instrument; the underlying of
+each follow row on screen, once each (an input of `useLiveRows`, filled in F11); then the rows in display order,
+a strike row counting 2 (an input, filled in F12). A row that does not fit whole is not followed, and nothing
+after it is. A row not followed shows its last figure, grey, with a clock and "Price at 10:42 · not real-time:
+this list follows 250 prices at most" (and "outside the 250 followed" to a screen reader); with no read yet it
+says "No price read yet". It is never re-read on a timer: the quiet re-sync of `useLiveRows` takes followed rows
+only, and the snapshot's own events (open, reconnect, market opening or closing, back after 15 s) still read
+the whole list. A list longer than 250 (a built-in list, from F10; tests use a synthetic one) follows a window
+of 120 rows (`useFollowWindow.ts`): centred on the first visible row, recomputed 300 ms after the scrolling
+stops (every row of such a list carries `data-row-index`, read from the page), and moved only when the visible
+rows leave the window's middle half, so a move swaps about 30 keys. Rows outside it say "not real-time: this
+list follows 120 rows at a time" and "outside the 120 followed". The window is over the rows as they are
+shown, so a sort moves it. A row that leaves the followed set keeps its last WebSocket tick (`lastTicks` in
+`useLiveRows`, one entry per row of the open list, dropped with the list) and shows it with the time of it; the
+newer of that tick and the latest read wins, so it is never the read made when the list opened if a tick came
+after. One REST snapshot covers the whole list, `QUOTE_KEYS_PER_CALL` (500) keys a call, the calls made at
+once so every row is read at one instant. A price sort on a list longer than 250 calls `readAll` first and
+ranks every row on that read alone (`entryFromSnapshot`, never a tick): the line says "Sorted by % change, high
+first, at 14:00, from prices read at 14:00". A failed read takes no snapshot and the list keeps its order until
+Sort again. With the switch off nothing here applies: every row is followed, as it was. Tests: `follow.test.ts`
+(hand-typed vectors), `useLiveRows.follow.test.tsx`, `follow.view.test.tsx`.
 
 ## W7 - sections (`store/sections.py`, `ops/sections.py`, `words/sections.py`)
 
@@ -705,6 +956,212 @@ so a favourite never follows another list that was handed a deleted list's id. T
 of schema 1 itself (added in `schema.py`, so the W2 migration's create path makes it) because schema
 1 has not shipped in any release; there is no upgrade step for it.
 
+## F17 - Alert on this list or section
+
+The list menu (the options button beside the tabs) offers "Alert on this list" for the list on show,
+and each section's menu "Alert on this section". Each opens the Alerts page's list form through
+`listAlertAddress({ ref, name, count, fed })` (`alerts/useAlertOverlay.ts`) and builds nothing else
+by hand; `watchlist/v2/listAlert.ts` decides the offer (`offerFor`) and `useAlertOffers` gives the
+page its offers.
+- **What it opens with.** The ref of the list on show (`list:<id>`, `preset:...`, `flag:<n>`), or a
+  section's `list:<id>/section:<id>` (the form the alert service reads); the name; the row count (the
+  list's rows, or the section's own count). A built-in list whose tab has no count yet passes 0, and
+  the form's heading, which is only a hint, says so; the service's answer is the truth.
+- **Off, with the reason, never hidden.** One sentence, the first that applies: the watchlist features
+  off ("Alerts on a list need the new watchlist features, which are switched off on the server."); a
+  ranked list ("A ranked list changes with every read. Set the alert on a list or a built-in list
+  instead."); market alerts off (the Alerts state's `enabled` is false: "Market alerts are switched
+  off on the server, so a list cannot be watched."). An unread Alerts state offers the item and the
+  Alerts page says what it finds. With the v2 switch off the menus are as before apart from this
+  disabled item and its sentence.
+- **`fed`.** The phone already knows which lists a screener screen fills (`useFedLists`, from the
+  screener state it reads already), so `fed=1` is added for an own list (and its sections) a screen
+  feeds. No server call was added; a built-in or flag list is never fed.
+- **A ranked list** (`ranked:` refs) arrives in a later change; the refusal is in place for it.
+- **Tests:** `v2/listAlert.test.tsx` (each address, the ranked refusal, the three off states, the
+  500 ms guard on the section sheet), `pages/MarketAlerts.listAlert.test.tsx` (the address opens
+  lane A's form, headed "Every symbol of Swing (24)").
+
+
+## F10 - built-in lists on the phone
+
+A built-in list (`preset:<id>`, from W12) opens like any list: from the All lists sheet (the group
+"Built-in (locked)", after the own lists, each with its count, or none while the master is not loaded,
+and its note such as "As of 9 Nov 2026") or from a favourite tab. Nothing assumes the three lists of
+W12: the page reads whatever `lists.presets` names, so W13's typed lists arrive with no phone change.
+
+- **Rows and words.** The page reads the list from `view` alone, as it does a flag list (`itemsOf`), so
+  there is no OpenAlgo item behind a row. The tab carries the lock glyph and a label for screen
+  readers ("built-in, locked"); a list opened from the sheet that is not a favourite gets a tab once
+  its view has said its name. Over the rows (`PresetLine.tsx`) the server's `lines` are shown as sent,
+  in order, each once. F9 has no list-level line of its own: it marks each row outside the followed
+  window ("not real-time: this list follows 120 rows at a time"), which stays, since a row that is not
+  moving must say so. So over 250 rows the server's window line is shown once and the rows carry their
+  own marker.
+- **What is absent, not disabled.** The header Add, edit mode and move, remove in the symbol sheet,
+  sections and "New section", and in the list menu Rename list, Reorder or remove and Delete list
+  (`ListTabs` `locked`). What works: the View sheet (sort and change basis, saved under the built-in
+  list's ref by `pref`), flags and notes, the holdings line, the cap and window of F9, and "Alert on
+  this list".
+- **Make a copy** (48 dp, under the lines) opens the existing name dialog (`NameDialog`, mode `copy`)
+  prefilled "<name> (my copy)" (cut to fit 64 letters), behind the 500 ms open guard (`?sheet=copy`,
+  v2 only). It sends one `copy` with `keys`: every row in the order shown at the tap, after a sort
+  too. The server cuts at 250 and says so in `CopyDone.words`, shown as a toast as sent (the page's own
+  "Copied N symbols to NAME." only when the server sent none). When it is done the lists are read
+  again and the new list is opened. A refusal (the 50-list cap) is shown in the dialog, in the
+  server's sentence, and the dialog stays open.
+- **A list that cannot be shown.** The master not loaded (`failed`) and an unknown id (`gone`) show
+  the server's sentence in place of rows (with Try again for the first only), never an empty list that
+  looks real, and no Make a copy.
+- **Alert on this list without a count.** A built-in list whose count is not known passed 0 and the
+  form read "(0)". `listAlertAddress` (lane A's `alerts/useAlertOverlay.ts`, a small edit marked
+  "lane F (F10)") takes `count` as optional and leaves it out of the address when not known; the page
+  passes the count the open view reports (`total`), else the tab's, else none.
+- **With the switch off** the page is as before: the new code is reached only through `v2`.
+- **Tests:** `pages/Watchlist.preset.test.tsx` (the All lists group with a known and an unknown count,
+  the lock and the lines once each, the window line once over 300 rows, no edit control, sort, flags
+  and notes, Make a copy in the order shown after a sort and the server's words, the refusal, the
+  500 ms guard, the `failed` and `gone` sentences, the alert address with and without a count, the
+  switch off), `alerts/useAlertOverlay.test.tsx` (the address with no count).
+
+## F - the list menu acts on the list on screen
+
+Every item of the list menu acts on the list on screen or is absent, decided once in
+`watchlist/v2/menuRules.ts` (`menuFor`, keyed on the ref kind of the open list; a kind not written
+there offers nothing that edits). An own list keeps its menu, a built-in list keeps F10's, a flag list
+offers "Rename this flag" (the `flags` op, the five names with the flag's own as typed and the others as
+the state sent them, on the flags version read, the server's sentence shown on a refusal) and "Alert on
+this list" but no Reorder or remove and no Delete list, and a ranked list offers nothing that edits it.
+Delete list's confirmation names the list and takes its id from the list on screen when it opened; if
+another list comes on screen while it is open it closes and sends nothing. The same rule is held for what
+else used to reach the own list behind another ref: the Add sheet and the header and empty-state Add,
+sections, New section, move, copy to a list and the View of an own list (all now tied to "no other list
+open"), and a ranked or unknown favourite with no tab no longer shows the own list's rows. A sheet opened
+by address that acts on the own list while another list is open is closed. Tests:
+`pages/Watchlist.menu.test.tsx`.
+
+## F11 - ATM and current-month FUT rows
+
+The phone draws the rows W15 stores (`view.follow`) and keeps each on the contract the server says it
+stands on now. `followRows.ts` is the pure part (words, form choices, request bodies and
+`FollowResolver`), `useFollowRows.ts` its React wiring, `FollowRows.tsx` the row, `FollowRowSheet.tsx`
+the form.
+- **Where they are.** First in their section (or in No section), above the fixed symbols, as the view's
+  order says; they do not take part in a sort and are not in edit mode's arranging (change or remove one
+  from its sheet). A row's contract is an item of the list with a negative id (`-<row id>`), so it is
+  subscribed, snapshotted and counted in the 250 like any row; the open sheet's contract that the row has
+  moved off is held as one more item with its own id for as long as the sheet is open. Only the open own
+  list shows them, never a family render, and only with the switch on.
+- **A row.** Title "NIFTY 25,900 CE" (the resolved strike; "NIFTY FUT" for a future; "NIFTY ATM+2 CE"
+  while it has no contract), a chip ("ATM", "ATM+2", "ATM-1", "Current-month FUT", "Fixed strike"), the
+  detail "NFO · 24 Nov 2026 · follows NIFTY", the contract's price and change as any row. The ATM chip's
+  help text is in the row's screen-reader text, in its tooltip and on the row's sheet. The one line under
+  a row, in this order: the page's note while it lasts (60 s): "Moved from 25,850 CE at 10:12 (NIFTY
+  25,931)", composed here from the strike last shown and the answer's price and time (the server sends no
+  such words), or the server's "Rolled to ... at HH:MM" as sent (found by its first words, shown for 60 s
+  from the answer); else the server's words for waiting, closed and missing, as sent; else, while the row
+  has no contract, a sentence for a read that failed. A move is not noted across a roll, for a fixed strike
+  or for a future.
+- **When it asks again.** The page follows each underlying once (`follow.underlyings`, counted before any
+  row) and the resolver compares the latest websocket tick with the band of the last answer (open at both
+  ends, as the server's). A tick on or past an edge asks `resolve`; so do the first tick after "waiting",
+  one timeout aimed at the earliest `valid_until` (sent with `held` null, as after a roll; a longer wait
+  than a timer can hold is aimed again), a reconnect (the socket's epoch moving) and the page coming back.
+  One call for every row that needs it, at most 100; a row has one call in flight (a reconnect or return
+  that meets one is asked again when it lands); a band exit or the first price keeps to one ask in 2 s a
+  row, and the tick that is turned away is simply the next tick's business. Nothing repeats on a clock:
+  30 minutes with no band exit and no `valid_until` ask nothing (tested). `held` is the strike the row
+  last showed; the price is the underlying's tick, or null with source null for the server to ask the feed.
+- **The sheet** of a row stays on the contract it opened with. When the row moves it says "This row now
+  follows 25,950 CE" with Show; Buy and Sell open the existing ticket for the contract shown (the ticket
+  and its 500 ms open guard are unchanged, nothing was added to the order path). Edit and Remove are on the
+  sheet; a row with no contract opens its form on tap. The sheet has no flags, notes, pin, move or copy:
+  those belong to the contract, which the row does not own.
+- **The form** (`FollowRowSheet`, `?sheet=follow`, carried by the history entry like the order ticket and
+  never reopened by a reload): Expiry (Nearest, Next, This month's, Next month's; a future offers the two
+  monthly ones), Strike (ATM, ATM+1 to +10, ATM-1 to -10), Side (CE, PE), a line saying what the row will
+  follow, Add row or Save, and Remove this row after asking. Each write carries the list's version, is
+  sent once however it is tapped, and the list is read again after it; the server's words are shown as
+  sent. It is offered by the symbol sheet of an NSE or BSE stock or index with options in an own list
+  ("Add ATM row", "Add current-month FUT row"), the row going into the symbol's section. A future of an
+  underlying with options but no futures is refused by the server in words.
+- **The seam for F13.** Open `{ kind: 'follow', form: { mode: 'add', kind, underlying, exchange,
+  sectionId } }` through the page's `open` or `swap` (`FollowForm` in `followRows.ts`; `exchange` is
+  `NSE_INDEX`, `NSE`, `BSE_INDEX` or `BSE`); nothing else is needed.
+- **Decision: no preview from the server.** The design reads the preview line from "one `resolve` of a
+  draft", but `resolve` takes stored row ids only, so before the row exists there is nothing to ask. The
+  form's line says what the row will follow in its own words; the server's "Now: ..." line is the row's
+  own once added. Tests: `followRows.test.ts` (the rules, the resolver), `follow.rows.test.tsx` (rows, ticks,
+  the sheet, the form, the switch off).
+
+## F12 - strike rows and the strike sheet
+
+A strike row (`kind: strike_pair`, W15) is one row that follows the CE and the PE of one strike. The form of
+F11 gains Side "Both, as one row" (an ATM row sends `strike_pair` with `strike_rule: atm` and the offset, no
+side). `StrikeRow.tsx` draws it as three blocks: the CE's price and signed change on the left, the strike
+and expiry in the middle ("25,900 · 24 Nov", with the chip), the PE's on the right, each price with its own
+tick arrow; the line under it is a follow row's. The resolver keeps `Shown.pair` (both legs; `contract` is
+the CE); a pair the master lacks a side of answers `missing` with both contracts null, and the row and the
+sheet say the server's words and have no prices. The row is two items of the list (the CE at `-rowId`, the
+PE at `-(PE_BASE + rowId)`), counts 2 in `follow.ts` through `FollowOptions.strikes` and follows both in
+Quote mode through `FollowOptions.quote`: `useLiveRows` runs a second `useFrameLines` in Quote mode for the
+keys in `quote`, and an instrument is in exactly one of the two sets (with the option off nothing changes).
+- **The sheet** (`StrikeSheet.tsx`, pure parts in `strikeSheet.ts`): both legs' price and change, OI, IV,
+  Delta, Theta, Gamma and Vega, "Straddle 340.55", Buy CE, Sell CE, Buy PE and Sell PE (the existing ticket
+  through the page's `onOrder`, the contract's lot and tick from the server's answer, nothing added to the
+  order path; the sheet's own 500 ms guard covers the first taps), Open option chain (`chainPath`), Edit and
+  Remove. OI change is not shown. IV and Greeks are `lib/optionGreeks.ts`: the forward is the strike plus the CE
+  price minus the PE price (the chain's parity), a leg's price its mid when it has a book else its last, time
+  to expiry to 15:30 IST of the expiry date. "IV not worked out: no price on one side yet." stands in their
+  place while a side has no price. The sheet stays on the contracts it opened with ("This row now follows
+  25,950" with Show), those being followed too while it is open.
+- **Other expiries.** The next four expiries after the row's, CE and PE of the same strike, tick while the
+  sheet is open: they are items of the list while it is open, in `follow.sheet` (counted first in the cap)
+  and Quote mode, and gone when it closes. Their contracts come from the server's `strikes` op since F13 (see
+  "F13 - the search sheet"); F12 had read the page's own instrument search before that op was on this branch.
+- **Two things differ from the design.** The option chain page has no interest-rate preference in this fork
+  (it prices with the default 0, as the server does), so `CHAIN_RATE_PCT` is 0 and is the one place that will
+  follow a preference. The other expiries' change comes from the one snapshot read when they join the list.
+- **The seam for F14.** Open `{ kind: 'follow', form: { mode: 'add', kind: 'strike_pair', underlying,
+  exchange, sectionId, fixed: { strike, expiry } } }` (`FollowForm` in `followRows.ts`; `expiry` is an
+  `ExpiryRule`, nearest when absent): the form shows "Strike 25,900, kept for good" and sends `strike_rule:
+  fixed` with the strike. Tests: `strike.rows.test.tsx`, `strike.sheet.test.tsx`, `strikeSheet.test.ts`.
+
+## F13 - the search sheet
+
+With the switch on, `?sheet=add` is `SearchSheet.tsx` (M8.18), not today's Add sheet; with it off the page renders
+`AddSymbolSheet` exactly as before. The pure parts are `searchSheet.ts` (the chips, the group headings, the exchange of
+an underlying) and `recents.ts`.
+- **What it asks.** One `search` op per search the owner typed or chip he touched: `q`, `seg`, `limit` 50 and `list`
+  (the open list's id, so the server marks `added`). Typing waits 250 ms for a pause and starts at two letters; a
+  chip sends at once; a request that is overtaken is aborted. Nothing asks on a clock, and the sheet sends no `p`,
+  so a query that needs the underlying's price (ATM) is answered by the server in its own words.
+- **What it shows.** The field "Symbol, name or contract"; the chips All, Stocks, Futures, Options, Indices and
+  Commodities (48 dp, scrolling sideways, the chosen one with a tick as well as a tint); the understood line and the
+  near-miss sentence exactly as sent; the hits in the server's order with one heading for each run of the same group;
+  each hit's title and detail as sent with Add, or Added when the server marks it or the list holds it (the page's own
+  held set covers a symbol added a moment ago). A full list disables Add and says why, as the old sheet did.
+- **Underlying with options.** `underlying` set shows Pick a strike, Add ATM row and Add current-month FUT row. The
+  last two open F11's form through the page's `swap` with `{ mode: 'add', kind, underlying, exchange, sectionId:
+  null }`; the exchange is read from the answer's own cash hit for that name, else from where the options trade
+  (NFO or BFO) and whether the name is a known index, and with neither the offer is not made.
+- **The seam for F14.** Pass `onPickStrike(underlying, exchange)` to `SearchSheet`; while it is absent Pick a strike is
+  shown disabled. The page passes nothing yet. F14 should call `strikes` with `u` and `x` from that callback.
+- **Recent.** An empty field shows the last 20 symbols added from this sheet on this device (title, detail, Add or
+  Added), newest first, with Clear recents. They live in `localStorage` under `sudarshan-watchlist-recents`; every read
+  and write is wrapped, so a refused storage leaves the sheet working with no recents and no error. A refused add
+  records nothing.
+- **`useSameStrike`** now reads the server's `strikes` op: one answer for the open expiries, then one for each of the
+  next four after the row's, each asked for the strike alone (`p` the strike, `n` 0) on the underlying's own exchange
+  (`underlying_exchange`, no longer the derivatives one). It keeps F12's subscription: the contracts are followed only
+  while the strike sheet is open, and the reads are aborted with it. The `expiry` and `strike` fields F12 added to
+  `SearchResult`, `otherExpiries` and `expiryIso` are removed, since nothing else used them.
+- **One fix on the merge.** `followFixtures.ts` gains `rolled: false`, which lane W's generated `Resolved` now requires.
+- **Tests.** `search.sheet.test.tsx` (the chips and their `seg`, the debounce, grouping, Added, the understood line
+  and the near miss, Add and recents, the last 20 and Clear recents, a refused storage, 48 dp, the 500 ms guard, the
+  ATM and FUT forms, F14's callback), `Watchlist.search.test.tsx` (the switch on and off, the form from the page),
+  and `strike.sheet.test.tsx` (the `strikes` op and the release on close).
+
 ## W12 - built-in lists from the master (`presets/`, `refs/preset.py`, `ops/presets.py`, `words/presets.py`)
 
 Three built-in lists made from today's master: **Indices**, **F&O stocks** and **Index futures**
@@ -871,6 +1328,48 @@ grammar is written here once; `refs.split` and the readers of `refs/` are its co
 
 A ranked list changes with every read, so it has rows but no members: the members route and the
 alerts refuse it in words. A section ref is only for members (a list alert on one section).
+
+## F14 - the strike picker
+
+With the switch on, Pick a strike in the search sheet (`onPickStrike(underlying, exchange)`, F13's seam) swaps
+`?sheet=add` for `?sheet=strikes` (`useOverlay`: the pick rides in the history entry's state like the follow
+form, so a reload never reopens it). `StrikePicker.tsx` is the sheet, `useStrikeLadder.ts` its reads of the
+`strikes` op, `strikePicker.ts` the pure parts (`atmOf`, `ruleFor`), and `LiveList` holds it because the page's
+socket is there. With the switch off nothing changes: the address is not known and `LiveList` takes no picker.
+- **What it shows.** The underlying's price with its feed line ("Real-time" only while ticks arrive, as
+  every other line), the expiry tabs as the server labels them (the chosen one with a tick as well as a tint),
+  the server's `words` as sent, and the 21 strikes of ATM plus or minus 10 (`n` 10), each with its CE and PE
+  price ticking, Add CE, Add PE and Add as one row; the ATM strike carries the word "ATM" and a tint. Add ATM row
+  opens F11's form and Open option chain is the page's `chainPath`. Every control is `min-h-12`; the sheet is
+  the existing `BottomSheet`, so its 500 ms open guard covers the first taps.
+- **What it follows.** The underlying is an item of the live list (read once over REST like a row, so a closed
+  market still shows its last price), and the CE and PE of the strikes on screen are followed in LTP mode with
+  no snapshot of their own. All 43 are `follow.sheet`, counted first in the 250. They are released when the
+  picker closes and the moment a tab is left (the new tab's follow from the answer that names them). A strike's
+  price shows a dash until its first tick.
+- **When it asks.** `strikes` is asked on opening without `p` (the tabs, the middle of the ladder and the
+  server's words), then with `p` from the underlying's own price (the newer of its tick and its read, as a
+  row's) as soon as there is one; again only when that price's nearest strike (a tie to the lower, the server's
+  rule) is no longer the ATM of the answer on screen, and on a tab change. One read at a time (a tab change
+  takes the place of the one in flight), and at most one in 2 s: a move that comes inside the gap waits for it
+  with one timeout, set only while there is such a need. A price that stays inside its band asks nothing, and a
+  price already asked with is not asked again, so a server and a page that disagree on a tie cannot loop. Thirty
+  minutes with a still price ask nothing (tested).
+- **An expiry that ended.** `invalid` on `exp` re-reads the ladder without `exp` and shows the server's sentence
+  above it, and the tab on screen is the one the server then names.
+- **Add CE and Add PE** use the page's own add (`watchlists.addItem`, as a search result does) and mark the
+  strike "Added" with a tick; a symbol the list already holds is Added from the start, a full list disables the
+  adds and says so, and a refused add toasts the server's words and stays addable.
+- **Add as one row** opens F12's form through the page's `swap` with `fixed: { strike, expiry }`. The form keeps
+  a rule, not a date, so the tab maps to one: the first tab is Nearest, the second Next, a monthly expiry in
+  this calendar month (IST) This month's, one in the next month Next month's. **A tab no rule says** (a weekly
+  from the third on, a month after next) disables Add as one row and says why under the tabs; Add CE and Add PE
+  work there. This is the one place the picker offers less than the design's wording.
+- **Tests.** `strikePicker.test.ts` (the ATM tie, the rules), `strike.picker.test.tsx` (the tabs and the word
+  ATM, the price and its feed line, ATM moving only past the midpoint with ten ticks inside it asking nothing,
+  the 2 s gap, 30 minutes asking nothing, a tab change, an ended expiry, every subscription released on close
+  and on a tab change, the cap, Add CE and Add PE and Added, the form's seam, 48 dp, the 500 ms guard, the
+  switch off) and `Watchlist.search.test.tsx` (from the search to the picker to the form, and a reload).
 
 ## W17 - the search and strikes ops (`ops/search.py`, `words/strikes.py`)
 

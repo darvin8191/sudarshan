@@ -60,6 +60,7 @@ from sudarshan.alerts.market.feedlink import (
     parse_health,
 )
 from sudarshan.alerts.market.lane import Line, MarketLane
+from sudarshan.alerts.market.members import MembersSource, OpenAlgoMembers
 from sudarshan.alerts.market.push import (
     ALERT_EVENT,
     APP_FULL,
@@ -120,8 +121,15 @@ class MarketRuntime:
         openalgo_db: Path | None = None,
         clock: Callable[[], datetime] | None = None,
         push_fernet: Fernet | None = None,
+        members_fernet: Fernet | None = None,
     ):
         self.settings, self.config = alerts, market
+        #: Where list alerts read their lists' members (members.py): the sealed route when a key
+        #: is given, a stub in tests, None while it is not wired (list alerts then wait).
+        self.members: MembersSource | None = None
+        self.members_fernet = members_fernet
+        #: The one list-alert sync running (desk.py), cancelled with the jobs at a stop.
+        self.group_task: asyncio.Task | None = None
         #: The key that seals pushes to OpenAlgo's owner room (M10.7); None: no app channel.
         self.push_fernet = push_fernet
         self.read_owner, self.pacer, self.openalgo_db = owner_reader, pacer, openalgo_db
@@ -261,6 +269,9 @@ class MarketRuntime:
         self._roll(now, force=True)
         async with httpx.AsyncClient(trust_env=False, follow_redirects=False) as client:
             self.client = client
+            if self.members is None and self.members_fernet is not None:
+                self.members = OpenAlgoMembers(self.settings.openalgo_url, client,
+                                               self.members_fernet)  # fmt: skip
             telegram = OpenAlgoTelegram(
                 self.settings.openalgo_url, client, self._owner, self._reload_owner
             )
@@ -291,7 +302,7 @@ class MarketRuntime:
                 # A cancel can be lost inside httpx (sudarshan/tasks.py): sent again until each
                 # task has ended, or the stop would wait for ever.
                 try:
-                    await cancel_and_wait(*jobs)
+                    await cancel_and_wait(*jobs, self.group_task)
                     await self._shutdown()  # Telegram's queue goes while its sender still runs
                 finally:
                     await cancel_and_wait(sender, pushing)
@@ -606,6 +617,10 @@ class MarketRuntime:
         }
         return [session for key, session in self._sessions.items() if key in classes]
 
+    def in_session(self, now: int) -> bool:
+        """Inside any of today's sessions: where a list's one-minute check is allowed."""
+        return self._inside(now, list(self._sessions.values()))
+
     @staticmethod
     def _inside(now: int, watched: list) -> bool:
         return any(s.start <= now < s.end + ARRIVAL_GRACE_MS for s in watched)
@@ -842,6 +857,12 @@ class MarketRuntime:
         """Whether ``alert``'s stock closes by auction today (a CAS key), as the Market will say
         once it is in the Book: the desk claims such a key in full mode before it saves."""
         return bool(self._today) and alert.key in cas_keys([alert], self._today, self._fno)
+
+    def master_loaded(self, day: date) -> bool:
+        """Whether ``day``'s master contract has been read at or after 09:00, once the day's login
+        had downloaded it: the list alerts ask their lists again then, so a current-month future
+        resolves against it (the morning build runs before, on the day's first tick)."""
+        return self._master_read == (day, True)
 
     def _read_master(self, now: int) -> None:
         """The CAS keys' source (X6a): read at start, and again at or after 09:00, once the day's

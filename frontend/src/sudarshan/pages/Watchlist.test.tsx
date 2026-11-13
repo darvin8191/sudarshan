@@ -394,6 +394,13 @@ afterEach(() => {
 })
 
 describe('Watchlist lists', () => {
+  it('shows no All lists button and ignores its address while v2 is off (M8.5)', async () => {
+    renderPage(['/watchlist?sheet=lists'])
+    await screen.findAllByRole('tab')
+    expect(screen.queryByRole('button', { name: 'All lists' })).toBeNull()
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
   it('shows each list as a tab and opens the one last used on this device', async () => {
     localStorage.setItem(OPEN_LIST_KEY, '2')
     renderPage()

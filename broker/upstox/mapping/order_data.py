@@ -306,6 +306,10 @@ def transform_holdings_data(holdings_data):
             "pnl": round(float(holdings.get("pnl") or 0.0), 2),
             "pnlpercent": pnlpercent,
         }
+        # F7 (SUDARSHAN): the ISIN, when Upstox gives one, so the watchlist's holdings line can
+        # match a BSE holding to the same company's NSE row.
+        if holdings.get("isin"):
+            transformed_position["isin"] = holdings["isin"]
         transformed_data.append(transformed_position)
     return transformed_data
 

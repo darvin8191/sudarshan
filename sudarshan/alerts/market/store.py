@@ -48,7 +48,7 @@ from __future__ import annotations
 import contextlib
 import json
 import uuid
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -89,6 +89,15 @@ MOVES = {"pause": ("active", "paused"), "resume": ("paused", "active"),
          "restart": ("stopped", "active")}  # fmt: skip
 DELIVERY = ("pending", "sent", "not_sent", "off")
 OFF_REASON = "Off in your alert settings"
+#: How a list alert's Telegram messages go (M8.14): the first at once, then one a window; or each.
+GROUP_DELIVERY = ("first_then_digest", "each")
+GROUP_FIELDS = (
+    "ref", "name", "kind", "params", "frequency", "candle_min", "cooldown_s", "ends_at",
+    "delivery", "digest_min", "note", "covered", "left_out", "synced_version", "synced_at",
+    "list_key",
+)  # fmt: skip
+#: What an edit of a group sets on every member as well (the instrument stays each member's own).
+GROUP_SHARED = ("params", "frequency", "candle_min", "cooldown_s", "ends_at", "note")
 DEFINITION = (
     "kind", "symbol", "exchange", "instrument_key", "tick_size", "expiry", "params", "frequency",
     "candle_min", "cooldown_s", "ends_at", "note", "channels",
@@ -103,7 +112,18 @@ alert = Table(
     Column("frequency", String), Column("candle_min", Integer), Column("cooldown_s", Integer),
     Column("ends_at", Integer), Column("status", String), Column("status_reason", String),
     Column("note", String), Column("channels", String), Column("created_at", Integer),
-    Column("updated_at", Integer), Column("version", Integer),
+    Column("updated_at", Integer), Column("version", Integer), Column("group_id", Integer),
+)  # fmt: skip
+alert_group = Table(
+    "alert_group", meta,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    *(Column(n, String) for n in ("principal", "ref", "name", "kind", "params", "frequency")),
+    Column("candle_min", Integer), Column("cooldown_s", Integer), Column("ends_at", Integer),
+    Column("status", String), Column("status_reason", String), Column("delivery", String),
+    Column("digest_min", Integer), Column("note", String), Column("covered", Integer),
+    Column("left_out", String), Column("synced_version", String), Column("synced_at", Integer),
+    Column("list_key", String),
+    Column("created_at", Integer), Column("updated_at", Integer), Column("version", Integer),
 )  # fmt: skip
 STATE_FIELDS = State._fields[:9]
 alert_state = Table(
@@ -169,6 +189,15 @@ class VersionConflict(StoreError):
 
 class Refused(StoreError):
     """The owner's pause, resume or restart, refused by the status the alert has now."""
+
+
+class GroupRefused(StoreError):
+    """A group that does not fit the limits, or a move its status does not allow: the words are
+    the owner's, and nothing was made or changed."""
+
+
+class GroupLimit(GroupRefused):
+    """A group the limits cannot hold (the fit check's words, both numbers in them)."""
 
 
 class UnknownPrincipal(ValueError):
@@ -373,6 +402,173 @@ class MarketStore:
         query = select(alert).where(alert.c.principal == self._who(principal))
         if status is not None:
             query = query.where(alert.c.status == _status(status))
+        with self._read() as conn:
+            rows = conn.execute(query.order_by(alert.c.id)).mappings().all()
+        return [_alert_row(row) for row in rows]
+
+    # ---- list alerts: groups (M8.14) --------------------------------------------------------
+    def create_group(
+        self,
+        principal: str,
+        fields: Mapping[str, Any],
+        members: list[Mapping[str, Any]],
+        now: int,
+        *,
+        fit: Callable[[frozenset[str], int, list[str]], str | None] | None = None,
+    ) -> dict[str, Any]:
+        """A group and its member alerts, all or nothing. ``fit(keys in use, Active alerts in
+        use, the members' keys)`` runs in this write transaction, after the write lock is held
+        and before anything is written, so two groups made at once cannot both pass on the same
+        room; it returns the owner's words to refuse, or None to admit."""
+        who = self._who(principal)
+        with self._tx() as conn:
+            _admit(conn, who, fit, [m["instrument_key"] for m in members])
+            group_id = conn.execute(insert(alert_group).values(
+                **_group_values(fields), principal=who, status="active", status_reason="",
+                created_at=now, updated_at=now, version=1)).inserted_primary_key[0]  # fmt: skip
+            _add_members(conn, who, group_id, members, now)
+        return self.group(principal, group_id)
+
+    def update_group(
+        self, principal: str, group_id: int, version: int, fields: Mapping[str, Any], now: int,
+        *, reset_state: bool = False,
+        fit: Callable[[frozenset[str], int, list[str]], str | None] | None = None,
+    ) -> dict[str, Any]:  # fmt: skip
+        """The owner's edit of a group, from ``version``: its shared fields and name go to the
+        group and to every member in this one transaction, each member keeping the status it has
+        (spec.status_after_edit) and its own instrument. A changed condition sets Stopped members
+        going again, which adds Active alerts, so ``fit`` holds that to the limits."""
+        who = self._who(principal)
+        shared = {k: v for k, v in _definition(_plain(fields)).items() if k in GROUP_SHARED}
+        shared = {k: v for k, v in shared.items() if k in fields}
+        with self._tx() as conn:
+            row = _group_for_update(conn, who, group_id, version)
+            members = conn.execute(select(alert.c.id, alert.c.status, alert.c.instrument_key).where(
+                alert.c.group_id == group_id, alert.c.principal == who)).all()  # fmt: skip
+            if reset_state:
+                _admit(conn, who, fit, [m.instrument_key for m in members if m.status == "stopped"])
+            for member in members:
+                conn.execute(update(alert).where(alert.c.id == member.id).values(
+                    **shared, status=spec.status_after_edit(member.status, reset_state),
+                    updated_at=now, version=alert.c.version + 1))  # fmt: skip
+                if reset_state:
+                    conn.execute(delete(alert_state).where(alert_state.c.alert_id == member.id))
+            own = {k: fields[k] for k in ("name", "delivery", "digest_min") if k in fields}
+            _check_delivery(own.get("delivery", row.delivery))
+            conn.execute(update(alert_group).where(alert_group.c.id == group_id).values(
+                **shared, **own, status=spec.status_after_edit(row.status, reset_state),
+                status_reason=row.status_reason if row.status == "active" else "",
+                updated_at=now, version=version + 1))  # fmt: skip
+        return self.group(principal, group_id)
+
+    def move_group(
+        self, principal: str, group_id: int, version: int, move: str, now: int,
+        *, fit: Callable[[frozenset[str], int, list[str]], str | None] | None = None,
+    ) -> dict[str, Any]:  # fmt: skip
+        """The owner's pause, resume or restart of a group: the group and every member that is in
+        the status the move is for change together. A resume or restart adds Active alerts, so
+        it is held to the limits by ``fit`` as a new group is."""
+        who = self._who(principal)
+        start, end = MOVES[move]
+        with self._tx() as conn:
+            row = _group_for_update(conn, who, group_id, version, check_version=False)
+            if row.status != start:
+                raise GroupRefused(
+                    f"This alert is already {'paused' if end == 'paused' else 'active'}."
+                    if row.status == end
+                    else "This alert cannot be moved from here."
+                )
+            if row.version != version:
+                raise VersionConflict("try again")
+            moving = conn.execute(select(alert.c.id, alert.c.instrument_key).where(
+                alert.c.group_id == group_id, alert.c.principal == who,
+                alert.c.status == start)).all()  # fmt: skip
+            if end == "active":
+                _admit(conn, who, fit, [m.instrument_key for m in moving])
+            ids = [m.id for m in moving]
+            conn.execute(update(alert).where(alert.c.id.in_(ids)).values(
+                status=end, status_reason="", updated_at=now, version=alert.c.version + 1))  # fmt: skip
+            conn.execute(update(alert_group).where(alert_group.c.id == group_id).values(
+                status=end, status_reason="", updated_at=now, version=version + 1))  # fmt: skip
+        return self.group(principal, group_id)
+
+    def stop_group(self, principal: str, group_id: int, reason: str, now: int) -> bool:
+        """The service stopped a group itself (its list was deleted): the group and every member
+        that is Active or Paused stop with ``reason``. The version stays, as an engine stop's
+        does. False when the group is not there or has stopped already."""
+        who = self._who(principal)
+        with self._tx() as conn:
+            done = conn.execute(update(alert_group).where(
+                alert_group.c.id == group_id, alert_group.c.principal == who,
+                alert_group.c.status != "stopped").values(
+                status="stopped", status_reason=reason, updated_at=now)).rowcount  # fmt: skip
+            if done:
+                conn.execute(update(alert).where(
+                    alert.c.group_id == group_id, alert.c.principal == who,
+                    alert.c.status != "stopped").values(
+                    status="stopped", status_reason=reason, updated_at=now))  # fmt: skip
+        return bool(done)
+
+    def delete_group(self, principal: str, group_id: int) -> bool:
+        """The group, its members and their state go; their history stays in the log."""
+        who = self._who(principal)
+        with self._tx() as conn:
+            ids = select(alert.c.id).where(alert.c.group_id == group_id, alert.c.principal == who)
+            conn.execute(delete(alert_state).where(alert_state.c.alert_id.in_(ids)))
+            conn.execute(delete(alert).where(alert.c.group_id == group_id,
+                                             alert.c.principal == who))  # fmt: skip
+            return bool(conn.execute(delete(alert_group).where(
+                alert_group.c.id == group_id, alert_group.c.principal == who)).rowcount)  # fmt: skip
+
+    def sync_group(
+        self, principal: str, group_id: int, now: int, *, add: list[Mapping[str, Any]],
+        remove: list[int], covered: int, left_out: list[str], synced_version: str | None,
+        fit: Callable[[frozenset[str], int, list[str]], str | None] | None = None,
+        note: str | None = None,
+    ) -> dict[str, Any]:  # fmt: skip
+        """The list changed: ``add`` become members (each in the group's status), ``remove`` (alert
+        ids of this group) go with their state, and what the group covers and when it was last in
+        step are written, all in one transaction. The group's version stays: it counts the owner's
+        edits. A group that is not Active adds nothing to the limits and is not held to them.
+        ``note`` (when given) is the card's words for an Active group: frozen, or how far it
+        covers; an empty one clears them."""
+        who = self._who(principal)
+        with self._tx() as conn:
+            row = _group_for_update(conn, who, group_id, None)
+            mine = alert.c.group_id == group_id
+            gone = select(alert.c.id).where(mine, alert.c.principal == who, alert.c.id.in_(remove))
+            conn.execute(delete(alert_state).where(alert_state.c.alert_id.in_(gone)))
+            conn.execute(delete(alert).where(mine, alert.c.principal == who,
+                                             alert.c.id.in_(remove)))  # fmt: skip
+            if row.status == "active":
+                _admit(conn, who, fit, [m["instrument_key"] for m in add])
+            _add_members(conn, who, group_id, add, now, status=row.status)
+            conn.execute(update(alert_group).where(alert_group.c.id == group_id).values(
+                covered=covered, left_out=json.dumps(list(left_out)),
+                synced_version=synced_version, synced_at=now, updated_at=now,
+                status_reason=note if note is not None and row.status == "active"
+                else row.status_reason))  # fmt: skip
+        return self.group(principal, group_id)
+
+    def group(self, principal: str, group_id: int) -> dict[str, Any] | None:
+        query = select(alert_group).where(
+            alert_group.c.id == group_id, alert_group.c.principal == self._who(principal)
+        )
+        with self._read() as conn:
+            row = conn.execute(query).mappings().first()
+        return _group_row(row) if row else None
+
+    def groups(self, principal: str) -> list[dict[str, Any]]:
+        query = select(alert_group).where(alert_group.c.principal == self._who(principal))
+        with self._read() as conn:
+            rows = conn.execute(query.order_by(alert_group.c.id)).mappings().all()
+        return [_group_row(row) for row in rows]
+
+    def group_members(self, principal: str, group_id: int) -> list[dict[str, Any]]:
+        """The group's alerts, by id."""
+        query = select(alert).where(
+            alert.c.group_id == group_id, alert.c.principal == self._who(principal)
+        )
         with self._read() as conn:
             rows = conn.execute(query.order_by(alert.c.id)).mappings().all()
         return [_alert_row(row) for row in rows]
@@ -783,6 +979,64 @@ WORDS = {
     "version {known}). Start sudarshan-alerts once to bring it up to date, then try again.",
     "read_only": "The market alert record was opened only to read: nothing can be saved here.",
 }
+
+
+def _plain(fields: Mapping[str, Any]) -> dict[str, Any]:
+    """An edit's shared fields as a definition for ``_definition`` (which wants every one)."""
+    return {name: fields.get(name) for name in GROUP_SHARED} | {"params": fields.get("params", {})}
+
+
+def _check_delivery(delivery: str) -> str:
+    if delivery not in GROUP_DELIVERY:
+        raise ValueError(f"not a list alert delivery: {delivery!r}")
+    return delivery
+
+
+def _group_values(fields: Mapping[str, Any]) -> dict[str, Any]:
+    values = {name: fields.get(name) for name in GROUP_FIELDS}
+    values["params"] = json.dumps(fields["params"], sort_keys=True, separators=(",", ":"))
+    values["left_out"] = json.dumps(list(fields.get("left_out") or []))
+    values["delivery"] = _check_delivery(values["delivery"] or "first_then_digest")
+    values["digest_min"] = values["digest_min"] or 5
+    values["note"], values["cooldown_s"] = values["note"] or "", values["cooldown_s"] or 0
+    values["covered"] = values["covered"] or 0
+    return values
+
+
+def _group_row(row) -> dict[str, Any]:
+    out = dict(row)
+    out["params"], out["left_out"] = json.loads(out["params"]), json.loads(out["left_out"])
+    return out
+
+
+def _group_for_update(conn, who: str, group_id: int, version: int | None, *, check_version=True):
+    row = conn.execute(select(alert_group).where(
+        alert_group.c.id == group_id, alert_group.c.principal == who)).first()  # fmt: skip
+    if row is None:
+        raise NotFound()
+    if check_version and version is not None and row.version != version:
+        raise VersionConflict()
+    return row
+
+
+def _admit(conn, who: str, fit, new_keys: list[str]) -> None:
+    """Refuse, in the write transaction, what ``fit`` says does not fit: it sees the instruments
+    and Active alerts in use as this transaction reads them."""
+    if fit is None:
+        return
+    keys = conn.execute(select(alert.c.instrument_key).where(
+        alert.c.principal == who, alert.c.status == "active")).scalars().all()  # fmt: skip
+    words = fit(frozenset(keys), len(keys), new_keys)
+    if words:
+        raise GroupLimit(words)
+
+
+def _add_members(conn, who, group_id, members, now, status: str = "active") -> None:
+    rows = [_definition(m) | {"principal": who, "status": status, "status_reason": "",
+                              "created_at": now, "updated_at": now, "version": 1,
+                              "group_id": group_id} for m in members]  # fmt: skip
+    if rows:
+        conn.execute(insert(alert), rows)
 
 
 def _status(status: str) -> str:

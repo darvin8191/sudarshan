@@ -1,5 +1,5 @@
-import { ArrowDown, ArrowUp, Clock, ListPlus, Plus, Trash2 } from 'lucide-react'
-import { memo } from 'react'
+import { ArrowDown, ArrowUp, Clock, ListPlus, Plus, StickyNote, Trash2 } from 'lucide-react'
+import { memo, type ReactNode } from 'react'
 import type { WatchlistItem } from '@/api/watchlist'
 import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
@@ -7,8 +7,17 @@ import { directionOf, formatPercent, formatPrice } from '@/sudarshan/dashboard/f
 import { TREND_TEXT, TrendArrow } from '@/sudarshan/dashboard/Trend'
 import { ChipMark } from '@/sudarshan/screener/ChipMark'
 import type { Chip } from '@/sudarshan/screener/types'
-import { describe, formatChange, priceDecimals, type TickDirection } from './rows'
+import { type ArrangeEdit, ArrangeRows } from './ArrangeSheet'
+import { FOLLOW_CAP, outsideNote, outsideSpeech } from './follow'
+import { type HeldFigures, HoldingLine } from './HoldingLine'
+import { MarkGlyph } from './marks'
+import { describe, formatChange, OPEN_UNKNOWN, priceDecimals, type TickDirection } from './rows'
+import { SectionHeader } from './SectionHeader'
 import type { LiveRow } from './useLiveRows'
+import { CLOCK } from './ViewSheet'
+import { markWords, type RowMark } from './v2/marks'
+import type { Group } from './v2/sections'
+import type { Section } from './v2/types'
 
 /** Grey for a level that has stopped arriving; its sign and arrow stay. */
 const STALE = 'text-[color:var(--stale)]'
@@ -24,6 +33,12 @@ export interface FigureValues {
   changePercent: number | null
   direction: TickDirection | null
   stale: boolean
+  /** F6: the change is from today's open and it is not known yet. */
+  openMissing?: boolean
+  /** F9: the row is not followed: it shows the last figure it had, grey, with the time of it. */
+  outside?: 'cap' | 'window'
+  /** F9: when that figure was read or ticked, or null when none was. */
+  outsideAt?: number | null
 }
 
 export function figuresOf(row: LiveRow): FigureValues {
@@ -33,6 +48,9 @@ export function figuresOf(row: LiveRow): FigureValues {
     changePercent: row.view.changePercent,
     direction: row.direction,
     stale: row.stale,
+    openMissing: row.view.openMissing, // F6
+    outside: row.outside, // F9
+    outsideAt: row.outside ? row.view.at : undefined, // F9
   }
 }
 
@@ -40,23 +58,57 @@ function Name({
   symbol,
   exchange,
   chip,
+  holding,
+  position,
+  mark,
 }: {
   symbol: string
   exchange: string
+  /** F8: the flag, the note and the expired reading. */
+  mark?: RowMark
   /** SUDARSHAN M9 UI7: what a screener says about this row (New, Held, Pinned), an icon and a word. */
   chip?: Chip
+  /** F7: the quantity held and the net position, on the second line. */
+  holding?: number
+  position?: number
 }) {
   const named = describe(symbol, exchange)
   return (
     <span className="flex min-w-0 flex-1 flex-col gap-0.5">
       <span className="flex min-w-0 items-center gap-2">
+        {mark?.flag != null && <MarkGlyph mark={mark.flag} /> /* F8 */}
         <span className="truncate text-[0.9375rem] leading-tight font-semibold" title={symbol}>
           {named.title}
         </span>
+        {
+          mark?.note && (
+            <StickyNote
+              aria-hidden="true"
+              data-note="true"
+              className="size-4 shrink-0 text-[color:var(--text-secondary)]"
+            />
+          ) /* F8 */
+        }
+        {mark && <span className="sr-only">{markWords(mark)}</span> /* F8 */}
+        {
+          mark?.expired && (
+            <span
+              data-expired="true"
+              className="inline-flex shrink-0 items-center gap-1 text-xs font-semibold text-[color:var(--warning-text)]"
+            >
+              <Clock aria-hidden="true" className="size-3" />
+              Expired
+            </span>
+          ) /* F8 */
+        }
         {chip && <ChipMark chip={chip} />}
       </span>
-      <span className="truncate text-xs leading-tight font-medium text-[color:var(--text-tertiary)]">
-        {named.detail}
+      <span className="flex min-w-0 flex-wrap items-center gap-x-2">
+        <span className="min-w-0 truncate text-xs leading-tight font-medium text-[color:var(--text-tertiary)]">
+          {named.detail}
+        </span>
+        {/* F7: "Holding 25" and "Position +65", in ink; nothing for zero. */}
+        <HoldingLine holding={holding} position={position} />
       </span>
     </span>
   )
@@ -75,12 +127,22 @@ export function Figures({
   changePercent,
   direction,
   stale,
+  openMissing,
+  outside, // F9
+  outsideAt: _outsideAt,
   size = 'row',
   decimals = 2,
-}: FigureValues & { size?: 'row' | 'sheet'; decimals?: number }) {
+  align = 'end', // F12: a strike row's CE block sits on the left
+}: FigureValues & { size?: 'row' | 'sheet'; decimals?: number; align?: 'start' | 'end' }) {
   const day = change === null ? 'flat' : directionOf(change, decimals)
+  stale = stale || outside !== undefined // F9: a figure that is not followed is grey like a stale one
   return (
-    <span className="flex shrink-0 flex-col items-end gap-0.5 text-right">
+    <span
+      className={cn(
+        'flex shrink-0 flex-col gap-0.5',
+        align === 'end' ? 'items-end text-right' : 'items-start text-left'
+      )}
+    >
       <span
         data-tick={direction ?? undefined}
         className={cn(
@@ -111,10 +173,17 @@ export function Figures({
         {change !== null && changePercent !== null && (
           <span>{`${formatChange(change, decimals)} (${formatPercent(changePercent)})`}</span>
         )}
+        {/* F6: from today's open, which is not known yet: a dash and the words. */}
+        {change === null && openMissing && ltp !== null && (
+          <>
+            <span aria-hidden="true">&mdash;</span>
+            <span className="sr-only">{OPEN_UNKNOWN}</span>
+          </>
+        )}
         {stale && (
           <>
             <Clock aria-hidden="true" className="size-3" />
-            <span className="sr-only">Stale</span>
+            {outside === undefined && <span className="sr-only">Stale</span>}
           </>
         )}
       </span>
@@ -128,29 +197,155 @@ const PriceRow = memo(function PriceRow({
   symbol,
   exchange,
   chip,
+  holding,
+  position,
+  mark,
   onOpen,
+  rowIndex,
   ...figures
 }: FigureValues & {
+  /** F9: its place in a list longer than the cap, which the window is worked out from. */
+  rowIndex?: number
+  mark?: RowMark // F8
   itemId: number
   symbol: string
   exchange: string
   chip?: Chip
+  holding?: number // F7
+  position?: number // F7
   onOpen: (itemId: number) => void
 }) {
+  const body = (
+    <>
+      <Name
+        symbol={symbol}
+        exchange={exchange}
+        chip={chip}
+        holding={holding}
+        position={position}
+        mark={mark}
+      />
+      <Figures {...figures} decimals={priceDecimals(exchange)} />
+    </>
+  )
+  const { outside, outsideAt } = figures
   return (
-    <li data-stale={figures.stale || undefined}>
-      <button
-        type="button"
-        aria-haspopup="dialog"
-        onClick={() => onOpen(itemId)}
-        className="flex min-h-14 w-full items-center gap-3 px-4 py-2 text-left outline-none active:bg-accent focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-      >
-        <Name symbol={symbol} exchange={exchange} chip={chip} />
-        <Figures {...figures} decimals={priceDecimals(exchange)} />
-      </button>
+    <li data-stale={figures.stale || undefined} data-row-index={rowIndex /* F9 */}>
+      {outside === undefined ? (
+        <button
+          type="button"
+          aria-haspopup="dialog"
+          onClick={() => onOpen(itemId)}
+          className="flex min-h-14 w-full items-center gap-3 px-4 py-2 text-left outline-none active:bg-accent focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+        >
+          {body}
+        </button>
+      ) : (
+        // F9: not followed. The last figure, grey, and why it is not moving: words and a clock, never colour alone.
+        <button
+          type="button"
+          aria-haspopup="dialog"
+          data-outside={outside}
+          onClick={() => onOpen(itemId)}
+          className="flex min-h-14 w-full flex-col justify-center gap-1 px-4 py-2 text-left outline-none active:bg-accent focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+        >
+          <span className="flex w-full items-center gap-3">{body}</span>
+          <span className="flex items-start gap-1.5 text-xs font-medium text-[color:var(--stale)]">
+            <Clock aria-hidden="true" className="mt-0.5 size-3 shrink-0" />
+            <span>
+              {outsideAt != null ? `Price at ${CLOCK.format(outsideAt)}` : 'No price read yet'}
+              {' · '}
+              {outsideNote(outside)}
+            </span>
+            <span className="sr-only">{outsideSpeech(outside)}</span>
+          </span>
+        </button>
+      )}
     </li>
   )
 })
+
+/** F3 (v2): the open own list in sections: the view's groups, what is folded, and the taps. */
+export interface SectionLayout {
+  groups: Group[]
+  collapsed: ReadonlySet<number>
+  onToggle: (id: number) => void
+  onMenu: (id: number) => void
+}
+
+/** F11: the rows that follow the price, drawn for one section (null: no section); first in their group. */
+export interface FollowSlots {
+  count: number
+  render: (sectionId: number | null) => ReactNode
+}
+
+/** F3: no section first, then each section under its header; a folded one shows only its header. */
+function Sectioned({
+  rows,
+  follow,
+  layout,
+  tags,
+  held,
+  marks,
+  onOpen,
+}: {
+  marks?: ReadonlyMap<string, RowMark> // F8
+  rows: LiveRow[]
+  follow?: FollowSlots // F11
+  layout: SectionLayout
+  tags?: ReadonlyMap<string, Chip>
+  held?: ReadonlyMap<string, HeldFigures> // F7
+  onOpen: (itemId: number) => void
+}) {
+  const byId = new Map(rows.map((row) => [row.item.id, row]))
+  const shown = new Set(layout.groups.flatMap((group) => group.ids))
+  // An item the view does not list yet (the two reads crossed) is shown with the unsectioned.
+  const extra = rows.filter((row) => !shown.has(row.item.id)).map((row) => row.item.id)
+  return (
+    <ul className="divide-y divide-[color:var(--divider)]">
+      {layout.groups.flatMap((group) => {
+        const ids = group.section ? group.ids : [...group.ids, ...extra]
+        const section: Section | null = group.section
+        const open = ids.flatMap((id) => {
+          const row = byId.get(id)
+          return row && !layout.collapsed.has(section?.id ?? -1)
+            ? [
+                <PriceRow
+                  key={row.item.id}
+                  itemId={row.item.id}
+                  symbol={row.item.symbol}
+                  exchange={row.item.exchange}
+                  chip={tags?.get(row.key)}
+                  holding={held?.get(row.key)?.holding} // F7
+                  position={held?.get(row.key)?.position} // F7
+                  mark={marks?.get(row.key)} // F8
+                  onOpen={onOpen}
+                  {...figuresOf(row)}
+                />,
+              ]
+            : []
+        })
+        const followed = layout.collapsed.has(section?.id ?? -1)
+          ? null
+          : follow?.render(section?.id ?? null) // F11
+        return section
+          ? [
+              <SectionHeader
+                key={`section-${section.id}`}
+                section={section}
+                count={ids.length}
+                collapsed={layout.collapsed.has(section.id)}
+                onToggle={layout.onToggle}
+                onMenu={layout.onMenu}
+              />,
+              followed,
+              ...open,
+            ]
+          : [followed, ...open]
+      })}
+    </ul>
+  )
+}
 
 /**
  * The open list's rows: 56dp or taller, the name and venue on the left, the
@@ -167,7 +362,16 @@ export function WatchlistRows({
   onRemove,
   onAdd,
   tags,
+  sections,
+  arrange,
+  held,
+  marks,
+  follow,
 }: {
+  /** v2 (F11): the rows that follow the price. Absent with the switch off. */
+  follow?: FollowSlots
+  /** v2 (F8): the flag, note and expired reading of each row, by EXCHANGE:SYMBOL. Absent with the switch off. */
+  marks?: ReadonlyMap<string, RowMark>
   rows: LiveRow[]
   loading: boolean
   editing: boolean
@@ -178,6 +382,12 @@ export function WatchlistRows({
   onAdd?: () => void
   /** The chip of each row a screener fed, by EXCHANGE:SYMBOL (M9 UI7). */
   tags?: ReadonlyMap<string, Chip>
+  /** v2 (F3): the rows in sections. Absent with the switch off, and while editing (flat). */
+  sections?: SectionLayout
+  /** v2 (F5): edit mode as a draft with sections. Absent with the switch off. */
+  arrange?: ArrangeEdit
+  /** v2 (F7): what is held and open per row, by EXCHANGE:SYMBOL. Absent with the switch off. */
+  held?: ReadonlyMap<string, HeldFigures>
 }) {
   if (loading) {
     return (
@@ -192,7 +402,12 @@ export function WatchlistRows({
     )
   }
 
-  if (rows.length === 0) {
+  // F5: editing an own list in v2 arranges a draft.
+  if (editing && arrange)
+    return <ArrangeRows edit={arrange} items={rows.map((row) => row.item)} onRemove={onRemove} />
+
+  const sectioned = sections && !editing && sections.groups.length > 1
+  if (rows.length === 0 && !sectioned && !(follow && follow.count > 0)) {
     return (
       <div className="flex flex-col items-center gap-3 px-6 py-10 text-center">
         <span className="flex size-12 items-center justify-center rounded-2xl bg-[color:var(--primary-tint)] text-primary">
@@ -216,8 +431,22 @@ export function WatchlistRows({
     )
   }
 
+  if (sections && sectioned)
+    return (
+      <Sectioned
+        rows={rows}
+        follow={follow} // F11
+        layout={sections}
+        tags={tags}
+        held={held}
+        marks={marks} // F8
+        onOpen={onOpen}
+      />
+    )
+
   return (
     <ul className="divide-y divide-[color:var(--divider)]">
+      {!editing && follow?.render(null) /* F11 */}
       {rows.map((row, index) => {
         const { item } = row
         if (!editing) {
@@ -228,7 +457,11 @@ export function WatchlistRows({
               symbol={item.symbol}
               exchange={item.exchange}
               chip={tags?.get(row.key)}
+              holding={held?.get(row.key)?.holding} // F7
+              position={held?.get(row.key)?.position} // F7
+              mark={marks?.get(row.key)} // F8
               onOpen={onOpen}
+              rowIndex={rows.length > FOLLOW_CAP ? index : undefined} // F9
               {...figuresOf(row)}
             />
           )

@@ -1,5 +1,16 @@
 import { useQuery } from '@tanstack/react-query'
-import { BellPlus, CandlestickChart, Clock, Layers, Pin, PinOff, Trash2 } from 'lucide-react'
+import {
+  BellPlus,
+  CandlestickChart,
+  Clock,
+  Copy,
+  FolderInput,
+  Layers,
+  Pencil,
+  Pin,
+  PinOff,
+  Trash2,
+} from 'lucide-react'
 import { useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router'
 import { oiProfileApi } from '@/api/oi-profile'
@@ -25,7 +36,9 @@ import {
 import { type Contract, contractOf } from './api'
 import { BottomSheet } from './BottomSheet'
 import { chainOf, describe, isIndex, priceDecimals, statusLine } from './rows'
+import { SymbolMarks } from './SymbolMarks'
 import type { LiveRow } from './useLiveRows'
+import type { FlagName } from './v2/types'
 import { Figures, figuresOf } from './WatchlistRows'
 
 /** The option chain tool, opened on an underlying. */
@@ -33,6 +46,34 @@ export function chainPath(chain: { exchange: string; underlying: string }): stri
   const query = new URLSearchParams({ exchange: chain.exchange, underlying: chain.underlying })
   return `/optionchain?${query}`
 }
+
+/** F5: what the symbol sheet offers an own list in v2. */
+export interface ArrangeActions {
+  /** Absent while the list has no sections. */
+  onSection?: (item: WatchlistItem) => void
+  onCopy: (item: WatchlistItem) => void
+}
+
+/** F11: the sheet of a row that follows the price, which stays on the contract it opened with. */
+export interface FollowSheet {
+  title: string
+  detail: string
+  chip: string
+  /** The ATM chip's help text. */
+  help: string | null
+  /** The row has moved on: what it follows now, and Show to switch the sheet to it. */
+  moved: { words: string; onShow: () => void } | null
+  onEdit: () => void
+  onRemove: () => void
+}
+
+/** F11: Add ATM row and Add current-month FUT row, for an underlying with options. */
+export interface FollowOffer {
+  onAdd: (kind: 'atm_option' | 'month_future', item: WatchlistItem) => void
+}
+
+/** The exchanges a row can follow (the server refuses the rest in words). */
+const UNDERLYING_EXCHANGES = new Set(['NSE_INDEX', 'NSE', 'BSE_INDEX', 'BSE'])
 
 const ACTION =
   'inline-flex min-h-12 items-center justify-center gap-2 rounded-[0.875rem] px-4 text-[0.9375rem] font-semibold outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50'
@@ -273,6 +314,11 @@ export function SymbolSheet({
   onAlert,
   onRemove,
   pin,
+  arrange,
+  flags,
+  readOnly,
+  follow,
+  offer,
 }: {
   row: LiveRow | null
   listName: string
@@ -289,11 +335,21 @@ export function SymbolSheet({
   onRemove?: (item: WatchlistItem) => void
   /** A row a screener put here: Pin keeps it in the list while it stops matching (M9 UI7). */
   pin?: PinControl | null
+  /** v2 (F5): Move to section and Copy to another list; absent where the list is not an own one. */
+  arrange?: ArrangeActions
+  /** v2 (F8): the five flag names; present while the switch is on. The flag and note block shows only then. */
+  flags?: readonly FlagName[]
+  /** v2 (F8): a family render. The flag, the note and everything private are absent, not disabled. */
+  readOnly?: boolean
+  /** v2 (F11): this is a follow row's sheet. */
+  follow?: FollowSheet
+  /** v2 (F11): the underlying's sheet offers the two follow rows. */
+  offer?: FollowOffer
 }) {
   if (!row) return null
   return (
     <Sheet
-      key={row.item.id}
+      key={follow ? row.key : row.item.id} // F11: a follow row's sheet is the contract it shows
       row={row}
       listName={listName}
       apiKey={apiKey}
@@ -305,6 +361,11 @@ export function SymbolSheet({
       onAlert={onAlert}
       onRemove={onRemove}
       pin={pin}
+      arrange={arrange}
+      flags={flags}
+      readOnly={readOnly}
+      follow={follow}
+      offer={offer}
     />
   )
 }
@@ -321,9 +382,16 @@ function Sheet({
   onAlert,
   onRemove,
   pin,
+  arrange,
+  flags,
+  readOnly,
+  follow,
+  offer,
 }: Parameters<typeof SymbolSheet>[0] & { row: LiveRow }) {
   const { item } = row
-  const named = describe(item.symbol, item.exchange)
+  const named = follow
+    ? { title: follow.title, detail: follow.detail }
+    : describe(item.symbol, item.exchange)
   const tradable = !isIndex(item.exchange)
   const chain = useOptionChain(item)
   const [product, setProduct] = useState(() => ticketProduct(item.exchange))
@@ -371,6 +439,29 @@ function Sheet({
     >
       <div className="flex flex-col gap-3">
         <LiveLine line={line} now={now} className="flex" />
+
+        {follow && (
+          <div data-follow-sheet="true" className="flex flex-col gap-2">
+            <p className="flex flex-wrap items-center gap-2 text-sm font-medium text-[color:var(--text-secondary)]">
+              <span className="rounded-md bg-[color:var(--primary-tint)] px-1.5 py-0.5 text-xs font-bold text-primary">
+                {follow.chip}
+              </span>
+              {follow.help}
+            </p>
+            {follow.moved && (
+              <output className="flex items-center justify-between gap-2 rounded-[0.875rem] bg-[color:var(--surface-2)] px-3 py-2">
+                <span className="text-sm font-semibold">{follow.moved.words}</span>
+                <button
+                  type="button"
+                  onClick={follow.moved.onShow}
+                  className={cn(OUTLINED, 'shrink-0')}
+                >
+                  Show
+                </button>
+              </output>
+            )}
+          </div>
+        )}
 
         {tradable && (
           <div className="flex flex-col gap-2">
@@ -448,7 +539,43 @@ function Sheet({
 
         {tradable && apiKey !== null && <Depth item={item} marketOpen={marketOpen} now={now} />}
 
-        {pin && (
+        {offer && !follow && !readOnly && chain && UNDERLYING_EXCHANGES.has(item.exchange) && (
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => offer.onAdd('atm_option', item)}
+              className={OUTLINED}
+            >
+              Add ATM row
+            </button>
+            <button
+              type="button"
+              onClick={() => offer.onAdd('month_future', item)}
+              className={OUTLINED}
+            >
+              Add current-month FUT row
+            </button>
+          </div>
+        )}
+
+        {follow && (
+          <div className="grid grid-cols-2 gap-2">
+            <button type="button" onClick={follow.onEdit} className={OUTLINED}>
+              <Pencil aria-hidden="true" className="size-5" />
+              Edit row
+            </button>
+            <button
+              type="button"
+              onClick={follow.onRemove}
+              className={cn(OUTLINED, 'text-[color:var(--down)]')}
+            >
+              <Trash2 aria-hidden="true" className="size-5" />
+              Remove row
+            </button>
+          </div>
+        )}
+
+        {pin && !follow && (
           <div className="flex flex-col gap-1">
             <button
               type="button"
@@ -471,7 +598,26 @@ function Sheet({
           </div>
         )}
 
-        {onRemove && (
+        {arrange && !follow && (
+          <div className="grid grid-cols-2 gap-2">
+            {arrange.onSection && (
+              <button type="button" onClick={() => arrange.onSection?.(item)} className={OUTLINED}>
+                <FolderInput aria-hidden="true" className="size-5" />
+                Move to section
+              </button>
+            )}
+            <button type="button" onClick={() => arrange.onCopy(item)} className={OUTLINED}>
+              <Copy aria-hidden="true" className="size-5" />
+              Copy to another list
+            </button>
+          </div>
+        )}
+
+        {flags && !readOnly && !follow && (
+          <SymbolMarks k={`${item.exchange}:${item.symbol}`.toUpperCase()} names={flags} /> // F8
+        )}
+
+        {onRemove && !follow && (
           <button
             type="button"
             onClick={() => onRemove(item)}

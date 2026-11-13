@@ -54,7 +54,8 @@ HEALTH_PATH = "/health"
 OPS_PREFIX = "/v1/"
 OPS = frozenset(
     {"state", "create", "update", "delete", "events", "events_since", "prefs_get", "prefs_set",
-     "test", "screener_digest"}
+     "test", "screener_digest", "group_sync", "group_add", "group_edit", "group_pause",
+     "group_resume", "group_delete"}
 )  # fmt: skip
 #: The screener's digests come sealed under their own purpose (sudarshan/alerts/screener-digest/v1,
 #: cross-design X9): this op opens only with that key, the others only with the bridge's.
@@ -139,6 +140,8 @@ def off_state(now: int, reason: str | None = None) -> dict[str, Any]:
         "limits": {"instruments": 0, "instruments_used": 0, "active": 0, "active_used": 0},
         "prefs": {"telegram": True, "app": True},
         "alerts": [],
+        "groups": [],
+        "groups_by_ref": {},
         "last_event_id": 0,
         "server_time": now,
     }
