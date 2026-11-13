@@ -360,6 +360,26 @@ def test_a_duplicate_symbol_in_the_target_is_not_added_twice_and_is_no_error(cli
     assert oa_order(dst) == ["TCS", "INFY", "ITC"]
 
 
+def test_a_copy_that_finds_every_symbol_already_there_bumps_nothing(client, emitted):
+    """Nothing changed, so nothing is bumped or pushed (review L3); a move of the same symbols
+    still changes the source, and pushes that list alone."""
+    src = make_list()
+    dst = make_list(("TCS", "INFY"), "Other")
+    mine = sec(client, dst, "Picked", "0")
+    emitted.clear()
+    before = versions.read()
+    for to in ({"list": dst}, {"list": dst, "section_id": mine}):
+        r = put(client, {"from": {"ref": f"list:{src}", "keys": ["NSE:INFY", "NSE:TCS"]},
+                         "to": to, "version": "1"})  # fmt: skip
+        assert r.get_json()["data"] == {
+            "list": dst, "added": 0, "skipped": 2, "version": None, "words": None}  # fmt: skip
+    assert versions.read() == before and emitted == []
+    put(client, {"from": {"ref": f"list:{src}", "keys": ["NSE:INFY", "NSE:TCS"]},
+                 "to": {"list": dst}, "move": True})  # fmt: skip
+    assert oa_order(src) == ["SBIN", "ITC"]
+    assert [(p["why"], p["refs"]) for p in emitted] == [("items", [f"list:{src}"])]
+
+
 # -- the two files -------------------------------------------------------------------------------
 def test_a_failed_add_says_how_far_it_got_and_a_move_does_not_remove(client, monkeypatch, emitted):
     from database import watchlist_db as oa

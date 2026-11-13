@@ -78,6 +78,9 @@ def screener_stand_in(found: bool = True) -> Blueprint:
 
 
 def build(status: int = 200, found: bool = True):
+    from database import watchlist_db as oa
+
+    oa.Base.metadata.create_all(oa.engine)  # the add's look before it reads OpenAlgo's lists
     reset_users()
     app = make_app(echo_handlers())
     app.register_blueprint(stand_in(status))
@@ -251,6 +254,36 @@ def test_each_openalgo_write_bumps_once_and_emits_once(emitted, method, path, wh
     ((event, data, _),) = emitted
     assert event == contract.EVENT_PUSH and (data["why"], data["ref"]) == (why, ref)
     assert data["refs"] == [ref]
+
+
+def test_an_add_of_a_symbol_the_list_already_holds_bumps_nothing(emitted):
+    """OpenAlgo answers an add of a symbol already in the list as a success with the row it had
+    (review L3): nothing changed, so nothing is bumped or pushed; a new symbol is, once."""
+    import blueprints.watchlist as real
+    from database import watchlist_db as oa
+
+    oa.Base.metadata.create_all(oa.engine)
+    oa.db_session.query(oa.WatchlistItem).delete()
+    oa.db_session.query(oa.Watchlist).delete()
+    oa.db_session.commit()
+    made = oa.create_watchlist(OWNER, "Swing", [{"symbol": "INFY", "exchange": "NSE"}])
+    oa.db_session.remove()
+    reset_users()
+    app = make_app(echo_handlers())
+    app.register_blueprint(real.watchlist_bp)
+    client = app.test_client()
+    login_session(client)
+    headers = csrf_headers(client)
+    url = f"/watchlist/api/lists/{made['id']}/items"
+    before = versions.read()
+    for body in ({"symbol": "INFY", "exchange": "NSE"}, {"symbol": " infy ", "exchange": "nse"}):
+        r = client.post(url, json=body, headers=headers)
+        assert r.status_code == 201 and r.get_json()["status"] == "success"  # OpenAlgo's answer
+    assert versions.read() == before and emitted == []
+    r = client.post(url, json={"symbol": "TCS", "exchange": "NSE"}, headers=headers)
+    assert r.status_code == 201
+    ((_, data, _),) = emitted
+    assert (data["why"], data["refs"]) == ("items", [f"list:{made['id']}"])
 
 
 def test_a_get_bumps_nothing(emitted):
@@ -442,6 +475,27 @@ def test_a_refusal_after_part_of_the_change_committed_bumps_once_for_what_it_nam
     assert (data["why"], data["ref"], data["refs"]) == ("items", "lists", ["list:3", "list:4"])
     r = client.post(path, json={"list": 3, "name": "nothing", "version": "v"}, headers=headers)
     assert r.status_code == 500 and len(emitted) == 1  # nothing committed: nothing pushed
+
+
+def test_a_write_whose_refs_say_unchanged_bumps_and_pushes_nothing(emitted):
+    """A write that changed nothing this time (review L3) says so from its refs function."""
+    reset_users()
+
+    @ops.bumps("sections", lambda args, data: data["changed"] or ops.UNCHANGED)
+    def maybe(args):
+        return {"changed": [] if args["name"] == "same" else [f"list:{args['list']}"]}
+
+    handlers = echo_handlers()
+    handlers["section_add"] = maybe
+    client = make_app(handlers).test_client()
+    login_session(client)
+    headers = csrf_headers(client)
+    path = contract.API_PREFIX + "/sections"
+    before = versions.read()
+    r = client.post(path, json={"list": 3, "name": "same", "version": "v"}, headers=headers)
+    assert r.status_code == 200 and versions.read() == before and emitted == []
+    client.post(path, json={"list": 3, "name": "new", "version": "v"}, headers=headers)
+    assert [d["refs"] for _, d, _ in emitted] == [["list:3"]]
 
 
 def test_an_op_that_does_not_declare_a_bump_pushes_nothing(emitted):

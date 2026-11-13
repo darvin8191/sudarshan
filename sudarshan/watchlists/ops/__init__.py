@@ -38,11 +38,22 @@ class OpError(Exception):
         self.changed = tuple(dict.fromkeys(changed))
 
 
+class _Unchanged:
+    def __repr__(self) -> str:
+        return "ops.UNCHANGED"
+
+
+#: What a ``bumps`` refs function returns for a write that, this time, changed nothing (a copy of
+#: symbols the target already holds, a mark that sets what is already set): no bump and no push.
+UNCHANGED = _Unchanged()
+
+
 def bumps(why: str, refs=None):
     """Declare that an op changes what a list, a section or a flag list holds: the bridge bumps
     the lists version once and pushes ``why`` after the handler returns (so after its commit),
     and after a refusal only for what the refusal names as committed (``OpError.changed``).
-    ``refs(args, data)`` names the refs changed (none: the whole of lists)."""
+    ``refs(args, data)`` names the refs changed (none: the whole of lists), or returns
+    ``UNCHANGED`` when the write changed nothing, and then nothing is bumped or pushed."""
 
     def mark(handler):
         handler.bump = (why, refs)

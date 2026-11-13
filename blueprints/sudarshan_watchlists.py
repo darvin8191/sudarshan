@@ -210,7 +210,9 @@ def _served(op: contract.OpSpec, handler):
             data = handler(args)
             if declared is not None:  # a write op: the change is committed, tell the phone
                 why, refs = declared
-                versions.bump(why, refs(args, data) if refs else ())
+                changed = refs(args, data) if refs else ()
+                if changed is not ops.UNCHANGED:  # a write that changed nothing tells nobody
+                    versions.bump(why, changed)
             return _answer({"status": "ok", "data": data})
         except _Bad as bad:
             return _error("invalid", field=bad.field)

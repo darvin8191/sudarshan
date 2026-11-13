@@ -31,7 +31,7 @@ import time
 from flask import session
 
 from sudarshan.watchlists import contract, engine, refs
-from sudarshan.watchlists.ops import OpError, bumps
+from sudarshan.watchlists.ops import UNCHANGED, OpError, bumps
 from sudarshan.watchlists.ops.sections import _held
 from sudarshan.watchlists.store import items as store_items
 from sudarshan.watchlists.store import sections as store
@@ -219,7 +219,13 @@ def _place(target: dict, added: list, section_id: int, held: int) -> tuple[str |
         return None, words.LOST
 
 
-@bumps("items", lambda args, data: list(data.refs))
+def _changed(args: dict, data: Done):
+    """The lists the copy changed; ``UNCHANGED`` for one that found every symbol already in the
+    target and took nothing out of a source (no bump, no push)."""
+    return list(data.refs) or UNCHANGED
+
+
+@bumps("items", _changed)
 def copy(args: dict) -> dict:
     user, move = _user(), bool(args.get("move", False))
     src, source, picked, from_section = _source(args["from"])

@@ -225,8 +225,11 @@ The one rule: every write that changes what a list, a section or a flag list hol
 version once, after its transaction commits, from one of two sources and never both. (1) The hook:
 `bridge/push.py` registers one `after_request`; for a 2xx answer to a non-GET request of OpenAlgo's
 watchlist blueprint, or to the screener's internal watchlist route when its op is `watchlist_apply`
-and it found the list, it bumps and pushes. Every other request pays one membership test of
-`request.blueprint`. A delete also prunes that list's overlay (`store/prune.py`: list guard row,
+and it found the list, it bumps and pushes. An add of a symbol the list already holds changes
+nothing, and OpenAlgo answers it as a success with the row it had: a look before the add route runs
+(one read of the list's items, for that route only, through OpenAlgo's models) notes that row, and
+an answer naming the same row bumps nothing. Every other request pays one comparison of
+`request.endpoint` before and one membership test of `request.blueprint` after. A delete also prunes that list's overlay (`store/prune.py`: list guard row,
 sections, section items, follow rows, preferences, and favourite slots naming `list:<id>`, with the
 favourites version raised in the same transaction) in one transaction in the overlay's own file; a
 clear drops section membership only, because /trading cannot see sections or follow rows. A store file that is missing (never
@@ -237,7 +240,9 @@ refusal names as already committed (`OpError(code, words, changed=refs)`): a wri
 steps and commits part of its change before it answers `failed` or `conflict` (a copy that stopped
 part way, an arrange whose OpenAlgo order failed) still bumps the lists version once and pushes the
 refs it changed, so the tablet and the alerts' backstop learn of it; a refusal that committed
-nothing bumps nothing. The hook starts no thread, timer
+nothing bumps nothing. A write that changed nothing this time (a copy that found every symbol
+already in the target) has its refs function return `ops.UNCHANGED`, and nothing is bumped or
+pushed. The hook starts no thread, timer
 or loop. Tests: `tests/test_watchlists_push.py`; `test/test_gthread_watchlists.py` (twelve bumps at
 once, twelve writes through the hook under a real gthread worker).
 
