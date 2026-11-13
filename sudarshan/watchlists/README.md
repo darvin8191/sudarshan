@@ -426,7 +426,7 @@ which names only rename. With the switch off nothing here is drawn or read. Test
 
 ## F fixes after the mid-point review
 
-Seven findings of the mid-point review (H2, M2, M3, L11, L12, and the W5 bullet), all in the phone.
+Five findings of the mid-point review (H2, M2, M3, L11, L12) and its W5 bullet, all in the phone.
 
 - **Where fields travel (H2).** `callOp` follows the contract and the bridge: a GET or DELETE
   sends its fields (the path's own excluded) in the query string, every other method sends the whole
