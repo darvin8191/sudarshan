@@ -505,7 +505,7 @@ export default function Watchlist() {
               kind={kindOfRef(otherRef)} // M8.6: the menu follows the list on screen
               onImport={v2 ? () => open({ kind: 'import' }) : undefined} // F15
               onExport={v2 ? () => open({ kind: 'export' }) : undefined} // F15
-              alert={listAlert} // F17
+              alert={v2 ? listAlert : undefined} // F17; switch off: today's menu (review H1)
               newSectionOff={
                 view && view.sections.length >= LIMITS.sections_per_list ? SECTIONS_FULL : null
               }
