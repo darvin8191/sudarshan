@@ -19,6 +19,7 @@ atexit.register(shutil.rmtree, _TMP, ignore_errors=True)
 os.environ.setdefault("API_KEY_PEPPER", "f" * 64)  # fake, test only
 os.environ.setdefault("APP_KEY", "test-only-app-key-" + "0" * 32)
 os.environ.setdefault("DATABASE_URL", f"sqlite:///{_TMP}/openalgo-unused.db")
+os.environ.setdefault("SUDARSHAN_UNIVERSES_DIR", f"{_TMP}/no-universes")  # no server folder
 os.environ.setdefault("LOG_DIR", f"{_TMP}/log")
 
 dotenv.load_dotenv = lambda *args, **kwargs: False

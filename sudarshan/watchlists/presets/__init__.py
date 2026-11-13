@@ -1,7 +1,7 @@
 """The catalogue of built-in lists, found by discovery (M8.8, W12).
 
 Pure: no Flask, no OpenAlgo, no I/O, no clock, no logging. A source module of this package
-(``master_lists.py`` now, W13's typed files later) is found with ``pkgutil.iter_modules`` and names
+(``master_lists.py``, and ``typed_lists.py`` of W13) is found with ``pkgutil.iter_modules`` and names
 its lists in ``ENTRIES``, so a new source adds a file and edits no shared line. Each ``Entry``
 carries the list's id (the ``<id>`` of ``preset:<id>``), its name, its kind (``master``: derived
 from today's master; ``typed``: a file a person typed, W13), the rule or file it comes from and two
@@ -40,7 +40,8 @@ class Prepared(NamedTuple):
     rows: tuple = ()  # the master's own rows, in the list's order
     missing: tuple[str, ...] = ()  # ``EXCHANGE:SYMBOL`` of names the master lacks
     futures: tuple = ()  # index futures: per underlying, the (iso, row) pairs, soonest first
-    as_of: str | None = None  # a typed list's own date; None: the master's
+    as_of: str | None = None  # a typed list's own date; None: the master's (a typed one: unknown)
+    notes: tuple[str, ...] = ()  # a typed file's format problems, in words
 
     def expiries(self) -> set[str]:
         """Every expiry date (ISO) the list might roll between: what the calendar may be asked."""
@@ -54,6 +55,7 @@ class Built(NamedTuple):
     missing: tuple[str, ...] = ()
     #: Epoch ms at which a row would be a different contract (index futures); None for the rest.
     valid_until: int | None = None
+    notes: tuple[str, ...] = ()  # a typed file's format problems, in words
 
 
 class Entry(NamedTuple):
@@ -64,6 +66,12 @@ class Entry(NamedTuple):
     prepare: Callable[[Any], Prepared]
     members: Callable[[Prepared, int, dict], Built]
     review: bool = False  # a typed list that is checked at each index review
+    #: A typed list is offered only while its file is there; None: always offered.
+    offered: Callable[[], bool] | None = None
+    #: What identifies the file's content now (path, modification time, size), or None when there
+    #: is none. A prepared list is kept with the master's generation *and* this stamp, so a file
+    #: changed on disk is read again at the next call without a restart.
+    stamp: Callable[[], object] | None = None
 
     @property
     def ref(self) -> str:
@@ -85,24 +93,41 @@ def _collect() -> tuple[Entry, ...]:
     return tuple(e for _, _, e in found)
 
 
-CATALOGUE: tuple[Entry, ...] = _collect()
-BY_ID = {e.id: e for e in CATALOGUE}
+ALL: tuple[Entry, ...] = _collect()
+BY_ID = {e.id: e for e in ALL}
+
+
+def catalogue() -> tuple[Entry, ...]:
+    """The lists offered now, in catalogue order: every master-derived list, and each typed list
+    whose file is there (W13). Asked at each call, so a file added or removed shows at once."""
+    return tuple(e for e in ALL if e.offered is None or e.offered())
+
+
+def __getattr__(name: str):
+    """``presets.CATALOGUE`` is the lists offered now (a typed list's file may come and go)."""
+    if name == "CATALOGUE":
+        return catalogue()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def entry(ident: str) -> Entry | None:
-    """The list ``preset:<ident>``, or None."""
-    return BY_ID.get(ident)
+    """The list ``preset:<ident>`` when it is offered, else None."""
+    found = BY_ID.get(ident)
+    return found if found is not None and (found.offered is None or found.offered()) else None
 
 
 def lines(e: Entry, built: Built, as_of: str | None) -> list[str]:
     """The words over the rows: the lock, where the list comes from, the window and the names it
     could not find."""
-    out = [words.locked_line(e.name, len(built.rows)), words.source_line(e.rule, as_of)]
+    if e.kind == "typed":  # the lock and the file's own date, in one line
+        out = [words.typed_locked_line(e.name, len(built.rows), as_of)]
+    else:
+        out = [words.locked_line(e.name, len(built.rows)), words.source_line(e.rule, as_of)]
     if len(built.rows) > contract.LIMITS["list_items"]:
         out.append(words.WINDOW)
     if built.missing:
         out.append(words.missing_line([k.partition(":")[2] for k in built.missing], e.review))
-    return out
+    return out + list(built.notes)
 
 
 def merge(

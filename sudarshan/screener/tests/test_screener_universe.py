@@ -181,3 +181,28 @@ def test_the_master_is_read_only_and_a_missing_file_is_said_in_words(tmp_path, m
         u.Master(tmp_path / "none.db").rows("NSE")
     assert "master contract" in str(caught.value) and not (tmp_path / "none.db").exists()
     assert u.Master(tmp_path / "none.db").ready() is False
+
+
+#: The symbols of the two shipped files, pinned by hash so that no constituent list is copied here:
+#: adding the one ``# as of`` header line to each file (M8.8, X1) must not change what the
+#: screener reads from them.
+PINNED = {
+    "NIFTY50": (50, "f6744964a2feaad4c788f43e1e15139b8980e7536ca40f9869443dc0db694d48"),
+    "NIFTYBANK": (12, "e9b859a1f32410429f12edcdb6ebeb9cae522a2d7d17511cf1d09172b4632da2"),
+}
+
+
+@pytest.mark.parametrize("list_id", sorted(PINNED))
+def test_the_shipped_files_read_the_same_symbols_with_their_as_of_header(list_id):
+    import hashlib
+
+    names = u.read_list(list_id)
+    count, digest = PINNED[list_id]
+    assert len(names) == count
+    assert hashlib.sha256("\n".join(names).encode()).hexdigest() == digest
+    lines = (u.LISTS_DIR / f"{list_id}.txt").read_text(encoding="utf-8").splitlines()
+    headers = [n for n, text in enumerate(lines) if text == "# as of 2026-09-30"]
+    assert len(headers) == 1, "one header line, with the date of the index review"
+    first = next(n for n, text in enumerate(lines) if text and not text.startswith("#"))
+    assert headers[0] < first, "the header sits above the first symbol"
+    assert all(text.startswith("#") for text in lines[: headers[0]]), "below the comment lines"

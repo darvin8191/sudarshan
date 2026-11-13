@@ -110,11 +110,16 @@ def test_index_futures_roll_at_the_close_of_expiry_day(case):
 
 
 def test_the_catalogue_is_found_by_discovery_with_a_seam_for_typed_lists():
-    assert [e.id for e in presets.CATALOGUE] == ["indices", "fno_stocks", "index_futures"]
-    assert {e.kind for e in presets.CATALOGUE} == {"master"}
+    # the repository's two typed files are offered with no server folder; the rest need theirs
+    assert [e.id for e in presets.CATALOGUE] == [
+        "nifty50", "niftybank", "indices", "fno_stocks", "index_futures"]  # fmt: skip
+    assert {e.kind for e in presets.CATALOGUE} == {"master", "typed"}
     assert all(e.ref == f"preset:{e.id}" for e in presets.CATALOGUE)
     modules = {m.__name__.rpartition(".")[2] for m in presets._MODULES}
-    assert "master_lists" in modules  # W13 adds typed_lists.py beside it and edits nothing here
+    assert {
+        "master_lists",
+        "typed_lists",
+    } <= modules  # W13 adds typed_lists.py beside it and edits nothing here
 
 
 def test_the_pure_modules_import_no_flask_and_no_openalgo():
@@ -127,6 +132,8 @@ def test_the_pure_modules_import_no_flask_and_no_openalgo():
             elif isinstance(node, ast.ImportFrom) and node.module:
                 mods = [node.module]
             for m in mods:
+                if path.name == "typed_lists.py" and m == "utils.logging":
+                    continue  # the one module that reads files, and logs a folder it cannot read
                 assert m.split(".")[0] not in ("flask", "database", "utils", "extensions"), (
                     path,
                     m,
