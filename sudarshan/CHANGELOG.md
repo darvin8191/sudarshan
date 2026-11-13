@@ -5,6 +5,61 @@ publish. The owner publishes each release on GitHub. The server's deploy timer t
 outside 08:30-16:00 IST on trading days (09:00-15:45 until v0.3.1), keeps backups, and rolls
 back if the app does not come up healthy.
 
+## v0.8.1 (13 Nov 2026)
+
+The market's timings change on **Monday 7 Dec 2026** (SEBI's circular of 15 Oct 2026, NSE's of
+6 Nov 2026): F&O trades to 15:45, an expiring index contract stops at 15:30 on its expiry day, and
+a stock with derivatives closes by auction from 15:30 to 15:40. SUDARSHAN switches to them that
+morning by itself; nothing changes before 7 Dec. It includes everything in v0.8.0. **Publish it
+only after v0.8.0 has installed and run one trading day, and no later than Friday 4 Dec**, so it is
+installed before the Monday it is for.
+
+### What changes for you on 7 Dec 2026
+- **F&O runs to 15:45 everywhere:** the charts on the phone and on /trading (the 15:40 five-minute
+  candle opens on time, the last hourly candle closes at 15:45), the market status, Python
+  strategies, Flow, and the daily loss limit's F&O session.
+- **Analyze mode settles an expiring index contract** (NIFTY, BANKNIFTY, SENSEX and the others) at
+  15:30 on its expiry day, and a stock contract at 15:45. Until 6 Dec every expiring contract
+  settles at 15:40. Your MIS square-off time does not change.
+- **A stock with derivatives** trades to 15:30, then closes by auction. It shows "Closing auction ·
+  price at about 15:40" until its price comes, and alerts and screens wait for it until 15:40.
+- **A stock without derivatives** closes at 15:30 with no auction and keeps its usual close.
+- **Auto-login** may log in until 15:45. Test now is refused from 09:00 to 15:45 while Upstox is
+  connected, and the page names the day's hours.
+- **Longer windows around the close:** the price feed stays connected until 15:55 and reconnects a
+  stalled feed until 15:45; order alerts stay connected until 16:05; the nightly backup and
+  history downloads wait until 16:05.
+- **The Upstox tab's closing record** is taken at 16:00 and marked "Taken late" after 16:30. The
+  history names each record's time.
+- **A day high or low alert on F&O** may start watching up to 15:44.
+- **OpenAlgo's timings page** shows NFO and BFO at 15:40 with "15:45 from 7 Dec 2026" under it. A
+  close you set yourself is never changed.
+
+### What you must do
+- **Nothing when you publish:** no setting changes and no database change.
+- **If you set your own NFO or BFO close** on the timings page, it stays as you set it on every
+  date. Set it back to 15:40 to let it follow by itself, or to 15:45.
+- **If you set your own window** in `SUDARSHAN_FEED_WINDOW`, `SUDARSHAN_ALERTS_WINDOW` or
+  `SUDARSHAN_AUTOLOGIN_WINDOW`, its end also moves 5 minutes later from 7 Dec.
+- **On the morning of Mon 7 Dec, check:** the Auto login page says "from 09:00 to 15:45"; the
+  timings page shows NFO today as 09:15-15:45; the feed's health shows hours 08:58-15:55; after
+  15:40, a NIFTY future's phone chart still forms candles.
+- **On Tue 8 Dec (NIFTY expiry):** an expiring NIFTY position in Analyze mode settles at 15:30.
+
+### What is refused now that used to be accepted
+- Nothing.
+
+### Still to check, or not modelled
+- **On 7 Dec after 15:30**, a stock without derivatives shows its close at 15:30 and no auction
+  line. Which stocks close by auction comes from reports of NSE's circulars of 6 Nov 2026 (stocks
+  with derivatives on any exchange); NSE's own text was not read.
+- **Deploy gate:** installs are still kept out only until 16:00, as your rules say. From 7 Dec an
+  install between 16:01 and 16:05 can restart the order alerts while they are connected; they read
+  the order book again afterwards.
+- **Option greeks, IV and the straddle and gamma charts** assume NFO and BFO options expire at
+  15:30. That is right for index options from 7 Dec and 15 minutes early for stock options on their
+  expiry day.
+
 ## v0.8.0 (13 Nov 2026)
 
 A logout on one device now signs out every device, the nightly backup can keep an encrypted copy
