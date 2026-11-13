@@ -24,10 +24,10 @@ reimplemented (CLAUDE.md "Risk rules live in services/risk/"): reaching the limi
 
 The day is India's date. A lock written for it holds until that date ends, so an order sent that
 evening (an AMO) is refused too. The figure is looked at only while the order's own segment is
-in session, by the exchange's own hours (database/market_calendar_db: F&O to 15:40, cash to
-15:30, MCX into the night; amendment R11), never by one 15:30 for every segment. Outside its
-session a book can still show the day before (Upstox resets it in the morning), and a lock
-written from it would hold a whole new day.
+in session, by the exchange's own hours (database/market_calendar_db: F&O to 15:40 and to 15:45
+from 7 Dec 2026, cash to 15:30, MCX into the night; amendment R11), never by one 15:30 for every
+segment. Outside its session a book can still show the day before (Upstox resets it in the
+morning), and a lock written from it would hold a whole new day.
 """
 
 from __future__ import annotations

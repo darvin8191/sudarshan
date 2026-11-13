@@ -101,7 +101,8 @@ def _answer(answer: killswitch.Answer):
 
 _PIPES = ("live", "sandbox")
 #: The segment whose session the daily card follows: the limit is set for F&O (R4), whose
-#: session (09:15 to 15:40) is when an order's figure is looked at (R11).
+#: session (09:15 to 15:40; to 15:45 from 7 Dec 2026, by the calendar) is when an order's figure
+#: is looked at (R11).
 _CARD_SEGMENT = "NFO"
 
 
