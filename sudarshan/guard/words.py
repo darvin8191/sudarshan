@@ -508,6 +508,7 @@ def phrase_refused(asked: str) -> str:
 
 PHRASE_ASKED_KS_ON = "turn the kill switch on"
 PHRASE_ASKED_KS_EXIT = "turn the kill switch on and exit every position"
+PHRASE_ASKED_KS_OFF = "turn the kill switch off"
 
 
 def phrase_asked_settings(names: list[str]) -> str:

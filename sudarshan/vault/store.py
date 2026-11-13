@@ -244,7 +244,9 @@ class Vault:
 
     def _prepare(self):
         ensure_private_file(self.path)
-        engine = create_db_engine(f"sqlite:///{self.path}")
+        # Sealed secrets are values here: no failed statement's error text carries them into a log
+        # (release review v0.8.0, L10).
+        engine = create_db_engine(f"sqlite:///{self.path}", hide_parameters=True)
         try:
             Base.metadata.create_all(engine)
         except OperationalError:

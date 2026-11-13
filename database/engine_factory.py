@@ -32,12 +32,16 @@ from sqlalchemy import create_engine
 from sqlalchemy.pool import NullPool
 
 
-def create_db_engine(database_url=None):
+def create_db_engine(database_url=None, *, hide_parameters=False):
     """Create a SQLAlchemy engine with the project-wide pooling policy.
 
     Args:
         database_url: SQLAlchemy database URL. Falls back to the ``DATABASE_URL``
             environment variable when not provided.
+        hide_parameters: SUDARSHAN (release review v0.8.0, L10): leave a failed
+            statement's parameters out of its error text, for a database whose
+            values are secrets (the risk layer's confirm phrase, the owner
+            vault). Off by default, as upstream builds every engine.
 
     Returns:
         A configured SQLAlchemy ``Engine``. SQLite URLs use ``NullPool`` with
@@ -53,7 +57,14 @@ def create_db_engine(database_url=None):
             database_url,
             poolclass=NullPool,
             connect_args={"check_same_thread": False},
+            hide_parameters=hide_parameters,
         )
 
     # Non-SQLite backends (e.g. PostgreSQL): use a real connection pool.
-    return create_engine(database_url, pool_size=50, max_overflow=100, pool_timeout=10)
+    return create_engine(
+        database_url,
+        pool_size=50,
+        max_overflow=100,
+        pool_timeout=10,
+        hide_parameters=hide_parameters,
+    )

@@ -230,8 +230,8 @@ def test_a_table_another_creator_makes_between_check_and_create_is_no_failure(
 
     real = store.create_db_engine
 
-    def watched(url):
-        engine = real(url)
+    def watched(url, **options):
+        engine = real(url, **options)
         event.listen(engine, "before_cursor_execute", first_by_the_other)
         return engine
 

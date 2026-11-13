@@ -56,7 +56,9 @@ feed and API-key calls work as before.
     "The risk layer's confirm phrase, if it is forgotten"). It writes a History line, tells you on
     Telegram and works at the next try, with no restart. The phrase card says so;
   - a wrong phrase is now written in History, from the app or Telegram, for a settings change and
-    for turning the kill switch on: what was asked and how many tries in a row, never what was typed;
+    for turning the kill switch on or off: "A wrong confirm phrase was refused when asked to ..."
+    with what was asked and how many tries in a row (one line, counted up), never what was typed;
+    a box left empty is asked for again, not recorded;
   - after saving a daily limit at or below the day's loss, the warning "saving locks new orders until
     tomorrow" no longer stays on the card; the day card's chip says the rest;
   - in Analyze mode a refused order's message reads "NIFTY17NOV2825200CE: Daily loss limit reached:

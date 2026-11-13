@@ -173,6 +173,7 @@ def kill_switch_sentences() -> list[str]:
     out += [
         words.phrase_refused(words.PHRASE_ASKED_KS_ON),
         words.phrase_refused(words.PHRASE_ASKED_KS_EXIT),
+        words.phrase_refused(words.PHRASE_ASKED_KS_OFF),
         words.phrase_refused(words.phrase_asked_settings(["max_lots_fo", "confirm_phrase"])),
         words.PHRASE_RESET_AUDIT,
     ]

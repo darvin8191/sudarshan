@@ -131,11 +131,12 @@ def activate(owner: Owner, *, exit_all: bool, phrase: object = None, phrase_need
             else risk_store.RiskSettings().confirm_phrase
         )
         if not phrase_matches(phrase, expected):
-            note_phrase_refused(
-                owner.surface,
-                owner.actor,
-                words.PHRASE_ASKED_KS_EXIT if exit_all else words.PHRASE_ASKED_KS_ON,
-            )
+            if str(phrase or "").strip():  # an empty box is asked for again, not recorded (L9)
+                note_phrase_refused(
+                    owner.surface,
+                    owner.actor,
+                    words.PHRASE_ASKED_KS_EXIT if exit_all else words.PHRASE_ASKED_KS_ON,
+                )
             return Answer(400, words.PHRASE_WRONG)
     recover()
     activation_id = "ks-" + uuid.uuid4().hex[:12]
@@ -989,7 +990,11 @@ def resume(owner: Owner, *, phrase: object) -> Answer:
     if settings is None:
         return Answer(503, words.KS_SETTINGS_UNREADABLE)
     if not phrase_matches(phrase, settings.confirm_phrase):
-        return _refused(owner, Answer(400, words.PHRASE_WRONG, risk_gate.GATE.state()))
+        # Release review v0.8.0 L9: as for turning it on or changing a limit, a wrong phrase is
+        # one History line per surface, counted up for tries in a row; an empty box is not one.
+        if str(phrase or "").strip():
+            note_phrase_refused(owner.surface, owner.actor, words.PHRASE_ASKED_KS_OFF)
+        return Answer(400, words.PHRASE_WRONG, risk_gate.GATE.state())
     recover()
     state = risk_gate.GATE.state()
     if state is None:

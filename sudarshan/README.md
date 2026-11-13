@@ -630,7 +630,9 @@ cd /opt/sudarshan/apps/openalgo && sudo -u sudarshan .venv/bin/python -m sudarsh
 - Change it again afterwards from Settings > Risk. A phrase that is already the default is left
   alone: the command says so and writes and sends nothing.
 - Every wrong phrase is in History as well (turning the kill switch on or off, changing a limit),
-  with what was being asked and how many tries, never with what was typed.
+  with what was being asked and how many tries, never with what was typed: tries in a row within
+  a minute, from one place (the app or Telegram), share one line, counted up. A box left empty
+  is asked for again and not recorded.
 
 Tests: `sudarshan/guard/tests/test_guard_phrase.py`.
 
