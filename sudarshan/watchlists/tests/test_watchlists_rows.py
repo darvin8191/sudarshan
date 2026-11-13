@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import select, text
 from watchlists_bridge_app import OWNER, csrf_headers, login_session, make_app, reset_users
+from watchlists_follow_master import build_master
 
 import blueprints.sudarshan_watchlists as bp_module
 from sudarshan.watchlists import contract, engine, master, ops, schema, versions, view
@@ -16,48 +17,6 @@ from sudarshan.watchlists.words import sections as section_words
 
 NOW = 1_700_000_000_000
 ROWS = contract.API_PREFIX + "/rows"
-EXPIRIES = ("24-NOV-26", "01-DEC-26", "29-DEC-26")
-STRIKES = (25800.0, 25850.0, 25900.0, 25950.0, 26000.0)
-
-
-def fo(symbol, u, exch, typ, expiry, strike=None):
-    return SimpleNamespace(
-        symbol=symbol, name=u, exchange=exch, token=f"{exch}|{symbol}", expiry=expiry,
-        strike=strike, lotsize=75, tick_size=0.05, instrumenttype=typ, underlying=u,
-    )  # fmt: skip
-
-
-def cash(symbol, exch, name=None):
-    return SimpleNamespace(
-        symbol=symbol, name=name or symbol, exchange=exch, token=f"{exch}|{symbol}", expiry=None,
-        strike=None, lotsize=1, tick_size=0.05, instrumenttype="EQ", underlying=None,
-    )  # fmt: skip
-
-
-class Snap:
-    """A snapshot the master can hold a weak reference to (a namespace cannot be)."""
-
-    def __init__(self, rows):
-        self.by_symbol_exchange = {(r.symbol, r.exchange): r for r in rows}
-        self.by_exchange = {"ALL": tuple(rows)}
-        self.by_token = {r.token: r for r in rows}
-
-
-def build_master(drop=()):
-    """NIFTY (index, options on three expiries, futures), SBIN (cash, futures only), SENSEX on
-    the BSE side. ``drop`` names option symbols the master lacks."""
-    rows = [cash("NIFTY", "NSE_INDEX"), cash("SBIN", "NSE"), cash("SENSEX", "BSE_INDEX")]
-    for iso in EXPIRIES:
-        tag = iso.replace("-", "")
-        rows.append(fo(f"NIFTY{tag}FUT", "NIFTY", "NFO", "FUT", iso))
-        for k in STRIKES:
-            for typ in ("CE", "PE"):
-                sym = f"NIFTY{tag}{int(k)}{typ}"
-                if sym not in drop:
-                    rows.append(fo(sym, "NIFTY", "NFO", typ, iso, k))
-    rows.append(fo("SBIN24NOV26FUT", "SBIN", "NFO", "FUT", "24-NOV-26"))
-    rows.append(fo("SENSEX26NOV2680000CE", "SENSEX", "BFO", "CE", "26-NOV-26", 80000.0))
-    return Snap(rows)
 
 
 @pytest.fixture(autouse=True)
@@ -338,3 +297,107 @@ def test_a_deleted_lists_rows_go_with_its_overlay(client):
         prune.drop_overlay(s, lid)
     assert table("wl_row") == []
     oa.db_session.remove()
+
+
+# -- resolve, through the bridge -------------------------------------------------------------------------
+RESOLVE = contract.API_PREFIX + "/resolve"
+AT = int(
+    __import__("datetime").datetime.fromisoformat("2026-11-20T11:00:00+05:30").timestamp() * 1000
+)
+
+
+@pytest.fixture
+def world(monkeypatch):
+    """The clock at 11:00 IST on a Friday, an open market, no calendar rows and a feed that has
+    one tick; ``asked`` records what the feed was asked."""
+    from sudarshan.watchlists import feedsnap, sessions
+    from sudarshan.watchlists.ops import rows as rows_ops
+
+    asked = []
+    monkeypatch.setattr(rows_ops, "_now_ms", lambda: AT)
+    monkeypatch.setattr(sessions, "market_open", lambda exchange, now: True)
+    monkeypatch.setattr(sessions, "closes", lambda dates, exchange: {})
+
+    def feed(keys):
+        asked.append(keys)
+        return {"NSE_INDEX|NIFTY": (25851.0, AT - 1000)} if "NSE_INDEX|NIFTY" in keys else {}
+
+    monkeypatch.setattr(feedsnap, "read", feed)
+    return asked
+
+
+def ask(client, rows, connected=True):
+    return client.post(RESOLVE, json={"rows": rows, "connected": connected}, headers=client.headers)
+
+
+def page(i, price=25912.35, source="tick", held=None):
+    return {"id": i, "price": price, "price_at": AT - 500, "source": source, "held": held}
+
+
+def test_resolve_answers_each_row_with_its_contracts_and_writes_nothing(client, emitted, world):
+    lid, _ = make_list()
+    a = add(client, lid, "0", offset=1).get_json()["data"]["id"]
+    b = add(client, lid, v(1), kind="strike_pair").get_json()["data"]["id"]
+    c = add(client, lid, v(2), kind="month_future").get_json()["data"]["id"]
+    n, before = len(emitted), (table("wl_row"), table("wl_list"))
+    r = ask(client, [page(a), page(b), page(c, None, None)])
+    assert r.status_code == 200 and r.headers["Cache-Control"] == "no-store"
+    first, pair, fut = r.get_json()["data"]["rows"]
+    assert (first["id"], first["state"], first["strike"]) == (a, "ok", 25950.0)
+    assert first["ce"]["symbol"] == "NIFTY24NOV2625950CE" and first["pe"] is None
+    assert (pair["ce"]["symbol"], pair["pe"]["symbol"]) == (
+        "NIFTY24NOV2625900CE", "NIFTY24NOV2625900PE")  # fmt: skip
+    assert fut["future"]["symbol"] == "NIFTY24NOV26FUT" and fut["state"] == "ok"
+    assert first["valid_until"] == AT + (4 * 24 * 3600 + 4 * 3600 + 30 * 60) * 1000
+    assert (len(emitted), (table("wl_row"), table("wl_list"))) == (n, before)  # no write, no push
+    assert world == []  # the page had a price for every row that needs one
+
+
+def test_resolve_asks_the_feed_once_for_rows_the_page_has_no_price_for(client, world):
+    lid, _ = make_list()
+    a = add(client, lid, "0").get_json()["data"]["id"]
+    b = add(client, lid, v(1), offset=2).get_json()["data"]["id"]
+    got = ask(client, [page(a, None, None), page(b, None, None)]).get_json()["data"]["rows"]
+    assert world == [["NSE_INDEX|NIFTY"]]
+    assert [g["strike"] for g in got] == [25850.0, 25950.0]
+    assert got[0]["words"] == "Now: NIFTY 25,850 CE, 24 Nov 2026 (NIFTY at 25,851)"
+
+
+def test_resolve_names_a_row_that_is_gone_and_checks_its_request(client, world):
+    lid, _ = make_list()
+    a = add(client, lid, "0").get_json()["data"]["id"]
+    got = ask(client, [page(a), page(999)]).get_json()["data"]["rows"]
+    assert [(g["id"], g["state"]) for g in got] == [(a, "ok"), (999, "missing")]
+    assert got[1]["words"] == words.ROW_GONE
+    assert ask(client, []).get_json()["data"] == {"rows": []}
+    refused(client.post(RESOLVE, json={"rows": [{"id": 1}], "connected": True},
+                        headers=client.headers), 400, "invalid", "rows")  # fmt: skip
+    refused(
+        client.post(RESOLVE, json={"rows": []}, headers=client.headers), 400, "invalid", "connected"
+    )
+    many = [page(i) for i in range(1, 102)]
+    assert refused(ask(client, many), 400, "invalid", "rows") == words.TOO_MANY
+
+
+def test_resolve_with_the_master_not_loaded_says_so_and_a_list_of_gone_rows_does_not(
+    client, world, monkeypatch
+):
+    lid, _ = make_list()
+    a = add(client, lid, "0").get_json()["data"]["id"]
+    monkeypatch.setattr(master, "openalgo_snapshot", lambda: None)
+    assert refused(ask(client, [page(a)]), 500, "failed") == words.NOT_LOADED
+    assert ask(client, [page(999)]).get_json()["data"]["rows"][0]["state"] == "missing"
+
+
+def test_resolve_follows_the_rows_through_a_roll_without_a_write(client, world, monkeypatch):
+    from sudarshan.watchlists.ops import rows as rows_ops
+
+    lid, _ = make_list()
+    a = add(client, lid, "0").get_json()["data"]["id"]
+    close = ask(client, [page(a)]).get_json()["data"]["rows"][0]["valid_until"]
+    monkeypatch.setattr(rows_ops, "_now_ms", lambda: close + 1000)
+    after = ask(client, [page(a)]).get_json()["data"]["rows"][0]
+    assert (
+        after["ce"]["expiry"] == "2026-12-01" and after["words"] == "Rolled to 1 Dec 2026 at 15:30"
+    )
+    assert len(table("wl_row")) == 1

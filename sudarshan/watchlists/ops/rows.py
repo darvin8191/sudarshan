@@ -10,6 +10,8 @@ OpenAlgo items, so ``openalgo.db`` is never written. ``resolve`` is below the wr
 
 from __future__ import annotations
 
+import time
+
 from flask import session
 
 from sudarshan.watchlists import engine
@@ -61,11 +63,6 @@ def _ref(args: dict, data: Done):
     return UNCHANGED if data.same else [data.ref]
 
 
-def fo_exchange(underlying_exchange: str) -> str:
-    """The derivatives exchange of an underlying's exchange."""
-    return "NFO" if underlying_exchange.startswith("NSE") else "BFO"
-
-
 def _check_master(rule: dict) -> None:
     """The underlying must be in today's master and have what the row follows. Raises OpError."""
     from sudarshan.watchlists import master  # imported when used: the bridge loads no master
@@ -76,6 +73,8 @@ def _check_master(rule: dict) -> None:
     name, exch = rule["underlying"], rule["underlying_exchange"]
     if not m.known(exch, name):
         raise OpError("invalid", words.not_listed(name), "underlying")
+    from sudarshan.watchlists.resolver import fo_exchange
+
     ix, fo = m.index(), fo_exchange(exch)
     if ix is None:
         raise OpError("failed", words.NOT_LOADED)
@@ -186,4 +185,45 @@ def row_remove(args: dict) -> dict:
     return _done(version, ident, list_id)
 
 
-HANDLERS = {"row_add": row_add, "row_edit": row_edit, "row_remove": row_remove}
+MAX_RESOLVE = 100
+
+
+def _now_ms() -> int:
+    return int(time.time() * 1000)
+
+
+def resolve(args: dict) -> dict:
+    """Follow rows to contracts, now (a read: it changes nothing and bumps nothing). ``rows`` is
+    what the page knows of each row it asks about: its price and where it came from, and the
+    strike the row last showed (``held``); ``connected`` says whether the page's socket is up."""
+    from sudarshan.watchlists import feedsnap, master, resolver, sessions
+
+    items = {}
+    for item in args["rows"]:
+        items.setdefault(item["id"], item)
+    if len(items) > MAX_RESOLVE:
+        raise OpError("invalid", words.TOO_MANY, "rows")
+    with engine.open_session() as s:
+        found = store.find_many(s, list(items))
+        rules = {i: store.as_rule(r) for i, r in found.items()}
+    m = master.shared()
+    if rules and not m.loaded():
+        raise OpError("failed", words.NOT_LOADED)
+    ix = m.index() if rules else None
+    if rules and ix is None:
+        raise OpError("failed", words.NOT_LOADED)
+    now = _now_ms()
+    answered = resolver.resolve_rows(
+        rules, items, now_ms=now, connected=args["connected"], ix=ix,
+        row_of=m.row, isin=m.isin, closes_of=lambda fo, dates: sessions.closes(dates, fo),
+        is_open=sessions.market_open, feed=feedsnap.read,
+    )  # fmt: skip
+    return {"rows": answered}
+
+
+HANDLERS = {
+    "row_add": row_add,
+    "row_edit": row_edit,
+    "row_remove": row_remove,
+    "resolve": resolve,
+}
