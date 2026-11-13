@@ -74,7 +74,7 @@ def raw(path, sql: str):
 
 
 def test_a_fresh_file_is_private_and_at_the_latest_version(path, store):
-    assert store.applied == [1] and raw(path, "PRAGMA user_version") == [(migrations.LATEST,)]
+    assert store.applied == [1, 2] and raw(path, "PRAGMA user_version") == [(migrations.LATEST,)]
     assert os.stat(path).st_mode & 0o777 == 0o600
     assert os.stat(path.parent).st_mode & 0o777 == 0o700
     store.create("owner", FIELDS, NOW)
@@ -106,7 +106,7 @@ def test_a_populated_file_forced_back_to_version_0_migrates_without_loss(path, s
     store.close()
     raw(path, "PRAGMA user_version = 0")
     again = MarketStore(path)
-    assert again.applied == [1]
+    assert again.applied == [1, 2]
     assert again.alert("owner", row["id"]) == row
     assert again.states("owner")[row["id"]] == State(20261021, 0)
     assert [e["id"] for e in again.events("owner")] == [event_id]
@@ -125,18 +125,18 @@ def test_a_later_step_on_a_populated_old_copy_then_again_forced_back(path, store
     stopped = store.create("owner", FIELDS, NOW)
     store.set_status("owner", stopped["id"], "stopped", "Fired once at 10:00", NOW, version=1)
     store.close()
-    monkeypatch.setattr(migrations, "STEPS", (*migrations.STEPS, (2, _step2)))
+    monkeypatch.setattr(migrations, "STEPS", (*migrations.STEPS, (3, _step2)))
     first = MarketStore(path)
-    assert first.applied == [2] and raw(path, "PRAGMA user_version") == [(2,)]
+    assert first.applied == [3] and raw(path, "PRAGMA user_version") == [(3,)]
     first.close()
     assert raw(path, "SELECT id, colour FROM alert ORDER BY id") == [
         (active["id"], ""),
         (stopped["id"], "grey"),
     ]
     raw(path, f"UPDATE alert SET colour = 'gold' WHERE id = {active['id']}")  # the owner's own
-    raw(path, "PRAGMA user_version = 1")  # forced back, the column already there
+    raw(path, "PRAGMA user_version = 2")  # forced back, the column already there
     again = MarketStore(path)
-    assert again.applied == [2]
+    assert again.applied == [3]
     assert raw(path, "SELECT colour FROM alert ORDER BY id") == [("gold",), ("grey",)]
     again.close()
     third = MarketStore(path)
@@ -153,10 +153,10 @@ def test_a_step_that_fails_leaves_the_file_as_it_was(path, store, monkeypatch):
         migrations.add_column(conn, "alert", "colour", "TEXT")
         raise RuntimeError("the disk went away")
 
-    monkeypatch.setattr(migrations, "STEPS", (*migrations.STEPS, (2, broken)))
+    monkeypatch.setattr(migrations, "STEPS", (*migrations.STEPS, (3, broken)))
     with pytest.raises(RuntimeError):
         MarketStore(path)
-    assert raw(path, "PRAGMA user_version") == [(1,)]
+    assert raw(path, "PRAGMA user_version") == [(2,)]
     assert raw(path, "SELECT name FROM sqlite_master WHERE name = 'half_done'") == []
     assert "colour" not in {row[1] for row in raw(path, "PRAGMA table_info(alert)")}
 
@@ -171,9 +171,9 @@ def test_a_step_another_process_finished_first_is_not_run_again(path, store, mon
         runs.append(conn)
         conn.exec_driver_sql("CREATE TABLE once_only (x INTEGER)")
 
-    monkeypatch.setattr(migrations, "STEPS", (*migrations.STEPS, (2, once)))
+    monkeypatch.setattr(migrations, "STEPS", (*migrations.STEPS, (3, once)))
     MarketStore(path).close()
-    monkeypatch.setattr(migrations, "pending", lambda engine, steps=None: [2])  # a stale look
+    monkeypatch.setattr(migrations, "pending", lambda engine, steps=None: [3])  # a stale look
     again = MarketStore(path)
     assert again.applied == [] and len(runs) == 1
     again.close()
@@ -265,7 +265,7 @@ def test_two_processes_opening_a_new_file_at_once_both_start(path, monkeypatch):
     finally:
         event.remove(Engine, "before_cursor_execute", hook)
     assert not [r for r in results if isinstance(r, StoreError)], results
-    assert sorted(len(r.applied) for r in results) == [0, 1]
+    assert sorted(n for r in results for n in r.applied) == [1, 2]  # each step run once
     for opened in results:
         opened.close()
     assert raw(path, "PRAGMA user_version") == [(migrations.LATEST,)]
@@ -278,7 +278,7 @@ def test_a_file_newer_than_the_code_is_refused_and_left_alone(path, store):
         MarketStore(path)
     assert str(caught.value) == (
         "The market alert record was written by a newer SUDARSHAN release (version 99; this "
-        "one knows up to 1). Market alerts stay off until that release is installed again; "
+        "one knows up to 2). Market alerts stay off until that release is installed again; "
         "order alerts carry on."
     )
     assert raw(path, "PRAGMA user_version") == [(99,)]

@@ -104,6 +104,34 @@ def test_turning_it_on_saves_it_before_any_broker_call_then_clears_up(
     assert risk_store.history()[0].kind == "ks_on"
 
 
+def test_the_history_row_carries_the_moment_it_went_on_not_when_the_steps_ended(
+    account, risk_store, monkeypatch
+):
+    # The card said "Since 10:40" while History said 10:41:00 for the same activation: the row
+    # was stamped when its report was saved, a minute after the switch went on.
+    from sudarshan.guard import store as store_module
+
+    late = utcnow() + timedelta(seconds=90)
+    monkeypatch.setattr(store_module, "utcnow", lambda: late)
+    _on()
+    saved = risk_store.state()
+    row = risk_store.history()[0]
+    assert row.kind == "ks_on" and row.surface == OWNER.surface
+    assert abs((row.at - saved.since).total_seconds()) < 1
+    assert abs((row.last_at - saved.since).total_seconds()) < 1
+
+
+def test_the_report_names_the_orders_it_cancelled_in_the_sandbox_too(account, monkeypatch):
+    """The phone says "Cancelled by the kill switch." only for an order the report names
+    (review of v0.6.1, MEDIUM-4): the Live step named its cancels already, now the sandbox's
+    does too."""
+    monkeypatch.setenv(flag.ENV, "sandbox")
+    answer = _on()
+    step = next(s for s in answer.state.report["steps"] if s["step"] == "sandbox_orders")
+    assert step["detail"]["cancelled_ids"] == ["S-1"]
+    assert step["detail"]["cancelled"] == 1
+
+
 def test_in_the_sandbox_stage_it_leaves_mcp_the_agent_and_upstox_alone(
     account, risk_store, monkeypatch
 ):
@@ -119,6 +147,43 @@ def test_in_the_sandbox_stage_it_leaves_mcp_the_agent_and_upstox_alone(
     steps = [step["step"] for step in saved.report["steps"]]
     assert "mcp" not in steps and "agent" not in steps
     assert not saved.agent_engaged_by_us
+
+
+def test_the_sandbox_exit_all_is_worded_from_its_counts_with_the_right_plural(
+    account, risk_store, monkeypatch
+):
+    # The sandbox's own sentence reads "Closed 1 positions"; the owner is told ours.
+    monkeypatch.setenv(flag.ENV, "sandbox")
+    answer = _on(exit_all=True)
+    step = next(s for s in answer.state.report["steps"] if s["step"] == "sandbox_exit_all")
+    assert step["words"] == "The sandbox's Exit all closed 1 position."
+    assert "positions" not in step["words"]
+    assert words.ks_sandbox_exit_all("Closed 3 positions", 3, 0) == (
+        "The sandbox's Exit all closed 3 positions."
+    )
+    assert words.ks_sandbox_exit_all("x", 2, 1) == (
+        "The sandbox's Exit all closed 2 positions and could not close 1 position."
+    )
+    assert words.ks_sandbox_exit_all("No open positions to close", 0, 0) == (
+        "The sandbox's Exit all found no open positions to close."
+    )
+
+
+def test_an_empty_sandbox_book_is_said_in_our_words_too(account, monkeypatch):
+    """The sandbox answers an empty book with success and its own sentence, no counts (review of
+    v0.6.1, LOW 5): it read "The sandbox's Exit all: No open positions to close."."""
+    import services.sandbox_service as sandbox
+
+    empty = {"status": "success", "message": "No open positions to close", "mode": "analyze"}
+    monkeypatch.setattr(sandbox, "sandbox_close_position", lambda *args: (True, empty, 200))
+    monkeypatch.setenv(flag.ENV, "sandbox")
+    answer = _on(exit_all=True)
+    step = next(s for s in answer.state.report["steps"] if s["step"] == "sandbox_exit_all")
+    assert step["words"] == "The sandbox's Exit all found no open positions to close."
+    # a count that is not one is never read as one
+    assert words.ks_sandbox_exit_all("Closed 1 positions", 1, True) == (
+        "The sandbox's Exit all: Closed 1 positions."
+    )
 
 
 def test_exit_all_goes_through_the_one_claim_and_is_never_retried(account, risk_store):

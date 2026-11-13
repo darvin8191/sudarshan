@@ -350,10 +350,14 @@ class RiskStore:
         detail: dict | None = None,
         merge_key: str | None = None,
         count: int = 1,
+        at: datetime | None = None,
     ) -> None:
         """Append what the risk layer did, ``count`` times over. With ``merge_key``, a row written
-        for the same key in the last ``REFUSAL_MERGE_S`` seconds is counted up instead."""
+        for the same key in the last ``REFUSAL_MERGE_S`` seconds is counted up instead. ``at`` is
+        the moment it happened when that is earlier than the write (a kill switch's report is
+        saved when its steps end, but the switch went on at its start)."""
         now = utcnow()
+        happened = at or now
         with self._session() as session:
             row = None
             if merge_key:
@@ -371,8 +375,8 @@ class RiskStore:
             else:
                 session.add(
                     AuditRow(
-                        at=_to_db(now),
-                        last_at=_to_db(now),
+                        at=_to_db(happened),
+                        last_at=_to_db(happened),
                         kind=kind,
                         pipe=pipe,
                         surface=_clip(surface, 120),
@@ -404,10 +408,14 @@ class RiskStore:
                 self._pruned_on = None
 
     def history(self, limit: int = 50) -> list[AuditEntry]:
-        """The newest audit rows first."""
+        """The newest audit rows first, by when each happened: a kill switch's row is written
+        when its report is saved but stamped with the moment it went on, so a refusal written
+        during its clear-up is listed above it (review of v0.6.1, LOW 4)."""
         with self._session() as session:
             rows = session.execute(
-                select(AuditRow).order_by(AuditRow.id.desc()).limit(max(1, min(int(limit), 500)))
+                select(AuditRow)
+                .order_by(AuditRow.at.desc(), AuditRow.id.desc())
+                .limit(max(1, min(int(limit), 500)))
             ).scalars()
             return [
                 AuditEntry(

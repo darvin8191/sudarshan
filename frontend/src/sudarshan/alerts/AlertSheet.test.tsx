@@ -33,12 +33,23 @@ const LIVE: SheetLive = {
   marketOpen: true,
 }
 
-function renderSheet(row: AlertRow) {
+function renderSheet(
+  row: AlertRow,
+  group: { id: number; name: string } | null = null,
+  onOpenGroup: (id: number) => void = () => {}
+) {
   const client = createQueryClient()
   const tree = (shown: AlertRow) => (
     <QueryClientProvider client={client}>
       <MemoryRouter>
-        <AlertSheet row={shown} live={LIVE} onClose={() => {}} onEdit={() => {}} />
+        <AlertSheet
+          row={shown}
+          live={LIVE}
+          onClose={() => {}}
+          onEdit={() => {}}
+          group={group}
+          onOpenGroup={onOpenGroup}
+        />
       </MemoryRouter>
     </QueryClientProvider>
   )
@@ -87,5 +98,37 @@ describe('a status changed by the server while the sheet is open', () => {
     rerender(alertRow({ status: 'active', fired_today: 2 }))
     await user.click(screen.getByRole('button', { name: 'Pause' }))
     expect(api.change).toHaveBeenCalledWith(12, { version: 3, action: 'pause' })
+  })
+})
+
+describe('a member of a list alert (A7)', () => {
+  const member = () => alertRow({ group_id: 7, note: 'kept', fired_today: 1 })
+
+  it('says which list alert it is part of and hides Edit, Pause, Resume and Delete', () => {
+    renderSheet(member(), { id: 7, name: 'Swing' })
+    expect(screen.getByText('Part of the list alert Swing')).toBeInTheDocument()
+    for (const name of ['Edit', 'Pause', 'Resume', 'Restart', 'Delete'])
+      expect(screen.queryByRole('button', { name })).toBeNull()
+    // The rest of the sheet stays: its note, its chart and its history.
+    expect(screen.getByText('kept')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Chart' })).toBeInTheDocument()
+    expect(api.events).toHaveBeenCalled()
+  })
+
+  it('opens the list alert from its button, by the group id', async () => {
+    const open = vi.fn()
+    const user = userEvent.setup()
+    renderSheet(member(), { id: 7, name: 'Swing' }, open)
+    vi.setSystemTime(NOW + 2_000) // past the half second a sheet takes no tap
+    await user.click(screen.getByRole('button', { name: 'Open the list alert' }))
+    expect(open).toHaveBeenCalledWith(7)
+  })
+
+  it('leaves a sheet of an alert with no group as it was', () => {
+    renderSheet(alertRow())
+    expect(screen.queryByText(/Part of/)).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Open the list alert' })).toBeNull()
+    for (const name of ['Edit', 'Pause', 'Delete'])
+      expect(screen.getByRole('button', { name })).toBeInTheDocument()
   })
 })

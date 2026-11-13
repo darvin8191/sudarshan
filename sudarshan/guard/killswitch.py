@@ -271,6 +271,7 @@ def _clear_up(
             actor=owner.actor,
             activation_id=state.activation_id,
             detail=report,
+            at=state.since,  # the moment it went on, the one the card and the banner show
         )
     except Exception:
         logger.exception("The kill switch's report could not be saved")
@@ -709,13 +710,17 @@ def _sweep_again(
 
 
 def _cancel_sandbox_orders(owner: Owner) -> tuple[bool, str, dict]:
+    """Cancel every open sandbox order. The report names the orders it cancelled, as the Live
+    step does: the phone says "Cancelled by the kill switch." for those orders only."""
     from services.sandbox_service import sandbox_cancel_all_orders
 
     ok, body, status = sandbox_cancel_all_orders({}, owner.api_key, {})
-    count = int(
-        (body or {}).get("canceled_count") or len((body or {}).get("canceled_orders") or [])
-    )
-    return bool(ok), words.ks_sandbox_orders(count, ok), {"cancelled": count, "status": status}
+    ids = [str(orderid) for orderid in (body or {}).get("canceled_orders") or [] if orderid]
+    count = int((body or {}).get("canceled_count") or len(ids))
+    detail: dict[str, Any] = {"cancelled": count, "status": status}
+    if ids:
+        detail["cancelled_ids"] = ids
+    return bool(ok), words.ks_sandbox_orders(count, ok), detail
 
 
 def _cancel_sandbox_gtts(owner: Owner) -> tuple[bool, str, dict]:
@@ -734,9 +739,13 @@ def _exit_all_sandbox(owner: Owner) -> tuple[bool, str, dict]:
     from services.sandbox_service import sandbox_close_position
 
     ok, body, status = sandbox_close_position({}, owner.api_key, {})
+    body = body or {}
+    closed, failed = body.get("closed_positions"), body.get("failed_closures")
+    if ok and closed is None and failed is None:
+        closed = failed = 0  # the sandbox answers an empty book with success and no counts
     return (
         bool(ok),
-        words.ks_sandbox_exit_all(str((body or {}).get("message") or "")),
+        words.ks_sandbox_exit_all(str(body.get("message") or ""), closed, failed),
         {"status": status},
     )
 

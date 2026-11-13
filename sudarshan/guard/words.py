@@ -471,7 +471,17 @@ def ks_sandbox_gtts(cancelled: int, failed: int) -> str:
     return said
 
 
-def ks_sandbox_exit_all(message: str) -> str:
+def ks_sandbox_exit_all(message: str, closed: object = None, failed: object = None) -> str:
+    """The sandbox's Exit all, in our words when it gave counts (the sandbox's own sentence reads
+    "Closed 1 positions"); its message only when it gave none."""
+    counted = isinstance(closed, int) and isinstance(failed, int)
+    if counted and not isinstance(closed, bool) and not isinstance(failed, bool):
+        if closed == 0 and failed == 0:
+            return "The sandbox's Exit all found no open positions to close."
+        said = f"The sandbox's Exit all closed {_many(closed, 'position', 'positions')}"
+        if failed:
+            said += f" and could not close {_many(failed, 'position', 'positions')}"
+        return f"{said}."
     if not message.strip():
         return "The sandbox's Exit all sent."
     return f"The sandbox's Exit all: {_ended(message)}"
@@ -922,12 +932,19 @@ def reversal_cut(
     *,
     since: str | None = "",
     locked: tuple[float, float] | None = None,
+    unread: str | None = None,
 ) -> str:
-    """A reversing order under the kill switch or the day's lock: its exit was sent, the part
-    beyond it refused (the coordinator's decision a)."""
+    """A reversing order under the kill switch or the day's lock, or while the day's P&L cannot
+    be read (``unread``: the pipe): its exit was sent, the part beyond it refused (the
+    coordinator's decision a)."""
     name = trader_name(position)
     were = "was" if beyond == 1 else "were"
-    if locked is not None:
+    if unread is not None:
+        why = (
+            f"new orders are paused, because today's P&L could not be read from {_where(unread)} "
+            "and the daily loss limit cannot be checked. Try again in a few seconds."
+        )
+    elif locked is not None:
         loss, limit = locked
         why = (
             f"the day's loss of {rupees(abs(loss))} has reached your daily limit of "
@@ -963,9 +980,16 @@ def burst_told(count: int, window_s: float, again_at: float, pipe: str) -> str:
     )
 
 
-def sandbox_gtt_refused(name: str) -> str:
+def sandbox_gtt_refused(name: str, paused: bool = False) -> str:
     """Telegram, once, when a sandbox GTT's order is refused as it triggers: the GTT is
-    rejected rather than tried again on every tick."""
+    rejected rather than tried again on every tick. ``paused``: new orders were paused because
+    the day's P&L could not be read (the order's own sentence says to try again; a GTT cannot)."""
+    if paused:
+        return (
+            f"Sandbox GTT on {name} rejected: when it triggered, new orders were paused because "
+            "today's P&L could not be read from the sandbox. It will not fire again, and it is "
+            "not tried again by itself; place it again if you still want it."
+        )
     return (
         f"Sandbox GTT on {name} rejected: when it triggered, its order was refused by your risk "
         "settings (the kill switch, the daily loss limit or another limit). It will not fire "

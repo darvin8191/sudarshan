@@ -93,6 +93,8 @@ export interface AlertRow {
   created_at: number
   updated_at: number
   words: { condition: string; meta: string; checks_at: string | null }
+  /** The list alert (group) this alert belongs to; null or absent for an ordinary alert. */
+  group_id?: number | null
   /** Active alerts only, and only when not simply watching. */
   check: StatusLine | null
   fired_today: number
@@ -107,9 +109,77 @@ export interface MarketAlertsState {
   limits: Limits
   prefs: Prefs
   alerts: AlertRow[]
+  /** List alerts (M8.14): one card each; their member alerts are in `alerts` with `group_id`. */
+  groups?: GroupRow[]
+  /** `{ref: [group ids]}`: which lists carry a list alert. */
+  groups_by_ref?: Record<string, number[]>
   /** The newest event's id (0: none). */
   last_event_id: number
   server_time: number
+}
+
+export type GroupDelivery = 'first_then_digest' | 'each'
+
+/** A list alert as the service's state answer carries it (M8.14); its words are shown as sent. */
+export interface GroupRow {
+  id: number
+  /** Sent back with every PATCH. */
+  version: number
+  /** The list or section the alert follows. */
+  ref: string
+  name: string
+  kind: AlertKind
+  params: Params
+  frequency: Frequency
+  candle_min: CandleMin | null
+  cooldown_s: number
+  ends_at: number | null
+  status: AlertStatus
+  /** The card's own words: frozen, stopped or how far it covers. '' when none. */
+  status_reason: string
+  delivery: GroupDelivery
+  digest_min: number
+  note: string
+  /** How many symbols the alerts cover now. */
+  covered: number
+  /** Rows the alerts leave out, in words. */
+  left_out: string[]
+  synced_at: number | null
+  created_at: number
+  updated_at: number
+  /** How many member alerts it holds. */
+  members: number
+  words: { title: string; condition: string; meta: string }
+  /** Words when the list could not be read just now; '' when none. */
+  follow: string
+}
+
+/** What a push says of a changed group: its status and words (not its condition). */
+export type GroupBrief = Pick<
+  GroupRow,
+  'id' | 'version' | 'status' | 'status_reason' | 'covered' | 'left_out' | 'synced_at'
+>
+
+/** The list alert's form, as the bridge takes it (blueprints/sudarshan_alerts.py GROUP_DRAFT). */
+export interface GroupDraft {
+  ref?: string
+  name: string
+  kind: AlertKind
+  params: Params
+  frequency?: Frequency
+  candle?: Candle
+  cooldown_s?: number
+  ends?: string | null
+  note?: string
+  delivery: GroupDelivery
+  digest_min?: number
+}
+
+/** A group's answer to a make, an edit, a pause or a resume: the card and the fit sentence. */
+export interface GroupAnswer {
+  group: GroupRow
+  /** "This alert needs 24 instruments and 24 alerts. ... It fits."; '' when none. */
+  fit: string
 }
 
 export type Candle = 1 | 5 | 15 | 30 | 60 | 'day'
@@ -134,6 +204,10 @@ export interface AlertDraft {
 export type Change =
   | { version: number; action: 'edit'; alert: AlertDraft }
   | { version: number; action: 'pause' | 'resume' | 'restart' }
+
+export type GroupChange =
+  | { version: number; action: 'edit'; group: GroupDraft }
+  | { version: number; action: 'pause' | 'resume' }
 
 export type Channel = 'telegram' | 'app'
 
@@ -215,6 +289,9 @@ export interface MarketAlertsStatePush {
     Pick<AlertRow, 'id' | 'version' | 'status' | 'status_reason' | 'check' | 'fired_today'>
   >
   removed: number[]
+  /** Changed list alerts (M8.14). */
+  groups?: GroupBrief[]
+  removed_groups?: number[]
   /** A push was lost: read /state again (contract 2.3). */
   resync?: true
   server_time: number
@@ -326,6 +403,14 @@ export const marketAlertsApi = {
     call<AlertRow>(webClient.patch(`${BASE}/alerts/${id}`, change, { timeout: CHANGE_MS })),
   remove: (id: number) =>
     call<{ deleted: boolean }>(webClient.delete(`${BASE}/alerts/${id}`, { timeout: CHANGE_MS })),
+  createGroup: (group: GroupDraft) =>
+    call<GroupAnswer>(webClient.post(`${BASE}/groups`, { group }, { timeout: CHANGE_MS })),
+  changeGroup: (id: number, change: GroupChange) =>
+    call<GroupAnswer>(webClient.patch(`${BASE}/groups/${id}`, change, { timeout: CHANGE_MS })),
+  removeGroup: (id: number) =>
+    call<{ deleted: boolean; alerts: number }>(
+      webClient.delete(`${BASE}/groups/${id}`, { timeout: CHANGE_MS })
+    ),
   /** Where alerts go when an alert does not say: the default for every alert, on every device. */
   prefs: () => call<Prefs>(webClient.get(`${BASE}/prefs`, { timeout: READ_MS })),
   setPrefs: (prefs: Prefs) =>

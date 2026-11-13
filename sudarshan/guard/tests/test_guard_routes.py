@@ -297,7 +297,14 @@ def test_the_banner_s_read_carries_the_switch_and_reads_no_broker(world, monkeyp
     assert data == {
         "stage": "sandbox",
         "kill_switch": killswitch.public_state(KillSwitchState()),
-        "daily": {"sandbox": {"locked": False, "unchecked": False, "unchecked_left_s": None}},
+        "daily": {
+            "sandbox": {
+                "locked": False,
+                "unchecked": False,
+                "unchecked_left_s": None,
+                "paused": False,
+            }
+        },
     }
     gate.GATE.set_state(KillSwitchState(on=True, since=utcnow(), surface="telegram"))
     data = _owner_call(client, "get", "/sudarshan/risk/state").get_json()["data"]
@@ -322,7 +329,7 @@ def _lock_today(pipe: str, figure: float, limit: float, monkeypatch) -> None:
 def test_the_banner_s_read_says_which_covered_book_the_day_has_locked(world, monkeypatch):
     client, account, store = world
     store.lock_day("sandbox", _today(), -4100.0, 4000.0)  # before a restart: read at first use
-    quiet = {"unchecked": False, "unchecked_left_s": None}
+    quiet = {"unchecked": False, "unchecked_left_s": None, "paused": False}
     data = _owner_call(client, "get", "/sudarshan/risk/state").get_json()["data"]
     assert data["daily"] == {"sandbox": {"locked": True, **quiet}}  # Live is not covered
     monkeypatch.setenv(flag.ENV, "on")
@@ -399,6 +406,21 @@ def test_outside_the_session_the_status_never_says_reached_and_says_when_it_open
     assert {exchange for _day, exchange in asked} == {"NFO"}
 
 
+def test_the_card_says_when_the_sandbox_positions_were_marked(world, monkeypatch):
+    client, account, store = world
+    from datetime import UTC, datetime, timedelta
+
+    from sudarshan.guard import readers
+
+    monkeypatch.setattr(gate.GATE, "_in_session", lambda exchange, at: True)
+    marked = datetime.now(UTC) - timedelta(seconds=45)
+    monkeypatch.setattr(
+        readers, "sandbox_day", lambda user: daily.DayFigure(0.0, 8601.8, marked_at=marked)
+    )
+    day = _owner_call(client, "get", "/sudarshan/risk/status").get_json()["data"]["daily"]
+    assert day["sandbox"]["read_at"] == marked.isoformat()
+
+
 def test_status_reads_the_live_figure_from_upstox_s_rows(world, monkeypatch):
     client, account, store = world
     from sudarshan.guard import readers
@@ -427,6 +449,27 @@ def test_a_figure_that_cannot_be_read_is_shown_as_unknown(world, monkeypatch):
     assert answer.status_code == 200
     day = answer.get_json()["data"]["daily"]["sandbox"]
     assert (day["figure"], day["reached"]) == (None, False)
+
+
+def test_the_card_and_banner_say_new_orders_pause_when_the_figure_cannot_be_read(
+    world, monkeypatch
+):
+    """Today's figure could not be read for an order while its book could: the gate refused new
+    orders and let exits go, so the screens say that, not that orders go unchecked."""
+    client, account, store = world
+    import time
+
+    def said() -> tuple:
+        status = _owner_call(client, "get", "/sudarshan/risk/status").get_json()["data"]
+        state = _owner_call(client, "get", "/sudarshan/risk/state").get_json()["data"]
+        card, banner = status["daily"]["sandbox"], state["daily"]["sandbox"]
+        return card["unchecked"], card["paused"], banner["unchecked"], banner["paused"]
+
+    assert said() == (False, False, False, False)
+    gate.GATE._mark_unchecked("sandbox", time.monotonic(), paused=True)
+    assert said() == (True, True, True, True)
+    gate.GATE._mark_unchecked("sandbox", time.monotonic())  # the book could not be read: orders go
+    assert said() == (True, False, True, False)
 
 
 def test_status_says_the_pace_this_server_sends_orders_at(world):

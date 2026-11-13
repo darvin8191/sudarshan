@@ -31,6 +31,7 @@ import { DailyCard } from '@/sudarshan/risk/DailyCard'
 import { noteKillSwitch } from '@/sudarshan/risk/killSwitch'
 import {
   clockOf,
+  fromSurface,
   RISK_AUDIT_KEY,
   RISK_STATUS_KEY,
   StepList,
@@ -272,6 +273,7 @@ function HistoryCard({ rows, loading }: { rows: AuditRow[] | undefined; loading:
             >
               <span className="text-[0.78125rem] font-medium text-[color:var(--text-tertiary)]">
                 {stampOf(row.last_at)}
+                {fromSurface(row.surface) ? `, ${fromSurface(row.surface)}` : ''}
                 {row.count > 1 ? `, ${row.count} times since ${clockOf(row.at)}` : ''}
               </span>
               <span>{row.summary}</span>

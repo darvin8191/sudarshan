@@ -750,12 +750,62 @@ describe('k: an exit held by its own order, still working', () => {
 
 describe('l: the wide table', () => {
   const close = () => screen.getByRole('button', { name: `Close ${CALL} position` })
+  /** For checking that no question about the call is open at all, whatever size it asks. */
+  const QUESTION_OF_ANY_SIZE = /^Exit NIFTY 27 OCT 25900 CE: sell \d+ at market\?$/
+
+  it('asks first with what it will send, sends once however it is tapped, and says what went', async () => {
+    const tap = user()
+    fakeScreen('wide')
+    api.closePosition
+      .mockReset()
+      .mockResolvedValue({ status: 'success', message: 'BUY Order Placed for Qty: 0, Size: 0' })
+    await open(LONG, PUT)
+    await tap.click(close())
+    await settle()
+    const asked = screen.getByRole('dialog', {
+      name: 'Exit NIFTY 27 OCT 25900 CE: sell 130 at market?',
+    })
+    expect(api.closePosition).not.toHaveBeenCalled()
+    const go = within(asked).getByRole('button', { name: 'Exit' })
+    await tap.dblClick(go)
+    await settle()
+    expect(api.closePosition).toHaveBeenCalledTimes(1)
+    expect(toast.success).toHaveBeenCalledWith(
+      'Exit sent: sell 130 NIFTY 27 OCT 25900 CE',
+      'positions'
+    )
+  })
+
+  it('asks first for a short NRML row too: buys what is short, in its product, in the contract words', async () => {
+    const tap = user()
+    fakeScreen('wide')
+    api.closePosition
+      .mockReset()
+      .mockResolvedValue({ status: 'success', message: 'SELL Order Placed for Qty: 0, Size: 0' })
+    await open(LONG, { ...PUT, quantity: -1050, pnl: 16905 } as Position) // 35 lots of 30
+    await tap.click(screen.getByRole('button', { name: `Close ${PUT.symbol} position` }))
+    await settle()
+    const asked = screen.getByRole('dialog', {
+      name: 'Exit BANKNIFTY 27 OCT 57500 PE: buy 1,050 at market?',
+    })
+    expect(asked).toHaveTextContent(/Buys 1,050 \(NRML\) at market price/)
+    expect(api.closePosition).not.toHaveBeenCalled()
+    await tap.dblClick(within(asked).getByRole('button', { name: 'Exit' }))
+    await settle()
+    expect(api.closePosition).toHaveBeenCalledTimes(1)
+    expect(api.closePosition).toHaveBeenLastCalledWith(PUT.symbol, 'NFO', 'NRML')
+    expect(toast.success).toHaveBeenCalledWith(
+      'Exit sent: buy 1,050 BANKNIFTY 27 OCT 57500 PE',
+      'positions'
+    )
+  })
 
   it('tells the hold every book it reads: Close All goes once a Close shows flat', async () => {
     const tap = user()
     fakeScreen('wide')
     await open(LONG, PUT)
     await tap.click(close())
+    await tap.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Exit' }))
     await settle()
     expect(api.closePosition).toHaveBeenCalledTimes(1)
 
@@ -773,6 +823,7 @@ describe('l: the wide table', () => {
     fakeScreen('wide')
     await open(LONG, PUT)
     await tap.click(close())
+    await tap.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Exit' }))
     await settle()
     api.getPositions.mockResolvedValue(book({ ...LONG, quantity: 65, pnl: 650 } as Position, PUT))
     await reread(tap)
@@ -781,12 +832,14 @@ describe('l: the wide table', () => {
     await tap.click(close())
     await settle()
     expect(api.closePosition).toHaveBeenCalledTimes(1)
-    const asked = screen.getByRole('dialog', { name: 'Close NIFTY 25900 CE?' })
+    const asked = screen.getByRole('dialog', {
+      name: 'Exit NIFTY 27 OCT 25900 CE: sell 65 at market?',
+    })
     expect(asked).toHaveTextContent(
       /The exit sent at 10:42:2\d has closed 65 of 130 so far\. If the rest is still open in Orders, this sends a second order for it\./
     )
     expect(asked).toHaveTextContent(/Sells 65 \(MIS\) at market price/)
-    await tap.click(within(asked).getByRole('button', { name: 'Close' }))
+    await tap.click(within(asked).getByRole('button', { name: 'Exit' }))
     await settle()
     expect(api.closePosition).toHaveBeenCalledTimes(2)
   })
@@ -796,23 +849,26 @@ describe('l: the wide table', () => {
     fakeScreen('wide')
     await open(LONG, PUT)
     await tap.click(close())
+    await tap.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Exit' }))
     await settle()
     await pass(16_000)
     await tap.click(close())
     await settle()
-    expect(screen.getByRole('dialog', { name: 'Close NIFTY 25900 CE?' })).toBeInTheDocument()
+    expect(
+      screen.getByRole('dialog', { name: 'Exit NIFTY 27 OCT 25900 CE: sell 130 at market?' })
+    ).toBeInTheDocument()
 
     // The page's next read: the earlier exit filled after all.
     api.getPositions.mockResolvedValue(book({ ...LONG, quantity: 0, pnl: 1300 } as Position, PUT))
     await pass(46_000)
-    expect(screen.queryByRole('dialog', { name: 'Close NIFTY 25900 CE?' })).toBeNull()
+    expect(screen.queryByRole('dialog', { name: QUESTION_OF_ANY_SIZE })).toBeNull()
     expect(api.closePosition).toHaveBeenCalledTimes(1)
 
     // A new position in the same contract later: the question never comes back by itself.
     api.getPositions.mockResolvedValue(book(LONG, PUT))
     await pass(46_000)
     expect(close()).toBeInTheDocument()
-    expect(screen.queryByRole('dialog', { name: 'Close NIFTY 25900 CE?' })).toBeNull()
+    expect(screen.queryByRole('dialog', { name: QUESTION_OF_ANY_SIZE })).toBeNull()
   })
 
   it('says in Close All’s confirmation what became of an exit whose time ran out', async () => {
@@ -820,6 +876,7 @@ describe('l: the wide table', () => {
     fakeScreen('wide')
     await open(LONG, PUT)
     await tap.click(close())
+    await tap.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Exit' }))
     await settle()
     await pass(16_000)
     await tap.click(screen.getByRole('button', { name: /Close All/ }))
@@ -975,16 +1032,19 @@ describe('r: the wide table’s question, once its position is held again', () =
     await open(LONG, PUT)
     const close = () => screen.getByRole('button', { name: `Close ${CALL} position` })
     await tap.click(close())
+    await tap.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Exit' }))
     await settle()
     await pass(16_000)
     await tap.click(close())
     await settle()
-    const asked = screen.getByRole('dialog', { name: 'Close NIFTY 25900 CE?' })
+    const asked = screen.getByRole('dialog', {
+      name: 'Exit NIFTY 27 OCT 25900 CE: sell 130 at market?',
+    })
 
     // While it asks, the page's next read shows the earlier exit working: held again.
     api.getPositions.mockResolvedValue(book({ ...LONG, quantity: 65, pnl: 650 } as Position, PUT))
     await pass(46_000)
-    await tap.click(within(asked).getByRole('button', { name: 'Close' }))
+    await tap.click(within(asked).getByRole('button', { name: 'Exit' }))
     await settle()
     expect(api.closePosition).toHaveBeenCalledTimes(1)
     expect(toast.warning).toHaveBeenLastCalledWith(

@@ -483,7 +483,12 @@ sudarshan-feed (one Upstox socket) -> ZMQ 127.0.0.1:5581 (ticks, __health__)
   alert takes its instrument key, tick size and expiry from the master contract, with an Upstox
   login only. It forwards through OpenAlgo's shared HTTP client with explicit timeouts (3 s, 6 s
   for a change, 12 s for the test) after checking who listens on 5582, and learns whether market
-  alerts are on from the service's `/health`. It holds no thread, loop or scheduler.
+  alerts are on from the service's `/health`. It holds no thread, loop or scheduler. The list alert
+  routes (`POST /api/groups`, `PATCH` and `DELETE /api/groups/<id>`, `POST /api/groups/sync`) are
+  each route written out beside the others (the bridge is not generic over the service's ops), with
+  the same checks and a limit of 30 a minute (60 for the sync a pushed list change makes); the page
+  sets the group's ref, name, condition and delivery and never its members, and their waits are 10
+  to 12 s because a group reads its list before it claims.
 - **The app** (M10.7). A fire, a card that changed, the line under "Alerts", and a fire's Telegram
   delivery once it is sent or refused (for History) are pushed at once to OpenAlgo's
   `/sudarshan/alerts/internal/push` (sealed under its own key, every 50 ms, at most 50 items and
@@ -528,6 +533,111 @@ cd /opt/sudarshan/apps/openalgo && sudo -u sudarshan .venv/bin/python -m sudarsh
 A record that cannot be opened turns market alerts off with a line in the journal; order alerts
 carry on. A record from a newer release (after a rollback) does the same until that release is
 back.
+
+### List alerts follow their list (M8.14)
+
+A list alert (a group of alerts, one per symbol of a watchlist) keeps its members equal to the
+list's. The desired members come from OpenAlgo's sealed members route (`market/members.py`: the
+seal and the loopback call in one small module, the contract in its docstring, a stub in the tests
+until the route is built). `market/groups.py` decides, purely, what to add, remove and keep; the
+desk (`sync` in `desk.py`) translates: it asks the route outside the change lock, then claims the
+new keys at the feed in one request, and writes the adds, the removes and the group's words in one
+transaction. A removed member's key is released at the feed only when no other alert holds it.
+A sync runs on the `group_sync` op (the watchlist page calls it at once when its push names a
+list that has a group; the op takes `ref` or a group `id`), on the first clock tick of each day
+and at the service start (the morning build), when a current-month future's end passes, and as a
+backstop once a minute inside a session when the lists' version differs from the group's. These ride on
+the existing one-second clock job: no timer of their own, and one sync task at a time, cancelled
+with the other jobs at a stop. When the watchlist feature is switched off the route answers `off`
+and the group freezes with its last members and the card's words, never an error and never an empty
+list; a deleted list stops the group; a route that cannot be asked changes nothing. A list that
+outgrows the 200 instruments or 500 Active alerts is covered in list order as far as both allow.
+A group remembers the list's own identity (`list_key`, OpenAlgo's `created_at` text for the list,
+taken at creation from the members route's answer): OpenAlgo gives a deleted list's id to the next
+list made, so when the route's value differs from the stored one the sync stops the group with the
+deleted-list words and never follows the other list (review M4). A sync whose adds do not fit the
+limits (its numbers were stale) still applies every removal, then plans once more on fresh numbers
+(review L13).
+
+The group ops (A5) are the owner's way to make and change one, all through the API's sealed
+channel: `group_add`, `group_edit`, `group_pause`, `group_resume`, `group_delete`, beside
+`group_sync`. `group_add` takes a ref (an own list, a section of one, a built-in list or a flag
+list; a ranked list is refused with "A ranked list changes with every read. Set the alert on a list
+or a built-in list instead."), the kind (a % move, a day high or low break or a VWAP cross: a price
+level is per symbol), the usual condition fields, a name and the delivery. It reads the list first,
+claims the keys at the feed, then writes the group and its members in one transaction that checks
+both limits, so two groups made at once cannot both take the last room. It answers both numbers
+either way: "This alert needs 24 instruments and 24 alerts. In use now: 150 of 200 instruments and
+310 of 500 Active alerts. It fits." or "It does not fit: it needs 180 alerts and 140 of the 500 are
+free. Nothing was made." (409, code `limit`, never partly made). `group_edit`, `group_pause` and
+`group_resume` apply to every member in one transaction, each from the group's version; a resume
+and a changed condition add Active alerts and are held to the limits in the same way ("Nothing was
+changed."); an edit or a resume then follows the list at once. `group_delete` removes the group and
+its members together; their history stays. A list that is switched off, deleted or not answering
+makes nothing, in words. The state answer carries `groups` (each group's card: its fields, its
+words and its member count) and `groups_by_ref` (`{ref: [group ids]}`, which the watchlist page
+reads to call `group_sync` for a pushed ref); each alert row carries its `group_id`; a push carries
+changed group cards and `removed_groups`.
+
+Until the members route is built the client meets a 404 and says nothing to anyone: the sync
+changes nothing, the log gets one INFO line in five minutes, and the group's card carries `follow`:
+"The list could not be read just now, so this alert keeps its last 24 symbols and asks again in a
+minute." The runtime builds its members client from `members_fernet`, which the service derives from
+the pepper under `WATCHLISTS_INTERNAL_INFO`.
+
+The morning build runs on the first tick of a day, before the day's contract master is loaded
+(about 09:00), so a current-month future would resolve against yesterday's. The runtime already
+knows when it has read the master at or after 09:00 (`master_loaded`), so the groups are synced
+once more on the first tick after that, on the same clock job and without a timer.
+
+### The Alerts page: list mode and the group card (A6)
+
+The page draws each list alert (a group) as one card, ahead of the ordinary alerts of its tab:
+"Swing · % move 2% · 24 symbols · Active · follows the list", with the service's words as sent
+(`status_reason`, `follow`, `left_out`) and Pause or Resume, Edit and Delete for the whole group.
+Its member alerts (rows with `group_id`) are not cards of their own: they show inside the card
+when it is expanded, and their prices are followed only then, counted inside the page's 100
+instruments (the page says how many symbols of the opened lists show no price when the cap stops
+some). Pause and Resume send the group's `version`; a stale version, a refusal at the limits and a
+group already gone are shown in the service's words and the state is read again; Delete asks first,
+names how many alerts go and sends once (their history stays). A push's changed group cards and
+`removed_groups` are applied in place (`stateCache.applyStatePush`); a card the page does not hold,
+or a newer version, is read again.
+
+The form in list mode (`ListAlertForm.tsx`) offers a % move (from the previous close or the open),
+a Day high or low break and a VWAP cross; a price level is per symbol and is not offered. Telegram
+is "Alerts that follow within 5 minutes go as one message" (`first_then_digest`, the default) or
+"Each alert at once" (`each`). After Save the form shows what the service answered, as it came: the
+fit sentence with both numbers, the card's words and what is left out; a refusal (409 `limit`, a
+ranked list, a stale version) is shown as sent and nothing is made. Editing opens on the group's own
+settings and keeps its kind.
+
+The address contract the watchlist's menus use (`useAlertOverlay.ts`; build it with
+`listAlertAddress`):
+
+- `/market-alerts?sheet=list&ref=<ref>&name=<list or section name>&count=<rows>` opens the form for
+  a new list alert; `&fed=1` adds "A screen feeds this list. Its own alerts may suit better." The
+  name and count are only the form's heading ("Every symbol of Swing (24)"); the service's answer
+  is the truth.
+- `/market-alerts?sheet=group&group=<id>` opens a group's own form.
+
+Both follow the Back rules of the other overlays: opening pushes an entry, closing goes back, and
+one the page did not open is closed by replacing the entry.
+
+### Members change only through their group (A7)
+
+A member alert (a row with `group_id`) is changed only through its group. A member changed alone
+would be undone by the group's next edit or sync, and a deleted member would come back at the next
+sync while the list still holds its symbol, which reads as the app ignoring the owner. So the
+desk's single-alert ops that write a row the owner chose (`update` with edit, pause, resume or
+restart, and `delete`) refuse a member in one sentence naming its group: "This alert is part of the
+list alert Swing. Change it from the list alert's card." The answer is a 409 with the code
+`group_member` (the bridge passes it through as it does the other codes) and nothing is changed.
+The group ops, the sync, the engine's own transitions (a once-only alert firing and stopping,
+expiry, a member removed by the sync) and history are untouched, and an alert with no group works
+as before. On the phone a member's sheet shows "Part of the list alert Swing" and a button "Open the
+list alert" that closes the sheet and expands that group's card (on the tab the card is on), and
+hides Edit, Pause, Resume, Restart and Delete; its condition, last trigger, chart and history stay.
 
 ## Tests
 

@@ -1,5 +1,6 @@
 import { useCallback, useLayoutEffect, useRef } from 'react'
 import { useLocation, useNavigate, useSearchParams } from 'react-router'
+import { ALERTS_PATH } from './marketAlerts'
 
 /**
  * What the Alerts page has open over its cards, kept in the address so the phone's Back closes
@@ -7,7 +8,15 @@ import { useLocation, useNavigate, useSearchParams } from 'react-router'
  *
  * - `?alert=<id>`: an alert's details sheet (a toast's View opens it);
  * - `?sheet=new`: the form for a new alert; `?sheet=edit&alert=<id>`: the form for that alert;
- * - `?sheet=settings`: where alerts are sent, and the test.
+ * - `?sheet=settings`: where alerts are sent, and the test;
+ * - `?sheet=list&ref=<ref>&name=<name>&count=<rows>`: the form for a new list alert (M8.14), one
+ *   alert per symbol of the list or section `ref` names. This is the address the watchlist's
+ *   "Alert on this list" and "Alert on this section" open (build it with `listAlertAddress`).
+ *   `name` (the list's or section's name) and `count` (its rows) come from the opener and are
+ *   only the form's heading, "Every symbol of Swing (24)": the service's answer is the truth.
+ *   An optional `&fed=1` says a screen feeds the list, and the form then adds "A screen feeds
+ *   this list. Its own alerts may suit better.";
+ * - `?sheet=group&group=<id>`: the form for that list alert's own settings.
  *
  * Opening pushes a history entry marked as this page's own, and closing it goes back, so Back and
  * the close button leave the same history behind; one the page did not open (a link, a reload) is
@@ -23,6 +32,8 @@ export type AlertOverlay =
   | { kind: 'new' }
   | { kind: 'edit'; id: number }
   | { kind: 'settings' }
+  | { kind: 'list'; ref: string; name: string; count: number | null; fed: boolean }
+  | { kind: 'group'; id: number }
 
 export type AlertTab = 'active' | 'stopped' | 'history'
 
@@ -31,9 +42,49 @@ function idOf(params: URLSearchParams): number | null {
   return params.has('alert') && Number.isInteger(id) && id > 0 ? id : null
 }
 
+function groupIdOf(params: URLSearchParams): number | null {
+  const id = Number(params.get('group'))
+  return params.has('group') && Number.isInteger(id) && id > 0 ? id : null
+}
+
+function listOf(params: URLSearchParams): AlertOverlay | null {
+  const ref = params.get('ref')?.trim()
+  if (!ref) return null
+  const count = Number(params.get('count'))
+  return {
+    kind: 'list',
+    ref,
+    name: params.get('name')?.trim() ?? '',
+    count: params.has('count') && Number.isInteger(count) && count >= 0 ? count : null,
+    fed: params.get('fed') === '1',
+  }
+}
+
+/** The address a list or section menu opens the list alert form with (the contract above). */
+export function listAlertAddress(list: {
+  ref: string
+  name: string
+  count: number
+  fed?: boolean
+}): string {
+  const query = new URLSearchParams({
+    sheet: 'list',
+    ref: list.ref,
+    name: list.name,
+    count: String(list.count),
+  })
+  if (list.fed) query.set('fed', '1')
+  return `${ALERTS_PATH}?${query.toString()}`
+}
+
 export function alertOverlayOf(params: URLSearchParams): AlertOverlay | null {
   const sheet = params.get('sheet')
   const id = idOf(params)
+  if (sheet === 'list') return listOf(params)
+  if (sheet === 'group') {
+    const group = groupIdOf(params)
+    return group === null ? null : { kind: 'group', id: group }
+  }
   if (sheet === 'new' || sheet === 'settings') return { kind: sheet }
   if (sheet === 'edit') return id === null ? null : { kind: 'edit', id }
   return sheet === null && id !== null ? { kind: 'alert', id } : null
@@ -48,6 +99,14 @@ function withOverlay(params: URLSearchParams, next: AlertOverlay | null): URLSea
   const out = new URLSearchParams(params)
   out.delete('alert')
   out.delete('sheet')
+  for (const name of ['ref', 'name', 'count', 'fed', 'group']) out.delete(name)
+  if (next?.kind === 'list') {
+    out.set('ref', next.ref)
+    out.set('name', next.name)
+    if (next.count !== null) out.set('count', String(next.count))
+    if (next.fed) out.set('fed', '1')
+  }
+  if (next?.kind === 'group') out.set('group', String(next.id))
   if (next?.kind === 'alert' || next?.kind === 'edit') out.set('alert', String(next.id))
   if (next && next.kind !== 'alert') out.set('sheet', next.kind)
   return out

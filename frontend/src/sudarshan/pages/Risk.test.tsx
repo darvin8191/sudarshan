@@ -107,6 +107,46 @@ describe('the Risk page', () => {
     expect(screen.queryByRole('dialog', { name: 'Resume trading' })).toBeNull()
   })
 
+  it('says in History where each line was done, from the app or from Telegram', async () => {
+    api.status.mockResolvedValue(status({ known: true, on: false }))
+    api.audit.mockResolvedValue([
+      {
+        at: '2026-11-09T05:10:00.000Z',
+        last_at: '2026-11-09T05:10:00.000Z',
+        kind: 'ks_on',
+        pipe: null,
+        surface: 'telegram',
+        count: 1,
+        summary: 'Kill switch on.',
+      },
+      {
+        at: '2026-11-09T05:20:00.000Z',
+        last_at: '2026-11-09T05:20:00.000Z',
+        kind: 'ks_off',
+        pipe: null,
+        surface: 'app',
+        count: 1,
+        summary: 'Resumed.',
+      },
+      {
+        at: '2026-11-09T05:30:00.000Z',
+        last_at: '2026-11-09T05:30:00.000Z',
+        kind: 'refused',
+        pipe: 'sandbox',
+        surface: '/api/v1/placeorder',
+        count: 1,
+        summary: 'Refused.',
+      },
+    ])
+    renderBook('/risk', <Risk />)
+    await settle()
+    await pass(100)
+    expect(screen.getByText(/^9 Nov, 10:40:00 IST, from Telegram$/)).toBeInTheDocument()
+    expect(screen.getByText(/^9 Nov, 10:50:00 IST, from the app$/)).toBeInTheDocument()
+    // An order's route is not a surface the owner used.
+    expect(screen.getByText(/^9 Nov, 11:00:00 IST$/)).toBeInTheDocument()
+  })
+
   it('words the switch for the sandbox only when the guard covers nothing else', async () => {
     api.status.mockResolvedValue(status({ known: true, on: false }, 'sandbox'))
     renderBook('/risk', <Risk />)

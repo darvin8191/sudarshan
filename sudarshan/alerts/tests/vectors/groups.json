@@ -1,0 +1,721 @@
+{
+  "note": "Hand-typed. Numbers are never produced by the code under test.",
+  "diff": [
+    {
+      "name": "added, removed and kept",
+      "members": [
+        [
+          1,
+          "A"
+        ],
+        [
+          2,
+          "B"
+        ],
+        [
+          3,
+          "C"
+        ]
+      ],
+      "rows": [
+        "A",
+        "C",
+        "D"
+      ],
+      "add": [
+        "D"
+      ],
+      "remove": [
+        2
+      ]
+    },
+    {
+      "name": "a key listed twice counts once; a second member on one key goes",
+      "members": [
+        [
+          1,
+          "A"
+        ],
+        [
+          4,
+          "A"
+        ],
+        [
+          3,
+          "C"
+        ]
+      ],
+      "rows": [
+        "A",
+        "A",
+        "C",
+        "D",
+        "D"
+      ],
+      "add": [
+        "D"
+      ],
+      "remove": [
+        4
+      ]
+    },
+    {
+      "name": "an empty list removes every member (it is not off)",
+      "members": [
+        [
+          1,
+          "A"
+        ],
+        [
+          2,
+          "B"
+        ]
+      ],
+      "rows": [],
+      "add": [],
+      "remove": [
+        1,
+        2
+      ]
+    },
+    {
+      "name": "nothing changed",
+      "members": [
+        [
+          1,
+          "A"
+        ]
+      ],
+      "rows": [
+        "A"
+      ],
+      "add": [],
+      "remove": []
+    }
+  ],
+  "left_out": [
+    {
+      "items": [
+        {
+          "why": "atm"
+        },
+        {
+          "why": "atm"
+        },
+        {
+          "why": "strike"
+        }
+      ],
+      "words": [
+        "ATM and strike rows change contract during the day and are left out: 3."
+      ]
+    },
+    {
+      "items": [
+        {
+          "why": "atm"
+        },
+        {
+          "why": "unknown"
+        }
+      ],
+      "words": [
+        "ATM and strike rows change contract during the day and are left out: 1.",
+        "Rows without a contract to follow are left out: 1."
+      ]
+    },
+    {
+      "items": [],
+      "words": []
+    }
+  ],
+  "fit": [
+    {
+      "name": "the design's own example: it fits",
+      "new": 24,
+      "in_use": {
+        "keys": 150,
+        "alerts": 310,
+        "same_keys": false
+      },
+      "ok": true,
+      "words": "This alert needs 24 instruments and 24 alerts. In use now: 150 of 200 instruments and 310 of 500 Active alerts. It fits."
+    },
+    {
+      "name": "three groups on one 180-symbol list: the first",
+      "new": 180,
+      "in_use": {
+        "keys": 0,
+        "alerts": 0,
+        "same_keys": false
+      },
+      "ok": true,
+      "words": "This alert needs 180 instruments and 180 alerts. In use now: 0 of 200 instruments and 0 of 500 Active alerts. It fits."
+    },
+    {
+      "name": "the second reuses the same 180 instruments",
+      "new": 180,
+      "in_use": {
+        "keys": 180,
+        "alerts": 180,
+        "same_keys": true
+      },
+      "ok": true,
+      "words": "This alert needs 180 instruments and 180 alerts. In use now: 180 of 200 instruments and 180 of 500 Active alerts. It fits."
+    },
+    {
+      "name": "the third: 180 instruments, 540 alerts, refused with the alerts' numbers",
+      "new": 180,
+      "in_use": {
+        "keys": 180,
+        "alerts": 360,
+        "same_keys": true
+      },
+      "ok": false,
+      "words": "It does not fit: it needs 180 alerts and 140 of the 500 are free. Nothing was made."
+    },
+    {
+      "name": "alerts over, instruments not",
+      "new": 180,
+      "in_use": {
+        "keys": 180,
+        "alerts": 440,
+        "same_keys": true
+      },
+      "ok": false,
+      "words": "It does not fit: it needs 180 alerts and 60 of the 500 are free. Nothing was made."
+    },
+    {
+      "name": "instruments over, alerts not",
+      "new": 24,
+      "in_use": {
+        "keys": 190,
+        "alerts": 190,
+        "same_keys": false
+      },
+      "ok": false,
+      "words": "It does not fit: it needs 24 more instruments and 10 of the 200 are free. Nothing was made."
+    },
+    {
+      "name": "both over: both numbers said",
+      "new": 24,
+      "in_use": {
+        "keys": 190,
+        "alerts": 490,
+        "same_keys": false
+      },
+      "ok": false,
+      "words": "It does not fit: it needs 24 alerts and 10 of the 500 are free; and it needs 24 more instruments and 10 of the 200 are free. Nothing was made."
+    },
+    {
+      "name": "exactly the room left fits",
+      "new": 10,
+      "in_use": {
+        "keys": 190,
+        "alerts": 490,
+        "same_keys": false
+      },
+      "ok": true,
+      "words": "This alert needs 10 instruments and 10 alerts. In use now: 190 of 200 instruments and 490 of 500 Active alerts. It fits."
+    }
+  ],
+  "release": [
+    {
+      "holders": {
+        "A": [
+          1
+        ],
+        "B": [
+          2,
+          9
+        ],
+        "C": [
+          3
+        ]
+      },
+      "removed": [
+        1,
+        2
+      ],
+      "released": [
+        "A"
+      ]
+    },
+    {
+      "holders": {
+        "A": [
+          1
+        ],
+        "B": [
+          2,
+          9
+        ]
+      },
+      "removed": [
+        1,
+        2,
+        9
+      ],
+      "released": [
+        "A",
+        "B"
+      ]
+    },
+    {
+      "holders": {
+        "A": [
+          1
+        ]
+      },
+      "removed": [],
+      "released": []
+    }
+  ],
+  "refs": [
+    {
+      "ref": "list:7",
+      "refusal": null
+    },
+    {
+      "ref": "list:7/section:2",
+      "refusal": null
+    },
+    {
+      "ref": "preset:fno",
+      "refusal": null
+    },
+    {
+      "ref": "flag:2",
+      "refusal": null
+    },
+    {
+      "ref": "ranked:oi-up",
+      "refusal": "A ranked list changes with every read. Set the alert on a list or a built-in list instead."
+    },
+    {
+      "ref": "other:1",
+      "refusal": "This kind of list cannot carry an alert. Set it on a list or a built-in list."
+    }
+  ],
+  "plan": [
+    {
+      "name": "growth past the instruments limit is covered in list order, with the count",
+      "limits": [
+        10,
+        12
+      ],
+      "state": "ok",
+      "active": true,
+      "members": [
+        [
+          1,
+          "K1"
+        ],
+        [
+          2,
+          "K2"
+        ],
+        [
+          3,
+          "K3"
+        ],
+        [
+          4,
+          "K4"
+        ],
+        [
+          5,
+          "K5"
+        ],
+        [
+          6,
+          "K6"
+        ],
+        [
+          7,
+          "K7"
+        ],
+        [
+          8,
+          "K8"
+        ]
+      ],
+      "holders": {
+        "K1": [
+          1
+        ],
+        "K2": [
+          2
+        ],
+        "K3": [
+          3
+        ],
+        "K4": [
+          4
+        ],
+        "K5": [
+          5
+        ],
+        "K6": [
+          6
+        ],
+        "K7": [
+          7
+        ],
+        "K8": [
+          8
+        ]
+      },
+      "rows": [
+        "K1",
+        "K2",
+        "K3",
+        "K4",
+        "K5",
+        "K6",
+        "K7",
+        "K8",
+        "K9",
+        "K10",
+        "K11",
+        "K12"
+      ],
+      "action": "sync",
+      "add": [
+        "K9",
+        "K10"
+      ],
+      "remove": [],
+      "release": [],
+      "covered": 10,
+      "total": 12,
+      "note": "Covers 10 of 12: alerts can follow at most 10 instruments and 12 Active alerts."
+    },
+    {
+      "name": "growth past the alerts limit",
+      "limits": [
+        200,
+        9
+      ],
+      "state": "ok",
+      "active": true,
+      "members": [
+        [
+          1,
+          "K1"
+        ],
+        [
+          2,
+          "K2"
+        ]
+      ],
+      "holders": {
+        "K1": [
+          1,
+          50,
+          51
+        ],
+        "K2": [
+          2,
+          52
+        ],
+        "X": [
+          60,
+          61
+        ]
+      },
+      "rows": [
+        "K1",
+        "K2",
+        "K3",
+        "K4",
+        "K5"
+      ],
+      "action": "sync",
+      "add": [
+        "K3",
+        "K4"
+      ],
+      "remove": [],
+      "release": [],
+      "covered": 4,
+      "total": 5,
+      "note": "Covers 4 of 5: alerts can follow at most 200 instruments and 9 Active alerts."
+    },
+    {
+      "name": "a symbol taken off that another alert still holds frees no instrument, so the added one is not covered",
+      "limits": [
+        3,
+        500
+      ],
+      "state": "ok",
+      "active": true,
+      "members": [
+        [
+          1,
+          "A"
+        ],
+        [
+          2,
+          "B"
+        ],
+        [
+          3,
+          "C"
+        ]
+      ],
+      "holders": {
+        "A": [
+          1
+        ],
+        "B": [
+          2,
+          9
+        ],
+        "C": [
+          3
+        ]
+      },
+      "rows": [
+        "A",
+        "C",
+        "D"
+      ],
+      "action": "sync",
+      "add": [],
+      "remove": [
+        2
+      ],
+      "release": [],
+      "covered": 2,
+      "total": 3,
+      "note": "Covers 2 of 3: alerts can follow at most 3 instruments and 500 Active alerts."
+    },
+    {
+      "name": "a symbol taken off that nobody else holds frees the room for the added one",
+      "limits": [
+        3,
+        500
+      ],
+      "state": "ok",
+      "active": true,
+      "members": [
+        [
+          1,
+          "A"
+        ],
+        [
+          2,
+          "B"
+        ],
+        [
+          3,
+          "C"
+        ]
+      ],
+      "holders": {
+        "A": [
+          1
+        ],
+        "B": [
+          2
+        ],
+        "C": [
+          3
+        ]
+      },
+      "rows": [
+        "A",
+        "C",
+        "D"
+      ],
+      "action": "sync",
+      "add": [
+        "D"
+      ],
+      "remove": [
+        2
+      ],
+      "release": [
+        "B"
+      ],
+      "covered": 3,
+      "total": 3,
+      "note": ""
+    },
+    {
+      "name": "a removed symbol nobody else holds is released",
+      "limits": [
+        200,
+        500
+      ],
+      "state": "ok",
+      "active": true,
+      "members": [
+        [
+          1,
+          "A"
+        ],
+        [
+          2,
+          "B"
+        ]
+      ],
+      "holders": {
+        "A": [
+          1
+        ],
+        "B": [
+          2
+        ]
+      },
+      "rows": [
+        "A"
+      ],
+      "action": "sync",
+      "add": [],
+      "remove": [
+        2
+      ],
+      "release": [
+        "B"
+      ],
+      "covered": 1,
+      "total": 1,
+      "note": ""
+    },
+    {
+      "name": "a current-month future is kept and the list is asked again when it ends",
+      "limits": [
+        200,
+        500
+      ],
+      "state": "ok",
+      "active": true,
+      "members": [],
+      "holders": {},
+      "rows": [
+        "A",
+        {
+          "key": "NIFTYFUT",
+          "valid_until": 1788000000000
+        },
+        {
+          "key": "BANKFUT",
+          "valid_until": 1787000000000
+        }
+      ],
+      "action": "sync",
+      "add": [
+        "A",
+        "NIFTYFUT",
+        "BANKFUT"
+      ],
+      "remove": [],
+      "release": [],
+      "covered": 3,
+      "total": 3,
+      "note": "",
+      "ask_again_at": 1787000000000
+    },
+    {
+      "name": "a paused group adds every row; the limits are held when it resumes",
+      "limits": [
+        1,
+        1
+      ],
+      "state": "ok",
+      "active": false,
+      "members": [],
+      "holders": {
+        "Z": [
+          90
+        ]
+      },
+      "rows": [
+        "A",
+        "B"
+      ],
+      "action": "sync",
+      "add": [
+        "A",
+        "B"
+      ],
+      "remove": [],
+      "release": [],
+      "covered": 2,
+      "total": 2,
+      "note": ""
+    },
+    {
+      "name": "the feature is off: the group freezes with its 3 symbols and never reads an empty list",
+      "limits": [
+        200,
+        500
+      ],
+      "state": "off",
+      "active": true,
+      "members": [
+        [
+          1,
+          "A"
+        ],
+        [
+          2,
+          "B"
+        ],
+        [
+          3,
+          "C"
+        ]
+      ],
+      "holders": {
+        "A": [
+          1
+        ],
+        "B": [
+          2
+        ],
+        "C": [
+          3
+        ]
+      },
+      "rows": [],
+      "action": "freeze",
+      "add": [],
+      "remove": [],
+      "release": [],
+      "covered": 3,
+      "total": 3,
+      "note": "The watchlist feature is switched off, so this alert keeps its last 3 symbols."
+    },
+    {
+      "name": "the list was deleted: the group stops",
+      "limits": [
+        200,
+        500
+      ],
+      "state": "gone",
+      "active": true,
+      "members": [
+        [
+          1,
+          "A"
+        ]
+      ],
+      "holders": {
+        "A": [
+          1
+        ]
+      },
+      "rows": [],
+      "action": "stop",
+      "add": [],
+      "remove": [],
+      "release": [],
+      "covered": 0,
+      "total": 0,
+      "note": "The list Swing was deleted, so this alert stopped."
+    }
+  ]
+}

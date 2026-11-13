@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import { beforeAll, describe, expect, it, vi } from 'vitest'
 import { SymbolHeader } from './SymbolHeader'
 
@@ -110,12 +110,29 @@ describe('SymbolHeader selectors', () => {
     expect(screen.getByText('Idle')).toBeInTheDocument()
 
     rerender(<SymbolHeader {...props} connectionStatus="refreshing" isRefreshing />)
-    expect(screen.getByText('Refreshing')).toBeInTheDocument()
+    expect(screen.getByText('Loading')).toBeInTheDocument() // a first read, not a reconnect
+    expect(screen.queryByText('Reconnecting')).toBeNull()
 
     rerender(<SymbolHeader {...props} connectionStatus="stale" />)
-    expect(screen.getByText('Stale')).toBeInTheDocument()
+    expect(screen.getByText('Delayed')).toBeInTheDocument()
+
+    vi.useFakeTimers()
+    try {
+      vi.setSystemTime(Date.UTC(2026, 10, 9, 5, 0, 0))
+      const at = new Date(Date.UTC(2026, 10, 9, 4, 59, 48))
+      rerender(<SymbolHeader {...props} connectionStatus="stale" figuresAt={at} />)
+      expect(screen.getByText('Delayed')).toBeInTheDocument()
+      expect(screen.getByText('· updated 12s ago')).toBeInTheDocument() // with the figures' age
+      act(() => vi.advanceTimersByTime(3_000))
+      expect(screen.getByText('· updated 15s ago')).toBeInTheDocument()
+      // on a phone held upright too: the line is never hidden by the screen's width
+      expect(screen.getByText('Delayed').parentElement).not.toHaveClass('hidden')
+    } finally {
+      vi.useRealTimers()
+    }
 
     rerender(<SymbolHeader {...props} connectionStatus="live" />)
-    expect(screen.getByText('Live')).toBeInTheDocument()
+    expect(screen.getByText('Real-time')).toBeInTheDocument()
+    expect(screen.queryByText('Live')).toBeNull()
   })
 })

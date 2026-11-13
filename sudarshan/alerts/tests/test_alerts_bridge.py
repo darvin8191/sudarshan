@@ -37,6 +37,8 @@ OPTION = SymbolData(symbol="NIFTY25NOV2625900CE", brsymbol="NIFTY 25900 CE 25 NO
 MASTER = {("SBIN", "NSE"): SBIN, ("NIFTY25NOV2625900CE", "NFO"): OPTION}
 DRAFT = {"symbol": "SBIN", "exchange": "NSE", "kind": "price",
          "params": {"op": "crosses_above", "level": "100"}}  # fmt: skip
+GROUP = {"ref": "list:7", "name": "Swing", "kind": "move",
+         "params": {"direction": "up", "percent": "2", "base": "close"}}
 ROUTES = [
     ("get", "/sudarshan/alerts/api/state", None),
     ("post", "/sudarshan/alerts/api/alerts", {"alert": DRAFT}),
@@ -47,6 +49,10 @@ ROUTES = [
     ("get", "/sudarshan/alerts/api/prefs", None),
     ("put", "/sudarshan/alerts/api/prefs", {"telegram": True, "app": False}),
     ("post", "/sudarshan/alerts/api/test", None),
+    ("post", "/sudarshan/alerts/api/groups", {"group": GROUP}),
+    ("patch", "/sudarshan/alerts/api/groups/1", {"version": 1, "action": "pause"}),
+    ("delete", "/sudarshan/alerts/api/groups/1", None),
+    ("post", "/sudarshan/alerts/api/groups/sync", {"ref": "list:7"}),
 ]
 WRITES = [route for route in ROUTES if route[0] != "get"]
 
@@ -233,6 +239,69 @@ def test_the_service_s_refusals_pass_through_in_its_words(bridge, service, desk)
         "This alert was changed on another screen. Open it again, then try again.")}  # fmt: skip
 
 
+def test_the_list_alert_ops_reach_the_service_as_sent_and_the_page_sets_nothing_else(
+    bridge, service, desk
+):
+    headers = as_owner(bridge)
+    draft = GROUP | {"delivery": "each", "digest_min": 5, "members": ["FORGED"],
+                     "instrument_key": "NSE_EQ|FORGED"}  # fmt: skip
+    call(bridge, "post", "/sudarshan/alerts/api/groups", {"group": draft}, headers)
+    call(bridge, "patch", "/sudarshan/alerts/api/groups/4",
+         {"version": 2, "action": "edit", "group": GROUP | {"name": "Swing 3"}}, headers)
+    call(bridge, "patch", "/sudarshan/alerts/api/groups/4", {"version": 3, "action": "pause"}, headers)
+    call(bridge, "patch", "/sudarshan/alerts/api/groups/4", {"version": 4, "action": "resume"},
+         headers)  # fmt: skip
+    call(bridge, "delete", "/sudarshan/alerts/api/groups/4", None, headers)
+    call(bridge, "post", "/sudarshan/alerts/api/groups/sync", {"ref": "list:7"}, headers)
+    seen = [(op, {k: v for k, v in message.items() if k not in ("op", "nonce", "principal")})
+            for op, message in desk.calls]  # fmt: skip
+    assert seen == [
+        ("group_add", {"group": GROUP | {"delivery": "each", "digest_min": 5}}),
+        ("group_edit", {"id": 4, "version": 2, "group": GROUP | {"name": "Swing 3"}}),
+        ("group_pause", {"id": 4, "version": 3}),
+        ("group_resume", {"id": 4, "version": 4}),
+        ("group_delete", {"id": 4}),
+        ("group_sync", {"ref": "list:7", "id": None}),
+    ]
+
+
+def test_an_unreadable_list_alert_is_the_draft_refusal_and_never_forwarded(bridge, service, desk):
+    headers = as_owner(bridge)
+    for method, path, body in (
+        ("post", "/sudarshan/alerts/api/groups", {"group": "Swing"}),
+        ("patch", "/sudarshan/alerts/api/groups/1", {"version": 1, "action": "edit"}),
+        ("patch", "/sudarshan/alerts/api/groups/1", {"version": 1, "action": "restart"}),
+    ):
+        answer = call(bridge, method, path, body, headers)
+        assert answer.status_code == 400 and answer.get_json()["code"] == "draft"
+    big = {"group": GROUP | {"note": "x" * 70_000}}
+    assert call(bridge, "post", "/sudarshan/alerts/api/groups", big, headers).status_code == 400
+    assert desk.calls == []
+
+
+def test_the_service_s_list_alert_refusals_pass_through_in_its_words(bridge, service, desk):
+    words = "It does not fit: it needs 180 alerts and 140 of the 500 are free. Nothing was made."
+    desk.answers["group_add"] = ApiError(409, "limit", words)
+    answer = call(bridge, "post", "/sudarshan/alerts/api/groups", {"group": GROUP},
+                  as_owner(bridge))  # fmt: skip
+    assert answer.status_code == 409
+    assert answer.get_json() == {"status": "error", "code": "limit", "message": words}
+
+
+def test_list_alert_changes_are_limited_to_thirty_a_minute(service, desk, monkeypatch):
+    reset_users()
+    http = httpx.Client(trust_env=False)
+    monkeypatch.setattr(bp_module, "_loopback", lambda: http)
+    try:
+        client = make_app(rate_limits=True).test_client()
+        headers = as_owner(client)
+        answers = [call(client, "delete", "/sudarshan/alerts/api/groups/1", None, headers)
+                   for _ in range(31)]  # fmt: skip
+    finally:
+        http.close()
+    assert [a.status_code for a in answers] == [200] * 30 + [429]
+
+
 # -- when the service cannot answer ---------------------------------------------------------
 
 
@@ -309,7 +378,8 @@ def test_every_route_is_the_contract_s(bridge):
     rules = {(rule.rule, method) for rule in bridge.application.url_map.iter_rules()
              for method in rule.methods - {"HEAD", "OPTIONS"}
              if rule.rule.startswith("/sudarshan/alerts")}  # fmt: skip
-    expected = {(re.sub(r"/1$", "/<int:alert_id>", path.split("?")[0]), method.upper())
+    expected = {(re.sub(r"/1$", "/<int:group_id>" if "/groups/" in path else "/<int:alert_id>",
+                       path.split("?")[0]), method.upper())
                 for method, path, _ in ROUTES}  # fmt: skip
     assert rules == expected | {("/sudarshan/alerts/internal/push", "POST")}  # the service's
 
@@ -384,6 +454,8 @@ def test_each_op_waits_as_long_as_the_contract_says():
     assert bp_module.TIMEOUTS == {
         "state": 3.0, "create": 6.0, "update": 6.0, "delete": 6.0, "events": 3.0,
         "events_since": 3.0, "prefs_get": 3.0, "prefs_set": 6.0, "test": 12.0,
+        "group_add": 10.0, "group_edit": 12.0, "group_pause": 12.0, "group_resume": 12.0,
+        "group_delete": 6.0, "group_sync": 12.0,
     }  # fmt: skip
 
 
@@ -460,3 +532,18 @@ def test_creating_is_limited_to_thirty_a_minute(service, desk, monkeypatch):
     finally:
         http.close()
     assert codes == [200] * 30 + [429]
+
+
+def test_a_member_alert_refusal_is_a_409_with_its_code_and_sentence(bridge, service, desk):
+    words = "This alert is part of the list alert Swing. Change it from the list alert's card."
+    desk.answers["update"] = ApiError(409, "group_member", words)
+    desk.answers["delete"] = ApiError(409, "group_member", words)
+    headers = as_owner(bridge)
+    answers = [
+        call(bridge, "patch", "/sudarshan/alerts/api/alerts/1", {"version": 1, "action": "pause"},
+             headers),
+        call(bridge, "delete", "/sudarshan/alerts/api/alerts/1", None, headers),
+    ]
+    for answer in answers:
+        assert answer.status_code == 409
+        assert answer.get_json() == {"status": "error", "code": "group_member", "message": words}

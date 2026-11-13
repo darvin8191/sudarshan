@@ -51,10 +51,12 @@ else a reversing order is judged whole, as before.
 The daily loss limit (M5.14, daily.py) refuses new risk the same way once the day's loss has
 reached it: the first order to see the figure at the limit writes the day's lock, and the lock
 holds every new order in that pipe until India's date changes, whatever the figure does after.
-While a limit is set, each order's step 2 also yields the day's figure, from the same read of the
-book. A book that cannot be read leaves the order unjudged, so under the daily limit alone it
-goes, and that is noted (an exit must never be refused for a read that failed); a two-leg GTT,
-new risk whatever the book says, is refused instead.
+While a limit is set, an order found in step 3 to add risk has the day's figure read (outside the
+lock, from the same read of the book in Live, from the sandbox's rows and prices in the sandbox)
+and is decided again; an exit never has it read, for it always goes. A book that cannot be read
+leaves the order unjudged, so under the daily limit alone it goes, and that is noted (an exit
+must never be refused for a read that failed); a two-leg GTT, new risk whatever the book says, is
+refused instead.
 
 The price band (M20.7, band.py) holds a priced order that adds risk to the market: step 2 reads
 Upstox's quote for it (kept a second) only when the book shows the order adding risk, and step 3
@@ -400,6 +402,15 @@ class _CheckClaims:
     refs: frozenset
 
 
+class _ReadDay:
+    """The order adds risk and the daily limit is set: read today's figure (outside the lock)
+    and decide again. An exit never reads it (review of v0.6.1, MEDIUM-3): it always goes, and
+    in the sandbox the gate decides inside the position's lock."""
+
+
+_READ_DAY = _ReadDay()
+
+
 @dataclass(frozen=True)
 class _Refusing:
     """What refuses new risk right now."""
@@ -439,6 +450,8 @@ class Gate:
         self._day_locks: dict[tuple[str, str], risk_store.DayLock | None] = {}
         self._sessions = LockedTTLCache(maxsize=32, ttl=SESSION_KEPT_S)
         self._unchecked: dict[str, float] = {}  # pipe -> monotonic: the daily limit unchecked
+        # pipe -> whether that was today's figure, not the book: new orders paused, exits go
+        self._paused: dict[str, bool] = {}
         self._bursts: dict[str, _Burst] = {}  # pipe -> its admissions (the burst brake)
         self._tellings: dict[tuple, tuple[float, int]] = {}  # (pipe, symbol, code) -> (at, untold)
         self._problem: tuple[float, str, str] | None = None  # (epoch, kind, words): the last one
@@ -756,9 +769,9 @@ class Gate:
         known, facts = self._facts(order, fallback)  # reads: outside the lock
         lock, day_unread, reads = None, False, _Reads(_NO_QUOTE)
         if refusing is None and not facts.pass_through and not facts.unreadable:
-            lock, day_unread = self._day_facts(known, facts, guards)  # the figure, and its lock
             reads = self._limit_reads(known, facts, guards)  # the market and the lot size
         checked = False  # the order book read for claims, at most once per order
+        day_read = False  # today's figure, read only once the order is found to add risk
         while True:
             with self._lock:
                 now = time.monotonic()
@@ -766,8 +779,12 @@ class Gate:
                 if lock is None and guards.daily:
                     lock = self._day_locks.get((known.pipe, guards.day))  # another order's
                 decided = self._decide(
-                    known, facts, guards, refusing, lock, day_unread, reads, now, checked
+                    known, facts, guards, refusing, lock, day_unread, reads, now, checked, day_read
                 )
+            if decided is _READ_DAY:
+                lock, day_unread = self._day_facts(known, facts, guards)  # the figure, its lock
+                day_read = True
+                continue
             if not isinstance(decided, _CheckClaims):
                 return decided
             checked = True
@@ -796,9 +813,11 @@ class Gate:
         reads: _Reads,
         now: float,
         checked: bool,
-    ) -> Decision | _CheckClaims:
+        day_read: bool = True,
+    ) -> Decision | _CheckClaims | _ReadDay:
         """Step 3: judge and decide, under the lock. ``_CheckClaims`` when the order would be
-        refused only because of claims the order book has not been read for yet."""
+        refused only because of claims the order book has not been read for yet; ``_READ_DAY``
+        when it adds risk and today's figure has not been read for it yet."""
         if facts.pass_through:
             return Decision(token=self._register(known, None, now))
         if facts.unreadable:
@@ -816,8 +835,12 @@ class Gate:
             refs = self._claims_in_the_way(known, facts, verdict)
             if refs:
                 return _CheckClaims(refs)
-        if (refusing is not None or lock is not None) and self._clippable(known, verdict):
-            return self._clip(known, refusing, lock, verdict, now)
+        if not day_read and refusing is None and lock is None and guards.limit is not None:
+            return _READ_DAY
+        if (refusing is not None or lock is not None or day_unread) and self._clippable(
+            known, verdict
+        ):
+            return self._clip(known, refusing, lock, verdict, now, day_unread)
         if refusing is not None:
             return self._refuse(known, refusing, verdict, sent_at)
         if lock is not None:
@@ -842,10 +865,11 @@ class Gate:
         lock: risk_store.DayLock | None,
         verdict: rules.Verdict,
         now: float,
+        day_unread: bool = False,
     ) -> Decision:
-        """The coordinator's decision a: under the kill switch or the day's lock a reversal
-        sends its exit to 0 and only the part beyond is refused. The exit is recorded as one;
-        call under the lock."""
+        """The coordinator's decision a: under the kill switch or the day's lock (or while the
+        day's figure cannot be read) a reversal sends its exit to 0 and only the part beyond is
+        refused. The exit is recorded as one; call under the lock."""
         room = verdict.room
         exit_part = replace(order, quantity=room)
         exited = rules.Verdict(True, rules.EXIT, verdict.position, verdict.claimed, room)
@@ -855,6 +879,9 @@ class Gate:
             since = None if refusing.state is None else _hhmm(refusing.state.since)
             said = words.reversal_cut(order.name, order.side, room, beyond, since=since)
             code = KILL_SWITCH_ACTIVE if refusing.state is not None else RISK_STATE_UNREADABLE
+        elif lock is None and day_unread:
+            said = words.reversal_cut(order.name, order.side, room, beyond, unread=order.pipe)
+            code = GUARD_UNAVAILABLE
         else:
             said = words.reversal_cut(
                 order.name, order.side, room, beyond, locked=(lock.figure, lock.loss_limit)
@@ -1146,7 +1173,7 @@ class Gate:
         except readers.Unreadable as exc:
             logger.warning(f"The daily loss limit could not be checked: {exc}")
             with self._lock:
-                now_shown = self._mark_unchecked(order.pipe, time.monotonic())
+                now_shown = self._mark_unchecked(order.pipe, time.monotonic(), paused=True)
             if now_shown:
                 _announce_unchecked(order.pipe)
             return None, True
@@ -1323,12 +1350,28 @@ class Gate:
         left = at + UNCHECKED_SHOWN_S - time.monotonic()
         return round(left, 1) if left >= 0 else None
 
-    def _mark_unchecked(self, pipe: str, now: float) -> bool:
-        """The daily limit could not be checked in ``pipe`` just now; True when the banner was
-        not already saying so (the screens are told). Call under the lock."""
+    def day_unchecked_paused(self, pipe: str) -> bool:
+        """Whether the daily limit is not being checked because today's figure could not be read
+        while the book could (new orders are paused, exits go), rather than because the book
+        could not be read (orders go, since any may be an exit). Read with
+        ``day_unchecked_left``, which says whether it is being said at all."""
+        with self._lock:
+            return self._paused.get(pipe, False)
+
+    def _mark_unchecked(self, pipe: str, now: float, paused: bool = False) -> bool:
+        """The daily limit could not be checked in ``pipe`` just now: ``paused`` when it was
+        today's figure that could not be read (new orders refused), else the book (orders go).
+        While a book that could not be read is being said, that stays the line: orders go then,
+        and an order refused for its figure says so in its own words. True when the banner was
+        not already saying this (the screens are told). Call under the lock."""
         at = self._unchecked.get(pipe)
+        shown = at is not None and now - at <= UNCHECKED_SHOWN_S
+        was_paused = self._paused.get(pipe, False)
+        if paused and shown and not was_paused:
+            paused = False
         self._unchecked[pipe] = now
-        return at is None or now - at > UNCHECKED_SHOWN_S
+        self._paused[pipe] = paused
+        return not shown or was_paused != paused
 
     # -- deciding, under the lock -------------------------------------------------------------------
 
@@ -1974,12 +2017,12 @@ def _tell_owner(text: str) -> None:
         logger.exception("A risk message could not be told on Telegram")
 
 
-def gtt_refused(symbol: str, exchange: str) -> None:
+def gtt_refused(symbol: str, exchange: str, paused: bool = False) -> None:
     """A sandbox GTT whose order the gate refused when it triggered is rejected for good
     (sandbox/gtt_manager.py): the owner is told once; never raises."""
     try:
         name = trader_name((str(exchange or "").upper(), str(symbol or ""), ""))
-        _tell_owner(words.sandbox_gtt_refused(name))
+        _tell_owner(words.sandbox_gtt_refused(name, paused))
     except Exception:
         logger.exception("A refused sandbox GTT could not be told on Telegram")
 
@@ -2310,6 +2353,8 @@ def _refuse_in_the_sandbox(text: str, told: int | None = None):
     # risk_refused: a GTT leg the gate refuses is rejected for good (sandbox/gtt_manager.py);
     # nothing_sent: Analyze mode's order alert titles it as not sent
     body = {"status": "error", "message": text, "mode": "analyze", "risk_refused": True}
+    if text == words.daily_unreadable(SANDBOX):
+        body["risk_paused"] = True  # a GTT cannot "try again": its owner is told so
     return False, {**body, "nothing_sent": True}, 403
 
 

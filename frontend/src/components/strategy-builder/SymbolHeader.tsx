@@ -1,4 +1,5 @@
 import { Check, ChevronsUpDown, RefreshCw } from 'lucide-react'
+import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import {
   Command,
@@ -17,6 +18,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { cn } from '@/lib/utils'
+import { ago } from '@/sudarshan/dashboard/live'
 
 export interface SymbolHeaderProps {
   exchanges: Array<{ value: string; label: string }>
@@ -42,6 +44,20 @@ export interface SymbolHeaderProps {
   onRefresh: () => void
   isRefreshing: boolean
   connectionStatus: 'live' | 'refreshing' | 'stale' | 'idle'
+  /** SUDARSHAN: when the chain's newest figures came (a tick or a read), for "Delayed"'s age. */
+  figuresAt?: Date | null
+}
+
+/** SUDARSHAN: now, ticking each second while `ticking` (only the words move: nothing is read). */
+function useNow(ticking: boolean): number {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    if (!ticking) return
+    setNow(Date.now())
+    const timer = setInterval(() => setNow(Date.now()), 1_000)
+    return () => clearInterval(timer)
+  }, [ticking])
+  return now
 }
 
 interface MetricCellProps {
@@ -100,16 +116,22 @@ export function SymbolHeader({
   onRefresh,
   isRefreshing,
   connectionStatus,
+  figuresAt = null,
 }: SymbolHeaderProps) {
+  // SUDARSHAN: "LIVE" is only the trading-mode chip; the feed says Real-time while ticks
+  // arrive, Loading while the chain is first read, and Delayed with the figures' age otherwise
+  // (it read a green "Live" in Analyze mode too, and "Reconnecting" during a first load).
   const statusLabel =
     connectionStatus === 'live'
-      ? 'Live'
+      ? 'Real-time'
       : connectionStatus === 'refreshing'
-        ? 'Refreshing'
+        ? 'Loading'
         : connectionStatus === 'stale'
-          ? 'Stale'
+          ? 'Delayed'
           : 'Idle'
   const isLive = connectionStatus === 'live'
+  const delayed = connectionStatus === 'stale' && figuresAt !== null
+  const now = useNow(delayed)
 
   return (
     <div
@@ -211,8 +233,8 @@ export function SymbolHeader({
         </div>
 
         <div className="ml-auto flex items-center gap-3">
-          {/* Live indicator */}
-          <div className="hidden items-center gap-1.5 sm:flex">
+          {/* Live indicator: on a phone too (SUDARSHAN: a screen that is not live says so) */}
+          <div className="flex items-center gap-1.5">
             <span className="relative flex h-2 w-2">
               <span
                 className={cn(
@@ -233,6 +255,11 @@ export function SymbolHeader({
             >
               {statusLabel}
             </span>
+            {delayed && figuresAt && (
+              <span className="text-[10px] font-medium text-muted-foreground">
+                {`· updated ${ago(now - figuresAt.getTime())}`}
+              </span>
+            )}
           </div>
 
           <Button

@@ -1,6 +1,7 @@
 import { useQueryClient } from '@tanstack/react-query'
 import {
   CandlestickChart,
+  ListChecks,
   type LucideIcon,
   Pause,
   Pencil,
@@ -53,14 +54,29 @@ export function AlertSheet({
   live,
   onClose,
   onEdit,
+  group = null,
+  onOpenGroup,
 }: {
   row: AlertRow | null
   live: SheetLive
   onClose: () => void
   onEdit: (id: number) => void
+  /** The list alert this one is a member of (A7), when the row has a `group_id`. */
+  group?: { id: number; name: string } | null
+  onOpenGroup?: (id: number) => void
 }) {
   if (!row) return null
-  return <Sheet key={row.id} row={row} live={live} onClose={onClose} onEdit={onEdit} />
+  return (
+    <Sheet
+      key={row.id}
+      row={row}
+      live={live}
+      onClose={onClose}
+      onEdit={onEdit}
+      group={group}
+      onOpenGroup={onOpenGroup}
+    />
+  )
 }
 
 function Sheet({
@@ -68,12 +84,18 @@ function Sheet({
   live,
   onClose,
   onEdit,
+  group,
+  onOpenGroup,
 }: {
   row: AlertRow
   live: SheetLive
   onClose: () => void
   onEdit: (id: number) => void
+  group: { id: number; name: string } | null
+  onOpenGroup?: (id: number) => void
 }) {
+  // A member of a list alert changes only through its group (A7): the service refuses the rest.
+  const member = row.group_id != null
   const client = useQueryClient()
   const held = useHeld(row.id)
   const [confirming, setConfirming] = useState(false)
@@ -129,44 +151,60 @@ function Sheet({
           ]}
         />
 
+        {member && (
+          <div className="flex flex-col gap-2">
+            <p className="text-sm font-semibold text-[color:var(--text-secondary)]">
+              {group ? `Part of the list alert ${group.name}` : 'Part of a list alert'}
+            </p>
+            {group && onOpenGroup && (
+              <button type="button" onClick={() => onOpenGroup(group.id)} className={OUTLINED}>
+                <ListChecks aria-hidden="true" className="size-5" />
+                Open the list alert
+              </button>
+            )}
+          </div>
+        )}
+
         {held?.state === 'unconfirmed' && <SentNote text={NO_ANSWER[held.action]} />}
 
         {/* A status the server changed while the sheet is open (fired once, paused after 50
             fires) changes what the middle button does under the finger: the row takes no tap
             for the same half second a sheet does when it opens. */}
-        <Settling key={row.status} className="grid grid-cols-3 gap-2">
-          <button
-            type="button"
-            disabled={held !== undefined}
-            onClick={() => onEdit(row.id)}
-            className={cn(OUTLINED, 'px-2', HELD)}
-          >
-            <Pencil aria-hidden="true" className="size-5" />
-            Edit
-          </button>
-          <button
-            type="button"
-            disabled={held !== undefined}
-            onClick={() => void sendChange(client, row, move.action)}
-            className={cn(OUTLINED, 'px-2', HELD)}
-          >
-            {sending(move.action) ? (
-              <BusyIcon />
-            ) : (
-              <MoveIcon aria-hidden="true" className="size-5" />
-            )}
-            {sending(move.action) ? move.busy : move.label}
-          </button>
-          <button
-            type="button"
-            disabled={held !== undefined}
-            onClick={() => setConfirming(true)}
-            className={cn(OUTLINED, 'px-2 text-[color:var(--down)]', HELD)}
-          >
-            {sending('delete') ? <BusyIcon /> : <Trash2 aria-hidden="true" className="size-5" />}
-            {sending('delete') ? 'Deleting' : 'Delete'}
-          </button>
-        </Settling>
+        {!member && (
+          <Settling key={row.status} className="grid grid-cols-3 gap-2">
+            <button
+              type="button"
+              disabled={held !== undefined}
+              onClick={() => onEdit(row.id)}
+              className={cn(OUTLINED, 'px-2', HELD)}
+            >
+              <Pencil aria-hidden="true" className="size-5" />
+              Edit
+            </button>
+            <button
+              type="button"
+              disabled={held !== undefined}
+              onClick={() => void sendChange(client, row, move.action)}
+              className={cn(OUTLINED, 'px-2', HELD)}
+            >
+              {sending(move.action) ? (
+                <BusyIcon />
+              ) : (
+                <MoveIcon aria-hidden="true" className="size-5" />
+              )}
+              {sending(move.action) ? move.busy : move.label}
+            </button>
+            <button
+              type="button"
+              disabled={held !== undefined}
+              onClick={() => setConfirming(true)}
+              className={cn(OUTLINED, 'px-2 text-[color:var(--down)]', HELD)}
+            >
+              {sending('delete') ? <BusyIcon /> : <Trash2 aria-hidden="true" className="size-5" />}
+              {sending('delete') ? 'Deleting' : 'Delete'}
+            </button>
+          </Settling>
+        )}
         <Link to={chartPath(row.symbol, row.exchange)} className={OUTLINED}>
           <CandlestickChart aria-hidden="true" className="size-5" />
           Chart

@@ -198,8 +198,9 @@ function DaySection({
             aria-hidden="true"
             className="mt-0.5 size-4 shrink-0 text-[color:var(--warning-text)]"
           />
-          Not being checked just now: positions cannot be read. Orders go meanwhile, since any of
-          them may be an exit.
+          {day.paused
+            ? "Not being checked just now: today's P&L cannot be read. New orders are paused meanwhile; exits and cancels still go."
+            : 'Not being checked just now: positions cannot be read. Orders go meanwhile, since any of them may be an exit.'}
         </p>
       )}
     </section>

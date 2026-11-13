@@ -440,54 +440,35 @@ def test_the_figure_is_read_from_the_same_book_the_order_is_judged_on(day):
 
 
 def test_readers_sandbox_day_is_its_funds_and_open_positions(monkeypatch):
-    """The sandbox's figure: today's realised P&L in its funds and its open positions' P&L, its
-    delivery (CNC in cash) left out of both (the owner's decision)."""
+    """The sandbox's figure: today's realised P&L in its funds and its open positions' P&L at the
+    sandbox's prices, its delivery (CNC in cash) left out of both (the owner's decision)."""
     from decimal import Decimal
 
-    class Query:
-        def __init__(self, rows):
-            self.rows = rows
+    from sandbox.position_manager import PositionManager
 
-        def filter_by(self, **kwargs):
-            return self
-
-        def filter(self, *args):
-            return self
-
-        def populate_existing(self):
-            return self
-
-        def first(self):
-            return self.rows[0] if self.rows else None
-
-        def all(self):
-            return self.rows
-
-    class Model:
-        def __init__(self, rows):
-            self.query = Query(rows)
-            self.user_id = self.quantity = 0  # compared, never used
-
-    def position(product, exchange, quantity, pnl, booked):
+    def position(symbol, product, exchange, quantity, average, booked):
         return SimpleNamespace(
-            product=product, exchange=exchange, quantity=quantity, pnl=pnl,
-            today_realized_pnl=booked,
+            symbol=symbol, product=product, exchange=exchange, quantity=quantity,
+            average_price=average, ltp=None, pnl=Decimal("0"), today_realized_pnl=booked,
         )  # fmt: skip
 
-    db = SimpleNamespace(
-        SandboxFunds=Model([SimpleNamespace(today_realized_pnl=Decimal("-1250.50"))]),
-        SandboxPositions=Model(
-            [
-                position("MIS", "NFO", 65, Decimal("-300"), Decimal("0")),
-                position("NRML", "NFO", 0, None, None),  # closed: nothing open
-                position("CNC", "NSE", 400, Decimal("-4000"), Decimal("-250")),  # delivery
-                position("CNC", "BSE", 0, Decimal("0"), Decimal("-100")),  # delivery, sold today
-            ]
-        ),
-    )
-    monkeypatch.setattr(readers, "_sandbox", lambda: db)
+    rows = [
+        position("NIFTY29DEC3025900CE", "MIS", "NFO", 60, Decimal("100"), Decimal("0")),
+        position("NIFTY29DEC3026000CE", "NRML", "NFO", 0, Decimal("0"), None),  # closed
+        position("RELIANCE", "CNC", "NSE", 400, Decimal("1500"), Decimal("-250")),  # delivery
+        position("INFY", "CNC", "BSE", 0, Decimal("0"), Decimal("-100")),  # delivery, sold today
+    ]
+    monkeypatch.setattr(readers, "_sandbox_book", lambda user: (Decimal("-1250.50"), rows))
+    asked = []
+
+    def ticks(self, symbols):
+        asked.extend(symbols)
+        return {symbol: {"ltp": 95.0} for symbol in symbols}
+
+    monkeypatch.setattr(PositionManager, "_fetch_quotes_from_websocket", ticks)
     figure = readers.sandbox_day("owner")
-    assert (figure.realised, figure.unrealised) == (-900.5, -300.0)
+    assert (figure.realised, figure.unrealised) == (-900.5, -300.0)  # (95 - 100) x 60
+    assert asked == [("NIFTY29DEC3025900CE", "NFO")]  # only what is open and not delivery
 
 
 def test_a_segment_s_window_is_kept_and_a_closed_day_is_asked_again(risk_store, monkeypatch):
@@ -571,6 +552,36 @@ def test_a_sandbox_order_at_the_limit_locks_the_sandbox_s_day_only(day, monkeypa
     assert day.told == [words.daily_lock_told(-4500.0, LIMIT, "sandbox")]
 
 
+def test_an_exit_never_works_out_the_figure_an_entry_does(day, monkeypatch):
+    """Review of v0.6.1, MEDIUM-3: an exit always goes, so the daily limit reads nothing for it,
+    Live or sandbox; an entry is judged on the figure as before."""
+    worked: list = []
+    original = daily.live_figure
+
+    def counted(rows):
+        worked.append(len(rows))
+        return original(rows)
+
+    monkeypatch.setattr(daily, "live_figure", counted)
+    day.book.rows = [day_row(CE, 65, -1000.0, 0.0)]
+    upstox = broker()
+    assert upstox.place(order("SELL"), "token")[2] == "OID0"  # the CE long's exit
+    assert worked == []
+    assert upstox.place(order("BUY", symbol=PE), "token")[2] == "OID1"  # an entry
+    assert worked == [1]
+    book = SandboxBook(daily.DayFigure(-1000.0, 0.0))
+    book.sandbox_position = lambda owner, symbol, exchange, product: 65  # long 65
+    fresh = gate.Gate(store=day.store, read=book)
+    fresh.set_state(KillSwitchState())
+    monkeypatch.setattr(fresh, "_in_session", lambda exchange, at: True)
+    kind = gate._Kind(
+        gate.SANDBOX, gate._sandbox_place, gate._refuse_in_the_sandbox, gate._answer_in_the_sandbox
+    )
+    data = {"symbol": CE, "exchange": "NFO", "product": "MIS", "action": "SELL", "quantity": 65}
+    assert not fresh.admit(kind, (SimpleNamespace(user_id="owner"), data), {}).refused
+    assert book.calls == []  # its position read (patched above), and never the day
+
+
 def test_an_order_that_read_the_book_just_before_another_locked_the_day_is_refused(day):
     """A reads the book while the day is above the limit; B reads it at the limit and locks the
     day before A decides. A, deciding after the lock, is refused too: the lock holds from the
@@ -592,3 +603,19 @@ def test_an_order_that_read_the_book_just_before_another_locked_the_day_is_refus
     day.book.before_rows = b_locks_the_day_first
     refused_message(upstox.place(order("BUY", symbol=PE), "token"))  # A
     assert ran == ["B"] and upstox.reached == []
+
+
+def test_the_banner_says_why_the_limit_is_not_checked_and_an_unread_book_stays_the_line(day):
+    """Today's figure unreadable while the book reads: new orders are paused (exits go). The book
+    unreadable: orders go, since any may be an exit. While that is being said it stays the line,
+    for an order refused for its figure says so in its own words; each change is told."""
+    unchecked = day.gate._mark_unchecked
+    assert unchecked("sandbox", 100.0, paused=True) is True  # told
+    assert day.gate.day_unchecked_paused("sandbox")
+    assert unchecked("sandbox", 101.0, paused=True) is False  # already being said
+    assert unchecked("sandbox", 102.0) is True  # the book now: orders go, told again
+    assert not day.gate.day_unchecked_paused("sandbox")
+    assert unchecked("sandbox", 103.0, paused=True) is False  # the book's line stays
+    assert not day.gate.day_unchecked_paused("sandbox")
+    assert unchecked("sandbox", 103.0 + gate.UNCHECKED_SHOWN_S + 1, paused=True) is True
+    assert day.gate.day_unchecked_paused("sandbox")

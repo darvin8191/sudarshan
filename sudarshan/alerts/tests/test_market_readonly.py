@@ -82,7 +82,7 @@ def test_an_older_file_is_refused_and_left_as_it_is(path):
     raw(path, "PRAGMA user_version = 0")
     with pytest.raises(StoreError) as caught:
         MarketStore(path, read_only=True)
-    assert "older release (version 0; this one reads version 1)" in str(caught.value)
+    assert "older release (version 0; this one reads version 2)" in str(caught.value)
     assert raw(path, "PRAGMA user_version") == [(0,)]  # never migrated by a reader
 
 
@@ -96,12 +96,15 @@ def test_migrate_status_reports_without_touching(path, tmp_path, monkeypatch, ca
     before = digest(path)
     assert migrate.main(["--status", "--db", str(path)]) == 0
     assert capsys.readouterr().out.splitlines() == [
-        f"market.db: {path}", "file version: 1", "code version: 1", "pending steps: none",
+        f"market.db: {path}", "file version: 2", "code version: 2", "pending steps: none",
     ]  # fmt: skip
     assert digest(path) == before
     raw(path, "PRAGMA user_version = 0")
     code, lines = migrate.status(path)
-    assert code == 0 and lines[1:] == ["file version: 0", "code version: 1", "pending steps: 1"]
+    assert code == 0 and lines[1:] == ["file version: 0", "code version: 2", "pending steps: 1, 2"]
+    raw(path, "PRAGMA user_version = 1")  # a step-1 file: --status names step 2 (M8.14)
+    code, lines = migrate.status(path)
+    assert code == 0 and lines[1:] == ["file version: 1", "code version: 2", "pending steps: 2"]
     raw(path, "PRAGMA user_version = 4")
     code, lines = migrate.status(path)
     assert code == 0 and lines[-1].startswith("pending steps: none; the file is from a newer")

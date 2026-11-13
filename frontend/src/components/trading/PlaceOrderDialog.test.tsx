@@ -86,6 +86,18 @@ describe('PlaceOrderDialog', () => {
     placeOrder.mockReset()
   })
 
+  it('scrolls its body inside the window so Place and Cancel stay reachable on a short screen', () => {
+    render(<PlaceOrderDialog {...nifty} priceType="SL" />)
+    const body = screen.getByTestId('ticket-body')
+    expect(body.className).toContain('overflow-y-auto')
+    const dialog = screen.getByRole('dialog')
+    expect(dialog.className).toContain('max-h-[calc(100dvh-1rem)]')
+    expect(dialog.className).toContain('overflow-hidden')
+    // The buttons sit outside the scrolling body.
+    expect(body.contains(screen.getByRole('button', { name: 'Place BUY Order' }))).toBe(false)
+    expect(body.contains(screen.getByRole('button', { name: 'Cancel' }))).toBe(false)
+  })
+
   it('shows the lots a units quantity stands for, over the same total', () => {
     render(<PlaceOrderDialog {...nifty} />)
     expect(screen.getByRole('spinbutton')).toHaveValue(2)

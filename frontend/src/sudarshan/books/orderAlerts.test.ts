@@ -27,6 +27,7 @@ vi.mock('./chime', () => ({
 }))
 
 import { useAlertStore } from '@/stores/alertStore'
+import { noteKillSwitch, resetKillSwitchForTests } from '@/sudarshan/risk/killSwitch'
 import type { Order } from '@/types/trading'
 import {
   APP_CANCEL_MS,
@@ -34,6 +35,7 @@ import {
   CANCEL_SETTLE_MS,
   describeOrderUpdate,
   installOrderAlerts,
+  KILL_SWITCH_REPORT_WAIT_MS,
   noteAppCancelEvent,
   noteCancelAllFromApp,
   type OrderUpdateFrame,
@@ -196,8 +198,19 @@ describe('describeOrderUpdate', () => {
     ).toMatchObject({
       kind: 'cancelled',
       title: 'Cancelled · BUY 65 NIFTY28OCT2525900CE',
-      description: 'Cancelled at the broker, not from this app. 30 of 65 had filled.',
+      description: 'Cancelled at Upstox, not from this screen. 30 of 65 had filled.',
     })
+  })
+
+  it('names the kill switch only when told it cancelled the order, and says no cause otherwise', () => {
+    const cancel = frame({ order_status: 'cancelled', mode: 'analyze', filled_quantity: 0 })
+    expect(describeOrderUpdate(cancel, true)?.description).toBe('Cancelled by the kill switch.')
+    expect(describeOrderUpdate(cancel)?.description).toBe(
+      'Cancelled in the sandbox, not from this screen.'
+    )
+    expect(
+      describeOrderUpdate(frame({ order_status: 'cancelled', filled_quantity: 0 }))?.description
+    ).toBe('Cancelled at Upstox, not from this screen.')
   })
 
   it('labels every alert "Sandbox" in Analyze mode, where the sandbox speaks, not the broker', () => {
@@ -314,9 +327,7 @@ describe('installOrderAlerts', () => {
 
     vi.advanceTimersByTime(CANCEL_SETTLE_MS)
     expect(toast.warning).toHaveBeenCalledTimes(1)
-    expect(toast.warning.mock.calls[0][2].description).toMatch(
-      /^10:12:31 · Cancelled at the broker/
-    )
+    expect(toast.warning.mock.calls[0][2].description).toMatch(/^10:12:31 · Cancelled at Upstox/)
   })
 
   it('does not announce a cancel this app asked for, whichever arrives first', () => {
@@ -531,6 +542,91 @@ describe('installOrderAlerts', () => {
     } finally {
       useAlertStore.getState().resetToDefaults()
     }
+  })
+
+  describe('a cancel the kill switch may have made (review of v0.6.1, MEDIUM-4)', () => {
+    const SINCE = '2026-10-20T05:12:00+00:00' // an hour ahead of this phone's clock: never read
+    /** The switch on, its steps still running or ended with a report naming `cancelled`. */
+    function switchOn(running: boolean, cancelled: string[] = []): void {
+      noteKillSwitch(
+        {
+          known: true,
+          on: true,
+          since: SINCE,
+          running,
+          report: running
+            ? null
+            : {
+                activation_id: 'ks-1',
+                steps: [
+                  { step: 'saved', ok: true, words: 'Saved.' },
+                  {
+                    step: 'sandbox_orders',
+                    ok: true,
+                    words: 'Open sandbox orders cancelled.',
+                    detail: { cancelled: cancelled.length, cancelled_ids: cancelled },
+                  },
+                ],
+              },
+        },
+        'sandbox'
+      )
+    }
+    const cancel = (orderid: string) =>
+      frame({ orderid, mode: 'analyze', order_status: 'cancelled', filled_quantity: 0 })
+    const said = () => toast.warning.mock.calls.map((call) => call[2].description)
+
+    afterEach(() => resetKillSwitchForTests())
+
+    it('names the switch for an order its report lists, whatever the clocks say', () => {
+      switchOn(false, ['S1'])
+      const socket = fakeSocket()
+      installOrderAlerts(socket as never)
+      socket.fire('order_update', cancel('S1'))
+      socket.fire('order_update', cancel('S2'))
+      vi.advanceTimersByTime(CANCEL_SETTLE_MS)
+      expect(said()).toEqual([
+        '10:12:31 · Cancelled by the kill switch.',
+        '10:12:31 · Cancelled in the sandbox, not from this screen.',
+      ])
+    })
+
+    it('keeps the neutral words for a cancel hours later while the switch stays on', () => {
+      switchOn(false, ['S1'])
+      const socket = fakeSocket()
+      installOrderAlerts(socket as never)
+      vi.advanceTimersByTime(4 * 3_600_000) // the 15:15 square-off cancels a stop placed since
+      socket.fire('order_update', cancel('S9'))
+      vi.advanceTimersByTime(CANCEL_SETTLE_MS)
+      expect(said()).toEqual(['14:12:31 · Cancelled in the sandbox, not from this screen.'])
+    })
+
+    it('holds a cancel while the steps run, then says what the report says', () => {
+      switchOn(true)
+      const socket = fakeSocket()
+      installOrderAlerts(socket as never)
+      socket.fire('order_update', cancel('S1'))
+      socket.fire('order_update', cancel('S2'))
+      vi.advanceTimersByTime(CANCEL_SETTLE_MS * 4)
+      expect(toast.warning).not.toHaveBeenCalled()
+      switchOn(false, ['S1'])
+      vi.advanceTimersByTime(CANCEL_SETTLE_MS)
+      expect(said()).toEqual([
+        '10:12:31 · Cancelled by the kill switch.',
+        '10:12:31 · Cancelled in the sandbox, not from this screen.',
+      ])
+    })
+
+    it('says the place when the report never comes', () => {
+      switchOn(true)
+      const socket = fakeSocket()
+      installOrderAlerts(socket as never)
+      socket.fire('order_update', cancel('S1'))
+      vi.advanceTimersByTime(KILL_SWITCH_REPORT_WAIT_MS - CANCEL_SETTLE_MS)
+      expect(toast.warning).not.toHaveBeenCalled()
+      vi.advanceTimersByTime(CANCEL_SETTLE_MS * 2)
+      expect(said()).toEqual(['10:12:31 · Cancelled in the sandbox, not from this screen.'])
+    })
   })
 
   it('stops listening when removed, dropping a cancel still waiting', async () => {

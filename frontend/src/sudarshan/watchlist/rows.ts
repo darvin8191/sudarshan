@@ -178,6 +178,14 @@ const CONTRACT = new RegExp(
   `^(.+?)(\\d{2})(${MONTHS.join('|')})(\\d{2})(?:(FUT)|(\\d+(?:\\.\\d+)?)(CE|PE))$`
 )
 
+/** A contract as a trader says it, expiry included: "NIFTY 17 NOV 25000 CE"; else the symbol. */
+export function spokenContract(symbol: string, exchange: string): string {
+  const parsed = DERIVATIVE_EXCHANGES.has(exchange.toUpperCase()) ? CONTRACT.exec(symbol) : null
+  if (!parsed) return symbol
+  const [, base, day, month, , future, strike, right] = parsed
+  return `${base} ${Number(day)} ${month} ${future ? 'FUT' : `${strike} ${right}`}`
+}
+
 export function isIndex(exchange: string): boolean {
   return exchange.toUpperCase().endsWith('_INDEX')
 }

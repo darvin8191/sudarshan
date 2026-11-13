@@ -618,7 +618,7 @@ describe('StrategyBuilder live request orchestration', () => {
       </MemoryRouter>
     )
 
-    await screen.findByText('Live')
+    await screen.findByText('Real-time')
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(screen.getByText('NIFTY18AUG2624600CE')).toBeVisible()
     expect(mocks.getOptionChain).toHaveBeenCalledTimes(1)
@@ -658,7 +658,7 @@ describe('StrategyBuilder live request orchestration', () => {
       </MemoryRouter>
     )
 
-    await screen.findByText('Live')
+    await screen.findByText('Real-time')
     await waitFor(() => expect(screen.getAllByText('₹140.00').length).toBeGreaterThan(0))
     expect(screen.getByText('NIFTY13AUG2624600CE')).toBeVisible()
     expect(mocks.getOptionChain).not.toHaveBeenCalled()
@@ -699,7 +699,7 @@ describe('StrategyBuilder live request orchestration', () => {
       </MemoryRouter>
     )
 
-    await screen.findByText('Live')
+    await screen.findByText('Real-time')
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(screen.getByText('NIFTY27AUG26FUT')).toBeVisible()
     expect(mocks.getFutures).toHaveBeenCalledTimes(1)
@@ -711,8 +711,8 @@ describe('StrategyBuilder live request orchestration', () => {
     await waitFor(() => expect(requests('/api/v1/optionchain')).toHaveLength(1))
     await waitForAddButton()
 
-    expect(screen.getByText('Stale')).toBeInTheDocument()
-    expect(screen.queryByText('Live')).not.toBeInTheDocument()
+    expect(screen.getByText('Delayed')).toBeInTheDocument()
+    expect(screen.queryByText('Real-time')).not.toBeInTheDocument()
     expect(requests('/api/v1/syntheticfuture')).toHaveLength(0)
     expect(requests('/api/v1/optiongreeks')).toHaveLength(0)
     expect(requests('/api/v1/multioptiongreeks')).toHaveLength(0)
@@ -726,8 +726,8 @@ describe('StrategyBuilder live request orchestration', () => {
     renderBuilder()
     await waitForAddButton()
 
-    expect(screen.getByText('Stale')).toBeInTheDocument()
-    expect(screen.queryByText('Live')).not.toBeInTheDocument()
+    expect(screen.getByText('Delayed')).toBeInTheDocument()
+    expect(screen.queryByText('Real-time')).not.toBeInTheDocument()
   })
 
   it('keeps recent REST-cached data Stale until an authenticated WebSocket tick arrives', async () => {
@@ -748,8 +748,8 @@ describe('StrategyBuilder live request orchestration', () => {
     const view = renderBuilder()
     await waitForAddButton()
 
-    expect(screen.getByText('Stale')).toBeInTheDocument()
-    expect(screen.queryByText('Live')).not.toBeInTheDocument()
+    expect(screen.getByText('Delayed')).toBeInTheDocument()
+    expect(screen.queryByText('Real-time')).not.toBeInTheDocument()
 
     mocks.marketData = new Map([
       [
@@ -768,8 +768,8 @@ describe('StrategyBuilder live request orchestration', () => {
       </MemoryRouter>
     )
 
-    await waitFor(() => expect(screen.getByText('Live')).toBeInTheDocument())
-    expect(screen.queryByText('Stale')).not.toBeInTheDocument()
+    await waitFor(() => expect(screen.getByText('Real-time')).toBeInTheDocument())
+    expect(screen.queryByText('Delayed')).not.toBeInTheDocument()
   })
 
   it('requires a post-reconnect WebSocket tick before returning to Live', async () => {
@@ -789,7 +789,7 @@ describe('StrategyBuilder live request orchestration', () => {
     ])
 
     const view = renderBuilder()
-    await waitFor(() => expect(screen.getByText('Live')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('Real-time')).toBeInTheDocument())
 
     mocks.marketConnected = false
     mocks.marketAuthenticated = false
@@ -798,7 +798,7 @@ describe('StrategyBuilder live request orchestration', () => {
         <StrategyBuilder />
       </MemoryRouter>
     )
-    await waitFor(() => expect(screen.getByText('Stale')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('Delayed')).toBeInTheDocument())
 
     mocks.marketConnected = true
     mocks.marketAuthenticated = true
@@ -808,8 +808,8 @@ describe('StrategyBuilder live request orchestration', () => {
         <StrategyBuilder />
       </MemoryRouter>
     )
-    expect(screen.getByText('Stale')).toBeInTheDocument()
-    expect(screen.queryByText('Live')).not.toBeInTheDocument()
+    expect(screen.getByText('Delayed')).toBeInTheDocument()
+    expect(screen.queryByText('Real-time')).not.toBeInTheDocument()
 
     mocks.marketData = new Map([
       [
@@ -827,7 +827,7 @@ describe('StrategyBuilder live request orchestration', () => {
         <StrategyBuilder />
       </MemoryRouter>
     )
-    await waitFor(() => expect(screen.getByText('Live')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('Real-time')).toBeInTheDocument())
   })
 
   it('does not repeat an unchanged margin request when support is confirmed', async () => {

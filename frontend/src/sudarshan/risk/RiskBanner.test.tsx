@@ -218,6 +218,29 @@ describe('the daily loss limit, not being checked', () => {
     }
   })
 
+  it("says new orders are paused when today's P&L, not the positions, could not be read", async () => {
+    serve({
+      status: 200,
+      body: {
+        data: {
+          stage: 'on',
+          kill_switch: OFF,
+          daily: { live: { locked: false, unchecked: true, unchecked_left_s: 30, paused: true } },
+        },
+      },
+    })
+    renderShell()
+    const banner = await screen.findByTestId('risk-banner')
+    expect(banner).toHaveTextContent(
+      "Daily loss limit not being checked · today's P&L cannot be read · new orders paused, exits go"
+    )
+    expect(banner).not.toHaveTextContent('orders go meanwhile')
+    expect(screen.getByTestId('risk-chip')).toHaveAttribute(
+      'title',
+      "Daily loss limit not being checked: today's P&L cannot be read, so new orders are paused"
+    )
+  })
+
   it("gives way to the day's lock and to the kill switch", async () => {
     serve({
       status: 200,
