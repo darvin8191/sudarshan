@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import gc
-import os
 import sqlite3
 import threading
 from pathlib import Path
@@ -15,28 +13,7 @@ from test_portfolio_service import FERNET, free_port, post, run, sealed, setting
 from sudarshan.portfolio import migrations, service
 from sudarshan.portfolio.service import Service
 from sudarshan.portfolio.store import DB_FILENAME, THREAD_PREFIX, Scope, StoreError
-
-
-def fds() -> int:
-    return len(os.listdir("/proc/self/fd"))
-
-
-def settled_fds() -> int:
-    """The count once earlier tests' garbage is collected: a socket another test left unreferenced
-    closes whenever the collector runs, and must not close inside this test's window. Seen in CI:
-    a Socket.IO test's unclosed HTTP sessions moved this count by one either way."""
-    gc.collect()
-    return fds()
-
-
-def targets() -> dict:
-    out = {}
-    for name in os.listdir("/proc/self/fd"):
-        try:
-            out[name] = os.readlink(f"/proc/self/fd/{name}")
-        except OSError:
-            pass
-    return out
+from sudarshan.tests.fdwatch import FdWatch
 
 
 def store_threads() -> list[str]:
@@ -59,8 +36,7 @@ def version_of(path: Path) -> int:
 
 def test_start_migrates_seeds_and_stop_leaves_nothing_open(tmp_path):
     seen: dict = {}
-    before_fds, before_threads = settled_fds(), set(threading.enumerate())
-    t0 = targets()
+    watch, before_threads = FdWatch(), set(threading.enumerate())
 
     async def scenario():
         svc = Service(settings_for(tmp_path, free_port()), FERNET, jobs={})
@@ -78,7 +54,7 @@ def test_start_migrates_seeds_and_stop_leaves_nothing_open(tmp_path):
     assert len(seen["threads"]) == 1  # the store's one writer thread ...
     assert store_threads() == []  # ... is gone after the stop
     assert set(threading.enumerate()) <= before_threads
-    assert fds() == before_fds, {k: v for k, v in targets().items() if k not in t0}
+    watch.assert_clean()
     assert oct(path.stat().st_mode & 0o777) == "0o600"
     assert version_of(path) == migrations.LATEST  # migrations ran at start
 
@@ -94,10 +70,10 @@ def test_a_second_start_runs_nothing_again_and_seeds_nothing_twice(tmp_path):
         await asyncio.wait_for(task, 10)
 
     run(once)
-    before = settled_fds()
+    watch = FdWatch()
     run(once)
     assert counts[0] == counts[1]
-    assert fds() == before
+    watch.assert_clean()
 
 
 def test_a_file_newer_than_the_code_keeps_the_portfolio_off_in_the_designs_words(tmp_path):
@@ -123,7 +99,7 @@ def test_a_file_newer_than_the_code_keeps_the_portfolio_off_in_the_designs_words
         svc.stop()
         await asyncio.wait_for(task, 10)
 
-    before = fds()
+    watch = FdWatch()
     run(scenario)
     sentence = (
         "Your portfolio data was written by a newer release. Install that release again; "
@@ -137,7 +113,8 @@ def test_a_file_newer_than_the_code_keeps_the_portfolio_off_in_the_designs_words
     assert version_of(path) == migrations.LATEST + 1
     with contextlib.closing(sqlite3.connect(path)) as conn:
         assert [r[0] for r in conn.execute("SELECT name FROM sqlite_master")] == ["keep"]
-    assert store_threads() == [] and fds() == before
+    assert store_threads() == []
+    watch.assert_clean()
 
 
 def test_a_store_that_will_not_open_keeps_the_portfolio_off_and_the_service_up(tmp_path):

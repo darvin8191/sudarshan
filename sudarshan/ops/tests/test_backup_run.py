@@ -38,13 +38,13 @@ from backup_fakes import (
     ist,
     make_database,
     no_sleep,
-    open_files,
     sha,
 )
 
 from sudarshan.autologin.schedule import IST, TradingCalendar
 from sudarshan.ops import backup, retention
 from sudarshan.ops.backup import CAP, FAILED, INTEGRITY, OK, PARTIAL, SKIPPED, SOURCE, SPACE, WRITE
+from sudarshan.tests.fdwatch import FdWatch
 
 ARCHIVE = "sudarshan-backup-20261027-163102.tar.gz"
 PARTIAL_ARCHIVE = "sudarshan-backup-20261027-163102-partial.tar.gz"
@@ -528,7 +528,7 @@ def test_a_night_leaves_no_file_open_whatever_went_wrong_in_it(server):
     (server.app / "db" / "junk.db").write_bytes(b"this is not a database at all" * 50)
     sparse(server.etc / "huge.bin", backup.MAX_PLAIN_FILE + 1)
     go(server, force=True)  # the first night may open what the process then keeps for good
-    before = open_files()
+    watch = FdWatch()
 
     assert go(server, NIGHT + timedelta(minutes=1), force=True).outcome == PARTIAL
     (server.app / "db" / "junk.db").unlink()
@@ -541,7 +541,7 @@ def test_a_night_leaves_no_file_open_whatever_went_wrong_in_it(server):
     damage(damage_target)
     assert go(server, NIGHT + timedelta(minutes=4), force=True).outcome == PARTIAL
 
-    assert open_files() == before
+    watch.assert_clean()
 
 
 def test_a_night_with_a_file_not_taken_is_a_partial_one_the_evening_retry_does_not_mistake(server):
