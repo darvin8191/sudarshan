@@ -23,6 +23,7 @@ from sudarshan.portfolio import config, ops, service
 from sudarshan.portfolio.api import ApiError, PortfolioApi
 from sudarshan.portfolio.core import kinds
 from sudarshan.portfolio.service import Service
+from sudarshan.tests.fdwatch import FdWatch
 from sudarshan.vault import ALERTS_API_INFO, PORTFOLIO_API_INFO, fernet_for
 
 PEPPER = "p" * 48  # fake, test only
@@ -407,10 +408,6 @@ class FakeStore:
         self.closed = 0
 
 
-def fds() -> int:
-    return len(os.listdir("/proc/self/fd"))
-
-
 async def until(check, timeout_s: float = 30.0) -> None:
     """Wait for ``check()`` to hold, polling, rather than for a fixed time a slow runner may need
     more of; give up after ``timeout_s``."""
@@ -508,11 +505,11 @@ def test_start_then_stop_opens_the_store_once_and_leaves_nothing_open(tmp_path):
         await asyncio.wait_for(task, 10)
         assert svc.health()["portfolio_state"]["store"] == "closed"
 
-    before_threads, before_fds = set(threading.enumerate()), fds()
+    before_threads, fd_watch = set(threading.enumerate()), FdWatch()
     run(scenario)
     assert [s.closed for s in opened] == [1]
     assert set(threading.enumerate()) <= before_threads
-    assert fds() == before_fds
+    fd_watch.assert_clean()
 
 
 def test_a_job_that_fails_does_not_stop_the_api_and_the_store_still_closes(tmp_path):
