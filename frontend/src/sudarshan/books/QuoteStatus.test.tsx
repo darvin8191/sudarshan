@@ -3,7 +3,7 @@
  * contract nobody has traded today has no price to be late with, so it says
  * "No trade yet" rather than "Stale".
  */
-import { render, screen } from '@testing-library/react'
+import { act, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { resetInstrumentSessions } from '@/lib/trading/instrumentSession'
 
@@ -118,5 +118,53 @@ describe('QuoteStatus for an expiring contract (review M3)', () => {
     )
     expect(await screen.findByText(/Stale/)).toBeInTheDocument()
     expect(screen.queryByText(/Stopped trading/)).toBeNull()
+  })
+
+  it('asks again for the new day when the dialog is left open past midnight (review N3)', async () => {
+    const monday = Date.UTC(2026, 11, 7, 18, 29, 50) // 23:59:50 in India
+    vi.useFakeTimers({
+      now: monday,
+      shouldAdvanceTime: false,
+      toFake: ['setTimeout', 'clearTimeout', 'Date'],
+    })
+    resetInstrumentSessions()
+    const asked = vi.fn()
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        asked()
+        const tuesday = Date.now() >= Date.UTC(2026, 11, 7, 18, 30)
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            status: 'success',
+            data: { day: 'd', stops_at: tuesday ? stopsAt : null, closing: null },
+          }),
+        }
+      })
+    )
+    const view = render(
+      <QuoteStatus
+        exchange="NFO"
+        symbol="NIFTY08DEC2625900CE"
+        calendar={open}
+        feed={stale(Date.now())}
+      />
+    )
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    expect(asked).toHaveBeenCalledTimes(1)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000) // 00:00:00
+    })
+    expect(asked).toHaveBeenCalledTimes(1)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000)
+    })
+    expect(asked).toHaveBeenCalledTimes(2)
+    view.unmount()
+    expect(vi.getTimerCount()).toBe(0)
   })
 })

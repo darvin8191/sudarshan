@@ -103,6 +103,7 @@ import {
   isComparisonScale,
   storedComparisonMode,
 } from './comparisonScale'
+import { watchIstDay } from './dayWatch' // SUDARSHAN: review N3
 import { ExpressionFeed, isChartExpression, resolveLeg } from './expressionFeed'
 import {
   type IndicatorTemplateMode,
@@ -1220,6 +1221,8 @@ export class TradingTerminal {
   private builder: LiveBarBuilder | null = null
   /** SUDARSHAN (review M3): an expiring contract's own stop today, from the server. */
   private stopsAt: { symbol: string; exchange: string; at: number } | null = null
+  /** Stops the watch for the date in India to change (review N3). */
+  private dayWatch: (() => void) | null = null
   /**
    * SUDARSHAN M4.1: opens a bar at each boundary while the session is open,
    * when no tick has, by the server's clock rather than the machine's.
@@ -6754,14 +6757,34 @@ export class TradingTerminal {
     this.liveStatus.reset(exchange)
     this.syncCountdown()
     if (!exchange) return
-    const ticket = this.loadTicket
-    // SUDARSHAN (review M1, M2): the instrument's own facts, asked beside the hours.
+    this.askHours(exchange, builder, this.loadTicket, false)
+    // SUDARSHAN (review N3): a terminal left open past midnight in India asks the day's facts again.
+    this.dayWatch?.()
+    this.dayWatch = watchIstDay(() => {
+      if (!this.destroyed) this.askHours(exchange, this.builder, this.loadTicket, true)
+    })
+    if (builder) void this.foldTodayFromQuote(builder, exchange)
+  }
+
+  /**
+   * The exchange's hours and the loaded instrument's own facts for today (review M1, M2, M3),
+   * applied to the live bar and the marker. `again` is a terminal that was already open when
+   * the date changed (review N3): the facts are asked for the new day, and a stop or closing
+   * window that belonged to the old one is dropped when the new day has none.
+   */
+  private askHours(
+    exchange: string,
+    builder: LiveBarBuilder | null,
+    ticket: number,
+    again: boolean
+  ): void {
     const sym = this.sym
     const facts = sym && !sym.synthetic ? instrumentSessionFor(sym.symbol, exchange) : null
     void sessionCalendarFor(exchange, this.apiKey)
       .then((calendar) => {
         if (this.destroyed || ticket !== this.loadTicket || !calendar) return facts
         this.liveStatus.setCalendar(calendar)
+        if (again && this.chart && !this.chart.isDestroyed) this.chart.setSessionCalendar(calendar)
         if (!builder || this.builder !== builder) return facts
         builder.setSession(calendar)
         this.liveClock.start()
@@ -6772,7 +6795,13 @@ export class TradingTerminal {
         if (this.destroyed || ticket !== this.loadTicket || !found) return
         // A closing print after the cash close goes to the day's last candle.
         if (builder && this.builder === builder) builder.setClosing(found.closing)
-        if (found.stopsAt === null || !sym) return
+        if (found.stopsAt === null || !sym) {
+          if (this.stopsAt !== null) {
+            this.stopsAt = null
+            this.liveStatus.setStop(null)
+          }
+          return
+        }
         // An expiring contract's own stop (review M3): no candle, countdown or "Stale" after it.
         this.stopsAt = { symbol: sym.symbol, exchange, at: found.stopsAt }
         this.liveStatus.setStop(found.stopsAt / 1000)
@@ -6786,7 +6815,6 @@ export class TradingTerminal {
           this.syncCountdown()
         })
       })
-    if (builder) void this.foldTodayFromQuote(builder, exchange)
   }
 
   /** SUDARSHAN (review M3): the loaded contract's own stop today, epoch ms, when the server gave one. */
@@ -6798,6 +6826,8 @@ export class TradingTerminal {
 
   /** SUDARSHAN M4.1: stop the forming bar: a load is about to replace what it belongs to. */
   private stopLiveBar(): void {
+    this.dayWatch?.()
+    this.dayWatch = null
     this.liveClock.stop()
     this.builder = null
     this.liveBucket = null
@@ -8301,6 +8331,8 @@ export class TradingTerminal {
     this.replayInvalidation = null
     if (this.workspaceReplayMember || this.workspaceReplayPick) this.stopReplay()
     this.destroyed = true
+    this.dayWatch?.() // SUDARSHAN: review N3
+    this.dayWatch = null
     let comparisonError: unknown
     let comparisonFailed = false
     try {

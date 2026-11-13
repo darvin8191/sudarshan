@@ -1,6 +1,7 @@
 import { Clock } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import type { useMarketStatus } from '@/hooks/useMarketStatus'
+import { watchIstDay } from '@/lib/trading/dayWatch'
 import { instrumentSessionFor } from '@/lib/trading/instrumentSession'
 import { cn } from '@/lib/utils'
 import { useMarketOpen } from '@/sudarshan/dashboard/hooks'
@@ -61,18 +62,26 @@ export function QuoteStatus({
   return <LiveLine line={line} now={now} className={className} />
 }
 
-/** When an F&O contract stops trading today (epoch ms), from the server; null when it trades on. */
+/**
+ * When an F&O contract stops trading today (epoch ms), from the server; null when it trades on.
+ * A dialog left open past midnight in India asks again for the new day (review N3).
+ */
 function useContractStop(symbol: string | undefined, exchange: string): number | null {
   const [stopsAt, setStopsAt] = useState<number | null>(null)
   useEffect(() => {
     setStopsAt(null)
     if (!symbol || (exchange !== 'NFO' && exchange !== 'BFO')) return
     let alive = true
-    void instrumentSessionFor(symbol, exchange).then((found) => {
-      if (alive) setStopsAt(found?.stopsAt ?? null)
-    })
+    const ask = () => {
+      void instrumentSessionFor(symbol, exchange).then((found) => {
+        if (alive) setStopsAt(found?.stopsAt ?? null)
+      })
+    }
+    ask()
+    const stopWatching = watchIstDay(ask)
     return () => {
       alive = false
+      stopWatching()
     }
   }, [symbol, exchange])
   return stopsAt
