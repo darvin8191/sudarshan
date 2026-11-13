@@ -1,6 +1,7 @@
 """The service against a fake Upstox on 127.0.0.1: fan-out, HTTP API, reconnects, refusals."""
 
 import asyncio
+import itertools
 import json
 import logging
 import os
@@ -35,6 +36,14 @@ async def _stop(svc: FeedService, run: asyncio.Task) -> None:
     await asyncio.wait_for(run, 10)
 
 
+async def _next_tick(sub) -> list[bytes]:
+    """The next frame that is not the health document this test also listens to."""
+    while True:
+        topic, payload = await asyncio.wait_for(sub.recv_multipart(), 2)
+        if topic.decode() != bus.HEALTH_TOPIC:
+            return [topic, payload]
+
+
 def test_fan_out_http_api_and_clean_close(feed_env, fast, caplog):
     caplog.set_level(logging.DEBUG, logger="sudarshan.feed")
 
@@ -48,6 +57,7 @@ def test_fan_out_http_api_and_clean_close(feed_env, fast, caplog):
             sub = ctx.socket(zmq.SUB)
             sub.connect(svc.pub.endpoint)
             sub.subscribe(b"NSE_")
+            sub.subscribe(bus.HEALTH_TOPIC.encode())  # last: its frames prove the one above is live
             try:
                 # Every key is re-sent on connect, in batches (SUB_BATCH=2), as binary frames.
                 await ff.wait_until(lambda: fake.requests and len(fake.requests[0]) == 3)
@@ -57,17 +67,25 @@ def test_fan_out_http_api_and_clean_close(feed_env, fast, caplog):
                 assert all(r["binary"] for r in fake.requests[0])
                 await ff.wait_until(lambda: svc.health()["subscriptions_live"])
                 server = fake.sockets[0]
+                flips = itertools.cycle(("NORMAL_CLOSE", "NORMAL_OPEN"))
+
+                async def probe():  # a changed market status is published as health at once
+                    await server.send(ff.response({}, "market_info", {"NSE_EQ": next(flips)}))
+
+                # A SUB misses every frame sent before it has joined, and a connect does not wait
+                # for that: only once the publisher's own frame has come back are the ticks safe.
+                await ff.wait_joined(sub, probe)
                 await server.send(ff.response({}, "market_info", {"NSE_EQ": "NORMAL_OPEN"}))
                 feeds = {REL: ff.full_stock(), NIFTY: ff.ltpc(25000.5, cp=24900.0)}
                 await server.send(ff.response(feeds, kind="initial_feed"))
                 got = {}
                 while len(got) < 2:
-                    topic, payload = await asyncio.wait_for(sub.recv_multipart(), 2)
+                    topic, payload = await _next_tick(sub)
                     got[topic.decode()] = json.loads(payload)
                 assert got[REL]["key"] == REL and got[REL]["bid"] == 1400.4
                 assert got[REL]["ts_recv"] > 0 and got[NIFTY]["cp"] == 24900.0
                 await server.send(ff.response({REL: ff.full_stock(ltp=1401.0, with_ltpc=False)}))
-                _, payload = await asyncio.wait_for(sub.recv_multipart(), 2)
+                _, payload = await _next_tick(sub)
                 assert json.loads(payload)["ltp"] == 1400.5  # no LTPC in the packet: last LTP kept
 
                 async with httpx.AsyncClient(base_url=f"http://127.0.0.1:{svc.http_port}") as http:
@@ -480,3 +498,34 @@ def test_the_auction_phase_is_forgotten_when_its_socket_closes(feed_env, fast, c
     told = [r.getMessage() for r in caplog.records if "closing auction status" in r.getMessage()]
     assert told == ["closing auction status on connect: NSE_EQ CAS_LM_START at "
                     "2026-10-27T15:20:00+05:30"] * 2  # fmt: skip
+
+
+def test_a_sub_that_has_proved_it_joined_misses_no_frame_after():
+    """The cause of the fan-out test's order-dependent failure: a SUB's connect returns before the
+    publisher has the subscription, and a frame sent in that gap is gone. wait_joined must not
+    return in it, in a fresh pair every time (a helper that returned at once failed this)."""
+
+    async def scenario():
+        for _ in range(25):
+            pub = bus.Publisher(0)
+            ctx = zmq.asyncio.Context()
+            sub = ctx.socket(zmq.SUB)
+            try:
+                sub.connect(pub.endpoint)
+                sub.subscribe(b"NSE_")
+                sub.subscribe(bus.HEALTH_TOPIC.encode())
+
+                async def probe(pub=pub):
+                    pub.send(bus.HEALTH_TOPIC, b"{}")
+
+                await ff.wait_joined(sub, probe)
+                for n in range(20):
+                    pub.send(f"NSE_EQ|{n}", b"{}")
+                got = [(await asyncio.wait_for(sub.recv_multipart(), 2))[0] for _ in range(20)]
+                assert got == [f"NSE_EQ|{n}".encode() for n in range(20)]
+            finally:
+                sub.close(0)
+                ctx.term()
+                pub.close()
+
+    asyncio.run(scenario())
