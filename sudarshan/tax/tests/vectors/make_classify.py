@@ -92,8 +92,10 @@ INTRADAY = [
 ]
 
 
-def trip(case, note, exchange, product, same_day, out):
+def trip(case, note, exchange, product, same_day, out, isin="INE000A01010"):
     row = {"exchange": exchange, "symbol": "XYZ", "product": product, "same_day": same_day}
+    if isin is not None:
+        row["isin"] = isin
     return {"id": case, "note": note, "in": row, "out": out}
 
 
@@ -111,6 +113,16 @@ PRODUCT = [
     trip("P-CDS", "currency derivatives", "CDS", "MIS", True, "derivative"),
     trip("P-INDEX", "an index is not traded: not computed", "NSE_INDEX", "CNC", False,
          "not_computed"),
+    trip("P-GOLD-ETF", "a gold ETF's trip held overnight is no share's: not computed", "NSE", "CNC",
+         False, "not_computed", "INF000B01019"),
+    trip("P-LIQUID-ETF-DAY", "a liquid ETF bought and sold in a day is no intraday share trade",
+         "NSE", "MIS", True, "not_computed", "INF000C01017"),
+    trip("P-REIT", "a REIT's unit", "NSE", "CNC", False, "not_computed", "INE000R25014"),
+    trip("P-GOLD-BOND", "a gold bond", "NSE", "CNC", False, "not_computed", "IN0020200013"),
+    trip("P-NO-ISIN", "a cash trip whose ISIN is not known is not assumed to be a share's", "BSE",
+         "CNC", False, "not_computed", None),
+    trip("P-NFO-NO-ISIN", "a derivative has no ISIN and needs none", "NFO", "NRML", False,
+         "derivative", None),
     trip("P-NSE-NRML", "NRML is not a cash-market product: not computed", "NSE", "NRML", False,
          "not_computed"),
 ]  # fmt: skip

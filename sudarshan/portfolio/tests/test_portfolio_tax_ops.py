@@ -430,3 +430,21 @@ def test_every_list_of_sales_is_named_and_a_share_no_record_names_has_none():
     assert [row["name"] for row in rows] == ["First Ltd", None, None, None]
     assert [row["isin"] for row in rows] == [f"INE00{n}X01010" for n in range(4)]
     assert set(tax_ops.SALE_LISTS) == {"schedule", "needs_fmv", "unknown_cost", "exempt_buybacks"}
+
+
+def test_a_sale_the_paper_does_not_compute_is_named_too():
+    """An ETF, a REIT or a bond sold is listed by ISIN and value; the ISIN alone does not say
+    what it was, so it carries the same name a share's sale does. A contract names itself."""
+    from sudarshan.portfolio.ops import tax_ops
+
+    contract = ["NFO", "ACME", 20260924, 0, "FUT"]
+    outside = [{"instrument": "INF204KB17I5"}, {"instrument": "INF000D01015"},
+               {"instrument": contract}]  # fmt: skip
+    pack = {"capital_gains": {key: [] for key in tax_ops.SALE_LISTS},
+            "not_computed_sales": outside}  # fmt: skip
+    named = tax_ops._named(pack, {"INF204KB17I5": "GOLD ETF UNITS"})["not_computed_sales"]
+    assert named == [
+        {"instrument": "INF204KB17I5", "name": "GOLD ETF UNITS"},
+        {"instrument": "INF000D01015", "name": None},
+        {"instrument": contract},
+    ]

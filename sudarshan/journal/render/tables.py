@@ -210,13 +210,22 @@ HEAD_LABELS = {
 KIND_ORDER = tuple(HEAD_LABELS.values())
 
 
+def isin_of(trip: Mapping[str, Any]) -> str | None:
+    """A cash trade's ISIN: the part of Upstox's instrument key after the bar (``NSE_EQ|INE...``).
+    None where the journal kept no key; the classifier then does not take it for a share."""
+    key = str(trip.get("instrument_key") or "")
+    return key.rsplit("|", 1)[1].strip().upper() if "|" in key else None
+
+
 def kind_of_trade(trip: Mapping[str, Any]) -> str:
     """The row a closed trade is counted in (see ``HEAD_LABELS``). The journal keeps Upstox's
-    product codes too (I, D), so the product goes to the classifier by its class."""
+    product codes too (I, D), so the product goes to the classifier by its class. A cash trade is
+    a share's only when its ISIN is a company's equity share (the classifier's rule): an ETF's,
+    a REIT's or a gold bond's is "Other", as the working paper leaves them out."""
     product = "MIS" if trip.get("product_class") == "intraday" else "CNC"
     same_day = trip.get("open_day") is not None and trip.get("open_day") == trip.get("close_day")
     head = classify.head_of_product(str(trip["exchange"]), str(trip.get("symbol") or ""),
-                                    product, same_day=same_day)  # fmt: skip
+                                    product, same_day=same_day, isin=isin_of(trip))  # fmt: skip
     return HEAD_LABELS[head]
 
 

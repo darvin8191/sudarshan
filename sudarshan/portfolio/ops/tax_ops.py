@@ -263,6 +263,11 @@ def _named(pack: dict, names: dict[str, str]) -> dict:
     for key in SALE_LISTS:
         for row in pack["capital_gains"][key]:
             row["name"] = names.get(row["isin"])
+    # A sale the paper does not compute (an ETF, a REIT, a bond) is named too: an ISIN alone
+    # does not say what was sold. A derivative's instrument is its contract and names itself.
+    for row in pack.get("not_computed_sales") or ():
+        if isinstance(row.get("instrument"), str):
+            row["name"] = names.get(row["instrument"])
     return pack
 
 

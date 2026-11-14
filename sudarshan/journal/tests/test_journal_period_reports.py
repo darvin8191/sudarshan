@@ -281,9 +281,10 @@ def test_a_trade_is_counted_by_the_tax_cores_own_classifier_and_no_holding_perio
     base = {"exchange": "NFO", "symbol": "NIFTY25NOV2625000CE", "product_class": "carry"}
     assert tables.kind_of_trade(base) == "F&O and other derivatives"
     assert tables.kind_of_trade({**base, "exchange": "MCX"}) == "F&O and other derivatives"
-    eq = {"exchange": "NSE", "symbol": "ACME", "product_class": "intraday"}
+    share = {"exchange": "NSE", "symbol": "ACME", "instrument_key": "NSE_EQ|INE000A01010"}
+    eq = {**share, "product_class": "intraday"}
     assert tables.kind_of_trade(eq) == "Shares, bought and sold the same day"
-    carry = {"exchange": "NSE", "symbol": "ACME", "product_class": "carry", "open_day": 20261102}
+    carry = {**share, "product_class": "carry", "open_day": 20261102}
     for close in (20261103, 20271102, 20271103, 20301103):
         assert tables.kind_of_trade({**carry, "close_day": close}) == (
             "Shares, taken or given in delivery"
@@ -292,6 +293,13 @@ def test_a_trade_is_counted_by_the_tax_cores_own_classifier_and_no_holding_perio
         "Shares, bought and sold the same day"
     )  # the delivery product, the same day: nothing was delivered (review H1)
     assert tables.kind_of_trade({**carry, "exchange": "XYZ"}) == "Other"
+    # What trades beside shares and is none (the working paper leaves each out): a gold ETF, a
+    # liquid ETF, a REIT, a gold bond; and a trade whose instrument the journal did not keep.
+    for key in ("NSE_EQ|INF204KB17I5", "NSE_EQ|INF732E01037", "NSE_EQ|INE041025011",
+                "NSE_EQ|IN0020200013", "", None):  # fmt: skip
+        for trip in (carry, eq, {**carry, "close_day": 20261102}):
+            assert tables.kind_of_trade({**trip, "instrument_key": key}) == "Other", key
+    assert tables.isin_of({"instrument_key": "bse_eq|ine000a01010 "}) == "INE000A01010"
     from sudarshan.tax import classify
 
     assert set(tables.HEAD_LABELS) == {classify.DERIVATIVE, classify.INTRADAY,

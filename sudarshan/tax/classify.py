@@ -77,12 +77,16 @@ def kind_of_contract(contract: tuple) -> str:
     return "options" if contract[4] in ("CE", "PE") else "futures"
 
 
-def head_of_product(exchange: str, symbol: str, product: str, same_day: bool = False) -> str:
+def head_of_product(
+    exchange: str, symbol: str, product: str, same_day: bool = False, isin: str | None = None
+) -> str:
     """The head of a round trip whose product is known (the journal's label). On a cash exchange
     MIS is intraday, and so is a CNC trip opened and closed on one day (``same_day``): nothing was
-    delivered. ``symbol`` is taken so the rule can grow without its callers changing."""
+    delivered. As for ``head_of``, a cash trip is a share's only when its ``isin`` is a company's
+    equity share: an ETF's, a REIT's or a bond's trip, and one whose ISIN is not known, is not
+    computed. ``symbol`` is taken so the rule can grow without its callers changing."""
     if exchange in DERIVATIVE_EXCHANGES:
         return DERIVATIVE
-    if exchange in CASH_EXCHANGES and product in CASH_PRODUCTS:
+    if exchange in CASH_EXCHANGES and product in CASH_PRODUCTS and is_equity_share(isin):
         return INTRADAY if product == "MIS" or same_day else DELIVERY
     return NOT_COMPUTED
