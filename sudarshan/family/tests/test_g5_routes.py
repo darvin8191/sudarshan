@@ -12,6 +12,8 @@ and what does not); this module reads its report against route_classes.py:
 - every rule the app registers is classified, and every line of the table names a rule it has;
 - each rule answers every caller as its class allows (route_classes.py says what each class
   allows), and nothing reaches the network, starts a process, raises or hands out a session;
+- no caller writes a row to the owner's order log or analyzer log, and an order event a caller
+  causes is one raised while refusing a request for its key, which the bus hands to no subscriber;
 - only protected, webhook, login-flow and internal rules take a write;
 - Socket.IO, which the url_map does not hold, refuses the anonymous caller and the viewer on every
   namespace, and an order event reaches the owner's socket and neither of theirs (Y7);
@@ -24,8 +26,11 @@ no eventlet and no gunicorn, only the repository's own dependencies.
 from __future__ import annotations
 
 import ast
+import base64
+import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 import warnings
@@ -138,6 +143,9 @@ class Walk:
         self.shell = index[0]["sha256"] if index and index[0]["status"] == 200 else None
         self.shell_views = {endpoint for (rule, endpoint), cls in classes.ROUTES.items()
                             if cls == classes.PUBLIC_SHELL}  # fmt: skip
+        page = report.get("shell_page")
+        self.shell_page = base64.b64decode(page) if page else None
+        self.family_shells = family_shells(self.shell_page) if self.shell_page else set()
 
     def answers(self, rule: str, endpoint: str, method: str) -> list[dict]:
         """The records of requests this rule's own view answered: on the app, or, where a React
@@ -145,6 +153,23 @@ class Walk:
         records = self.records.get((rule, endpoint, method), [])
         own = [r for r in records if r["app"] == "app" and r["reached"] == endpoint]
         return own or [r for r in records if r["reached"] == endpoint]
+
+
+MANIFEST_LINK = re.compile(rb"""<link\b[^>]*\brel\s*=\s*["']?manifest\b[^>]*>""", re.IGNORECASE)
+HREF = re.compile(rb"""(\bhref\s*=\s*)(["'])[^"']*\2""", re.IGNORECASE)
+
+
+def family_shells(shell_page: bytes) -> set[str]:
+    """The sha256 of each page that differs from ``shell_page`` only in that the href of one of
+    its manifest links names the family manifest: what the family shell may answer."""
+    family = classes.FAMILY_MANIFEST_HREF.encode()
+    found = set()
+    for link in MANIFEST_LINK.finditer(shell_page):
+        tag = HREF.sub(lambda m: m[1] + m[2] + family + m[2], link.group(), count=1)
+        if tag != link.group():
+            page = shell_page[: link.start()] + tag + shell_page[link.end() :]
+            found.add(hashlib.sha256(page).hexdigest())
+    return found
 
 
 @pytest.fixture(scope="module")
@@ -184,8 +209,11 @@ def verdict(cls: str, record: dict, walk: Walk) -> str | None:
     elif cls == classes.INTERNAL:
         clean = status in (401, 403, 404)
     elif cls == classes.PUBLIC_SHELL:
-        clean = (status in (200, 404) and record["sha256"] == walk.shell) or (
-            status == 302 and record["location_endpoint"] in walk.shell_views
+        clean = (
+            (status in (200, 404) and record["sha256"] == walk.shell)
+            or (status == 302 and record["location_endpoint"] in walk.shell_views)
+            or (status == 200 and record["endpoint"] == classes.FAMILY_SHELL
+                and record["sha256"] in walk.family_shells)  # fmt: skip
         )
     elif cls == classes.PUBLIC_STATIC:
         clean = status in (200, 304, 404)
@@ -294,6 +322,24 @@ def test_nothing_reached_the_network_started_a_process_or_succeeded(report):
     assert not bad, "\n".join(f"  {e['kind']} {e['what']} during {e['during']}" for e in bad)
 
 
+def test_no_caller_writes_a_row_to_the_owner_s_logs(report):
+    """Observation 4: OpenAlgo checked a request's fields before its key and logged a request its
+    fields refused, so a keyless body to /api/v1/orderstatus, /openposition, /margin or /analyzer
+    added a row to the owner's order log (15 in the walk of 14 Nov 2026)."""
+    assert report["log_rows"] == {"order_logs": 0, "analyzer_logs": 0}
+
+
+def test_an_order_event_a_caller_causes_is_refused_for_its_key(report):
+    """Observation 4: the order events a keyless body caused (cancel, modify, close, basket,
+    split, smart and GTT orders) reached the order log and, in analyze mode, the owner's screen.
+    Raised while refusing a request for its key, an event reaches no subscriber (utils/event_bus.py);
+    an event a caller who is not the owner causes that is not so marked would reach them."""
+    heard = [f"  {r['method']} {r['path']} as {r['caller']}: {e['what']}"
+             for r in report["requests"] for e in r["ledger"]
+             if e["kind"] == "event" and not e.get("key_refused")]  # fmt: skip
+    assert not heard, "order events a subscriber would hear:\n" + "\n".join(heard)
+
+
 def test_no_answer_came_from_an_ip_ban(report):
     """A banned address answers 403 to everything, which would pass every check above."""
     assert report["banned_addresses"] == 0
@@ -303,6 +349,83 @@ def test_no_answer_came_from_an_ip_ban(report):
 def test_the_shell_is_what_the_root_answers(walk):
     assert walk.shell is not None, "/ did not answer the anonymous caller with the shell"
     assert classes.ROUTES[("/", "react.react_index")] == classes.PUBLIC_SHELL
+    assert walk.shell_page is not None and hashlib.sha256(walk.shell_page).hexdigest() == walk.shell
+
+
+FAMILY_LINK = f'<link rel="manifest" href="{classes.FAMILY_MANIFEST_HREF}" />'
+OWNER_LINK = '<link rel="manifest" href="/images/sudarshan.webmanifest" />'
+INDEX = (
+    '<!doctype html>\n<html lang="en">\n  <head>\n    <meta charset="UTF-8" />\n'
+    '    <link rel="icon" href="/favicon.ico" />\n'
+    f"    {OWNER_LINK}\n"
+    "    <title>सुदर्शन · SUDARSHAN</title>\n"
+    '    <script type="module" crossorigin src="/assets/index-AbC123.js"></script>\n'
+    '  </head>\n  <body>\n    <div id="root"></div>\n  </body>\n</html>\n'
+).encode()
+
+
+def shell_answers(tmp_path, monkeypatch, *, family_manifest: bool):
+    """A temporary build served through the real React blueprint (with the family manifest when
+    ``family_manifest``); the walk's view of / and a function giving the walk's record of one
+    page, as g5_probe records it."""
+    from flask import Flask
+
+    import blueprints.react_app as react_app
+
+    dist = tmp_path / ("with-family-manifest" if family_manifest else "without")
+    (dist / "images").mkdir(parents=True)
+    (dist / "index.html").write_bytes(INDEX)
+    (dist / "images" / "sudarshan.webmanifest").write_text("{}")
+    if family_manifest:
+        (dist / "images" / "sudarshan-family.webmanifest").write_text("{}")
+    monkeypatch.setattr(react_app, "FRONTEND_DIST", dist)
+    app = Flask("sudarshan-g5-family-shell")
+    app.register_blueprint(react_app.react_bp)
+    client = app.test_client()
+
+    def record(path: str, endpoint: str, body: bytes | None = None) -> dict:
+        answer = client.get(path)
+        body = answer.get_data() if body is None else body
+        return {"rule": path, "endpoint": endpoint, "method": "GET", "caller": "anonymous",
+                "app": "app", "path": path, "reached": endpoint, "status": answer.status_code,
+                "location": None, "location_endpoint": None, "success": False,
+                "sha256": hashlib.sha256(body).hexdigest(), "body": "", "session": None,
+                "ledger": []}  # fmt: skip
+
+    root = record("/", "react.react_index")
+    page = base64.b64encode(client.get("/").get_data()).decode("ascii")
+    return Walk({"rules": [], "requests": [root], "shell_page": page}), record
+
+
+def test_the_family_shell_may_differ_from_the_root_in_its_manifest_href_only(tmp_path, monkeypatch):
+    """Item 6 (lane FB, P6 B2): once the build carries the family manifest, /family and its pages
+    answer the shell with that one href changed. Before this exception they failed the class."""
+    walk, record = shell_answers(tmp_path, monkeypatch, family_manifest=True)
+    family = [record("/family", classes.FAMILY_SHELL),
+              record("/family/positions", classes.FAMILY_SHELL)]  # fmt: skip
+    for answer in family:
+        assert answer["status"] == 200 and answer["sha256"] != walk.shell, "no family manifest"
+        assert verdict(classes.PUBLIC_SHELL, answer, walk) is None
+    as_built = INDEX.replace(OWNER_LINK.encode(), FAMILY_LINK.encode())
+    assert family[0]["sha256"] == hashlib.sha256(as_built).hexdigest()
+
+    other_href = INDEX.replace(OWNER_LINK.encode(), b'<link rel="manifest" href="/images/x.json" />')
+    icon_href = INDEX.replace(b"/favicon.ico", classes.FAMILY_MANIFEST_HREF.encode())
+    refused = {
+        "a byte more": record("/family", classes.FAMILY_SHELL, as_built + b"\n"),
+        "another manifest": record("/family", classes.FAMILY_SHELL, other_href),
+        "another link's href": record("/family", classes.FAMILY_SHELL, icon_href),
+        "another shell view": dict(family[0], endpoint="react.react_dashboard"),
+    }
+    assert {name: verdict(classes.PUBLIC_SHELL, answer, walk) for name, answer in refused.items()} == (
+        dict.fromkeys(refused, "answered 200")
+    )
+
+
+def test_without_the_family_manifest_the_family_shell_is_the_root_s(tmp_path, monkeypatch):
+    walk, record = shell_answers(tmp_path, monkeypatch, family_manifest=False)
+    answer = record("/family", classes.FAMILY_SHELL)
+    assert answer["sha256"] == walk.shell and verdict(classes.PUBLIC_SHELL, answer, walk) is None
 
 
 def test_socketio_refuses_the_anonymous_caller_and_the_viewer_who_hear_no_order(report):

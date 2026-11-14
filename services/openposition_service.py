@@ -7,6 +7,7 @@ from database.apilog_db import executor as log_executor
 from database.auth_db import get_auth_token_broker
 from database.settings_db import get_analyze_mode
 from extensions import emit_from_any_thread
+from sudarshan.refused_keys import refused_api_key  # SUDARSHAN: G5
 from utils.logging import get_logger
 
 # Initialize logger
@@ -22,6 +23,8 @@ def _emit_analyzer_update(payload: dict[str, Any]) -> None:
     ``emit_from_any_thread`` hands the emit to the hub when a real OS thread
     calls under eventlet (the agent's order tools reach this service).
     """
+    if refused_api_key():  # SUDARSHAN: G5, a request refused for its API key reaches no screen
+        return
     try:
         emit_from_any_thread("analyzer_update", payload)
     except Exception:

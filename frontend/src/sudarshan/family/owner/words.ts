@@ -48,6 +48,14 @@ export function privacyLine(privacy: Privacy): string {
 /** Cross-design Y24: P&L is worked out from quantities, so P&L is offered only with them. */
 export const PNL_NEEDS_QTY = 'Live P&L is worked out from quantities'
 
+/**
+ * Review H1: beside a quantity, any rupee figure gives the P&L away, so hiding P&L hides them all
+ * (the `cost` list of privacy_fields.json). Said under the switches while P&L is hidden.
+ */
+export const PNL_HIDES_MONEY =
+  'Hidden, and every rupee figure with it: cost, value, the day’s change'
+export const FUNDS_WITHOUT_AMOUNTS = 'Shown without amounts while P&L is hidden'
+
 /** The privacy as the page sends it: with quantities off, P&L goes off with them. */
 export function settled(privacy: Privacy): Privacy {
   return privacy.qty ? privacy : { ...privacy, pnl: false }

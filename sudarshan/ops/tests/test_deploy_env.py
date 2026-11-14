@@ -318,9 +318,11 @@ def test_the_shipped_list_on_a_fresh_install(tmp_path):
     assert after["UPSTOX_ORDER_MAX_PER_SECOND"] == "5"  # M5.14: orders paced at 5 a second
     assert after["SUDARSHAN_PORTFOLIO"] == "on"  # M7: the portfolio is switched on by the release
     assert after["SUDARSHAN_WATCHLISTS_V2"] == "off"  # M8.4: Watchlists v2 ships off
+    assert after["SUDARSHAN_JOURNAL"] == "on"  # M14, M15: the journal is switched on by the release
     managed = {
         "SUDARSHAN_PORTFOLIO",
         "SUDARSHAN_WATCHLISTS_V2",
+        "SUDARSHAN_JOURNAL",
         "MAX_WEBSOCKET_CONNECTIONS",
         "WEBSOCKET_BROKER_LINGER_SECONDS",
         "SUDARSHAN_RISK_GUARD",
@@ -330,6 +332,23 @@ def test_the_shipped_list_on_a_fresh_install(tmp_path):
         k: v for k, v in before.items() if k not in managed
     }
     assert "left alone" not in out
+
+
+@pytest.mark.parametrize("owners", [b"off", b"'off'", b"0"])
+def test_the_journal_switch_has_no_old_value_so_an_owners_off_stays(tmp_path, owners):
+    """JE2: the release turns the journal on where .env does not name it; an owner who turned it
+    off keeps it off through every later deploy, because the line lists no old value."""
+    words = [
+        line.split("#", 1)[0].split()
+        for line in SHIPPED_LIST.read_text().splitlines()
+        if line.split("#", 1)[0].strip()
+    ]
+    assert [w for w in words if w[0] == "SUDARSHAN_JOURNAL"] == [["SUDARSHAN_JOURNAL", "on"]]
+    original = b"APP_KEY='k'\nSUDARSHAN_JOURNAL=" + owners + b"\n"
+    env, out = _applied(tmp_path, original, SHIPPED_LIST.read_bytes())
+    assert env.startswith(original), "the owner's line stays byte for byte"
+    assert _read_by_openalgo(env)["SUDARSHAN_JOURNAL"] == owners.decode().strip("'")
+    assert "SUDARSHAN_JOURNAL left alone: the owner chose its value" in out
 
 
 def test_the_shipped_list_is_whole_and_reads(tmp_path):
