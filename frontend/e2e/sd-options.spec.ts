@@ -13,7 +13,9 @@
  * thread's own CPU time for every task from a trace and scales it by four, so it gives the same
  * answer on a busy machine, where a slowed clock and wall time do not. It measures a production
  * build (`vite build`, then `vite preview`) and is skipped on the dev server, whose React is
- * several times slower.
+ * several times slower. It asserts on each task (none over 50 ms, the 95th percentile under 34 ms)
+ * and only reports the share of time the main thread is busy: sustained load is for the owner's
+ * phone to judge.
  *
  * Each state asserts: no sideways scroll; every link, button and switch at least 48 x 48 CSS px;
  * the freshness words for the state, and no "Real-time" without ticks; every up or down figure
@@ -369,7 +371,7 @@ async function costRun(
     over50: tasks.filter((ms) => ms > 50).map((ms) => Math.round(ms)),
     largest: Math.round(tasks[tasks.length - 1] ?? 0),
     p95: Math.round((busy[Math.floor(busy.length * 0.95)] ?? 0) * 10) / 10,
-    /** The share of each second the main thread would be busy on such a phone. */
+    /** The share of each second the main thread would be busy on such a phone. Reported only. */
     busyShare: Math.round((tasks.reduce((sum, ms) => sum + ms, 0) / (seconds * 1000)) * 100) / 100,
     ticked,
   }
@@ -378,7 +380,10 @@ async function costRun(
   expect(cost.tasks, 'tasks measured').toBeGreaterThan(500)
   expect(cost.over50, 'tasks over 50 ms on a phone four times slower').toEqual([])
   expect(cost.p95, 'a busy task at the 95th percentile, well inside two frames (34 ms)').toBeLessThan(34)
-  expect(cost.busyShare, 'the main thread keeps up with the tape').toBeLessThan(0.75)
+  // The busy share is written down, not asserted (coordinator's decision, SCR-P item 1). It divides
+  // CPU time by the tape's wall time, so the same build read 0.67 to 0.94 run to run on the build
+  // machine. Sustained load is judged on the owner's phone (15 minutes on the Chain tab: does it
+  // warm or lag); the per-task limits above are what this run decides.
   return cost
 }
 
