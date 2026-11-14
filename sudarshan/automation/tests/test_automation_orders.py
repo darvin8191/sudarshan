@@ -916,3 +916,25 @@ def test_under_gthread_a_long_wait_for_the_lock_is_answered_busy(store, desk, mo
     assert [t[1] for t in desk.told] == ["busy"]
     # it was not claimed, so the same alert delivered again is handled
     assert send(store, desk, token, indicator_alert("long", NOW - 1)).verdict == "sent"
+
+
+# ---- M6: the real-worker tests' boundary table, in process ---------------------------------------
+
+
+def _boundaries():
+    from test_automation_gunicorn import BOUNDARIES
+
+    return BOUNDARIES
+
+
+@pytest.mark.parametrize(
+    ("when", "verdict", "symbol"), _boundaries(), ids=[b[0] for b in _boundaries()]
+)
+def test_m6_a_long_alert_at_each_boundary_of_the_contract_list(store, when, verdict, symbol):
+    """The same table the real-worker file runs under gunicorn (CI only), on the fake desk here:
+    what the fixed contract list gives at each moment the wall clock used to break those tests."""
+    desk = FakeDesk(at(when))
+    strategy, token = make(store)
+    send(store, desk, token, indicator_alert("long", desk.now()))
+    assert [line["verdict"] for line in lines(store, strategy.id)] == [verdict]
+    assert [o["symbol"] for o in desk.placed] == ([symbol] if symbol else [])

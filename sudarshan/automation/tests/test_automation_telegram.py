@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import functools
 import json
+import os
 import subprocess
 import sys
 import textwrap
@@ -337,7 +338,7 @@ def test_auto_stop_runs_on_the_hub_and_waits_for_the_alert_being_handled(tmp_pat
         import services.telegram_bot_service as tg
         import database.telegram_db as telegram_db
         from utils import real_threading as rt
-        from automation_world import FakeDesk, TV, indicator_alert
+        from automation_world import NOW, FakeDesk, TV, indicator_alert
         from sudarshan.automation import contract, intake, store, telegram
         import sudarshan.guard.telegram as guard_telegram
 
@@ -345,7 +346,10 @@ def test_auto_stop_runs_on_the_hub_and_waits_for_the_alert_being_handled(tmp_pat
         eventlet.sleep(0.05)
         hub = rt._real_get_ident()
         desk = FakeDesk()
-        desk.now = time.time
+        # a named moment plus the time this script has run, never the wall clock: the desk's
+        # contract list is fixed, and on the wall clock this test turned red near each expiry
+        started = time.monotonic()
+        desk.now = lambda: NOW + (time.monotonic() - started)
         desk.delay = 1.5
         STORE = store.shared()
         strategy, token = STORE.create(contract.clean(
@@ -360,7 +364,7 @@ def test_auto_stop_runs_on_the_hub_and_waits_for_the_alert_being_handled(tmp_pat
             return real_answer(chat, user, args, desk=desk, store=STORE)
 
         telegram.answer = recorded
-        placing = eventlet.spawn(intake.handle, token, indicator_alert("long", time.time()), TV, desk, STORE)
+        placing = eventlet.spawn(intake.handle, token, indicator_alert("long", desk.now()), TV, desk, STORE)
         eventlet.sleep(0.3)
         replies, out = [], {}
 
@@ -386,7 +390,7 @@ def test_auto_stop_runs_on_the_hub_and_waits_for_the_alert_being_handled(tmp_pat
         assert rt.join(t, timeout=30), "the bot thread never finished"
         end = time.monotonic()
         first = placing.wait()
-        after = intake.handle(token, indicator_alert("short", time.time()), TV, desk, STORE)
+        after = intake.handle(token, indicator_alert("short", desk.now()), TV, desk, STORE)
         print(json.dumps({
             "on_hub": ran_on == [hub], "took": out["took"], "reply": replies[0],
             "first": first.verdict, "after": after.verdict, "placed": len(desk.placed),
@@ -402,6 +406,7 @@ def test_auto_stop_runs_on_the_hub_and_waits_for_the_alert_being_handled(tmp_pat
         "APP_KEY": "test-only-app-key-" + "4" * 32,
         "DATABASE_URL": f"sqlite:///{tmp_path}/openalgo.db",
         "LOG_DIR": f"{tmp_path}/log",
+        "PYTHONPATH": os.environ.get("PYTHONPATH", ""),  # where eventlet is, if beside the venv
     }
     done = subprocess.run(
         [sys.executable, "-c", script],
