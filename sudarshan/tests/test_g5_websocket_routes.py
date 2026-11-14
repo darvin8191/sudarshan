@@ -171,6 +171,29 @@ def test_the_owner_s_valid_session_is_answered_as_before(app, method, path, body
         assert data == {"reached": data["reached"]}
 
 
+def test_the_market_namespace_s_disconnect_handler_runs_to_its_end(app, monkeypatch):
+    """Flask-SocketIO 5.6 hands a disconnect handler the reason. /market's took no argument, so
+    every disconnect raised there: app.py's Socket.IO error handler logged it as an error and the
+    handler's cleanup never ran. Before G5 the subscriber entry below was left behind."""
+    from extensions import socketio
+    from utils.socketio_error_handler import init_socketio_error_handling
+
+    user_db.Base.metadata.create_all(user_db.engine)
+    user_db.User.query.delete()
+    user_db.db_session.commit()
+    user_db.add_user(OWNER, "owner@example.invalid", "Fake-Pass-123!", is_admin=True)
+    user_db.db_session.remove()
+    monkeypatch.setattr(socketio, "default_exception_handler", None)  # put back after the test
+    socketio.init_app(app)
+    init_socketio_error_handling(socketio)  # as app.py binds it
+    sio = socketio.test_client(app, flask_test_client=browser(app, "owner"), namespace="/market")
+    assert sio.is_connected("/market")
+    sid = next(iter(socketio.server.manager.rooms["/market"][f"user_{OWNER}"]))
+    monkeypatch.setitem(market.socketio_subscribers, sid, "a subscriber of this socket")
+    sio.disconnect(namespace="/market")
+    assert sid not in market.socketio_subscribers
+
+
 def test_a_refusal_leaves_a_login_waiting_for_its_broker_step_signed_in(app):
     """The market data manager outlives the page that started it, so it can ask for the stream
     address while a new login waits for its broker step; the refusal must not end that login.

@@ -379,7 +379,7 @@ def handle_connect(auth):
 
 
 @socketio.on("disconnect", namespace="/market")
-def handle_disconnect():
+def handle_disconnect(reason=None):  # SUDARSHAN: G5, Flask-SocketIO 5.6 passes the reason
     """Handle client disconnection"""
     username = get_username_from_session()
     if username:
