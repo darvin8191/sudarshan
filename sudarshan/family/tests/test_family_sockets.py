@@ -587,7 +587,9 @@ def test_the_book_message_reaches_every_socket_of_a_member_who_may_see_the_part(
             assert told["part"] == "trades"
             assert (await next_of(idle, "book")) == told
             assert [m for m in await gather(child, 0.5) if m.get("type") == "book"] == []
-            assert [c[0] for c in world.portfolio.calls] == ["upstox_book"]  # the child: no read
+            # the child: no read. M3 (v0.12.0): what the member is shared is asked before it.
+            assert [c[0] for c in world.portfolio.calls] == ["shares_for_viewer", "upstox_book"]
+            assert {c[1] for c in world.portfolio.calls} == {member["id"]}
             for sock in (trades, idle, child):
                 await sock.close()
 
