@@ -121,6 +121,20 @@ describe('sharing watchlists', () => {
     expect(screen.getByText('0 symbols · Not shared')).toBeInTheDocument()
   })
 
+  // Review M6 (v0.12.0): the switch alone was the 44 x 24 target. The whole 48 dp row is its
+  // label now. On the old row a tap on the line under the name did nothing.
+  it('shares a list from a tap anywhere on its row, once', async () => {
+    api.shareSet.mockResolvedValue(shareOf())
+    mount()
+    const toggle = await screen.findByRole('switch', { name: 'Share Morning list' })
+    const row = toggle.closest('label') as HTMLElement
+    expect(row).toHaveAttribute('data-switch-row')
+    expect(row.className.split(/\s+/)).toEqual(expect.arrayContaining(['min-h-12', 'w-full']))
+    await userEvent.click(screen.getByText('1 symbol · Not shared'))
+    expect(api.shareSet).toHaveBeenCalledTimes(1)
+    expect(api.shareSet).toHaveBeenCalledWith(expect.objectContaining({ ref: '7' }))
+  })
+
   it('shares a list with every member: no member and no role', async () => {
     api.shareSet.mockResolvedValue(shareOf())
     mount()

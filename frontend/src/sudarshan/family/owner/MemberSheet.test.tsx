@@ -103,6 +103,36 @@ const order = () =>
     .sort((a, b) => a[0] - b[0])
     .map(([, name]) => name)
 
+// Review M6 (v0.12.0): each privacy switch was a 44 x 24 target under a 14 px name. The whole
+// 48 dp row is the switch's label now. On the old row a tap on the line under the name did nothing.
+describe('the privacy switches', () => {
+  it('each sit in a row that is their label, at least 48 dp tall and as wide as the sheet', async () => {
+    mount()
+    await waitFor(() => expect(floors.list).toHaveBeenCalled())
+    for (const name of ['P&L', 'Quantities', 'Funds', 'Orders']) {
+      const toggle = screen.getByRole('switch', { name })
+      const row = toggle.closest('label') as HTMLElement
+      expect(row).toHaveAttribute('data-switch-row')
+      expect(row.getAttribute('for')).toBe(toggle.id)
+      expect(row.className.split(/\s+/)).toEqual(expect.arrayContaining(['min-h-12', 'w-full']))
+      // the line under the name describes the switch, and is not part of its name
+      expect(toggle).toHaveAccessibleDescription()
+    }
+  })
+
+  it('flip from a tap on the line under the name, once', async () => {
+    mount()
+    await waitFor(() => expect(floors.list).toHaveBeenCalled())
+    const orders = screen.getByRole('switch', { name: 'Orders' })
+    const before = orders.getAttribute('aria-checked')
+    const line = document.getElementById(`${orders.id}-line`) as HTMLElement
+    await userEvent.click(line)
+    expect(orders.getAttribute('aria-checked')).toBe(before === 'true' ? 'false' : 'true')
+    await userEvent.click(orders)
+    expect(orders.getAttribute('aria-checked')).toBe(before)
+  })
+})
+
 describe('the privacy floor follows the owner (cross-design Y6)', () => {
   it('hiding writes the floor first, then the family row, and says Saved when both are confirmed', async () => {
     api.memberUpdate.mockResolvedValue(cardOf({ version: 4 }))

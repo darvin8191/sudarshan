@@ -25,7 +25,6 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Switch } from '@/components/ui/switch'
 import type { SharesList } from '@/sudarshan/portfolio/types'
 import { BottomSheet } from '@/sudarshan/watchlist/BottomSheet'
 import { newRequestId, OwnerError, ownerApi, ownerProblem } from '../ownerApi'
@@ -40,7 +39,7 @@ import {
   type Role,
 } from '../types'
 import { devicesKey, MEMBERS_KEY, PORTFOLIO_SHARES_KEY } from './keys'
-import { Ask, ROW, SaidLine, useOnce } from './parts'
+import { Ask, SaidLine, SwitchRow, useOnce } from './parts'
 import {
   driftOf,
   type FloorDrift,
@@ -224,20 +223,15 @@ function Fields({
         {CATEGORIES.map((category) => {
           const needsQty = category === 'pnl' && !effective.qty
           return (
-            <div key={category} className={ROW}>
-              <div className="flex flex-col">
-                <Label htmlFor={`privacy-${category}`}>{CATEGORY_LABEL[category].name}</Label>
-                <span className="text-[0.8125rem] text-[color:var(--text-tertiary)]">
-                  {categoryLine(category, effective)}
-                </span>
-              </div>
-              <Switch
-                id={`privacy-${category}`}
-                checked={effective[category]}
-                disabled={needsQty}
-                onCheckedChange={(on) => flip(category, on)}
-              />
-            </div>
+            <SwitchRow
+              key={category}
+              id={`privacy-${category}`}
+              name={CATEGORY_LABEL[category].name}
+              line={categoryLine(category, effective)}
+              checked={effective[category]}
+              disabled={needsQty}
+              onCheckedChange={(on) => flip(category, on)}
+            />
           )
         })}
       </fieldset>

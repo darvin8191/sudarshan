@@ -9,12 +9,11 @@ import { ArrowDown, ChevronRight, Loader2 } from 'lucide-react'
 import { useState } from 'react'
 import { watchlistApi } from '@/api/watchlist'
 import { Label } from '@/components/ui/label'
-import { Switch } from '@/components/ui/switch'
 import { ownerApi } from '../ownerApi'
 import type { MemberCard, Share, ShareKind } from '../types'
 import { SHARES_KEY } from './keys'
 import { PortfolioTabShares } from './PortfolioTabShares'
-import { CARD, ROW, SaidLine, useOnce } from './parts'
+import { CARD, SaidLine, SwitchRow, useOnce } from './parts'
 import { coveredByAll, rowFor, type Target } from './shareRules'
 
 const SELECT =
@@ -141,22 +140,18 @@ function Watchlists({ members, shares }: { members: MemberCard[]; shares: readon
             const viaAll = target !== 'all' && coveredByAll(shares, 'watchlist', ref)
             const on = own || viaAll
             return (
-              <li key={list.id} className={ROW}>
-                <div className="flex min-w-0 flex-col">
-                  <Label htmlFor={`share-list-${list.id}`} className="truncate">
-                    {list.name}
-                  </Label>
-                  <span className="text-[0.8125rem] text-[color:var(--text-tertiary)]">
-                    {viaAll && !own
-                      ? 'Shared with every member'
-                      : `${list.items.length} ${list.items.length === 1 ? 'symbol' : 'symbols'} · ${on ? 'Shared' : 'Not shared'}`}
-                  </span>
-                </div>
-                <Switch
+              <li key={list.id}>
+                <SwitchRow
                   id={`share-list-${list.id}`}
+                  name={list.name}
+                  line={
+                    viaAll && !own
+                      ? 'Shared with every member'
+                      : `${list.items.length} ${list.items.length === 1 ? 'symbol' : 'symbols'} · ${on ? 'Shared' : 'Not shared'}`
+                  }
+                  label={`Share ${list.name}`}
                   checked={on}
                   disabled={swap.pending || (viaAll && !own)}
-                  aria-label={`Share ${list.name}`}
                   onCheckedChange={(next) => swap.flip('watchlist', ref, target, next, list.name)}
                 />
               </li>
