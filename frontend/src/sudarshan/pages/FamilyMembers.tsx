@@ -152,7 +152,7 @@ export default function FamilyMembers() {
             )}
           </TabsContent>
           <TabsContent value="shares">
-            <Shares members={cards} />
+            <Shares members={cards} now={now} />
           </TabsContent>
           <TabsContent value="audit">
             <AuditList members={cards} now={now} />

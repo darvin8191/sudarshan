@@ -1,0 +1,1345 @@
+[
+ {
+  "id": "L1",
+  "note": "buy 100 at 1,000 (cost 1,00,000); bonus 1:1 adds lot B 100 at nil on 10 Sep 2025; split 1 into 5 makes A 500 and B 500, cost and day kept; sell 600 at 150 = 90,000: 500 from A take 90,000 x 500/600 = 75,000 against 1,00,000, 100 from B take 15,000 against 0; B keeps 400 at nil",
+  "in": {
+   "trades": [
+    {
+     "taxpayer": 1,
+     "account": 1,
+     "day": 20250601,
+     "seq": 1,
+     "side": "BUY",
+     "segment": "EQ",
+     "instrument": "INE000A01010",
+     "qty_u": 100000000,
+     "price_u": 10000000,
+     "amount_paise": 10000000
+    },
+    {
+     "taxpayer": 1,
+     "account": 1,
+     "day": 20260620,
+     "seq": 2,
+     "side": "SELL",
+     "segment": "EQ",
+     "instrument": "INE000A01010",
+     "qty_u": 600000000,
+     "price_u": 1500000,
+     "amount_paise": 9000000
+    }
+   ],
+   "actions": [
+    {
+     "kind": "BONUS",
+     "instrument": "INE000A01010",
+     "ex_day": 20250910,
+     "num": 1,
+     "den": 1
+    },
+    {
+     "kind": "SPLIT",
+     "instrument": "INE000A01010",
+     "ex_day": 20260105,
+     "num": 5,
+     "den": 1
+    }
+   ]
+  },
+  "out": {
+   "disposals": [
+    {
+     "sale_day": 20260620,
+     "qty_u": 500000000,
+     "sale_paise": 7500000,
+     "acquired_day": 20250601,
+     "cost_paise": 10000000,
+     "lot_source": "upstox_history"
+    },
+    {
+     "sale_day": 20260620,
+     "qty_u": 100000000,
+     "sale_paise": 1500000,
+     "acquired_day": 20250910,
+     "cost_paise": 0,
+     "lot_source": "bonus"
+    }
+   ],
+   "open_lots": [
+    {
+     "acquired_day": 20250910,
+     "qty_u": 400000000,
+     "cost_paise": 0,
+     "source": "bonus"
+    }
+   ],
+   "intraday": [],
+   "notes": 0,
+   "fractions": []
+  }
+ },
+ {
+  "id": "L1-not-accepted",
+  "note": "the same with neither action accepted: only lot A 100 exists, so of the 600 sold 100 take 90,000 x 100/600 = 15,000 against 1,00,000 and 500 (75,000) have no purchase record: no cost at all, never nil; one note per unconfirmed action",
+  "in": {
+   "trades": [
+    {
+     "taxpayer": 1,
+     "account": 1,
+     "day": 20250601,
+     "seq": 1,
+     "side": "BUY",
+     "segment": "EQ",
+     "instrument": "INE000A01010",
+     "qty_u": 100000000,
+     "price_u": 10000000,
+     "amount_paise": 10000000
+    },
+    {
+     "taxpayer": 1,
+     "account": 1,
+     "day": 20260620,
+     "seq": 2,
+     "side": "SELL",
+     "segment": "EQ",
+     "instrument": "INE000A01010",
+     "qty_u": 600000000,
+     "price_u": 1500000,
+     "amount_paise": 9000000
+    }
+   ],
+   "actions": [
+    {
+     "kind": "BONUS",
+     "instrument": "INE000A01010",
+     "ex_day": 20250910,
+     "num": 1,
+     "den": 1,
+     "accepted": false
+    },
+    {
+     "kind": "SPLIT",
+     "instrument": "INE000A01010",
+     "ex_day": 20260105,
+     "num": 5,
+     "den": 1,
+     "accepted": false
+    }
+   ]
+  },
+  "out": {
+   "disposals": [
+    {
+     "sale_day": 20260620,
+     "qty_u": 100000000,
+     "sale_paise": 1500000,
+     "acquired_day": 20250601,
+     "cost_paise": 10000000
+    },
+    {
+     "sale_day": 20260620,
+     "qty_u": 500000000,
+     "sale_paise": 7500000,
+     "acquired_day": null,
+     "cost_paise": null,
+     "lot_source": null
+    }
+   ],
+   "open_lots": [],
+   "intraday": [],
+   "notes": 2,
+   "fractions": []
+  }
+ },
+ {
+  "id": "L2",
+  "note": "5 + 5 shares consolidated 1 for 10: running total 5/10 = 0.5 then 10/10 = 1, so two lots of half a share that make one share; cost and days kept; reported as a fraction",
+  "in": {
+   "trades": [
+    {
+     "taxpayer": 1,
+     "account": 1,
+     "day": 20250602,
+     "seq": 5,
+     "side": "BUY",
+     "segment": "EQ",
+     "instrument": "INE000A01010",
+     "qty_u": 5000000,
+     "price_u": 1000000,
+     "amount_paise": 50000
+    },
+    {
+     "taxpayer": 1,
+     "account": 1,
+     "day": 20250603,
+     "seq": 6,
+     "side": "BUY",
+     "segment": "EQ",
+     "instrument": "INE000A01010",
+     "qty_u": 5000000,
+     "price_u": 1100000,
+     "amount_paise": 55000
+    }
+   ],
+   "actions": [
+    {
+     "kind": "SPLIT",
+     "instrument": "INE000A01010",
+     "ex_day": 20260105,
+     "num": 1,
+     "den": 10
+    }
+   ]
+  },
+  "out": {
+   "disposals": [],
+   "open_lots": [
+    {
+     "acquired_day": 20250602,
+     "qty_u": 500000,
+     "cost_paise": 50000
+    },
+    {
+     "acquired_day": 20250603,
+     "qty_u": 500000,
+     "cost_paise": 55000
+    }
+   ],
+   "intraday": [],
+   "notes": 1,
+   "fractions": [
+    [
+     1,
+     1,
+     "INE000A01010",
+     20260105,
+     "SPLIT",
+     1000000
+    ]
+   ]
+  }
+ },
+ {
+  "id": "F1-last-takes-the-rest",
+  "note": "3 shares for 100.00: three sales of 1 cost 10,000/3 = 3,333, then 6,667/2 = 3,333.5 up to 3,334, then the rest 3,333: the lot is used up exactly",
+  "in": {
+   "trades": [
+    {
+     "taxpayer": 1,
+     "account": 1,
+     "day": 20250602,
+     "seq": 7,
+     "side": "BUY",
+     "segment": "EQ",
+     "instrument": "INE000A01010",
+     "qty_u": 3000000,
+     "price_u": 333333,
+     "amount_paise": 10000
+    },
+    {
+     "taxpayer": 1,
+     "account": 1,
+     "day": 20250701,
+     "seq": 8,
+     "side": "SELL",
+     "segment": "EQ",
+     "instrument": "INE000A01010",
+     "qty_u": 1000000,
+     "price_u": 400000,
+     "amount_paise": 4000
+    },
+    {
+     "taxpayer": 1,
+     "account": 1,
+     "day": 20250702,
+     "seq": 9,
+     "side": "SELL",
+     "segment": "EQ",
+     "instrument": "INE000A01010",
+     "qty_u": 1000000,
+     "price_u": 400000,
+     "amount_paise": 4000
+    },
+    {
+     "taxpayer": 1,
+     "account": 1,
+     "day": 20250703,
+     "seq": 10,
+     "side": "SELL",
+     "segment": "EQ",
+     "instrument": "INE000A01010",
+     "qty_u": 1000000,
+     "price_u": 400000,
+     "amount_paise": 4000
+    }
+   ]
+  },
+  "out": {
+   "disposals": [
+    {
+     "sale_day": 20250701,
+     "qty_u": 1000000,
+     "sale_paise": 4000,
+     "acquired_day": 20250602,
+     "cost_paise": 3333
+    },
+    {
+     "sale_day": 20250702,
+     "qty_u": 1000000,
+     "sale_paise": 4000,
+     "acquired_day": 20250602,
+     "cost_paise": 3334
+    },
+    {
+     "sale_day": 20250703,
+     "qty_u": 1000000,
+     "sale_paise": 4000,
+     "acquired_day": 20250602,
+     "cost_paise": 3333
+    }
+   ],
+   "open_lots": [],
+   "intraday": [],
+   "notes": 0,
+   "fractions": []
+  }
+ },
+ {
+  "id": "F2-oldest-first",
+  "note": "10 at 100 then 10 at 120; sell 15 for 2,000.01: the oldest 10 take 2,00,001 x 10/15 = 1,33,334 paise against 1,00,000, the next 5 the rest 66,667 against 1,20,000 x 5/10 = 60,000; 5 stay at 60,000",
+  "in": {
+   "trades": [
+    {
+     "taxpayer": 1,
+     "account": 1,
+     "day": 20250602,
+     "seq": 11,
+     "side": "BUY",
+     "segment": "EQ",
+     "instrument": "INE000A01010",
+     "qty_u": 10000000,
+     "price_u": 1000000,
+     "amount_paise": 100000
+    },
+    {
+     "taxpayer": 1,
+     "account": 1,
+     "day": 20250710,
+     "seq": 12,
+     "side": "BUY",
+     "segment": "EQ",
+     "instrument": "INE000A01010",
+     "qty_u": 10000000,
+     "price_u": 1200000,
+     "amount_paise": 120000
+    },
+    {
+     "taxpayer": 1,
+     "account": 1,
+     "day": 20250901,
+     "seq": 13,
+     "side": "SELL",
+     "segment": "EQ",
+     "instrument": "INE000A01010",
+     "qty_u": 15000000,
+     "price_u": 1333340,
+     "amount_paise": 200001
+    }
+   ]
+  },
+  "out": {
+   "disposals": [
+    {
+     "sale_day": 20250901,
+     "qty_u": 10000000,
+     "sale_paise": 133334,
+     "acquired_day": 20250602,
+     "cost_paise": 100000
+    },
+    {
+     "sale_day": 20250901,
+     "qty_u": 5000000,
+     "sale_paise": 66667,
+     "acquired_day": 20250710,
+     "cost_paise": 60000
+    }
+   ],
+   "open_lots": [
+    {
+     "acquired_day": 20250710,
+     "qty_u": 5000000,
+     "cost_paise": 60000
+    }
+   ],
+   "intraday": [],
+   "notes": 0,
+   "fractions": []
+  }
+ },
+ {
+  "id": "C1-charges",
+  "note": "a ledger buy of 10 at 100 with charges 5.00: lot cost 1,00,000 + 500 = 1,00,500 paise; a sale of 4 with charges 3.00 takes 1,00,500 x 4/10 = 40,200 and carries its own 300",
+  "in": {
+   "trades": [
+    {
+     "taxpayer": 1,
+     "account": 1,
+     "day": 20250602,
+     "seq": 14,
+     "side": "BUY",
+     "segment": "EQ",
+     "instrument": "INE000A01010",
+     "qty_u": 10000000,
+     "price_u": 1000000,
+     "amount_paise": 100000,
+     "source": "ledger",
+     "charges_ex_stt_paise": 500
+    },
+    {
+     "taxpayer": 1,
+     "account": 1,
+     "day": 20250901,
+     "seq": 15,
+     "side": "SELL",
+     "segment": "EQ",
+     "instrument": "INE000A01010",
+     "qty_u": 4000000,
+     "price_u": 1100000,
+     "amount_paise": 44000,
+     "source": "ledger",
+     "charges_ex_stt_paise": 300
+    }
+   ]
+  },
+  "out": {
+   "disposals": [
+    {
+     "sale_day": 20250901,
+     "qty_u": 4000000,
+     "sale_paise": 44000,
+     "acquired_day": 20250602,
+     "cost_paise": 40200,
+     "charges_paise": 300
+    }
+   ],
+   "open_lots": [
+    {
+     "acquired_day": 20250602,
+     "qty_u": 6000000,
+     "cost_paise": 60300
+    }
+   ],
+   "intraday": [],
+   "notes": 0,
+   "fractions": []
+  }
+ },
+ {
+  "id": "O1-opening-lot",
+  "note": "100 bought 10 Mar 2015 for 20,000, before the records: the owner's opening lot is what the sale of 12 Aug 2026 takes, with its own day",
+  "in": {
+   "trades": [
+    {
+     "taxpayer": 1,
+     "account": 1,
+     "day": 20260812,
+     "seq": 16,
+     "side": "SELL",
+     "segment": "EQ",
+     "instrument": "INE000A01010",
+     "qty_u": 100000000,
+     "price_u": 5000000,
+     "amount_paise": 5000000
+    }
+   ],
+   "opening": [
+    {
+     "taxpayer": 1,
+     "account": 1,
+     "instrument": "INE000A01010",
+     "acquired_day": 20150310,
+     "qty_u": 100000000,
+     "cost_paise": 2000000,
+     "source": "owner"
+    }
+   ]
+  },
+  "out": {
+   "disposals": [
+    {
+     "sale_day": 20260812,
+     "qty_u": 100000000,
+     "sale_paise": 5000000,
+     "acquired_day": 20150310,
+     "cost_paise": 2000000,
+     "lot_source": "owner",
+     "basis_qty_u": 100000000
+    }
+   ],
+   "open_lots": [],
+   "intraday": [],
+   "notes": 0,
+   "fractions": []
+  }
+ },
+ {
+  "id": "O2-split-after-2018",
+  "note": "100 of 2016 split 1 into 5 in 2020: 500 held, but the 31 Jan 2018 price is for the 100 of that day; selling 250 takes half the cost (10,000) and half the 2018 quantity (50)",
+  "in": {
+   "trades": [
+    {
+     "taxpayer": 1,
+     "account": 1,
+     "day": 20260812,
+     "seq": 17,
+     "side": "SELL",
+     "segment": "EQ",
+     "instrument": "INE000A01010",
+     "qty_u": 250000000,
+     "price_u": 1000000,
+     "amount_paise": 2500000
+    }
+   ],
+   "opening": [
+    {
+     "taxpayer": 1,
+     "account": 1,
+     "instrument": "INE000A01010",
+     "acquired_day": 20160310,
+     "qty_u": 100000000,
+     "cost_paise": 2000000,
+     "source": "owner"
+    }
+   ],
+   "actions": [
+    {
+     "kind": "SPLIT",
+     "instrument": "INE000A01010",
+     "ex_day": 20200615,
+     "num": 5,
+     "den": 1
+    }
+   ]
+  },
+  "out": {
+   "disposals": [
+    {
+     "sale_day": 20260812,
+     "qty_u": 250000000,
+     "sale_paise": 2500000,
+     "acquired_day": 20160310,
+     "cost_paise": 1000000,
+     "basis_qty_u": 50000000
+    }
+   ],
+   "open_lots": [
+    {
+     "acquired_day": 20160310,
+     "qty_u": 250000000,
+     "cost_paise": 1000000,
+     "basis_qty_u": 50000000
+    }
+   ],
+   "intraday": [],
+   "notes": 0,
+   "fractions": []
+  }
+ },
+ {
+  "id": "O3-split-before-2018",
+  "note": "the same split in June 2017: on 31 Jan 2018 there were already 500, so the 2018 quantity of the 250 sold is 250",
+  "in": {
+   "trades": [
+    {
+     "taxpayer": 1,
+     "account": 1,
+     "day": 20260812,
+     "seq": 18,
+     "side": "SELL",
+     "segment": "EQ",
+     "instrument": "INE000A01010",
+     "qty_u": 250000000,
+     "price_u": 1000000,
+     "amount_paise": 2500000
+    }
+   ],
+   "opening": [
+    {
+     "taxpayer": 1,
+     "account": 1,
+     "instrument": "INE000A01010",
+     "acquired_day": 20160310,
+     "qty_u": 100000000,
+     "cost_paise": 2000000,
+     "source": "owner"
+    }
+   ],
+   "actions": [
+    {
+     "kind": "SPLIT",
+     "instrument": "INE000A01010",
+     "ex_day": 20170615,
+     "num": 5,
+     "den": 1
+    }
+   ]
+  },
+  "out": {
+   "disposals": [
+    {
+     "sale_day": 20260812,
+     "qty_u": 250000000,
+     "sale_paise": 2500000,
+     "acquired_day": 20160310,
+     "cost_paise": 1000000,
+     "basis_qty_u": 250000000
+    }
+   ],
+   "open_lots": [
+    {
+     "acquired_day": 20160310,
+     "qty_u": 250000000,
+     "cost_paise": 1000000,
+     "basis_qty_u": 250000000
+    }
+   ],
+   "intraday": [],
+   "notes": 0,
+   "fractions": []
+  }
+ },
+ {
+  "id": "U1-no-purchase-record",
+  "note": "40 sold with nothing held and no opening lot: listed with the sale value 8,000 and no cost",
+  "in": {
+   "trades": [
+    {
+     "taxpayer": 1,
+     "account": 1,
+     "day": 20260812,
+     "seq": 19,
+     "side": "SELL",
+     "segment": "EQ",
+     "instrument": "INE000A01010",
+     "qty_u": 40000000,
+     "price_u": 2000000,
+     "amount_paise": 800000
+    }
+   ]
+  },
+  "out": {
+   "disposals": [
+    {
+     "sale_day": 20260812,
+     "qty_u": 40000000,
+     "sale_paise": 800000,
+     "acquired_day": null,
+     "cost_paise": null
+    }
+   ],
+   "open_lots": [],
+   "intraday": [],
+   "notes": 0,
+   "fractions": []
+  }
+ },
+ {
+  "id": "A1-new-isin",
+  "note": "10 bought under the old ISIN, split 1 into 2 with a new ISIN, 20 sold under the new one: one chain of lots, the whole cost 1,000 against the sale",
+  "in": {
+   "trades": [
+    {
+     "taxpayer": 1,
+     "account": 1,
+     "day": 20250602,
+     "seq": 20,
+     "side": "BUY",
+     "segment": "EQ",
+     "instrument": "INE000B01018",
+     "qty_u": 10000000,
+     "price_u": 1000000,
+     "amount_paise": 100000
+    },
+    {
+     "taxpayer": 1,
+     "account": 1,
+     "day": 20260812,
+     "seq": 21,
+     "side": "SELL",
+     "segment": "EQ",
+     "instrument": "INE000B01026",
+     "qty_u": 20000000,
+     "price_u": 600000,
+     "amount_paise": 120000
+    }
+   ],
+   "actions": [
+    {
+     "kind": "SPLIT",
+     "instrument": "INE000B01018",
+     "ex_day": 20260105,
+     "num": 2,
+     "den": 1,
+     "new_isin": "INE000B01026"
+    }
+   ]
+  },
+  "out": {
+   "disposals": [
+    {
+     "sale_day": 20260812,
+     "qty_u": 20000000,
+     "sale_paise": 120000,
+     "acquired_day": 20250602,
+     "cost_paise": 100000,
+     "isin": "INE000B01026"
+    }
+   ],
+   "open_lots": [],
+   "intraday": [],
+   "notes": 0,
+   "fractions": []
+  }
+ },
+ {
+  "id": "B1-bonus-fraction",
+  "note": "5 held, bonus 1 for 2: 2.5 shares at nil on the ex-date, kept as a fraction and reported",
+  "in": {
+   "trades": [
+    {
+     "taxpayer": 1,
+     "account": 1,
+     "day": 20250602,
+     "seq": 22,
+     "side": "BUY",
+     "segment": "EQ",
+     "instrument": "INE000A01010",
+     "qty_u": 5000000,
+     "price_u": 1000000,
+     "amount_paise": 50000
+    }
+   ],
+   "actions": [
+    {
+     "kind": "BONUS",
+     "instrument": "INE000A01010",
+     "ex_day": 20250910,
+     "num": 1,
+     "den": 2
+    }
+   ]
+  },
+  "out": {
+   "disposals": [],
+   "open_lots": [
+    {
+     "acquired_day": 20250602,
+     "qty_u": 5000000,
+     "cost_paise": 50000
+    },
+    {
+     "acquired_day": 20250910,
+     "qty_u": 2500000,
+     "cost_paise": 0,
+     "source": "bonus"
+    }
+   ],
+   "intraday": [],
+   "notes": 1,
+   "fractions": [
+    [
+     1,
+     1,
+     "INE000A01010",
+     20250910,
+     "BONUS",
+     7500000
+    ]
+   ]
+  }
+ },
+ {
+  "id": "I1",
+  "note": "holding 100 (cost 18,000); one day buy 50 at 200, sell 80 at 210: intraday min(50, 80) = 50, bought 10,000, sold 16,800 x 50/80 = 10,500, +500; the other 30 are a delivery sale of 6,300 against 18,000 x 30/100 = 5,400; no lot opens that day",
+  "in": {
+   "trades": [
+    {
+     "taxpayer": 1,
+     "account": 1,
+     "day": 20260803,
+     "seq": 3,
+     "side": "BUY",
+     "segment": "EQ",
+     "instrument": "INE000A01010",
+     "qty_u": 50000000,
+     "price_u": 2000000,
+     "amount_paise": 1000000
+    },
+    {
+     "taxpayer": 1,
+     "account": 1,
+     "day": 20260803,
+     "seq": 4,
+     "side": "SELL",
+     "segment": "EQ",
+     "instrument": "INE000A01010",
+     "qty_u": 80000000,
+     "price_u": 2100000,
+     "amount_paise": 1680000
+    }
+   ],
+   "opening": [
+    {
+     "taxpayer": 1,
+     "account": 1,
+     "instrument": "INE000A01010",
+     "acquired_day": 20250512,
+     "qty_u": 100000000,
+     "cost_paise": 1800000,
+     "source": "owner"
+    }
+   ]
+  },
+  "out": {
+   "disposals": [
+    {
+     "sale_day": 20260803,
+     "qty_u": 30000000,
+     "sale_paise": 630000,
+     "acquired_day": 20250512,
+     "cost_paise": 540000
+    }
+   ],
+   "open_lots": [
+    {
+     "acquired_day": 20250512,
+     "qty_u": 70000000,
+     "cost_paise": 1260000
+    }
+   ],
+   "intraday": [
+    {
+     "kind": "speculative",
+     "open_day": 20260803,
+     "close_day": 20260803,
+     "qty_u": 50000000,
+     "buy_paise": 1000000,
+     "sell_paise": 1050000,
+     "pnl_paise": 50000
+    }
+   ],
+   "notes": 0,
+   "fractions": []
+  }
+ },
+ {
+  "id": "I2",
+  "note": "the same day marked all delivery: the buy opens a lot of 50 at 10,000 and the 80 sold (16,800) come from the old lot at 18,000 x 80/100 = 14,400",
+  "in": {
+   "trades": [
+    {
+     "taxpayer": 1,
+     "account": 1,
+     "day": 20260803,
+     "seq": 3,
+     "side": "BUY",
+     "segment": "EQ",
+     "instrument": "INE000A01010",
+     "qty_u": 50000000,
+     "price_u": 2000000,
+     "amount_paise": 1000000
+    },
+    {
+     "taxpayer": 1,
+     "account": 1,
+     "day": 20260803,
+     "seq": 4,
+     "side": "SELL",
+     "segment": "EQ",
+     "instrument": "INE000A01010",
+     "qty_u": 80000000,
+     "price_u": 2100000,
+     "amount_paise": 1680000
+    }
+   ],
+   "opening": [
+    {
+     "taxpayer": 1,
+     "account": 1,
+     "instrument": "INE000A01010",
+     "acquired_day": 20250512,
+     "qty_u": 100000000,
+     "cost_paise": 1800000,
+     "source": "owner"
+    }
+   ],
+   "all_delivery": [
+    [
+     1,
+     1,
+     "INE000A01010",
+     20260803
+    ]
+   ]
+  },
+  "out": {
+   "disposals": [
+    {
+     "sale_day": 20260803,
+     "qty_u": 80000000,
+     "sale_paise": 1680000,
+     "acquired_day": 20250512,
+     "cost_paise": 1440000
+    }
+   ],
+   "open_lots": [
+    {
+     "acquired_day": 20250512,
+     "qty_u": 20000000,
+     "cost_paise": 360000
+    },
+    {
+     "acquired_day": 20260803,
+     "qty_u": 50000000,
+     "cost_paise": 1000000
+    }
+   ],
+   "intraday": [],
+   "notes": 0,
+   "fractions": []
+  }
+ },
+ {
+  "id": "I3-earliest-first",
+  "note": "buy 30 at 100, sell 40 at 105, buy 30 at 102: intraday 40 = the first 30 (3,000) and 10 of the second buy (3,060 x 10/30 = 1,020) = 4,020 against 4,200: +180; the other 20 open a lot at 2,040",
+  "in": {
+   "trades": [
+    {
+     "taxpayer": 1,
+     "account": 1,
+     "day": 20260803,
+     "seq": 23,
+     "side": "BUY",
+     "segment": "EQ",
+     "instrument": "INE000A01010",
+     "qty_u": 30000000,
+     "price_u": 1000000,
+     "amount_paise": 300000
+    },
+    {
+     "taxpayer": 1,
+     "account": 1,
+     "day": 20260803,
+     "seq": 24,
+     "side": "SELL",
+     "segment": "EQ",
+     "instrument": "INE000A01010",
+     "qty_u": 40000000,
+     "price_u": 1050000,
+     "amount_paise": 420000
+    },
+    {
+     "taxpayer": 1,
+     "account": 1,
+     "day": 20260803,
+     "seq": 25,
+     "side": "BUY",
+     "segment": "EQ",
+     "instrument": "INE000A01010",
+     "qty_u": 30000000,
+     "price_u": 1020000,
+     "amount_paise": 306000
+    }
+   ]
+  },
+  "out": {
+   "disposals": [],
+   "open_lots": [
+    {
+     "acquired_day": 20260803,
+     "qty_u": 20000000,
+     "cost_paise": 204000
+    }
+   ],
+   "intraday": [
+    {
+     "kind": "speculative",
+     "open_day": 20260803,
+     "close_day": 20260803,
+     "qty_u": 40000000,
+     "buy_paise": 402000,
+     "sell_paise": 420000,
+     "pnl_paise": 18000
+    }
+   ],
+   "notes": 0,
+   "fractions": []
+  }
+ },
+ {
+  "id": "I4-same-day-cnc-round-trip",
+  "note": "100 bought at 50 and sold at 51 on one day, whatever the product: nothing delivered, all intraday, +100; no lot and no disposal",
+  "in": {
+   "trades": [
+    {
+     "taxpayer": 1,
+     "account": 1,
+     "day": 20260803,
+     "seq": 26,
+     "side": "BUY",
+     "segment": "EQ",
+     "instrument": "INE000A01010",
+     "qty_u": 100000000,
+     "price_u": 500000,
+     "amount_paise": 500000
+    },
+    {
+     "taxpayer": 1,
+     "account": 1,
+     "day": 20260803,
+     "seq": 27,
+     "side": "SELL",
+     "segment": "EQ",
+     "instrument": "INE000A01010",
+     "qty_u": 100000000,
+     "price_u": 510000,
+     "amount_paise": 510000
+    }
+   ]
+  },
+  "out": {
+   "disposals": [],
+   "open_lots": [],
+   "intraday": [
+    {
+     "kind": "speculative",
+     "open_day": 20260803,
+     "close_day": 20260803,
+     "qty_u": 100000000,
+     "buy_paise": 500000,
+     "sell_paise": 510000,
+     "pnl_paise": 10000
+    }
+   ],
+   "notes": 0,
+   "fractions": []
+  }
+ },
+ {
+  "id": "I5-sell-then-buy",
+  "note": "holding 100; 40 sold at 210 before 40 bought back at 205 the same day: still intraday min(40, 40), +200, and the old lot is untouched",
+  "in": {
+   "trades": [
+    {
+     "taxpayer": 1,
+     "account": 1,
+     "day": 20260803,
+     "seq": 28,
+     "side": "SELL",
+     "segment": "EQ",
+     "instrument": "INE000A01010",
+     "qty_u": 40000000,
+     "price_u": 2100000,
+     "amount_paise": 840000
+    },
+    {
+     "taxpayer": 1,
+     "account": 1,
+     "day": 20260803,
+     "seq": 29,
+     "side": "BUY",
+     "segment": "EQ",
+     "instrument": "INE000A01010",
+     "qty_u": 40000000,
+     "price_u": 2050000,
+     "amount_paise": 820000
+    }
+   ],
+   "opening": [
+    {
+     "taxpayer": 1,
+     "account": 1,
+     "instrument": "INE000A01010",
+     "acquired_day": 20250512,
+     "qty_u": 100000000,
+     "cost_paise": 1800000,
+     "source": "owner"
+    }
+   ]
+  },
+  "out": {
+   "disposals": [],
+   "open_lots": [
+    {
+     "acquired_day": 20250512,
+     "qty_u": 100000000,
+     "cost_paise": 1800000
+    }
+   ],
+   "intraday": [
+    {
+     "kind": "speculative",
+     "open_day": 20260803,
+     "close_day": 20260803,
+     "qty_u": 40000000,
+     "buy_paise": 820000,
+     "sell_paise": 840000,
+     "pnl_paise": 20000
+    }
+   ],
+   "notes": 0,
+   "fractions": []
+  }
+ },
+ {
+  "id": "I6-buyback-is-never-intraday",
+  "note": "50 tendered in a buyback on a day 50 were also bought: the tender is a disposal of the old lot (18,000 x 50/100 = 9,000), the buy opens a lot",
+  "in": {
+   "trades": [
+    {
+     "taxpayer": 1,
+     "account": 1,
+     "day": 20260803,
+     "seq": 30,
+     "side": "BUY",
+     "segment": "EQ",
+     "instrument": "INE000A01010",
+     "qty_u": 50000000,
+     "price_u": 2000000,
+     "amount_paise": 1000000
+    },
+    {
+     "taxpayer": 1,
+     "account": 1,
+     "day": 20260803,
+     "seq": 31,
+     "side": "SELL",
+     "segment": "EQ",
+     "instrument": "INE000A01010",
+     "qty_u": 50000000,
+     "price_u": 3000000,
+     "amount_paise": 1500000,
+     "kind_hint": "buyback"
+    }
+   ],
+   "opening": [
+    {
+     "taxpayer": 1,
+     "account": 1,
+     "instrument": "INE000A01010",
+     "acquired_day": 20250512,
+     "qty_u": 100000000,
+     "cost_paise": 1800000,
+     "source": "owner"
+    }
+   ]
+  },
+  "out": {
+   "disposals": [
+    {
+     "sale_day": 20260803,
+     "qty_u": 50000000,
+     "sale_paise": 1500000,
+     "acquired_day": 20250512,
+     "cost_paise": 900000,
+     "kind_hint": "buyback"
+    }
+   ],
+   "open_lots": [
+    {
+     "acquired_day": 20250512,
+     "qty_u": 50000000,
+     "cost_paise": 900000
+    },
+    {
+     "acquired_day": 20260803,
+     "qty_u": 50000000,
+     "cost_paise": 1000000
+    }
+   ],
+   "intraday": [],
+   "notes": 0,
+   "fractions": []
+  }
+ },
+ {
+  "id": "I7-per-account",
+  "note": "account 1 buys 50 and account 2 sells 50 of its own on one day: no intraday, the rule is per account",
+  "in": {
+   "trades": [
+    {
+     "taxpayer": 1,
+     "account": 2,
+     "day": 20250602,
+     "seq": 32,
+     "side": "BUY",
+     "segment": "EQ",
+     "instrument": "INE000A01010",
+     "qty_u": 50000000,
+     "price_u": 1000000,
+     "amount_paise": 500000
+    },
+    {
+     "taxpayer": 1,
+     "account": 1,
+     "day": 20260803,
+     "seq": 33,
+     "side": "BUY",
+     "segment": "EQ",
+     "instrument": "INE000A01010",
+     "qty_u": 50000000,
+     "price_u": 2000000,
+     "amount_paise": 1000000
+    },
+    {
+     "taxpayer": 1,
+     "account": 2,
+     "day": 20260803,
+     "seq": 34,
+     "side": "SELL",
+     "segment": "EQ",
+     "instrument": "INE000A01010",
+     "qty_u": 50000000,
+     "price_u": 2100000,
+     "amount_paise": 1050000
+    }
+   ]
+  },
+  "out": {
+   "disposals": [
+    {
+     "sale_day": 20260803,
+     "qty_u": 50000000,
+     "sale_paise": 1050000,
+     "acquired_day": 20250602,
+     "cost_paise": 500000,
+     "account": 2
+    }
+   ],
+   "open_lots": [
+    {
+     "acquired_day": 20260803,
+     "qty_u": 50000000,
+     "cost_paise": 1000000,
+     "account": 1
+    }
+   ],
+   "intraday": [],
+   "notes": 0,
+   "fractions": []
+  }
+ },
+ {
+  "id": "I8-fund-units",
+  "note": "equity fund units bought and sold on one day are not intraday: 10 units of 2025 go first in, first out",
+  "in": {
+   "trades": [
+    {
+     "taxpayer": 1,
+     "account": 1,
+     "day": 20250602,
+     "seq": 35,
+     "side": "BUY",
+     "segment": "MF",
+     "instrument": "INF000A01011",
+     "qty_u": 10000000,
+     "price_u": 500000,
+     "amount_paise": 50000,
+     "asset_class": "equity"
+    },
+    {
+     "taxpayer": 1,
+     "account": 1,
+     "day": 20260803,
+     "seq": 36,
+     "side": "BUY",
+     "segment": "MF",
+     "instrument": "INF000A01011",
+     "qty_u": 10000000,
+     "price_u": 600000,
+     "amount_paise": 60000,
+     "asset_class": "equity"
+    },
+    {
+     "taxpayer": 1,
+     "account": 1,
+     "day": 20260803,
+     "seq": 37,
+     "side": "SELL",
+     "segment": "MF",
+     "instrument": "INF000A01011",
+     "qty_u": 10000000,
+     "price_u": 610000,
+     "amount_paise": 61000,
+     "asset_class": "equity"
+    }
+   ]
+  },
+  "out": {
+   "disposals": [
+    {
+     "sale_day": 20260803,
+     "qty_u": 10000000,
+     "sale_paise": 61000,
+     "acquired_day": 20250602,
+     "cost_paise": 50000
+    }
+   ],
+   "open_lots": [
+    {
+     "acquired_day": 20260803,
+     "qty_u": 10000000,
+     "cost_paise": 60000
+    }
+   ],
+   "intraday": [],
+   "notes": 0,
+   "fractions": []
+  }
+ },
+ {
+  "id": "X1-other-heads-passed-over",
+  "note": "a future and an untagged fund are not lots: nothing out",
+  "in": {
+   "trades": [
+    {
+     "taxpayer": 1,
+     "account": 1,
+     "day": 20260803,
+     "seq": 38,
+     "side": "BUY",
+     "segment": "FO",
+     "instrument": [
+      "NFO",
+      "NIFTY",
+      20260827,
+      0,
+      "FUT"
+     ],
+     "qty_u": 65000000,
+     "price_u": 240000000,
+     "amount_paise": 156000000
+    },
+    {
+     "taxpayer": 1,
+     "account": 1,
+     "day": 20260803,
+     "seq": 39,
+     "side": "BUY",
+     "segment": "MF",
+     "instrument": "INF000A01011",
+     "qty_u": 10000000,
+     "price_u": 600000,
+     "amount_paise": 60000
+    }
+   ]
+  },
+  "out": {
+   "disposals": [],
+   "open_lots": [],
+   "intraday": [],
+   "notes": 0,
+   "fractions": []
+  }
+ }
+]

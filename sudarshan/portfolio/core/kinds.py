@@ -430,6 +430,18 @@ OPS = (
         "upstox",
         query=(("fy", "int"), ("segment", "str"), ("force", "bool")),
     ),
+    # What the owner shares with each family member and the member's privacy floor (M7.37,
+    # cross-design Y6): the owner's Family page sends these, never the family process.
+    OpSpec(
+        "shares_list",
+        "GET",
+        "/family/shares",
+        "read",
+        query=(("tab_id", "int"), ("viewer", "str")),
+    ),
+    OpSpec("share_set", "PUT", "/family/shares", "write"),
+    OpSpec("share_remove", "DELETE", "/family/shares", "write"),
+    OpSpec("member_privacy_set", "PUT", "/family/privacy", "write"),
 )
 OP_NAMES = tuple(op.name for op in OPS)
 #: A write op whose body may carry ``dry_run``: the bridge counts those against the dry-run
@@ -437,9 +449,11 @@ OP_NAMES = tuple(op.name for op in OPS)
 DRY_RUN_OPS = ("activity_create", "activity_update")
 
 # ---- the other purposes of the sealed API (cross-design Y4, Y6; P1, P2, PJ) -----------------------
-#: Ops the owner's purpose also opens, and that have no route of the owner's bridge: the family
-#: admin flow in OpenAlgo seals them (a tab shared with a member, a member's privacy floor).
-OWNER_EXTRA_OPS = ("share_set", "share_remove", "shares_list", "member_privacy_set")
+#: The owner's sharing ops (M7.37; cross-design Y6): which tabs each family member is given and the
+#: member's privacy floor. Routes of the owner's bridge like every op above: the owner's Family
+#: page sends them from his own browser, in the same action as the family service's own record, and
+#: the family purpose never opens them.
+SHARING_OPS = ("shares_list", "share_set", "share_remove", "member_privacy_set")
 #: The only ops under the family purpose (principal ``viewer:<member id>``): reads. Anything else
 #: under it answers 403 and is logged.
 FAMILY_OPS = (
@@ -468,9 +482,7 @@ JOURNAL_PRINCIPAL = "sudarshan-journal"
 SHARE_LEVELS = ("view", "restricted")
 #: The four categories of a member's privacy (family design 3.1; Y24).
 PRIVACY_CATEGORIES = ("pnl", "qty", "funds", "orders")
-SERVICE_OP_NAMES = tuple(
-    dict.fromkeys((*OP_NAMES, *OWNER_EXTRA_OPS, *FAMILY_OPS, *JOURNAL_OPS))
-)
+SERVICE_OP_NAMES = tuple(dict.fromkeys((*OP_NAMES, *FAMILY_OPS, *JOURNAL_OPS)))
 
 # ---- what types.ts repeats -----------------------------------------------------------------
 #: The numbers, lists, labels, strings and sentences the phone's types.ts carries a copy of, by
@@ -545,6 +557,8 @@ SHARED_LISTS = {
     "PART_STATES": PART_STATES,
     "ERROR_CODES": ERROR_CODES,
     "QUERY_TYPES": QUERY_TYPES,
+    "SHARE_LEVELS": SHARE_LEVELS,
+    "PRIVACY_CATEGORIES": PRIVACY_CATEGORIES,
 }
 SHARED_STRINGS = {"API_PREFIX": API_PREFIX}
 SHARED_LABELS = {

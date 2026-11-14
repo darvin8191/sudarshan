@@ -1,0 +1,584 @@
+[
+ {
+  "id": "S1",
+  "note": "derivatives -1,80,000, intraday +25,000, intraday loss of FY 2024-25 of 40,000 brought forward. This year first: the derivative loss takes the 25,000 (1,55,000 left). No intraday profit is left, so the 40,000 stays (to FY 2028-29). 1,55,000 is available against other income except salary, else carried to FY 2034-35",
+  "in": {
+   "fy": 2026,
+   "non_speculative_net": -18000000,
+   "speculative_net": 2500000,
+   "carries": [
+    {
+     "taxpayer": 1,
+     "loss_fy": 2024,
+     "bucket": "speculative",
+     "paise": 4000000,
+     "source": "owner"
+    }
+   ]
+  },
+  "out": {
+   "taxable": {
+    "non_speculative_paise": 0,
+    "speculative_paise": 0
+   },
+   "available_other_heads_paise": 15500000,
+   "carried": [
+    {
+     "loss_fy": 2024,
+     "bucket": "speculative",
+     "paise": 4000000,
+     "source": "owner",
+     "last_fy": 2028
+    },
+    {
+     "loss_fy": 2026,
+     "bucket": "business",
+     "paise": 15500000,
+     "source": "computed",
+     "last_fy": 2034
+    }
+   ],
+   "lapsed": [],
+   "own_figures": [],
+   "says": [
+    "This year's F&O (business) loss: Rs 25,000 set against this year's intraday profit.",
+    "Available against other income this year except salary: Rs 1,55,000; what is not used is carried, against business income only.",
+    "F&O (business) loss of FY 2026-27: Rs 1,55,000 carried 8 years (to FY 2034-35), against business income only."
+   ]
+  }
+ },
+ {
+  "id": "S2",
+  "note": "intraday -30,000 and derivatives +50,000: a speculative loss reduces nothing else: 50,000 taxable; 30,000 carried 4 years, to FY 2030-31",
+  "in": {
+   "fy": 2026,
+   "non_speculative_net": 5000000,
+   "speculative_net": -3000000,
+   "carries": []
+  },
+  "out": {
+   "taxable": {
+    "non_speculative_paise": 5000000,
+    "speculative_paise": 0
+   },
+   "available_other_heads_paise": 0,
+   "carried": [
+    {
+     "loss_fy": 2026,
+     "bucket": "speculative",
+     "paise": 3000000,
+     "source": "computed",
+     "last_fy": 2030
+    }
+   ],
+   "lapsed": [],
+   "own_figures": [],
+   "says": [
+    "An intraday (speculative) loss cannot reduce any other income.",
+    "Intraday (speculative) loss of FY 2026-27: Rs 30,000 carried 4 years (to FY 2030-31), against intraday (speculative) profit only."
+   ]
+  }
+ },
+ {
+  "id": "S3",
+  "note": "VERIFY WITH CA. Intraday +25,000, no loss this year; brought forward from FY 2024-25: intraday loss 40,000 and business loss 60,000. The intraday loss goes first: 25,000 used, 15,000 left; the business loss stays 60,000 as no business income is left",
+  "in": {
+   "fy": 2026,
+   "non_speculative_net": 0,
+   "speculative_net": 2500000,
+   "carries": [
+    {
+     "taxpayer": 1,
+     "loss_fy": 2024,
+     "bucket": "business",
+     "paise": 6000000,
+     "source": "owner"
+    },
+    {
+     "taxpayer": 1,
+     "loss_fy": 2024,
+     "bucket": "speculative",
+     "paise": 4000000,
+     "source": "owner"
+    }
+   ]
+  },
+  "out": {
+   "taxable": {
+    "non_speculative_paise": 0,
+    "speculative_paise": 0
+   },
+   "available_other_heads_paise": 0,
+   "carried": [
+    {
+     "loss_fy": 2024,
+     "bucket": "speculative",
+     "paise": 1500000,
+     "source": "owner",
+     "last_fy": 2028
+    },
+    {
+     "loss_fy": 2024,
+     "bucket": "business",
+     "paise": 6000000,
+     "source": "owner",
+     "last_fy": 2032
+    }
+   ],
+   "lapsed": [],
+   "own_figures": [],
+   "says": [
+    "Order used: this year's losses first, then earlier years' oldest first, an intraday (speculative) loss before a business loss. Verify with your CA."
+   ]
+  }
+ },
+ {
+  "id": "S4",
+  "note": "an intraday loss of FY 2021-22 offered in FY 2026-27: its 4 years ended with FY 2025-26, so it is listed as lapsed and the 25,000 profit is taxable in full",
+  "in": {
+   "fy": 2026,
+   "non_speculative_net": 0,
+   "speculative_net": 2500000,
+   "carries": [
+    {
+     "taxpayer": 1,
+     "loss_fy": 2021,
+     "bucket": "speculative",
+     "paise": 4000000,
+     "source": "owner"
+    }
+   ]
+  },
+  "out": {
+   "taxable": {
+    "non_speculative_paise": 0,
+    "speculative_paise": 2500000
+   },
+   "available_other_heads_paise": 0,
+   "carried": [],
+   "lapsed": [
+    {
+     "loss_fy": 2021,
+     "bucket": "speculative",
+     "paise": 4000000,
+     "source": "owner",
+     "last_fy": 2025
+    }
+   ],
+   "own_figures": [],
+   "says": [
+    "Intraday (speculative) loss of FY 2021-22: Rs 40,000 could be used up to FY 2025-26. It has lapsed."
+   ]
+  }
+ },
+ {
+  "id": "S4-last-year",
+  "note": "the same loss of FY 2022-23 is in its last year: 25,000 used; the 15,000 left cannot go further and is listed as lapsed",
+  "in": {
+   "fy": 2026,
+   "non_speculative_net": 0,
+   "speculative_net": 2500000,
+   "carries": [
+    {
+     "taxpayer": 1,
+     "loss_fy": 2022,
+     "bucket": "speculative",
+     "paise": 4000000,
+     "source": "owner"
+    }
+   ]
+  },
+  "out": {
+   "taxable": {
+    "non_speculative_paise": 0,
+    "speculative_paise": 0
+   },
+   "available_other_heads_paise": 0,
+   "carried": [],
+   "lapsed": [
+    {
+     "loss_fy": 2022,
+     "bucket": "speculative",
+     "paise": 1500000,
+     "source": "owner",
+     "last_fy": 2026
+    }
+   ],
+   "own_figures": [],
+   "says": []
+  }
+ },
+ {
+  "id": "S5",
+  "note": "the owner entered a business loss of FY 2025-26 of 70,000 and SUDARSHAN computed 65,000 for the same year: the owner's is used (1,00,000 - 70,000 = 30,000 taxable) and the computed figure is only shown beside it",
+  "in": {
+   "fy": 2026,
+   "non_speculative_net": 10000000,
+   "speculative_net": 0,
+   "carries": [
+    {
+     "taxpayer": 1,
+     "loss_fy": 2025,
+     "bucket": "business",
+     "paise": 6500000,
+     "source": "computed"
+    },
+    {
+     "taxpayer": 1,
+     "loss_fy": 2025,
+     "bucket": "business",
+     "paise": 7000000,
+     "source": "owner"
+    }
+   ]
+  },
+  "out": {
+   "taxable": {
+    "non_speculative_paise": 3000000,
+    "speculative_paise": 0
+   },
+   "available_other_heads_paise": 0,
+   "carried": [],
+   "lapsed": [],
+   "own_figures": [
+    {
+     "loss_fy": 2025,
+     "bucket": "business",
+     "paise": 6500000,
+     "source": "computed",
+     "last_fy": 2033
+    }
+   ],
+   "says": [
+    "SUDARSHAN's own figure for the F&O (business) loss of FY 2025-26 is Rs 65,000; yours is used."
+   ]
+  }
+ },
+ {
+  "id": "S5-computed-alone",
+  "note": "with no owner figure for that year the computed one is used: 1,00,000 - 65,000 = 35,000",
+  "in": {
+   "fy": 2026,
+   "non_speculative_net": 10000000,
+   "speculative_net": 0,
+   "carries": [
+    {
+     "taxpayer": 1,
+     "loss_fy": 2025,
+     "bucket": "business",
+     "paise": 6500000,
+     "source": "computed"
+    }
+   ]
+  },
+  "out": {
+   "taxable": {
+    "non_speculative_paise": 3500000,
+    "speculative_paise": 0
+   },
+   "available_other_heads_paise": 0,
+   "carried": [],
+   "lapsed": [],
+   "own_figures": [],
+   "says": []
+  }
+ },
+ {
+  "id": "S6",
+  "note": "VERIFY WITH CA. Derivatives +20,000, intraday +30,000, business loss of FY 2023-24 of 45,000: 20,000 against derivative profit, then 25,000 against intraday profit (business income of any kind): 5,000 intraday profit taxable",
+  "in": {
+   "fy": 2026,
+   "non_speculative_net": 2000000,
+   "speculative_net": 3000000,
+   "carries": [
+    {
+     "taxpayer": 1,
+     "loss_fy": 2023,
+     "bucket": "business",
+     "paise": 4500000,
+     "source": "owner"
+    }
+   ]
+  },
+  "out": {
+   "taxable": {
+    "non_speculative_paise": 0,
+    "speculative_paise": 500000
+   },
+   "available_other_heads_paise": 0,
+   "carried": [],
+   "lapsed": [],
+   "own_figures": [],
+   "says": []
+  }
+ },
+ {
+  "id": "S7",
+  "note": "an intraday loss brought forward never reduces derivative profit: 50,000 taxable, the 40,000 of FY 2025-26 stays (to FY 2029-30)",
+  "in": {
+   "fy": 2026,
+   "non_speculative_net": 5000000,
+   "speculative_net": 0,
+   "carries": [
+    {
+     "taxpayer": 1,
+     "loss_fy": 2025,
+     "bucket": "speculative",
+     "paise": 4000000,
+     "source": "owner"
+    }
+   ]
+  },
+  "out": {
+   "taxable": {
+    "non_speculative_paise": 5000000,
+    "speculative_paise": 0
+   },
+   "available_other_heads_paise": 0,
+   "carried": [
+    {
+     "loss_fy": 2025,
+     "bucket": "speculative",
+     "paise": 4000000,
+     "source": "owner",
+     "last_fy": 2029
+    }
+   ],
+   "lapsed": [],
+   "own_figures": [],
+   "says": []
+  }
+ },
+ {
+  "id": "S8",
+  "note": "a business loss of FY 2017-18 in FY 2026-27: 8 years ended with FY 2025-26: lapsed",
+  "in": {
+   "fy": 2026,
+   "non_speculative_net": 5000000,
+   "speculative_net": 0,
+   "carries": [
+    {
+     "taxpayer": 1,
+     "loss_fy": 2017,
+     "bucket": "business",
+     "paise": 4000000,
+     "source": "owner"
+    }
+   ]
+  },
+  "out": {
+   "taxable": {
+    "non_speculative_paise": 5000000,
+    "speculative_paise": 0
+   },
+   "available_other_heads_paise": 0,
+   "carried": [],
+   "lapsed": [
+    {
+     "loss_fy": 2017,
+     "bucket": "business",
+     "paise": 4000000,
+     "source": "owner",
+     "last_fy": 2025
+    }
+   ],
+   "own_figures": [],
+   "says": []
+  }
+ },
+ {
+  "id": "S9",
+  "note": "both profits and nothing brought forward: both taxable as they are",
+  "in": {
+   "fy": 2026,
+   "non_speculative_net": 5000000,
+   "speculative_net": 2500000,
+   "carries": []
+  },
+  "out": {
+   "taxable": {
+    "non_speculative_paise": 5000000,
+    "speculative_paise": 2500000
+   },
+   "available_other_heads_paise": 0,
+   "carried": [],
+   "lapsed": [],
+   "own_figures": [],
+   "says": []
+  }
+ },
+ {
+  "id": "S10",
+  "note": "derivatives -10,000 and intraday +25,000: 15,000 intraday profit taxable, nothing carried",
+  "in": {
+   "fy": 2026,
+   "non_speculative_net": -1000000,
+   "speculative_net": 2500000,
+   "carries": []
+  },
+  "out": {
+   "taxable": {
+    "non_speculative_paise": 0,
+    "speculative_paise": 1500000
+   },
+   "available_other_heads_paise": 0,
+   "carried": [],
+   "lapsed": [],
+   "own_figures": [],
+   "says": []
+  }
+ },
+ {
+  "id": "S11",
+  "note": "both losses: nothing meets anything; the derivative loss 80,000 is available against other income, else carried to FY 2034-35; the intraday 20,000 to FY 2030-31",
+  "in": {
+   "fy": 2026,
+   "non_speculative_net": -8000000,
+   "speculative_net": -2000000,
+   "carries": []
+  },
+  "out": {
+   "taxable": {
+    "non_speculative_paise": 0,
+    "speculative_paise": 0
+   },
+   "available_other_heads_paise": 8000000,
+   "carried": [
+    {
+     "loss_fy": 2026,
+     "bucket": "business",
+     "paise": 8000000,
+     "source": "computed",
+     "last_fy": 2034
+    },
+    {
+     "loss_fy": 2026,
+     "bucket": "speculative",
+     "paise": 2000000,
+     "source": "computed",
+     "last_fy": 2030
+    }
+   ],
+   "lapsed": [],
+   "own_figures": [],
+   "says": []
+  }
+ },
+ {
+  "id": "S12-oldest-first",
+  "note": "derivatives +50,000; business losses of FY 2024-25 (40,000) and FY 2022-23 (30,000): the older goes first in full, then 20,000 of the newer; 20,000 of FY 2024-25 stays (to FY 2032-33)",
+  "in": {
+   "fy": 2026,
+   "non_speculative_net": 5000000,
+   "speculative_net": 0,
+   "carries": [
+    {
+     "taxpayer": 1,
+     "loss_fy": 2024,
+     "bucket": "business",
+     "paise": 4000000,
+     "source": "owner"
+    },
+    {
+     "taxpayer": 1,
+     "loss_fy": 2022,
+     "bucket": "business",
+     "paise": 3000000,
+     "source": "owner"
+    }
+   ]
+  },
+  "out": {
+   "taxable": {
+    "non_speculative_paise": 0,
+    "speculative_paise": 0
+   },
+   "available_other_heads_paise": 0,
+   "carried": [
+    {
+     "loss_fy": 2024,
+     "bucket": "business",
+     "paise": 2000000,
+     "source": "owner",
+     "last_fy": 2032
+    }
+   ],
+   "lapsed": [],
+   "own_figures": [],
+   "says": []
+  }
+ },
+ {
+  "id": "S13",
+  "note": "VERIFY WITH CA. Derivatives -30,000, intraday +50,000, intraday loss of FY 2024-25 of 40,000: this year's loss first (intraday 20,000 left), then 20,000 of the old loss; 20,000 of it stays (to FY 2028-29). The other way round would carry 20,000 of this year's instead",
+  "in": {
+   "fy": 2026,
+   "non_speculative_net": -3000000,
+   "speculative_net": 5000000,
+   "carries": [
+    {
+     "taxpayer": 1,
+     "loss_fy": 2024,
+     "bucket": "speculative",
+     "paise": 4000000,
+     "source": "owner"
+    }
+   ]
+  },
+  "out": {
+   "taxable": {
+    "non_speculative_paise": 0,
+    "speculative_paise": 0
+   },
+   "available_other_heads_paise": 0,
+   "carried": [
+    {
+     "loss_fy": 2024,
+     "bucket": "speculative",
+     "paise": 2000000,
+     "source": "owner",
+     "last_fy": 2028
+    }
+   ],
+   "lapsed": [],
+   "own_figures": [],
+   "says": []
+  }
+ },
+ {
+  "id": "S14-capital-losses-ignored",
+  "note": "capital losses brought forward are not business losses: 50,000 taxable",
+  "in": {
+   "fy": 2026,
+   "non_speculative_net": 5000000,
+   "speculative_net": 0,
+   "carries": [
+    {
+     "taxpayer": 1,
+     "loss_fy": 2024,
+     "bucket": "stcl",
+     "paise": 4000000,
+     "source": "owner"
+    },
+    {
+     "taxpayer": 1,
+     "loss_fy": 2024,
+     "bucket": "ltcl",
+     "paise": 4000000,
+     "source": "owner"
+    }
+   ]
+  },
+  "out": {
+   "taxable": {
+    "non_speculative_paise": 5000000,
+    "speculative_paise": 0
+   },
+   "available_other_heads_paise": 0,
+   "carried": [],
+   "lapsed": [],
+   "own_figures": [],
+   "says": []
+  }
+ }
+]
