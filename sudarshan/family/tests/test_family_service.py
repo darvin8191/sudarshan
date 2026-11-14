@@ -245,6 +245,44 @@ def test_the_size_caps_are_judged_before_the_body_is_read(tmp_path):
     run(scenario())
 
 
+@pytest.mark.parametrize(
+    "head",
+    [
+        "POST /family/api/login HTTP/1.1\r\nHost: x\r\nContent-Length: \xb2\r\n\r\n",
+        "POST /family/api/login HTTP/1.1\r\nHost: x\r\nContent-Length: \xb9\xb3\r\n\r\n",
+        "POST /v1/nudge HTTP/1.1\r\nHost: x\r\nContent-Length: \xb3\r\n\r\n",
+        "GET //[x/ HTTP/1.1\r\nHost: x\r\n\r\n",
+        "GET http://[::1/family/api/me HTTP/1.1\r\nHost: x\r\n\r\n",
+    ],
+    ids=["superscript-two", "superscripts", "nudge-superscript", "open-ipv6-target", "open-host"],
+)
+def test_a_head_it_cannot_read_is_400_in_words_never_a_500(tmp_path, caplog, head):
+    """Review L2: "\\xb2".isdigit() is true and int() refuses it, and urlsplit raises on a target
+    such as //[x/; both reached the catch-all and answered 500 with a traceback in the log."""
+
+    async def scenario():
+        service = service_for(tmp_path)
+        service.viewer = FakeViewer()
+        async with running(service):
+            reader, writer = await asyncio.open_connection("127.0.0.1", service.listener.port)
+            writer.write(head.encode("latin-1"))
+            await writer.drain()
+            raw = await asyncio.wait_for(reader.read(), 15)
+            writer.close()
+            first, _, body = raw.partition(b"\r\n\r\n")
+            assert first.split(b"\r\n")[0] == b"HTTP/1.1 400 Bad Request"
+            assert json.loads(body) == {
+                "status": "error",
+                "code": "invalid",
+                "message": "That was not accepted. Check what you typed and try again.",
+            }
+            assert service.viewer.seen == []
+
+    with caplog.at_level(logging.INFO, logger="sudarshan.family"):
+        run(scenario())
+    assert not [r for r in caplog.records if r.exc_info or r.pathname.endswith("listener.py")]
+
+
 # ---- port, switch, store ------------------------------------------------------------------------------
 def test_a_taken_port_is_said_in_words_and_tried_again(tmp_path, caplog):
     import socket

@@ -11,7 +11,9 @@ asked, so that no door can forget one:
 * a sealed door or /health with an Origin header (a browser page) is refused;
 * a body is read only after its length was checked against the door's cap (admin 64 KiB, nudge
   4 KiB, viewer 64 KiB; X9), and a chunked body is refused, so a request cannot be smuggled;
-* the head is at most 16 KiB and must arrive within 10 s.
+* the head is at most 16 KiB and must arrive within 10 s;
+* a head it cannot read (a target urlsplit refuses, a length that is not ASCII digits) is answered
+  400 in words, never a traceback and a 500.
 
 A taken port raises OSError from ``start``; the service says so in words and tries again every
 minute, never another port (X2).
@@ -215,11 +217,12 @@ async def read_head(reader: asyncio.StreamReader, peer: Any) -> Request:
                 headers[key] = (
                     f"{headers[key]}; {value.strip()}" if key in headers else value.strip()
                 )
+        # A target such as //[x/ is an IPv6 host that does not close: urlsplit raises for it.
+        parts = urlsplit(target)
+        path = unquote(parts.path) if parts.path else "/"
+        query = dict(parse_qsl(parts.query, keep_blank_values=True))
     except ValueError:
         raise FamilyError("invalid") from None
-    parts = urlsplit(target)
-    path = unquote(parts.path) if parts.path else "/"
-    query = dict(parse_qsl(parts.query, keep_blank_values=True))
     return Request(method, path, query, headers, door_of(path), head, peer=peer)
 
 
@@ -240,7 +243,8 @@ def check(request: Request) -> None:
         if request.method in ("POST", "PUT", "PATCH"):
             raise FamilyError("invalid")
         return
-    if not raw.isdigit():
+    # ASCII digits only: "\xb2" (a superscript two) is a digit to isdigit() and int() refuses it.
+    if not (raw.isascii() and raw.isdigit()):
         raise FamilyError("invalid")
     if int(raw) > CAPS.get(door, 0):
         raise FamilyError("too_large")
