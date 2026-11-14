@@ -159,6 +159,33 @@ def test_nginx_itself_accepts_the_two_files(tmp_path):
     assert done.returncode != 0, "a forgotten zone file is caught by nginx -t, before any reload"
 
 
+@pytest.mark.skipif(shutil.which("nginx") is None, reason="needs nginx for its own syntax test")
+def test_nginx_accepts_the_assistants_lines_beside_the_family_views(tmp_path):
+    """One site with both sets of lines installed as their READMEs say: no location is named
+    twice and no counter clashes."""
+    (tmp_path / "snippets").mkdir()
+    for name in ("sudarshan-family.conf", "sudarshan-family-proxy.conf", "sudarshan-mcp.conf"):
+        shutil.copy(NGINX / name, tmp_path / "snippets" / name)
+    conf = tmp_path / "nginx.conf"
+    conf.write_text(
+        f"pid {tmp_path}/nginx.pid;\nerror_log stderr;\nevents {{}}\n"
+        f"http {{\n  access_log off;\n  client_body_temp_path {tmp_path}/body;\n"
+        f"  proxy_temp_path {tmp_path}/proxy;\n  fastcgi_temp_path {tmp_path}/fastcgi;\n"
+        f"  uwsgi_temp_path {tmp_path}/uwsgi;\n  scgi_temp_path {tmp_path}/scgi;\n"
+        f"  include {NGINX}/sudarshan-family-zones.conf;\n"
+        f"  include {NGINX}/sudarshan-mcp-zone.conf;\n"
+        f"  server {{\n    listen unix:{tmp_path}/site.sock;\n"
+        "    include snippets/sudarshan-family.conf;\n"
+        "    include snippets/sudarshan-mcp.conf;\n"
+        "    location / { proxy_pass http://127.0.0.1:5000; }\n  }\n}\n"
+    )
+    done = subprocess.run(
+        ["nginx", "-t", "-q", "-c", str(conf), "-p", str(tmp_path), "-e", "stderr"],
+        capture_output=True, text=True, timeout=30,
+    )  # fmt: skip
+    assert done.returncode == 0, done.stderr
+
+
 def test_the_check_reads_statuses_and_judges_them():
     good = {path: (403 if refuse else 200) for path, refuse, _what in nginx_check.EXPECTED}
     code, lines = nginx_check.judge(good)
