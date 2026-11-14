@@ -19,11 +19,11 @@ import { useMemo } from 'react'
 import { useNavigate, useSearchParams } from 'react-router'
 import { portfolioCall, problemOf, switchesOf } from '@/sudarshan/portfolio/api'
 import { CalendarView } from '@/sudarshan/portfolio/calendar/CalendarView'
+import { GoalsView } from '@/sudarshan/portfolio/goals/GoalsView'
 import { RiskView } from '@/sudarshan/portfolio/risk/RiskView'
 import {
   CustomStub,
   PhaseChips,
-  PhaseStub,
   type PhaseView,
   phaseViewOf,
   phaseViewsOn,
@@ -175,7 +175,7 @@ export default function Portfolio() {
       ) : money === 'risk' ? (
         <RiskView tabs={tabs} />
       ) : (
-        <PhaseStub view={money} />
+        <GoalsView tabs={tabs} />
       )
   } else {
     body =
