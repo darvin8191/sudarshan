@@ -51,6 +51,7 @@ const Watchlist = lazy(() => import('@/sudarshan/pages/Watchlist')) // SUDARSHAN
 const MarketAlerts = lazy(() => import('@/sudarshan/pages/MarketAlerts')) // SUDARSHAN M10
 const Screener = lazy(() => import('@/sudarshan/pages/Screener')) // SUDARSHAN M9
 const Risk = lazy(() => import('@/sudarshan/pages/Risk')) // SUDARSHAN M20.7
+const System = lazy(() => import('@/sudarshan/pages/System')) // SUDARSHAN M20.8
 const Journal = lazy(() => import('@/sudarshan/pages/Journal')) // SUDARSHAN M14
 const Reports = lazy(() => import('@/sudarshan/pages/Reports')) // SUDARSHAN M15.10
 
@@ -355,6 +356,8 @@ function App() {
                 <Route path="/market-alerts" element={<MarketAlerts />} />
                 {/* SUDARSHAN M20.7: Settings > Risk, the kill switch */}
                 <Route path="/risk" element={<Risk />} />
+                {/* SUDARSHAN M20.8: the server's state, and Disconnect the assistant */}
+                <Route path="/system" element={<System />} />
                 {/* SUDARSHAN M14: the trade journal */}
                 <Route path="/journal" element={<Journal />} />
                 {/* SUDARSHAN M15.10: the reports archive and settings */}

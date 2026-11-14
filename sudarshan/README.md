@@ -765,8 +765,19 @@ cd /opt/sudarshan/apps/openalgo && sudo -u sudarshan .venv/bin/python -m sudarsh
 
 One line per check: `fine`, `warning`, `failing`, `unread` (could not be read just now) or `off`
 (not expected now: the market is closed, or the service is not set up). The last look is also in
-`/var/lib/sudarshan-watch/report.json` (`sudo cat` it), which the System page will show in a
-later release.
+`/var/lib/sudarshan-watch/report.json` (`sudo cat` it), and on the System page.
+
+**The System page (M20.8).** Menu, System (`/system`, the owner's account only) shows the last
+look in one list, each line with an icon, a word and what to do: the services, the market day's
+connections, the disk, memory, the certificate, updates, the outside heartbeat, the nightly
+backup and the year's archive, the last restore test with the first thing that failed, the
+safety settings, AI connections, Telegram links and your signed-in devices. It says so when the
+watch has not looked for over 10 minutes. It is the page a support session asks you to open.
+**Disconnect the assistant** on it ends every AI connection at once: every sign-in is revoked
+and every token already handed out is refused at its next call. Use it whenever an AI
+connection should end and the kill switch is not the tool: while the risk guard checks the
+sandbox only, the kill switch leaves the assistant alone. Nothing comes back by itself; you
+connect and approve again.
 
 **After the release that brings the watch is installed, once:** run the `--check` line above and
 read it; then, outside market hours, stop the screener for 5 minutes

@@ -167,6 +167,7 @@ public_shell  /strategy/<int:strategy_id>/edit       react.react_strategy_edit
 public_shell  /strategy/new                          react.react_strategy_new
 public_shell  /strategybuilder                       react.react_strategybuilder
 public_shell  /strategybuilder/portfolio             react.react_strategybuilder_portfolio
+public_shell  /system                              react.react_system
 public_shell  /telegram                              react.react_telegram_index
 public_shell  /telegram/analytics                    react.react_telegram_analytics
 public_shell  /telegram/config                       react.react_telegram_config
