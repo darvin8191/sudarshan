@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { fetchRefusalSentence } from '@/lib/serverSentence'
 import type { OptionChainDataIdentity, OptionChainResponse } from '@/types/option-chain'
-import { usePageVisibility } from './usePageVisibility'
+import { useIsPageVisible } from './usePageVisibility'
 
 interface UseOptionChainPollingOptions {
   enabled: boolean
@@ -57,7 +57,7 @@ export function useOptionChainPolling(
     derivativeExchange = exchange,
     pollWhen,
   } = options
-  const { isVisible } = usePageVisibility()
+  const isVisible = useIsPageVisible() // SUDARSHAN (SCR-F): no render each second
   const pollWhenRef = useRef(pollWhen)
   pollWhenRef.current = pollWhen
 

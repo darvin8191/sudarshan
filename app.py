@@ -109,6 +109,7 @@ from blueprints.sudarshan_automation import sudarshan_automation_bp  # SUDARSHAN
 from blueprints.sudarshan_autologin import sudarshan_autologin_bp  # SUDARSHAN M2.20 auto-login
 from blueprints.sudarshan_family import sudarshan_family_bp  # SUDARSHAN M20.6 family view bridge
 from blueprints.sudarshan_journal import sudarshan_journal_bp  # SUDARSHAN M14.1 journal bridge
+from blueprints.sudarshan_options import sudarshan_options_bp  # SUDARSHAN M11.1 option chain
 from blueprints.sudarshan_portfolio import sudarshan_portfolio_bp  # SUDARSHAN M7.18 portfolio bridge
 from blueprints.sudarshan_risk import sudarshan_risk_bp  # SUDARSHAN M5.13 kill switch, risk
 from blueprints.sudarshan_screener import (  # SUDARSHAN M9 screener bridge
@@ -373,6 +374,7 @@ def create_app():
     app.register_blueprint(sudarshan_session_bp)  # SUDARSHAN: v0.8.1 review M1-M3, chart hours
     app.register_blueprint(sudarshan_watchlists_bp)  # SUDARSHAN M8.4: sudarshan/watchlists/README.md
     app.register_blueprint(sudarshan_journal_bp)  # SUDARSHAN M14.1: the journal (sudarshan-journal)
+    app.register_blueprint(sudarshan_options_bp)  # SUDARSHAN M11.1: sudarshan/options (chain snapshot)
     app.register_blueprint(sudarshan_family_bp)  # SUDARSHAN M20.6: the family view's two doors
     app.register_blueprint(sudarshan_automation_bp)  # SUDARSHAN M12.1: sudarshan/automation (alerts)
 

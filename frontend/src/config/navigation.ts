@@ -22,6 +22,7 @@ import {
   Key,
   KeyRound,
   Layers,
+  Layers3,
   LayoutDashboard,
   type LucideIcon,
   MessageCircle,
@@ -107,6 +108,9 @@ export const profileMenuItems: NavItem[] = [
   { href: '/chart', label: 'Chart', icon: ChartCandlestick, group: 'Trade' },
   // SUDARSHAN M10.3: market alerts, at /market-alerts (upstream owns /alerts).
   { href: '/market-alerts', label: 'Alerts', icon: BellRing, group: 'Analyse' },
+  // SUDARSHAN M11.1: the option chain on the phone. Under Trade it follows Chart; it sits after
+  // Alerts here because Alerts is pinned right after Chart.
+  { href: '/options', label: 'Options', icon: Layers3, group: 'Trade' },
   // Agent Config is NOT here. It lives under /admin with the other
   // configuration surfaces. The chat header carries its own settings control,
   // so a configured /agent still has a route back to its settings without this

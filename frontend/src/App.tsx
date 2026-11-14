@@ -88,6 +88,7 @@ const ChartTest = lazy(() => import('@/pages/ChartTest'))
 const Playground = lazy(() => import('@/pages/Playground'))
 const Trading = lazy(() => import('@/pages/Trading'))
 const PhoneChart = lazy(() => import('@/sudarshan/chart/ChartPage')) // SUDARSHAN M4.15
+const OptionsPage = lazy(() => import('@/sudarshan/options/OptionsPage')) // SUDARSHAN M11.1
 const Historify = lazy(() => import('@/pages/Historify'))
 const HistorifyCharts = lazy(() => import('@/pages/HistorifyCharts'))
 
@@ -230,6 +231,9 @@ function App() {
                 <Route path="/dashboard" element={<Dashboard />} />
                 {/* SUDARSHAN M8.2: the phone-first watchlist */}
                 <Route path="/watchlist" element={<Watchlist />} />
+                {/* SUDARSHAN M11.1: the option chain on the phone; a bare /options opens the last one. */}
+                <Route path="/options" element={<OptionsPage />} />
+                <Route path="/options/:exchange/:underlying" element={<OptionsPage />} />
                 {/* SUDARSHAN M9: the screener */}
                 <Route path="/screener" element={<Screener />} />
                 <Route path="/positions" element={<Positions />} />

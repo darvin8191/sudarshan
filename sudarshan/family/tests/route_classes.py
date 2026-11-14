@@ -127,6 +127,8 @@ public_shell  /oiprofile                             react.react_oiprofile
 public_shell  /oirange                               react.react_oirange
 public_shell  /oitracker                             react.react_oitracker
 public_shell  /optionchain                           react.react_optionchain
+public_shell  /options                              react.react_options
+public_shell  /options/<exchange>/<underlying>      react.react_options_chain
 public_shell  /orderbook                             react.react_orderbook
 public_shell  /platforms                             react.react_platforms
 public_shell  /playground                            react.react_playground
@@ -769,6 +771,8 @@ protected     /sudarshan/journal/api/tags/<int:id>                              
 protected     /sudarshan/journal/api/trips                                              sudarshan_journal.trips
 protected     /sudarshan/journal/api/trips/<int:id>                                     sudarshan_journal.trip_get
 protected     /sudarshan/journal/api/trips/<int:id>                                     sudarshan_journal.trip_update
+protected     /sudarshan/options/api/chain                                              sudarshan_options.chain
+protected     /sudarshan/options/api/expiries                                           sudarshan_options.expiries
 protected     /sudarshan/portfolio/api/accounts                                         sudarshan_portfolio.account_create
 protected     /sudarshan/portfolio/api/accounts/<int:id>                                sudarshan_portfolio.account_update
 protected     /sudarshan/portfolio/api/activities/<int:id>                              sudarshan_portfolio.activity_delete
