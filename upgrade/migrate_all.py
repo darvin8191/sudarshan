@@ -108,6 +108,9 @@ REQUIRED_MIGRATIONS = frozenset(
         "migrate_strategy_module.py",
         "migrate_strategy_universe_tab.py",
         "migrate_sudarshan_risk.py",  # SUDARSHAN M5.13
+        # SUDARSHAN v0.5.2: a failed freeze-limit step rolls the install back instead of
+        # leaving limits the exchange rejects in place behind a "completed" deploy.
+        "migrate_qty_freeze_nov_2026.py",
     }
 )
 

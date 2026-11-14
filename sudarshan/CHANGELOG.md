@@ -61,8 +61,9 @@ phone check after this install, and its first Live trading day's checks on Monda
   shipped phrase is in this public repository. Only you type the phrase, and once the guard checks
   Live, /killswitch exit with it cancels your orders and exits every position.
 - **Check after the install (1 minute):** Freeze Quantities shows NIFTY 1800 and BANKNIFTY 900.
-  If it does not, the install rolled back (the database goes back as it was), so keep single NIFTY
-  orders within 27 lots and BANKNIFTY within 30 until it is installed. In Analyze mode, a 30-lot
+  If it does not, the install rolled back (the database goes back as it was, and the server's
+  Telegram notice says it rolled back), so keep single NIFTY orders within 27 lots and BANKNIFTY
+  within 30 until it is installed, and tell me. In Analyze mode, a 30-lot
   NIFTY scalping Close goes as 27 lots and 3.
 - **Publish a release prepared before this one only once its notes say it includes v0.5.2.** One
   that does not puts the October limits back when it installs.

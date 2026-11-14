@@ -209,3 +209,16 @@ def test_no_script_a_deploy_runs_raises_the_limits_again():
         if (UPGRADE / name).exists() and "qty_freeze" in (UPGRADE / name).read_text()
     ]
     assert writers == ["migrate_qty_freeze_nov_2026.py"]
+
+
+def test_a_failed_freeze_step_fails_the_deploy_so_it_rolls_back():
+    """migrate_all.py reports a non-zero exit of an ordinary script as a warning and exits 0, so
+    the deploy would record the release as installed with the October limits still in the table.
+    The November script is a required migration: its failure fails migrate_all.py, and the deploy
+    rolls back, as the v0.5.2 notes tell the owner."""
+    sys.path.insert(0, str(UPGRADE))
+    try:
+        import migrate_all  # noqa: PLC0415 - the runner is a script, not a package
+    finally:
+        sys.path.remove(str(UPGRADE))
+    assert "migrate_qty_freeze_nov_2026.py" in migrate_all.REQUIRED_MIGRATIONS
