@@ -197,6 +197,74 @@ def test_an_alert_fired_before_the_last_one_applied_is_not_sent(store, desk):
     assert len(desk.placed) == 1
 
 
+OPTION_FORM = {"kind": "option", "expiry_rule": "nearest", "strike_offset": "ATM"}
+
+
+@pytest.mark.parametrize("change", [{}, OPTION_FORM], ids=["future", "option"])
+@pytest.mark.parametrize("held", [False, True], ids=["flat", "holding"])
+def test_h2_one_alert_dated_ahead_does_not_stop_the_later_ones(store, desk, change, held):
+    """A flat alert dated a month ahead (a wrong time in the alert message, or anyone holding the
+    link) is applied as a late exit. The alerts after it are still applied, an exit included."""
+    strategy, token = make(store, **change)
+    if held:
+        assert send(store, desk, token, indicator_alert("long", NOW - 2)).verdict == "sent"
+    ahead = send(store, desk, token, indicator_alert("flat", NOW + 30 * 86_400))
+    assert ahead.verdict == ("sent" if held else "no_action")
+    state = store.state(strategy.id)
+    assert state.last_fired_s == int(NOW) and state.held_symbol is None  # clamped to the clock
+    said = lines(store, strategy.id)[-1]["sentence"]
+    assert "ahead of this server's clock" in said and " late" not in said
+    desk.clock = NOW + 60
+    assert send(store, desk, token, indicator_alert("long", desk.clock - 1)).verdict == "sent"
+    desk.clock = NOW + 3600
+    assert send(store, desk, token, indicator_alert("flat", desk.clock - 1)).verdict == "sent"
+    assert not any(desk.positions.values())
+    assert "out_of_order" not in [line["verdict"] for line in lines(store, strategy.id)]
+
+
+def test_h2_an_entry_dated_ahead_is_refused_and_leaves_no_mark(store, desk):
+    strategy, token = make(store)
+    got = send(store, desk, token, indicator_alert("long", NOW + 30 * 86_400))
+    assert got.verdict == "late" and "ahead of this server's clock" in got.sentence
+    assert store.state(strategy.id).last_fired_s is None and desk.placed == []
+    assert send(store, desk, token, indicator_alert("long", NOW - 1)).verdict == "sent"
+
+
+def test_h2_alerts_are_still_ordered_after_one_dated_ahead(store, desk):
+    """The clamp keeps the rule: an alert that fired before the newest one applied is refused."""
+    strategy, token = make(store)
+    send(store, desk, token, indicator_alert("flat", NOW + 600))
+    assert send(store, desk, token, indicator_alert("long", NOW - 1)).verdict == "out_of_order"
+    assert send(store, desk, token, indicator_alert("long", NOW)).verdict == "sent"
+
+
+@pytest.mark.parametrize("how", ["new link", "stop and start", "stop only"])
+def test_h2_new_link_and_stop_then_start_clear_the_mark(store, desk, how):
+    """A row written before the clamp, or a clock that was wrong for a while: the owner's New
+    link, or Stop and Start, begins the order of alerts again. A stop alone keeps it, so an old
+    exit still cannot close a newer entry while the strategy is left to its exits."""
+    strategy, token = make(store)
+    assert send(store, desk, token, indicator_alert("long", NOW - 1)).verdict == "sent"
+    store.write_state(strategy.id, {"last_fired_s": int(NOW) + 3})  # inside the slack: it counts
+    assert send(store, desk, token, indicator_alert("flat", NOW)).verdict == "out_of_order"
+    current = store.strategy(strategy.id)
+    if how == "new link":
+        _changed, token = control.new_link(
+            current.id, current.version, "the app", desk=desk, store=store
+        )
+    else:
+        current = control.switch(
+            current.id, current.version, m.EXITS_ONLY, "the app", desk=desk, store=store
+        )
+        if how == "stop and start":
+            control.switch(current.id, current.version, m.ACTIVE, "the app", desk=desk, store=store)
+    kept = how == "stop only"
+    assert store.state(strategy.id).last_fired_s == (int(NOW) + 3 if kept else None)
+    got = send(store, desk, token, indicator_alert("flat", NOW + 1))
+    assert got.verdict == ("out_of_order" if kept else "sent")
+    assert store.state(strategy.id).held_symbol == (NOV if kept else None)
+
+
 def test_stopped_for_new_entries_a_short_sends_nothing_and_a_flat_closes(store, desk):
     """8."""
     strategy, token = make(store)

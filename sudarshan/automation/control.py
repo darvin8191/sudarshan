@@ -119,9 +119,14 @@ def switch(
             if not desk.phrase_ok(phrase, f"start {before.name} Live", surface):
                 raise Refused(words.WRONG_PHRASE, 400)
         try:
-            return store.set_state(strategy_id, version, state, why)
+            changed = store.set_state(strategy_id, version, state, why)
         except Taken as taken:
             raise _taken(before.name, taken) from taken
+        if state == m.ACTIVE and before.state != m.ACTIVE:
+            # Stop and Start: the strategy begins again, and no earlier alert's time decides
+            # which alert is out of order.
+            store.clear_mark(strategy_id)
+        return changed
 
     changed = _write(strategy_id, change, store)
     _said(desk, changed, words.switched(changed.name, state, surface), "switched")
@@ -328,6 +333,7 @@ def new_link(
     def change() -> m.Strategy:
         strategy, token = store.replace_token(strategy_id, version)
         made.append(token)
+        store.clear_mark(strategy_id)  # a new link starts the order of alerts again
         return strategy
 
     changed = _write(strategy_id, change, store)

@@ -124,6 +124,11 @@ def late(name: str, target: int, late_s: int, last_target: int) -> str:
 
 
 def late_note(late_s: int) -> str:
+    if late_s < 0:
+        return (
+            f"(the alert carries a time {span(late_s)} ahead of this server's clock; check the "
+            "alert message in Alert set-up)"
+        )
     return f"(alert was {span(late_s)} late)"
 
 

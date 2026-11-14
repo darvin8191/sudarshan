@@ -9,7 +9,8 @@ The rules, in order:
 
 1. repeat        the alert's claim is already there: nothing is sent.
 2. out of order  it fired before the newest alert applied: nothing, an exit included (an old exit
-                 must not close a newer entry).
+                 must not close a newer entry). The mark it is judged against never runs ahead of
+                 the server's clock (``mark_of``), and one read ahead of it counts as unset.
 3. stopped       a Stopped strategy sends nothing; one stopped for new entries lets only a flat
                  target through.
 4. capped        the day's alerts are used up: the strategy takes no new entries today, and only a
@@ -78,7 +79,12 @@ def decide(
     target = target_of(strategy, alert)
     if claimed:
         return Decision("repeat", target)
-    if state.last_fired_s is not None and alert.fired_s < state.last_fired_s:
+    mark = state.last_fired_s
+    if mark is not None and mark > now_s + FUTURE_SLACK_S:
+        # A mark ahead of this server's clock is no mark: an alert's own time is never trusted
+        # ahead of now, or one wrongly dated alert would refuse every later one, exits included.
+        mark = None
+    if mark is not None and alert.fired_s < mark:
         return Decision("out_of_order", target)
     if strategy.state == m.STOPPED or (strategy.state == m.EXITS_ONLY and target != 0):
         return Decision("stopped", target, tell_stopped=state.told_stopped_day != day)
@@ -185,6 +191,14 @@ def read_answer(success: bool, response: object, status: int) -> tuple[str, bool
     return NOT_CONFIRMED, False, False
 
 
+def mark_of(alert: m.Alert, now_ms: int) -> int:
+    """The order mark an applied alert leaves (``auto_state.last_fired_s``): the second it fired,
+    and never later than the server's own clock. An alert dated ahead (a wrong time in the alert
+    message, or anyone holding the link) is stored as now, so the alerts after it are still
+    judged against a time that has passed."""
+    return min(alert.fired_s, now_ms // 1000)
+
+
 def state_after(
     verdict: str,
     flat_found: bool,
@@ -205,7 +219,7 @@ def state_after(
     """
     if verdict not in m.MOVED:
         return {}
-    values: dict[str, object] = {"last_target": target, "last_fired_s": alert.fired_s}
+    values: dict[str, object] = {"last_target": target, "last_fired_s": mark_of(alert, now_ms)}
     if target == 0:
         if verdict != NOT_CONFIRMED:
             values.update(held_exchange=None, held_symbol=None, held_side=None, held_since_ms=None)

@@ -179,32 +179,50 @@ def test_reading_the_smart_orders_answer(success, response, status, expect):
 
 
 ALERT = m.Alert(position="long", fired_s=500)
+AT = 502_000  # the server's clock when the answer came, two seconds after the alert fired
 
 
 @pytest.mark.parametrize("verdict", [v for v in m.VERDICTS if v not in m.MOVED])
 def test_the_state_stays_when_nothing_was_sent(verdict):
     """Mutation 12."""
-    assert rules.state_after(verdict, False, 1, ALERT, "NFO", "X", 9) == {}
+    assert rules.state_after(verdict, False, 1, ALERT, "NFO", "X", AT) == {}
 
 
 def test_the_state_after_an_order():
-    entry = rules.state_after("sent", False, 1, ALERT, "NFO", "NIFTY24NOV26FUT", 9)
+    entry = rules.state_after("sent", False, 1, ALERT, "NFO", "NIFTY24NOV26FUT", AT)
     assert entry == {
         "last_target": 1, "last_fired_s": 500, "held_exchange": "NFO",
-        "held_symbol": "NIFTY24NOV26FUT", "held_side": "long", "held_since_ms": 9,
+        "held_symbol": "NIFTY24NOV26FUT", "held_side": "long", "held_since_ms": AT,
     }  # fmt: skip
-    maybe = rules.state_after("not_confirmed", False, -1, ALERT, "NFO", "X", 9)
+    maybe = rules.state_after("not_confirmed", False, -1, ALERT, "NFO", "X", AT)
     assert maybe["held_side"] == "short"  # an entry that may have gone is held
     held = m.State(1, held_symbol="X", held_side="long", held_since_ms=3)
-    same = rules.state_after("no_action", False, 1, ALERT, "NFO", "X", 9, held)
+    same = rules.state_after("no_action", False, 1, ALERT, "NFO", "X", AT, held)
     assert same["held_since_ms"] == 3  # already there: since when is kept
-    closed = rules.state_after("sent", False, 0, ALERT, "NFO", "X", 9)
+    closed = rules.state_after("sent", False, 0, ALERT, "NFO", "X", AT)
     assert closed["held_symbol"] is None and closed["last_target"] == 0
-    assert rules.state_after("no_action", True, 0, ALERT, "NFO", "X", 9)["held_symbol"] is None
+    assert rules.state_after("no_action", True, 0, ALERT, "NFO", "X", AT)["held_symbol"] is None
     # an exit that is not confirmed keeps the held contract
-    assert rules.state_after("not_confirmed", False, 0, ALERT, "NFO", "X", 9) == {
+    assert rules.state_after("not_confirmed", False, 0, ALERT, "NFO", "X", AT) == {
         "last_target": 0, "last_fired_s": 500,
     }  # fmt: skip
+
+
+@pytest.mark.parametrize(
+    ("fired_s", "mark"), [(500, 500), (502, 502), (503, 502), (507, 502), (2_592_502, 502)]
+)
+def test_h2_the_mark_an_alert_leaves_never_runs_ahead_of_the_servers_clock(fired_s, mark):
+    alert = m.Alert(position="flat", fired_s=fired_s)
+    assert rules.mark_of(alert, AT) == mark
+    for verdict in sorted(m.MOVED):
+        assert rules.state_after(verdict, False, 0, alert, "NFO", "X", AT)["last_fired_s"] == mark
+    assert rules.state_after("sent", False, 1, alert, "NFO", "X", AT)["last_fired_s"] == mark
+
+
+def test_h2_a_flat_alert_dated_ahead_says_so_in_its_own_words():
+    assert "ahead of this server's clock" in words.late_note(-2_592_000)
+    assert "late" not in words.late_note(-2_592_000)
+    assert words.late_note(45) == "(alert was 45 s late)"
 
 
 # ---- sentences ----------------------------------------------------------------------------------

@@ -255,7 +255,7 @@ def plan(
         if steps.verdict == rules.NO_ACTION:
             # Nothing held and nothing to close: the state says flat. An option that expired
             # since is said first.
-            state_values.update(last_target=0, last_fired_s=alert.fired_s)
+            state_values.update(last_target=0, last_fired_s=rules.mark_of(alert, now_ms))
             said = " ".join([*notes, steps.sentence])
             return replace(steps, sentence=said, tell="expired" if notes else None, **common)
         return replace(steps, **common)

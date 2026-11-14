@@ -784,6 +784,119 @@
     "verdict": null,
     "target": 1
    }
+  },
+  {
+   "name": "H2: a mark 6 s ahead of this server is read as unset: a fresh long goes",
+   "strategy": {},
+   "state": {
+    "last_fired_s": 1794804316
+   },
+   "alert": {
+    "position": "long",
+    "fired_s": 1794804308
+   },
+   "now": 1794804310,
+   "day": "2026-11-16",
+   "claimed": false,
+   "waited": false,
+   "expect": {
+    "verdict": null,
+    "target": 1,
+    "late_s": null
+   }
+  },
+  {
+   "name": "H2: a mark 30 days ahead: a fresh flat goes",
+   "strategy": {},
+   "state": {
+    "last_fired_s": 1797396310,
+    "last_target": 1
+   },
+   "alert": {
+    "position": "flat",
+    "fired_s": 1794804309
+   },
+   "now": 1794804310,
+   "day": "2026-11-16",
+   "claimed": false,
+   "waited": false,
+   "expect": {
+    "verdict": null,
+    "target": 0
+   }
+  },
+  {
+   "name": "H2: a mark 30 days ahead: a fresh short goes",
+   "strategy": {},
+   "state": {
+    "last_fired_s": 1797396310
+   },
+   "alert": {
+    "position": "short",
+    "fired_s": 1794804310
+   },
+   "now": 1794804310,
+   "day": "2026-11-16",
+   "claimed": false,
+   "waited": false,
+   "expect": {
+    "verdict": null,
+    "target": -1
+   }
+  },
+  {
+   "name": "H2: a mark 5 s ahead (the slack) still orders the alerts",
+   "strategy": {},
+   "state": {
+    "last_fired_s": 1794804315
+   },
+   "alert": {
+    "position": "flat",
+    "fired_s": 1794804314
+   },
+   "now": 1794804310,
+   "day": "2026-11-16",
+   "claimed": false,
+   "waited": false,
+   "expect": {
+    "verdict": "out_of_order"
+   }
+  },
+  {
+   "name": "H2: a mark at now still orders the alerts",
+   "strategy": {},
+   "state": {
+    "last_fired_s": 1794804310
+   },
+   "alert": {
+    "position": "flat",
+    "fired_s": 1794804309
+   },
+   "now": 1794804310,
+   "day": "2026-11-16",
+   "claimed": false,
+   "waited": false,
+   "expect": {
+    "verdict": "out_of_order"
+   }
+  },
+  {
+   "name": "H2: 5 s ahead, flat: goes and is not late",
+   "strategy": {},
+   "state": {},
+   "alert": {
+    "position": "flat",
+    "fired_s": 1794804315
+   },
+   "now": 1794804310,
+   "day": "2026-11-16",
+   "claimed": false,
+   "waited": false,
+   "expect": {
+    "verdict": null,
+    "target": 0,
+    "late_s": null
+   }
   }
  ]
 }

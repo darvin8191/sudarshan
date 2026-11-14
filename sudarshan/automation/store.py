@@ -250,6 +250,11 @@ class AutomationStore:
         contract."""
         return self._write(strategy_id, version, {"state": state, "stopped_why": why})
 
+    def clear_mark(self, strategy_id: int) -> None:
+        """Forget the time of the newest alert applied: the next alert is judged on its own. The
+        owner's New link and Start do this, holding the strategy's lock."""
+        self.write_state(strategy_id, {"last_fired_s": None})
+
     def set_mode(self, strategy_id: int, version: int, mode: str) -> m.Strategy:
         return self._write(strategy_id, version, {"mode": mode})
 
