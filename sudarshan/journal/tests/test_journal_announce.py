@@ -137,7 +137,7 @@ def test_step_four_backfills_each_kept_report_as_announced_when_it_was_made(tmp_
             )
     opened = JournalStore(path, now=1)
     try:
-        assert opened.applied == [4]
+        assert opened.applied == [n for n, _ in migrations.STEPS if n > 3]
         got = opened.read(OWNER, lambda tx: [(r["kind"], r["announced_ms"], r["announced_partial"])
                                              for r in tx.rows("report", order="id")])  # fmt: skip
         assert got == [("monthly", 111, True), ("eod", 222, False), ("weekly", 333, False)]
