@@ -291,6 +291,57 @@ def test_in_the_sandbox_a_crossed_protect_is_refused_with_its_sentence(service, 
     assert body["message"].startswith("The last price is 1,239.00, already at or below 1,240.00")
 
 
+@pytest.mark.parametrize("analyze", [True, False], ids=["app in Analyze", "app Live"])
+def test_n4_a_change_the_sandbox_refuses_answers_with_the_sandboxs_sentence(
+    service, monkeypatch, analyze
+):
+    """At stage ``sandbox`` every Protect Change goes to the sandbox. One it refuses (the GTT
+    already triggered, or was cancelled) answers the sandbox's own sentence with its refusal
+    status; upstream's failure event was built with a field it does not have, and raised."""
+    import services.modify_gtt_order_service as modify
+    import services.sandbox_service as sandbox
+
+    published = []
+    monkeypatch.setattr(modify.bus, "publish", published.append)
+    monkeypatch.setenv(protect_flag.ENV, "sandbox")
+    service["analyze"] = analyze
+    refusal = {"status": "error", "message": "GTT is not active", "mode": "analyze"}
+    monkeypatch.setattr(
+        sandbox, "sandbox_modify_gtt_order", lambda trigger_id, data, key: (False, refusal, 400)
+    )
+    change = {**protect("falls", 1230.0), "trigger_id": "GTT-261116-0a1b2c3d"}
+    ok, body, status = service["modify"](
+        change, api_key="k" if analyze else None, auth_token="token", broker="upstox"
+    )
+    assert (ok, status) == (False, 400) and body["message"] == "GTT is not active"
+    assert service["broker"] == []
+    (event,) = published
+    assert (event.topic, event.mode, event.error_message, event.trigger_id) == (
+        "gtt.modify_failed", "analyze", "GTT is not active", "GTT-261116-0a1b2c3d",
+    )  # fmt: skip
+
+
+def test_n4_every_gtt_event_in_the_services_is_built_with_fields_it_has():
+    """The same slip anywhere else in the two services: each event call's keywords are fields of
+    the event it builds."""
+    import ast
+    import dataclasses
+
+    import events
+
+    for name in ("place_gtt_order_service.py", "modify_gtt_order_service.py"):
+        tree = ast.parse((Path(__file__).resolve().parents[3] / "services" / name).read_text())
+        seen = 0
+        for node in ast.walk(tree):
+            kind = getattr(events, getattr(getattr(node, "func", None), "id", ""), None)
+            if isinstance(node, ast.Call) and dataclasses.is_dataclass(kind):
+                known = {f.name for f in dataclasses.fields(kind)}
+                extra = {k.arg for k in node.keywords} - known
+                assert not extra, (name, node.lineno, kind.__name__, extra)
+                seen += 1
+        assert seen >= 4, name
+
+
 def test_the_book_rule_can_only_move_a_request_to_the_sandbox(monkeypatch):
     for stage, expect in (("sandbox", True), ("on", False), ("off", False), ("ON", False)):
         monkeypatch.setenv(protect_flag.ENV, stage)
