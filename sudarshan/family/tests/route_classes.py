@@ -746,6 +746,7 @@ protected     /sudarshan/journal/api/tags/<int:id>                              
 protected     /sudarshan/journal/api/trips                                              sudarshan_journal.trips
 protected     /sudarshan/journal/api/trips/<int:id>                                     sudarshan_journal.trip_get
 protected     /sudarshan/journal/api/trips/<int:id>                                     sudarshan_journal.trip_update
+protected     /sudarshan/options/api/chain                                              sudarshan_options.chain
 protected     /sudarshan/portfolio/api/accounts                                         sudarshan_portfolio.account_create
 protected     /sudarshan/portfolio/api/accounts/<int:id>                                sudarshan_portfolio.account_update
 protected     /sudarshan/portfolio/api/activities/<int:id>                              sudarshan_portfolio.activity_delete
