@@ -50,6 +50,8 @@ interface Snapshot {
  * since at the open the previous close becomes yesterday's; and when the page
  * comes back into view or the feed reconnects, if the last good read is over
  * ten minutes old. Never on a timer: the ticks keep the levels current.
+ * Never while the page is hidden either (SCR-F): a read asked for then is made
+ * once, when the page is shown.
  */
 export function useIndexSnapshot(
   apiKey: string | null,
@@ -64,6 +66,8 @@ export function useIndexSnapshot(
   const alive = useRef(true)
   const busy = useRef(false)
   const readAt = useRef<number | null>(null)
+  /** A read a hidden page was asked for, made when it is shown (SCR-F). */
+  const owed = useRef(false)
 
   useEffect(() => {
     alive.current = true
@@ -74,6 +78,12 @@ export function useIndexSnapshot(
 
   const load = useCallback(async () => {
     if (!apiKey || busy.current) return
+    // Nothing is read while the page is hidden: nobody is looking (SCR-F).
+    if (document.visibilityState === 'hidden') {
+      owed.current = true
+      return
+    }
+    owed.current = false
     busy.current = true
     const at = Date.now()
     const failed = () =>
@@ -127,11 +137,13 @@ export function useIndexSnapshot(
   // Back into view.
   useEffect(() => {
     const shown = () => {
-      if (document.visibilityState === 'visible') loadIfOld()
+      if (document.visibilityState !== 'visible') return
+      if (owed.current) load()
+      else loadIfOld()
     }
     document.addEventListener('visibilitychange', shown)
     return () => document.removeEventListener('visibilitychange', shown)
-  }, [loadIfOld])
+  }, [load, loadIfOld])
 
   return snapshot
 }
