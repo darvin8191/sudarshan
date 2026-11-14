@@ -32,7 +32,13 @@ const fakes = vi.hoisted(() => ({
     barAt: ReturnType<typeof vi.fn>
     barX: ReturnType<typeof vi.fn>
     priceAt: ReturnType<typeof vi.fn>
+    setOverlays: ReturnType<typeof vi.fn>
+    moveLines(ys: Array<{ id: string; y: number }>): void
   }>,
+  /** The books the chart's lines are read from (C5). */
+  positions: [] as unknown[],
+  orders: [] as unknown[],
+  alerts: [] as unknown[],
   config: { apiKey: 'test-key', wsUrl: 'ws://test.invalid' } as unknown,
   instrument: { name: 'STATE BANK OF INDIA', lotSize: 1, tickSize: 0.05 } as unknown,
   /** What the broker offers, as the terminal groups it (Upstox's set). */
@@ -116,10 +122,32 @@ vi.mock('./phoneChart', () => ({
     }))
     barX = vi.fn(() => 120)
     priceAt = vi.fn(() => fakes.heldPrice)
+    /** The lines the page laid over the chart (C5), and where the host says each stands. */
+    setOverlays = vi.fn()
+    private ys: Array<{ id: string; y: number }> = []
+    private readonly heard = new Set<() => void>()
+    overlayLayout = () => this.ys
+    onOverlayLayout = (listener: () => void) => {
+      this.heard.add(listener)
+      return () => this.heard.delete(listener)
+    }
+    moveLines(ys: Array<{ id: string; y: number }>) {
+      this.ys = ys
+      for (const listener of this.heard) listener()
+    }
     constructor(opts: unknown) {
       this.opts = opts
       fakes.charts.push(this as never)
     }
+  },
+}))
+vi.mock('@/api/trading', () => ({
+  tradingApi: {
+    getPositions: vi.fn(async () => ({ status: 'success', data: fakes.positions })),
+    getOrders: vi.fn(async () => ({
+      status: 'success',
+      data: { orders: fakes.orders, statistics: {} },
+    })),
   },
 }))
 vi.mock('./api', () => ({
@@ -204,7 +232,11 @@ const alerting = vi.hoisted(() => ({
 }))
 vi.mock('@/api/marketAlerts', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/api/marketAlerts')>()),
-  marketAlertsApi: { create: alerting.create, prefs: alerting.prefs },
+  marketAlertsApi: {
+    create: alerting.create,
+    prefs: alerting.prefs,
+    state: async () => ({ enabled: true, alerts: fakes.alerts }),
+  },
 }))
 vi.mock('@/utils/toast', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/utils/toast')>()),
@@ -340,6 +372,9 @@ beforeEach(() => {
   fakes.problems = []
   fakes.prevOi = null
   fakes.heldPrice = 814.35
+  fakes.positions = []
+  fakes.orders = []
+  fakes.alerts = []
   localStorage.clear()
   Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 })
   Object.defineProperty(window, 'innerHeight', { configurable: true, value: 844 })
@@ -1316,5 +1351,87 @@ describe('the phone on its side (C10)', () => {
     expect(buttons).toHaveLength(6)
     for (const button of buttons)
       expect(button.className, button.textContent ?? '').toMatch(/\b(min-)?h-12\b|\bsize-12\b/)
+  })
+})
+
+describe('the lines of the charted instrument (C5)', () => {
+  const HELD = {
+    symbol: 'SBIN',
+    exchange: 'NSE',
+    product: 'MIS',
+    quantity: 10,
+    average_price: 810,
+    ltp: 812,
+    pnl: 20,
+    pnlpercent: 0.25,
+  }
+  const STOP = {
+    symbol: 'SBIN',
+    exchange: 'NSE',
+    action: 'SELL',
+    quantity: 10,
+    price: 0,
+    trigger_price: 800,
+    pricetype: 'SL-M',
+    product: 'MIS',
+    orderid: 'A1',
+    order_status: 'trigger pending',
+    timestamp: '2026-11-16 10:41:51',
+  }
+
+  it('lays the position, its working order and its price alert over the chart, each with its words', async () => {
+    fakes.positions = [HELD, { ...HELD, symbol: 'INFY' }]
+    fakes.orders = [STOP, { ...STOP, orderid: 'A2', order_status: 'complete' }]
+    fakes.alerts = [
+      {
+        id: 7,
+        status: 'active',
+        kind: 'price',
+        symbol: 'SBIN',
+        exchange: 'NSE',
+        params: { op: 'at_or_above', level: '830' },
+      },
+    ]
+    await opened()
+    await waitFor(() =>
+      expect(
+        (chart().setOverlays.mock.lastCall?.[0] as { lines: Array<{ label: string }> }).lines.map(
+          (line) => line.label
+        )
+      ).toEqual(['Buy 10 @ 810.00', 'SELL 10 SL-M 800.00', 'Alert ≥ 830.00'])
+    )
+    act(() =>
+      chart().moveLines([
+        { id: 'position:MIS', y: 200 },
+        { id: 'order:A1:trigger', y: 300 },
+        { id: 'alert:7', y: 80 },
+      ])
+    )
+    const lines = within(screen.getByTestId('chart-lines'))
+    expect(lines.getByText('Buy 10 @ 810.00')).toBeVisible()
+    expect(lines.getByText('SELL 10 SL-M 800.00')).toBeVisible()
+    expect(lines.getByText('Alert ≥ 830.00')).toBeVisible()
+    // The position's P&L is the book's until a tick moves it, then moves with the tick.
+    const label = lines.getByText('Buy 10 @ 810.00').closest('[data-line]') as HTMLElement
+    expect(label).toHaveTextContent('+₹20.00')
+    act(() =>
+      chart().opts.callbacks.onTick({
+        ltp: 815,
+        time: null,
+        tradeTime: null,
+        at: Date.now() + 1000,
+        polled: false,
+      })
+    )
+    await waitFor(() => expect(label).toHaveTextContent('+₹50.00'))
+  })
+
+  it('reads no book for an index, and draws no line on it', async () => {
+    const { tradingApi } = await import('@/api/trading')
+    vi.mocked(tradingApi.getPositions).mockClear()
+    fakes.positions = [{ ...HELD, symbol: 'NIFTY', exchange: 'NSE_INDEX' }]
+    await opened('/chart/NSE_INDEX/NIFTY')
+    expect(tradingApi.getPositions).not.toHaveBeenCalled()
+    expect(screen.queryByTestId('chart-lines')).toBeNull()
   })
 })

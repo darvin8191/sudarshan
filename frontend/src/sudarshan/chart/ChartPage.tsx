@@ -74,6 +74,7 @@ import {
 import { DepthSheet, DepthStrip } from './DepthStrip'
 import { IndicatorSettingsSheet } from './IndicatorSettingsSheet'
 import { IndicatorSheet } from './IndicatorSheet'
+import { LineLabels } from './LineLabels'
 import { LongPress } from './longPress'
 import { isQuoteOnly, PhoneChart } from './phoneChart'
 import {
@@ -110,6 +111,7 @@ import { SidewaysStrip } from './SidewaysStrip'
 import { StudyLegend } from './StudyLegend'
 import { StyleSheet } from './StyleSheet'
 import { TimeframeSheet } from './TimeframeSheet'
+import { useChartBooks, useChartLines } from './useChartLines'
 import { usePhoneSideways } from './usePhoneLayout'
 import { useWakeLock } from './useWakeLock'
 
@@ -395,6 +397,26 @@ const ChartScreen = memo(function ChartScreen({
     setInspect(null)
     void owner.load(symbol, exchange, timeframe)
   }, [owner, symbol, exchange, timeframe])
+
+  // The instrument's position, working orders and price alerts, as lines (C5). The 45 s
+  // re-read of the books is held while the market is known to be shut.
+  const shut = useRef(false)
+  shut.current = status?.line.kind === 'closed'
+  const marketOpen = useCallback(() => (shut.current ? false : null), [])
+  const books = useChartBooks({
+    apiKey: config?.apiKey ?? null,
+    enabled: !quoteOnly,
+    marketOpen,
+  })
+  const drawn = useChartLines({
+    symbol,
+    exchange,
+    decimals: priceDp(info?.tickSize, 0),
+    books,
+  })
+  useEffect(() => {
+    owner?.setOverlays({ lines: drawn.lines })
+  }, [owner, drawn.lines])
 
   // Press and hold to read a candle.
   useEffect(() => {
@@ -705,6 +727,16 @@ const ChartScreen = memo(function ChartScreen({
             prices={prices}
             heldTime={inspect?.bar.time ?? null}
             below={inspect ? (heldOrder ? READOUT_WITH_ORDERS : READOUT) : 0}
+          />
+        )}
+        {owner && (
+          <LineLabels
+            owner={owner}
+            lines={drawn.lines}
+            more={drawn.more}
+            bookAt={books.bookAt}
+            prices={prices}
+            quiet={priceQuiet(status)}
           />
         )}
         {inspect && (
