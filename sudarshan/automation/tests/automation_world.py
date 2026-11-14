@@ -52,6 +52,9 @@ class FakeDesk:
         self.guard = "sandbox"
         self.key: str | None = API_KEY
         self.semi = False
+        self.kill_switch = False
+        self.phrase = "STOP"
+        self.phrases_asked: list[tuple[str, str]] = []
         self.positions: dict[tuple, int] = {}
         self.placed: list[dict[str, Any]] = []
         self.script: list[Any] = []  # answers to give next, before the book is asked
@@ -111,6 +114,18 @@ class FakeDesk:
 
     def semi_auto(self, api_key: str) -> bool:
         return self.semi
+
+    def kill_switch_on(self) -> bool:
+        return self.kill_switch
+
+    def phrase_ok(self, typed, asked: str, surface: str) -> bool:
+        self.phrases_asked.append((asked, surface))
+        return str(typed or "").strip().casefold() == self.phrase.casefold()
+
+    def others(self):
+        return [
+            {"kind": "flow", "name": "A flow", "on": True, "detail": "webhook on", "path": "/flow"}
+        ]
 
     # the sender
     def place(self, order: dict[str, Any], api_key: str, analyze: bool):
@@ -174,3 +189,66 @@ def strategy_alert(position: str, fired: float, *, before: str | None = None, or
 
 def indicator_alert(position: str, fired: float, **more) -> bytes:
     return json.dumps({"v": 1, "position": position, "fired": int(fired * 1000), **more}).encode()
+
+
+# ---- the owner's routes: an app of its own, with CSRF and sessions as OpenAlgo has them ----------
+
+OWNER = "owner"
+OWNER_PASSWORD = "Fake-Pass-123!"  # fake, for the throwaway test database only
+
+
+def make_app(*, rate_limits: bool = False):
+    """The real Automation blueprint on a minimal app."""
+    from flask import Flask
+    from flask_wtf.csrf import CSRFProtect, generate_csrf
+
+    import blueprints.sudarshan_automation as routes
+    from database import auth_db, user_db
+    from limiter import limiter
+
+    app = Flask("sudarshan-automation-tests")
+    app.secret_key = "test-only-secret-key-" + "5" * 32
+    app.config.update(
+        TESTING=True, WTF_CSRF_ENABLED=True, WTF_CSRF_TIME_LIMIT=None, RATELIMIT_ENABLED=rate_limits
+    )
+    app.csrf = CSRFProtect(app)
+    limiter.init_app(app)
+    if rate_limits:
+        limiter.reset()
+    app.register_blueprint(routes.sudarshan_automation_bp)
+
+    @app.route("/csrf-token-for-tests")
+    def csrf_token_for_tests():
+        return {"csrf_token": generate_csrf()}
+
+    @app.teardown_appcontext
+    def remove_sessions(exception=None):
+        auth_db.db_session.remove()
+        user_db.db_session.remove()
+
+    return app
+
+
+def fresh_owner() -> None:
+    """An empty users table with one owner, in the throwaway database."""
+    from database import auth_db, user_db
+
+    auth_db.Base.metadata.create_all(auth_db.engine)
+    user_db.Base.metadata.create_all(user_db.engine)
+    user_db.User.query.delete()
+    user_db.db_session.commit()
+    user_db.add_user(OWNER, "owner@example.invalid", OWNER_PASSWORD, is_admin=True)
+    user_db.db_session.remove()
+
+
+def login_session(client, username: str = OWNER) -> None:
+    now = datetime.now(IST)
+    with client.session_transaction() as session:
+        session["user"] = username
+        session["logged_in"] = True
+        session["login_time"] = now.isoformat()
+
+
+def csrf_headers(client) -> dict:
+    token = client.get("/csrf-token-for-tests").get_json()["csrf_token"]
+    return {"X-CSRFToken": token}

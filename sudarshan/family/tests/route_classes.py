@@ -707,6 +707,16 @@ protected     /sudarshan/alerts/api/prefs                                       
 protected     /sudarshan/alerts/api/prefs                                               sudarshan_alerts.set_prefs
 protected     /sudarshan/alerts/api/state                                               sudarshan_alerts.state
 protected     /sudarshan/alerts/api/test                                                sudarshan_alerts.send_test
+protected     /sudarshan/automation/api/alerts                                          sudarshan_automation_bp.api_alerts
+protected     /sudarshan/automation/api/check                                           sudarshan_automation_bp.api_check
+protected     /sudarshan/automation/api/create                                          sudarshan_automation_bp.api_create
+protected     /sudarshan/automation/api/list                                            sudarshan_automation_bp.api_list
+protected     /sudarshan/automation/api/mode                                            sudarshan_automation_bp.api_mode
+protected     /sudarshan/automation/api/one                                             sudarshan_automation_bp.api_one
+protected     /sudarshan/automation/api/others                                          sudarshan_automation_bp.api_others
+protected     /sudarshan/automation/api/state                                           sudarshan_automation_bp.api_state
+protected     /sudarshan/automation/api/token                                           sudarshan_automation_bp.api_token
+protected     /sudarshan/automation/api/update                                          sudarshan_automation_bp.api_update
 protected     /sudarshan/autologin/enabled                                              sudarshan_autologin.set_enabled
 protected     /sudarshan/autologin/pin                                                  sudarshan_autologin.clear_pin
 protected     /sudarshan/autologin/pin                                                  sudarshan_autologin.set_pin

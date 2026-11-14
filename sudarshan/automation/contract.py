@@ -137,9 +137,10 @@ ANSWERS = {
         "live_allowed": "boolean",
         "live_blocked_why": "string | null",
         "kill_switch_on": "boolean",
+        "notes": "string[]",  # sentences for the top of the page (a set-up fault the owner can fix)
         "strategies": "Strategy[]",
     },
-    "OneAnswer": {"status": "'success'", "strategy": "Strategy"},
+    "OneAnswer": {"status": "'success'", "strategy": "Strategy", "messages": "AlertMessages"},
     "CreateAnswer": {
         "status": "'success'",
         "strategy": "Strategy",

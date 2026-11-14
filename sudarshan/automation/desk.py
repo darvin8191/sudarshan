@@ -116,6 +116,89 @@ class Desk:
 
         return bool(should_route_to_pending(api_key, "smartorder"))
 
+    def kill_switch_on(self) -> bool:
+        try:
+            from sudarshan.guard import gate
+
+            state = gate.GATE.state()
+            return bool(state is not None and state.on)
+        except Exception:
+            logger.exception("Automation: the kill switch could not be read")
+            return False
+
+    def phrase_ok(self, typed: object, asked: str, surface: str) -> bool:
+        """Whether ``typed`` is the owner's confirm phrase (the risk layer's own, read fresh). A
+        wrong one goes to the risk layer's History, as its own routes write it: what was asked,
+        never what was typed. An empty box is asked for again and not recorded."""
+        from sudarshan.guard import killswitch
+        from sudarshan.guard import store as risk_store
+
+        try:
+            expected = risk_store.STORE.settings(fresh=True).confirm_phrase
+        except Exception:
+            logger.exception("Automation: the confirm phrase could not be read")
+            return False
+        if killswitch.phrase_matches(typed, expected):
+            return True
+        if str(typed or "").strip():
+            killswitch.note_phrase_refused(surface, self.owner() or "", asked)
+        return False
+
+    def others(self) -> list[dict[str, Any]]:
+        """The other automation on this server, read only: each reader is tried on its own."""
+        found: list[dict[str, Any]] = []
+        owner = self.owner() or ""
+        try:
+            from database import strategy_module_db
+
+            for row in strategy_module_db.list_strategies(owner):
+                detail = "webhook locked" if row.get("webhook_locked") else "webhook open"
+                detail += ", Live allowed" if row.get("live_enabled") else ", Sandbox only"
+                found.append(
+                    {
+                        "kind": "strategy",
+                        "name": str(row.get("name", "")),
+                        "on": row.get("status") == "running",
+                        "detail": detail,
+                        "path": "/strategy",
+                    }
+                )
+        except Exception:
+            logger.exception("Automation: the strategy module's list could not be read")
+        try:
+            from database import flow_db
+
+            for row in flow_db.get_all_workflows():
+                if getattr(row, "webhook_enabled", False):
+                    found.append(
+                        {
+                            "kind": "flow",
+                            "name": str(row.name),
+                            "on": bool(getattr(row, "is_active", False)),
+                            "detail": "webhook on",
+                            "path": "/flow",
+                        }
+                    )
+        except Exception:
+            logger.exception("Automation: the Flow list could not be read")
+        try:
+            from database import chartink_db
+
+            for row in chartink_db.get_all_strategies():
+                if getattr(row, "is_active", False):
+                    found.append(
+                        {
+                            "kind": "chartink",
+                            "name": str(row.name),
+                            "on": True,
+                            "detail": "active",
+                            "path": "/chartink",
+                        }
+                    )
+        except Exception:
+            logger.exception("Automation: the Chartink list could not be read")
+        return found
+
     # -- the one sender -------------------------------------------------------------------------
 
     def place(self, order: dict[str, Any], api_key: str, analyze: bool) -> tuple[bool, Any, int]:

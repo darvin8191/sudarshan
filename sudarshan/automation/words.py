@@ -346,6 +346,12 @@ LIVE_WAITS_FOR_STAGE = "Automation is in Sandbox only. Live comes in a later rel
 WRONG_PHRASE = "That is not your confirm phrase. Nothing was changed."
 CHANGED_ELSEWHERE = "This strategy was changed on another screen. Reload and try again."
 NOT_FOUND = "This strategy is no longer there. Reload the page."
+OWNER_ONLY = "Only the account owner can use Automation."
+TOO_MANY_REQUESTS = "Too many requests. Try again in a minute."
+SENDER_HIDDEN = (
+    "An alert reached this server without its sender's address, so it was refused. The server's "
+    "proxy setting needs a check: see The fence around the alert links in the README."
+)
 STAGE_WORDS = {
     "off": "Automation is switched off.",
     "sandbox": "Automation is in Sandbox only.",

@@ -16,10 +16,10 @@ from utils import runtime
 from utils.keyed_locks import LockBusy
 from utils.logging import get_logger
 
+from . import contract, flag, messages, words
 from . import model as m
-from . import words
 from .desk import Desk
-from .intake import LOCK_WAIT_S, LOCKS
+from .intake import LOCK_WAIT_S, LOCKS, local_sender_seen_ms
 from .store import AutomationStore, Conflict, Missing, Taken, shared
 
 logger = get_logger(__name__)
@@ -72,12 +72,26 @@ def _write(strategy_id: int, change, store: AutomationStore) -> m.Strategy:
         raise Refused(words.CHANGED_ELSEWHERE, 409) from moved
 
 
+def _live_gate(desk: Desk) -> str | None:
+    """Why a strategy cannot be Live now, or ``None``."""
+    if flag.stage() != flag.ON:
+        return words.LIVE_WAITS_FOR_STAGE
+    if desk.guard_stage() != "on":
+        return words.LIVE_WAITS_FOR_GUARD
+    return None
+
+
+def _taken(name: str, taken: Taken) -> Refused:
+    return Refused(words.contract_taken(name, taken.other or "another strategy"))
+
+
 def switch(
     strategy_id: int,
     version: int | None,
     state: str,
     surface: str,
     *,
+    phrase: object = None,
     desk: Desk | None = None,
     store: AutomationStore | None = None,
 ) -> m.Strategy:
@@ -85,7 +99,9 @@ def switch(
 
     Making a strategy Active (or leaving it to its exits) claims its contract and product in its
     mode: the claim is one write against a unique index, so of two strategies started together on
-    one contract exactly one is Active, and the other is refused with a sentence.
+    one contract exactly one is Active, and the other is refused with a sentence. Starting a Live
+    strategy needs automation and the risk guard both at ``on``, and the owner's confirm phrase;
+    stopping never needs anything.
     """
     if state not in m.STATES:
         raise Refused("Choose Active or Stopped.", 400)
@@ -96,16 +112,192 @@ def switch(
         before = store.strategy(strategy_id)
         if before is None:
             raise Missing(strategy_id)
+        if state == m.ACTIVE and before.mode == m.LIVE:
+            blocked = _live_gate(desk)
+            if blocked:
+                raise Refused(blocked)
+            if not desk.phrase_ok(phrase, f"start {before.name} Live", surface):
+                raise Refused(words.WRONG_PHRASE, 400)
         try:
             return store.set_state(strategy_id, version, state, why)
         except Taken as taken:
-            raise Refused(
-                words.contract_taken(before.name, taken.other or "another strategy")
-            ) from taken
+            raise _taken(before.name, taken) from taken
 
     changed = _write(strategy_id, change, store)
     _said(desk, changed, words.switched(changed.name, state, surface), "switched")
     return changed
+
+
+def set_mode(
+    strategy_id: int,
+    version: int,
+    mode: str,
+    surface: str,
+    *,
+    phrase: object = None,
+    desk: Desk | None = None,
+    store: AutomationStore | None = None,
+) -> m.Strategy:
+    """Sandbox or Live for one strategy. Holding the strategy's lock.
+
+    Live needs automation at ``on``, the risk guard at ``on`` and the confirm phrase. A strategy
+    holding a position cannot change its mode: it closes the position where it opened it.
+    """
+    if mode not in m.MODES:
+        raise Refused("Choose Sandbox or Live.", 400)
+    desk, store = desk or Desk(), store or shared()
+
+    def change() -> m.Strategy:
+        both = store.both(strategy_id)
+        if both is None:
+            raise Missing(strategy_id)
+        before, state = both
+        if before.mode == mode:
+            return before
+        if state.held_symbol:
+            raise Refused(
+                words.holds_position(
+                    before.name, state.held_symbol, state.held_side or "", before.mode
+                )
+            )
+        if mode == m.LIVE:
+            blocked = _live_gate(desk)
+            if blocked:
+                raise Refused(blocked)
+            if not desk.phrase_ok(phrase, f"set {before.name} to Live", surface):
+                raise Refused(words.WRONG_PHRASE, 400)
+        try:
+            return store.set_mode(strategy_id, version, mode)
+        except Taken as taken:
+            raise _taken(before.name, taken) from taken
+
+    changed = _write(strategy_id, change, store)
+    _said(desk, changed, words.mode_changed(changed.name, mode, surface), "mode")
+    return changed
+
+
+def create(
+    form: dict[str, Any], *, desk: Desk | None = None, store: AutomationStore | None = None
+) -> tuple[m.Strategy, str]:
+    """A new strategy, Sandbox and Stopped, and its link's token (given once)."""
+    desk, store = desk or Desk(), store or shared()
+    try:
+        columns = contract.clean(form)
+        if store.count() >= contract.STRATEGIES_MOST:
+            raise contract.Refused(f"You can have at most {contract.STRATEGIES_MOST} strategies.")
+        return store.create(columns)
+    except contract.Refused as refused:
+        raise Refused(str(refused), 400) from refused
+
+
+def update(
+    strategy_id: int,
+    version: int,
+    changes: dict[str, Any],
+    *,
+    desk: Desk | None = None,
+    store: AutomationStore | None = None,
+) -> m.Strategy:
+    """An edit. While the strategy holds a position only its name and its limits may change:
+    what it trades, its product and its size decide which position its exit closes."""
+    desk, store = desk or Desk(), store or shared()
+    if not isinstance(changes, dict) or not changes:
+        raise Refused("Nothing was changed.", 400)
+
+    def change() -> m.Strategy:
+        both = store.both(strategy_id)
+        if both is None:
+            raise Missing(strategy_id)
+        before, state = both
+        try:
+            unknown = set(changes) - contract.EDITABLE
+            if unknown:
+                raise contract.Refused("The strategy has a setting this release does not know.")
+            columns = contract.clean({**contract.form_of(before), **changes})
+        except contract.Refused as refused:
+            raise Refused(str(refused), 400) from refused
+        moved = {k for k, v in columns.items() if getattr(before, k) != v}
+        if state.held_symbol and moved - contract.HELD_EDITABLE:
+            raise Refused(
+                words.holds_position(
+                    before.name, state.held_symbol, state.held_side or "", before.mode
+                )
+            )
+        if not moved:
+            return before
+        try:
+            return store.update(strategy_id, version, {k: columns[k] for k in moved})
+        except Taken as taken:
+            raise _taken(before.name, taken) from taken
+        except contract.Refused as refused:
+            raise Refused(str(refused), 400) from refused
+
+    return _write(strategy_id, change, store)
+
+
+CLAIMED_STALE_MS = 180_000
+
+
+def alert_line(row: dict[str, Any], name: str, now_ms: int) -> dict[str, Any]:
+    """An alert's line for the page. A line still ``claimed`` minutes later was being handled
+    when the server stopped: its order is not confirmed."""
+    line = {key: row.get(key) for key in contract.ALERT}
+    if line["verdict"] == "claimed" and now_ms - (line["received_ms"] or 0) > CLAIMED_STALE_MS:
+        line["verdict"], line["sentence"] = "not_confirmed", words.interrupted(name)
+    return line
+
+
+def view(strategy: m.Strategy, store: AutomationStore, now_ms: int) -> dict[str, Any]:
+    """One strategy as the page reads it (contract.STRATEGY). Never a token or its hash."""
+    state = store.state(strategy.id)
+    last = store.last_alert(strategy.id)
+    out = {key: getattr(strategy, key) for key in contract.STRATEGY if hasattr(strategy, key)}
+    out.update(
+        trades=words.trades(strategy),
+        last_target=state.last_target,
+        held_exchange=state.held_exchange,
+        held_symbol=state.held_symbol,
+        held_side=state.held_side,
+        held_since_ms=state.held_since_ms,
+        alerts_today=state.alerts_today,
+        last_alert=alert_line(last, strategy.name, now_ms) if last else None,
+        sandbox_run=store.sandbox_run(strategy.id),
+    )
+    return out
+
+
+def listing(*, desk: Desk | None = None, store: AutomationStore | None = None) -> dict[str, Any]:
+    """Everything the page's first read needs (contract.ANSWERS["ListAnswer"])."""
+    desk, store = desk or Desk(), store or shared()
+    now_ms = int(desk.now() * 1000)
+    stage = flag.stage()
+    blocked = _live_gate(desk)
+    notes = []
+    if now_ms - local_sender_seen_ms() < 86_400_000 and local_sender_seen_ms():
+        notes.append(words.SENDER_HIDDEN)
+    return {
+        "status": "success",
+        "stage": stage,
+        "stage_words": words.STAGE_WORDS[stage],
+        "live_allowed": blocked is None,
+        "live_blocked_why": blocked,
+        "kill_switch_on": desk.kill_switch_on(),
+        "notes": notes,
+        "strategies": [view(strategy, store, now_ms) for strategy in store.strategies()],
+    }
+
+
+def created(
+    strategy: m.Strategy, token: str, store: AutomationStore, now_ms: int
+) -> dict[str, Any]:
+    """The answer that carries a link's token: the only one that ever does."""
+    return {
+        "status": "success",
+        "strategy": view(strategy, store, now_ms),
+        "token": token,
+        "link_path": f"{contract.PUBLIC_PREFIX}/{token}",
+        "messages": messages.for_strategy(strategy),
+    }
 
 
 def new_link(
