@@ -959,6 +959,65 @@ name this cannot be chosen, and the watch reads the certificate nginx serves fir
 
 Tests: `sudarshan/ops/tests/test_ops_nginx.py`.
 
+## The restart page (M1.17)
+
+While a deploy restarts the app, a page load is answered by nginx alone for some seconds, with
+its bare "502 Bad Gateway". SUDARSHAN ships one page for that moment,
+`frontend/public/images/restarting.html`: the name in both scripts, "SUDARSHAN is restarting. It
+is back within a minute.", and it tries the same address again by itself every 15 seconds. It is
+one plain file with no script, font or image of its own, because the app that would serve those
+is what is down.
+
+Two things show it:
+
+- **The family app, with no step of yours.** Its service worker keeps the page on the phone and
+  shows it when a page load is answered 502, 503 or 504. It applies from the release that carries
+  it, on phones that have opened the family view since.
+- **nginx, once you install the lines below.** They cover the owner's pages too, and a family
+  phone that has not kept the page yet. Until then nginx's own error page is shown, as today.
+
+As for the assistant's lines above: nginx is not SUDARSHAN's alone, the deploy tool never touches
+it, and these lines go into SUDARSHAN's own site and nowhere else. On the server, from the app
+folder (`cd /opt/sudarshan/apps/openalgo`):
+
+1. Copy the page and the lines into root's folders. nginx never reads the app folder itself.
+
+   ```
+   sudo install -D -m 644 -o root -g root frontend/public/images/restarting.html /usr/share/sudarshan/restarting.html
+   sudo install -m 644 -o root -g root sudarshan/ops/nginx/sudarshan-restart.conf /etc/nginx/snippets/sudarshan-restart.conf
+   ```
+
+2. Open SUDARSHAN's own site file in nginx and add one line inside its `server { }` block, above
+   its `location /` line (below the family view's and the assistant's `include` lines, if they are
+   there). Add it to no other site:
+
+   ```
+   include snippets/sudarshan-restart.conf;
+   ```
+
+   If that block already has an `error_page` line naming 502 or 504, take those two numbers out
+   of it first, or nginx keeps the older line.
+
+3. Test, then reload; never restart. If `nginx -t` reports an error, undo step 2 and stop.
+
+   ```
+   sudo nginx -t
+   sudo systemctl reload nginx
+   ```
+
+4. See it at the next deploy: open any page while the app restarts. It keeps the same address,
+   says it is restarting, and becomes the app by itself within about 15 seconds of it being back.
+
+What the lines do not change: the answer keeps its status (a restart never reads as success to
+TradingView or to the app's own order calls), anything the app itself answers is passed on as it
+is, and the family view's API keeps its own "did not answer" sentence. After a release that
+changes the page (the changelog says so), run the first `install` line of step 1 again; no reload
+is needed for the page alone. To take the lines out, remove the `include` line, then
+`sudo nginx -t` and `sudo systemctl reload nginx`.
+
+Tests: `sudarshan/ops/tests/test_ops_restart_page.py`, `frontend/src/sudarshan/pwa/restartPage.test.ts`
+and `frontend/src/sudarshan/pwa/sw.test.ts`.
+
 ## Secrets: where each one lives and what changing it breaks (M19.4)
 
 Every secret the server holds, in one place. Nothing here is a value: this table says where a
