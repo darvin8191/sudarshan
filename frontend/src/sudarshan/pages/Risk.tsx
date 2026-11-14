@@ -298,9 +298,20 @@ export default function Risk() {
   const { overlay, open: openSheet, close: closeSheet } = useBookOverlay()
   const sheet = overlay?.act === 'killswitch' ? 'on' : overlay?.act === 'resume' ? 'resume' : null
   // Not market data: read once and again on every change the server announces over Socket.IO
-  // (the report of an activation is announced when it is saved). Nothing polls.
-  const status = useQuery({ queryKey: RISK_STATUS_KEY, queryFn: riskApi.status })
-  const audit = useQuery({ queryKey: RISK_AUDIT_KEY, queryFn: () => riskApi.audit(50) })
+  // (the report of an activation is announced when it is saved). Nothing polls. A page come
+  // back to the front, or a connection come back, reads again whatever the age of what it
+  // holds: an announcement made meanwhile reached nobody (a sleeping phone's socket drops), and
+  // the switch or the day's lock must be right the moment the page is seen again.
+  const status = useQuery({
+    queryKey: RISK_STATUS_KEY,
+    queryFn: riskApi.status,
+    refetchOnWindowFocus: 'always',
+  })
+  const audit = useQuery({
+    queryKey: RISK_AUDIT_KEY,
+    queryFn: () => riskApi.audit(50),
+    refetchOnWindowFocus: 'always',
+  })
 
   // The banner's copy follows what this page read.
   useEffect(() => {
@@ -315,9 +326,11 @@ export default function Risk() {
     }
     socket.on('sudarshan_risk', onRisk)
     socket.on('sudarshan_risk_day', onRisk) // the daily loss limit locked the day
+    socket.on('connect', onRisk) // back after a drop: what was announced meanwhile went to nobody
     return () => {
       socket.off('sudarshan_risk', onRisk)
       socket.off('sudarshan_risk_day', onRisk)
+      socket.off('connect', onRisk)
     }
   }, [socket, queryClient])
 

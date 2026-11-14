@@ -1,0 +1,734 @@
+{
+ "gain": [
+  {
+   "id": "G1",
+   "note": "cost 20,000, 31 Jan 2018 value 35,000, sold for 50,000: max(20,000, min(35,000, 50,000)) = 35,000; gain 15,000 long-term at 12.5%",
+   "in": {
+    "disposal": {
+     "taxpayer": 1,
+     "account": 1,
+     "isin": "INE000A01010",
+     "sale_day": 20260812,
+     "seq": 1,
+     "qty_u": 100000000,
+     "sale_paise": 5000000,
+     "acquired_day": 20160310,
+     "cost_paise": 2000000,
+     "basis_qty_u": 100000000
+    },
+    "fmv": {
+     "INE000A01010": 3500000
+    }
+   },
+   "out": {
+    "status": "ok",
+    "gain_paise": 1500000,
+    "term": "long",
+    "rate_bp": 1250,
+    "cost_paise": 3500000,
+    "fmv_used": true
+   }
+  },
+  {
+   "id": "G2",
+   "note": "sold for 30,000: min(35,000, 30,000) = 30,000; max(20,000, 30,000) = 30,000; gain 0",
+   "in": {
+    "disposal": {
+     "taxpayer": 1,
+     "account": 1,
+     "isin": "INE000A01010",
+     "sale_day": 20260812,
+     "seq": 1,
+     "qty_u": 100000000,
+     "sale_paise": 3000000,
+     "acquired_day": 20160310,
+     "cost_paise": 2000000,
+     "basis_qty_u": 100000000
+    },
+    "fmv": {
+     "INE000A01010": 3500000
+    }
+   },
+   "out": {
+    "status": "ok",
+    "gain_paise": 0,
+    "term": "long",
+    "rate_bp": 1250,
+    "cost_paise": 3000000,
+    "fmv_used": true
+   }
+  },
+  {
+   "id": "G3",
+   "note": "sold for 15,000: min(35,000, 15,000) = 15,000; max(20,000, 15,000) = 20,000; loss 5,000",
+   "in": {
+    "disposal": {
+     "taxpayer": 1,
+     "account": 1,
+     "isin": "INE000A01010",
+     "sale_day": 20260812,
+     "seq": 1,
+     "qty_u": 100000000,
+     "sale_paise": 1500000,
+     "acquired_day": 20160310,
+     "cost_paise": 2000000,
+     "basis_qty_u": 100000000
+    },
+    "fmv": {
+     "INE000A01010": 3500000
+    }
+   },
+   "out": {
+    "status": "ok",
+    "gain_paise": -500000,
+    "term": "long",
+    "rate_bp": 1250,
+    "cost_paise": 2000000,
+    "fmv_used": false
+   }
+  },
+  {
+   "id": "G4",
+   "note": "2018 value 15,000, sold for 50,000: min = 15,000; max(20,000, 15,000) = 20,000; gain 30,000",
+   "in": {
+    "disposal": {
+     "taxpayer": 1,
+     "account": 1,
+     "isin": "INE000A01010",
+     "sale_day": 20260812,
+     "seq": 1,
+     "qty_u": 100000000,
+     "sale_paise": 5000000,
+     "acquired_day": 20160310,
+     "cost_paise": 2000000,
+     "basis_qty_u": 100000000
+    },
+    "fmv": {
+     "INE000A01010": 1500000
+    }
+   },
+   "out": {
+    "status": "ok",
+    "gain_paise": 3000000,
+    "term": "long",
+    "rate_bp": 1250,
+    "cost_paise": 2000000,
+    "fmv_used": false
+   }
+  },
+  {
+   "id": "G5",
+   "note": "the 2018 price is not known and the sale is above cost: left out of every total, never worked out as if the price were 0 (which would give 30,000)",
+   "in": {
+    "disposal": {
+     "taxpayer": 1,
+     "account": 1,
+     "isin": "INE000A01010",
+     "sale_day": 20260812,
+     "seq": 1,
+     "qty_u": 100000000,
+     "sale_paise": 5000000,
+     "acquired_day": 20160310,
+     "cost_paise": 2000000,
+     "basis_qty_u": 100000000
+    },
+    "fmv": {}
+   },
+   "out": {
+    "status": "needs_fmv",
+    "gain_paise": null,
+    "term": "long"
+   }
+  },
+  {
+   "id": "G5-below-cost",
+   "note": "the 2018 price is not known but the sale (15,000) is below cost (20,000): min(any value, 15,000) is at most 15,000, so the cost stays 20,000 whatever the price was: loss 5,000 without asking for it",
+   "in": {
+    "disposal": {
+     "taxpayer": 1,
+     "account": 1,
+     "isin": "INE000A01010",
+     "sale_day": 20260812,
+     "seq": 1,
+     "qty_u": 100000000,
+     "sale_paise": 1500000,
+     "acquired_day": 20160310,
+     "cost_paise": 2000000,
+     "basis_qty_u": 100000000
+    },
+    "fmv": {}
+   },
+   "out": {
+    "status": "ok",
+    "gain_paise": -500000,
+    "term": "long",
+    "rate_bp": 1250,
+    "cost_paise": 2000000,
+    "fmv_used": false
+   }
+  },
+  {
+   "id": "G6",
+   "note": "bought on 1 Feb 2018 itself: the 2018 rule does not apply whatever the table holds; gain 50,000 - 20,000 = 30,000",
+   "in": {
+    "disposal": {
+     "taxpayer": 1,
+     "account": 1,
+     "isin": "INE000A01010",
+     "sale_day": 20260812,
+     "seq": 1,
+     "qty_u": 100000000,
+     "sale_paise": 5000000,
+     "acquired_day": 20180201,
+     "cost_paise": 2000000,
+     "basis_qty_u": 100000000
+    },
+    "fmv": {
+     "INE000A01010": 3500000
+    }
+   },
+   "out": {
+    "status": "ok",
+    "gain_paise": 3000000,
+    "term": "long",
+    "rate_bp": 1250,
+    "cost_paise": 2000000,
+    "fmv_used": false
+   }
+  },
+  {
+   "id": "G7",
+   "note": "bought on 31 Jan 2018, the last day the rule covers: cost becomes 35,000, gain 15,000",
+   "in": {
+    "disposal": {
+     "taxpayer": 1,
+     "account": 1,
+     "isin": "INE000A01010",
+     "sale_day": 20260812,
+     "seq": 1,
+     "qty_u": 100000000,
+     "sale_paise": 5000000,
+     "acquired_day": 20180131,
+     "cost_paise": 2000000,
+     "basis_qty_u": 100000000
+    },
+    "fmv": {
+     "INE000A01010": 3500000
+    }
+   },
+   "out": {
+    "status": "ok",
+    "gain_paise": 1500000,
+    "term": "long",
+    "rate_bp": 1250,
+    "cost_paise": 3500000,
+    "fmv_used": true
+   }
+  },
+  {
+   "id": "G8-split-after-2018",
+   "note": "250 sold of a lot split 1 into 5 in 2020 (50 shares in 2018 terms), cost 10,000, sold for 25,000, 2018 price 350: value 350 x 50 = 17,500 (not 350 x 250); max(10,000, min(17,500, 25,000)) = 17,500; gain 7,500",
+   "in": {
+    "disposal": {
+     "taxpayer": 1,
+     "account": 1,
+     "isin": "INE000A01010",
+     "sale_day": 20260812,
+     "seq": 1,
+     "qty_u": 250000000,
+     "sale_paise": 2500000,
+     "acquired_day": 20160310,
+     "cost_paise": 1000000,
+     "basis_qty_u": 50000000
+    },
+    "fmv": {
+     "INE000A01010": 3500000
+    }
+   },
+   "out": {
+    "status": "ok",
+    "gain_paise": 750000,
+    "term": "long",
+    "rate_bp": 1250,
+    "cost_paise": 1750000,
+    "fmv_used": true
+   }
+  },
+  {
+   "id": "G9-no-record",
+   "note": "no purchase record: no cost, no gain, no term; in no total",
+   "in": {
+    "disposal": {
+     "taxpayer": 1,
+     "account": 1,
+     "isin": "INE000A01010",
+     "sale_day": 20260812,
+     "seq": 1,
+     "qty_u": 100000000,
+     "sale_paise": 5000000,
+     "acquired_day": null,
+     "cost_paise": null,
+     "basis_qty_u": 100000000
+    },
+    "fmv": {}
+   },
+   "out": {
+    "status": "unknown_cost",
+    "gain_paise": null,
+    "cost_paise": null,
+    "term": null,
+    "rate_bp": null
+   }
+  },
+  {
+   "id": "E1-allocated",
+   "note": "G1 with 120.50 of the year's non-STT charges allocated to this sale: 50,000 - 35,000 - 120.50 = 14,879.50",
+   "in": {
+    "disposal": {
+     "taxpayer": 1,
+     "account": 1,
+     "isin": "INE000A01010",
+     "sale_day": 20260812,
+     "seq": 1,
+     "qty_u": 100000000,
+     "sale_paise": 5000000,
+     "acquired_day": 20160310,
+     "cost_paise": 2000000,
+     "basis_qty_u": 100000000
+    },
+    "fmv": {
+     "INE000A01010": 3500000
+    },
+    "expenses_paise": 12050
+   },
+   "out": {
+    "status": "ok",
+    "gain_paise": 1487950,
+    "expenses_paise": 12050,
+    "allocated": true
+   }
+  },
+  {
+   "id": "E2-own-charges",
+   "note": "a ledger sale that carries its own non-STT charges of 3.00: 440 - 402 - 3 = 35",
+   "in": {
+    "disposal": {
+     "taxpayer": 1,
+     "account": 1,
+     "isin": "INE000A01010",
+     "sale_day": 20260812,
+     "seq": 1,
+     "qty_u": 4000000,
+     "sale_paise": 44000,
+     "acquired_day": 20250602,
+     "cost_paise": 40200,
+     "basis_qty_u": 4000000,
+     "charges_paise": 300
+    },
+    "fmv": {}
+   },
+   "out": {
+    "status": "ok",
+    "gain_paise": 3500,
+    "expenses_paise": 300,
+    "allocated": false
+   }
+  },
+  {
+   "id": "E3-none-known",
+   "note": "no charges known and none allocated: expenses 0, the larger gain",
+   "in": {
+    "disposal": {
+     "taxpayer": 1,
+     "account": 1,
+     "isin": "INE000A01010",
+     "sale_day": 20260812,
+     "seq": 1,
+     "qty_u": 4000000,
+     "sale_paise": 44000,
+     "acquired_day": 20250602,
+     "cost_paise": 40200,
+     "basis_qty_u": 4000000
+    },
+    "fmv": {}
+   },
+   "out": {
+    "status": "ok",
+    "gain_paise": 3800,
+    "expenses_paise": 0
+   }
+  }
+ ],
+ "term": [
+  {
+   "id": "H1-anniversary",
+   "note": "bought 20 Jun 2025, sold 20 Jun 2026: exactly 12 months, not more: short-term at 20%",
+   "in": {
+    "disposal": {
+     "taxpayer": 1,
+     "account": 1,
+     "isin": "INE000A01010",
+     "sale_day": 20260620,
+     "seq": 1,
+     "qty_u": 10000000,
+     "sale_paise": 150000,
+     "acquired_day": 20250620,
+     "cost_paise": 100000,
+     "basis_qty_u": 10000000
+    },
+    "fmv": {}
+   },
+   "out": {
+    "status": "ok",
+    "gain_paise": 50000,
+    "term": "short",
+    "rate_bp": 2000,
+    "cost_paise": 100000
+   }
+  },
+  {
+   "id": "H1-day-after",
+   "note": "sold 21 Jun 2026: more than 12 months: long-term at 12.5%",
+   "in": {
+    "disposal": {
+     "taxpayer": 1,
+     "account": 1,
+     "isin": "INE000A01010",
+     "sale_day": 20260621,
+     "seq": 1,
+     "qty_u": 10000000,
+     "sale_paise": 150000,
+     "acquired_day": 20250620,
+     "cost_paise": 100000,
+     "basis_qty_u": 10000000
+    },
+    "fmv": {}
+   },
+   "out": {
+    "status": "ok",
+    "gain_paise": 50000,
+    "term": "long",
+    "rate_bp": 1250,
+    "cost_paise": 100000
+   }
+  },
+  {
+   "id": "H1-day-before",
+   "note": "sold 19 Jun 2026: short-term",
+   "in": {
+    "disposal": {
+     "taxpayer": 1,
+     "account": 1,
+     "isin": "INE000A01010",
+     "sale_day": 20260619,
+     "seq": 1,
+     "qty_u": 10000000,
+     "sale_paise": 150000,
+     "acquired_day": 20250620,
+     "cost_paise": 100000,
+     "basis_qty_u": 10000000
+    },
+    "fmv": {}
+   },
+   "out": {
+    "status": "ok",
+    "gain_paise": 50000,
+    "term": "short",
+    "rate_bp": 2000,
+    "cost_paise": 100000
+   }
+  },
+  {
+   "id": "H1-leap-28-feb",
+   "note": "bought 29 Feb 2024; 2025 has no 29 Feb, so the anniversary is 28 Feb 2025: sold that day is short-term",
+   "in": {
+    "disposal": {
+     "taxpayer": 1,
+     "account": 1,
+     "isin": "INE000A01010",
+     "sale_day": 20250228,
+     "seq": 1,
+     "qty_u": 10000000,
+     "sale_paise": 150000,
+     "acquired_day": 20240229,
+     "cost_paise": 100000,
+     "basis_qty_u": 10000000
+    },
+    "fmv": {}
+   },
+   "out": {
+    "status": "ok",
+    "gain_paise": 50000,
+    "term": "short",
+    "rate_bp": 2000,
+    "cost_paise": 100000
+   }
+  },
+  {
+   "id": "H1-leap-1-mar",
+   "note": "bought 29 Feb 2024, sold 1 Mar 2025: long-term",
+   "in": {
+    "disposal": {
+     "taxpayer": 1,
+     "account": 1,
+     "isin": "INE000A01010",
+     "sale_day": 20250301,
+     "seq": 1,
+     "qty_u": 10000000,
+     "sale_paise": 150000,
+     "acquired_day": 20240229,
+     "cost_paise": 100000,
+     "basis_qty_u": 10000000
+    },
+    "fmv": {}
+   },
+   "out": {
+    "status": "ok",
+    "gain_paise": 50000,
+    "term": "long",
+    "rate_bp": 1250,
+    "cost_paise": 100000
+   }
+  },
+  {
+   "id": "H2-into-leap-28",
+   "note": "bought 28 Feb 2023, sold 28 Feb 2024: the anniversary: short-term at the 15% of that day",
+   "in": {
+    "disposal": {
+     "taxpayer": 1,
+     "account": 1,
+     "isin": "INE000A01010",
+     "sale_day": 20240228,
+     "seq": 1,
+     "qty_u": 10000000,
+     "sale_paise": 150000,
+     "acquired_day": 20230228,
+     "cost_paise": 100000,
+     "basis_qty_u": 10000000
+    },
+    "fmv": {}
+   },
+   "out": {
+    "status": "ok",
+    "gain_paise": 50000,
+    "term": "short",
+    "rate_bp": 1500,
+    "cost_paise": 100000
+   }
+  },
+  {
+   "id": "H2-into-leap-29",
+   "note": "bought 28 Feb 2023, sold 29 Feb 2024: a day past the anniversary: long-term at the 10% of that day",
+   "in": {
+    "disposal": {
+     "taxpayer": 1,
+     "account": 1,
+     "isin": "INE000A01010",
+     "sale_day": 20240229,
+     "seq": 1,
+     "qty_u": 10000000,
+     "sale_paise": 150000,
+     "acquired_day": 20230228,
+     "cost_paise": 100000,
+     "basis_qty_u": 10000000
+    },
+    "fmv": {}
+   },
+   "out": {
+    "status": "ok",
+    "gain_paise": 50000,
+    "term": "long",
+    "rate_bp": 1000,
+    "cost_paise": 100000
+   }
+  },
+  {
+   "id": "H3-year-end",
+   "note": "bought 1 Jan 2025, sold 31 Dec 2025: short-term",
+   "in": {
+    "disposal": {
+     "taxpayer": 1,
+     "account": 1,
+     "isin": "INE000A01010",
+     "sale_day": 20251231,
+     "seq": 1,
+     "qty_u": 10000000,
+     "sale_paise": 150000,
+     "acquired_day": 20250101,
+     "cost_paise": 100000,
+     "basis_qty_u": 10000000
+    },
+    "fmv": {}
+   },
+   "out": {
+    "status": "ok",
+    "gain_paise": 50000,
+    "term": "short",
+    "rate_bp": 2000,
+    "cost_paise": 100000
+   }
+  },
+  {
+   "id": "H4-other-reading",
+   "note": "the rule row's other reading (on_anniversary): bought 20 Jun 2025, sold 20 Jun 2026 is already long-term",
+   "in": {
+    "disposal": {
+     "taxpayer": 1,
+     "account": 1,
+     "isin": "INE000A01010",
+     "sale_day": 20260620,
+     "seq": 1,
+     "qty_u": 10000000,
+     "sale_paise": 150000,
+     "acquired_day": 20250620,
+     "cost_paise": 100000,
+     "basis_qty_u": 10000000
+    },
+    "fmv": {},
+    "settings": {
+     "lt_boundary": "on_anniversary"
+    }
+   },
+   "out": {
+    "status": "ok",
+    "gain_paise": 50000,
+    "term": "long",
+    "rate_bp": 1250,
+    "cost_paise": 100000
+   }
+  },
+  {
+   "id": "H4-other-reading-before",
+   "note": "on that reading 19 Jun 2026 is still short-term",
+   "in": {
+    "disposal": {
+     "taxpayer": 1,
+     "account": 1,
+     "isin": "INE000A01010",
+     "sale_day": 20260619,
+     "seq": 1,
+     "qty_u": 10000000,
+     "sale_paise": 150000,
+     "acquired_day": 20250620,
+     "cost_paise": 100000,
+     "basis_qty_u": 10000000
+    },
+    "fmv": {},
+    "settings": {
+     "lt_boundary": "on_anniversary"
+    }
+   },
+   "out": {
+    "status": "ok",
+    "gain_paise": 50000,
+    "term": "short",
+    "rate_bp": 2000,
+    "cost_paise": 100000
+   }
+  },
+  {
+   "id": "R1-last-old-day",
+   "note": "sold 22 Jul 2024, short-term: 15%",
+   "in": {
+    "disposal": {
+     "taxpayer": 1,
+     "account": 1,
+     "isin": "INE000A01010",
+     "sale_day": 20240722,
+     "seq": 1,
+     "qty_u": 10000000,
+     "sale_paise": 150000,
+     "acquired_day": 20240101,
+     "cost_paise": 100000,
+     "basis_qty_u": 10000000
+    },
+    "fmv": {}
+   },
+   "out": {
+    "status": "ok",
+    "gain_paise": 50000,
+    "term": "short",
+    "rate_bp": 1500,
+    "cost_paise": 100000
+   }
+  },
+  {
+   "id": "R1-first-new-day",
+   "note": "sold 23 Jul 2024, short-term: 20%, though bought before the change",
+   "in": {
+    "disposal": {
+     "taxpayer": 1,
+     "account": 1,
+     "isin": "INE000A01010",
+     "sale_day": 20240723,
+     "seq": 1,
+     "qty_u": 10000000,
+     "sale_paise": 150000,
+     "acquired_day": 20240101,
+     "cost_paise": 100000,
+     "basis_qty_u": 10000000
+    },
+    "fmv": {}
+   },
+   "out": {
+    "status": "ok",
+    "gain_paise": 50000,
+    "term": "short",
+    "rate_bp": 2000,
+    "cost_paise": 100000
+   }
+  },
+  {
+   "id": "R2-last-old-day",
+   "note": "sold 22 Jul 2024, long-term: 10%",
+   "in": {
+    "disposal": {
+     "taxpayer": 1,
+     "account": 1,
+     "isin": "INE000A01010",
+     "sale_day": 20240722,
+     "seq": 1,
+     "qty_u": 10000000,
+     "sale_paise": 150000,
+     "acquired_day": 20230101,
+     "cost_paise": 100000,
+     "basis_qty_u": 10000000
+    },
+    "fmv": {}
+   },
+   "out": {
+    "status": "ok",
+    "gain_paise": 50000,
+    "term": "long",
+    "rate_bp": 1000,
+    "cost_paise": 100000
+   }
+  },
+  {
+   "id": "R2-first-new-day",
+   "note": "sold 23 Jul 2024, long-term: 12.5%, though bought before the change",
+   "in": {
+    "disposal": {
+     "taxpayer": 1,
+     "account": 1,
+     "isin": "INE000A01010",
+     "sale_day": 20240723,
+     "seq": 1,
+     "qty_u": 10000000,
+     "sale_paise": 150000,
+     "acquired_day": 20230101,
+     "cost_paise": 100000,
+     "basis_qty_u": 10000000
+    },
+    "fmv": {}
+   },
+   "out": {
+    "status": "ok",
+    "gain_paise": 50000,
+    "term": "long",
+    "rate_bp": 1250,
+    "cost_paise": 100000
+   }
+  }
+ ]
+}

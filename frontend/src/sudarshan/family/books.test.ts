@@ -4,6 +4,7 @@ import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { PRICE_SCALE, QTY_SCALE } from '@/sudarshan/portfolio/types'
 import {
+  COST_FIELDS,
   FIELD_CATEGORY,
   holdingFigures,
   isOpen,
@@ -64,6 +65,72 @@ describe('FIELD_CATEGORY against the one privacy table', () => {
   })
 })
 
+describe('P&L hidden with quantities shown (review H1)', () => {
+  const table = JSON.parse(
+    readFileSync(resolve(__dirname, '../../../../sudarshan/family/privacy_fields.json'), 'utf8')
+  ) as { cost: string[] }
+  const inCost = (field: string) =>
+    table.cost.some((entry) =>
+      entry.startsWith('*') ? field.endsWith(entry.slice(1)) : entry === field
+    )
+
+  it.each(COST_FIELDS)('%s is in the table cost list, hidden whenever P&L is', (field) => {
+    expect(inCost(field)).toBe(true)
+  })
+  it.each(NEVER_HIDDEN)('%s is not in the cost list', (field) => {
+    expect(inCost(field)).toBe(false)
+  })
+
+  // The row as the server leaves it: the quantity and the live price, no P&L, no average.
+  const held: MaskedHolding = {
+    exchange: 'NSE',
+    symbol: 'SYNTH',
+    qty_u: qty(10),
+    last_price_u: px(105),
+    close_price_u: px(100),
+  }
+
+  it('a holding shows its quantity and price, and no value, invested, average or day change', () => {
+    const figures = holdingFigures(held, tick(106), READ_AT)
+    expect(figures.quantity).toBe(10)
+    expect(figures.ltp).toBe(106)
+    expect(figures.dayPercent).toBeCloseTo(6)
+    expect(figures.value).toBeUndefined()
+    expect(figures.invested).toBeUndefined()
+    expect(figures.today).toBeUndefined()
+    expect(figures.average).toBeUndefined()
+    expect(figures.pnl).toBeUndefined()
+    expect(figures.pnlPercent).toBeUndefined()
+  })
+
+  it('works nothing out from an average a server left in by mistake', () => {
+    const figures = holdingFigures({ ...held, avg_price_u: px(90) }, undefined, READ_AT)
+    expect(figures.invested).toBeUndefined()
+    expect(figures.average).toBeUndefined()
+    expect(figures.value).toBeUndefined()
+  })
+
+  it('a position shows its quantity and direction, and no average', () => {
+    const figures = positionFigures({ ...long, pnl_paise: undefined }, tick(106), READ_AT)
+    expect(figures.quantity).toBe(10)
+    expect(figures.side).toBe('long')
+    expect(figures.average).toBeUndefined()
+    expect(figures.pnl).toBeUndefined()
+  })
+
+  it('with P&L shown the same holding has all of them', () => {
+    const figures = holdingFigures(
+      { ...held, avg_price_u: px(90), pnl_paise: 15_000 },
+      undefined,
+      READ_AT
+    )
+    expect(figures.value).toBeCloseTo(1050)
+    expect(figures.invested).toBeCloseTo(900)
+    expect(figures.today).toBeCloseTo(50)
+    expect(figures.average).toBe(90)
+  })
+})
+
 describe('a hidden figure is never worked out and never 0', () => {
   it('a position with no quantity and no P&L has neither, and still has its price', () => {
     const masked: MaskedPosition = {
@@ -97,7 +164,8 @@ describe('a hidden figure is never worked out and never 0', () => {
     )
     expect(figures.pnl).toBeUndefined()
     const holding: MaskedHolding = { exchange: 'NSE', symbol: 'SYNTH', last_price_u: null }
-    const held = holdingFigures({ ...holding, qty_u: qty(2) }, undefined, READ_AT)
+    // P&L shown (H1: with it hidden, no value is worked out at all), the price not known yet
+    const held = holdingFigures({ ...holding, qty_u: qty(2), pnl_paise: 0 }, undefined, READ_AT)
     expect(held.value).toBeNull()
   })
 

@@ -4,7 +4,7 @@
 // with the time the service took it, and re-read when the service says it has (Y11), on return to
 // the page and every 45 s. A tab shared as restricted shows holdings and allocation by count only.
 import { useQuery } from '@tanstack/react-query'
-import { Lock } from 'lucide-react'
+import { Check, Lock } from 'lucide-react'
 import { useSearchParams } from 'react-router'
 import { cn } from '@/lib/utils'
 import { Hidden } from '@/sudarshan/books/cards/Hidden'
@@ -222,10 +222,14 @@ export default function FamilyPortfolio() {
                 aria-selected={selected}
                 onClick={() => setParams({ tab: String(tab.id) }, { replace: true })}
                 className={cn(
-                  'inline-flex min-h-12 shrink-0 items-center gap-1.5 rounded-xl border px-4 text-sm font-semibold outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                  selected ? 'border-[color:var(--family)] bg-accent' : 'bg-card hover:bg-accent'
+                  'inline-flex min-h-12 shrink-0 items-center gap-1.5 rounded-xl border px-4 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                  // never colour alone (rule 6): the selected tab is bold and carries a check
+                  selected
+                    ? 'border-[color:var(--family)] bg-accent font-bold'
+                    : 'bg-card font-semibold hover:bg-accent'
                 )}
               >
+                {selected && <Check aria-hidden="true" data-mark="selected" className="size-3.5" />}
                 {tab.level === 'restricted' && <Lock aria-hidden="true" className="size-3.5" />}
                 {tab.name}
                 {tab.level === 'restricted' && <span className="sr-only"> limited detail</span>}

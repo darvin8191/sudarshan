@@ -6,7 +6,10 @@ every request is checked here and forwarded, sealed, to the service's local API 
 (``sudarshan/portfolio/api.py``), whose answer comes back in the phone's envelope.
 
 Every route of the contract's table (``OPS`` in ``sudarshan/portfolio/core/kinds.py``) is built
-from that one table, so a later op never means editing this file. Each route is checked in this
+from that one table, so a later op never means editing this file. The table includes the owner's
+four sharing ops (``kinds.SHARING_OPS``: the tabs each family member is given and the member's
+privacy floor), which the owner's Family page sends: they are sealed under the owner's purpose like
+every other route, and this module holds no key of the family purpose. Each route is checked in this
 order: an OpenAlgo session (401), the owner himself (403 for any other session, reading included),
 CSRF on writes, and a limiter on the class of the op: reads 120 a minute, writes 60, imports 10,
 and a dry run of an entry 120 (it changes nothing and has a limiter of its own, cross-design R9).

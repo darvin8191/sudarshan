@@ -5,11 +5,15 @@
 ``serialize.hidden`` reads. The portfolio's own viewer mask (``serialize.VIEWER_MASK``) is built
 from it here, and the family service and the phone read the same file, so the lists cannot drift.
 
-Two rules live here and nowhere else:
+Three rules live here and nowhere else:
 
 * **P&L is offered only with quantities** (Y24). A P&L worked out between reads is
   (price - average) x quantity, so with quantities hidden it would give them away: ``qty`` hidden
   forces ``pnl`` hidden.
+* **P&L hidden hides what it is worked out from** (review H1). Beside a quantity, what a holding
+  cost (its average, the amount invested), what it is worth now, a trade's price and the day's
+  change in rupees give the P&L away by one subtraction. So while ``pnl`` is hidden, the table's
+  ``cost`` list is hidden too, whatever ``qty`` says.
 * **No row, no figures.** A member the owner has not set a privacy row for sees nothing but
   names, symbols and directions: every category is hidden until the owner chooses.
 
@@ -44,7 +48,19 @@ def load(path: Path = FIELDS_FILE) -> dict[str, frozenset[str]]:
     return out
 
 
+def load_cost(path: Path = FIELDS_FILE) -> frozenset[str]:
+    """The table's ``cost`` list: what is hidden whenever P&L is. Raises ValueError for a file
+    whose ``cost`` is missing or is not a non-empty list of field names."""
+    found = json.loads(path.read_text(encoding="utf-8")).get("cost")
+    if not isinstance(found, list) or not found:
+        raise ValueError(f"{path.name} must list the cost fields hidden with P&L")
+    if not all(isinstance(e, str) and e.strip("*") for e in found):
+        raise ValueError(f"{path.name}: cost has an entry that is not a field name")
+    return frozenset(found)
+
+
 CATEGORIES: dict[str, frozenset[str]] = load()
+COST: frozenset[str] = load_cost()
 
 
 def json_never_hidden(path: Path = FIELDS_FILE) -> tuple[str, ...]:
@@ -64,10 +80,14 @@ def hidden_categories(shown: Mapping[str, bool] | None) -> frozenset[str]:
 
 
 def mask_of(hidden: Iterable[str]) -> frozenset[str]:
-    """The fields the hidden categories remove, the union of their lists."""
+    """The fields the hidden categories remove: the union of their lists, and the ``cost`` list
+    whenever ``pnl`` is one of them."""
     out: set[str] = set()
-    for name in hidden:
+    names = set(hidden)
+    for name in names:
         out |= CATEGORIES[name]
+    if "pnl" in names:
+        out |= COST
     return frozenset(out)
 
 

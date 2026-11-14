@@ -3,11 +3,11 @@ import { Clock, Loader2, Play, TriangleAlert } from 'lucide-react'
 import { useEffect, useId, useRef, useState } from 'react'
 import { type KillSwitchState, type PreviewCounts, riskApi, type SwitchAnswer } from '@/api/risk'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { BottomSheet } from '@/sudarshan/watchlist/BottomSheet'
 import { showToast } from '@/utils/toast'
 import { noteKillSwitch } from './killSwitch'
+import { PhraseInput } from './PhraseInput'
 import { clockOf, RISK_AUDIT_KEY, RISK_STATUS_KEY, surfaceOf } from './parts'
 import { PHRASE_HINT } from './phrase'
 
@@ -161,16 +161,11 @@ export function ResumeSheet({
           <Label htmlFor={phraseId} className="text-[0.9375rem] font-semibold">
             Confirm phrase
           </Label>
-          <Input
+          <PhraseInput
             id={phraseId}
             value={phrase}
-            onChange={(event) => setPhrase(event.target.value)}
-            autoComplete="off"
-            autoCorrect="off"
-            autoCapitalize="characters"
-            spellCheck={false}
-            className="h-12 text-base"
-            aria-describedby={`${phraseId}-hint`}
+            onChange={setPhrase}
+            describedBy={`${phraseId}-hint`}
           />
           <p id={`${phraseId}-hint`} className="text-[0.8125rem] text-[color:var(--text-tertiary)]">
             {PHRASE_HINT}
