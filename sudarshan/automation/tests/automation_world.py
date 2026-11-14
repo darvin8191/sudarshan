@@ -72,6 +72,7 @@ class FakeDesk:
         self.lots = {"NIFTY": 65, "BANKNIFTY": 30}
         self.freeze = {"NIFTY": 1800, "BANKNIFTY": 600}
         self.loaded = True
+        self.holidays: set[str] = set()
         self.analyze_app = False
         self.guard = "sandbox"
         self.key: str | None = API_KEY
@@ -155,6 +156,9 @@ class FakeDesk:
     def phrase_ok(self, typed, asked: str, surface: str) -> bool:
         self.phrases_asked.append((asked, surface))
         return str(typed or "").strip().casefold() == self.phrase.casefold()
+
+    def trading_day(self, day) -> bool:
+        return day.weekday() < 5 and day.isoformat() not in self.holidays
 
     def others(self):
         return [

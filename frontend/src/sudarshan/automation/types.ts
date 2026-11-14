@@ -15,7 +15,21 @@ export type Kind = 'same' | 'future' | 'option'
 export type Direction = 'both' | 'long' | 'short'
 export type SizeMode = 'fixed' | 'scaled'
 export type Product = 'MIS' | 'NRML' | 'CNC'
-export type Verdict = 'sent' | 'no_action' | 'repeat' | 'out_of_order' | 'late' | 'stopped' | 'not_mapped' | 'not_sized' | 'mode_refused' | 'capped' | 'order_refused' | 'not_confirmed' | 'bad_message' | 'claimed'
+export type Verdict =
+  | 'sent'
+  | 'no_action'
+  | 'repeat'
+  | 'out_of_order'
+  | 'late'
+  | 'stopped'
+  | 'not_mapped'
+  | 'not_sized'
+  | 'mode_refused'
+  | 'capped'
+  | 'order_refused'
+  | 'not_confirmed'
+  | 'bad_message'
+  | 'claimed'
 
 export interface StrategyForm {
   name: string
@@ -74,6 +88,7 @@ export interface Strategy {
   alerts_today: number
   last_alert: AlertLine | null
   sandbox_run: SandboxRun
+  quiet_days: number
 }
 
 export interface AlertLine {

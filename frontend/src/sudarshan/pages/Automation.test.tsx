@@ -142,4 +142,39 @@ describe('the Automation page', () => {
     expect(screen.getByRole('link', { name: /Breakout/ })).toHaveAttribute('href', '/flow')
     await waitFor(() => expect(screen.getByText('On · webhook on')).toBeInTheDocument())
   })
+
+  it('says when an Active strategy has had no alert for three trading days, and not before (P4)', async () => {
+    api.list.mockResolvedValue(
+      listOf([
+        strategy({ id: 1, name: 'Quiet', quiet_days: 3 }),
+        strategy({ id: 2, name: 'Fresh', quiet_days: 2 }),
+        strategy({ id: 3, name: 'Off', state: 'stopped', quiet_days: 9 }),
+      ])
+    )
+    renderBook('/automation', <Automation />)
+    await settle()
+    const quiet = screen.getAllByTestId('auto-quiet')
+    expect(quiet).toHaveLength(1)
+    expect(screen.getByTestId('auto-card-1')).toContainElement(quiet[0])
+    expect(quiet[0]).toHaveTextContent('No alert for 3 trading days.')
+    expect(quiet[0].querySelector('svg')).not.toBeNull() // never colour alone
+  })
+
+  it('lists a Python script among the other automation, as a link to its page (P4)', async () => {
+    api.list.mockResolvedValue(listOf([]))
+    api.others.mockResolvedValue({
+      status: 'success',
+      others: [
+        { kind: 'python', name: 'ORB script', on: true, detail: 'running', path: '/python' },
+      ],
+    })
+    renderBook('/automation', <Automation />)
+    await settle()
+    const link = screen.getByRole('link', { name: /ORB script/ })
+    expect(link).toHaveAttribute('href', '/python')
+    expect(link).toHaveTextContent('On · running')
+    expect(
+      screen.getByText('The kill switch on the Risk page stops new orders from all of these.')
+    ).toBeInTheDocument()
+  })
 })

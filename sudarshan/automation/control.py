@@ -16,7 +16,7 @@ from utils import runtime
 from utils.keyed_locks import LockBusy
 from utils.logging import get_logger
 
-from . import contract, flag, messages, words
+from . import contract, flag, messages, rules, symbols, words
 from . import model as m
 from .desk import Desk
 from .intake import LOCK_WAIT_S, LOCKS, local_sender_seen_ms
@@ -247,10 +247,19 @@ def alert_line(row: dict[str, Any], name: str, now_ms: int) -> dict[str, Any]:
     return line
 
 
-def view(strategy: m.Strategy, store: AutomationStore, now_ms: int) -> dict[str, Any]:
-    """One strategy as the page reads it (contract.STRATEGY). Never a token or its hash."""
+def view(strategy: m.Strategy, store: AutomationStore, now_ms: int, trading=None) -> dict[str, Any]:
+    """One strategy as the page reads it (contract.STRATEGY). Never a token or its hash.
+
+    ``trading`` says whether the market traded on a date; with it, an Active strategy that has
+    had no alert since it last heard one (or since it was started) carries the trading days gone.
+    """
     state = store.state(strategy.id)
     last = store.last_alert(strategy.id)
+    quiet = 0
+    if trading is not None and strategy.state == m.ACTIVE:
+        heard = (last or {}).get("received_ms") or strategy.updated_ms or strategy.created_ms
+        if heard:
+            quiet = rules.quiet_days(symbols.india_date(heard), symbols.india_date(now_ms), trading)
     out = {key: getattr(strategy, key) for key in contract.STRATEGY if hasattr(strategy, key)}
     out.update(
         trades=words.trades(strategy),
@@ -262,6 +271,7 @@ def view(strategy: m.Strategy, store: AutomationStore, now_ms: int) -> dict[str,
         alerts_today=state.alerts_today,
         last_alert=alert_line(last, strategy.name, now_ms) if last else None,
         sandbox_run=store.sandbox_run(strategy.id),
+        quiet_days=quiet,
     )
     return out
 
@@ -283,7 +293,9 @@ def listing(*, desk: Desk | None = None, store: AutomationStore | None = None) -
         "live_blocked_why": blocked,
         "kill_switch_on": desk.kill_switch_on(),
         "notes": notes,
-        "strategies": [view(strategy, store, now_ms) for strategy in store.strategies()],
+        "strategies": [
+            view(strategy, store, now_ms, desk.trading_day) for strategy in store.strategies()
+        ],
     }
 
 

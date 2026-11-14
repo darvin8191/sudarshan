@@ -32,6 +32,9 @@ from . import flag
 from . import model as m
 
 FUTURE_SLACK_S = 5
+#: From this many trading days without an alert, an Active strategy's card says so: a halted or
+#: expired TradingView alert looks exactly like a quiet strategy.
+QUIET_DAYS = 3
 CHAIN_WAIT_S = 1.5
 CHAIN_STEP_S = 0.1
 
@@ -206,3 +209,20 @@ def state_after(
         held_since_ms=state.held_since_ms if same else now_ms,
     )
     return values
+
+
+def quiet_days(since_day: str, today: str, trading) -> int:
+    """Whole trading days that passed with no alert: the days after ``since_day`` and before
+    ``today`` (both YYYY-MM-DD in India) on which the market traded. ``trading`` answers that for
+    one date; the caller reads the calendar. Never more than 60 days are asked."""
+    from datetime import date, timedelta
+
+    try:
+        day, end = date.fromisoformat(since_day), date.fromisoformat(today)
+    except (TypeError, ValueError):
+        return 0
+    count, asked = 0, 0
+    while (day := day + timedelta(days=1)) < end and asked < 60:
+        asked += 1
+        count += 1 if trading(day) else 0
+    return count

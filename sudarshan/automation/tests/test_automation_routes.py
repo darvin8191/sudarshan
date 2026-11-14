@@ -540,3 +540,65 @@ def test_every_alert_message_given_to_the_owner_is_one_the_intake_reads(directio
     assert "f_msg" in given["indicator"] and "alert.freq_once_per_bar_close" in given["indicator"]
     everything = json.dumps(given)
     assert "apikey" not in everything.lower() and "sdt_" not in everything
+
+
+# ---- P4: the quiet line and the other automation --------------------------------------------------
+
+
+def test_quiet_days_counts_trading_days_between_and_never_today():
+    from datetime import date
+
+    from sudarshan.automation import rules
+
+    weekdays = lambda day: day.weekday() < 5  # noqa: E731
+    # Fri 13 Nov to Wed 18 Nov: Mon 16 and Tue 17 passed quietly
+    assert rules.quiet_days("2026-11-13", "2026-11-18", weekdays) == 2
+    assert rules.quiet_days("2026-11-13", "2026-11-19", weekdays) == 3
+    assert rules.quiet_days("2026-11-18", "2026-11-18", weekdays) == 0
+    assert rules.quiet_days("2026-11-18", "2026-11-19", weekdays) == 0  # heard yesterday
+    holiday = lambda day: weekdays(day) and day != date(2026, 11, 17)  # noqa: E731
+    assert rules.quiet_days("2026-11-13", "2026-11-19", holiday) == 2
+    assert rules.quiet_days("", "2026-11-19", weekdays) == 0
+    assert rules.quiet_days("2020-01-01", "2026-11-19", weekdays) <= 60  # bounded
+
+
+def test_an_active_strategy_says_how_many_trading_days_passed_with_no_alert(store, desk):
+    from sudarshan.automation import control, intake
+    from sudarshan.automation import model as m
+
+    strategy, token = store.create(contract.clean(FORM))
+    strategy = store.set_state(strategy.id, strategy.version, m.ACTIVE)
+    now_ms = int(desk.clock * 1000)  # Mon 16 Nov 2026
+    week = 7 * 86_400_000
+    seen = control.view(strategy, store, now_ms + week, desk.trading_day)
+    assert seen["quiet_days"] >= 4  # started and never heard from, a week on
+    assert control.view(strategy, store, now_ms + week)["quiet_days"] == 0  # no calendar, no claim
+    stopped = store.set_state(strategy.id, None, m.STOPPED)
+    assert control.view(stopped, store, now_ms + week, desk.trading_day)["quiet_days"] == 0
+    assert set(control.view(strategy, store, now_ms, desk.trading_day)) == set(contract.STRATEGY)
+    assert intake is not None
+
+
+def test_the_other_automation_lists_python_scripts_only_when_the_host_is_loaded(monkeypatch):
+    import sys
+    from types import SimpleNamespace
+
+    from sudarshan.automation.desk import Desk
+
+    monkeypatch.setattr(Desk, "owner", lambda self: "owner")
+    host = SimpleNamespace(
+        STRATEGY_CONFIGS={
+            "a": {"name": "ORB script", "is_running": True},
+            "b": {"name": "Evening scan", "is_scheduled": True},
+            "c": {"name": "Idle"},
+        }
+    )
+    monkeypatch.setitem(sys.modules, "blueprints.python_strategy", host)
+    python = [o for o in Desk().others() if o["kind"] == "python"]
+    assert python == [
+        {"kind": "python", "name": "ORB script", "on": True, "detail": "running", "path": "/python"},
+        {"kind": "python", "name": "Evening scan", "on": False, "detail": "scheduled", "path": "/python"},
+    ]  # fmt: skip
+    monkeypatch.delitem(sys.modules, "blueprints.python_strategy")
+    assert [o for o in Desk().others() if o["kind"] == "python"] == []
+    assert "blueprints.python_strategy" not in sys.modules  # a read never starts the scheduler

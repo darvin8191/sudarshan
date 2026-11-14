@@ -90,6 +90,9 @@ function Line({ label, children }: { label: string; children: ReactNode }) {
   )
 }
 
+/** From this many trading days without an alert, an Active strategy's card says so. */
+export const QUIET_DAYS = 3
+
 /** Today's closed trades of this strategy in its mode, as the journal counts them. */
 function DayLine({ strategy }: { strategy: Strategy }) {
   const day = useQuery({
@@ -156,6 +159,18 @@ export function StrategyCard({ strategy, actions }: { strategy: Strategy; action
           )}
         </Line>
       </dl>
+      {strategy.state === 'active' && strategy.quiet_days >= QUIET_DAYS && (
+        <p
+          data-testid="auto-quiet"
+          className="mt-2 flex items-start gap-1.5 text-[0.875rem] leading-snug font-semibold text-[color:var(--warning-text)]"
+        >
+          <TriangleAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+          <span>
+            No alert for {strategy.quiet_days} trading days. An alert that TradingView halted or
+            that expired looks exactly like a quiet strategy: check it in TradingView.
+          </span>
+        </p>
+      )}
       {actions}
     </li>
   )

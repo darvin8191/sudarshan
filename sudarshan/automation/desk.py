@@ -171,6 +171,17 @@ class Desk:
             killswitch.note_phrase_refused(surface, self.owner() or "", asked)
         return False
 
+    def trading_day(self, day) -> bool:
+        """Whether the cash market traded on a date, by OpenAlgo's calendar. When the calendar
+        cannot be read a weekday counts, which can only make the quiet line come a day early."""
+        try:
+            from database.market_calendar_db import is_market_holiday
+
+            return not is_market_holiday(day, "NSE")
+        except Exception:
+            logger.exception("Automation: the market calendar could not be read")
+            return day.weekday() < 5
+
     def others(self) -> list[dict[str, Any]]:
         """The other automation on this server, read only: each reader is tried on its own."""
         found: list[dict[str, Any]] = []
@@ -224,6 +235,25 @@ class Desk:
                     )
         except Exception:
             logger.exception("Automation: the Chartink list could not be read")
+        try:
+            import sys
+
+            # Only when the app has loaded the Python strategy host: importing it here would
+            # start its scheduler, and this is a read.
+            host = sys.modules.get("blueprints.python_strategy")
+            for config in list(getattr(host, "STRATEGY_CONFIGS", {}).values()):
+                if config.get("is_running") or config.get("is_scheduled"):
+                    found.append(
+                        {
+                            "kind": "python",
+                            "name": str(config.get("name") or "Unnamed"),
+                            "on": bool(config.get("is_running")),
+                            "detail": "running" if config.get("is_running") else "scheduled",
+                            "path": "/python",
+                        }
+                    )
+        except Exception:
+            logger.exception("Automation: the Python strategies could not be read")
         return found
 
     # -- the one sender -------------------------------------------------------------------------

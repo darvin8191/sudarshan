@@ -106,6 +106,8 @@ STRATEGY = {
     "alerts_today": "number",
     "last_alert": "AlertLine | null",
     "sandbox_run": "SandboxRun",
+    # trading days gone with no alert, for an Active strategy; 0 when it is not known
+    "quiet_days": "number",
 }
 ALERT = {
     "id": "number",
