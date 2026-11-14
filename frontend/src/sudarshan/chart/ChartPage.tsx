@@ -61,8 +61,19 @@ import {
   loadIntervals,
   searchSymbols,
 } from './api'
+import { IndicatorSheet } from './IndicatorSheet'
 import { LongPress } from './longPress'
 import { isQuoteOnly, PhoneChart } from './phoneChart'
+import {
+  COMMON_STUDIES,
+  hasOpenInterest,
+  type Placement,
+  REFUSED,
+  refusal,
+  type StudyEntry,
+  VOLUME_MA,
+  VOLUME_MA_LENGTH,
+} from './phoneStudies'
 import {
   type ChartStyle,
   chartPath,
@@ -71,15 +82,18 @@ import {
   readInterval,
   readLastInstrument,
   readPinned,
+  readStudies,
   readStyle,
   saveInterval,
   saveLastInstrument,
   savePinned,
+  saveStudies,
   saveStyle,
   styleOf,
   togglePin,
 } from './prefs'
 import { PriceStore, tickLine } from './prices'
+import { StudyLegend } from './StudyLegend'
 import { StyleSheet } from './StyleSheet'
 import { TimeframeSheet } from './TimeframeSheet'
 import { useWakeLock } from './useWakeLock'
@@ -145,6 +159,7 @@ type Sheet =
   | { sheet: 'alert' }
   | { sheet: 'timeframe' }
   | { sheet: 'style' }
+  | { sheet: 'indicators' }
 
 function readSheet(state: unknown): Sheet | null {
   if (!state || typeof state !== 'object') return null
@@ -153,6 +168,7 @@ function readSheet(state: unknown): Sheet | null {
   if (value.sheet === 'alert') return { sheet: 'alert' }
   if (value.sheet === 'timeframe') return { sheet: 'timeframe' }
   if (value.sheet === 'style') return { sheet: 'style' }
+  if (value.sheet === 'indicators') return { sheet: 'indicators' }
   if (value.sheet === 'ticket' && (value.side === 'BUY' || value.side === 'SELL'))
     return { sheet: 'ticket', side: value.side }
   return null
@@ -194,6 +210,11 @@ function PhoneChartScreen({
   /** The style as it is now, for a chart built later; a change reaches a built one through setStyle. */
   const styleNow = useRef(style)
   styleNow.current = style
+  /** The indicator set (C3), the phone's, for every instrument. */
+  const [studies, setStudies] = useState<StudyEntry[]>(() => readStudies())
+  const [studyNotice, setStudyNotice] = useState<string | null>(null)
+  /** Counts the chart's study changes, so the sheet and the legend read them again. */
+  const [, setStudyVersion] = useState(0)
   const [prevClose, setPrevClose] = useState<number | null>(null)
   const [status, setStatus] = useState<LiveStatus | null>(null)
   const [load, setLoad] = useState<ChartStateView | null>(null)
@@ -262,6 +283,7 @@ function PhoneChartScreen({
         onStatus: setStatus,
         onLoad: (state) => gate.set(state),
         onSessionClose: setClosesAt,
+        onStudies: () => setStudyVersion((n) => n + 1),
       },
     })
     setOwner(next)
@@ -279,6 +301,14 @@ function PhoneChartScreen({
   useEffect(() => {
     void owner?.setStyle(style)
   }, [owner, style])
+
+  useEffect(() => {
+    void owner?.setStudies(studies)
+  }, [owner, studies])
+
+  useEffect(() => {
+    if (owner && info) owner.setTick(info.tickSize)
+  }, [owner, info])
 
   useEffect(() => {
     if (!config) return
@@ -325,6 +355,26 @@ function PhoneChartScreen({
     setTimeframe(next)
     saveInterval(next)
   }, [])
+
+  /** Add a study to the set, unless five are there or it would make a third pane. */
+  const addStudy = useCallback(
+    (id: string) => {
+      const placementOf = (study: string): Placement =>
+        COMMON_STUDIES.find((c) => c.id === study)?.placement ??
+        owner?.studyFacts(study)?.placement ??
+        'onchart'
+      const refused = refusal(studies, placementOf(id), placementOf)
+      setStudyNotice(refused ? REFUSED[refused] : null)
+      if (refused) return
+      const next = [
+        ...studies,
+        { id, settings: id === VOLUME_MA ? { length: VOLUME_MA_LENGTH } : {} },
+      ]
+      setStudies(next)
+      saveStudies(next)
+    },
+    [owner, studies]
+  )
 
   /** The pinned timeframes the broker offers, which are the chips. */
   const chips = useMemo(
@@ -480,6 +530,23 @@ function PhoneChartScreen({
       <div className="flex shrink-0 gap-1 border-b bg-card px-1 py-0.5" data-testid="chart-tools">
         <button
           type="button"
+          onClick={() => {
+            setStudyNotice(null)
+            void owner?.loadIndicatorTier()
+            openSheet({ sheet: 'indicators' })
+          }}
+          className="inline-flex h-12 min-w-12 items-center gap-1.5 rounded-full px-3 text-sm font-semibold hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <ChromeIcon id="indicators" size={18} className="shrink-0" />
+          Indicators{' '}
+          {studies.length > 0 && (
+            <span className="rounded-full bg-[color:var(--primary-tint)] px-1.5 text-xs font-bold text-primary">
+              {studies.length} <span className="sr-only">on the chart</span>
+            </span>
+          )}
+        </button>
+        <button
+          type="button"
           onClick={() => openSheet({ sheet: 'style' })}
           aria-label={`Chart style: ${styleOf(style).label}`}
           className="inline-flex h-12 min-w-12 items-center gap-1.5 rounded-full px-3 text-sm font-semibold hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -496,6 +563,14 @@ function PhoneChartScreen({
         data-testid="chart-surface"
       >
         <div ref={host} className="absolute inset-0" />
+        {owner && studies.length > 0 && (
+          <StudyLegend
+            owner={owner}
+            prices={prices}
+            heldTime={inspect?.bar.time ?? null}
+            below={inspect ? 88 : 0}
+          />
+        )}
         {inspect && <Crosshair x={inspect.x} y={inspect.y} />}
         {inspect && (
           <Readout
@@ -591,6 +666,24 @@ function PhoneChartScreen({
           }}
         />
       )}
+      <IndicatorSheet
+        open={sheet?.sheet === 'indicators'}
+        onOpenChange={(open) => !open && closeSheet()}
+        set={studies}
+        rows={(owner?.legendRows() ?? []).map((row) => ({
+          name: `${row.title} ${row.params}`.trim(),
+          note: row.note,
+        }))}
+        derivative={hasOpenInterest(exchange)}
+        notice={studyNotice}
+        onAdd={addStudy}
+        onRemove={(index) => {
+          setStudyNotice(null)
+          const next = studies.filter((_, i) => i !== index)
+          setStudies(next)
+          saveStudies(next)
+        }}
+      />
       <StyleSheet
         open={sheet?.sheet === 'style'}
         onOpenChange={(open) => !open && closeSheet()}

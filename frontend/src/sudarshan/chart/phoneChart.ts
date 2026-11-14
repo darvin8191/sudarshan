@@ -20,6 +20,9 @@ import {
   createChart,
   DataLoadingController,
   type DataLoadingSnapshot,
+  getIndicator,
+  hasIndicator,
+  type IndicatorApi,
   InvalidationLevel,
   type LtpEvent,
   type MarketDepth,
@@ -56,6 +59,16 @@ import { applySessionHours, sessionCalendarFor } from '@/lib/trading/sessionHour
 import { volumePoint } from '@/lib/trading/volumeSettings'
 import type { AppMode } from '@/stores/themeStore'
 import { CHART_BRANDING } from '@/sudarshan/brand'
+import {
+  legendValues,
+  type Placement,
+  type StudyEntry,
+  type StudyFacts,
+  skipReason,
+  VOLUME_MA,
+  volumeMaAt,
+  volumeMaLength,
+} from './phoneStudies'
 import { type ChartStyle, DEFAULT_STYLE, intervalLabel, styleOf } from './prefs'
 
 /** How often the quote fallback asks while the stream is down: the same as /trading's. */
@@ -109,6 +122,21 @@ export interface PhoneChartCallbacks {
    * overshoots; null otherwise.
    */
   onSessionClose?(at: number | null): void
+  /** The studies on the chart changed: a set applied, a chart built anew (C3). */
+  onStudies?(): void
+}
+
+/** One legend line (C3): a study's name and settings, its values at a bar, or why it is not drawn. */
+export interface LegendRow {
+  key: string
+  title: string
+  params: string
+  values: string[]
+  /** The pane it belongs to, and that pane's top in the chart's pixels. */
+  pane: number
+  top: number
+  /** Why it is not drawn here, or why it could not compute. */
+  note?: string
 }
 
 export interface PhoneChartOptions {
@@ -129,6 +157,15 @@ export class PhoneChart {
   private style: ChartStyle
   /** The transform tier is loaded: Heikin Ashi can be drawn. */
   private transformReady = false
+  /** The indicator set (C3), applied to every chart this host builds. */
+  private studies: StudyEntry[] = []
+  /** Each entry's study on the current chart, or null where it is skipped or drawn by the host. */
+  private studyApis: Array<IndicatorApi | null> = []
+  private indicatorsReady = false
+  /** The volume pane's moving average, when the set holds one and the instrument trades. */
+  private volumeMa: SeriesApi | null = null
+  /** The instrument's tick, for the price axis and a study's `ctx.tickSize`. */
+  private tick = 0
   private chart: Chart
   private price: SeriesApi
   private volume: SeriesApi | null = null
@@ -272,6 +309,7 @@ export class PhoneChart {
     ;({ chart: this.chart, price: this.price, volume: this.volume } = this.buildChart(exchange))
     this.chart.setDataContext({ symbol, exchange, interval: this.interval })
     applySessionHours(this.chart, exchange, this.apiKey, this.stopsAt)
+    this.applyStudies()
     const to = this.frames.clock.nowSec()
     const request = {
       symbol,
@@ -342,6 +380,186 @@ export class PhoneChart {
     }
   }
 
+  /**
+   * The indicator set (C3), for this chart and every one built after it. The
+   * engine's indicator tier is imported the first time a set needs it.
+   */
+  async setStudies(set: readonly StudyEntry[]): Promise<void> {
+    if (this.destroyed) return
+    this.studies = set.map((entry) => ({ id: entry.id, settings: { ...entry.settings } }))
+    if (this.studies.some((entry) => entry.id !== VOLUME_MA)) await this.loadIndicatorTier()
+    if (this.destroyed) return
+    this.applyStudies()
+    if (this.bars.length) this.draw()
+  }
+
+  /** What the registry says of a study: its name and where it draws; null for an id it does not hold. */
+  studyFacts(id: string): StudyFacts | null {
+    if (id === VOLUME_MA) return { name: 'Volume moving average', placement: 'host' }
+    if (!this.indicatorsReady || !hasIndicator(id)) return null
+    const descriptor = getIndicator(id)
+    return {
+      name: descriptor.name,
+      placement: (descriptor.placement === 'pane' ? 'pane' : 'onchart') as Placement,
+      category: descriptor.category,
+    }
+  }
+
+  /** The tier the studies come from, imported once, when a set or the sheet first needs it. */
+  async loadIndicatorTier(): Promise<boolean> {
+    if (this.indicatorsReady) return true
+    try {
+      await import('openalgo-charts/indicators')
+      this.indicatorsReady = true
+    } catch {
+      /* the next set or sheet asks again */
+    }
+    return this.indicatorsReady
+  }
+
+  /** The instrument's tick: the price axis is written in it, and a study reads it. */
+  setTick(tick: number): void {
+    if (!(tick > 0) || this.destroyed) return
+    this.tick = tick
+    this.chart.setPriceScaleOptions({ minMove: tick })
+  }
+
+  /**
+   * One legend line per study (C3), with its values at the bar of `time`, or
+   * at the last bar. A study the engine could not compute says so in place of
+   * values.
+   */
+  legendRows(time: number | null = null): LegendRow[] {
+    const held = time === null ? -1 : this.bars.findIndex((bar) => bar.time === time)
+    const at = held >= 0 ? held : this.bars.length - 1
+    const decimals = (pane: number) => (pane === 0 ? Math.max(2, decimalsOf(this.tick)) : 2)
+    return this.studies.map((entry, i) => {
+      const api = this.studyApis[i]
+      const key = `${i}:${entry.id}`
+      if (entry.id === VOLUME_MA) {
+        const top = this.chart.plotRect(1)?.top ?? 0
+        if (!this.volumeMa)
+          return {
+            key,
+            title: 'Vol MA',
+            params: '',
+            values: [],
+            pane: 1,
+            top,
+            note: this.skip(entry) ?? undefined,
+          }
+        const length = volumeMaLength(entry.settings)
+        const value = volumeMaAt(
+          this.bars.map((b) => b.volume),
+          at,
+          length
+        )
+        const values = [value === null ? '—' : compactVolume.format(value)]
+        return { key, title: 'Vol MA', params: String(length), values, pane: 1, top }
+      }
+      if (!api)
+        return {
+          key,
+          title: this.studyFacts(entry.id)?.name ?? entry.id,
+          params: '',
+          values: [],
+          pane: 0,
+          top: 0,
+          note: this.skip(entry) ?? undefined,
+        }
+      const legend = api.legend()?.options()
+      const pane = api.paneIndex
+      const status = api.dataStatus()
+      const row: LegendRow = {
+        key,
+        title: legend?.title ?? api.name,
+        params: legend?.params ?? '',
+        values: [],
+        pane,
+        top: this.chart.plotRect(pane)?.top ?? 0,
+      }
+      if (status?.state === 'error') return { ...row, note: 'Could not compute on this chart.' }
+      const plots = getIndicator(entry.id).plots.map((plot) => plot.key)
+      return { ...row, values: legendValuesOf(api, plots, at, decimals(pane)) }
+    })
+  }
+
+  private skip(entry: StudyEntry): string | null {
+    const sym = this.sym
+    if (!sym) return null
+    return skipReason(entry.id, this.studyFacts(entry.id), {
+      exchange: sym.exchange,
+      traded: !isQuoteOnly(sym.exchange),
+    })
+  }
+
+  /**
+   * Put the set on the chart as it is now: what it had goes, each entry is
+   * added in order, and one that cannot run on this instrument is skipped. The
+   * engine's own legend rows and their small buttons stay hidden: the page
+   * draws the legend, and the sheet holds the settings and Remove.
+   */
+  private applyStudies(): void {
+    for (const api of this.studyApis) {
+      try {
+        if (api) this.chart.removeIndicator(api.id, { force: true })
+      } catch {
+        /* went with the chart it was on */
+      }
+    }
+    this.studyApis = []
+    this.volumeMa?.remove()
+    this.volumeMa = null
+    for (const entry of this.studies) {
+      if (entry.id === VOLUME_MA) {
+        if (this.volume && !this.volumeMa) this.volumeMa = this.addVolumeMa()
+        this.studyApis.push(null)
+        continue
+      }
+      if (!this.indicatorsReady || this.skip(entry)) {
+        this.studyApis.push(null)
+        continue
+      }
+      try {
+        const api = this.chart.addIndicator(entry.id, entry.settings, {
+          policy: { removable: false, configurable: false, movable: false },
+        })
+        api.legend()?.setOptions({ visible: false })
+        this.studyApis.push(api)
+      } catch {
+        this.studyApis.push(null)
+      }
+    }
+    this.weighPanes()
+    if (!this.destroyed) this.cb.onStudies?.()
+  }
+
+  /**
+   * Heights on a phone: the candles keep most of it, and a study's pane gets
+   * enough to read its line; the volume pane gives a little up when two study
+   * panes share the screen.
+   */
+  private weighPanes(): void {
+    const panes = this.chart.panes().length
+    const studyPanes = panes - (this.volume ? 2 : 1)
+    this.chart.setPaneWeight(0, 4)
+    if (this.volume) this.chart.setPaneWeight(1, studyPanes > 1 ? 0.8 : 1)
+    for (let p = this.volume ? 2 : 1; p < panes; p++) this.chart.setPaneWeight(p, 1.4)
+  }
+
+  private addVolumeMa(): SeriesApi {
+    return this.chart.addSeries('line', {
+      paneIndex: 1,
+      priceFormat: { type: 'volume' },
+      style: {
+        color: this.chart.theme().axisText,
+        lineWidth: 1.5,
+        priceLineVisible: false,
+        lastValueVisible: false,
+      },
+    })
+  }
+
   /** The chart built anew for a mode or a style, as /trading does, keeping the bars and the view. */
   private rebuild(): void {
     const sym = this.sym
@@ -355,6 +573,7 @@ export class PhoneChart {
       interval: this.interval,
     })
     applySessionHours(this.chart, sym.exchange, this.apiKey, this.stopsAt)
+    this.applyStudies()
     if (!this.bars.length) return
     this.draw()
     if (range) this.chart.setVisibleLogicalRange(range)
@@ -538,6 +757,10 @@ export class PhoneChart {
       shortcuts: false,
       ...chartMotionOptions(),
       branding: CHART_BRANDING,
+      // The page draws the studies' legend (C3): the engine's own rows are
+      // hidden, and its "Indicators" toggle, whose 16 px target sits where
+      // they would start, is placed above the pane, where it is not drawn.
+      legendOffset: { top: -10_000, left: 8 },
     })
     // Heikin Ashi waits for its tier; meanwhile, and should the tier not load, candles.
     const style = styleOf(this.style)
@@ -554,6 +777,10 @@ export class PhoneChart {
       chart.setPaneWeight(1, 1)
     }
     chart.setHistoryLoader(() => void this.loadOlder())
+    if (this.tick > 0) chart.setPriceScaleOptions({ minMove: this.tick })
+    // The studies of the chart before went with it.
+    this.studyApis = []
+    this.volumeMa = null
     return { chart, price, volume }
   }
 
@@ -575,6 +802,21 @@ export class PhoneChart {
         )
       )
     }
+    if (this.volumeMa) {
+      const length = this.volumeMaSetting()
+      const volumes = this.bars.map((bar) => bar.volume)
+      this.volumeMa.setData(
+        this.bars.map((bar, i) => {
+          const value = volumeMaAt(volumes, i, length)
+          return value === null ? { time: bar.time } : { time: bar.time, value }
+        })
+      )
+    }
+  }
+
+  private volumeMaSetting(): number {
+    const entry = this.studies.find((e) => e.id === VOLUME_MA)
+    return volumeMaLength(entry?.settings ?? {})
   }
 
   /** Draw one bar again where it already stands, the tail or just before it. */
@@ -586,6 +828,14 @@ export class PhoneChart {
     this.volume?.update(
       volumePoint(bar, this.bars[i - 1]?.close, bar.volume ?? 0, this.volumeStyle(), true)
     )
+    if (this.volumeMa) {
+      const value = volumeMaAt(
+        this.bars.map((b) => b.volume),
+        i,
+        this.volumeMaSetting()
+      )
+      this.volumeMa.update(value === null ? { time: bar.time } : { time: bar.time, value })
+    }
   }
 
   private applySnapshot(snapshot: DataLoadingSnapshot): void {
@@ -943,4 +1193,26 @@ function cleanError(error: unknown): string {
     .replace(/^(?:openalgo\s+)?history request failed\b(?:\s*\(\d+\))?:?\s*/i, '')
     .replace(/^\/api\/v1\/[\w/]+\s+failed\s+\(\d+\)(:\s*)?/i, '')
     .trim()
+}
+
+const compactVolume = new Intl.NumberFormat('en-IN', {
+  notation: 'compact',
+  maximumFractionDigits: 2,
+})
+
+/** Decimals a tick is written with: 0.05 has two. */
+function decimalsOf(tick: number): number {
+  if (!(tick > 0)) return 0
+  const text = String(tick)
+  return text.includes('.') ? text.split('.')[1].length : 0
+}
+
+/** A study's values at a bar, from its own columns, at a pane's decimals. */
+function legendValuesOf(
+  api: IndicatorApi,
+  plots: readonly string[],
+  index: number,
+  decimals: number
+) {
+  return legendValues(api.values(), plots, index, decimals)
 }

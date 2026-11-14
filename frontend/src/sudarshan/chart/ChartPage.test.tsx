@@ -22,6 +22,9 @@ const fakes = vi.hoisted(() => ({
     load: ReturnType<typeof vi.fn>
     setAppMode: ReturnType<typeof vi.fn>
     setStyle: ReturnType<typeof vi.fn>
+    setStudies: ReturnType<typeof vi.fn>
+    setTick: ReturnType<typeof vi.fn>
+    legendRows: ReturnType<typeof vi.fn>
     destroy: ReturnType<typeof vi.fn>
     barAt: ReturnType<typeof vi.fn>
     barX: ReturnType<typeof vi.fn>
@@ -47,6 +50,25 @@ vi.mock('./phoneChart', () => ({
     load = vi.fn(async () => {})
     setAppMode = vi.fn()
     setStyle = vi.fn(async () => {})
+    setStudies = vi.fn(async (_set: Array<{ id: string }>) => {})
+    setTick = vi.fn()
+    loadIndicatorTier = vi.fn(async () => true)
+    studyFacts = vi.fn((id: string) =>
+      id === 'rsi' || id === 'macd' || id === 'atr'
+        ? { name: id.toUpperCase(), placement: 'pane' }
+        : null
+    )
+    /** One line per study the page last set, as the host gives them. */
+    legendRows = vi.fn(() =>
+      (this.setStudies.mock.lastCall?.[0] ?? []).map((entry: { id: string }, i: number) => ({
+        key: `${i}:${entry.id}`,
+        title: entry.id.toUpperCase(),
+        params: '',
+        values: ['1.00'],
+        pane: 0,
+        top: 0,
+      }))
+    )
     destroy = vi.fn()
     barAt = vi.fn(() => ({
       time: Date.UTC(2026, 9, 20, 4, 45) / 1000,
@@ -418,6 +440,64 @@ describe('the phone chart page at 390 px', () => {
     await opened()
     expect(chart().opts.style).toBe('bar')
     expect(screen.getByRole('button', { name: 'Chart style: Bars' })).toBeVisible()
+  })
+
+  it('adds indicators from the common list, for every instrument, and draws a legend line for each', async () => {
+    await opened()
+    expect(chart().setStudies).toHaveBeenLastCalledWith([])
+    await userEvent.click(screen.getByRole('button', { name: 'Indicators' }))
+    const sheet = await screen.findByRole('dialog', { name: 'Indicators' })
+    expect(within(sheet).getByText('No indicators yet. Add one below.')).toBeVisible()
+    // Open interest is a contract's; a share does not offer it.
+    expect(within(sheet).queryByRole('button', { name: 'Add Open interest' })).toBeNull()
+    await userEvent.click(within(sheet).getByRole('button', { name: 'Add EMA' }))
+    await userEvent.click(within(sheet).getByRole('button', { name: 'Add RSI' }))
+    expect(chart().setStudies).toHaveBeenLastCalledWith([
+      { id: 'ema', settings: {} },
+      { id: 'rsi', settings: {} },
+    ])
+    expect(JSON.parse(localStorage.getItem('sudarshan-chart-studies') ?? '[]')).toEqual([
+      { id: 'ema', settings: {} },
+      { id: 'rsi', settings: {} },
+    ])
+    expect(within(sheet).getByRole('button', { name: 'Remove EMA' })).toBeVisible()
+    await userEvent.click(within(sheet).getByRole('button', { name: 'Close' }))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Indicators' })).toBeNull())
+    expect(screen.getByRole('button', { name: 'Indicators 2 on the chart' })).toBeVisible()
+    expect(screen.getByTestId('study-legend')).toHaveTextContent('EMA1.00')
+  })
+
+  it('refuses a sixth indicator and a third pane, each with a sentence, and removes one', async () => {
+    localStorage.setItem(
+      'sudarshan-chart-studies',
+      JSON.stringify(['ema', 'rsi', 'macd', 'sma', 'vwap'].map((id) => ({ id, settings: {} })))
+    )
+    await opened()
+    await userEvent.click(screen.getByRole('button', { name: 'Indicators 5 on the chart' }))
+    const sheet = await screen.findByRole('dialog', { name: 'Indicators' })
+    await userEvent.click(within(sheet).getByRole('button', { name: 'Add Supertrend' }))
+    expect(within(sheet).getByRole('status')).toHaveTextContent(
+      'Five indicators at most on the phone chart. Remove one, or open the full terminal.'
+    )
+    await userEvent.click(within(sheet).getByRole('button', { name: 'Remove SMA' }))
+    expect(within(sheet).queryByRole('status')).toBeNull()
+    await userEvent.click(within(sheet).getByRole('button', { name: 'Add ATR' }))
+    expect(within(sheet).getByRole('status')).toHaveTextContent(
+      'Two indicators with a pane of their own at most on the phone chart.'
+    )
+    expect(chart().setStudies).toHaveBeenLastCalledWith(
+      ['ema', 'rsi', 'macd', 'vwap'].map((id) => ({ id, settings: {} }))
+    )
+  })
+
+  it('offers open interest on a contract, and gives the chart its tick', async () => {
+    fakes.instrument = { name: 'NIFTY 27 OCT 25900 CE', lotSize: 65, tickSize: 0.05 }
+    await opened('/chart/NFO/NIFTY27OCT2625900CE')
+    await waitFor(() => expect(chart().setTick).toHaveBeenCalledWith(0.05))
+    await userEvent.click(screen.getByRole('button', { name: 'Indicators' }))
+    const sheet = await screen.findByRole('dialog', { name: 'Indicators' })
+    await userEvent.click(within(sheet).getByRole('button', { name: 'Add Open interest' }))
+    expect(chart().setStudies).toHaveBeenLastCalledWith([{ id: 'open-interest', settings: {} }])
   })
 
   it("opens the app's own order ticket from Buy and Sell, on Delivery for a share until a pick", async () => {

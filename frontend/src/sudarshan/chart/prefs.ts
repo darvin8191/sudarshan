@@ -9,6 +9,7 @@
  */
 import type { SeriesType } from 'openalgo-charts'
 import { intervalSeconds } from '@/lib/trading/intervals'
+import { MAX_STUDIES, type StudyEntry } from './phoneStudies'
 
 /** What is pinned on a phone that has pinned nothing yet, short to long. */
 export const DEFAULT_PINNED: readonly string[] = ['1m', '3m', '5m', '15m', '1h', 'D']
@@ -67,6 +68,7 @@ export function styleOf(style: ChartStyle): ChartStyleDef {
 const INTERVAL_KEY = 'sudarshan-chart-interval'
 const PINNED_KEY = 'sudarshan-chart-pinned'
 const STYLE_KEY = 'sudarshan-chart-style'
+const STUDIES_KEY = 'sudarshan-chart-studies'
 const LAST_KEY = 'sudarshan-chart-last'
 
 type Store = Pick<Storage, 'getItem' | 'setItem'>
@@ -196,6 +198,41 @@ export function readStyle(storage: Store | null = store()): ChartStyle {
 export function saveStyle(style: ChartStyle, storage: Store | null = store()): void {
   try {
     storage?.setItem(STYLE_KEY, style)
+  } catch {
+    /* kept for this visit only */
+  }
+}
+
+function isStudyEntry(value: unknown): value is StudyEntry {
+  if (!value || typeof value !== 'object') return false
+  const entry = value as { id?: unknown; settings?: unknown }
+  return (
+    typeof entry.id === 'string' &&
+    entry.id.length > 0 &&
+    entry.id.length <= 120 &&
+    !!entry.settings &&
+    typeof entry.settings === 'object' &&
+    !Array.isArray(entry.settings)
+  )
+}
+
+/** The indicator set on this device (C3), one for every instrument, five at most, in order. */
+export function readStudies(storage: Store | null = store()): StudyEntry[] {
+  try {
+    const saved: unknown = JSON.parse(storage?.getItem(STUDIES_KEY) ?? '[]')
+    if (!Array.isArray(saved)) return []
+    return saved
+      .filter(isStudyEntry)
+      .slice(0, MAX_STUDIES)
+      .map((entry) => ({ id: entry.id, settings: { ...entry.settings } }))
+  } catch {
+    return []
+  }
+}
+
+export function saveStudies(set: readonly StudyEntry[], storage: Store | null = store()): void {
+  try {
+    storage?.setItem(STUDIES_KEY, JSON.stringify(set))
   } catch {
     /* kept for this visit only */
   }

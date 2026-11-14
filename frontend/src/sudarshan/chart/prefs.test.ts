@@ -15,10 +15,12 @@ import {
   readInterval,
   readLastInstrument,
   readPinned,
+  readStudies,
   readStyle,
   saveInterval,
   saveLastInstrument,
   savePinned,
+  saveStudies,
   saveStyle,
   togglePin,
 } from './prefs'
@@ -153,6 +155,37 @@ describe('the chart style', () => {
     expect(readStyle()).toBe(DEFAULT_STYLE)
     expect(readStyle(refusing)).toBe(DEFAULT_STYLE)
     expect(() => saveStyle('line', refusing)).not.toThrow()
+  })
+})
+
+describe('the indicator set', () => {
+  it("is one set for every instrument, kept in order with each study's settings", () => {
+    expect(readStudies()).toEqual([])
+    const set = [
+      { id: 'ema', settings: { length: 21 } },
+      { id: 'rsi', settings: {} },
+    ]
+    saveStudies(set)
+    expect(readStudies()).toEqual(set)
+  })
+
+  it('keeps five at most and drops what is not a study, or a damaged entry', () => {
+    localStorage.setItem(
+      'sudarshan-chart-studies',
+      JSON.stringify([
+        { id: 'ema', settings: {} },
+        { id: '', settings: {} },
+        { id: 'sma' },
+        { id: 'rsi', settings: [] },
+        'macd',
+        ...['a', 'b', 'c', 'd', 'e'].map((id) => ({ id, settings: {} })),
+      ])
+    )
+    expect(readStudies().map((entry) => entry.id)).toEqual(['ema', 'a', 'b', 'c', 'd'])
+    localStorage.setItem('sudarshan-chart-studies', 'not json')
+    expect(readStudies()).toEqual([])
+    expect(readStudies(refusing)).toEqual([])
+    expect(() => saveStudies([], refusing)).not.toThrow()
   })
 })
 
