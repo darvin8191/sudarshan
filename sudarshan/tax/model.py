@@ -146,3 +146,31 @@ def build(cls, row: dict):
     if isinstance(values.get("instrument"), list):
         values["instrument"] = tuple(values["instrument"])
     return cls(**values)
+
+
+@dataclass(frozen=True, slots=True)
+class Gain:
+    """One disposal worked out. ``status`` is "ok", or why it is left out of every total:
+    "needs_fmv" (bought before 1 Feb 2018 and the price of 31 Jan 2018 is not known),
+    "unknown_cost" (no purchase record) or "exempt_buyback". ``receipt_paise`` is what was
+    received; ``sale_paise`` is the sale value used (nil for a buyback taxed as a dividend, whose
+    receipt is then ``dividend_paise``). ``allocated`` marks expenses shared out of a year's total."""
+
+    taxpayer: int
+    account: int
+    isin: str
+    acquired_day: int | None
+    sale_day: int
+    qty_u: int
+    receipt_paise: int
+    sale_paise: int
+    cost_paise: int | None
+    expenses_paise: int
+    gain_paise: int | None
+    term: str | None
+    rate_bp: int | None
+    status: str = "ok"
+    fmv_used: bool = False
+    allocated: bool = False
+    buyback: str | None = None
+    dividend_paise: int = 0
