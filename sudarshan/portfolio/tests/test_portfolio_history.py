@@ -43,10 +43,13 @@ from sudarshan.portfolio.core.days import from_date
 from sudarshan.portfolio.core.history import (
     Benchmark,
     Daily,
+    IndexStats,
     Quotes,
     SeriesPoint,
     benchmark,
     daily,
+    day_returns,
+    index_stats,
     price_on,
     report,
 )
@@ -58,6 +61,7 @@ from sudarshan.portfolio.core.performance import (
     by_financial_year,
     flows_of,
     income_report,
+    periods,
     summary,
     totals,
     twr,
@@ -408,10 +412,22 @@ def report_of(case):
     )
 
 
+SAME_MONEY = tuple(Benchmark("nifty50", "NIFTY 50", None, None, None, False, []).as_dict())
+
+
+def same_money(figures):
+    """Each ``BenchmarkFigure`` cut down to what ``benchmark`` gives (the statistics beside it,
+    M7.31, are checked in test_portfolio_index_stats.py)."""
+    return [{key: each[key] for key in SAME_MONEY} for each in figures]
+
+
 @pytest.mark.parametrize("case", FILE["reports"], ids=lambda case: case["id"])
 def test_a_report_is_the_vectors(case):
     got = report_of(case)
     for key, want in case["expect"].items():
+        if key == "benchmarks":  # the same-money figures; the statistics have their own vectors
+            assert same_money(got[key]) == want
+            continue
         assert got[key] == want, key
     day = case["valuation_day"]
     ledger = replayed(case["entries"], day)
@@ -428,9 +444,9 @@ def test_the_report_has_the_members_and_the_order_the_phone_reads():
     found = interfaces(TYPES_TS.read_text(encoding="utf-8"))
     case = FILE["reports"][0]
     assert list(report_of(case)) == members(found["PerformanceReport"])
-    assert list(Benchmark("nifty50", "NIFTY 50", None, None, None, False, []).as_dict()) == members(
-        found["BenchmarkFigure"]
-    )
+    same_money = Benchmark("nifty50", "NIFTY 50", None, None, None, False, []).as_dict()
+    assert [*same_money, *IndexStats().as_dict()] == members(found["BenchmarkFigure"])
+    assert list(report_of(case)["benchmarks"][0]) == members(found["BenchmarkFigure"])
     assert list(SeriesPoint(20260105, 1, 2).as_dict()) == members(found["SeriesPoint"])
     assert list(SeriesPoint(20260105, 1, 2)._fields) == members(found["SeriesPoint"])
 
@@ -468,8 +484,10 @@ def test_the_arithmetic_context_of_the_process_changes_nothing():
         for case in cases:
             assert bench_of(case).as_dict() == case["expect"], case["id"]
         for case in FILE["reports"]:
+            got = report_of(case)
             for key, want in case["expect"].items():
-                assert report_of(case)[key] == want, (case["id"], key)
+                found = same_money(got[key]) if key == "benchmarks" else got[key]
+                assert found == want, (case["id"], key)
 
 
 def test_the_sentences_a_trader_reads_are_in_words_py():
@@ -1139,14 +1157,24 @@ def test_the_report_of_a_random_tab_is_its_parts():
         assert got["by_fy"] == [fy.as_dict() for fy in by_financial_year(ledger)]
         assert got["income"] == income_report(ledger, last_day)
         assert [each["benchmark"] for each in got["benchmarks"]] == list(kinds.BENCHMARKS)
+        moves = day_returns(periods(days.points, days.opening_paise), holidays)
         for each in got["benchmarks"]:
             name = each["benchmark"]
-            assert (
-                each
-                == benchmark(
-                    name, flows, index.get(name, ()), last_day, (now or {}).get(name), days.span()
-                ).as_dict()
+            same = benchmark(
+                name, flows, index.get(name, ()), last_day, (now or {}).get(name), days.span()
             )
+            figures = index_stats(
+                name,
+                moves,
+                index.get(name, ()),
+                last_day,
+                got["twr"]["pct"],
+                same.twr_pct,
+                holidays,
+            )
+            assert each == {**same.as_dict(), **figures.as_dict()}
+            assert 0 <= each["stat_days"] <= kinds.STAT_DAYS
+            assert (each["beta"] is None) or each["stat_days"] >= kinds.STAT_MIN_DAYS
         no_float(got)
         checked += bool(flows)
     assert checked >= 40

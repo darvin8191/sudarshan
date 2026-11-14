@@ -234,8 +234,18 @@ async def test_the_phase_hides_nothing_a_family_screen_shows_today(rig):
         status, body = await rig.family("7", op, **args)
         assert status == 200, (op, body)
         keys(body["data"])
+        if op == "performance":
+            body_of_performance = body["data"]
     added = frozenset((*V3_PNL, *V3_QTY))
-    assert {key for key in seen if serialize.hidden(key, added)} == set()
+    # The one thing of the phase a family screen may carry (design p7 section 10): the benchmark
+    # statistics, which sit inside ``benchmarks`` and so show only where the member's P&L does.
+    assert {key for key in seen if serialize.hidden(key, added)} == set(BENCHMARK_STATS)
+    for each in body_of_performance["benchmarks"]:
+        assert set(BENCHMARK_STATS) < set(each)
+    assert not set(BENCHMARK_STATS) & (set(body_of_performance) | set(body_of_performance["twr"]))
+
+
+BENCHMARK_STATS = ("beta", "correlation", "stat_days", "stat_note")
 
 
 # ---- the table and the list ----------------------------------------------------------------------
