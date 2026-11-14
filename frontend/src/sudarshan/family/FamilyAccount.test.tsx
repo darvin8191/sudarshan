@@ -436,7 +436,12 @@ describe('Settings', () => {
     const again = (await screen.findAllByRole('listitem')).find(
       (item) => item.getAttribute('data-device') === 'dev-other'
     ) as HTMLElement
+    // Review L1 (v0.12.0): one tap sent it. It asks now; fails on the old row.
     await user.click(within(again).getByRole('button', { name: /Sign out/ }))
+    expect(router.calls.some((call) => call.method === 'DELETE')).toBe(false)
+    const ask = within(again).getByRole('alertdialog')
+    expect(ask.textContent).toContain('Sign that device out?')
+    await user.click(within(ask).getByRole('button', { name: 'Sign out' }))
     await waitFor(() => expect(router.calls.some((call) => call.method === 'DELETE')).toBe(true))
     expect(router.calls.find((call) => call.method === 'DELETE')?.url).toBe(
       '/family/api/devices/dev-other'
@@ -454,8 +459,26 @@ describe('Settings', () => {
     // review M1: a sign-out by the member's own tap leaves the sign-in page no reason to give
     window.localStorage.setItem('sd-family-was-in', '1')
     await user.click(within(mine).getByRole('button', { name: /Sign out/ }))
+    const ask = within(mine).getByRole('alertdialog')
+    expect(ask.textContent).toContain('Sign out of this phone?')
+    expect(where.path).toBe('/family/settings')
+    await user.click(within(ask).getByRole('button', { name: 'Sign out' }))
     await waitFor(() => expect(where.path).toBe('/family/login'))
     expect(window.localStorage.getItem('sd-family-was-in')).toBeNull()
+  })
+
+  it('stays signed in when the member answers Stay signed in', async () => {
+    const router = service()
+    const user = userEvent.setup()
+    mountFamily('/family/settings', <FamilySettings />, '/family/settings')
+    const mine = (await screen.findAllByRole('listitem')).find(
+      (item) => item.getAttribute('data-device') === 'dev-this'
+    ) as HTMLElement
+    await user.click(within(mine).getByRole('button', { name: /Sign out/ }))
+    await user.click(within(mine).getByRole('button', { name: 'Stay signed in' }))
+    expect(within(mine).queryByRole('alertdialog')).toBeNull()
+    expect(router.calls.some((call) => call.method === 'DELETE')).toBe(false)
+    expect(where.path).toBe('/family/settings')
   })
 
   it('asks before Sign out everywhere, then leaves', async () => {

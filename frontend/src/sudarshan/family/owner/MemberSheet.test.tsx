@@ -35,6 +35,7 @@ import {
   REMOVE_ASK,
   RESET_ASK,
   SIGN_OUT_ASK,
+  SUSPEND_ASK,
   UNLOCK_LINE,
   UNLOCKED,
 } from './MemberSheet'
@@ -447,6 +448,7 @@ describe('the request id', () => {
     )
     const { spy } = mount()
     await userEvent.click(screen.getByRole('button', { name: 'Suspend' }))
+    await userEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Suspend' }))
     const said = await screen.findByText(/^Not confirmed/)
     expect(said.textContent).not.toMatch(/fail/i)
     expect(spy).toHaveBeenCalled() // the members are read again to see what happened
@@ -594,8 +596,24 @@ describe('Suspend and Resume', () => {
     const { unmount } = render(<div />)
     unmount()
     mount()
+    // Review L1 (v0.12.0): one tap sent it, with no question. Fails on the old sheet.
     await userEvent.click(screen.getByRole('button', { name: 'Suspend' }))
+    expect(api.memberStatus).not.toHaveBeenCalled()
+    const ask = screen.getByRole('alertdialog')
+    expect(ask.textContent).toContain(SUSPEND_ASK)
+    await userEvent.click(within(ask).getByRole('button', { name: 'Suspend' }))
+    expect(api.memberStatus).toHaveBeenCalledTimes(1)
     expect(api.memberStatus).toHaveBeenCalledWith({ id: 1, version: 3, status: 'suspended' })
+  })
+
+  it('keeps the member signed in when the owner answers Keep', async () => {
+    mount()
+    await userEvent.click(screen.getByRole('button', { name: 'Suspend' }))
+    await userEvent.click(
+      within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Keep' })
+    )
+    expect(screen.queryByRole('alertdialog')).toBeNull()
+    expect(api.memberStatus).not.toHaveBeenCalled()
   })
 
   it('offers Resume for a suspended member', async () => {

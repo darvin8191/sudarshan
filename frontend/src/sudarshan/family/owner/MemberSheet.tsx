@@ -60,6 +60,8 @@ import {
   whenOf,
 } from './words'
 
+export const SUSPEND_ASK =
+  'Suspend this member? Every device of theirs is signed out at once, and they cannot sign in until you resume them.'
 export const REMOVE_ASK =
   'Remove this member? Their devices are signed out and their Telegram unlinked. The audit record stays.'
 export const RESET_ASK =
@@ -112,7 +114,12 @@ const LANGUAGES: ReadonlyArray<{ value: Language; label: string }> = [
   { value: 'gu', label: 'ગુજરાતી' },
 ]
 
-type Asking = { kind: 'remove' } | { kind: 'reset' } | { kind: 'device'; id: string } | null
+type Asking =
+  | { kind: 'remove' }
+  | { kind: 'reset' }
+  | { kind: 'suspend' }
+  | { kind: 'device'; id: string }
+  | null
 
 function sameRole(a: Role): Privacy {
   return { ...PRIVACY_DEFAULTS[a] }
@@ -578,6 +585,7 @@ export function MemberSheet({
         () => (status === 'suspended' ? 'Suspended. They are signed out.' : 'Resumed.')
       )
       .then((done) => {
+        setAsking(null)
         if (done) void reread()
       })
   }
@@ -728,12 +736,22 @@ export function MemberSheet({
                     variant="outline"
                     className="h-12 justify-start"
                     disabled={once.pending}
-                    onClick={() => suspend('suspended')}
+                    onClick={() => setAsking({ kind: 'suspend' })}
                   >
                     <CirclePause aria-hidden="true" className="size-4" />
                     Suspend
                   </Button>
                 )}
+                {/* Review L1 (v0.12.0): it signs the member out of every device, so it asks. */}
+                {status === 'active' && asking?.kind === 'suspend' ? (
+                  <Ask
+                    question={SUSPEND_ASK}
+                    yes="Suspend"
+                    pending={once.pending}
+                    onYes={() => suspend('suspended')}
+                    onNo={() => setAsking(null)}
+                  />
+                ) : null}
               </section>
             ) : null}
 
