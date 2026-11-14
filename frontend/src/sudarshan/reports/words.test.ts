@@ -3,7 +3,9 @@ import type { Report } from '../journal/types'
 import {
   ALERTS_OFF,
   checkWords,
+  DESK_WORDS,
   deliveryOf,
+  deskOf,
   downloadName,
   emptyWords,
   hasCsv,
@@ -29,22 +31,54 @@ const report = (over: Partial<Report> = {}): Report => ({
 
 describe('delivery in words', () => {
   it('says Sent, Text only and Not sent with the reason', () => {
-    expect(deliveryOf(report(), true)).toMatchObject({ tone: 'sent', word: 'Sent' })
-    expect(deliveryOf(report({ status: 'text_only' }), true)).toMatchObject({
+    expect(deliveryOf(report(), 'on')).toMatchObject({ tone: 'sent', word: 'Sent' })
+    expect(deliveryOf(report({ status: 'text_only' }), 'on')).toMatchObject({
       tone: 'text',
       word: 'Text only',
     })
     expect(
-      deliveryOf({ ...report({ status: 'not_sent' }), reason: 'Telegram did not answer' }, true)
+      deliveryOf({ ...report({ status: 'not_sent' }), reason: 'Telegram did not answer' }, 'on')
         .word
     ).toBe('Not sent: Telegram did not answer')
   })
 
-  it('says the alerts service is off when the settings say so (Y38)', () => {
-    expect(deliveryOf(report({ status: 'not_sent' }), false).word).toBe(`Not sent: ${ALERTS_OFF}`)
-    expect(deliveryOf(report({ status: 'ready' }), false).word).toBe(
+  it('says the alerts service is off only when the desk says so (Y38)', () => {
+    expect(deliveryOf(report({ status: 'not_sent' }), 'off').word).toBe(`Not sent: ${ALERTS_OFF}`)
+    expect(deliveryOf(report({ status: 'ready' }), 'off').word).toBe(
       'Not sent: the alerts service is switched off on the server'
     )
+    // not answering is not off
+    expect(deliveryOf(report({ status: 'ready' }), 'unknown')).toEqual({
+      tone: 'text',
+      word: 'Ready to send',
+      detail: 'Whether it can be sent just now is not known.',
+    })
+  })
+
+  it('puts a report’s own recorded reason first, and guesses no status (review M5)', () => {
+    expect(deliveryOf({ ...report({ status: 'not_sent' }), reason: 'X.' }, 'off').word).toContain(
+      'X.'
+    )
+    expect(deliveryOf(report({ status: 'failed_new_status' as never }), 'on')).toEqual({
+      tone: 'unknown',
+      word: 'Delivery not known',
+      detail: null,
+    })
+  })
+
+  it('reads the desk’s state from the settings, and an older answer without guessing', () => {
+    expect(deskOf(undefined)).toBeUndefined()
+    for (const state of ['on', 'starting', 'journal_off', 'journal_down', 'off'] as const) {
+      expect(deskOf({ desk_state: state })).toBe(state)
+    }
+    expect(deskOf({ desk_state: 'new_state', alerts_on: true })).toBe('unknown')
+    expect(deskOf({ alerts_on: true })).toBe('on')
+    expect(deskOf({ alerts_on: false })).toBe('unknown')
+    expect(deskOf({})).toBeUndefined()
+    // a sentence of its own for every state but on
+    expect(DESK_WORDS.on).toBeNull()
+    const words = Object.entries(DESK_WORDS).filter(([state]) => state !== 'on')
+    expect(new Set(words.map(([, w]) => w)).size).toBe(words.length)
   })
 })
 

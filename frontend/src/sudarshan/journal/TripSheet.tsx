@@ -15,31 +15,42 @@ import {
   History,
   LoaderCircle,
 } from 'lucide-react'
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router'
 import { cn } from '@/lib/utils'
 import { istTime } from '@/sudarshan/books/time'
 import { Signed } from '@/sudarshan/portfolio/Signed'
 import { BottomSheet } from '@/sudarshan/watchlist/BottomSheet'
-import { journalData, problemOf, type SheetFill, WORDS } from './api'
+import { describe } from '@/sudarshan/watchlist/rows'
+import { journalData, problemOf, type SheetFill, type TripDetail, WORDS } from './api'
+import { clearDraft, readDraft, writeDraft } from './drafts'
 import { JOURNAL_KEY } from './keys'
-import { holdWords, openQty, priceText } from './live'
+import { countText, holdWords, openQty, priceText } from './live'
 import { paiseAmount } from './money'
-import { Problem, SideChip } from './parts'
+import { Problem, SideChip, UnsavedQuestion } from './parts'
 import {
   buildUpdate,
+  changedFields,
   checklistFor,
   formOf,
   MOODS,
   parseRupees,
   problemsOf,
+  rebase,
   recentStrategies,
   riskText,
   rText,
   type SheetForm,
 } from './sheetForm'
 import { NewTag, TagChips } from './TagChips'
-import { type FillSource, LIMITS, type Playbook, type Tag, type Trip } from './types'
+import {
+  type FillSource,
+  LIMITS,
+  type Playbook,
+  type Tag,
+  type Trip,
+  type TripUpdateReq,
+} from './types'
 
 const SOURCE_WORDS: Record<FillSource, string> = {
   stream_read: 'Order stream',
@@ -90,8 +101,6 @@ export const UNMATCHED_WORDS =
   'This position was opened before the journal started, so the price it was opened at is not known here. Upstox’s own report has it. It is not in your figures.'
 export const EXPIRED_WORDS =
   'This contract ended at expiry. An expiry has no fill, so the journal cannot work out its result; Upstox’s own report has it. It is not in your figures.'
-
-const QTY = new Intl.NumberFormat('en-IN')
 
 /** A fill's part in this trade, when it is less than the whole fill (a reversal). */
 export function partOf(fill: SheetFill): number | null {
@@ -168,8 +177,8 @@ function FillsTable({
               </td>
               <td className="py-2 pr-2 text-right" data-testid="fill-qty">
                 {partOf(fill) === null
-                  ? QTY.format(fill.qty)
-                  : `${QTY.format(partOf(fill) ?? 0)} of ${QTY.format(fill.qty)}`}
+                  ? countText(fill.qty)
+                  : `${countText(partOf(fill) ?? 0)} of ${countText(fill.qty)}`}
               </td>
               <td className="py-2 pr-2 text-right">{priceText(fill.price_u)}</td>
               <td className="py-2">{SOURCE_WORDS[fill.source]}</td>
@@ -258,35 +267,163 @@ function captureOf(net: number | null, mfe: number | null, given: string | null 
   return `${sign}${Math.floor(magnitude / 100)}.${String(magnitude % 100).padStart(2, '0')}`
 }
 
+/** The trade's changes as the sheet holds them (reviews H2, H3, M1). */
+interface Draft {
+  id: number
+  /** The trade's version the form now stands on: Save sends it. */
+  version: number
+  /** The form as the service holds it at that version, and as the owner has changed it. */
+  base: SheetForm
+  form: SheetForm
+  /** Notes typed here that the other screen's notes replaced in the field: offered back. */
+  typedNotes: string | null
+  /** The other screen also changed these; its values are shown. */
+  overlap: string[]
+  /** Changes this tab kept from before came back into the form. */
+  restored: boolean
+  /** A change made on another screen came in while the form held changes of its own. */
+  moved: boolean
+}
+
+function freshDraft(trip: TripDetail, base: SheetForm): Draft {
+  return {
+    id: trip.id,
+    version: trip.version,
+    base,
+    form: base,
+    typedNotes: null,
+    overlap: [],
+    restored: false,
+    moved: false,
+  }
+}
+
+/**
+ * The draft after a read of the trade. The same version keeps everything. A newer version (a Save
+ * on another screen, "Open it again" after a conflict) takes the new values where the owner changed
+ * nothing and keeps what he typed where he did (`rebase`), so a re-read never drops his words. The
+ * first read of a trade brings back what this tab kept of it.
+ */
+function nextDraft(prev: Draft | null, trip: TripDetail): Draft {
+  const theirs = formOf(trip, trip.note)
+  if (prev && prev.id === trip.id) {
+    if (prev.version === trip.version) return prev
+    if (changedFields(prev.base, prev.form).length === 0 && prev.typedNotes === null) {
+      return freshDraft(trip, theirs)
+    }
+    const merged = rebase(prev.base, prev.form, theirs)
+    const typedNotes = merged.typedNotes ?? prev.typedNotes
+    if (changedFields(theirs, merged.form).length === 0 && typedNotes === null) {
+      // The newer read holds just what was typed (this sheet's own Save coming back): nothing to
+      // say about another screen.
+      return freshDraft(trip, theirs)
+    }
+    return {
+      ...freshDraft(trip, theirs),
+      form: merged.form,
+      typedNotes,
+      overlap: merged.overlap,
+      restored: prev.restored,
+      moved: true,
+    }
+  }
+  const kept = readDraft(trip.id)
+  if (!kept) return freshDraft(trip, theirs)
+  if (kept.version === trip.version) {
+    return {
+      ...freshDraft(trip, theirs),
+      form: kept.form,
+      typedNotes: kept.typedNotes,
+      restored: true,
+    }
+  }
+  const merged = rebase(kept.base, kept.form, theirs)
+  return {
+    ...freshDraft(trip, theirs),
+    form: merged.form,
+    typedNotes: merged.typedNotes ?? kept.typedNotes,
+    overlap: merged.overlap,
+    restored: true,
+    moved: true,
+  }
+}
+
+const QUIET_BUTTON =
+  'inline-flex min-h-12 items-center justify-center gap-2 rounded-[0.875rem] border border-input bg-card px-4 text-[0.9375rem] font-semibold hover:bg-accent'
+
+/** Notes typed here that another screen's notes replaced: shown whole, to add back or copy. */
+function TypedNotes({ text, onAdd }: { text: string; onAdd: () => void }) {
+  const [copied, setCopied] = useState(false)
+  const clipboard = typeof navigator !== 'undefined' ? navigator.clipboard : undefined
+  return (
+    <div
+      data-testid="typed-notes"
+      className="flex flex-col gap-2 rounded-[0.875rem] border border-[color:var(--border-strong)] px-3 py-2"
+    >
+      <p className="text-sm font-semibold">
+        The notes were changed on another screen; they are in the field above. What you typed here
+        is not saved:
+      </p>
+      <p className="text-sm whitespace-pre-wrap [overflow-wrap:anywhere]">{text}</p>
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+        <button type="button" onClick={onAdd} className={QUIET_BUTTON}>
+          Add it to the notes
+        </button>
+        {clipboard?.writeText && (
+          <button
+            type="button"
+            onClick={() =>
+              void clipboard.writeText(text).then(
+                () => setCopied(true),
+                () => setCopied(false)
+              )
+            }
+            className={QUIET_BUTTON}
+          >
+            {copied ? <Check aria-hidden="true" className="size-4" strokeWidth={3} /> : null}
+            {copied ? 'Copied' : 'Copy it'}
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function Editor({
   trip,
-  start,
+  draft,
   tags,
   playbooks,
   recent,
-  onSaved,
+  saving,
+  update,
+  problem,
+  onChange,
+  onSave,
   onReopen,
 }: {
   trip: Trip
-  start: SheetForm
+  draft: Draft
   tags: readonly Tag[]
   playbooks: readonly Playbook[]
   recent: readonly string[]
-  onSaved: () => void
+  saving: boolean
+  update: TripUpdateReq | null
+  problem: { message: string; conflict: boolean } | null
+  onChange: (change: (now: Draft) => Draft) => void
+  onSave: () => void
   onReopen: () => void
 }) {
   const queries = useQueryClient()
-  const [form, setForm] = useState<SheetForm>(start)
-  const [saving, setSaving] = useState(false)
-  const [problem, setProblem] = useState<{ message: string; conflict: boolean } | null>(null)
   const [tagBusy, setTagBusy] = useState(false)
   const [tagProblem, setTagProblem] = useState<string | null>(null)
-  const sending = useRef(false)
+  const form = draft.form
+  const setForm = (change: (now: SheetForm) => SheetForm) =>
+    onChange((now) => ({ ...now, form: change(now.form) }))
   const set = <K extends keyof SheetForm>(key: K, value: SheetForm[K]) =>
     setForm((now) => ({ ...now, [key]: value }))
 
   const problems = problemsOf(form)
-  const update = useMemo(() => buildUpdate(trip, start, form), [trip, start, form])
   const playbook = playbooks.find((p) => p.id === form.setupId) ?? null
   const risk = parseRupees(form.risk)
   const r = rText(trip.net_paise, risk.paise)
@@ -302,26 +439,6 @@ function Editor({
     }))
   }
 
-  const save = async () => {
-    // One Save, one request, however it is tapped.
-    if (sending.current || update === null || problems.length > 0) return
-    sending.current = true
-    setSaving(true)
-    setProblem(null)
-    try {
-      await journalData('trip_update', update)
-      await queries.invalidateQueries({ queryKey: JOURNAL_KEY })
-      onSaved()
-    } catch (error) {
-      const found = problemOf(error)
-      const conflict = found.code === 'conflict'
-      setProblem({ message: conflict ? WORDS.conflict : found.message, conflict })
-    } finally {
-      sending.current = false
-      setSaving(false)
-    }
-  }
-
   const addTag = async (name: string): Promise<boolean> => {
     setTagBusy(true)
     setTagProblem(null)
@@ -333,7 +450,10 @@ function Editor({
         request_id: crypto.randomUUID(),
       })
       await queries.invalidateQueries({ queryKey: [...JOURNAL_KEY, 'tags'] })
-      if (done.id !== null) set('mistakes', [...form.mistakes, done.id])
+      if (done.id !== null) {
+        const id = done.id
+        setForm((now) => ({ ...now, mistakes: [...now.mistakes, id] }))
+      }
       return true
     } catch (error) {
       setTagProblem(problemOf(error).message)
@@ -349,9 +469,22 @@ function Editor({
       className="flex flex-col gap-4"
       onSubmit={(event) => {
         event.preventDefault()
-        void save()
+        onSave()
       }}
     >
+      {draft.restored && (
+        <output className="block text-sm font-medium text-[color:var(--text-secondary)]">
+          What you typed on this trade before is back in the form. It is not saved yet.
+        </output>
+      )}
+      {draft.moved && (
+        <output className="block text-sm font-medium text-[color:var(--text-secondary)]">
+          This trade was changed on another screen. Its changes are shown, and what you typed here
+          is kept.
+          {draft.overlap.length > 0 &&
+            ` It also changed ${draft.overlap.join(', ')}; what it saved is shown there.`}
+        </output>
+      )}
       <Section title="Strategy and setup">
         <label className="flex flex-col gap-1">
           <span className={LABEL}>Strategy (up to {LIMITS.strategy_name} characters)</span>
@@ -525,6 +658,23 @@ function Editor({
             {form.notes.length.toLocaleString('en-IN')} of {LIMITS.notes.toLocaleString('en-IN')}
           </span>
         </div>
+        {draft.typedNotes !== null && (
+          <TypedNotes
+            text={draft.typedNotes}
+            onAdd={() =>
+              onChange((now) => ({
+                ...now,
+                typedNotes: null,
+                form: {
+                  ...now.form,
+                  notes: now.form.notes
+                    ? `${now.form.notes}\n\n${now.typedNotes ?? ''}`
+                    : (now.typedNotes ?? ''),
+                },
+              }))
+            }
+          />
+        )}
       </Section>
 
       {problems.map((text) => (
@@ -534,11 +684,7 @@ function Editor({
         <div className="flex flex-col gap-2">
           <Problem>{problem.message}</Problem>
           {problem.conflict && (
-            <button
-              type="button"
-              onClick={onReopen}
-              className="inline-flex min-h-12 items-center justify-center rounded-[0.875rem] border border-input bg-card px-4 text-[0.9375rem] font-semibold hover:bg-accent"
-            >
+            <button type="button" onClick={onReopen} className={QUIET_BUTTON}>
               Open it again
             </button>
           )}
@@ -562,18 +708,31 @@ export function TripSheet({
   tradeId,
   open,
   onClose,
+  onDirty,
+  asked = 0,
 }: {
   tradeId: number
   open: boolean
   onClose: () => void
+  /** Told whenever the sheet starts or stops holding changes that are not saved. */
+  onDirty?: (dirty: boolean) => void
+  /** Moved on by the page when Back took the sheet's entry while it held changes: ask first. */
+  asked?: number
 }) {
   const queries = useQueryClient()
+  const [draft, setDraft] = useState<Draft | null>(null)
+  const dirtyNow =
+    draft !== null &&
+    (changedFields(draft.base, draft.form).length > 0 || draft.typedNotes !== null)
   const detail = useQuery({
     queryKey: [...JOURNAL_KEY, 'trip', tradeId],
     queryFn: async () => journalData('trip_get', { id: tradeId }),
     retry: false,
     staleTime: 0,
     refetchOnWindowFocus: false,
+    // A phone changes network often; while the form holds changes a new network does not read the
+    // trade again under them (review H3). The version check at Save guards a stale sheet.
+    refetchOnReconnect: !dirtyNow,
   })
   const tags = useQuery({
     queryKey: [...JOURNAL_KEY, 'tags'],
@@ -598,25 +757,110 @@ export function TripSheet({
     }
     return recentStrategies(seen)
   })
-  const start = useMemo(() => (trip ? formOf(trip, trip.note) : null), [trip])
+  // The contract as the books name it (review H5), never the code cut short in the title.
+  const named = trip ? describe(trip.symbol, trip.exchange) : null
+
+  const [saving, setSaving] = useState(false)
+  const [problem, setProblem] = useState<{ message: string; conflict: boolean } | null>(null)
+  const [asking, setAsking] = useState(false)
+  const sending = useRef(false)
+
+  // Each read of the trade moves the draft on (nextDraft); a newer version clears a conflict.
+  const [read, setRead] = useState<TripDetail | undefined>(undefined)
+  if (trip !== read) {
+    setRead(trip)
+    if (trip) {
+      const next = nextDraft(draft, trip)
+      if (next !== draft) {
+        if (draft && next.version !== draft.version) setProblem(null)
+        setDraft(next)
+      }
+    }
+  }
+  // Back asked to close while the sheet held changes: the question, as for Close.
+  const [seenAsked, setSeenAsked] = useState(asked)
+  if (asked !== seenAsked) {
+    setSeenAsked(asked)
+    setAsking(true)
+  }
+
+  const update = useMemo(
+    () => (trip && draft ? buildUpdate(trip, draft.base, draft.form) : null),
+    [trip, draft]
+  )
+  const dirty = update !== null || (draft !== null && draft.typedNotes !== null)
+  const problems = draft ? problemsOf(draft.form) : []
+
+  // What is not saved is kept in this tab while it is there, and the page is told.
+  const discarded = useRef(false)
+  useEffect(() => {
+    if (!draft || discarded.current) return
+    if (dirty) {
+      writeDraft(draft.id, {
+        version: draft.version,
+        base: draft.base,
+        form: draft.form,
+        typedNotes: draft.typedNotes,
+      })
+    } else clearDraft(draft.id)
+  }, [draft, dirty])
+  const told = useRef(onDirty)
+  told.current = onDirty
+  useEffect(() => {
+    told.current?.(dirty)
+  }, [dirty])
+
+  const finish = () => {
+    if (draft) clearDraft(draft.id)
+    discarded.current = true
+    told.current?.(false)
+    onClose()
+  }
+
+  const save = async () => {
+    // One Save, one request, however it is tapped.
+    if (sending.current || update === null) return
+    if (problems.length > 0) {
+      setAsking(false) // the sentences that say what to correct are under the form
+      return
+    }
+    sending.current = true
+    setSaving(true)
+    setProblem(null)
+    try {
+      await journalData('trip_update', update)
+      if (draft) clearDraft(draft.id)
+      await queries.invalidateQueries({ queryKey: JOURNAL_KEY })
+      finish()
+    } catch (error) {
+      const found = problemOf(error)
+      const conflict = found.code === 'conflict'
+      setProblem({ message: conflict ? WORDS.conflict : found.message, conflict })
+      setAsking(false)
+    } finally {
+      sending.current = false
+      setSaving(false)
+    }
+  }
+
+  // Close, a tap outside, Escape: with changes not saved, ask first (review H2).
+  const requestClose = () => {
+    if (asking) setAsking(false)
+    else if (dirty) setAsking(true)
+    else finish()
+  }
 
   let body: React.ReactNode
-  if (detail.isPending) {
-    body = (
+  if (!trip || !draft) {
+    body = detail.isPending ? (
       <p className="flex items-center gap-2 py-6 text-base font-bold" aria-live="polite">
         <LoaderCircle aria-hidden="true" className="size-5 animate-spin" />
         Loading the trade
       </p>
-    )
-  } else if (detail.isError || !trip || !start) {
-    body = (
+    ) : (
       <div className="flex flex-col gap-3 py-2">
         <Problem>{problemOf(detail.error).message}</Problem>
-        <button
-          type="button"
-          onClick={() => detail.refetch()}
-          className="inline-flex min-h-12 items-center justify-center rounded-[0.875rem] border border-input bg-card px-4 text-[0.9375rem] font-semibold hover:bg-accent"
-        >
+        <button type="button" onClick={() => detail.refetch()} className={QUIET_BUTTON}>
           Try again
         </button>
       </div>
@@ -634,134 +878,166 @@ export function TripSheet({
     const estimate = chargesWord(trip)
     const capture = captureOf(trip.net_paise, trip.mfe_paise, trip.excursion?.capture_pct)
     body = (
-      <div className="flex flex-col gap-4">
-        {trip.mode === 'sandbox' && (
-          <p className="flex items-center gap-2 rounded-[0.875rem] border border-[color:var(--sandbox-border)] bg-[color:var(--sandbox-tint)] px-3 py-2 text-sm font-semibold text-[color:var(--sandbox-ink)]">
-            <FlaskConical aria-hidden="true" className="size-4 shrink-0" />
-            Sandbox trade
-          </p>
+      <>
+        {asking && (
+          <UnsavedQuestion
+            title="Your changes to this trade are not saved."
+            canSave={update !== null}
+            saving={saving}
+            onSave={() => void save()}
+            onDiscard={finish}
+            onKeep={() => setAsking(false)}
+          />
         )}
-        {kept && (
-          <p
-            role="note"
-            className="flex items-start gap-2 rounded-[0.875rem] border border-[color:var(--border-strong)] px-3 py-2 text-sm font-medium"
-          >
-            <History aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
-            {ORPHAN_WORDS}
-          </p>
-        )}
-        {aside && (
-          <p
-            role="note"
-            data-testid="aside-note"
-            className="flex items-start gap-2 rounded-[0.875rem] border border-[color:var(--border-strong)] px-3 py-2 text-sm font-medium"
-          >
-            {unseen ? (
+        <div className="flex flex-col gap-4" hidden={asking}>
+          {detail.isError && (
+            // A re-read that failed keeps the sheet and what was typed in it (review H3).
+            <Problem>
+              {problemOf(detail.error).message} What you see is from the last read, and what you
+              typed is still here.
+            </Problem>
+          )}
+          {trip.mode === 'sandbox' && (
+            <p className="flex items-center gap-2 rounded-[0.875rem] border border-[color:var(--sandbox-border)] bg-[color:var(--sandbox-tint)] px-3 py-2 text-sm font-semibold text-[color:var(--sandbox-ink)]">
+              <FlaskConical aria-hidden="true" className="size-4 shrink-0" />
+              Sandbox trade
+            </p>
+          )}
+          {kept && (
+            <p
+              role="note"
+              className="flex items-start gap-2 rounded-[0.875rem] border border-[color:var(--border-strong)] px-3 py-2 text-sm font-medium"
+            >
               <History aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
-            ) : (
-              <CalendarX aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
-            )}
-            {unseen ? UNMATCHED_WORDS : EXPIRED_WORDS}
-          </p>
-        )}
-        <Section title="Result">
-          <dl className="flex flex-col gap-1.5">
-            <Row label="Quantity">{closed ? trip.qty_max : openQty(trip)}</Row>
-            <Row label="Entry average">{unseen ? notKnown : priceText(trip.entry_avg_u)}</Row>
-            <Row label="Exit average">
-              {expired
-                ? 'Ended at expiry'
-                : trip.exit_avg_u === null
-                  ? stillOpen
-                  : priceText(trip.exit_avg_u)}
-            </Row>
-            <Row label="Gross">
-              {aside ? (
-                notKnown
-              ) : trip.gross_paise === null ? (
-                '-'
+              {ORPHAN_WORDS}
+            </p>
+          )}
+          {aside && (
+            <p
+              role="note"
+              data-testid="aside-note"
+              className="flex items-start gap-2 rounded-[0.875rem] border border-[color:var(--border-strong)] px-3 py-2 text-sm font-medium"
+            >
+              {unseen ? (
+                <History aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
               ) : (
-                <Signed paise={trip.gross_paise} />
+                <CalendarX aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
               )}
-            </Row>
-            <Row label="Charges">
-              {unpriced ? (
-                NOT_ESTIMATED
-              ) : charges === null ? (
-                '-'
-              ) : (
-                <>
-                  {paiseAmount(charges)}{' '}
-                  <span className="text-xs font-semibold text-[color:var(--text-tertiary)]">
-                    {estimate}
-                  </span>
-                </>
-              )}
-            </Row>
-            <Row label="Net">
-              {aside ? (
-                notKnown
-              ) : trip.net_paise === null ? (
-                '-'
-              ) : (
-                <span className="inline-flex items-baseline gap-1.5">
-                  <Signed paise={trip.net_paise} />
-                  {trip.charges_actual_paise === null && (
+              {unseen ? UNMATCHED_WORDS : EXPIRED_WORDS}
+            </p>
+          )}
+          <Section title="Result">
+            <dl className="flex flex-col gap-1.5">
+              <Row label="Quantity">{countText(closed ? trip.qty_max : openQty(trip))}</Row>
+              <Row label="Entry average">{unseen ? notKnown : priceText(trip.entry_avg_u)}</Row>
+              <Row label="Exit average">
+                {expired
+                  ? 'Ended at expiry'
+                  : trip.exit_avg_u === null
+                    ? stillOpen
+                    : priceText(trip.exit_avg_u)}
+              </Row>
+              <Row label="Gross">
+                {aside ? (
+                  notKnown
+                ) : trip.gross_paise === null ? (
+                  '-'
+                ) : (
+                  <Signed paise={trip.gross_paise} />
+                )}
+              </Row>
+              <Row label="Charges">
+                {unpriced ? (
+                  NOT_ESTIMATED
+                ) : charges === null ? (
+                  '-'
+                ) : (
+                  <>
+                    {paiseAmount(charges)}{' '}
                     <span className="text-xs font-semibold text-[color:var(--text-tertiary)]">
-                      {unpriced ? 'no charges counted' : 'est.'}
+                      {estimate}
                     </span>
-                  )}
-                </span>
+                  </>
+                )}
+              </Row>
+              <Row label="Net">
+                {aside ? (
+                  notKnown
+                ) : trip.net_paise === null ? (
+                  '-'
+                ) : (
+                  <span className="inline-flex items-baseline gap-1.5">
+                    <Signed paise={trip.net_paise} />
+                    {trip.charges_actual_paise === null && (
+                      <span className="text-xs font-semibold text-[color:var(--text-tertiary)]">
+                        {unpriced ? 'no charges counted' : 'est.'}
+                      </span>
+                    )}
+                  </span>
+                )}
+              </Row>
+              <Row label="Held">
+                {aside ? '-' : trip.hold_s === null ? stillOpen : holdWords(trip.hold_s * 1000)}
+              </Row>
+              {trip.latency_ms !== null && trip.latency_ms !== undefined && (
+                <Row label="First entry order">answered in {countText(trip.latency_ms)} ms</Row>
               )}
-            </Row>
-            <Row label="Held">
-              {aside ? '-' : trip.hold_s === null ? stillOpen : holdWords(trip.hold_s * 1000)}
-            </Row>
-            {trip.latency_ms !== null && trip.latency_ms !== undefined && (
-              <Row label="First entry order">answered in {trip.latency_ms} ms</Row>
-            )}
-          </dl>
-        </Section>
-        <Section title="Fills">
-          <FillsTable fills={trip.fills} kept={kept} side={trip.side} />
-        </Section>
-        {!aside && (
-          <Section title="How far it went">
-            <Excursion trip={trip} capture={capture} />
+            </dl>
           </Section>
-        )}
-        <Editor
-          key={`${trip.id}:${trip.version}`}
-          trip={trip}
-          start={start}
-          tags={tags.data ?? []}
-          playbooks={playbooks.data ?? []}
-          recent={recent}
-          onSaved={onClose}
-          onReopen={() => detail.refetch()}
-        />
-        <Link
-          to={`/chart/${encodeURIComponent(trip.exchange)}/${encodeURIComponent(trip.symbol)}`}
-          className="inline-flex min-h-12 items-center justify-center gap-2 rounded-[0.875rem] border border-input bg-card px-4 text-[0.9375rem] font-semibold hover:bg-accent"
-        >
-          <ChartCandlestick aria-hidden="true" className="size-4" />
-          See on chart
-        </Link>
-      </div>
+          <Section title="Fills">
+            <FillsTable fills={trip.fills} kept={kept} side={trip.side} />
+          </Section>
+          {!aside && (
+            <Section title="How far it went">
+              <Excursion trip={trip} capture={capture} />
+            </Section>
+          )}
+          <Editor
+            trip={trip}
+            draft={draft}
+            tags={tags.data ?? []}
+            playbooks={playbooks.data ?? []}
+            recent={recent}
+            saving={saving}
+            update={update}
+            problem={problem}
+            onChange={(change) => setDraft((now) => (now ? change(now) : now))}
+            onSave={() => void save()}
+            onReopen={() => void detail.refetch()}
+          />
+          <Link
+            to={`/chart/${encodeURIComponent(trip.exchange)}/${encodeURIComponent(trip.symbol)}`}
+            className="inline-flex min-h-12 items-center justify-center gap-2 rounded-[0.875rem] border border-input bg-card px-4 text-[0.9375rem] font-semibold hover:bg-accent"
+          >
+            <ChartCandlestick aria-hidden="true" className="size-4" />
+            See on chart
+          </Link>
+        </div>
+      </>
     )
   }
 
   return (
     <BottomSheet
       open={open}
-      onOpenChange={(next) => !next && onClose()}
+      onOpenChange={(next) => {
+        if (!next) requestClose()
+      }}
+      step={asking ? 'ask' : 'form'}
       title={
         <span className="inline-flex items-center gap-2">
-          {trip ? trip.symbol : 'Trade'}
+          {named ? named.title : 'Trade'}
           {trip && trip.status !== 'unmatched' && <SideChip side={trip.side} />}
         </span>
       }
-      description={trip ? sheetDescription(trip.status) : undefined}
+      description={
+        trip && named ? (
+          <>
+            {sheetDescription(trip.status)}
+            <span>{` · ${named.detail}`}</span>
+          </>
+        ) : undefined
+      }
     >
       {body}
     </BottomSheet>

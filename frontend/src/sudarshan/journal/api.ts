@@ -124,6 +124,19 @@ function problemForStatus(status: number): JournalProblem {
   return { code: 'unavailable', message: WORDS.unavailable }
 }
 
+/**
+ * The bridge's codes the page acts on, by the bridge's own names (blueprints/sudarshan_journal.py
+ * ERROR_STATUS), so a conflict is known by its code and not only by its status (review P8).
+ */
+const KNOWN_CODES: Record<string, ProblemCode> = {
+  conflict: 'conflict',
+  version_conflict: 'conflict',
+  busy: 'busy',
+  rate_limited: 'busy',
+  unauthorized: 'unauthorized',
+  forbidden: 'forbidden',
+}
+
 function problemFrom(body: unknown): JournalProblem | null {
   if (!body || typeof body !== 'object') return null
   const raw = (body as { error?: unknown }).error
@@ -135,11 +148,7 @@ function problemFrom(body: unknown): JournalProblem | null {
         : text((body as { message?: unknown }).message)
   if (!message) return null
   const code = raw && typeof raw === 'object' ? text((raw as { code?: unknown }).code) : null
-  const known: ProblemCode =
-    code === 'conflict' || code === 'busy' || code === 'unauthorized' || code === 'forbidden'
-      ? code
-      : 'refused'
-  return { code: known, message }
+  return { code: KNOWN_CODES[code ?? ''] ?? 'refused', message }
 }
 
 const asText = (data: unknown): string =>
@@ -210,6 +219,98 @@ export function reportFileUrl(id: number, format?: 'csv'): string {
   if (!spec) return ''
   const path = pathOf(spec, { id })
   return format === 'csv' ? `${path}?format=csv` : path
+}
+
+/** The types a report's file comes as (cross-design Y32). */
+const FILE_TYPES = new Set(['application/pdf', 'text/csv', 'image/png'])
+
+/** A file that came back as something no phone can open: said, never saved. */
+export const FILE_UNREADABLE =
+  'This report’s file could not be read. Its text is on the Reports page; try the download again later.'
+
+const mimeOf = (header: unknown): string =>
+  typeof header === 'string' ? (header.split(';')[0] ?? '').trim().toLowerCase() : ''
+
+/** A blob's text: `Blob.text` where the browser has it, a reader where it does not. */
+function blobText(blob: Blob): Promise<string> {
+  if (typeof blob.text === 'function') return blob.text()
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result ?? ''))
+    reader.onerror = () => reject(reader.error)
+    reader.readAsText(blob)
+  })
+}
+
+/** The bridge's envelope in a blob, or null when it holds none. */
+async function envelopeOf(data: unknown): Promise<unknown> {
+  if (!(data instanceof Blob)) return data
+  if (data.size > 64 * 1024) return null
+  try {
+    return JSON.parse(await blobText(data))
+  } catch {
+    return null
+  }
+}
+
+/**
+ * A report's file, fetched rather than opened as a link (review H4), so nothing that will not open
+ * is ever saved: a 200 of a PDF, CSV or PNG is the file; anything else, a refusal or a 200 holding
+ * the bridge's envelope (the journal switched off, from a bridge before this release), is thrown as
+ * a `JournalError` with the sentence the bridge wrote. A 401 also takes the app's own way back to
+ * the sign-in (the web client's).
+ */
+export async function reportFile(id: number, format?: 'csv', signal?: AbortSignal): Promise<Blob> {
+  const url = reportFileUrl(id, format)
+  let response: { data: unknown; headers?: Record<string, unknown>; request?: unknown }
+  try {
+    response = await webClient.get(url, {
+      responseType: 'blob',
+      timeout: WAIT_MS.download,
+      signal,
+    })
+  } catch (error) {
+    if (axios.isAxiosError(error) && error.response) {
+      error.response.data = await envelopeOf(error.response.data)
+    }
+    throw new JournalError(problemOf(error))
+  }
+  const landed = (response.request as { responseURL?: string } | undefined)?.responseURL
+  if (sessionEnded(undefined, null, landed)) {
+    throw new JournalError({ code: 'unauthorized', message: WORDS.signedOut })
+  }
+  const type = mimeOf(response.headers?.['content-type'])
+  const data = response.data
+  if (data instanceof Blob && FILE_TYPES.has(type) && (format !== 'csv' || type === 'text/csv')) {
+    return data.type === type ? data : new Blob([data], { type })
+  }
+  const body = (await envelopeOf(data)) as {
+    status?: unknown
+    enabled?: unknown
+    message?: unknown
+  }
+  if (body && typeof body === 'object' && body.status === 'success' && body.enabled === false) {
+    throw new JournalError({ code: 'unavailable', message: text(body.message) ?? WORDS.off })
+  }
+  throw new JournalError(problemFrom(body) ?? { code: 'unreadable', message: FILE_UNREADABLE })
+}
+
+/**
+ * How long a saved file's address lives after the tap: some browsers start the download after the
+ * click returns, and cancel it when the address is already gone (as watchlist/tvTransfer.ts).
+ */
+export const FILE_URL_MS = 60_000
+
+/** Give the owner the file under `name`. */
+export function saveFile(blob: Blob, name: string): void {
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = name
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  setTimeout(() => URL.revokeObjectURL(url), FILE_URL_MS)
 }
 
 /** One op at the bridge. Throws a `JournalError` in the owner's words. */
