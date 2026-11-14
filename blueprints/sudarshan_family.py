@@ -38,7 +38,8 @@ OpenAlgo never reads, so every route below answers it as it answers a stranger.
    "member_id", "role"}``, at most 4 KiB. No session and no CSRF (the service has no browser to
    forge; the seal is its proof). A request carrying any header nginx sets is 404 before anything
    else; then the length (411), the size (413), the seal, op, nonce and principal (403; a full
-   nonce book 503 ``busy``), the fields (400), and 120 a minute (429).
+   nonce book 503 ``busy``), the fields (400), and 120 a minute (429), counted last: only a
+   request this server's family service sealed spends the limit, never a stranger's.
    The answer is ``{"status": "success", "data": {"lists": [{"id", "name", "created_at", "rows":
    [{"symbol", "exchange", "instrument_key", "name", "tick_size", "lot_size"}]}], "gone": [id]}}``:
    the lists asked for that OpenAlgo's own note (3.) says the owner shared with that member or
@@ -53,7 +54,8 @@ OpenAlgo never reads, so every route below answers it as it answers a stranger.
    in the family service, the internet-facing process, so OpenAlgo keeps its own note of every
    watchlist share the owner makes through 1. and serves no list it does not name. It is one entry
    of the owner vault (mode 600; sudarshan-family cannot read it), written as the owner's ops pass:
-   a ``share_set`` of one of his lists that the service confirmed is noted with the list's
+   a ``share_set`` of kind ``book`` is refused here, unsent (v0.12.0 review H1: nothing enforces
+   one); a ``share_set`` of one of his lists that the service confirmed is noted with the list's
    ``created_at``; a ``share_remove`` is forgotten before it is sent, and noted again only when the
    service answered that it still has the share; a removed member's shares are forgotten.
 """
@@ -86,6 +88,7 @@ from sudarshan.autologin.handoff import (
     seal,
 )
 from sudarshan.family import contract
+from sudarshan.family.words import BOOK_SHARE_REFUSED
 from sudarshan.vault import (
     FAMILY_ADMIN_INFO,
     FAMILY_INTERNAL_INFO,
@@ -527,8 +530,24 @@ def shared_lists(ids: list[int], member_id: int, role: str) -> dict:
     return {"lists": lists, "gone": [i for i in ids if i not in shown]}
 
 
+def _internal_lists(ids: list[int], member_id: int, role: str):
+    try:
+        return _answer({"status": "success", "data": shared_lists(ids, member_id, role)})
+    except Exception:
+        logger.exception("Family: the shared lists could not be read")
+        return _refused(500, "failed")
+
+
+#: SUDARSHAN v0.12.0 review M1: the limit (each row is resolved on the worker; M3 of feat/family-c)
+#: counts only a request that carried this server's seal, as the owner bridge counts only what
+#: passed its checks. With ``TRUST_PROXY_HEADERS`` off, a stranger forwarded by nginx and the family
+#: service both arrive as 127.0.0.1: a limit on the route itself let anyone spend the family's.
+_internal_counted = limiter.shared_limit(INTERNAL_LIMIT, scope="sudarshan-family-internal")(
+    _internal_lists
+)
+
+
 @sudarshan_family_bp.route("/internal/watchlists", methods=["POST"])
-@limiter.limit(INTERNAL_LIMIT)  # SUDARSHAN M3 (feat/family-c): each row is resolved on the worker
 def internal_watchlists():
     if any(header in request.headers for header in PROXY_HEADERS):
         return _refused(404, "not_found")
@@ -556,11 +575,7 @@ def internal_watchlists():
     member_ok = type(member_id) is int and 0 < member_id <= 2**31 - 1 and role in contract.ROLES
     if ids is None or not member_ok:
         return _refused(400, "invalid")
-    try:
-        return _answer({"status": "success", "data": shared_lists(ids, member_id, role)})
-    except Exception:
-        logger.exception("Family: the shared lists could not be read")
-        return _refused(500, "failed")
+    return _internal_counted(ids, member_id, role)
 
 
 # -- the note of shared lists (review M3; SUDARSHAN feat/family-c) --------------------------------
@@ -660,9 +675,12 @@ def _done(response) -> bool:
 def _share_set(op, fields):
     """A list shared: checked to be the owner's, sent, and noted once the service confirms it."""
     ref = fields.get("ref")
-    if fields.get("kind") != "watchlist" or not (isinstance(ref, str) and ref.isascii()
-                                                 and ref.isdigit() and len(ref) <= 10):  # fmt: skip
-        return _send(op, fields)  # a part of the books, or a ref the service refuses in its words
+    if fields.get("kind") == "book":
+        # SUDARSHAN v0.12.0 review H1: nothing enforces a share of a part of the books, so the
+        # owner's side refuses it before anything is sent, in the family service's own sentence.
+        return _error("invalid", BOOK_SHARE_REFUSED, "kind")
+    if not (isinstance(ref, str) and ref.isascii() and ref.isdigit() and len(ref) <= 10):
+        return _send(op, fields)  # a ref the service refuses in its words
     try:
         mine, made = _list_made(ref)
     except Exception:

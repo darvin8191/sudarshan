@@ -1014,12 +1014,20 @@ def test_m3_a_share_the_service_did_not_confirm_is_not_noted(bridge, family, lis
         time.sleep(0.6)  # the stand-in finishes its slow answer
 
 
-def test_m3_a_share_of_a_part_of_the_books_is_sent_as_it_is(bridge, family, lists):
-    fields = {"kind": "book", "ref": "positions", "role": "viewer", "level": "view"}
-    family.answers["share_set"] = share_answer(33, fields)
+def test_h1_a_share_of_a_part_of_the_books_is_refused_here_and_never_sent(bridge, family, lists):
+    """v0.12.0 review H1 (Fix A): the owner's side refuses a book share in the family service's
+    one sentence, sends nothing and notes nothing. Fails on the old code, which sent it on."""
+    from sudarshan.family.words import BOOK_SHARE_REFUSED
+
     before = bp_module._note()
-    assert send(bridge, OP["share_set"], fields, headers=as_owner(bridge)).status_code == 200
-    assert family.calls == [("share_set", fields)] and bp_module._note() == before
+    for part in contract.BOOK_PARTS:
+        fields = {"kind": "book", "ref": part, "role": "viewer", "level": "view"}
+        family.answers["share_set"] = share_answer(33, fields)
+        response = send(bridge, OP["share_set"], fields, headers=as_owner(bridge))
+        assert (response.status_code, response.get_json()) == (400, {
+            "status": "error", "code": "invalid", "message": BOOK_SHARE_REFUSED, "field": "kind"})  # fmt: skip
+    assert family.calls == [] and bp_module._note() == before
+    assert bp_module._sentence(BOOK_SHARE_REFUSED) == BOOK_SHARE_REFUSED  # fit to show as it is
 
 
 def test_m3_a_removed_share_is_forgotten_first_and_kept_only_while_the_service_has_it(
@@ -1088,6 +1096,29 @@ def test_m3_the_internal_route_answers_120_a_minute(monkeypatch, tmp_path, lists
         assert post_internal(client, internal_seal(list_ids=[lists["swing"]])).status_code == 200
     refused = post_internal(client, internal_seal(list_ids=[lists["swing"]]))
     assert refused.status_code == 429 and b"Swing" not in refused.data
+
+
+def test_m1_a_stranger_forwarded_by_nginx_cannot_spend_the_internal_routes_limit(
+    monkeypatch, lists
+):
+    """v0.12.0 review M1: with TRUST_PROXY_HEADERS off, nginx's callers and the family service
+    both arrive as 127.0.0.1. Only a request that carried this server's seal is counted, so 200
+    forwarded strangers, 60 unsealed local ones and 30 sealed for another op leave the family
+    service its whole limit. Fails on the old code: the first sealed request after them was 429."""
+    monkeypatch.setattr(bp_module, "_nonces", NonceBook(512))
+    client = make_app(rate_limits=True).test_client()
+    forwarded = {"X-Forwarded-For": "198.51.100.7", "X-Real-IP": "198.51.100.7"}
+    assert {post_internal(client, b"x", forwarded).status_code for _ in range(200)} == {404}
+    assert {post_internal(client, b"x").status_code for _ in range(60)} == {403}
+    other = [post_internal(client, internal_seal(info=FAMILY_ADMIN_INFO, list_ids=[1]))
+             for _ in range(30)]  # fmt: skip
+    assert {r.status_code for r in other} == {403}
+    for _ in range(120):
+        assert post_internal(client, internal_seal(list_ids=[lists["swing"]])).status_code == 200
+    refused = post_internal(client, internal_seal(list_ids=[lists["swing"]]))
+    assert refused.status_code == 429 and refused.get_json()["code"] == "busy"
+    # the limit is spent, and a stranger still gets the route's 404, never told so
+    assert post_internal(client, b"x", forwarded).status_code == 404
 
 
 def test_l7_the_internal_route_and_the_family_doors_refuse_one_list_of_headers():
