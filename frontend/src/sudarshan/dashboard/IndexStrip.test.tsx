@@ -353,4 +353,68 @@ describe('IndexStrip', () => {
     act(() => feed.push('BANKEX', 'BSE_INDEX', { ltp: 61_250.4 }, 'websocket'))
     expect(tiles()[3]).toHaveTextContent('61,250.40')
   })
+
+  it('reads nothing while the page is hidden, and reads once when it is shown (SCR-F)', async () => {
+    vi.useFakeTimers()
+    let visibility: DocumentVisibilityState = 'visible'
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      get: () => visibility,
+    })
+    const page = (state: DocumentVisibilityState) => {
+      visibility = state
+      act(() => {
+        document.dispatchEvent(new Event('visibilitychange'))
+      })
+    }
+    try {
+      const { rerender } = render(<IndexStrip apiKey="key" marketOpen={CLOSED} />)
+      await settle()
+      expect(getMultiQuotes).toHaveBeenCalledTimes(1)
+
+      page('hidden')
+      // Left open overnight in a hidden tab: NSE opens, and the feed signs in again later.
+      rerender(<IndexStrip apiKey="key" marketOpen={OPEN} />)
+      await settle()
+      await pass(SNAPSHOT_MAX_AGE_MS + 1000)
+      act(() => feed.setState({ connectionEpoch: 2 }))
+      await settle()
+      expect(getMultiQuotes).toHaveBeenCalledTimes(1)
+
+      page('visible')
+      await settle()
+      expect(getMultiQuotes).toHaveBeenCalledTimes(2)
+    } finally {
+      Reflect.deleteProperty(document, 'visibilityState')
+    }
+  })
+
+  it('reads the open it missed while hidden on a quick return, though the last read is young (SCR-F)', async () => {
+    vi.useFakeTimers()
+    let visibility: DocumentVisibilityState = 'visible'
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      get: () => visibility,
+    })
+    const page = (state: DocumentVisibilityState) => {
+      visibility = state
+      act(() => {
+        document.dispatchEvent(new Event('visibilitychange'))
+      })
+    }
+    try {
+      const { rerender } = render(<IndexStrip apiKey="key" marketOpen={CLOSED} />)
+      await settle()
+      page('hidden')
+      rerender(<IndexStrip apiKey="key" marketOpen={OPEN} />)
+      await pass(10_000)
+      expect(getMultiQuotes).toHaveBeenCalledTimes(1)
+      page('visible')
+      await settle()
+      // The previous close moved on at the open: that read is owed, however young the last.
+      expect(getMultiQuotes).toHaveBeenCalledTimes(2)
+    } finally {
+      Reflect.deleteProperty(document, 'visibilityState')
+    }
+  })
 })
