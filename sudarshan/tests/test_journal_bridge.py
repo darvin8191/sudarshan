@@ -112,7 +112,7 @@ def test_every_op_of_the_table_has_its_route():
         "state", "trips", "trip_get", "trip_update", "tags_list", "tag_create", "tag_update",
         "playbooks_list", "playbook_create", "playbook_update", "analytics", "reports_list",
         "report_get", "report_file", "report_build", "settings_get", "settings_set",
-        "reconcile_now",
+        "reconcile_now", "charges_reconcile",
     }  # fmt: skip
 
 

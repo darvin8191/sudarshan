@@ -456,6 +456,17 @@ class Tx:
         found = self.conn.execute(query.order_by(t.c.exch_ts_ms, t.c.trade_id)).mappings()
         return [self.out(row) for row in found]
 
+    def fills_between(self, mode: str, start_day: int, end_day: int) -> list[dict[str, Any]]:
+        """The fills of a mode from ``start_day`` to ``end_day``, withdrawn ones aside."""
+        t = self._t("fill")
+        query = (
+            select(t)
+            .where(self._mine(t), t.c.mode == mode, t.c.day >= start_day, t.c.day <= end_day,
+                   t.c.source != "withdrawn")
+            .order_by(t.c.exch_ts_ms, t.c.trade_id)
+        )  # fmt: skip
+        return [self.out(row) for row in self.conn.execute(query).mappings()]
+
     def fills_of_orders(self, mode: str, order_ids: Iterable[str]) -> list[dict[str, Any]]:
         """Every fill of the named orders (withdrawn ones aside), oldest first: an order is
         priced whole, whichever trades hold its fills (review M1)."""

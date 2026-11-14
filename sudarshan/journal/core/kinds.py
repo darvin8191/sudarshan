@@ -176,6 +176,7 @@ OP_NAMES = (
     "settings_get",
     "settings_set",
     "reconcile_now",
+    "charges_reconcile",
     "delivery",
     "family_day",
     "nudge",
@@ -270,6 +271,26 @@ RECORDS = {
     "ChargeActualPart": "part:string, label:string, paise:int",
     "ChargeActual": "parts:ChargeActualPart[], total_paise:int, basis:ChargeBasis, "
     "partial:bool, missing:string[]",
+    # Estimate against actual (M7.42). A difference is the actual less the estimate: above zero,
+    # Upstox charged more than the journal estimated; ``diff_pct`` is that as a percentage of
+    # the actual; ``flagged`` above 5%, with ``words`` naming the part that is off most.
+    # ``unestimated_paise``: what Upstox charged in parts the estimate has no figure for.
+    "ReconcilePart": "part:string, label:string, estimate_paise:int, actual_paise:int, "
+    "diff_paise:int",
+    "ReconcileSegment": "segment:string, label:string, orders:int, estimate_paise:int, "
+    "modelled:bool, actual_paise:int|null, diff_paise:int|null, diff_pct:string|null, "
+    "flagged:bool, unestimated_paise:int, parts:ReconcilePart[], words:string|null, "
+    "read_at:int|null",
+    # ``month``: 202610; a month has an actual only when each of its segments with orders has.
+    "ReconcileMonth": "month:int, label:string, orders:int, estimate_paise:int, "
+    "actual_paise:int|null, diff_paise:int|null, diff_pct:string|null, flagged:bool, "
+    "words:string|null, segments:ReconcileSegment[]",
+    "ReconcileYear": "months:int, estimate_paise:int, actual_paise:int|null, "
+    "diff_paise:int|null, diff_pct:string|null, flagged:bool",
+    # ``running``: the year is not over, so the later months are not there yet; ``note``: what
+    # the owner should know of the whole answer (the journal's first fill, nothing traded).
+    "ChargesReconcile": "fy:int, fy_label:string, running:bool, months:ReconcileMonth[], "
+    "year:ReconcileYear, note:string|null, rate_card:RateCard",
     "Analytics": "metrics:Metrics, hold:HoldBucketRow[], calendar:Calendar, equity:Equity, "
     "heat:HeatCell[], by_strategy:BlockRow[], by_tag:BlockRow[], by_playbook:BlockRow[], "
     "expiry:ExpirySplit, beta:Beta|null",
@@ -441,6 +462,9 @@ OPS = (
            "weekly_on?:bool, monthly_on?:bool, fy_on?:bool, charges_plan?:ChargePlan, "
            "report_language?:string", "Done"),
     OpSpec("reconcile_now", "POST", "/reconcile", "reconcile", "", "Done"),
+    # ``fy``: the year the financial year starts in (2026 for FY 2026-27); this year when absent.
+    OpSpec("charges_reconcile", "GET", "/charges/reconcile", "read", "fy?:int",
+           "ChargesReconcile"),
 )  # fmt: skip
 #: Ops that no route of the bridge carries: the alerts desk, the family service and the alerts'
 #: nudge call them. A nudge's three fields sit in the seal itself, beside ``op`` (alerts/nudge.py).
