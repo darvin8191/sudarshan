@@ -59,6 +59,8 @@ import { intervalLabel } from './prefs'
 
 /** Away longer than this, the candles traded meanwhile are read on coming back. */
 export const COMPUTED_AWAY_MS = 5_000
+/** How long one read of the legs answers every further call to re-sync. */
+export const COMPUTED_RESYNC_QUIET_MS = 3_000
 
 /** Bars in view when the chart opens. */
 export const COMPUTED_VISIBLE_BARS = 60
@@ -105,6 +107,8 @@ export class ComputedChart {
   private loadState: ChartStateView = CHART_READY
   private loadingOlder = false
   private hiddenAt: number | null = null
+  /** When re-sync last read the legs: calls within the quiet window share that read. */
+  private resyncReadAt = Number.NEGATIVE_INFINITY
   private destroyed = false
   private readonly offs: Array<() => void> = []
   /** History as the candle clock repairs it: never read while the page is hidden. */
@@ -217,11 +221,21 @@ export class ComputedChart {
     if (update) this.applyLiveBar(update)
   }
 
-  /** The screen's connection came back: what traded meanwhile was never built from ticks. */
+  /**
+   * The screen's connection came back: what traded meanwhile was never built from ticks.
+   * A return from sleep says so more than once within a second (the page is shown, the socket
+   * signs in again, the screen re-syncs): one read of the legs serves them all (v0.13.0 review
+   * L1). Whatever trades between that read and the first new tick is inside the forming bar,
+   * which the candle clock repairs from history at its close.
+   */
   resync(): void {
     if (this.destroyed || !this.spec) return
     this.builder?.resync()
-    if (document.visibilityState !== 'hidden') void this.data.refresh()
+    if (document.visibilityState === 'hidden') return
+    const now = Date.now()
+    if (now - this.resyncReadAt < COMPUTED_RESYNC_QUIET_MS) return
+    this.resyncReadAt = now
+    void this.data.refresh()
   }
 
   /** Analyze mode came on or went off: redraw in its colours, keeping the bars and the view. */

@@ -196,14 +196,17 @@ function Side({
         {name}
         {itm ? ', in the money' : ''}
       </span>
+      {/* v0.13.0 review L2: one meaning for an arrow. The premium is the figure itself, in ink;
+          the arrow, sign and colour below it are the day's change, which says so with its sign
+          and per cent. The last tick's arrow used to sit here, and could point down in red over
+          a day's change pointing up in green. `data-tick` still says the last tick's side. */}
       <span
         data-tick={tick ?? undefined}
         className={cn(
           'relative inline-flex items-center gap-1 text-base leading-tight font-bold',
-          grey ? GREY : TREND_TEXT[tick ?? 'flat']
+          grey ? GREY : 'text-[color:var(--text-primary)]'
         )}
       >
-        {tick && <TrendArrow direction={tick} className="size-2.5" />}
         {leg.ltp === null ? dash : formatPrice(leg.ltp)}
       </span>
       <span className={cn('relative flex flex-col gap-0.5', call ? 'items-start' : 'items-end')}>

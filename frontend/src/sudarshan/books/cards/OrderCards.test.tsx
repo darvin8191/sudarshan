@@ -582,19 +582,40 @@ describe('Order book on a phone: the cards', () => {
 describe('Order book on a phone: the sheet and its actions', () => {
   it('repeats an order through the app’s ticket: its instrument, side and quantity (B2)', async () => {
     const tap = user()
-    // The product is the one every ticket opens with: here the pick remembered for F&O.
+    // The product is the order's own (MIS), whatever is picked for F&O on this phone.
     localStorage.setItem('sudarshan-ticket-product', JSON.stringify({ fno: 'NRML' }))
     await renderPhone(STOP)
     await tap.click(orderCard('1002'))
     await settle()
     await tap.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Repeat' }))
     expect(screen.getByRole('region', { name: 'Order ticket' })).toHaveTextContent(
-      'SELL NIFTY27OCT2625800PE NFO qty 65 lot 65 product NRML strategy Orders'
+      'SELL NIFTY27OCT2625800PE NFO qty 65 lot 65 product MIS strategy Orders'
     )
     expect(where()).toBe('/orderbook?act=sell&row=1002')
     back()
     await waitFor(() => expect(screen.queryByRole('region', { name: 'Order ticket' })).toBeNull())
     expect(where()).toBe('/orderbook')
+  })
+
+  it('repeats an NRML order as NRML on a phone whose usual F&O product is MIS (review M3)', async () => {
+    const tap = user()
+    localStorage.setItem('sudarshan-ticket-product', JSON.stringify({ fno: 'MIS' }))
+    await renderPhone({ ...STOP, product: 'NRML' })
+    await tap.click(orderCard('1002'))
+    await settle()
+    await tap.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Repeat' }))
+    expect(screen.getByRole('region', { name: 'Order ticket' })).toHaveTextContent(
+      'SELL NIFTY27OCT2625800PE NFO qty 65 lot 65 product NRML strategy Orders'
+    )
+  })
+
+  it('repeats an order whose product the segment does not take in the ticket’s usual one', async () => {
+    const tap = user()
+    await renderPhone({ ...STOP, product: 'CNC' })
+    await tap.click(orderCard('1002'))
+    await settle()
+    await tap.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Repeat' }))
+    expect(screen.getByRole('region', { name: 'Order ticket' })).toHaveTextContent('product MIS')
   })
 
   it('offers Repeat on a final order too, and says when it goes to the sandbox (B2)', async () => {

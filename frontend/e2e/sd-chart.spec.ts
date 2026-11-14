@@ -136,18 +136,73 @@ function shiftDate(target: number) {
   globalThis.Date = ShiftedDate as DateConstructor
 }
 
+/**
+ * Every address that places, changes or cancels an order (v0.13.0 review L9): each call to one is
+ * counted in `sent`, and none is ever answered with success by a default. The three the chart's
+ * line sheet sends on purpose have their own answers below.
+ */
+const ORDER_ADDRESSES = [
+  'placeorder',
+  'placesmartorder',
+  'basketorder',
+  'splitorder',
+  'modifyorder',
+  'cancelorder',
+  'cancelallorder',
+  'closeposition',
+  'optionsorder',
+  'optionsmultiorder',
+  'placegttorder',
+  'modifygttorder',
+  'cancelgttorder',
+  'close_all_positions',
+  'cancel_all_orders',
+]
+/** The line sheet's own calls, which the tests of the sheet expect and count themselves. */
+const SHEET_ADDRESSES = ['close_position', 'cancel_order', 'modify_order']
+
+/** What the test in hand caught: order calls, and requests to any host but this machine. */
+let caught: { sent: Sent[]; outside: string[] } = { sent: [], outside: [] }
+test.beforeEach(() => {
+  caught = { sent: [], outside: [] }
+})
+test.afterEach(() => {
+  expect(caught.outside, 'a request to another host').toEqual([])
+  expect(
+    caught.sent.filter((call) => !SHEET_ADDRESSES.includes(call.path)).map((call) => call.path),
+    'an order call no test asked for'
+  ).toEqual([])
+})
+
 /** Every request the phone chart makes, answered here; the proxy's socket handed back. */
 async function serve(
   page: Page,
   fixture: Fixture
 ): Promise<{ proxy: () => WebSocketRoute; sockets: () => number; sent: Sent[] }> {
   const sockets: WebSocketRoute[] = []
-  const sent: Sent[] = []
+  const sent = caught.sent
+  const outside = caught.outside
+  // Nothing leaves this machine: any other host is refused and listed.
+  await page.route(
+    (url) => !['localhost', '127.0.0.1'].includes(url.hostname),
+    (route) => {
+      outside.push(route.request().url())
+      return route.abort()
+    }
+  )
   // The pages' own exit, cancel and modify calls: answered here, never sent anywhere (C6).
-  for (const path of ['close_position', 'cancel_order', 'modify_order'])
+  for (const path of SHEET_ADDRESSES)
     await page.route(`**/${path}`, (route) => {
       sent.push({ path, body: route.request().postDataJSON() as Record<string, unknown> })
       return route.fulfill(json({ status: 'success', orderid: 'X9', data: { orderid: 'X9' } }))
+    })
+  for (const path of ['close_all_positions', 'cancel_all_orders'])
+    await page.route(`**/${path}`, (route) => {
+      sent.push({ path, body: (route.request().postDataJSON() ?? {}) as Record<string, unknown> })
+      return route.fulfill({
+        ...json({ status: 'error', message: 'This is a test: no order was sent.' }),
+        status: 400,
+      })
     })
   await page.route('**/sudarshan/alerts/api/state', (route) =>
     route.fulfill(
@@ -228,6 +283,14 @@ async function serve(
   await page.route('**/api/v1/**', async (route) => {
     const path = new URL(route.request().url()).pathname.replace('/api/v1/', '')
     const body = (route.request().postDataJSON() ?? {}) as Record<string, string>
+    // An order address: counted, and refused in a trader's words, never answered as placed.
+    if (ORDER_ADDRESSES.includes(path)) {
+      sent.push({ path, body })
+      return route.fulfill({
+        ...json({ status: 'error', message: 'This is a test: no order was sent.' }),
+        status: 400,
+      })
+    }
     switch (path) {
       case 'positionbook':
         return route.fulfill(json({ status: 'success', data: fixture.books?.positions ?? [] }))
@@ -416,6 +479,50 @@ async function checkScreen(page: Page) {
   ).toEqual([])
 }
 
+/**
+ * The order ticket held to the phone rules (v0.13.0 review H1 and M2): the order said in one line
+ * beside Place, on screen whatever the body has scrolled to; every control 48 x 48, named, with
+ * its contrast; the side from the buy and sell tokens, and a word beside it.
+ */
+async function checkTicket(page: Page, ticket: Locator, held: string, tag: string) {
+  const priceText = Number(held.replaceAll(',', '')).toFixed(2)
+  const side = (await ticket.getByRole('button', { name: /^Place (BUY|SELL) Order$/ }).textContent())?.split(' ')[1]
+  const line = ticket.getByTestId('ticket-summary')
+  await expect(line).toHaveText(`${side} 1 SBIN · LIMIT ${priceText} · CNC`)
+  await expect(line).toBeInViewport({ ratio: 1 })
+  const place = ticket.getByRole('button', { name: `Place ${side} Order` })
+  await expect(place).toBeInViewport({ ratio: 1 })
+  await expect(ticket.getByRole('button', { name: 'Cancel' })).toBeInViewport({ ratio: 1 })
+  const fill = await place.evaluate((el, token) => {
+    const probe = document.createElement('i')
+    probe.style.backgroundColor = `var(${token})`
+    el.append(probe)
+    const wanted = getComputedStyle(probe).backgroundColor
+    probe.remove()
+    return { got: getComputedStyle(el).backgroundColor, wanted }
+  }, side === 'BUY' ? '--buy-solid' : '--sell-solid')
+  expect(fill.got, `${tag}: Place takes the side's token`).toBe(fill.wanted)
+  for (const name of ['Price Type', 'Product', 'Exchange'])
+    await expect(ticket.getByRole('combobox', { name })).toHaveCount(1)
+  await expect(ticket.getByRole('group', { name: 'Action' })).toHaveCount(1)
+  await expect(ticket.getByRole('button', { name: 'Close' })).toHaveCount(1)
+  // The price is reachable, and the line stays where it is while the body scrolls to it.
+  await ticket.getByRole('spinbutton', { name: 'Price', exact: true }).scrollIntoViewIfNeeded()
+  await expect(ticket.getByRole('spinbutton', { name: 'Price', exact: true })).toBeInViewport({ ratio: 1 })
+  await expect(line).toBeInViewport({ ratio: 1 })
+  const controls = await ticket.evaluate((dialog) =>
+    [...dialog.querySelectorAll('button, a[href], [role="switch"], [role="combobox"], input, select')]
+      .filter((el) => {
+        const box = el.getBoundingClientRect()
+        if (box.width === 0 && box.height === 0) return false
+        return box.width < 47.5 || box.height < 47.5
+      })
+      .map((el) => `${el.tagName} "${(el.getAttribute('aria-label') ?? el.textContent ?? '').trim()}"`)
+  )
+  expect(controls, `${tag}: every control of the ticket at least 48 x 48`).toEqual([])
+  await checkScreen(page)
+}
+
 /** The chart's freshness words, and "Real-time" nowhere unless ticks are arriving. */
 async function checkFresh(page: Page, words: string | RegExp, ticking = false) {
   await expect(page.getByTestId('phone-chart').locator('[data-feed]').first()).toHaveText(words)
@@ -488,6 +595,61 @@ test.describe('the phone chart at 360 x 800', () => {
     await settled(page, page.getByRole('button', { name: /^Sell at [\d,]+\.\d{2}$/ }))
     await page.screenshot({ path: info.outputPath('held.png') })
     await checkScreen(page)
+  })
+
+  test('Sell at a held price: the ticket shows the whole order without scrolling (review H1, M1, M2)', async ({ page }, info) => {
+    const { proxy } = await serve(page, { now: ist(10, 0, 30) })
+    await open(page)
+    await expect(page.getByRole('button', { name: 'BUY' })).toBeEnabled()
+    await page.clock.runFor(500)
+    await tick(page, proxy(), ist(10, 0, 31), 6)
+    const surface = (await page.getByTestId('chart-surface').boundingBox()) as DOMRect
+    await holdAt(page, surface.x + surface.width * 0.5, surface.y + surface.height * 0.55)
+    const sell = page.getByRole('button', { name: /^Sell at [\d,]+\.\d{2}$/ })
+    await settled(page, sell)
+    const held = (await sell.textContent())?.replace('Sell at ', '') ?? ''
+    await sell.click()
+    const ticket = page.getByRole('dialog', { name: 'Place Order - SELL SBIN' })
+    // Inside its first half second a press of Place sends nothing. The press is made in the
+    // page, in the same turn that sees the ticket still settling, so a slow machine cannot
+    // turn it into a press after the half second (which would be an order placed on purpose).
+    await expect(ticket).toBeVisible()
+    await page.evaluate(() => {
+      if (!document.querySelector('[data-settling]')) return
+      for (const button of document.querySelectorAll('button'))
+        if (button.textContent === 'Place SELL Order') button.click()
+    })
+    await settled(page, ticket)
+    await page.screenshot({ path: info.outputPath('ticket.png') })
+    // Upright, the fields themselves are on the first screen, in the body as it opened.
+    const body = (await ticket.getByTestId('ticket-body').boundingBox()) as DOMRect
+    expect(await ticket.getByTestId('ticket-body').evaluate((el) => el.scrollTop)).toBe(0)
+    for (const field of [
+      ticket.getByRole('button', { name: 'SELL', exact: true }),
+      ticket.getByRole('spinbutton', { name: 'Quantity' }),
+      ticket.getByRole('combobox', { name: 'Price Type' }),
+      ticket.getByRole('combobox', { name: 'Product' }),
+      ticket.getByRole('spinbutton', { name: 'Price', exact: true }),
+    ]) {
+      const box = (await field.boundingBox()) as DOMRect
+      expect(box.y, 'starts inside the body').toBeGreaterThanOrEqual(body.y - 0.5)
+      expect(box.y + box.height, 'ends inside the body').toBeLessThanOrEqual(body.y + body.height + 0.5)
+    }
+    await checkTicket(page, ticket, held, 'upright')
+    // A stop-loss limit adds its trigger: still on the first screen, and in the line.
+    await ticket.getByRole('combobox', { name: 'Price Type' }).click()
+    await page.getByRole('option', { name: 'SL-L' }).click()
+    const trigger = ticket.getByRole('spinbutton', { name: 'Trigger Price' })
+    await trigger.fill('800')
+    const triggerBox = (await trigger.boundingBox()) as DOMRect
+    expect(triggerBox.y + triggerBox.height).toBeLessThanOrEqual(body.y + body.height + 0.5)
+    await expect(ticket.getByTestId('ticket-summary')).toContainText(', trigger 800.00 · CNC')
+    await page.screenshot({ path: info.outputPath('ticket-sl.png') })
+    // A reload does not bring the ticket back: it opens only from a tap (M1).
+    await page.reload()
+    await expect(page.getByTestId('phone-chart')).toBeVisible()
+    await expect(page.getByRole('button', { name: 'BUY' })).toBeEnabled()
+    await expect(page.getByRole('dialog')).toHaveCount(0)
   })
 
   test('in a closed market: closed, when it opens, and the book as the session left it', async ({ page }, info) => {
@@ -628,13 +790,14 @@ test.describe('the phone chart on its side, 800 x 360', () => {
     // The app's own ticket: a limit at the price held, on the product the ticket picks.
     const ticket = page.getByRole('dialog', { name: 'Place Order - BUY SBIN' })
     await settled(page, ticket)
-    await expect(ticket.getByRole('combobox').nth(1)).toHaveText('Limit')
-    await expect(ticket.getByRole('combobox').nth(2)).toHaveText('CNC')
+    await expect(ticket.getByRole('combobox', { name: 'Price Type' })).toHaveText('Limit')
+    await expect(ticket.getByRole('combobox', { name: 'Product' })).toHaveText('CNC')
     await expect(ticket.getByRole('spinbutton', { name: 'Quantity' })).toBeVisible()
     await expect(ticket.getByRole('spinbutton', { name: 'Price', exact: true })).toHaveValue(
       String(Number(held.replaceAll(',', '')))
     )
     await page.screenshot({ path: info.outputPath('sideways-ticket.png') })
+    await checkTicket(page, ticket, held, 'sideways')
   })
 
   test('with the most indicators it takes, two in their own panes', async ({ page }, info) => {
@@ -796,7 +959,7 @@ for (const [layout, viewport] of [
       await sheet.getByRole('button', { name: /^Add/ }).click()
       const ticket = page.getByRole('dialog', { name: `Place Order - BUY ${SYMBOL}` })
       await settled(page, ticket)
-      await expect(ticket.getByRole('combobox').nth(2)).toHaveText('MIS')
+      await expect(ticket.getByRole('combobox', { name: 'Product' })).toHaveText('MIS')
       expect(sent).toHaveLength(1)
     })
 

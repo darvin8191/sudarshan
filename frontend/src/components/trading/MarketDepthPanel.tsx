@@ -41,8 +41,8 @@ function DepthRow({
           className={cn(
             'absolute top-0 bottom-0 transition-all duration-300',
             side === 'buy'
-              ? 'left-0 bg-gradient-to-r from-emerald-500/20 to-transparent'
-              : 'right-0 bg-gradient-to-l from-rose-500/20 to-transparent'
+              ? 'left-0 bg-[color:var(--buy-solid)] opacity-15'
+              : 'right-0 bg-[color:var(--sell-solid)] opacity-15'
           )}
           style={{ width: `${pct}%` }}
         />
@@ -50,7 +50,7 @@ function DepthRow({
       <span
         className={cn(
           'relative z-10 flex-1 font-mono text-xs',
-          side === 'buy' ? 'text-emerald-400' : 'text-rose-400'
+          side === 'buy' ? 'text-[color:var(--buy-solid)]' : 'text-[color:var(--sell-solid)]'
         )}
       >
         {price.toFixed(2)}
@@ -80,7 +80,10 @@ export function MarketDepthPanel({
 
   return (
     <Collapsible open={isExpanded} onOpenChange={onToggle}>
-      <CollapsibleTrigger className="flex items-center justify-between w-full py-2 px-3 bg-muted/20 rounded hover:bg-muted/30 transition-colors">
+      <CollapsibleTrigger
+        // SUDARSHAN (v0.13.0 review M2): 48 dp, and the D tokens below.
+        className="flex min-h-12 items-center justify-between w-full py-2 px-3 bg-muted/20 rounded hover:bg-muted/30 transition-colors"
+      >
         <span className="text-sm text-muted-foreground">
           {isExpanded ? 'Hide' : 'Show'} Market Depth
         </span>
@@ -96,8 +99,12 @@ export function MarketDepthPanel({
           <div className="mt-2 border rounded-lg overflow-hidden">
             {/* Header */}
             <div className="grid grid-cols-2 bg-muted/30">
-              <div className="px-2 py-1.5 text-xs font-medium text-emerald-500 border-r">Bids</div>
-              <div className="px-2 py-1.5 text-xs font-medium text-rose-500">Asks</div>
+              <div className="px-2 py-1.5 text-xs font-medium text-[color:var(--buy-solid)] border-r">
+                Bids
+              </div>
+              <div className="px-2 py-1.5 text-xs font-medium text-[color:var(--sell-solid)]">
+                Asks
+              </div>
             </div>
 
             {/* Depth rows */}
@@ -141,12 +148,12 @@ export function MarketDepthPanel({
             <div className="grid grid-cols-2 bg-muted/30 border-t divide-x">
               <div className="px-2 py-1.5 text-xs text-muted-foreground flex justify-between">
                 <span>Total</span>
-                <span className="font-mono text-emerald-400">
+                <span className="font-mono text-[color:var(--buy-solid)]">
                   {buyLevels.reduce((sum, l) => sum + l.quantity, 0).toLocaleString()}
                 </span>
               </div>
               <div className="px-2 py-1.5 text-xs text-muted-foreground flex justify-between">
-                <span className="font-mono text-rose-400">
+                <span className="font-mono text-[color:var(--sell-solid)]">
                   {sellLevels.reduce((sum, l) => sum + l.quantity, 0).toLocaleString()}
                 </span>
                 <span>Total</span>

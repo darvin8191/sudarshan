@@ -400,8 +400,13 @@ html[data-cvd='1'] {
      switch adds a chip, and until Khand arrives the tracked caps are a fifth wider in the
      fallback face. So the bar's lockup is one wrapping row, one line tall: when the icon and the
      name do not fit side by side the icon drops to a second line, which is clipped away, and both
-     scripts stay (owner rule 2). Shorter still, the name's own right edge is clipped: never a
-     control, and never the page's width. */
+     scripts stay (owner rule 2). Shorter still, the Latin name tightens instead of being cut
+     (v0.13.0 delta review L5: at 320 px in Analyze mode, before Khand arrived, it read
+     "SUDARSH"). The app bar measures the room it has left (`.sd-lockup-room`, a size container
+     below 48rem), and the caps' tracking is what that room allows over nine letters taken at
+     their widest (7em), between 0.06em and the design's 0.4em; in a room narrower than the
+     letters themselves the caps get smaller. Where nothing measures the room (the family bar,
+     a wide screen) the units fall back to the screen's width, which gives the design's values. */
   .sd-lockup--bar {
     display: flex;
     flex-flow: row-reverse wrap;
@@ -429,7 +434,13 @@ html[data-cvd='1'] {
     height: 1.875rem;
   }
   .sd-lockup--bar .sd-lockup__latin {
-    font-size: 0.625rem;
+    font-size: min(0.625rem, calc(100cqw / 7.6));
+    --sd-latin-tracking: clamp(0.06em, calc((100cqw - 7em) / 8), 0.4em);
+  }
+  @media (max-width: 47.98rem) {
+    .sd-lockup-room {
+      container-type: inline-size;
+    }
   }
   /* The narrowest phones never show the icon, also where the lockup is not let shrink (the
      family bar). */

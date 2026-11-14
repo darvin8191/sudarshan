@@ -40,10 +40,16 @@ describe('Navbar', () => {
     renderNavbar('/dashboard')
     const row = screen.getByTestId('navbar-row')
     const lockup = within(row).getByRole('link', { name: /सुदर्शन\s*SUDARSHAN/ })
-    const classes = lockup.className.split(/\s+/)
+    expect(lockup.className.split(/\s+/)).toContain('min-w-0')
+    // The link sits in the room the account controls leave, which the lockup's caps measure
+    // (v0.13.0 delta review L5): it gives way on a phone and keeps its width from 48rem.
+    const classes = (lockup.parentElement as HTMLElement).className.split(/\s+/)
+    expect(classes).toContain('sd-lockup-room')
     expect(classes).toContain('min-w-0')
+    expect(classes).toContain('flex-1')
     expect(classes).not.toContain('shrink-0')
     expect(classes).toContain('md:shrink-0')
+    expect(classes).toContain('md:flex-none')
     expect(row.lastElementChild?.className.split(/\s+/)).toContain('shrink-0')
 
     const css = readFileSync(join(process.cwd(), 'src/sudarshan/theme.css'), 'utf8')
@@ -51,6 +57,13 @@ describe('Navbar', () => {
     expect(bar).toMatch(/flex-flow:\s*row-reverse wrap/)
     expect(bar).toMatch(/overflow:\s*clip/)
     expect(bar).toMatch(/min-width:\s*0/)
+    // The caps tighten to the room instead of being cut: tracking and size follow the container.
+    const latin = /\.sd-lockup--bar \.sd-lockup__latin \{([^}]*)\}/.exec(css)?.[1] ?? ''
+    expect(latin).toMatch(
+      /--sd-latin-tracking:\s*clamp\(0\.06em, calc\(\(100cqw - 7em\) \/ 8\), 0\.4em\)/
+    )
+    expect(latin).toMatch(/font-size:\s*min\(0\.625rem, calc\(100cqw \/ 7\.6\)\)/)
+    expect(css).toMatch(/\.sd-lockup-room \{\s*container-type:\s*inline-size/)
   })
 
   it('marks only the active route as current in desktop navigation', () => {

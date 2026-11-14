@@ -6,12 +6,14 @@
  * dialog can be portalled into the caller, for a fullscreen pane.
  */
 
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { tradingApi } from '@/api/trading'
 import { noteKillSwitch, resetKillSwitchForTests } from '@/sudarshan/risk/killSwitch'
 import { render, screen, userEvent, waitFor } from '@/test/test-utils'
 import { showToast } from '@/utils/toast'
-import { lotsFor, PlaceOrderDialog } from './PlaceOrderDialog'
+import { lotsFor, orderLine, PlaceOrderDialog } from './PlaceOrderDialog'
 
 vi.mock('@/api/trading', async () => {
   const actual = await vi.importActual<typeof import('@/api/trading')>('@/api/trading')
@@ -182,6 +184,154 @@ describe('PlaceOrderDialog', () => {
       expect(host.querySelector('[role="dialog"]')).not.toBeNull()
     } finally {
       host.remove()
+    }
+  })
+})
+
+// SUDARSHAN v0.13.0 review H1 and M2: what the ticket shows on a phone. None of it changes what
+// the ticket sends (the tests above pin that).
+describe('PlaceOrderDialog on a phone', () => {
+  const comesBefore = (first: Element, second: Element) =>
+    Boolean(first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING)
+
+  it('puts price type, product, price and trigger straight under quantity, before Size by risk (H1)', () => {
+    render(<PlaceOrderDialog {...nifty} priceType="SL" price={101} triggerPrice={100.5} />)
+    const quantity = screen.getByRole('spinbutton', { name: 'Quantity' })
+    const type = screen.getByRole('combobox', { name: 'Price Type' })
+    const price = screen.getByRole('spinbutton', { name: 'Price' })
+    const trigger = screen.getByRole('spinbutton', { name: 'Trigger Price' })
+    const risk = screen.getByRole('button', { name: 'Size by risk' })
+    const depth = screen.getByRole('button', { name: /Market Depth/ })
+    expect(comesBefore(quantity, type)).toBe(true)
+    expect(comesBefore(type, price)).toBe(true)
+    expect(comesBefore(price, trigger)).toBe(true)
+    expect(comesBefore(trigger, risk)).toBe(true)
+    expect(comesBefore(risk, depth)).toBe(true)
+  })
+
+  it('says the order in one line beside Place, outside the scrolling body (H1)', async () => {
+    render(
+      <PlaceOrderDialog
+        {...nifty}
+        symbol="SBIN"
+        exchange="NSE"
+        action="SELL"
+        quantity={1}
+        lotSize={1}
+        product="CNC"
+        priceType="LIMIT"
+        price={803}
+      />
+    )
+    const line = screen.getByTestId('ticket-summary')
+    expect(line).toHaveTextContent('SELL 1 SBIN · LIMIT 803.00 · CNC')
+    expect(screen.getByTestId('ticket-body').contains(line)).toBe(false)
+    expect(screen.getByRole('button', { name: 'Place SELL Order' })).toHaveAccessibleDescription(
+      'SELL 1 SBIN · LIMIT 803.00 · CNC'
+    )
+    // It follows the form: a tick up, then the other side.
+    await userEvent.click(screen.getByRole('button', { name: 'Raise the price by one tick' }))
+    await userEvent.click(screen.getByRole('button', { name: 'BUY' }))
+    expect(line).toHaveTextContent('BUY 1 SBIN · LIMIT 803.05 · CNC')
+  })
+
+  it('keeps a price it was opened with when the last price is already known, and sends it', async () => {
+    const place = vi.fn().mockResolvedValue({ orderId: '1' })
+    render(
+      <PlaceOrderDialog
+        {...nifty}
+        symbol="SBIN"
+        exchange="NSE"
+        quantity={1}
+        lotSize={1}
+        product="CNC"
+        priceType="LIMIT"
+        price={803}
+        place={place}
+      />
+    )
+    // The quote says 100: the box and the order keep the 803 that was asked for.
+    expect(screen.getByRole('spinbutton', { name: 'Price' })).toHaveValue(803)
+    await userEvent.click(screen.getByRole('button', { name: 'Place BUY Order' }))
+    await waitFor(() => expect(place).toHaveBeenCalledTimes(1))
+    expect(place.mock.calls[0][0]).toMatchObject({ pricetype: 'LIMIT', price: 803 })
+  })
+
+  it('still fills a limit with the last price when it was opened with none', () => {
+    render(<PlaceOrderDialog {...nifty} priceType="LIMIT" />)
+    expect(screen.getByRole('spinbutton', { name: 'Price' })).toHaveValue(100)
+  })
+
+  it('words every price type in the line, with lots beside the units', () => {
+    const base = {
+      action: 'BUY' as const,
+      quantity: 150,
+      lots: 2,
+      symbol: 'NIFTY28MAR2420800CE',
+      price: 101,
+      trigger: 100.5,
+      product: 'NRML',
+    }
+    const said = (priceType: 'MARKET' | 'LIMIT' | 'SL' | 'SL-M') => {
+      const line = orderLine({ ...base, priceType })
+      return `${line.side} ${line.rest}`
+    }
+    expect(said('MARKET')).toBe('BUY 150 (2 lots) NIFTY28MAR2420800CE · MARKET · NRML')
+    expect(said('LIMIT')).toBe('BUY 150 (2 lots) NIFTY28MAR2420800CE · LIMIT 101.00 · NRML')
+    expect(said('SL')).toBe(
+      'BUY 150 (2 lots) NIFTY28MAR2420800CE · SL-L 101.00, trigger 100.50 · NRML'
+    )
+    expect(said('SL-M')).toBe('BUY 150 (2 lots) NIFTY28MAR2420800CE · SL-M, trigger 100.50 · NRML')
+    expect(orderLine({ ...base, lots: 1, quantity: 75, priceType: 'MARKET' }).rest).toContain(
+      '75 (1 lot) '
+    )
+  })
+
+  it('names the Action, Price Type, Product and Exchange pickers and the steppers (M2)', () => {
+    render(<PlaceOrderDialog {...nifty} symbol="SBIN" exchange="NSE" lotSize={1} priceType="SL" />)
+    const action = screen.getByRole('group', { name: 'Action' })
+    expect(action).toContainElement(screen.getByRole('button', { name: 'BUY', pressed: true }))
+    expect(action).toContainElement(screen.getByRole('button', { name: 'SELL', pressed: false }))
+    expect(screen.getByRole('combobox', { name: 'Price Type' })).toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: 'Product' })).toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: 'Exchange' })).toBeInTheDocument()
+    for (const name of [
+      'Lower the price by one tick',
+      'Raise the price by one tick',
+      'Lower the trigger price by one tick',
+      'Raise the trigger price by one tick',
+      'Close',
+    ])
+      expect(screen.getByRole('button', { name })).toBeInTheDocument()
+  })
+
+  it('gives every control a 48 dp box (M2)', () => {
+    render(<PlaceOrderDialog {...nifty} priceType="SL" />)
+    const tall = (element: HTMLElement) =>
+      /(^|\s|:)(h-12|size-12|min-h-12)(\s|$)/.test(element.className)
+    for (const name of ['Place BUY Order', 'Cancel', 'BUY', 'SELL', 'Lots', 'Shares', 'Close'])
+      expect(tall(screen.getByRole('button', { name })), name).toBe(true)
+    for (const name of ['Price Type', 'Product'])
+      expect(tall(screen.getByRole('combobox', { name })), name).toBe(true)
+    for (const box of screen.getAllByRole('spinbutton')) expect(tall(box)).toBe(true)
+    expect(screen.getByRole('button', { name: 'Lots', pressed: true })).toBeInTheDocument()
+  })
+
+  it('colours the side from --buy-solid and --sell-solid, and keeps no upstream green or red (M2)', async () => {
+    render(<PlaceOrderDialog {...nifty} />)
+    const place = () => screen.getByRole('button', { name: /^Place (BUY|SELL) Order$/ })
+    expect(place().className).toContain('bg-[color:var(--buy-solid)]')
+    await userEvent.click(screen.getByRole('button', { name: 'SELL' }))
+    expect(place().className).toContain('bg-[color:var(--sell-solid)]')
+    // Never colour alone: the side is a word in the title, on the button and in the line.
+    expect(screen.getByRole('dialog')).toHaveAccessibleName(/Place Order -\s*SELL/)
+    expect(screen.getByTestId('ticket-summary')).toHaveTextContent(/^SELL /)
+    for (const file of ['PlaceOrderDialog.tsx', 'QuoteHeader.tsx', 'MarketDepthPanel.tsx']) {
+      const source = readFileSync(join(process.cwd(), 'src/components/trading', file), 'utf8')
+      expect(
+        source.match(/(?:green|red|emerald|rose|purple|amber|pink|cyan|orange|blue)-\d{3}/g) ?? [],
+        file
+      ).toEqual([])
     }
   })
 })
