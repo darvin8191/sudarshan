@@ -764,3 +764,37 @@ def test_strangers_chats_do_not_grow_the_bots_tables_past_their_bound(tmp_path):
             close(opened)
 
     run(go())
+
+
+def test_cost_figures_follow_pnl_not_quantities(tmp_path):
+    """Family review H1 (privacy_fields.json version 2): with P&L hidden and quantities shown, an
+    order's price and a tab's value are not shown, whatever the row carries."""
+
+    class Leaky(Viewer):
+        async def _book(self, request, args, session):
+            answer = await super()._book(request, args, session)
+            answer.payload["data"]["rows"][0] |= {"avg_price_u": 10_000_000, "price_u": 10_000_000}
+            return answer
+
+    async def go():
+        opened = open_store(tmp_path)
+        try:
+            clock = Clock(ist(MONDAY, 11))
+            privacy = {"pnl": False, "qty": True, "funds": False, "orders": True}
+            member = add_member(opened, status="active", privacy=privacy)
+            fake = FakeTelegram(new_token())
+            routes = Leaky(hidden=("pnl", "funds"))
+            made, _ = make_bot(fake_service(opened, clock, tmp_path / "etc", routes), fake,
+                               tmp_path / "etc")  # fmt: skip
+            await ready(made)
+            made.chats[member["id"]] = CHAT_A
+            await made.handle(update("/orders", CHAT_A, date=clock() // 1000))
+            text = fake.sent[-1]["text"]
+            assert "Qty 2" in text and "₹1,000.00" not in text
+            await made.handle(update("/portfolio", CHAT_A, date=clock() // 1000))
+            assert "Value" not in fake.sent[-1]["text"]
+            await settle(made)
+        finally:
+            close(opened)
+
+    run(go())

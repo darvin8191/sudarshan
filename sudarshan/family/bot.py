@@ -590,7 +590,7 @@ class Bot:
         if qty is not None and "qty" not in hidden:
             bits.append(words.say("qty", language, qty=words.quantity(qty)))
         price = _int(row.get("avg_price_u")) or _int(row.get("price_u"))
-        if price and "qty" not in hidden:
+        if price and "pnl" not in hidden:  # a price paid is a cost figure: shown with P&L (H1)
             bits.append(words.price(price))
         return words.SEP.join(bit for bit in bits if bit)
 
@@ -617,7 +617,7 @@ class Bot:
             totals = live.get("totals") if isinstance(live, Mapping) else None
             if isinstance(totals, Mapping):
                 value = _int(totals.get("value_paise"))
-                if value is not None and "qty" not in hidden:
+                if value is not None and "pnl" not in hidden:  # a cost figure (H1)
                     bits.append(words.say("value", language, amount=words.money(value)))
                 today = totals.get("today") if isinstance(totals.get("today"), Mapping) else {}
                 paise = _int(today.get("paise"))
