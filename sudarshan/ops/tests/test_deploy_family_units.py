@@ -393,6 +393,48 @@ def test_removing_a_service_whose_folder_another_account_owns_copies_nothing(tmp
     assert not (next(box.backups.iterdir()) / "ring").exists()
 
 
+FAMILY_ENV_LIST = Path(__file__).resolve().parents[3] / "sudarshan/ops/deploy/family-env.conf"
+
+
+def test_l1_the_release_ships_the_family_settings_list_with_the_view_switched_off():
+    """v0.12.0 review L1: no family-env.conf shipped, so no deploy ever made family.env and the
+    switch-on steps had no file to name. The list holds the switch alone, off, with no old value
+    (an owner who turned it on keeps it on), and every key in it is one the service reads.
+    Fails on the old tree: the file was not there."""
+    from sudarshan.family.config import Settings
+
+    words = [line.split() for line in FAMILY_ENV_LIST.read_text(encoding="utf-8").splitlines()
+             if line.strip() and not line.startswith("#")]  # fmt: skip
+    assert words == [["SUDARSHAN_FAMILY", "off"]]
+    assert FAMILY_ENV_LIST.read_bytes().endswith(b"\n")  # the tool refuses a list cut off
+    assert Settings.from_env(dict(words)).enabled is False
+    assert Settings.from_env({"SUDARSHAN_FAMILY": "on"}).enabled is True
+
+
+@whole_tool
+def test_l1_the_shipped_list_makes_family_env_off_and_keeps_the_owners_on(tmp_path):
+    box = install_box(tmp_path)
+    conf = f"https://raw.githubusercontent.com/{box.OWNER_REPO}/v1.0.1/sudarshan/ops/deploy/family-env.conf"
+    fam_dir(box).mkdir(mode=0o750)  # the owner's set-up has made the family's folder
+    serve_units(box, "v1.0.1", {FAMILY_UNIT: family_unit(box)})
+    box.serve(conf, FAMILY_ENV_LIST.read_bytes())
+    condition_skips(box)
+    done = box.run()
+    assert done.returncode == 0, done.stdout + done.stderr
+    env = fam_dir(box) / "family.env"
+    assert env.read_text() == "SUDARSHAN_FAMILY='off'\n"
+    (tmp_path / "again").mkdir()  # the owner has switched the view on: a later deploy keeps it
+    again = install_box(tmp_path / "again")
+    fam_dir(again).mkdir(mode=0o750)
+    (fam_dir(again) / "family.env").write_text("SUDARSHAN_FAMILY=on\n")
+    serve_units(again, "v1.0.1", {FAMILY_UNIT: family_unit(again)})
+    again.serve(conf, FAMILY_ENV_LIST.read_bytes())
+    condition_skips(again)
+    done = again.run()
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert (fam_dir(again) / "family.env").read_text() == "SUDARSHAN_FAMILY=on\n"
+
+
 @whole_tool
 def test_the_family_settings_file_lives_in_its_own_folder(tmp_path):
     box = install_box(tmp_path)

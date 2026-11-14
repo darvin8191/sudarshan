@@ -532,6 +532,16 @@ def nginx_binary() -> str | None:
 
 NGINX = nginx_binary()
 needs_nginx = pytest.mark.skipif(NGINX is None, reason="no nginx binary (set SUDARSHAN_NGINX)")
+
+
+def test_l3_where_ci_installs_nginx_the_real_nginx_tests_cannot_skip():
+    """v0.12.0 review L3: CI's shard that holds this file installs nginx and sets
+    SUDARSHAN_NGINX_REQUIRED, so a binary that went missing there fails here instead of letting
+    every real-nginx test below skip unseen. On a developer's machine without it, they skip."""
+    workflow = (REPO / ".github" / "workflows" / "sudarshan-ci.yml").read_text(encoding="utf-8")
+    assert "nginx-light" in workflow and "SUDARSHAN_NGINX_REQUIRED=1" in workflow
+    if os.environ.get("SUDARSHAN_NGINX_REQUIRED"):
+        assert NGINX is not None, "CI installs nginx for this file, and no binary was found"
 PHONE = {"Cookie": f"{contract.COOKIE}=nginx-test"}
 CODE = "Invite-Code_0123456789abcdefghij"
 

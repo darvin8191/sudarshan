@@ -23,6 +23,18 @@ export function openQty(trip: Pick<Trip, 'entry_qty' | 'exit_qty'>): number {
   return Math.max(0, trip.entry_qty - trip.exit_qty)
 }
 
+/**
+ * Whether a position not in the figures is a trade the journal saw opened and did not see closed
+ * (the service's `pairing.unclosed`): it ended holding more than its fills took off, because the
+ * account no longer held it when the journal counted again. A position opened before the journal
+ * ends with at least as much sold as the journal saw bought.
+ */
+export function closingNotSeen(
+  trip: Pick<Trip, 'status' | 'closed_ms' | 'entry_qty' | 'exit_qty'>
+): boolean {
+  return trip.status === 'unmatched' && trip.closed_ms !== null && trip.entry_qty > trip.exit_qty
+}
+
 /** The P&L of `qty` open at `entryAvgU` when the last price is `ltpU`, in paise. */
 export function livePnlPaise(side: Side, qty: number, entryAvgU: number, ltpU: number): number {
   const moved = BigInt(ltpU - entryAvgU) * BigInt(qty) * BigInt(sideSign(side))

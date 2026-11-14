@@ -278,7 +278,13 @@ export function ReadOnlyOrders({
     <div className="flex flex-col gap-3">
       <ViewerNote name="orders" text={NOTE} />
       {content}
-      {!notShared && <ReadStamp part="Orders" readAt={readAt} />}
+      {!notShared && (
+        <ReadStamp
+          part="Orders"
+          readAt={readAt}
+          closed={readState === 'closed' || marketOpen('') === false}
+        />
+      )}
       {overlay?.act === 'sheet' && target && (
         <OrderSheet
           row={target}

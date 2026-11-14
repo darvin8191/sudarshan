@@ -3,9 +3,13 @@ mid-point review's M3).
 
 **Shares** (the owner's admin ops ``share_list``, ``share_set``, ``share_remove``): a row of
 family.db's ``share`` is a list (``kind`` watchlist, ``ref`` OpenAlgo's list id as written by
-OpenAlgo, digits only) or a part of the books (``kind`` book, ``ref`` one of the parts), shared
-with one member or with a role, at a level (view or restricted), until an optional end. A change
-names the version it was decided on, and every change is audited. A share with neither a member
+OpenAlgo, digits only), shared with one member or with a role, at a level (view or restricted),
+until an optional end. A change names the version it was decided on, and every change is audited.
+The schema's other kind, ``book`` (a part of the books), is refused by ``share_set`` and left out
+of ``share_list`` (review H1 of v0.12.0): nothing ever read such a row, so it was a choice that
+did nothing. Which books a member opens is decided by the Upstox tab's share in the portfolio and
+by the member's Orders and Funds switches (``words.BOOK_SHARE_REFUSED`` says so); a row of that
+kind already stored stays unread. A share with neither a member
 nor a role is a share with every member (the owner's Family page offers it so). OpenAlgo's owner bridge notes
 each watchlist share as it passes (review M3), and its internal route serves no list that note
 does not name for the member: a share made here alone shows nothing.
@@ -32,7 +36,7 @@ from typing import Any
 from sudarshan.tasks import cancel_and_wait
 
 from . import audit
-from .contract import BOOK_PARTS, LIMITS, ROLES, SHARE_KINDS, SHARE_LEVELS
+from .contract import LIMITS, ROLES, SHARE_KINDS, SHARE_LEVELS
 from .errors import FamilyError, Invalid, NotFound, VersionConflict
 from .listener import Response
 from .portfolio_client import Refusal
@@ -100,7 +104,10 @@ def share_set(tx: Any, args: dict[str, Any], now: int) -> dict[str, Any]:
     until, version = args.get("expires_at"), args.get("version")
     if kind not in SHARE_KINDS:
         raise Invalid(field="kind")
-    if (list_ref(ref) is None) if kind == "watchlist" else (ref not in BOOK_PARTS):
+    if kind == "book":
+        # Review H1 (v0.12.0): no reader ever enforced a book share, so none is taken.
+        raise Invalid("book_share", field="kind")
+    if list_ref(ref) is None:
         raise Invalid(field="ref")
     if level not in SHARE_LEVELS:
         raise Invalid(field="level")
@@ -143,9 +150,11 @@ def share_remove(tx: Any, args: dict[str, Any], now: int) -> dict[str, Any]:
 
 
 def share_list(tx: Any) -> list[dict[str, Any]]:
-    """Every share, oldest first; a removed member's are left out (they serve no one)."""
+    """Every list share, oldest first; a removed member's are left out (they serve no one), and
+    so is a row of kind ``book`` (review H1 of v0.12.0: it decides nothing, so it is not shown)."""
     gone = {row["id"] for row in tx.rows("member", status="removed")}
-    return [share_of(r) for r in tx.rows("share", "id") if r["member_id"] not in gone]
+    return [share_of(r) for r in tx.rows("share", "id", kind="watchlist")
+            if r["member_id"] not in gone]  # fmt: skip
 
 
 def shares_with(row: Mapping[str, Any], member: Mapping[str, Any]) -> bool:

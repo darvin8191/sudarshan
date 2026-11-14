@@ -32,9 +32,22 @@ the week in review, the monthly statement and the tax pack) and listed apart:
   as ended at expiry, out of the figures until a settlement value is known (Upstox's matched
   pairs, which the 22:00 catch-up already keeps, can supply it in a later release).
 
+- **Closing not seen** (status `unmatched`, ended holding more than its fills took off). The
+  opening is read once and the catch-up reaches back 3 trading days, so after the journal was off
+  for longer (a rollback and forward, or the switch off), a share trade whose sale it missed
+  would stay an open LONG for ever. Each night the 22:00 catch-up holds every open delivery trade
+  of a share not traded that day against Upstox's holdings (settled and yesterday's). Where the
+  account holds fewer shares than the trade, the trade is ended there, out of the figures, and
+  the journal goes on from what the account holds: a later sale of the rest is listed apart, a
+  later purchase is a new trade. The count is kept by its day (`key_recount`, schema step 5) and
+  read again each night until the share's next fill, so a read that was wrong is put right and
+  the trade comes back. If the history later brings the missed sale, the trade closes with its
+  result.
+
 Every period report and the tax pack carry one line when the period has any: "Not in these
-figures: N positions opened before the journal started, M contracts that ended at expiry.
-Upstox's own report has them." The Day report says the same of its trade count.
+figures: N positions opened before the journal started, M contracts that ended at expiry, K
+trades the journal did not see closed. Upstox's own report has them." The Day report says the
+same of its trade count.
 
 Limits: a read that does not happen (the portfolio service down) is tried again at the next
 replay of the instrument, so a derivative first seen on a day the portfolio could not be asked
@@ -42,6 +55,20 @@ can read as a short until it is. A contract that expired before the first read s
 what was held of it, so a position opened before the journal and closed on a day rebuilt from
 Upstox's history after its expiry shows as ended at expiry, not as opened before; either way it
 is out of the figures.
+
+The nightly count covers shares only, runs at 22:00 (so a trade whose sale was missed reads as
+open until the first 22:00 after the journal is back), and leaves a share traded that day for
+another night. More shares than the trade (a bonus, a transfer in) change nothing; fewer for a
+reason other than a sale (a reverse split, a transfer out) end the trade the same way. A
+derivative is not counted again: one whose closing was missed ends at its expiry.
+
+A day rebuilt from Upstox's trade history (the journal was down, or the three trading days
+before the install) has no products. A derivative trade is taken as carried. A share's trades of
+one day are taken as intraday when that day's bought and sold quantities are equal (nothing of
+it was carried either way), else as delivery. So an intraday short on such a day is one closed
+short, and a delivery sale of shares held before is still listed apart. Limit: a day that mixes
+both in one share with unequal quantities (shorted intraday and also bought for delivery) is
+taken as delivery whole; check that share against the Upstox app.
 
 ## Units
 

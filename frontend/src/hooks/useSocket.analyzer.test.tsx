@@ -67,9 +67,30 @@ describe('a refused order in Analyze mode', () => {
     // "NIFTY17NOV2825200CE: ...".
     renderHook(() => useSocket(), { wrapper })
     analyzerUpdate('NIFTY17NOV2825200CE', 'Daily loss limit reached: new orders are locked.')
+    // v0.12.0 review L6: the sentence is still alone on the first line; the symbol is the second,
+    // so a refused TradingView alert says which order it was.
     expect(world.toast.error).toHaveBeenCalledWith(
-      'Daily loss limit reached: new orders are locked.'
+      'Daily loss limit reached: new orders are locked.',
+      { description: 'NIFTY17NOV2825200CE' }
     )
+  })
+
+  it('does not repeat a symbol the sentence already names', () => {
+    renderHook(() => useSocket(), { wrapper })
+    analyzerUpdate('SBIN', 'SBIN is not allowed for trading today.')
+    expect(world.toast.error).toHaveBeenCalledWith('SBIN is not allowed for trading today.')
+  })
+
+  it('names the symbol under a refusal that came as an order notification', () => {
+    renderHook(() => useSocket(), { wrapper })
+    world.handlers.get('order_notification')?.[0]?.({
+      symbol: 'SBIN',
+      status: 'error',
+      message: 'The kill switch is on.',
+    })
+    expect(world.toast.error).toHaveBeenCalledWith('The kill switch is on.', {
+      description: 'SBIN',
+    })
   })
 
   it('names the symbol only when the server gave no sentence', () => {

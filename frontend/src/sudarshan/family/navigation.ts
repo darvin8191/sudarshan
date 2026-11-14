@@ -22,9 +22,20 @@ export interface FamilyNavItem {
   needs?: Category
 }
 
+/**
+ * The Dashboard's address, with its slash. Review M7 (v0.12.0): the installed app's scope and
+ * start address are `/family/`, and Chrome treats `/family` as outside it: the app can show its
+ * address bar there, and a reload there is not behind the service worker (no offline page). Every
+ * link and redirect to the Dashboard uses this.
+ */
+export const FAMILY_HOME = '/family/'
+
+/** A family address without its last slash, for comparing two of them. */
+export const bare = (path: string) => path.replace(/\/+$/, '') || '/'
+
 /** The four on the bar itself. */
 export const familyBarItems: FamilyNavItem[] = [
-  { href: '/family', label: 'Dashboard', icon: LayoutDashboard },
+  { href: FAMILY_HOME, label: 'Dashboard', icon: LayoutDashboard },
   { href: '/family/positions', label: 'Positions', icon: TrendingUp },
   { href: '/family/holdings', label: 'Holdings', icon: Wallet },
   { href: '/family/watchlist', label: 'Watchlist', icon: Bookmark },
@@ -56,6 +67,6 @@ export function familyMenu(me: Me | null): { bar: FamilyNavItem[]; more: FamilyN
 /** The screen title for a path (the app bar carries it). */
 export function familyTitle(pathname: string): string {
   const all = [...familyBarItems, ...familyMoreItems]
-  const hit = all.find((item) => item.href === pathname.replace(/\/$/, ''))
+  const hit = all.find((item) => bare(item.href) === bare(pathname))
   return hit?.label ?? 'Family'
 }

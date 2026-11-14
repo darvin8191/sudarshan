@@ -255,7 +255,8 @@ def leaves_out(rows: list[dict[str, Any]], aside: Mapping[str, int]) -> tuple[st
             f"{words.plural(unpriced, 'trade')} here {'shows' if unpriced == 1 else 'show'} "
             "none. Upstox's own report has them."
         )
-    line = words.left_out_line(int(aside.get("unmatched") or 0), int(aside.get("expired") or 0))
+    line = words.left_out_line(int(aside.get("unmatched") or 0), int(aside.get("expired") or 0),
+                               unclosed=int(aside.get("unclosed") or 0))  # fmt: skip
     if line:
         lines.append(line)
     return tuple(lines)

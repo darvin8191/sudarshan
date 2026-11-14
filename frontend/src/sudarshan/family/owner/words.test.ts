@@ -6,10 +6,12 @@ import { CATEGORIES, type Privacy } from '../types'
 import { cardOf, NOW } from './fixtures'
 import {
   AUDIT_WORDS,
+  BOOK_SHARE_RULE,
   CATEGORY_LABEL,
   clockOf,
   devicesLine,
   lastSeenLine,
+  PNL_HIDDEN_NOTE,
   privacyLine,
   settled,
   statusOf,
@@ -28,6 +30,28 @@ describe('the privacy categories', () => {
     ) as { categories: Record<string, string[]> }
     expect(Object.keys(table.categories).sort()).toEqual([...CATEGORIES].sort())
     expect(Object.keys(CATEGORY_LABEL).sort()).toEqual([...CATEGORIES].sort())
+  })
+
+  // The page cannot read the server's files at run time, so its two copies are pinned to them.
+  it('says under a hidden P&L the sentence privacy_fields.json gives, word for word', () => {
+    const table = JSON.parse(
+      readFileSync(
+        resolve(__dirname, '../../../../../sudarshan/family/privacy_fields.json'),
+        'utf8'
+      )
+    ) as { pnl_hidden_note: string }
+    expect(PNL_HIDDEN_NOTE).toBe(table.pnl_hidden_note)
+  })
+
+  it('says about books the sentence the server refuses a book share with, word for word', () => {
+    const source = readFileSync(
+      resolve(__dirname, '../../../../../sudarshan/family/words.py'),
+      'utf8'
+    )
+    const entry = /"book_share":\s*\(([\s\S]*?)\n\s*\),/.exec(source)?.[1] ?? ''
+    const sentence = [...entry.matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((m) => m[1]).join('')
+    expect(sentence.length).toBeGreaterThan(40)
+    expect(BOOK_SHARE_RULE).toBe(sentence)
   })
 
   it('are the categories the portfolio floor is sent with, in the same order (Y6)', () => {

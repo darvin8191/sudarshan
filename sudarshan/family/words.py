@@ -81,7 +81,17 @@ WORDS: dict[str, str] = {
     "push_failing": (
         "Notifications may not arrive on this phone. Turn them off and on again in Settings."
     ),
+    # v0.12.0 review H1: a share of a part of the books was kept and never read, so it is refused.
+    # The Family page shows this sentence as it is (``BOOK_SHARE_REFUSED`` below).
+    "book_share": (
+        "Which books a member can open is set by sharing the Upstox tab in Portfolio, and by "
+        "that member's Orders and Funds switches."
+    ),
 }
+
+#: The one sentence for a refused share of a part of the books (review H1 of v0.12.0): the family
+#: service's ``share_set`` and OpenAlgo's owner bridge both answer it, and the Family page shows it.
+BOOK_SHARE_REFUSED = WORDS["book_share"]
 
 
 def say(key: str, **facts: str) -> str:

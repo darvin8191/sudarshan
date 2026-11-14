@@ -26,6 +26,17 @@ next replay of the key. An open trip whose contract's own expiry day has passed 
 (the close check marks the day's own at 16:05, ``expire_open``); the replay keeps a trip the check
 marked so, unless a later fill closes it.
 
+**A share trade whose sale was not seen** (verification N2). The opening is read once, and
+the catch-up reaches back 3 trading days, so after the journal was off for longer an open share
+trade whose sale it missed would stay an open LONG for ever. The 22:00 catch-up therefore counts
+again (``recount_shares``): each open delivery trade of a share not traded that day is held
+against Upstox's holdings, and where the account holds fewer shares than the trade, what it
+holds is kept as of that day (``key_recount``). The pairing ends the trade there as ``unmatched``
+(its closing was not seen, ``pairing.unclosed``) and goes on from the quantity counted. A count
+is read again each night until the share's next fill, so a read that was wrong is put right and
+the trade comes back. More shares than the trade change nothing. Derivatives are not counted
+again: a contract left open ends at its expiry.
+
 Charges are estimated per trip from its orders (``core/charges.py``: brokerage per order, the
 rest on each order's turnover), so net = gross - est. charges once it closes. An order shared by
 two trips (a reversal) is priced once, whole, and each trip takes its share by quantity, in the
@@ -52,6 +63,7 @@ from sudarshan.portfolio.core.kinds import QTY_SCALE
 
 from .core import charges as charges_core
 from .core import kinds, pairing
+from .core.money import day_start_ms as money_day_start
 from .core.money import ist_day
 from .openalgo_ro import MANUAL, RecordsUnavailable, records_for
 from .portfolio import PortfolioUnavailable, link_for
@@ -256,9 +268,11 @@ def _start(tx: Tx, mode: str, key: tuple[str, str, str], anchor: int,
     )
 
 
-def replay_tx(tx: Tx, mode: str, days: Iterable[int], now: int, facts: Facts) -> dict[str, int]:
-    """Pair again every instrument the fills of ``days`` touch, and bring the stored trips to
-    what the pairing makes now (see the module's words). Returns counts."""
+def replay_tx(tx: Tx, mode: str, days: Iterable[int], now: int, facts: Facts,
+              keys: Mapping[tuple[str, str, str], int] | None = None) -> dict[str, int]:  # fmt: skip
+    """Pair again every instrument the fills of ``days`` touch, and each of ``keys`` (a key and
+    the instant to pair it from), and bring the stored trips to what the pairing makes now (see
+    the module's words). Returns counts."""
     counts = {"keys": 0, "new": 0, "kept": 0, "orphaned": 0, "forgotten": 0, "unmatched": 0,
               "expired": 0}  # fmt: skip
     today = ist_day(now)
@@ -266,7 +280,11 @@ def replay_tx(tx: Tx, mode: str, days: Iterable[int], now: int, facts: Facts) ->
         if facts.opening_day is not None and facts.opening_ms is not None:
             tx.opening_put(mode, key, qty, facts.opening_day, source, facts.opening_ms, now)
     openings = tx.openings_of(mode)
-    for (exchange, symbol, pclass), from_ms in keys_touched(tx, mode, days).items():
+    recounts = tx.recounts_of(mode)
+    touched = keys_touched(tx, mode, days)
+    for key, from_ms in (keys or {}).items():
+        touched[key] = min(touched.get(key, from_ms), from_ms)
+    for (exchange, symbol, pclass), from_ms in touched.items():
         counts["keys"] += 1
         reaching, anchor = window(tx, mode, (exchange, symbol, pclass), from_ms)
         stored = [t for t in reaching if t["opened_ms"] >= anchor]
@@ -277,7 +295,14 @@ def replay_tx(tx: Tx, mode: str, days: Iterable[int], now: int, facts: Facts) ->
         ]
         held = _start(tx, mode, (exchange, symbol, pclass), anchor, fills,
                       openings.get((exchange, symbol, pclass)), facts)  # fmt: skip
-        made = pairing.pair_fills(fills, {(mode, exchange, symbol, pclass): held})
+        # A recount speaks for the start of its day: one a fill before the window already
+        # reaches (that day or later) was applied to the trips before the window.
+        counted = recounts.get((exchange, symbol, pclass)) or []
+        if counted:
+            last = tx.last_fill_day(mode, exchange, symbol, pclass, anchor)
+            counted = [c for c in counted if last is None or c[0] > last]
+        pair_key = (mode, exchange, symbol, pclass)
+        made = pairing.pair_fills(fills, {pair_key: held}, {pair_key: counted})
         by_trade = {f["trade_id"]: f for f in fills}
         refs = tx.order_refs(mode, {f["order_id"] for f in fills})
         # Each order priced whole: the units of it before the window belong to earlier trips,
@@ -389,15 +414,86 @@ async def read_openings(service: Any, need: Mapping[tuple[str, str, str], str]) 
         for key, ik in others.items():
             facts.openings[key] = (held.get(ik, 0), "positions")
     if shares and (rows := await _rows(link.holdings)) is not None:
-        held = {}
-        for row in rows:
-            ik = str(row.get("instrument_key") or "")
-            held[ik] = held.get(ik, 0) + _whole(row.get("qty_u")) + _whole(row.get("t1_qty_u"))
+        held = _held_shares(rows)
         for key, ik in shares.items():
             facts.openings[key] = (held.get(ik, 0), "holdings")
     if len(facts.openings) < len(need):
         service.parts["openings_failed_ms"] = now
     return facts
+
+
+def _held_shares(rows: Iterable[Mapping[str, Any]]) -> dict[str, int]:
+    """Upstox's holdings by instrument key: settled and yesterday's (T1) shares."""
+    held: dict[str, int] = {}
+    for row in rows:
+        ik = str(row.get("instrument_key") or "")
+        held[ik] = held.get(ik, 0) + _whole(row.get("qty_u")) + _whole(row.get("t1_qty_u"))
+    return held
+
+
+def _to_recount(tx: Tx, today: int) -> dict[tuple[str, str, str], dict[str, Any]]:
+    """The share keys to hold against Upstox's holdings tonight (see ``recount_shares``): each
+    with its instrument key, the day its count speaks for, the instant to pair it again from,
+    and ``open_qty``, the open trade's quantity (None for a count read again)."""
+    found: dict[tuple[str, str, str], dict[str, Any]] = {}
+    for trip in tx.rows("round_trip", mode="live", status=pairing.OPEN):
+        key = (trip["exchange"], trip["symbol"], trip["product_class"])
+        if not pairing.cash_carry(key[0], key[2]) or not trip["instrument_key"]:
+            continue
+        # A share traded today is left for another night: what its holdings say on the day of
+        # a trade is not known (verification N4).
+        if tx.last_fill_day("live", *key) == today:
+            continue
+        found[key] = {"ik": trip["instrument_key"], "day": today,
+                      "from_ms": int(trip["opened_ms"]),
+                      "open_qty": int(trip["entry_qty"]) - int(trip["exit_qty"])}  # fmt: skip
+    for key, counted in tx.recounts_of("live").items():
+        day = counted[-1][0]
+        last = tx.last_fill_day("live", *key)
+        if key in found or not pairing.cash_carry(key[0], key[2]) or (last or 0) >= day:
+            continue
+        # Counted, and no fill of the share since: read again, so a wrong read is put right.
+        trips = [t for t in tx.rows("round_trip", mode="live", exchange=key[0], symbol=key[1])
+                 if t["product_class"] == key[2] and t["instrument_key"]]  # fmt: skip
+        if trips:
+            found[key] = {"ik": trips[-1]["instrument_key"], "day": day,
+                          "from_ms": money_day_start(day), "open_qty": None}  # fmt: skip
+    return found
+
+
+async def recount_shares(service: Any, today: int, now: int) -> str:
+    """Hold the open delivery trades of shares against Upstox's holdings (verification N2; the
+    module's words). Called by the 22:00 catch-up once today's trades are read, under the live
+    capture's lock (it pairs again). Returns the job log's line; raises PortfolioUnavailable when
+    the holdings could not be read, so the catch-up asks again."""
+    store = service.store
+    wanted = await _thread(lambda: store.read(OWNER, lambda tx: _to_recount(tx, today)))
+    if not wanted:
+        return "holdings: no open share trade to check"
+    rows = await _rows(link_for(service).holdings)
+    if rows is None:
+        raise PortfolioUnavailable("failed", "the holdings could not be read")
+    held = _held_shares(rows)
+    facts = await gather_facts(service, "live", [])
+
+    def write(tx):
+        again: dict[tuple[str, str, str], int] = {}
+        for key, want in _to_recount(tx, today).items():  # as the journal stands now
+            have = held.get(want["ik"], 0)
+            if want["open_qty"] is not None and have >= want["open_qty"]:
+                continue
+            if tx.recount_put("live", key, want["day"], have, "holdings", now, now):
+                again[key] = want["from_ms"]
+        if again:
+            replay_tx(tx, "live", [], now, facts, keys=again)
+        return len(again)
+
+    changed = await _thread(lambda: store.write(OWNER, write))
+    if changed:
+        log.warning("%d open share trades are not in Upstox's holdings as the journal has them; "
+                    "counted again from the holdings", changed)  # fmt: skip
+    return (f"holdings: {len(wanted)} share {'trade' if len(wanted) == 1 else 'trades'} checked, "
+            f"{changed} counted again")  # fmt: skip
 
 
 async def gather_facts(service: Any, mode: str, days: Iterable[int]) -> Facts:

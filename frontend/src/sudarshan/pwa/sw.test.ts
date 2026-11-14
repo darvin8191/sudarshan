@@ -474,6 +474,18 @@ describe('notificationclick', () => {
     expect(world.clients.openWindow).toHaveBeenCalledWith('/family/holdings')
   })
 
+  // Review M7 (v0.12.0): `/family` is outside the installed app's scope. Fails on the old worker.
+  it('opens the home at /family/, whether the message names /family, nothing or another site', async () => {
+    for (const url of ['/family', '', 'https://elsewhere.invalid/x', '/dashboard']) {
+      world.clients.openWindow.mockClear()
+      await click(url)
+      expect(world.clients.openWindow).toHaveBeenCalledWith('/family/')
+    }
+    world.clients.openWindow.mockClear()
+    await click('/family?from=digest')
+    expect(world.clients.openWindow).toHaveBeenCalledWith('/family/?from=digest')
+  })
+
   it('focuses an open family window instead of opening another', async () => {
     const focus = vi.fn().mockResolvedValue(undefined)
     world.clients.matchAll.mockResolvedValue([

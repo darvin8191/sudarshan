@@ -189,8 +189,9 @@ describe('Positions', () => {
       FakeSocket.last().open()
       FakeSocket.last().say({ type: 'feed_state', state: 'closed', since: Date.now() })
     })
+    // the status line says it, and (review L4) so does the read stamp
     await waitFor(() =>
-      expect(screen.getByText(/market closed|not real-time|closed/i)).toBeTruthy()
+      expect(screen.getAllByText(/market closed|not real-time|closed/i).length).toBeGreaterThan(0)
     )
     expect(screen.queryByText(/^Live$/)).toBeNull()
   })
@@ -315,5 +316,164 @@ describe('Dashboard', () => {
     mount('/family', <FamilyDashboard />, '/family')
     const total = await screen.findByTestId('glance-total')
     await waitFor(() => expect(total.textContent).toContain('50.00'))
+  })
+
+  // Review M3 (v0.12.0): the glance was worked out from the read alone and never moved between
+  // reads, under a Real-time line. Fails on the old screen: it never asked for SYNTH's ticks.
+  it('moves the glance total with a tick newer than the read', async () => {
+    routeFetch({
+      '/family/api/market': ok({ ...market, feed: 'realtime' }),
+      '/family/api/books/positions': ok(bookOf('positions', [FULL_POSITION])),
+    })
+    mount('/family', <FamilyDashboard />, '/family')
+    const total = await screen.findByTestId('glance-total')
+    await waitFor(() => expect(total.textContent).toContain('50.00'))
+    await waitFor(() => expect(FakeSocket.instances.length).toBeGreaterThan(0))
+    act(() => {
+      FakeSocket.last().open()
+      FakeSocket.last().say({ type: 'auth', status: 'success' })
+    })
+    // the screen follows the open position, not the indices alone
+    await waitFor(() =>
+      expect(FakeSocket.last().sent.some((sent) => sent.includes('"SYNTH"'))).toBe(true)
+    )
+    act(() => {
+      FakeSocket.last().say({
+        type: 'market_data',
+        symbol: 'SYNTH',
+        exchange: 'NSE',
+        mode: 1,
+        data: { ltp: 107, close: 100, ltt: Date.now(), timestamp: Date.now() },
+      })
+    })
+    // 10 held at 100, read at 105 (P&L 50.00); a tick at 107 makes it 70.00
+    await waitFor(() => expect(total.textContent).toContain('70.00'))
+    expect(total.textContent).not.toContain('50.00')
+  })
+
+  it('does not follow a closed position, whose P&L is booked', async () => {
+    routeFetch({
+      '/family/api/market': ok(market),
+      '/family/api/books/positions': ok(
+        bookOf('positions', [{ ...FULL_POSITION, symbol: 'SHUTX', qty_u: 0, pnl_paise: 1_200 }])
+      ),
+    })
+    mount('/family', <FamilyDashboard />, '/family')
+    const total = await screen.findByTestId('glance-total')
+    await waitFor(() => expect(total.textContent).toContain('12.00'))
+    await waitFor(() => expect(FakeSocket.instances.length).toBeGreaterThan(0))
+    act(() => {
+      FakeSocket.last().open()
+      FakeSocket.last().say({ type: 'auth', status: 'success' })
+    })
+    await waitFor(() =>
+      expect(FakeSocket.last().sent.some((sent) => sent.includes('"SYNIDX"'))).toBe(true)
+    )
+    expect(FakeSocket.last().sent.some((sent) => sent.includes('"SHUTX"'))).toBe(false)
+  })
+})
+
+// Review M4 (v0.12.0): "not shared", "portfolio off" and "cannot be read" came with no rows, and
+// the screens said "No open positions", "No holdings" and "₹0.00": a zero that is not a zero. Each
+// case fails on the old screens.
+describe('a part that was not read is not an empty account', () => {
+  const market = { feed: 'closed', since: null, indices: [] }
+  const CASES = [
+    ['not_shared', 'Not shared with you.'],
+    ['portfolio_off', 'The portfolio service is switched off on the server.'],
+    ['unreachable', 'The account cannot be read right now; prices still move.'],
+  ] as const
+  const unread = (part: 'positions' | 'holdings', state: string, words: string | null) =>
+    ok(bookOf(part, [], { state: state as never, words, read_at: null }))
+  const noZero = () => {
+    const text = document.body.textContent ?? ''
+    expect(text).not.toContain('No open positions')
+    expect(text).not.toContain('No holdings')
+    expect(text).not.toMatch(/₹\s?0(\.00)?/)
+    expect(text).not.toMatch(/\b0 open/)
+  }
+
+  it.each(CASES)('Positions, %s: the service sentence is the card', async (state, words) => {
+    routeFetch({ '/family/api/books/positions': unread('positions', state, words) })
+    mount('/family/positions', <FamilyPositions />)
+    expect((await screen.findByTestId('book-unread')).textContent).toBe(words)
+    noZero()
+  })
+
+  it.each(CASES)('Holdings, %s: the service sentence is the card', async (state, words) => {
+    routeFetch({ '/family/api/books/holdings': unread('holdings', state, words) })
+    mount('/family/holdings', <FamilyHoldings />, '/family/holdings')
+    expect((await screen.findByTestId('book-unread')).textContent).toBe(words)
+    noZero()
+  })
+
+  it.each(
+    CASES
+  )('Dashboard, %s: no figure and no count, the sentence once', async (state, words) => {
+    routeFetch({
+      '/family/api/market': ok(market),
+      '/family/api/books/positions': unread('positions', state, words),
+    })
+    mount('/family', <FamilyDashboard />, '/family')
+    expect((await screen.findByTestId('glance-unread')).textContent).toBe(words)
+    expect(screen.queryByTestId('glance-total')).toBeNull()
+    expect(screen.getAllByText(words)).toHaveLength(1)
+    noZero()
+  })
+
+  it('has a plain sentence where the service sent none', async () => {
+    routeFetch({ '/family/api/books/positions': unread('positions', 'not_shared', null) })
+    mount('/family/positions', <FamilyPositions />)
+    expect((await screen.findByTestId('book-unread')).textContent).toBe('Not shared with you.')
+  })
+
+  it('still says No open positions for a read that found none', async () => {
+    routeFetch({ '/family/api/books/positions': ok(bookOf('positions', [])) })
+    mount('/family/positions', <FamilyPositions />)
+    expect(await screen.findByText('No open positions')).toBeInTheDocument()
+    expect(screen.queryByTestId('book-unread')).toBeNull()
+  })
+
+  it('still says No open positions when the market is closed and the last read found none', async () => {
+    routeFetch({
+      '/family/api/books/positions': ok(
+        bookOf('positions', [], { state: 'closed', words: 'Market closed · figures from 15:40:12' })
+      ),
+    })
+    mount('/family/positions', <FamilyPositions />)
+    expect(await screen.findByText('No open positions')).toBeInTheDocument()
+  })
+})
+
+// Review L4 (v0.12.0): "refresh on every order and every 45 s" was said while the market was
+// closed, when no timed read runs. Fails on the old stamp.
+describe('the read stamp', () => {
+  it('promises the 45 s refresh only while a market is open', async () => {
+    routeFetch({ '/family/api/books/positions': ok(bookOf('positions', [FULL_POSITION])) })
+    mount('/family/positions', <FamilyPositions />)
+    expect(
+      await screen.findByText(/Positions from .* · refresh on every order and every 45 s/)
+    ).toBeTruthy()
+    await waitFor(() => expect(FakeSocket.instances.length).toBeGreaterThan(0))
+    act(() => {
+      FakeSocket.last().open()
+      FakeSocket.last().say({ type: 'feed_state', state: 'closed', since: Date.now() })
+    })
+    expect(await screen.findByText(/Positions from .* · market closed/)).toBeTruthy()
+    expect(screen.queryByText(/every 45 s/)).toBeNull()
+  })
+
+  it('says market closed for a read the service marks closed', async () => {
+    routeFetch({
+      '/family/api/books/holdings': ok(
+        bookOf('holdings', [FULL_HOLDING], {
+          state: 'closed',
+          words: 'Market closed · figures from 15:40:12',
+        })
+      ),
+    })
+    mount('/family/holdings', <FamilyHoldings />, '/family/holdings')
+    expect(await screen.findByText(/Holdings from .* · market closed/)).toBeTruthy()
+    expect(screen.queryByText(/every 45 s/)).toBeNull()
   })
 })
