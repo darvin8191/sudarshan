@@ -1,0 +1,789 @@
+{
+ "about": "rules.decide at each rule's edge. now is 1794804310; the strategy defaults are active, both, 30 s, 20 a day.",
+ "cases": [
+  {
+   "name": "fresh long, active strategy: go",
+   "strategy": {},
+   "state": {},
+   "alert": {
+    "position": "long",
+    "fired_s": 1794804308
+   },
+   "now": 1794804310,
+   "day": "2026-11-16",
+   "claimed": false,
+   "waited": false,
+   "expect": {
+    "verdict": null,
+    "target": 1,
+    "wait": false,
+    "gap": false,
+    "late_s": null,
+    "capped_now": false
+   }
+  },
+  {
+   "name": "repeat: the claim is there",
+   "strategy": {},
+   "state": {},
+   "alert": {
+    "position": "long",
+    "fired_s": 1794804308
+   },
+   "now": 1794804310,
+   "day": "2026-11-16",
+   "claimed": true,
+   "waited": false,
+   "expect": {
+    "verdict": "repeat"
+   }
+  },
+  {
+   "name": "repeat wins over everything else",
+   "strategy": {
+    "state": "stopped"
+   },
+   "state": {},
+   "alert": {
+    "position": "long",
+    "fired_s": 1794794311
+   },
+   "now": 1794804310,
+   "day": "2026-11-16",
+   "claimed": true,
+   "waited": false,
+   "expect": {
+    "verdict": "repeat"
+   }
+  },
+  {
+   "name": "fired one second before the last applied: out of order",
+   "strategy": {},
+   "state": {
+    "last_fired_s": 1794804309
+   },
+   "alert": {
+    "position": "long",
+    "fired_s": 1794804308
+   },
+   "now": 1794804310,
+   "day": "2026-11-16",
+   "claimed": false,
+   "waited": false,
+   "expect": {
+    "verdict": "out_of_order"
+   }
+  },
+  {
+   "name": "fired in the same second as the last applied: not out of order",
+   "strategy": {},
+   "state": {
+    "last_fired_s": 1794804308
+   },
+   "alert": {
+    "position": "long",
+    "fired_s": 1794804308
+   },
+   "now": 1794804310,
+   "day": "2026-11-16",
+   "claimed": false,
+   "waited": false,
+   "expect": {
+    "verdict": null,
+    "target": 1
+   }
+  },
+  {
+   "name": "fired after the last applied: go",
+   "strategy": {},
+   "state": {
+    "last_fired_s": 1794804307
+   },
+   "alert": {
+    "position": "long",
+    "fired_s": 1794804308
+   },
+   "now": 1794804310,
+   "day": "2026-11-16",
+   "claimed": false,
+   "waited": false,
+   "expect": {
+    "verdict": null
+   }
+  },
+  {
+   "name": "an old exit is out of order too",
+   "strategy": {},
+   "state": {
+    "last_fired_s": 1794804309
+   },
+   "alert": {
+    "position": "flat",
+    "fired_s": 1794804308
+   },
+   "now": 1794804310,
+   "day": "2026-11-16",
+   "claimed": false,
+   "waited": false,
+   "expect": {
+    "verdict": "out_of_order",
+    "target": 0
+   }
+  },
+  {
+   "name": "stopped: nothing, told once",
+   "strategy": {
+    "state": "stopped"
+   },
+   "state": {},
+   "alert": {
+    "position": "long",
+    "fired_s": 1794804308
+   },
+   "now": 1794804310,
+   "day": "2026-11-16",
+   "claimed": false,
+   "waited": false,
+   "expect": {
+    "verdict": "stopped",
+    "tell_stopped": true
+   }
+  },
+  {
+   "name": "stopped: a flat target is ignored too",
+   "strategy": {
+    "state": "stopped"
+   },
+   "state": {},
+   "alert": {
+    "position": "flat",
+    "fired_s": 1794804308
+   },
+   "now": 1794804310,
+   "day": "2026-11-16",
+   "claimed": false,
+   "waited": false,
+   "expect": {
+    "verdict": "stopped",
+    "target": 0
+   }
+  },
+  {
+   "name": "stopped: already told today",
+   "strategy": {
+    "state": "stopped"
+   },
+   "state": {
+    "told_stopped_day": "2026-11-16"
+   },
+   "alert": {
+    "position": "long",
+    "fired_s": 1794804308
+   },
+   "now": 1794804310,
+   "day": "2026-11-16",
+   "claimed": false,
+   "waited": false,
+   "expect": {
+    "verdict": "stopped",
+    "tell_stopped": false
+   }
+  },
+  {
+   "name": "stopped: told yesterday is told again today",
+   "strategy": {
+    "state": "stopped"
+   },
+   "state": {
+    "told_stopped_day": "2026-11-13"
+   },
+   "alert": {
+    "position": "long",
+    "fired_s": 1794804308
+   },
+   "now": 1794804310,
+   "day": "2026-11-16",
+   "claimed": false,
+   "waited": false,
+   "expect": {
+    "verdict": "stopped",
+    "tell_stopped": true
+   }
+  },
+  {
+   "name": "exits only: an entry is refused",
+   "strategy": {
+    "state": "exits_only"
+   },
+   "state": {},
+   "alert": {
+    "position": "long",
+    "fired_s": 1794804308
+   },
+   "now": 1794804310,
+   "day": "2026-11-16",
+   "claimed": false,
+   "waited": false,
+   "expect": {
+    "verdict": "stopped"
+   }
+  },
+  {
+   "name": "exits only: short is refused",
+   "strategy": {
+    "state": "exits_only"
+   },
+   "state": {},
+   "alert": {
+    "position": "short",
+    "fired_s": 1794804308
+   },
+   "now": 1794804310,
+   "day": "2026-11-16",
+   "claimed": false,
+   "waited": false,
+   "expect": {
+    "verdict": "stopped",
+    "target": -1
+   }
+  },
+  {
+   "name": "exits only: a flat target goes",
+   "strategy": {
+    "state": "exits_only"
+   },
+   "state": {},
+   "alert": {
+    "position": "flat",
+    "fired_s": 1794804308
+   },
+   "now": 1794804310,
+   "day": "2026-11-16",
+   "claimed": false,
+   "waited": false,
+   "expect": {
+    "verdict": null,
+    "target": 0
+   }
+  },
+  {
+   "name": "out of order is said before stopped",
+   "strategy": {
+    "state": "stopped"
+   },
+   "state": {
+    "last_fired_s": 1794804310
+   },
+   "alert": {
+    "position": "long",
+    "fired_s": 1794804308
+   },
+   "now": 1794804310,
+   "day": "2026-11-16",
+   "claimed": false,
+   "waited": false,
+   "expect": {
+    "verdict": "out_of_order"
+   }
+  },
+  {
+   "name": "the cap's last alert: 19 of 20 used, goes",
+   "strategy": {},
+   "state": {
+    "day": "2026-11-16",
+    "alerts_today": 19
+   },
+   "alert": {
+    "position": "long",
+    "fired_s": 1794804308
+   },
+   "now": 1794804310,
+   "day": "2026-11-16",
+   "claimed": false,
+   "waited": false,
+   "expect": {
+    "verdict": null,
+    "capped_now": false
+   }
+  },
+  {
+   "name": "the cap reached: 20 of 20 used, an entry is capped and the strategy stops entries",
+   "strategy": {},
+   "state": {
+    "day": "2026-11-16",
+    "alerts_today": 20
+   },
+   "alert": {
+    "position": "long",
+    "fired_s": 1794804308
+   },
+   "now": 1794804310,
+   "day": "2026-11-16",
+   "claimed": false,
+   "waited": false,
+   "expect": {
+    "verdict": "capped",
+    "capped_now": true
+   }
+  },
+  {
+   "name": "the cap reached: a flat target still goes, and the strategy stops entries",
+   "strategy": {},
+   "state": {
+    "day": "2026-11-16",
+    "alerts_today": 20
+   },
+   "alert": {
+    "position": "flat",
+    "fired_s": 1794804308
+   },
+   "now": 1794804310,
+   "day": "2026-11-16",
+   "claimed": false,
+   "waited": false,
+   "expect": {
+    "verdict": null,
+    "target": 0,
+    "capped_now": true
+   }
+  },
+  {
+   "name": "yesterday's count does not cap today",
+   "strategy": {},
+   "state": {
+    "day": "2026-11-13",
+    "alerts_today": 20
+   },
+   "alert": {
+    "position": "long",
+    "fired_s": 1794804308
+   },
+   "now": 1794804310,
+   "day": "2026-11-16",
+   "claimed": false,
+   "waited": false,
+   "expect": {
+    "verdict": null,
+    "capped_now": false
+   }
+  },
+  {
+   "name": "a smaller cap the owner chose",
+   "strategy": {
+    "max_alerts_day": 3
+   },
+   "state": {
+    "day": "2026-11-16",
+    "alerts_today": 3
+   },
+   "alert": {
+    "position": "long",
+    "fired_s": 1794804308
+   },
+   "now": 1794804310,
+   "day": "2026-11-16",
+   "claimed": false,
+   "waited": false,
+   "expect": {
+    "verdict": "capped"
+   }
+  },
+  {
+   "name": "age exactly the window: not late",
+   "strategy": {},
+   "state": {},
+   "alert": {
+    "position": "long",
+    "fired_s": 1794804280
+   },
+   "now": 1794804310,
+   "day": "2026-11-16",
+   "claimed": false,
+   "waited": false,
+   "expect": {
+    "verdict": null,
+    "late_s": null
+   }
+  },
+  {
+   "name": "age one over the window: late, an entry is refused",
+   "strategy": {},
+   "state": {},
+   "alert": {
+    "position": "long",
+    "fired_s": 1794804279
+   },
+   "now": 1794804310,
+   "day": "2026-11-16",
+   "claimed": false,
+   "waited": false,
+   "expect": {
+    "verdict": "late",
+    "late_s": 31
+   }
+  },
+  {
+   "name": "late short is refused",
+   "strategy": {},
+   "state": {},
+   "alert": {
+    "position": "short",
+    "fired_s": 1794804180
+   },
+   "now": 1794804310,
+   "day": "2026-11-16",
+   "claimed": false,
+   "waited": false,
+   "expect": {
+    "verdict": "late",
+    "target": -1
+   }
+  },
+  {
+   "name": "late flat goes, with how late",
+   "strategy": {},
+   "state": {},
+   "alert": {
+    "position": "flat",
+    "fired_s": 1794804180
+   },
+   "now": 1794804310,
+   "day": "2026-11-16",
+   "claimed": false,
+   "waited": false,
+   "expect": {
+    "verdict": null,
+    "target": 0,
+    "late_s": 130
+   }
+  },
+  {
+   "name": "the owner's window of 120 s",
+   "strategy": {
+    "max_age_s": 120
+   },
+   "state": {},
+   "alert": {
+    "position": "long",
+    "fired_s": 1794804190
+   },
+   "now": 1794804310,
+   "day": "2026-11-16",
+   "claimed": false,
+   "waited": false,
+   "expect": {
+    "verdict": null
+   }
+  },
+  {
+   "name": "5 s ahead of this server: allowed",
+   "strategy": {},
+   "state": {},
+   "alert": {
+    "position": "long",
+    "fired_s": 1794804315
+   },
+   "now": 1794804310,
+   "day": "2026-11-16",
+   "claimed": false,
+   "waited": false,
+   "expect": {
+    "verdict": null,
+    "late_s": null
+   }
+  },
+  {
+   "name": "6 s ahead: refused as an entry",
+   "strategy": {},
+   "state": {},
+   "alert": {
+    "position": "long",
+    "fired_s": 1794804316
+   },
+   "now": 1794804310,
+   "day": "2026-11-16",
+   "claimed": false,
+   "waited": false,
+   "expect": {
+    "verdict": "late",
+    "late_s": -6
+   }
+  },
+  {
+   "name": "6 s ahead, flat: goes",
+   "strategy": {},
+   "state": {},
+   "alert": {
+    "position": "flat",
+    "fired_s": 1794804316
+   },
+   "now": 1794804310,
+   "day": "2026-11-16",
+   "claimed": false,
+   "waited": false,
+   "expect": {
+    "verdict": null,
+    "target": 0,
+    "late_s": -6
+   }
+  },
+  {
+   "name": "chain match: before flat, state flat",
+   "strategy": {},
+   "state": {},
+   "alert": {
+    "position": "long",
+    "fired_s": 1794804308,
+    "before": "flat"
+   },
+   "now": 1794804310,
+   "day": "2026-11-16",
+   "claimed": false,
+   "waited": false,
+   "expect": {
+    "verdict": null,
+    "wait": false,
+    "gap": false
+   }
+  },
+  {
+   "name": "chain mismatch, fresh, not waited: wait",
+   "strategy": {},
+   "state": {},
+   "alert": {
+    "position": "long",
+    "fired_s": 1794804308,
+    "before": "short"
+   },
+   "now": 1794804310,
+   "day": "2026-11-16",
+   "claimed": false,
+   "waited": false,
+   "expect": {
+    "verdict": null,
+    "wait": true
+   }
+  },
+  {
+   "name": "chain mismatch after the wait: applied, the gap is said",
+   "strategy": {},
+   "state": {},
+   "alert": {
+    "position": "long",
+    "fired_s": 1794804308,
+    "before": "short"
+   },
+   "now": 1794804310,
+   "day": "2026-11-16",
+   "claimed": false,
+   "waited": true,
+   "expect": {
+    "verdict": null,
+    "wait": false,
+    "gap": true
+   }
+  },
+  {
+   "name": "chain mismatch but a same-second sibling was just applied: no gap said",
+   "strategy": {},
+   "state": {
+    "last_fired_s": 1794804308,
+    "last_target": 1
+   },
+   "alert": {
+    "position": "long",
+    "fired_s": 1794804308,
+    "before": "flat"
+   },
+   "now": 1794804310,
+   "day": "2026-11-16",
+   "claimed": false,
+   "waited": true,
+   "expect": {
+    "verdict": null,
+    "wait": false,
+    "gap": false
+   }
+  },
+  {
+   "name": "chain mismatch on a late exit: no wait, applied",
+   "strategy": {},
+   "state": {
+    "last_target": 0
+   },
+   "alert": {
+    "position": "flat",
+    "fired_s": 1794804110,
+    "before": "long"
+   },
+   "now": 1794804310,
+   "day": "2026-11-16",
+   "claimed": false,
+   "waited": false,
+   "expect": {
+    "verdict": null,
+    "target": 0,
+    "wait": false,
+    "gap": true,
+    "late_s": 200
+   }
+  },
+  {
+   "name": "an indicator alert carries no before: no chain rule",
+   "strategy": {},
+   "state": {
+    "last_target": -1
+   },
+   "alert": {
+    "position": "long",
+    "fired_s": 1794804308
+   },
+   "now": 1794804310,
+   "day": "2026-11-16",
+   "claimed": false,
+   "waited": false,
+   "expect": {
+    "verdict": null,
+    "wait": false,
+    "gap": false
+   }
+  },
+  {
+   "name": "exit after long, chain match",
+   "strategy": {},
+   "state": {
+    "last_target": 1
+   },
+   "alert": {
+    "position": "flat",
+    "fired_s": 1794804308,
+    "before": "long"
+   },
+   "now": 1794804310,
+   "day": "2026-11-16",
+   "claimed": false,
+   "waited": false,
+   "expect": {
+    "verdict": null,
+    "target": 0,
+    "gap": false
+   }
+  },
+  {
+   "name": "long-only strategy reads short as flat",
+   "strategy": {
+    "direction": "long"
+   },
+   "state": {},
+   "alert": {
+    "position": "short",
+    "fired_s": 1794804308
+   },
+   "now": 1794804310,
+   "day": "2026-11-16",
+   "claimed": false,
+   "waited": false,
+   "expect": {
+    "verdict": null,
+    "target": 0
+   }
+  },
+  {
+   "name": "short-only strategy reads long as flat",
+   "strategy": {
+    "direction": "short"
+   },
+   "state": {},
+   "alert": {
+    "position": "long",
+    "fired_s": 1794804308
+   },
+   "now": 1794804310,
+   "day": "2026-11-16",
+   "claimed": false,
+   "waited": false,
+   "expect": {
+    "verdict": null,
+    "target": 0
+   }
+  },
+  {
+   "name": "long-only, exits only: a short alert is an exit and goes",
+   "strategy": {
+    "direction": "long",
+    "state": "exits_only"
+   },
+   "state": {},
+   "alert": {
+    "position": "short",
+    "fired_s": 1794804308
+   },
+   "now": 1794804310,
+   "day": "2026-11-16",
+   "claimed": false,
+   "waited": false,
+   "expect": {
+    "verdict": null,
+    "target": 0
+   }
+  },
+  {
+   "name": "long-only: a late short alert is a late exit and goes",
+   "strategy": {
+    "direction": "long"
+   },
+   "state": {},
+   "alert": {
+    "position": "short",
+    "fired_s": 1794804210
+   },
+   "now": 1794804310,
+   "day": "2026-11-16",
+   "claimed": false,
+   "waited": false,
+   "expect": {
+    "verdict": null,
+    "target": 0,
+    "late_s": 100
+   }
+  },
+  {
+   "name": "short-only strategy takes short",
+   "strategy": {
+    "direction": "short"
+   },
+   "state": {},
+   "alert": {
+    "position": "short",
+    "fired_s": 1794804308
+   },
+   "now": 1794804310,
+   "day": "2026-11-16",
+   "claimed": false,
+   "waited": false,
+   "expect": {
+    "verdict": null,
+    "target": -1
+   }
+  },
+  {
+   "name": "same target as the state is still sent",
+   "strategy": {},
+   "state": {
+    "last_target": 1
+   },
+   "alert": {
+    "position": "long",
+    "fired_s": 1794804308
+   },
+   "now": 1794804310,
+   "day": "2026-11-16",
+   "claimed": false,
+   "waited": false,
+   "expect": {
+    "verdict": null,
+    "target": 1
+   }
+  }
+ ]
+}
