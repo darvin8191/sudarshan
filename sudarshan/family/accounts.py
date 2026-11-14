@@ -5,12 +5,23 @@
   the event loop or the store thread, and one at a time bounds the memory to one verify's. A
   sign-in name nobody has (or a member who has not joined) is verified against a fixed dummy hash
   with the same parameters, so the answer's timing does not tell names apart.
+* **The password work is bounded** (review H2: this is the one door strangers reach, on a box that
+  also runs the owner's trading): at most ``PASSWORD_SLOTS`` checks are taken at a time, running
+  or waiting, counted on the event loop that takes them. A sign-in, join or password change past
+  them is answered at once that the view is busy, before any name is looked up (so a busy answer
+  says nothing about names), and a check that waited ``PASSWORD_WAIT_S`` without starting is
+  dropped unrun with the same answer. A burst is paid for with at most that many checks, whoever
+  is still waiting for them; nginx's own limit per address is the outer layer, not this one.
 * **Codes** are TOTP (RFC 6238: 6 digits, 30 s, SHA-1, the code apps' default) accepted in a window
   of one step either side, and a step once: the last step accepted is kept per member and a code
   must be for a later one, so a code seen over a shoulder cannot be used again.
-* **Lockout** (``lockout.py``): failures in a row lock the sign-in for 15 minutes, then 1 hour, then
-  24 hours; each failure and each lock is audited and a lock is a notice for the owner. A wrong
-  sign-in name, password or code all get the same sentence.
+* **Lockout** (``lockout.py``, where the whole rule is written; review M2): wrong sign-ins are
+  counted per name as typed and per phone the member signed in on before, with a back-off that
+  grows from 1 minute to at most 15; a name nobody has is counted in the same table the same way,
+  and one network area that fails too often is held back. So a stranger cannot keep a member out
+  of their own phone, and the answers, their timing and the counts say nothing of which names
+  exist. Each failure and the first lock of a run are audited for a member, and that lock is a
+  notice for the owner. A wrong sign-in name, password or code all get the same sentence.
 * **Sessions** (``sessions.py``) are minted by a sign-in or a join and checked on every request.
 
 The store is the record; everything that decides runs in one store transaction (a failure count
@@ -26,6 +37,7 @@ import hmac
 import re
 import secrets
 import threading
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta, timezone
@@ -36,7 +48,7 @@ from argon2 import PasswordHasher, Type
 from argon2.exceptions import InvalidHashError, VerificationError, VerifyMismatchError
 
 from . import audit, invites, lockout, members, sessions
-from .contract import LIMITS
+from .contract import LIMITS, LOCKOUT
 from .errors import FamilyError, Invalid
 from .sessions import Device, Session
 from .store import FamilyStore, Tx
@@ -47,10 +59,16 @@ ARGON2 = {"time_cost": 3, "memory_cost": 64 * 1024, "parallelism": 1, "hash_len"
 HANDLE = re.compile(rf"[a-z0-9_]{{{LIMITS['handle_min']},{LIMITS['handle_max']}}}")
 TOTP_DIGITS, TOTP_STEP_S, TOTP_WINDOW = 6, 30, 1
 TOTP_ISSUER, TOTP_LABEL = "SUDARSHAN", "Family view"
-#: A sign-in from a device label the member has not used for this long is a new phone.
+#: A sign-in from a browser (its fixed summary, not the label a rename changes) or a network area
+#: the member has not used for this long is a new phone, and the owner is told (review L3).
 NEW_DEVICE_MS = 90 * sessions.DAY_MS
 IST = timezone(timedelta(hours=5, minutes=30))
 THREAD_PREFIX = "family-argon2"
+#: Password checks taken at a time, running or waiting: a burst costs at most this many (H2).
+PASSWORD_SLOTS = 8
+#: A check that waited this long for the password thread is dropped unrun (the box is too busy).
+PASSWORD_WAIT_S = 5.0
+_LATE = object()
 
 Notify = Callable[..., None]  # notify(kind, member_row, **facts)
 Revoked = Callable[[list[str]], None]  # revoked(session hashes)
@@ -75,8 +93,24 @@ def check_password(raw: Any, field_name: str = "password") -> str:
     return raw
 
 
-def device_from(user_agent: str | None, place: str | None = None) -> Device:
-    """The phone a request comes from, named from its browser's User-Agent (Android 15 · Chrome 142)."""
+def typed_name(raw: Any) -> str:
+    """The name a sign-in is counted against: as the rule reads it, or "" for a name that breaks
+    the rule (no member has one, so every such name shares one count)."""
+    try:
+        return handle_of(raw)
+    except Invalid:
+        return ""
+
+
+def device_from(
+    user_agent: str | None,
+    place: str | None = None,
+    *,
+    area: str | None = None,
+    phone: str | None = None,
+) -> Device:
+    """The phone a request comes from, named from its browser's User-Agent (Android 15 · Chrome 142),
+    with the keyed hashes of its address and network area and the phone cookie it sent."""
     ua = user_agent or ""
     system = ""
     if found := re.search(r"Android (\d+(?:\.\d+)?)", ua):
@@ -98,8 +132,10 @@ def device_from(user_agent: str | None, place: str | None = None) -> Device:
         if found := re.search(pattern, ua):
             browser = f"{name} {found.group(1)}"
             break  # fmt: skip
-    label = " · ".join(part for part in (system, browser) if part) or "Phone"
-    return Device(label[: LIMITS["device_label_max"]], label[: LIMITS["device_label_max"]], place)
+    label = (" · ".join(part for part in (system, browser) if part) or "Phone")[
+        : LIMITS["device_label_max"]
+    ]
+    return Device(label, label, place, area, phone)
 
 
 def clock_words(at_ms: int, now_ms: int) -> str:
@@ -159,11 +195,45 @@ def stop_hasher() -> None:
 
 class Hasher:
     """argon2id on the password thread. ``verify(None, ...)`` checks the dummy hash, which is made
-    once with the same parameters and never matches anything a person can type."""
+    once with the same parameters and never matches anything a person can type.
 
-    def __init__(self, hasher: PasswordHasher | None = None):
+    ``hash`` and ``verify`` take one of ``slots`` (FamilyError ``busy`` when none is free) and give
+    it back when they end; a check still waiting after ``wait_s`` is dropped unrun (``busy`` too).
+    The slots are counted only on the event loop that awaits them, so they need no lock."""
+
+    def __init__(
+        self,
+        hasher: PasswordHasher | None = None,
+        *,
+        slots: int = PASSWORD_SLOTS,
+        wait_s: float = PASSWORD_WAIT_S,
+        clock: Callable[[], float] = time.monotonic,
+    ):
         self.argon = hasher or PasswordHasher(**ARGON2, type=Type.ID)
         self._dummy: str | None = None
+        self.slots, self.wait_s, self._clock = slots, wait_s, clock
+        self.taken = 0
+
+    def full(self) -> bool:
+        """Every slot is taken: a new check would be refused."""
+        return self.taken >= self.slots
+
+    async def _bounded(self, work: Callable[..., Any], *args: Any) -> Any:
+        if self.full():
+            raise FamilyError("busy")
+        self.taken += 1
+        deadline = self._clock() + self.wait_s
+
+        def run() -> Any:
+            return _LATE if self._clock() > deadline else work(*args)
+
+        try:
+            done = await asyncio.wrap_future(_executor().submit(run))
+        finally:
+            self.taken -= 1
+        if done is _LATE:
+            raise FamilyError("busy")
+        return done
 
     def hash_now(self, password: str) -> str:
         return self.argon.hash(password)
@@ -180,10 +250,10 @@ class Hasher:
             return False
 
     async def hash(self, password: str) -> str:
-        return await asyncio.wrap_future(_executor().submit(self.hash_now, password))
+        return await self._bounded(self.hash_now, password)
 
     async def verify(self, stored: str | None, password: str) -> bool:
-        return await asyncio.wrap_future(_executor().submit(self.verify_now, stored, password))
+        return await self._bounded(self.verify_now, stored, password)
 
     async def warm(self) -> None:
         """Make the dummy hash now, so that the first unknown name costs one verify too."""
@@ -201,6 +271,23 @@ class Outcome:
     notices: list[tuple[str, dict[str, Any], dict[str, Any]]] = field(default_factory=list)
     revoked: list[str] = field(default_factory=list)
     data: Any = None
+    #: A wrong attempt was counted (the network area counts it too, unless from the member's phone).
+    counted: bool = False
+    #: The phone cookie's new value, after a right sign-in, a join or a password change.
+    phone: str | None = None
+
+
+@dataclass(frozen=True)
+class Attempt:
+    """A sign-in as read before its password is checked: the member the name is (None: nobody, or
+    nobody who has joined), the hash to check, the count it is judged on, whether it came from that
+    member's own phone, and the end of that count's lock (None: not locked)."""
+
+    member_id: int | None
+    password_hash: str | None
+    key: str
+    phone: bool
+    until: int | None
 
 
 class Accounts:
@@ -223,10 +310,14 @@ class Accounts:
         self.notify: Notify = notify or (lambda kind, member, **facts: None)
         self.revoked: Revoked = revoked or (lambda hashes: None)
         self.codes = invites.InviteCodes()
+        self.areas = lockout.Areas()
 
     async def _write(self, decide: Callable[[Tx, int], Outcome]) -> Any:
         """``decide(tx, now)`` in one transaction, then its notices and revokes, then its error."""
-        outcome = await self.store.write(lambda tx: decide(tx, self.clock()))
+        return self._after(await self.store.write(lambda tx: decide(tx, self.clock())))
+
+    def _after(self, outcome: Outcome) -> Outcome:
+        """What a committed decision leaves: its revokes, its notices, then its error."""
         if outcome.revoked:
             self.revoked(outcome.revoked)
         for kind, member, facts in outcome.notices:
@@ -245,40 +336,49 @@ class Accounts:
         return found
 
     async def login(self, handle: Any, password: Any, code: Any, device: Device) -> Outcome:
+        """A sign-in, judged by the rule ``lockout.py`` writes down: a known name and a name nobody
+        has take the same steps (one read, one password check, one write) and the same answers."""
         now = self.clock()
-        try:
-            name = handle_of(handle)
-        except Invalid:
-            name = None
-        found = await self.store.read(lambda tx: _account(tx, name)) if name else None
-        credential = found[1] if found else None
-        until = lockout.locked_until(credential, now)
-        if until is not None:
-            raise FamilyError("locked", time=clock_words(until, now))
+        if self.hasher.full():  # before any name is looked up: busy says nothing about names
+            raise FamilyError("busy")
+        name = typed_name(handle)
+        seen = await self.store.read(lambda tx: _attempt(tx, name, device, now))
+        held = None if seen.phone else self.areas.held(device.area, now)
+        ends = [at for at in (seen.until, held) if at is not None]
+        if ends:  # refused at once: no password is tried and nothing is counted
+            raise FamilyError("locked", time=clock_words(max(ends), now))
         typed = password if password_ok(password) else "-"
-        good = await self.hasher.verify(credential["password_hash"] if credential else None, typed)
-        if not credential:
-            raise FamilyError("signin_failed")
-        member_id = found[0]["id"]  # type: ignore[index]
-        return await self._write(lambda tx, at: self._settle(tx, member_id, good, code, device, at))
+        good = await self.hasher.verify(seen.password_hash, typed)
+        outcome = await self.store.write(
+            lambda tx: self._settle(tx, seen, good, code, device, self.clock())
+        )
+        if outcome.counted and not seen.phone:
+            self.areas.failed(device.area, now)
+        return self._after(outcome)
 
-    def _settle(self, tx: Tx, member_id: int, good: bool, code: Any, device: Device,
+    def _settle(self, tx: Tx, seen: Attempt, good: bool, code: Any, device: Device,
                 now: int) -> Outcome:  # fmt: skip
-        member, credential = tx.member(member_id), tx.row("credential", member_id=member_id)
-        if member is None or credential is None or member["status"] not in ("active", "suspended"):
-            return Outcome(FamilyError("signin_failed"))  # it changed while the password was read
-        until = lockout.locked_until(credential, now)
-        if until is not None:
-            return Outcome(FamilyError("locked", time=clock_words(until, now)))
+        if (until := lockout.locked_until(lockout.count(tx, seen.key), now)) is not None:
+            return Outcome(FamilyError("locked", time=clock_words(until, now)))  # meanwhile
+        member = tx.member(seen.member_id) if seen.member_id is not None else None
+        credential = tx.row("credential", member_id=seen.member_id) if member else None
+        if (
+            member is None
+            or credential is None
+            or member["status"] not in ("active", "suspended")
+            or credential["password_hash"] != seen.password_hash
+        ):  # nobody's name, or no longer the member and the password that were checked
+            member = credential = None
         step = None
-        if good:
+        if credential is not None and good:
             secret = tx.secrets.open(credential["totp_secret_enc"])  # type: ignore[union-attr]
             step = totp_step(secret, code, now, credential["totp_last_counter"])
-        if step is None:
-            return _failed(tx, member, credential, "code" if good else "password", device, now)
+        if step is None or member is None or credential is None:
+            return _failed(tx, seen, member, "code" if good else "password", device, now)
+        member_id = member["id"]
+        lockout.clear(tx, seen.key)
         tx.update("credential", {"member_id": member_id},
-                  {"failed_count": 0, "locked_until": None, "lock_level": 0,
-                   "totp_last_counter": step, "updated_at": now})  # fmt: skip
+                  {"totp_last_counter": step, "updated_at": now})  # fmt: skip
         if member["status"] == "suspended":
             audit.record(
                 tx,
@@ -290,15 +390,21 @@ class Accounts:
                 detail={"part": "suspended"},
             )
             return Outcome(FamilyError("signed_out", "suspended"))
-        new_phone = not tx.label_seen(member_id, device.label, now - NEW_DEVICE_MS)
-        detail = {"new_device": new_phone}
-        return _signed_in(tx, member, device, now, detail, new_phone, self.max_devices)
+        new_phone = not tx.phone_seen(member_id, device.summary, device.area, now - NEW_DEVICE_MS)
+        detail = {"new_device": new_phone, "known_phone": seen.phone}
+        outcome = _signed_in(tx, member, device, now, detail, new_phone, self.max_devices)
+        outcome.phone = _phone_cookie(tx, device, member_id, credential["password_changed_at"], now)
+        return outcome
 
-    async def join_info(self, code: Any) -> dict[str, Any]:
+    async def join_info(self, code: Any, device: Device | None = None) -> dict[str, Any]:
+        """What the join page shows, the code app's key among it: the first look at a link is
+        stamped and audited (review L8), so this is a write."""
         now = self.clock()
 
         def read(tx: Tx) -> dict[str, Any]:
             invite, member = invites.usable(tx, code, now)
+            place, label = (device.place, device.label) if device else (None, None)
+            invites.mark_opened(tx, invite, now, place, label)
             secret = tx.secrets.open(invite["totp_secret_enc"])  # type: ignore[union-attr]
             return {
                 "display_name": member["display_name"],
@@ -308,12 +414,14 @@ class Accounts:
                 "rules": {k: LIMITS[k] for k in ("handle_min", "handle_max", "password_min")},
             }
 
-        return await self.store.read(read)
+        return await self.store.write(read)
 
     async def join(self, code: Any, handle: Any, password: Any, totp: Any,
                    device: Device) -> Outcome:  # fmt: skip
         name = handle_of(handle)
         check_password(password)
+        if self.hasher.full():
+            raise FamilyError("busy")
         now = self.clock()
 
         def before(tx: Tx) -> None:  # refuse a dead link or a taken name before the slow hash
@@ -344,46 +452,56 @@ class Accounts:
 
         return await self._write(decide)
 
-    async def change_password(self, session: Session, current: Any, new: Any,
-                              code: Any) -> Outcome:  # fmt: skip
+    async def change_password(self, session: Session, current: Any, new: Any, code: Any,
+                              device: Device | None = None) -> Outcome:  # fmt: skip
+        """A member's own password change. Its wrong attempts are counted against this session
+        alone (a stranger cannot reach it, and it never locks a sign-in); a right one gives this
+        phone a fresh token, every earlier token of the member being worthless from now."""
         check_password(new)
+        if self.hasher.full():
+            raise FamilyError("busy")
         now = self.clock()
-        credential = await self.store.read(
-            lambda tx: tx.row("credential", member_id=session.member_id)
-        )
-        until = lockout.locked_until(credential, now)
+
+        def read(tx: Tx) -> tuple[str, dict[str, Any] | None, int | None]:
+            key = lockout.password_key(tx.secrets, session.member_id, session.id_hash)  # type: ignore[arg-type]
+            row = tx.row("credential", member_id=session.member_id)
+            return key, row, lockout.locked_until(lockout.count(tx, key), now)
+
+        key, credential, until = await self.store.read(read)
         if until is not None:
             raise FamilyError("locked", time=clock_words(until, now))
+        stored = credential["password_hash"] if credential else None
         typed = current if password_ok(current) else "-"
-        good = await self.hasher.verify(credential["password_hash"] if credential else None, typed)
+        good = await self.hasher.verify(stored, typed)
         hashed = await self.hasher.hash(new) if good else ""
         changed_at = credential["password_changed_at"] if credential else None
+        here = device or Device(session.row["device_label"], session.row["ua_summary"])
 
         def decide(tx: Tx, at: int) -> Outcome:
             member = tx.member(session.member_id)
             row = tx.row("credential", member_id=session.member_id)
             if row is None or member is None or row["password_changed_at"] != changed_at:
                 return Outcome(FamilyError("signed_out"))  # reset or changed meanwhile
-            if (until := lockout.locked_until(row, at)) is not None:
+            if (until := lockout.locked_until(lockout.count(tx, key), at)) is not None:
                 return Outcome(FamilyError("locked", time=clock_words(until, at)))
             step = None
             if good:
                 secret = tx.secrets.open(row["totp_secret_enc"])  # type: ignore[union-attr]
                 step = totp_step(secret, code, at, row["totp_last_counter"])
             if step is None:
-                device = Device(session.row["device_label"], session.row["ua_summary"])
+                seen = Attempt(member["id"], stored, key, True, None)
                 wrong = Invalid("password_current", field="current")
-                return _failed(tx, member, row, "code" if good else "password", device, at, wrong)
+                return _failed(tx, seen, member, "code" if good else "password", here, at, wrong)
             tx.update("credential", {"member_id": session.member_id},
-                      {"password_hash": hashed, "password_changed_at": at, "failed_count": 0,
-                       "locked_until": None, "lock_level": 0, "totp_last_counter": step,
-                       "updated_at": at})  # fmt: skip
+                      {"password_hash": hashed, "password_changed_at": at,
+                       "totp_last_counter": step, "updated_at": at})  # fmt: skip
+            lockout.clear(tx, key)
             done = sessions.revoke_member(tx, session.member_id, at, "password_changed",
                                           keep=session.id_hash)  # fmt: skip
             audit.record(tx, at=at, actor=audit.member_actor(session.member_id),
                          kind="password_changed", member_id=session.member_id,
                          session=session.id_hash, detail={"sessions": len(done)})  # fmt: skip
-            return Outcome(revoked=done)
+            return Outcome(revoked=done, phone=_phone_cookie(tx, here, member["id"], at, at))
 
         return await self._write(decide)
 
@@ -477,6 +595,22 @@ class Accounts:
         self.codes.put(request_id, *made)
         return invites.answer(*made)
 
+    async def signin_unlock(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Clear a member's counts of wrong sign-ins (their name's and their phones') and let every
+        held network area try again, keeping their password, code app and phones (review L1): the
+        owner's answer to "I am locked out" that is not a new invite."""
+
+        def decide(tx: Tx, now: int) -> Outcome:
+            member = members.live(tx, args.get("member_id"))
+            cleared = lockout.clear_member(tx, member)
+            audit.record(tx, at=now, actor=audit.OWNER, kind="signin_unlocked",
+                         member_id=member["id"], detail={"counts": cleared})  # fmt: skip
+            return Outcome(data=members.card(tx, member, now))
+
+        card = (await self._write(decide)).data
+        self.areas.clear()  # the owner decided: a member held back by an area waits no longer
+        return card
+
     async def device_list(self, args: dict[str, Any]) -> list[dict[str, Any]]:
         def read(tx: Tx) -> list[dict[str, Any]]:
             member = members.live(tx, args.get("member_id"))
@@ -504,41 +638,58 @@ def _request_id(args: dict[str, Any]) -> str | None:
     return value
 
 
-def _account(tx: Tx, handle: str) -> tuple[dict[str, Any], dict[str, Any] | None] | None:
-    member = tx.member_by_handle(handle)
-    if member is None or member["status"] == "removed":
-        return None
-    return member, tx.row("credential", member_id=member["id"])
-
-
-def _failed(tx: Tx, member: dict[str, Any], credential: dict[str, Any], part: str,
-            device: Device, now: int, wrong: FamilyError | None = None) -> Outcome:  # fmt: skip
-    """One more failure in a row: counted, audited and, at a threshold, a lock and a notice.
-    ``wrong`` is the answer below a threshold (the one sentence for any wrong part)."""
-    failures = int(credential["failed_count"]) + 1
-    values: dict[str, Any] = {"failed_count": failures, "updated_at": now}
-    actor = audit.member_actor(member["id"])
-    audit.record(tx, at=now, actor=actor, kind="login_failed", member_id=member["id"],
-                 ip_hash=device.place, detail={"part": part, "failures": failures})  # fmt: skip
-    seconds = lockout.lock_seconds(failures)
-    if seconds is None:
-        tx.update("credential", {"member_id": member["id"]}, values)
-        return Outcome(wrong or FamilyError("signin_failed"))
-    until = now + seconds * 1000
-    values |= {"locked_until": until, "lock_level": lockout.level(failures)}
-    tx.update("credential", {"member_id": member["id"]}, values)
-    audit.record(
-        tx,
-        at=now,
-        actor="system",
-        kind="lockout",
-        member_id=member["id"],
-        ip_hash=device.place,
-        detail={"failures": failures, "until": until},
+def _attempt(tx: Tx, name: str, device: Device, now: int) -> Attempt:
+    """What a sign-in is judged on before its password is checked: a name nobody has (or nobody
+    who has joined) gives the same shape as a member's, with no hash (the dummy is checked)."""
+    member = tx.member_by_handle(name) if name else None
+    credential = None
+    if member is not None and member["status"] in ("active", "suspended"):
+        credential = tx.row("credential", member_id=member["id"])
+    keys = tx.secrets
+    nonce = None
+    if member is not None and credential is not None:
+        changed_at = credential["password_changed_at"]
+        nonce = lockout.known_phone(keys, device.phone, member["id"], changed_at, now)
+    key = lockout.phone_key(keys, name, nonce) if nonce else lockout.name_key(keys, name)  # type: ignore[arg-type]
+    return Attempt(
+        member["id"] if member is not None and credential is not None else None,
+        credential["password_hash"] if credential is not None else None,
+        key,
+        nonce is not None,
+        lockout.locked_until(lockout.count(tx, key), now),
     )
-    facts = {"attempts": str(failures), "until": str(until // 1000), "device": device.label}
-    return Outcome(FamilyError("locked", time=clock_words(until, now)),
-                   notices=[("lockout", member, facts)])  # fmt: skip
+
+
+def _phone_cookie(tx: Tx, device: Device, member_id: int, changed_at: int, now: int) -> str:
+    """The phone cookie after a right sign-in on it: this member's fresh token, the others kept."""
+    token = lockout.phone_token(tx.secrets, member_id, changed_at, now)  # type: ignore[arg-type]
+    return lockout.with_token(device.phone, token)
+
+
+def _failed(tx: Tx, seen: Attempt, member: dict[str, Any] | None, part: str, device: Device,
+            now: int, wrong: FamilyError | None = None) -> Outcome:  # fmt: skip
+    """One more wrong attempt on its count. A member's is audited, and the first lock of a run is
+    audited and told to the owner; a name nobody has is counted the same way and nothing else.
+    ``wrong`` is the answer below a lock (by default the one sentence for any wrong part)."""
+    member_id = member["id"] if member is not None else None
+    failures, until = lockout.failed(tx, seen.key, member_id, now)
+    outcome = Outcome(counted=True)
+    if member is not None:
+        audit.record(tx, at=now, actor=audit.member_actor(member["id"]), kind="login_failed",
+                     member_id=member["id"], ip_hash=device.place,
+                     detail={"part": part, "failures": failures,
+                             "known_phone": seen.phone})  # fmt: skip
+    if until is None:
+        outcome.error = wrong or FamilyError("signin_failed")
+        return outcome
+    outcome.error = FamilyError("locked", time=clock_words(until, now))
+    if member is not None and failures == LOCKOUT["after"]:
+        audit.record(tx, at=now, actor=audit.SYSTEM, kind="lockout", member_id=member["id"],
+                     ip_hash=device.place, detail={"failures": failures, "until": until,
+                                                   "known_phone": seen.phone})  # fmt: skip
+        facts = {"attempts": str(failures), "until": str(until // 1000), "device": device.label}
+        outcome.notices.append(("lockout", member, facts))
+    return outcome
 
 
 def _signed_in(tx: Tx, member: dict[str, Any], device: Device, now: int, detail: dict[str, Any],
@@ -568,8 +719,11 @@ def _join(tx: Tx, code: Any, handle: str, hashed: str, totp: Any, device: Device
                              "totp_last_counter": step, "password_changed_at": now,
                              "updated_at": now})  # fmt: skip
     invites.mark_used(tx, invite["id"], now)
+    paused = member["status"] == "suspended"  # reset while paused: the pause holds (review M4)
+    status = "suspended" if paused else "active"
     joined = tx.member_change(member["id"], member["version"],
-                              {"status": "active", "handle": handle}, now)  # fmt: skip
+                              {"status": status, "handle": handle}, now)  # fmt: skip
+    lockout.clear(tx, lockout.name_key(tx.secrets, handle))  # type: ignore[arg-type]
     audit.record(
         tx,
         at=now,
@@ -577,8 +731,13 @@ def _join(tx: Tx, code: Any, handle: str, hashed: str, totp: Any, device: Device
         kind="invite_used",
         member_id=member["id"],
         ip_hash=device.place,
-        detail={"invite": invite["id"]},
+        detail={"invite": invite["id"], "paused": paused},
     )
+    if paused:  # the password and code app are set; signing in waits for the owner's resume
+        return Outcome(
+            FamilyError("signed_out", "suspended"), notices=[("invite_used", joined, {})]
+        )
     outcome = _signed_in(tx, joined, device, now, {"joined": True}, False, max_devices)
     outcome.notices.append(("invite_used", joined, {}))
+    outcome.phone = _phone_cookie(tx, device, member["id"], now, now)
     return outcome

@@ -75,6 +75,10 @@ FORWARDED_HEADERS = ("X-Forwarded-For", "X-Real-IP", "Forwarded", "X-Forwarded-P
 COOKIE = "__Host-sudarshan_family"
 CSRF_COOKIE = "__Host-sudarshan_family_csrf"
 CSRF_HEADER = "X-Family-CSRF"
+#: The phones a member signed in on (``lockout.py``): HttpOnly, so no page reads it, and kept
+#: across a sign-out so that the member's own phone still signs in while the name is locked.
+PHONE_COOKIE = "__Host-sudarshan_family_phone"
+PHONE_DAYS = 90
 #: The seal purposes of the two sealed doors and of the one call out (``sudarshan/vault/keys.py``
 #: holds the same strings).
 PURPOSES = {
@@ -111,10 +115,12 @@ LIMITS = {
     "internal_lists": 50,
     "ws_symbols": 150,
 }
-#: Failures in a row (since the last good sign-in) that lock a sign-in, and for how long (s).
-LOCKOUT = ((5, 15 * 60), (10, 60 * 60), (15, 24 * 60 * 60))
-#: A failure past the last threshold locks again for the last period every this many failures.
-LOCKOUT_REPEAT = 5
+#: Wrong sign-ins in a row on one count (``lockout.py``; review M2): the failure that first locks,
+#: that lock's length, and the longest any lock lasts (each lock after it is twice the last).
+LOCKOUT = {"after": 5, "first_s": 60, "max_s": 15 * 60}
+#: Sign-ins one network area may fail from phones not known for the names typed, within the
+#: window, before its sign-ins from such phones are refused until the window moves on.
+AREA_LIMIT = {"failures": 20, "window_s": 10 * 60}
 
 # ---- kinds ------------------------------------------------------------------------------------
 ROLES = ("viewer", "child")
@@ -148,6 +154,7 @@ AUDIT_KINDS = (
     "session_revoked",
     "session_expired",
     "invite_created",
+    "invite_opened",
     "invite_used",
     "invite_revoked",
     "member_created",
@@ -157,6 +164,7 @@ AUDIT_KINDS = (
     "member_removed",
     "privacy_changed",
     "signin_reset",
+    "signin_unlocked",
     "share_set",
     "share_removed",
     "device_renamed",
@@ -219,6 +227,7 @@ WORD_KEYS = (
     "password_changed",
     "signed_out_everywhere",
     "store_failed",
+    "viewer_unavailable",
 )
 
 PRIMITIVES = ("string", "int", "number", "bool", "json")
@@ -295,8 +304,8 @@ RECORDS = {
     # ---- the owner's admin ops (sealed) ----
     "MemberCard": "id:int, handle:string|null, display_name:string, role:Role, "
     "status:MemberStatus, privacy:Privacy, language:Language, devices:int, "
-    "last_seen_at:int|null, invite_expires_at:int|null, locked_until:int|null, "
-    "telegram_linked:bool, created_at:int, version:int",
+    "last_seen_at:int|null, invite_expires_at:int|null, invite_opened_at:int|null, "
+    "locked_until:int|null, telegram_linked:bool, created_at:int, version:int",
     "Invite": "member_id:int, code:string, path:string, expires_at:int",
     "AuditLine": "id:int, at:int, actor:string, member_id:int|null, kind:AuditKind, "
     "device:string|null, place:string|null, detail:json",
@@ -387,6 +396,8 @@ ADMIN_OPS = (
     SealedOp("invite_create", "member_id:int, request_id?:string", "Invite"),
     SealedOp("invite_revoke", "member_id:int", "Done"),
     SealedOp("signin_reset", "member_id:int, version:int, request_id?:string", "Invite"),
+    # Review L1: the counts of wrong sign-ins cleared, the password and code app kept.
+    SealedOp("signin_unlock", "member_id:int", "MemberCard"),
     SealedOp("device_list", "member_id:int", "Device[]"),
     SealedOp("device_revoke", "member_id:int, id:string", "Done"),
     SealedOp("audit_list", "member_id?:int|null, kind?:AuditKind|null, before?:int|null, "
