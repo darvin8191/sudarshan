@@ -360,3 +360,45 @@ def test_charges_count_without_stt_and_what_is_not_followed_is_said():
     assert [t.charges_ex_stt_paise for t in trades] == [2_000, None]
     assert any("A transfer of X Ltd on 1 Feb 2025 is not followed" in line for line in missing)
     assert any(line.startswith("1 entry has charges without a breakdown") for line in missing)
+
+
+# ---- corporate actions: each on its own account (owner decision 10) ----------------------------
+def test_upstoxs_accepted_actions_reach_its_account_and_a_pair_lot_keeps_its_purchase_units(made):
+    """A split of 1 into 2 the owner accepted for Upstox falls between the documented pair's
+    purchase (10 Jan 2024) and its sale of 10 (27 Oct 2026): the pair lot is put back to the 5
+    bought, the core splits them into the 10 sold, and the gain is what it was. An undecided
+    bonus is passed as not accepted, so the core changes nothing for it."""
+    cache(made)
+
+    def setup(tx):
+        split, _ = tx.ca_event_put({"isin": ISIN, "kind": "split", "ex_day": 20250602,
+                                    "ratio_num": 1, "ratio_den": 2, "raw_hash": "s"}, NOW)  # fmt: skip
+        tx.ca_event_put({"isin": KEY, "kind": "bonus", "ex_day": 20260302, "ratio_num": 1,
+                         "ratio_den": 1, "raw_hash": "b"}, NOW)  # fmt: skip
+        tx.insert("ca_decision", {"event_id": split["id"], "scope": "upstox", "state": "applied",
+                                  "ratio_num": 2, "ratio_den": 1}, NOW)  # fmt: skip
+        return tx.rows("account", system=1)[0]["id"]
+
+    upstox = made.write(OWNER, setup)
+    given = gathered(made)
+    assert [(a.kind, a.instrument, a.num, a.den, a.accepted, a.account) for a in given.actions] == [
+        ("SPLIT", ISIN, 2, 1, True, upstox),
+        ("BONUS", KEY, 1, 1, False, upstox),
+    ]
+    assert [(lot.qty_u, lot.cost_paise) for lot in given.opening] == [(5 * U, 2_000_000)]
+    (sale,) = build_pack(given)["capital_gains"]["schedule"]
+    assert (sale["qty_u"], sale["cost_paise"], sale["gain_paise"]) == (10 * U, 2_000_000, 598_600)
+
+
+def test_a_tabs_split_reaches_its_own_accounts_and_never_the_upstox_one():
+    rows = [
+        entry(1, "BUY", 20250101, qty_u=10 * U, amount_paise=100_000),
+        entry(2, "BUY", 20250101, account_id=8, qty_u=10 * U, amount_paise=100_000),
+        entry(3, "SPLIT", 20250601, account_id=None, ratio_num=2, ratio_den=1),  # all it holds
+        entry(4, "SPLIT", 20250701, ratio_num=3, ratio_den=1),  # account 7 only
+        entry(5, "SPLIT", 20250801, account_id=99, ratio_num=2, ratio_den=1),  # counts by reports
+    ]  # fmt: skip
+    _, _, actions, _ = tax_adapter.ledger_inputs(rows, {ACCOUNT: {}, 8: {}}, ASSETS, {}, 1, 0)
+    assert [(a.ex_day, a.num, a.account) for a in actions] == [
+        (20250601, 2, ACCOUNT), (20250601, 2, 8), (20250701, 3, ACCOUNT),
+    ]  # fmt: skip

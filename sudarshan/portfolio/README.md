@@ -203,7 +203,7 @@ two types, and a test holds this table, that map and `kinds.py` to each other.
 | `tax_input_delete` | DELETE | `/tax/inputs/<id>` | write | | `TaxInputDeleteArgs` | `Deleted` | P7 `tax` |
 | `tax_csv` | GET | `/tax/export.csv` | read | `fy:int, member:int, schedule:str` | `TaxCsvArgs` | `ExportFile` | P7 `tax`, download |
 | `report_csv` | GET | `/reports/export.csv` | read | `kind:str, fy:int, segment:str` | `ReportCsvArgs` | `ExportFile` | P7 `tax`, download: Upstox's rows as read |
-| `ca_list` | GET | `/corporate-actions` | read | `scope:str, from:day, to:day` | `CaListArgs` | `CaList` | P7 `insights` |
+| `ca_list` | GET | `/corporate-actions` | read | `scope:str, from:day, to:day, isin:str` | `CaListArgs` | `CaList` | P7 `insights` |
 | `ca_decide` | POST | `/corporate-actions/<id>` | write | | `CaDecideArgs` | `CaDecisionRow` | P7 `insights`: nothing changes a lot without it |
 | `dividends` | GET | `/dividends` | read | `fy:int, member:int` | `DividendsArgs` | `DividendsReport` | P7 `insights` |
 | `dividend_set` | POST | `/dividends/<id>` | write | | `DividendSetArgs` | `DividendLine` | P7 `insights` |
@@ -419,6 +419,15 @@ counts by its `tax_mode`; a ledger entry on the Upstox account is left out, so n
 twice. The view starts no read of Upstox: what is not read in full is a line of
 `inputs.missing`, and a read in flight for the year puts `tax_reading` first.
 
+A bonus or a split changes the lots of its own account only (owner decision 10; the core's
+`Action.account`): the corporate actions the owner accepted for Upstox (`corpactions`) reach the
+Upstox account, one not decided yet is passed unaccepted (the core changes nothing and says so),
+and a tab's SPLIT entry reaches that tab's accounts (all of the tab's accounts holding the share
+when the entry names none). An Upstox pair lot sold after an accepted split, like a transfer in
+after a tab's split, is put back into the units of its purchase day, so no split is applied twice.
+The paper's `dividends` block is the year's dividend lines of the accounts that count
+(`dividends.for_pack`), with the core's buyback receipt beside them and in the total.
+
 `tax_input_set` keeps one input of a closed kind (`TAX_INPUT_KINDS`): a 31 Jan 2018 price (one
 per share), a purchase from before the records (it wins over Upstox's pair for that share), a loss
 brought forward (one per year, kind and source), a day of delivery, a buyback tender, or the
@@ -426,6 +435,17 @@ readings of the open rules (`owner_setting` `tax:<member id>`, saved from the ve
 at, 0 before the first save). Every field is checked and refused in a sentence naming it; a new
 row is made once per `request_id`; an existing one changes from its version. With `dry_run` it
 writes nothing and answers `effect`, the year's headline figures that would change, as sentences.
+
+`tax_csv` writes one schedule of that paper (`TAX_SCHEDULES`: every sale with its cost, expenses,
+gain, term, rate and status, then the year's totals; business income by bucket and kind, with
+charges, net, the turnover method, flags and what differs from Upstox; each set-off, carry and
+lapse; dividends) under a first line naming सुदर्शन · SUDARSHAN, the year and the taxpayer, and
+the working-paper sentence. `report_csv` writes Upstox's trades or P&L pairs of one year and
+segment as the reader kept them (with the year's charges under the pairs), `_partial` in the name
+when the read was not complete; a report not read yet is refused with a sentence. In both,
+numbers are plain with their signs, text a spreadsheet would run as a formula gets an apostrophe
+(`csvutil.guard`), and the file names are ASCII (`SUDARSHAN_Tax_FY2026-27_member1_losses.csv`,
+`SUDARSHAN_Upstox_pnl_FY2026-27_FO.csv`).
 
 A family member sees nothing of this phase: none of its ops is a family op (a test holds
 `FAMILY_OPS` to that), and the mask table (version 3) hides its fields defensively anyway, its
