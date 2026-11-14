@@ -5,6 +5,7 @@
  */
 import type { MarketDepth } from 'openalgo-charts'
 import { type LiveStatus, opensAtWords } from '@/lib/trading/liveStatus'
+import { type Direction, directionOf } from '@/sudarshan/dashboard/format'
 import type { PhoneTick } from './phoneChart'
 
 /** The latest price, and the latest one the stream delivered. */
@@ -109,4 +110,28 @@ export function tickLine(
     return `Last tick ${clockSeconds.format(new Date(at))}`
   }
   return 'Waiting for the first tick'
+}
+
+/**
+ * Whether the price should be drawn grey: it is not real-time and should be
+ * (reconnecting, delayed, stale), so it must not pass for current.
+ */
+export function priceQuiet(status: LiveStatus | null): boolean {
+  const line = status?.line
+  return (
+    line?.kind === 'polling' ||
+    line?.kind === 'connecting' ||
+    (line?.kind === 'delayed' && line.stale)
+  )
+}
+
+/** The change on the previous close, as a sum and a percentage, and which way; null until both are known. */
+export function changeOn(
+  ltp: number | null,
+  prevClose: number | null,
+  decimals: number
+): { change: number | null; percent: number | null; direction: Direction } {
+  const change = ltp !== null && prevClose !== null ? ltp - prevClose : null
+  const percent = change !== null && prevClose ? (change / prevClose) * 100 : null
+  return { change, percent, direction: change === null ? 'flat' : directionOf(change, decimals) }
 }

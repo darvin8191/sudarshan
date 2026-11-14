@@ -728,6 +728,19 @@ export class PhoneChart {
     return bar.volume === undefined ? { ...bar, volume: this.bars[index]?.volume } : bar
   }
 
+  /**
+   * The price at a held finger's height on the candles' pane, at the
+   * instrument's tick (C10); null over the volume pane, a study's pane or the
+   * time axis, where no price of the instrument is drawn.
+   */
+  priceAt(y: number): number | null {
+    const rect = this.chart.plotRect(0)
+    if (!rect || y < rect.top || y > rect.top + rect.height) return null
+    const price = this.chart.coordinateToPrice(y, 0)
+    if (price === null || !Number.isFinite(price) || price <= 0) return null
+    return this.chart.snapPrice(0, price)
+  }
+
   /** What is drawn: the bars, or the elements a transform formed from them. */
   private drawnBars(): readonly Bar[] {
     return this.chart.seriesTransform(this.price) ? this.chart.primaryBars() : this.bars

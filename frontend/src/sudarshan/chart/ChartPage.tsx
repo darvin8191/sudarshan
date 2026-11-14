@@ -47,11 +47,12 @@ import { AccessNotice } from '@/sudarshan/AccessNotice'
 import { usePriceAccess } from '@/sudarshan/access'
 import { AlertFormSheet, toastAlertSet } from '@/sudarshan/alerts/AlertForm' // SUDARSHAN M10.2
 import { isCovered } from '@/sudarshan/alerts/words'
-import { directionOf, formatPercent, formatPrice, formatRupees } from '@/sudarshan/dashboard/format'
+import { formatPercent, formatPrice, formatRupees } from '@/sudarshan/dashboard/format'
 import { useNow } from '@/sudarshan/dashboard/hooks'
 import { LiveLine } from '@/sudarshan/dashboard/LiveLine'
 import { TREND_TEXT, TrendArrow } from '@/sudarshan/dashboard/Trend'
 import { ticketProduct } from '@/sudarshan/ticket/productPref'
+import { useOpenGuard } from '@/sudarshan/watchlist/openGuard'
 import { showToast } from '@/utils/toast'
 import {
   type FeedConfig,
@@ -96,10 +97,12 @@ import {
   styleOf,
   togglePin,
 } from './prefs'
-import { PriceStore, tickLine } from './prices'
+import { changeOn, PriceStore, priceQuiet, tickLine } from './prices'
+import { SidewaysStrip } from './SidewaysStrip'
 import { StudyLegend } from './StudyLegend'
 import { StyleSheet } from './StyleSheet'
 import { TimeframeSheet } from './TimeframeSheet'
+import { usePhoneSideways } from './usePhoneLayout'
 import { useWakeLock } from './useWakeLock'
 
 /** The order tag the chart's tickets carry, the same as the /trading terminal's. */
@@ -154,11 +157,15 @@ export default function ChartPage() {
   )
 }
 
-type Inspect = { bar: Bar; x: number | null; y: number }
+/** A candle being read, and the price at the finger's height on the candles' pane (C10). */
+type Inspect = { bar: Bar; x: number | null; y: number; price: number | null }
 
-/** A sheet over the chart, as the browser history entry it is; `alert` is a market alert's form (M10.2). */
+/**
+ * A sheet over the chart, as the browser history entry it is; `alert` is a
+ * market alert's form (M10.2). A ticket opened at a held price (C10) carries it.
+ */
 type Sheet =
-  | { sheet: 'ticket'; side: 'BUY' | 'SELL' }
+  | { sheet: 'ticket'; side: 'BUY' | 'SELL'; price?: number }
   | { sheet: 'search' }
   | { sheet: 'alert' }
   | { sheet: 'timeframe' }
@@ -169,7 +176,7 @@ type Sheet =
 
 function readSheet(state: unknown): Sheet | null {
   if (!state || typeof state !== 'object') return null
-  const value = state as { sheet?: unknown; side?: unknown }
+  const value = state as { sheet?: unknown; side?: unknown; price?: unknown }
   if (value.sheet === 'search') return { sheet: 'search' }
   if (value.sheet === 'alert') return { sheet: 'alert' }
   if (value.sheet === 'timeframe') return { sheet: 'timeframe' }
@@ -180,7 +187,9 @@ function readSheet(state: unknown): Sheet | null {
   if (value.sheet === 'study' && typeof index === 'number' && Number.isInteger(index) && index >= 0)
     return { sheet: 'study', index }
   if (value.sheet === 'ticket' && (value.side === 'BUY' || value.side === 'SELL'))
-    return { sheet: 'ticket', side: value.side }
+    return typeof value.price === 'number' && Number.isFinite(value.price) && value.price > 0
+      ? { sheet: 'ticket', side: value.side, price: value.price }
+      : { sheet: 'ticket', side: value.side }
   return null
 }
 
@@ -246,7 +255,10 @@ function PhoneChartScreen({
   const quoteOnly = isQuoteOnly(exchange)
   const sheet = readSheet(location.state)
   const side = sheet?.sheet === 'ticket' ? sheet.side : null
+  /** The price a ticket opened from a candle reading starts at, as a limit (C10). */
+  const heldPrice = sheet?.sheet === 'ticket' ? sheet.price : undefined
   const searching = sheet?.sheet === 'search'
+  const sideways = usePhoneSideways()
 
   useEffect(() => {
     saveLastInstrument(symbol, exchange)
@@ -368,7 +380,7 @@ function PhoneChartScreen({
     if (!el || !owner) return
     const read = (x: number, y: number) => {
       const bar = owner.barAt(x)
-      if (bar) setInspect({ bar, x: owner.barX(bar), y })
+      if (bar) setInspect({ bar, x: owner.barX(bar), y, price: owner.priceAt(y) })
     }
     const press = new LongPress(el, {
       onStart: ({ x, y }) => read(x, y),
@@ -543,81 +555,121 @@ function PhoneChartScreen({
   }
 
   const ordersOff = quoteOnly || !info
+  const openTicket = (side: 'BUY' | 'SELL', price?: number) =>
+    openSheet(price === undefined ? { sheet: 'ticket', side } : { sheet: 'ticket', side, price })
+  const openIndicators = () => {
+    setStudyNotice(null)
+    openSheet({ sheet: 'indicators' })
+    if (!owner) return
+    // The built-ins first, then the owner's own files, as the terminal loads them.
+    void owner.loadIndicatorTier().then(async (ready) => {
+      if (!ready) return
+      setCatalogue(owner.catalogue())
+      setScriptProblems(await owner.loadMyScripts())
+      setCatalogue(owner.catalogue())
+    })
+  }
+  const openTimeframes = () => {
+    setPinNotice(null)
+    openSheet({ sheet: 'timeframe' })
+  }
+  /** Buy or Sell at the price under the held finger, where orders can be placed (C10). */
+  const held = inspect?.price ?? null
+  const heldOrder =
+    held !== null && !ordersOff
+      ? {
+          price: formatPrice(held, dp(held)),
+          onOrder: (orderSide: 'BUY' | 'SELL') => {
+            setInspect(null)
+            openTicket(orderSide, held)
+          },
+        }
+      : null
   return (
     <Screen>
-      <AppBar
-        symbol={symbol}
-        exchange={exchange}
-        name={info?.name}
-        onBack={back}
-        onSearch={() => openSheet({ sheet: 'search' })}
-        onAlert={isCovered(exchange) ? () => openSheet({ sheet: 'alert' }) : undefined}
-      />
-
-      <PriceHeader
-        prices={prices}
-        prevClose={prevClose}
-        status={status}
-        dp={dp}
-        traded={!quoteOnly}
-        closesAt={closesAt}
-        openInterest={hasOpenInterest(exchange) ? { prev: prevOi } : null}
-      />
-      {!quoteOnly && (
-        <DepthStrip
+      {sideways ? (
+        <SidewaysStrip
+          symbol={symbol}
           prices={prices}
-          decimals={dp(prices.get().tick?.ltp ?? 0)}
-          quiet={bookQuiet(status)}
-          onOpen={() => openSheet({ sheet: 'depth' })}
+          prevClose={prevClose}
+          status={status}
+          dp={dp}
+          timeframe={timeframe}
+          studies={studies.length}
+          style={style}
+          orders={quoteOnly ? 'none' : info ? 'on' : 'off'}
+          onBack={back}
+          onTimeframe={openTimeframes}
+          onIndicators={openIndicators}
+          onStyle={() => openSheet({ sheet: 'style' })}
+          onOrder={(orderSide) => openTicket(orderSide)}
         />
-      )}
+      ) : (
+        <>
+          <AppBar
+            symbol={symbol}
+            exchange={exchange}
+            name={info?.name}
+            onBack={back}
+            onSearch={() => openSheet({ sheet: 'search' })}
+            onAlert={isCovered(exchange) ? () => openSheet({ sheet: 'alert' }) : undefined}
+          />
 
-      <TimeframeRow
-        chips={chips}
-        current={timeframe}
-        onPick={pickChip}
-        onMore={() => {
-          setPinNotice(null)
-          openSheet({ sheet: 'timeframe' })
-        }}
-      />
-
-      <div className="flex shrink-0 gap-1 border-b bg-card px-1 py-0.5" data-testid="chart-tools">
-        <button
-          type="button"
-          onClick={() => {
-            setStudyNotice(null)
-            openSheet({ sheet: 'indicators' })
-            if (!owner) return
-            // The built-ins first, then the owner's own files, as the terminal loads them.
-            void owner.loadIndicatorTier().then(async (ready) => {
-              if (!ready) return
-              setCatalogue(owner.catalogue())
-              setScriptProblems(await owner.loadMyScripts())
-              setCatalogue(owner.catalogue())
-            })
-          }}
-          className="inline-flex h-12 min-w-12 items-center gap-1.5 rounded-full px-3 text-sm font-semibold hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          <ChromeIcon id="indicators" size={18} className="shrink-0" />
-          Indicators{' '}
-          {studies.length > 0 && (
-            <span className="rounded-full bg-[color:var(--primary-tint)] px-1.5 text-xs font-bold text-primary">
-              {studies.length} <span className="sr-only">on the chart</span>
-            </span>
+          <PriceHeader
+            prices={prices}
+            prevClose={prevClose}
+            status={status}
+            dp={dp}
+            traded={!quoteOnly}
+            closesAt={closesAt}
+            openInterest={hasOpenInterest(exchange) ? { prev: prevOi } : null}
+          />
+          {!quoteOnly && (
+            <DepthStrip
+              prices={prices}
+              decimals={dp(prices.get().tick?.ltp ?? 0)}
+              quiet={bookQuiet(status)}
+              onOpen={() => openSheet({ sheet: 'depth' })}
+            />
           )}
-        </button>
-        <button
-          type="button"
-          onClick={() => openSheet({ sheet: 'style' })}
-          aria-label={`Chart style: ${styleOf(style).label}`}
-          className="inline-flex h-12 min-w-12 items-center gap-1.5 rounded-full px-3 text-sm font-semibold hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          <ChromeIcon id={styleOf(style).glyph} size={18} className="shrink-0" />
-          {styleOf(style).label}
-          <ChevronDown aria-hidden="true" className="size-3.5 shrink-0" />
-        </button>
-      </div>
+
+          <TimeframeRow
+            chips={chips}
+            current={timeframe}
+            onPick={pickChip}
+            onMore={openTimeframes}
+          />
+
+          <div
+            className="flex shrink-0 gap-1 border-b bg-card px-1 py-0.5"
+            data-testid="chart-tools"
+          >
+            <button
+              type="button"
+              onClick={openIndicators}
+              className="inline-flex h-12 min-w-12 items-center gap-1.5 rounded-full px-3 text-sm font-semibold hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <ChromeIcon id="indicators" size={18} className="shrink-0" />
+              Indicators{' '}
+              {studies.length > 0 && (
+                <span className="rounded-full bg-[color:var(--primary-tint)] px-1.5 text-xs font-bold text-primary">
+                  {studies.length} <span className="sr-only">on the chart</span>
+                </span>
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={() => openSheet({ sheet: 'style' })}
+              aria-label={`Chart style: ${styleOf(style).label}`}
+              className="inline-flex h-12 min-w-12 items-center gap-1.5 rounded-full px-3 text-sm font-semibold hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <ChromeIcon id={styleOf(style).glyph} size={18} className="shrink-0" />
+              {styleOf(style).label}
+              <ChevronDown aria-hidden="true" className="size-3.5 shrink-0" />
+            </button>
+          </div>
+        </>
+      )}
 
       <div
         ref={surface}
@@ -630,16 +682,23 @@ function PhoneChartScreen({
             owner={owner}
             prices={prices}
             heldTime={inspect?.bar.time ?? null}
-            below={inspect ? 88 : 0}
+            below={inspect ? (heldOrder ? READOUT_WITH_ORDERS : READOUT) : 0}
           />
         )}
-        {inspect && <Crosshair x={inspect.x} y={inspect.y} />}
+        {inspect && (
+          <Crosshair
+            x={inspect.x}
+            y={inspect.y}
+            price={held === null ? null : formatPrice(held, dp(held))}
+          />
+        )}
         {inspect && (
           <Readout
             bar={inspect.bar}
             dp={dp(inspect.bar.close)}
             interval={timeframe}
             volume={!quoteOnly}
+            order={heldOrder}
             onClose={() => setInspect(null)}
           />
         )}
@@ -650,53 +709,55 @@ function PhoneChartScreen({
         />
       </div>
 
-      <footer className="shrink-0 border-t bg-card px-3 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
-        <div className="flex min-h-12 items-center justify-between gap-3">
-          {wake.supported ? (
-            <label className="flex min-h-12 items-center gap-2 text-sm font-medium">
-              <SunMedium aria-hidden="true" className="size-4 text-muted-foreground" />
-              Keep screen on
-              <Switch checked={wake.on} onCheckedChange={wake.setOn} />
-            </label>
-          ) : (
-            <span />
-          )}
-          <Link
-            to={chartHref(symbol, exchange)}
-            className="inline-flex min-h-12 items-center text-sm font-semibold text-primary underline-offset-4 hover:underline"
-          >
-            Open in full terminal
-          </Link>
-        </div>
-        <div className="grid grid-cols-2 gap-2">
-          <button
-            type="button"
-            disabled={ordersOff}
-            onClick={() => openSheet({ sheet: 'ticket', side: 'BUY' })}
-            className="h-12 rounded-xl bg-[color:var(--buy-solid)] text-base font-bold tracking-[0.06em] text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-45"
-          >
-            BUY
-          </button>
-          <button
-            type="button"
-            disabled={ordersOff}
-            onClick={() => openSheet({ sheet: 'ticket', side: 'SELL' })}
-            className="h-12 rounded-xl bg-[color:var(--sell-solid)] text-base font-bold tracking-[0.06em] text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-45"
-          >
-            SELL
-          </button>
-        </div>
-        {quoteOnly ? (
-          <p className="mt-1 text-center text-xs font-medium text-muted-foreground">
-            An index is not traded. Open its future or an option to place an order.
-          </p>
-        ) : info === null ? (
-          <p className="mt-1 text-center text-xs font-medium text-muted-foreground">
-            The contract details did not load, so ordering is off here. Open the chart again to
-            retry.
-          </p>
-        ) : null}
-      </footer>
+      {!sideways && (
+        <footer className="shrink-0 border-t bg-card px-3 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
+          <div className="flex min-h-12 items-center justify-between gap-3">
+            {wake.supported ? (
+              <label className="flex min-h-12 items-center gap-2 text-sm font-medium">
+                <SunMedium aria-hidden="true" className="size-4 text-muted-foreground" />
+                Keep screen on
+                <Switch checked={wake.on} onCheckedChange={wake.setOn} />
+              </label>
+            ) : (
+              <span />
+            )}
+            <Link
+              to={chartHref(symbol, exchange)}
+              className="inline-flex min-h-12 items-center text-sm font-semibold text-primary underline-offset-4 hover:underline"
+            >
+              Open in full terminal
+            </Link>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              disabled={ordersOff}
+              onClick={() => openTicket('BUY')}
+              className="h-12 rounded-xl bg-[color:var(--buy-solid)] text-base font-bold tracking-[0.06em] text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-45"
+            >
+              BUY
+            </button>
+            <button
+              type="button"
+              disabled={ordersOff}
+              onClick={() => openTicket('SELL')}
+              className="h-12 rounded-xl bg-[color:var(--sell-solid)] text-base font-bold tracking-[0.06em] text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-45"
+            >
+              SELL
+            </button>
+          </div>
+          {quoteOnly ? (
+            <p className="mt-1 text-center text-xs font-medium text-muted-foreground">
+              An index is not traded. Open its future or an option to place an order.
+            </p>
+          ) : info === null ? (
+            <p className="mt-1 text-center text-xs font-medium text-muted-foreground">
+              The contract details did not load, so ordering is off here. Open the chart again to
+              retry.
+            </p>
+          ) : null}
+        </footer>
+      )}
 
       {info && (
         <PlaceOrderDialog
@@ -710,6 +771,9 @@ function PhoneChartScreen({
           // The product picked for this segment on this phone (M8.2), MIS
           // until one is: the owner trades intraday.
           product={ticketProduct(exchange) ?? 'MIS'}
+          // From a candle reading: a limit at the price held (C10); the product rule is the same.
+          priceType={heldPrice === undefined ? undefined : 'LIMIT'}
+          price={heldPrice}
           strategy={STRATEGY}
         />
       )}
@@ -975,14 +1039,9 @@ function PriceHeader({
   const now = useNow()
   const ltp = tick?.ltp ?? null
   const decimals = dp(ltp ?? 0)
-  const change = ltp !== null && prevClose !== null ? ltp - prevClose : null
-  const percent = change !== null && prevClose ? (change / prevClose) * 100 : null
-  const direction = change === null ? 'flat' : directionOf(change, decimals)
+  const { change, percent, direction } = changeOn(ltp, prevClose, decimals)
   const line = status?.line
-  const quiet =
-    line?.kind === 'polling' ||
-    line?.kind === 'connecting' ||
-    (line?.kind === 'delayed' && line.stale)
+  const quiet = priceQuiet(status)
   return (
     <section aria-label="Price" className="shrink-0 border-b bg-card px-4 pt-2 pb-2">
       {/* Wraps the chip under a price too wide to share the row with it. */}
@@ -1098,8 +1157,11 @@ function bookQuiet(status: LiveStatus | null): string | null {
   return null
 }
 
-/** Hair lines through the candle being read and the finger's height. */
-function Crosshair({ x, y }: { x: number | null; y: number }) {
+/**
+ * Hair lines through the candle being read and the finger's height, with the
+ * price at that height on the price axis, where the candles' pane has one (C10).
+ */
+function Crosshair({ x, y, price }: { x: number | null; y: number; price: string | null }) {
   return (
     <div aria-hidden="true" className="pointer-events-none absolute inset-0 z-[5]">
       {x !== null && (
@@ -1112,22 +1174,46 @@ function Crosshair({ x, y }: { x: number | null; y: number }) {
         className="absolute right-0 left-0 h-px bg-[color:var(--text-tertiary)]"
         style={{ top: y }}
       />
+      {price !== null && (
+        <span
+          className="absolute right-0 -translate-y-1/2 rounded-sm bg-[color:var(--text-primary)] px-1 py-0.5 text-[0.6875rem] leading-none font-semibold text-white tabular-nums"
+          style={{ top: y }}
+          data-testid="chart-held-price"
+        >
+          {price}
+        </span>
+      )}
     </div>
   )
 }
 
-/** The candle under a held finger: when, O H L C, and V where it trades. */
+/** The reading's height, which the study legend moves below: with Buy and Sell at the held price, more. */
+const READOUT = 88
+const READOUT_WITH_ORDERS = READOUT + 52
+
+/**
+ * The candle under a held finger: when, O H L C, and V where it trades; and,
+ * where orders can be placed, Buy and Sell at the price at the finger's
+ * height, each opening the order ticket with that price as a limit (C10).
+ *
+ * It appears under the finger that held, and a finger lifted soon after the
+ * hold is a tap to the browser, landing on whatever is there now: for its
+ * first half second the reading takes no tap (`useOpenGuard`), as a sheet does.
+ */
 function Readout({
   bar,
   dp,
   interval,
   volume,
+  order,
   onClose,
 }: {
   bar: Bar
   dp: number
   interval: string
   volume: boolean
+  /** The held price, written at the instrument's decimals; null where no order can be placed. */
+  order: { price: string; onOrder(side: 'BUY' | 'SELL'): void } | null
   onClose(): void
 }) {
   const at = new Date(bar.time * 1000)
@@ -1139,10 +1225,18 @@ function Readout({
     ['C', formatPrice(bar.close, dp)],
   ]
   if (volume) cells.push(['V', typeof bar.volume === 'number' ? compact.format(bar.volume) : '—'])
+  const guard = useOpenGuard(true)
   return (
     <div
-      className="absolute top-2 right-2 left-2 z-10 rounded-xl border bg-card py-1 pr-1 pl-3 shadow-[var(--shadow-raised)]"
+      // On a wide or sideways screen, a card at the left that leaves the latest candles in view.
+      className="absolute top-2 right-2 left-2 z-10 rounded-xl border bg-card py-1 pr-1 pl-3 shadow-[var(--shadow-raised)] sm:right-auto sm:w-[28rem]"
       data-testid="chart-readout"
+      // A touch on the reading is its own, not the chart's (longPress OVER_CHART): its taps land.
+      data-over-chart=""
+      data-settling={guard.settling || undefined}
+      onPointerDownCapture={guard.handlers.onPointerDownCapture}
+      onClickCapture={guard.handlers.onClickCapture}
+      onKeyDownCapture={guard.handlers.onKeyDownCapture}
     >
       <div className="flex items-center justify-between">
         <span className="text-xs font-semibold text-muted-foreground">{stamp}</span>
@@ -1168,6 +1262,24 @@ function Readout({
           </div>
         ))}
       </dl>
+      {order && (
+        <div className="grid grid-cols-2 gap-2 pr-2 pb-1">
+          <button
+            type="button"
+            onClick={() => order.onOrder('BUY')}
+            className="h-12 rounded-xl border-2 border-[color:var(--buy-solid)] px-2 text-sm font-bold text-[color:var(--buy-solid)] tabular-nums focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            Buy at {order.price}
+          </button>
+          <button
+            type="button"
+            onClick={() => order.onOrder('SELL')}
+            className="h-12 rounded-xl border-2 border-[color:var(--sell-solid)] px-2 text-sm font-bold text-[color:var(--sell-solid)] tabular-nums focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            Sell at {order.price}
+          </button>
+        </div>
+      )}
     </div>
   )
 }
