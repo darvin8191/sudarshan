@@ -37,6 +37,7 @@ from family_planekit import (
     signed_in,
 )
 from family_testkit import close
+from websockets.asyncio.client import connect
 
 from sudarshan.family import books as books_module
 from sudarshan.family import privacy, viewer_api
@@ -87,6 +88,36 @@ def test_each_role_hides_what_design_3_1_says_by_default():
         == ("pnl", "qty")  # Y24: P&L goes with quantities  # fmt: skip
     assert privacy.parts_shown(("funds",)) == ("positions", "holdings", "orders", "trades")
     assert privacy.parts_shown(CATEGORIES) == ("positions", "holdings")
+
+
+#: Review H1 (FP's ``cost`` list): with P&L hidden and quantities shown, every rupee figure the P&L
+#: follows from beside the quantity. Written out here, so a name dropped from the list turns red.
+COST_FIELDS = ("avg_price_u", "buy_price_u", "sell_price_u", "price_u", "trigger_price_u",
+               "value_paise", "invested_paise", "amount_paise", "charges_paise")  # fmt: skip
+
+
+def test_pnl_hidden_with_quantities_shown_leaves_nothing_to_work_the_pnl_out_from():
+    """H1: the quantity stays, and nothing it could be multiplied by to give the P&L does; the live
+    price stays (it is the price, not the owner's cost)."""
+    mask = privacy.mask_of(privacy.hidden_categories({"pnl": False, "qty": True, "funds": False,
+                                                      "orders": True}))  # fmt: skip
+    row = privacy.masked({**position(), "invested_paise": 1, "charges_paise": 2,
+                          "price_u": 3, "trigger_price_u": 4, "amount_paise": 5}, mask)  # fmt: skip
+    assert row["qty_u"] == 100_000 and row["last_price_u"] == 1_010_000
+    assert [f for f in COST_FIELDS if f in row] == []
+    assert "pnl_paise" not in row and "realised_paise" not in row
+
+    async def go():  # and through the books' second pass, though the portfolio leaked them
+        clock = Clock(ist(MONDAY, 10))
+        books, _ = shelf(clock, {"positions": [position()]})
+        shown = {"pnl": False, "qty": True, "funds": False, "orders": True}
+        books.screen(Sock(), member(shown=shown), "positions")
+        await settle(books)
+        sent = books.book_of(member(shown=shown), "positions", clock())["rows"][0]
+        assert sent["qty_u"] == 100_000 and [f for f in COST_FIELDS if f in sent] == []
+        assert sent["side"] == "long"
+
+    run(go())
 
 
 @pytest.mark.parametrize("field", QTY_FIELDS)
@@ -420,7 +451,7 @@ def test_a_nudge_storm_starts_a_read_of_a_part_at_most_once_a_window():
     run(go())
 
 
-def test_each_member_reads_as_themselves_and_is_told_alone():
+def test_each_member_reads_as_themselves_and_every_socket_of_theirs_is_told():
     """Y11: after a read, only that member's sockets showing the part get the book message."""
 
     async def go():
@@ -439,8 +470,10 @@ def test_each_member_reads_as_themselves_and_is_told_alone():
         by_member = {(call[1], call[2]["parts"][0]): call[3] for call in client.reads()}
         assert by_member[(1, "positions")] == privacy.mask_of(["funds"])
         assert by_member[(2, "positions")] == privacy.mask_of(CATEGORIES)
-        assert a.of("book") == [{"type": "book", "part": "positions", "read_at": clock()}]
-        assert b.of("book") == [{"type": "book", "part": "holdings", "read_at": clock()}]
+        both = [{"type": "book", "part": part, "read_at": clock()}
+                for part in ("holdings", "positions")]  # fmt: skip
+        # FD2: every socket of the member who may see the part, whatever screen it shows
+        assert sorted(a.of("book"), key=str) == sorted(b.of("book"), key=str) == both
         assert c.of("book") == [{"type": "book", "part": "positions", "read_at": clock()}]
         assert (1, "positions") in books.memory and (2, "positions") in books.memory
 
@@ -581,9 +614,28 @@ def test_the_page_reads_on_its_own_only_past_the_resync_or_a_nudge_window():
 CANARY = 987_654_321  # a figure that must never be written to family.db
 
 
-def plane_service(root: Path, url: str, fernet: Fernet, clock: Clock) -> FamilyService:
-    return FamilyService(settings(root, portfolio_url=url), keys(), hasher=fast_hasher(),
+def dead_port() -> int:
+    """A port nothing listens on: the feed link's calls there are refused at once (never the real
+    5580 or 5581)."""
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        return probe.getsockname()[1]
+
+
+def plane_service(root: Path, url: str, fernet: Fernet, clock: Clock, **more) -> FamilyService:
+    port = dead_port()
+    more = {"feed_url": f"http://127.0.0.1:{port}", "feed_zmq": f"tcp://127.0.0.1:{port}"} | more
+    return FamilyService(settings(root, portfolio_url=url, **more), keys(), hasher=fast_hasher(),
                          clock=clock, jobs={}, data_plane=PlaneKeys(fernet))  # fmt: skip
+
+
+async def until_type(sock, kind: str, seconds: float = 5.0) -> dict:
+    """The next message of ``kind`` a real socket receives (others are passed over)."""
+    async with asyncio.timeout(seconds):
+        while True:
+            message = json.loads(await sock.recv())
+            if message.get("type") == kind:
+                return message
 
 
 def test_the_door_serves_masked_books_and_a_nudge_tells_the_open_screen(tmp_path):
@@ -614,26 +666,31 @@ def test_the_door_serves_masked_books_and_a_nudge_tells_the_open_screen(tmp_path
                 status, _, answer = await ask(port, "GET", "/family/api/books/orders",
                                               headers={"Cookie": cookie})  # fmt: skip
                 assert answer["data"]["state"] == "not_shared" and len(fake.calls) == 1
-                sock = Sock(child["id"])
-                service.plane.books.screen(sock, child, "positions")  # what the socket tells it
+                sock = await connect(f"ws://127.0.0.1:{port}/family/ws",
+                                     additional_headers={"Cookie": cookie})  # fmt: skip
+                await sock.send(json.dumps({"action": "authenticate", "family": True}))
+                await sock.send(json.dumps({"action": "screen", "name": "positions"}))
+                await until_type(sock, "feed_state")
+                for _ in range(300):  # the screen is the socket's next message: wait for it
+                    if service.plane.books.screens:
+                        break
+                    await asyncio.sleep(0.01)
                 clock.at += 20_000
                 nudge = sealed(service.keys.nudge, "nudge", principal="sudarshan-alerts",
                                kind="orders", sandbox=False, at=clock())  # fmt: skip
+                began = time.monotonic()
                 status, _, answer = await ask(port, "POST", "/v1/nudge", body=nudge)
                 assert (status, answer["data"]) == (200, {"taken": True})
-                for _ in range(300):
-                    if sock.of("book"):
-                        break
-                    await asyncio.sleep(0.01)
-                assert sock.of("book") == [
-                    {"type": "book", "part": "positions", "read_at": clock()}
-                ]
+                told = await until_type(sock, "book")  # Y11: at once, well inside 3 s
+                assert told == {"type": "book", "part": "positions", "read_at": clock()}
+                assert time.monotonic() - began < 3
+                await sock.close()
                 status, _, answer = await ask(port, "GET", "/family/api/books/positions",
                                               headers={"Cookie": cookie})  # fmt: skip
                 assert answer["data"]["read_at"] == clock() and len(fake.calls) == 2  # kept
                 status, _, health = await ask(port, "GET", "/health")
                 data = health["family_state"]["data"]
-                assert data["books"] == {"reads": 2, "screens": 1, "kept": 1}
+                assert data["books"] == {"reads": 2, "screens": 0, "kept": 1}  # it closed
                 assert data["portfolio"] == "answering" and data["nudges"]["taken"] == 1
                 assert "SYNTH" not in json.dumps(health) and "Member" not in json.dumps(health)
             stored = b"".join(p.read_bytes() for p in (tmp_path / "state").glob("family.db*"))
@@ -741,7 +798,15 @@ def test_reads_and_nudges_leave_no_descriptor_and_a_stop_leaves_no_task(tmp_path
 
 
 #: The data plane's modules (F5 to F7); each lane adds its own.
-PLANE_MODULES = ["privacy.py", "portfolio_client.py", "books.py", "nudge.py"]
+PLANE_MODULES = [
+    "privacy.py",
+    "portfolio_client.py",
+    "books.py",
+    "nudge.py",
+    "feedlink.py",
+    "viewer_ws.py",
+    "symbol_map.py",
+]
 
 
 def test_no_log_call_of_the_data_plane_passes_a_name_a_code_or_a_token():
