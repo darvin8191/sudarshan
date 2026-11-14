@@ -88,7 +88,7 @@ export function FamilyLayout() {
 
   // SUDARSHAN P6 D8: on every open, a granted permission re-posts the subscription the browser
   // holds (Chrome does not always say when it changes).
-  usePushResync(session.data != null)
+  usePushResync(session.data != null, session.data?.member.id)
 
   // Coming back to the page (the phone woke, the app was switched back to) checks the session.
   useEffect(() => {

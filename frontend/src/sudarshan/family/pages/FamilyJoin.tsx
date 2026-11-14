@@ -340,6 +340,7 @@ type After = 'install' | 'notifications' | 'telegram'
  */
 function AfterJoin() {
   const navigate = useNavigate()
+  const client = useQueryClient()
   const [step, setStep] = useState<After>('install')
   const [link, setLink] = useState<{ url: string } | null>(null)
   const [problem, setProblem] = useState<string | null>(null)
@@ -353,7 +354,7 @@ function AfterJoin() {
     setBusy(true)
     setProblem(null)
     try {
-      const now = await enablePush()
+      const now = await enablePush(client.getQueryData<Me>(ME_KEY)?.member.id)
       setPushState(now)
       if (now === 'on') setStep('telegram')
     } catch (error) {

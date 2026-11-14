@@ -18,6 +18,7 @@ import {
 import { FamilyError, familyApi } from './api'
 import { Field, OUTLINE, PRIMARY, Problem, Saved, Section } from './forms'
 import { DEVICES_KEY, FAILING_WORDS, SETTINGS_KEY } from './keys'
+import { useFamilyMeOptional } from './session'
 import type { Channel, Notify, TestResult } from './types'
 
 export const SIGNIN_NOTICES = 'Push and Telegram, never silenced'
@@ -75,6 +76,7 @@ function Switch({
 }
 
 export function Notifications() {
+  const me = useFamilyMeOptional()
   const client = useQueryClient()
   const settings = useQuery({
     queryKey: SETTINGS_KEY,
@@ -114,7 +116,7 @@ export function Notifications() {
     setProblem(null)
     setSaved(null)
     try {
-      if (on) setStatus(await enablePush())
+      if (on) setStatus(await enablePush(me?.member.id))
       else {
         await disablePush()
         setStatus(await pushStatus())
