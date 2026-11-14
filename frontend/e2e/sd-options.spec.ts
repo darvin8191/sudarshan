@@ -8,9 +8,11 @@
  *
  *   npx playwright test e2e/sd-options.spec.ts --project=chromium
  *
- * The cost run is a tripwire, not the truth (the truth is the owner's phone): run it against a
- * production build (`vite build`, then `vite preview`), on a machine that is not busy. The dev
- * server's React is several times slower and fails it by construction.
+ * The cost run is a tripwire, not the truth (the truth is the owner's phone). It reads the main
+ * thread's own CPU time for every task from a trace and scales it by four, so it gives the same
+ * answer on a busy machine, where a slowed clock and wall time do not. It measures a production
+ * build (`vite build`, then `vite preview`) and is skipped on the dev server, whose React is
+ * several times slower.
  *
  * Each state asserts: no sideways scroll; every link, button and switch at least 48 x 48 CSS px;
  * the freshness words for the state, and no "Real-time" without ticks; every up or down figure
@@ -27,6 +29,8 @@ const EXPIRY = '2026-11-17'
 const SPOT = 25_912.35
 const STRIKES = Array.from({ length: 81 }, (_, i) => 23_900 + i * 50)
 const FUTURE = 'NIFTY24NOV26FUT'
+/** How much slower than this machine a mid-range phone is taken to be (design 2.5: "CPU throttled 4x"). */
+const SLOWER = 4
 
 /** Epoch ms of an IST wall time: ist('2026-11-17', '09:15'). */
 function ist(day: string, hhmm: string): number {
@@ -435,38 +439,15 @@ test.describe('the options screen at 360 x 800', () => {
     await expect.poll(() => seen.chain, 'the snapshot is read again after the sleep').toBe(2)
   })
 
-  test('the cost run: 84 instruments at 5 ticks a second for 10 s with the CPU slowed 4x', async ({ browser }, info) => {
+  test('the cost run: 84 instruments at 5 ticks a second for 10 s, by the main thread\'s own CPU time', async ({ page, browser }, info) => {
     test.slow()
-    // Its own page at device scale 1: the run measures the main thread's work, and painting three
-    // times the pixels without a GPU, as this headless browser does, would be measured instead.
-    const context = await browser.newContext({
-      viewport: { width: 360, height: 800 },
-      deviceScaleFactor: 1,
-      hasTouch: true,
-      isMobile: true,
-      baseURL: info.project.use.baseURL,
-    })
-    const page = await context.newPage()
     const { ticks } = await serve(page, OPEN)
     const devServer = await page.evaluate(() => document.querySelector('script[src*="@vite/client"]') !== null)
     test.skip(devServer, 'the cost run measures a production build: vite build, then vite preview')
     await expect(page.locator('[data-feed="live"]').first()).toBeVisible()
-    const cdp = await page.context().newCDPSession(page)
-    await cdp.send('Emulation.setCPUThrottlingRate', { rate: 4 })
     await page.waitForTimeout(1500) // the load's own work is not what is measured
-    await page.evaluate(() => {
-      const record = { long: [] as number[], frames: [] as number[], last: 0, on: true }
-      ;(window as unknown as { sdCost: typeof record }).sdCost = record
-      new PerformanceObserver((list) => {
-        for (const entry of list.getEntries()) record.long.push(entry.duration)
-      }).observe({ type: 'longtask', buffered: false })
-      const frame = (at: number) => {
-        if (record.last) record.frames.push(at - record.last)
-        record.last = at
-        if (record.on) requestAnimationFrame(frame)
-      }
-      requestAnimationFrame(frame)
-    })
+    await browser.startTracing(page, { categories: ['toplevel', 'disabled-by-default-devtools.timeline'] })
+    const began = Date.now()
     // The tape: every instrument ticks 5 times a second for 10 s, a tenth of them every 20 ms.
     for (let step = 1; step <= 50; step += 1) {
       for (let slice = 0; slice < 10; slice += 1) {
@@ -474,24 +455,39 @@ test.describe('the options screen at 360 x 800', () => {
         await page.waitForTimeout(20)
       }
     }
-    const cost = await page.evaluate(() => {
-      const record = (window as unknown as { sdCost: { long: number[]; frames: number[]; on: boolean } }).sdCost
-      record.on = false
-      const frames = [...record.frames].sort((a, b) => a - b)
-      return {
-        longTasks: record.long.map((ms) => Math.round(ms)),
-        frames: frames.length,
-        p95: frames[Math.floor(frames.length * 0.95)] ?? 0,
-        ticked: document.querySelectorAll('[data-tick]').length,
-      }
-    })
-    await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 })
-    await context.close()
+    const seconds = (Date.now() - began) / 1000
+    const ticked = await page.locator('[data-tick]').count()
+    const trace = JSON.parse((await browser.stopTracing()).toString()) as {
+      traceEvents: Array<{ name: string; ph: string; pid: number; tid: number; tdur?: number; args?: { name?: string } }>
+    }
+    // The page's main thread, and each of its tasks by the CPU time the thread itself used (`tdur`,
+    // microseconds): what the task costs, whatever else the machine is doing. A mid-range phone is
+    // taken as four times slower (design 2.5), so each is scaled by 4 against the budget.
+    const mains = new Set(
+      trace.traceEvents
+        .filter((event) => event.name === 'thread_name' && event.args?.name === 'CrRendererMain')
+        .map((event) => `${event.pid}:${event.tid}`)
+    )
+    const tasks = trace.traceEvents
+      .filter((event) => event.name === 'RunTask' && event.ph === 'X' && mains.has(`${event.pid}:${event.tid}`))
+      .map((event) => ((event.tdur ?? 0) / 1000) * SLOWER)
+      .sort((a, b) => a - b)
+    const busy = tasks.filter((ms) => ms >= 1)
+    const cost = {
+      tasks: tasks.length,
+      over50: tasks.filter((ms) => ms > 50).map((ms) => Math.round(ms)),
+      largest: Math.round(tasks[tasks.length - 1] ?? 0),
+      p95: Math.round((busy[Math.floor(busy.length * 0.95)] ?? 0) * 10) / 10,
+      /** The share of each second the main thread would be busy on such a phone. */
+      busyShare: Math.round((tasks.reduce((sum, ms) => sum + ms, 0) / (seconds * 1000)) * 100) / 100,
+      ticked,
+    }
     info.annotations.push({ type: 'cost', description: JSON.stringify(cost) })
     console.log(`cost run: ${JSON.stringify(cost)}`)
     expect(cost.ticked, 'the rows followed the tape').toBeGreaterThan(10)
-    expect(cost.frames, 'frames drawn through the tape').toBeGreaterThan(100)
-    expect(cost.longTasks, 'tasks over 50 ms while ticking').toEqual([])
-    expect(cost.p95, 'frame interval p95 in ms').toBeLessThan(34)
+    expect(cost.tasks, 'tasks measured').toBeGreaterThan(500)
+    expect(cost.over50, 'tasks over 50 ms on a phone four times slower').toEqual([])
+    expect(cost.p95, 'a busy task at the 95th percentile, well inside two frames (34 ms)').toBeLessThan(34)
+    expect(cost.busyShare, 'the main thread keeps up with the tape').toBeLessThan(0.75)
   })
 })
