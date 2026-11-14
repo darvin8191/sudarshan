@@ -2,9 +2,10 @@
 op of the family purpose that says what a member was given.
 
 ``share_set``, ``share_remove``, ``shares_list`` and ``member_privacy_set`` open under the owner's
-purpose only (core/kinds.OWNER_EXTRA_OPS): the owner's admin flow in OpenAlgo seals them, in the
-same step as it writes the family service's own record, so the portfolio holds the floor the
-family purpose applies. ``shares_for_viewer`` is the family purpose's: the member's own tabs.
+purpose only (core/kinds.SHARING_OPS): the owner's Family page sends them through OpenAlgo's
+portfolio bridge, from his own browser and in the same action as it writes the family service's
+own record, so the portfolio holds the floor the family purpose applies. ``shares_for_viewer`` is
+the family purpose's: the member's own tabs.
 """
 
 from __future__ import annotations
