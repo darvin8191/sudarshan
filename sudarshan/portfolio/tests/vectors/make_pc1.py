@@ -170,6 +170,62 @@ ANSWER = {
     "skipped": {"kind": 1, "date": 1, "row": 0},
 }
 
+U = 10**6  # one share
+
+#: [kind, held, num, den] -> shares added, shares after, and whether part of a share is left.
+EFFECTS = [
+    {"id": "E-BONUS", "why": "bonus 1 for 1 on 100: 100 more, 200 in all",
+     "in": ["bonus", 100 * U, 1, 1], "out": [100 * U, 200 * U, False]},
+    {"id": "E-BONUS-3-2", "why": "bonus 3 for 2 on 10: 10 x 3 / 2 = 15 more, 25 in all",
+     "in": ["bonus", 10 * U, 3, 2], "out": [15 * U, 25 * U, False]},
+    {"id": "E-BONUS-ODD", "why": "bonus 1 for 2 on 5: 2.5 more: half a share is left over",
+     "in": ["bonus", 5 * U, 1, 2], "out": [2_500_000, 7_500_000, True]},
+    {"id": "E-SPLIT", "why": "split every 1 into 5 on 100: 500, which is 400 more",
+     "in": ["split", 100 * U, 5, 1], "out": [400 * U, 500 * U, False]},
+    {"id": "E-CONSOLIDATE", "why": "every 5 become 1 on 100: 20, which is 80 fewer",
+     "in": ["split", 100 * U, 1, 5], "out": [-80 * U, 20 * U, False]},
+    {"id": "E-CONSOLIDATE-ODD", "why": "every 10 become 1 on 5: half a share",
+     "in": ["split", 5 * U, 1, 10], "out": [-4_500_000, 500_000, True]},
+]  # fmt: skip
+
+#: [kind, first, second, num, den, held or null] -> the sentence the owner reads.
+SENTENCES = [
+    {"id": "S-DESIGN", "in": ["bonus", 1, 1, 1, 1, 100 * U],
+     "out": "Bonus 1:1: you held 100, you get 100 more, 200 in all. Is that right?"},
+    {"id": "S-OTHER", "in": ["bonus", 1, 2, 2, 1, 100 * U],
+     "out": "Bonus 1:2: you held 100, you get 200 more, 300 in all. Is that right?"},
+    {"id": "S-SPLIT", "in": ["split", 1, 5, 5, 1, 1250 * U],
+     "out": "Split 1:5: you held 1,250, they become 6,250. Is that right?"},
+    {"id": "S-ODD", "in": ["bonus", 1, 2, 1, 2, 5 * U],
+     "out": "Bonus 1:2: you held 5, you get 2.5 more, 7.5 in all. Is that right? This leaves "
+            "part of a share, which a company usually pays in cash."},
+    {"id": "S-BONUS-NO-QTY", "in": ["bonus", 1, 2, 1, 2, None],
+     "out": "Bonus 1:2: 1 new share for every 2 held. Is that right?"},
+    {"id": "S-BONUS-NO-QTY-OTHER", "in": ["bonus", 1, 2, 2, 1, None],
+     "out": "Bonus 1:2: 2 new shares for every 1 held. Is that right?"},
+    {"id": "S-SPLIT-NO-QTY", "in": ["split", 1, 5, 5, 1, None],
+     "out": "Split 1:5: every 1 share becomes 5. Is that right?"},
+    {"id": "S-SPLIT-NO-QTY-OTHER", "in": ["split", 1, 5, 1, 5, None],
+     "out": "Split 1:5: every 5 shares become 1. Is that right?"},
+]  # fmt: skip
+
+#: The closing record that says what was held the day before an ex-date: [days, ex, today].
+EVE = [
+    {"id": "V-EVE", "why": "the record of the day before", "in": [[20261016, 20261019, 20261020],
+     20261020, 20261026], "out": 20261019},
+    {"id": "V-WEEKEND", "why": "ex-date on a Monday: Friday's record, three days before",
+     "in": [[20261015, 20261016], 20261019, 20261026], "out": 20261016},
+    {"id": "V-REACH", "why": "a record exactly 7 days before still says", "in": [[20261013],
+     20261020, 20261026], "out": 20261013},
+    {"id": "V-TOO-OLD", "why": "a record 8 days before says nothing of that day",
+     "in": [[20261012], 20261020, 20261026], "out": None},
+    {"id": "V-NONE-BEFORE", "why": "records begin on the ex-date: none says",
+     "in": [[20261020, 20261021], 20261020, 20261026], "out": None},
+    {"id": "V-NO-RECORDS", "why": "no record at all", "in": [[], 20261020, 20261026], "out": None},
+    {"id": "V-TO-COME", "why": "an ex-date to come: the last record there is stands in, however "
+     "far it is", "in": [[20261001, 20261023], 20261210, 20261026], "out": 20261023},
+]  # fmt: skip
+
 FILE = {
     "about": (
         "Golden vectors for core/corpactions (PC1, M7.36): Upstox's corporate-action rows as "
@@ -182,6 +238,9 @@ FILE = {
     "readings": READINGS,
     "identity": IDENTITY,
     "answer": ANSWER,
+    "effects": EFFECTS,
+    "sentences": SENTENCES,
+    "eve": EVE,
 }
 
 

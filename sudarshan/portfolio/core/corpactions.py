@@ -30,7 +30,9 @@ from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any
 
 from .days import days_between, is_day
-from .kinds import CA_KINDS, PRICE_SCALE
+from .kinds import CA_KINDS, PRICE_SCALE, QTY_SCALE
+from .money import round_div
+from .words import quantity
 
 MONTHS = ("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec")
 #: ``14 Aug 2025``, ``14 August 2025``, ``14-Aug-2025``; then ``2025-08-14``; then ``14-08-2025``.
@@ -221,3 +223,76 @@ def tonight(
         key=lambda isin: (read_days[isin], isin),
     )  # fmt: skip
     return (never + soon + stale)[: max(0, limit)]
+
+
+# ---- what a reading does to a holding (design p7 6.3) ----------------------------------------
+#: The closing record of the Upstox account that says what was held the day before an ex-date
+#: must be this near it (days): a weekend and holidays lie between, a month does not.
+EVE_REACH_DAYS = 7
+
+
+def effect(kind: str, held_qty_u: int, num: int, den: int) -> dict[str, Any]:
+    """What ``held_qty_u`` becomes under a reading: the quantity added, the quantity after, and
+    whether part of a share is left over (the company usually pays that in cash)."""
+    if kind == "bonus":
+        added = round_div(held_qty_u * num, den)
+    else:
+        added = round_div(held_qty_u * num, den) - held_qty_u
+    after = held_qty_u + added
+    whole = held_qty_u * num % den == 0 and after % QTY_SCALE == 0
+    return {"added_qty_u": added, "after_qty_u": after, "fraction": not whole}
+
+
+def sentence(kind: str, first: int, second: int, num: int, den: int, held_qty_u: int | None) -> str:
+    """The reading as the owner reads it, on his own quantity when it is known: "Bonus 1:1: you
+    held 100, you get 100 more, 200 in all. Is that right?" The ratio is shown as Upstox wrote
+    it; the example is what changes when he turns it round."""
+    label = f"{'Bonus' if kind == 'bonus' else 'Split'} {first}:{second}"
+    if not held_qty_u:
+        if kind == "bonus":
+            rule = f"{num} new {_shares(num)} for every {den} held"
+        else:
+            rule = f"every {den} {_shares(den)} {'becomes' if den == 1 else 'become'} {num}"
+        return f"{label}: {rule}. Is that right?"
+    done = effect(kind, held_qty_u, num, den)
+    held, after = quantity(held_qty_u), quantity(done["after_qty_u"])
+    if kind == "bonus":
+        text = f"you held {held}, you get {quantity(done['added_qty_u'])} more, {after} in all"
+    else:
+        text = f"you held {held}, they become {after}"
+    left = " This leaves part of a share, which a company usually pays in cash." * done["fraction"]
+    return f"{label}: {text}. Is that right?{left}"
+
+
+def _shares(count: int) -> str:
+    return "share" if count == 1 else "shares"
+
+
+def eve_record(record_days: list[int], ex_day: int, today: int) -> int | None:
+    """The closing record that says what the Upstox account held the day before ``ex_day``: the
+    last one before it. For an ex-date already here it must be within ``EVE_REACH_DAYS`` of it
+    (an older record says nothing of that day); for one to come, the last record there is stands
+    in, as what is held now. None when no record can say."""
+    before = [day for day in record_days if day < ex_day]
+    if not before:
+        return None
+    last = max(before)
+    if ex_day <= today and days_between(last, ex_day) > EVE_REACH_DAYS:
+        return None
+    return last
+
+
+def action_row(event: Mapping[str, Any], num: int, den: int, accepted: bool) -> dict[str, Any]:
+    """An event as the tax core's ``Action`` row (``sudarshan.tax.model.Action``): a bonus is
+    ``num`` new for every ``den`` held at nil cost dated the ex-date, a split every ``den``
+    become ``num``. ``accepted`` is the owner's one tap; without it the tax core changes nothing
+    and says so."""
+    return {
+        "kind": event["kind"].upper(),
+        "instrument": event["isin"],
+        "ex_day": event["ex_day"],
+        "num": num,
+        "den": den,
+        "new_isin": None,
+        "accepted": accepted,
+    }

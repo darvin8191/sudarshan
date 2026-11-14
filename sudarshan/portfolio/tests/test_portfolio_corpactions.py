@@ -80,3 +80,28 @@ def test_a_float_amount_is_read_through_its_text():
     assert ca.parse_amount("1,250.50") == 12505000
     for nothing in (None, True, "", "abc", 0, -2, "NaN", "Infinity"):
         assert ca.parse_amount(nothing) is None
+
+
+# ---- what a reading does to a holding (C3) -------------------------------------------------------
+@pytest.mark.parametrize("case", FILE["effects"], ids=lambda c: c["id"])
+def test_a_reading_on_a_quantity(case):
+    done = ca.effect(*case["in"])
+    assert [done["added_qty_u"], done["after_qty_u"], done["fraction"]] == case["out"]
+
+
+@pytest.mark.parametrize("case", FILE["sentences"], ids=lambda c: c["id"])
+def test_the_sentence_the_owner_reads(case):
+    assert ca.sentence(*case["in"]) == case["out"]
+
+
+@pytest.mark.parametrize("case", FILE["eve"], ids=lambda c: c["id"])
+def test_the_closing_record_of_the_day_before(case):
+    assert ca.eve_record(*case["in"]) == case["out"]
+
+
+def test_an_event_becomes_the_tax_cores_action_row_only_as_accepted_as_it_is_given():
+    event = {"isin": ISIN, "kind": "bonus", "ex_day": 20250910}
+    row = ca.action_row(event, 1, 2, False)
+    assert row == {"kind": "BONUS", "instrument": ISIN, "ex_day": 20250910, "num": 1, "den": 2,
+                   "new_isin": None, "accepted": False}  # fmt: skip
+    assert ca.action_row(event, 1, 2, True)["accepted"] is True
