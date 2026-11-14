@@ -72,8 +72,15 @@ def test_a_tax_input_has_a_dry_run_and_downloads_are_reads():
         assert spec.download and spec.cls == "read" and spec.method == "GET", name
 
 
-def test_no_op_of_the_phase_is_built_yet_so_each_answers_not_ready():
-    assert not set(PHASE_OPS) & set(REGISTRY)
+#: The ops of the phase whose lane has landed; every other still answers "not ready" whatever
+#: its switch says. One line per pull request, so that lanes landing side by side merge cleanly.
+BUILT = {
+    "risk", "settings_get", "settings_set",  # R4 (M7.32)
+}  # fmt: skip
+
+
+def test_an_op_of_the_phase_not_built_yet_answers_not_ready():
+    assert set(PHASE_OPS) & set(REGISTRY) == BUILT
 
 
 # ---- the switches are off in code ---------------------------------------------------------------
