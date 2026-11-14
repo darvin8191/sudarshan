@@ -51,6 +51,16 @@ vi.mock('@/sudarshan/watchlist/useSameStrike', () => ({
     retry: () => {},
   }),
 }))
+// The Straddle tab's chart is the chart lane's: here it is a stand-in that draws nothing.
+vi.mock('@/sudarshan/chart/computedChart', () => ({
+  ComputedChart: class {
+    async loadComputed() {}
+    tick() {}
+    resync() {}
+    setAppMode() {}
+    destroy() {}
+  },
+}))
 vi.mock('@/components/auth/AuthSync', () => ({ syncSession: vi.fn(async () => {}) }))
 vi.mock('@/api/client', () => ({
   webClient: {
@@ -423,7 +433,7 @@ describe('the options page', () => {
   it('switches between the Chain and the OI tab, kept in the address beside the expiry', async () => {
     await open('/options/NFO/NIFTY?expiry=2026-11-24')
     const tabs = within(screen.getByRole('tablist')).getAllByRole('tab')
-    expect(tabs.map((tab) => tab.textContent)).toEqual(['Chain', 'OI', 'IV'])
+    expect(tabs.map((tab) => tab.textContent)).toEqual(['Chain', 'OI', 'IV', 'Straddle'])
     expect(tabs[0]).toHaveAttribute('aria-selected', 'true')
     fireEvent.click(tabs[1])
     await settle()
@@ -445,6 +455,55 @@ describe('the options page', () => {
     )
     expect(drawn[0]).toBe(26_000)
     expect(drawn.at(-1)).toBe(27_000)
+  })
+
+  it('opens the Straddle tab on a tapped strike, inside the 84 instruments already followed', async () => {
+    await open()
+    fireEvent.click(screen.getByRole('button', { name: /^Straddle at 25,950/ }))
+    await settle()
+    expect(where()).toBe('/options/NFO/NIFTY?tab=straddle&strike=25950')
+    expect(screen.getByRole('tab', { name: 'Straddle' })).toHaveAttribute('aria-selected', 'true')
+    expect(document.querySelector('[data-straddle-strike]')).toHaveAttribute(
+      'data-straddle-strike',
+      '25950'
+    )
+    expect(feed.live()).toHaveLength(84) // its two legs are the window's own
+    expect(chainRead).toHaveBeenCalledTimes(1)
+    // Stepping across the whole window still follows nothing new.
+    for (let step = 0; step < 6; step += 1)
+      fireEvent.click(screen.getByRole('button', { name: 'Higher strike' }))
+    await settle()
+    expect(feed.live()).toHaveLength(84)
+  })
+
+  it('follows a far strike’s two legs only while its straddle is shown: 86, then 84 again', async () => {
+    await open('/options/NFO/NIFTY?tab=straddle&strike=24500')
+    expect(document.querySelector('[data-straddle-strike]')).toHaveAttribute(
+      'data-straddle-strike',
+      '24500'
+    )
+    expect(feed.live()).toHaveLength(86)
+    expect(feed.live()).toContain(`NFO:${symbolOf(24_500, 'CE')}:Quote`)
+    expect(feed.live()).toContain(`NFO:${symbolOf(24_500, 'PE')}:Quote`)
+    fireEvent.click(screen.getByRole('tab', { name: 'OI' }))
+    await settle()
+    expect(feed.live()).toHaveLength(84)
+  })
+
+  it('"Trade the legs" on the Straddle tab opens the strike sheet, and from it the app’s own ticket', async () => {
+    await open('/options/NFO/NIFTY?tab=straddle')
+    fireEvent.click(screen.getByRole('button', { name: '25,900 put' }))
+    await settle()
+    const sheet = screen.getByRole('dialog', { name: 'NIFTY 25,900' })
+    expect(feed.live()).toHaveLength(84)
+    vi.mocked(Date.now).mockReturnValue(NOW + 3000) // past the 500 ms guard
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Sell PE' }))
+    await settle()
+    expect(ticket.props.at(-1)).toMatchObject({
+      symbol: symbolOf(25_900, 'PE'),
+      exchange: 'NFO',
+      action: 'SELL',
+    })
   })
 
   it('lets every subscription go when the page is left', async () => {

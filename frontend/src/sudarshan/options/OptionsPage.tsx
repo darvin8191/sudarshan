@@ -1,7 +1,8 @@
 /**
  * `/options`: the option chain on the phone (M11.1, O4). One chain model, read by every tab.
  *
- * The address is `/options/<NFO|BFO>/<underlying>?expiry=YYYY-MM-DD&strike=N` (`words.optionsPath`;
+ * The address is `/options/<NFO|BFO>/<underlying>?expiry=YYYY-MM-DD&strike=N&tab=straddle`
+ * (`words.optionsPath`;
  * the underlying's own exchange is taken too, so another screen can link with what it has). A bare
  * `/options` opens the underlying and expiry last used on this phone, NIFTY's nearest the first
  * time. Prices, open interest, IV and the Greeks move with ticks for the followed window; the far
@@ -11,10 +12,11 @@
  */
 import { useQuery } from '@tanstack/react-query'
 import { Unplug } from 'lucide-react'
-import { memo, useCallback, useEffect, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router'
 import { PlaceOrderDialog } from '@/components/trading/PlaceOrderDialog'
 import { cn } from '@/lib/utils'
+import { useThemeStore } from '@/stores/themeStore'
 import { AccessNotice } from '@/sudarshan/AccessNotice'
 import { usePriceAccess } from '@/sudarshan/access'
 import { useMarketOpen, useNow } from '@/sudarshan/dashboard/hooks'
@@ -31,6 +33,7 @@ import { Header } from './Header'
 import { IvTab } from './IvTab'
 import { OiTab } from './OiTab'
 import { readLastChain, saveLastChain } from './prefs'
+import { StraddleTab } from './StraddleTab'
 import { StrikeEntry } from './StrikeEntry'
 import { useSheets } from './sheets'
 import { clockTime } from './TimedRefresh'
@@ -44,11 +47,12 @@ const QUIET =
   'inline-flex min-h-12 items-center rounded-sm text-sm font-semibold text-[color:var(--brand)] underline underline-offset-2 outline-none focus-visible:ring-2 focus-visible:ring-ring'
 const NOTE = 'text-sm font-semibold text-[color:var(--text-secondary)]'
 
-type Tab = 'chain' | 'oi' | 'iv'
+type Tab = 'chain' | 'oi' | 'iv' | 'straddle'
 const TABS: Array<{ tab: Tab; label: string }> = [
   { tab: 'chain', label: 'Chain' },
   { tab: 'oi', label: 'OI' },
   { tab: 'iv', label: 'IV' },
+  { tab: 'straddle', label: 'Straddle' },
 ]
 const tabOf = (text: string | null): Tab => TABS.find((each) => each.tab === text)?.tab ?? 'chain'
 
@@ -153,6 +157,13 @@ export default function OptionsPage() {
   const picking = sheets.sheet?.sheet === 'underlying'
   /** What the open strike sheet needs followed, beside the window. */
   const [sheetFollows, setSheetFollows] = useState<string[]>([])
+  /** What the Straddle tab needs followed: a far strike's two legs, nothing for a window strike. */
+  const [straddleFollows, setStraddleFollows] = useState<string[]>([])
+  const follows = useMemo(
+    () => [...straddleFollows, ...sheetFollows],
+    [straddleFollows, sheetFollows]
+  )
+  const appMode = useThemeStore((state) => state.appMode)
 
   // The expiries: read when the chain is named and again on a new day in India.
   const read = useQuery({
@@ -186,7 +197,7 @@ export default function OptionsPage() {
     apiKey: access.apiKey,
     marketOpen: listing ? isOpen(listing.exchange) : null,
     now,
-    sheet: sheetFollows,
+    sheet: follows,
     enabled: ready,
   })
   const pickTab = useCallback(
@@ -202,6 +213,15 @@ export default function OptionsPage() {
     (next: string) => {
       const params = new URLSearchParams(query)
       params.set('expiry', next)
+      setQuery(params, { replace: true })
+    },
+    [query, setQuery]
+  )
+  const openStraddle = useCallback(
+    (strike: number) => {
+      const params = new URLSearchParams(query)
+      params.set('tab', 'straddle')
+      params.set('strike', String(strike))
       setQuery(params, { replace: true })
     },
     [query, setQuery]
@@ -329,6 +349,23 @@ export default function OptionsPage() {
                   dim={dim}
                   startAt={startAt}
                   onOpen={openStrike}
+                  onStraddle={openStraddle}
+                />
+              )}
+              {tab === 'straddle' && access.apiKey && (
+                <StraddleTab
+                  model={model}
+                  chainKey={`${listing.exchange}:${listing.underlying}:${expiry}`}
+                  underlying={listing.underlying}
+                  startAt={startAt}
+                  followed={live.plan.strikes}
+                  lines={live.lines}
+                  epoch={live.feed.epoch}
+                  apiKey={access.apiKey}
+                  appMode={appMode}
+                  dim={dim}
+                  onFollow={setStraddleFollows}
+                  onTrade={openStrike}
                 />
               )}
             </div>
