@@ -86,6 +86,10 @@ def test_lane_p_has_built_the_working_papers_reads_and_inputs():
     assert {"tax_get", "tax_inputs", "tax_input_set", "tax_input_delete"} <= set(REGISTRY)
 
 
+def test_lane_c_has_built_corporate_actions_dividends_and_the_calendar():
+    assert {"ca_list", "ca_decide", "dividends", "dividend_set", "calendar"} <= set(REGISTRY)
+
+
 # ---- the switches are off in code ---------------------------------------------------------------
 def test_each_switch_is_off_unless_the_release_turns_it_on():
     settings = config.Settings.from_env({})
