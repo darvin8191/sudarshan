@@ -53,6 +53,14 @@ async def following(rt: MarketRuntime, key: str = SBIN) -> None:
     await asyncio.sleep(0.15)
 
 
+async def heard(rt: MarketRuntime, feed: FakeFeed, key: str = SBIN) -> None:
+    """Until the runtime follows the key's topic and the publisher holds that subscription, so
+    the next frame is delivered. Nothing is slept and nothing is assumed about the alert's side:
+    whether an alert has one yet depends on what the runtime kept of the key (see
+    test_a_restart_after_its_instrument_was_let_go_waits_for_the_next_price)."""
+    await wait_until(lambda: key in rt.link.topics and feed.follows(key))
+
+
 async def closed(rt: MarketRuntime, task: asyncio.Task) -> None:
     rt.stop("test")
     await asyncio.wait_for(task, 10)
@@ -297,17 +305,20 @@ def test_pause_and_resume_fire_on_nothing_and_a_stopped_alert_restarts_once(aler
             settings = alerts(notify)
             office, rt, task = await opened(settings, feed, clock)
             card = await office.call("create", {"alert": draft()})  # Once
-            await following(rt)
+            await heard(rt, feed)
             await trade(feed, clock, 99.95)
             await wait_until(lambda: rt.stats["judged"] == 1)
             await office.call("update", {"id": 1, "version": 1, "action": "pause"})
             await trade(feed, clock, 100.3, ltq=2)  # crossed while paused: not told
             feed.snapshot[SBIN] = {"ltp": 100.3, "ltt": ms(clock()), "ltq": 2,
                                    "ts_recv": ms(clock())}  # fmt: skip
+            # The paused price is taken before the resume, or the key was let go before it came
+            # (then the snapshot above, current at the new claim, is what the resume reads).
+            await wait_until(lambda: rt.stats["frames"] == 2 or SBIN not in rt.link.topics)
             resumed = await office.call("update", {"id": 1, "version": 2, "action": "resume"})
             assert resumed["status"] == "active"
             await wait_until(lambda: rt.book.state(1).side == 1)  # seeded above: no fire
-            await asyncio.sleep(0.15)  # the topic subscription reaches the publisher again
+            await heard(rt, feed)
             await trade(feed, clock, 99.8, ltq=3)
             await trade(feed, clock, 100.2, ltq=4)
             await wait_until(lambda: len(notify.bodies) == 1)  # fired once, then stopped
@@ -318,12 +329,62 @@ def test_pause_and_resume_fire_on_nothing_and_a_stopped_alert_restarts_once(aler
             restarted = await office.call("update", {"id": 1, "version": 3,
                                                      "action": "restart"})  # fmt: skip
             assert (restarted["status"], restarted["version"]) == ("active", 4)
-            await wait_until(lambda: getattr(rt.book.state(1), "side", None) == 1)
-            await asyncio.sleep(0.15)
+            # No wait for a side here. The stop lets the key go 0.2 s later (the claims job);
+            # a restart before that takes its side from the last price kept, and one after it
+            # waits for the next price (the test below). Both fire on the crossing that follows.
+            await heard(rt, feed)
             await trade(feed, clock, 99.7, ltq=5)
             await trade(feed, clock, 100.4, ltq=6)
             await wait_until(lambda: len(notify.bodies) == 2)
+            assert rt.stats["fires"] == 2
             assert card["words"]["meta"].startswith("Once")
+            await closed(rt, task)
+
+    run(scenario)
+
+
+def test_a_restart_after_its_instrument_was_let_go_waits_for_the_next_price(alerts, quick):
+    """The order CI run 43621031037 met: the restart came after the claims job had let the
+    stopped alert's key go, so nothing was kept of it and the feed's snapshot was older than the
+    new claim. The alert then has no side until a price comes, and waiting for one before
+    sending a price never ends. Here that order is made, not hoped for: the restart is sent only
+    once the publisher has lost the subscription and the feed holds no claim."""
+
+    async def scenario():
+        clock = Clock(ist(2026, 10, 21, 10, 0))
+        async with FakeFeed(clock) as feed, FakeOpenAlgo() as notify:
+            settings = alerts(notify)
+            office, rt, task = await opened(settings, feed, clock)
+            await office.call("create", {"alert": draft()})  # Once
+            await heard(rt, feed)
+            await trade(feed, clock, 99.95)
+            await wait_until(lambda: rt.stats["judged"] == 1)
+            await trade(feed, clock, 100.2, ltq=2)
+            await wait_until(lambda: len(notify.bodies) == 1)  # fired once, then stopped
+            await wait_until(lambda: record(settings, "alert", 1)["status"] == "stopped")
+            await wait_until(lambda: SBIN not in rt.link.topics and not feed.follows(SBIN)
+                             and feed.keys == {})  # fmt: skip
+            assert rt.last_frame(SBIN) is None  # nothing is kept of a key let go
+            # What the feed still holds of the key is from before the new claim, and the price
+            # has moved since: read as current it would put the alert below its level.
+            feed.snapshot[SBIN] = {"ltp": 99.5, "ltt": ms(clock()), "ltq": 3,
+                                   "ts_recv": ms(clock())}  # fmt: skip
+            clock.advance(1)
+            asked = len(feed.snapshot_asks)
+            restarted = await office.call("update", {"id": 1, "version": 1,
+                                                     "action": "restart"})  # fmt: skip
+            assert (restarted["status"], restarted["version"]) == ("active", 2)
+            await heard(rt, feed)
+            await wait_until(lambda: len(feed.snapshot_asks) == asked + 1)  # read, and not used
+            assert rt.book.state(1).side is None and rt._to_seed == {1}
+            await trade(feed, clock, 100.4, ltq=4)  # above, and nobody saw it cross: not told
+            await wait_until(lambda: rt.stats["frames"] == 3)
+            assert rt.book.state(1).side == 1 and rt._to_seed == set()
+            assert rt.stats["fires"] == 1
+            await trade(feed, clock, 99.7, ltq=5)
+            await trade(feed, clock, 100.3, ltq=6)
+            await wait_until(lambda: len(notify.bodies) == 2)
+            assert rt.stats["fires"] == 2
             await closed(rt, task)
 
     run(scenario)
