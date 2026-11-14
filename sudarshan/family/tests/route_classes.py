@@ -16,7 +16,9 @@ a user who is not the owner. What the suite holds each class to:
                    in one of the classes below.
 ``public_shell``   A React shell view: byte for byte the index.html served at /, which carries no
                    data, a 404 for a page this deployment does not have, or a redirect to another
-                   shell view. Never takes a write.
+                   shell view. Never takes a write. The family shell (FAMILY_SHELL) may differ from
+                   it in one place only: once the build carries the family manifest, the href of
+                   its manifest link names that manifest (FAMILY_MANIFEST_HREF).
 ``public_static``  A file or a fixed document with no account data: answers 200, 304 or 404, never
                    takes a write.
 ``public_auth``    The login flow and what the login page reads: may take a write, and never
@@ -53,9 +55,15 @@ CLASSES = (PROTECTED, PUBLIC_SHELL, PUBLIC_STATIC, PUBLIC_AUTH, WEBHOOK, INTERNA
 WRITABLE = frozenset({PROTECTED, PUBLIC_AUTH, WEBHOOK, INTERNAL})
 #: The classes whose every line says why.
 NEEDS_REASON = frozenset({PUBLIC_STATIC, PUBLIC_AUTH, WEBHOOK, INTERNAL})
+#: The family view's shell, /family and every page under it (blueprints/react_app.py,
+#: serve_family_shell; P6 B2): the one public_shell view whose page may differ from the one / serves,
+#: and only in its manifest link's href, which names the family manifest once the build carries it.
+FAMILY_SHELL = "react.react_family_shell"
+FAMILY_MANIFEST_HREF = "/images/sudarshan-family.webmanifest"
 
 TABLE = """
 # --- public_shell: the React shell; every view answers the index.html that / answers ---
+# --- (the family shell's names the family manifest instead, once the build carries it) ---
 public_shell  /                                      react.react_index
 public_shell  /<broker>/auth                         react.react_broker_auth
 public_shell  /about                                 react.react_about

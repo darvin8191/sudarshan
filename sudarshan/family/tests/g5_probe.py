@@ -43,7 +43,8 @@ What runs:
   a 429 would hide what the route answers. Events published on the event bus are recorded, with
   whether each was raised while refusing a request for its API key, and not delivered. Writes
   handed to the order-log executor run; once the walk is done they are let finish, and the rows of
-  the owner's order log and analyzer log are counted.
+  the owner's order log and analyzer log are counted. The page / answers is kept whole, so the
+  test can tell how the family shell's page may differ from it.
 - Every database is a file in the temporary folder (the test sets the URLs; this refuses to run
   otherwise), with the tables setup_environment creates, from its own list, and an owner account.
 - Nothing reaches the network or starts a process: every connect, name lookup and subprocess is
@@ -53,6 +54,7 @@ What runs:
 from __future__ import annotations
 
 import ast
+import base64
 import hashlib
 import json
 import os
@@ -403,6 +405,20 @@ def walk(app, who: dict[str, dict], label: str, only: set | None = None) -> list
     return records
 
 
+def shell_page(app) -> str | None:
+    """The page / answers the anonymous caller, base64, whole: the test tells from it how the
+    family shell's page may differ (route_classes.FAMILY_SHELL). None when / answers no page."""
+    LEDGER.during = "GET / for the shell's page"
+    answer = app.test_client(use_cookies=False).get(
+        "/", base_url=BASE_URL, headers=dict(BROWSER, **FORWARDED)
+    )
+    try:
+        return base64.b64encode(answer.get_data()).decode("ascii") if answer.status_code == 200 else None
+    finally:
+        answer.close()
+        LEDGER.during = "between requests"
+
+
 def rules_of(app) -> list[dict]:
     rules = sorted(app.url_map.iter_rules(), key=lambda r: (r.rule, r.endpoint))
     return [{"rule": rule.rule, "endpoint": rule.endpoint,
@@ -485,6 +501,7 @@ def main(argv: list[str]) -> int:
     who = callers(app)
     started = time.monotonic()
     report = {"rules": rules_of(app), "requests": walk(app, who, "app")}
+    report["shell_page"] = shell_page(app)
     hidden = {(r["rule"], r["endpoint"], r["method"]) for r in report["requests"]
               if r["reached"] != r["endpoint"]}  # fmt: skip
     report["socketio"] = socket_check(app, who)
