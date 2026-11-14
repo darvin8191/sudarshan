@@ -50,7 +50,7 @@ JOURNAL_SPOOL = Path("/var/lib/sudarshan-journal/events.jsonl")
 #: user, in its unit's state directory.
 WATCH_SPOOL = Path("/var/lib/sudarshan-watch/events.jsonl")
 #: What the notice desk reads. A missing file is normal: the family service may not be on.
-DEFAULT_SPOOLS = (DEPLOY_SPOOL, BACKUP_SPOOL, FAMILY_SPOOL)
+DEFAULT_SPOOLS = (DEPLOY_SPOOL, BACKUP_SPOOL, FAMILY_SPOOL, WATCH_SPOOL)
 #: What a notice can be about. Each has its words in ``sudarshan/alerts/notices.py``, except
 #: ``report`` (src journal): it carries the id of a report, its kind and the sha256 of its file and
 #: no text, and belongs to the report desk, not to the notice desk.

@@ -623,6 +623,9 @@ holds no Telegram or OpenAlgo secret and cannot be made to send anything:
 - the nightly backup runs as `sudarshan` and cannot write root's file, so it records its failures
   the same way in `/var/lib/sudarshan-backup/events.jsonl` (`ops/events.py` `record()`); both
   files are read;
+- the watch (`sudarshan-watch`, "Watching the server" below) records each change of a check in
+  `/var/lib/sudarshan-watch/events.jsonl`, read the same way: a failure and the recovery from one
+  are told at once, in market hours too; a warning waits for the close;
 - recording is best effort, in its own subshell with its own error handling: a missing `jq`, a full
   disk or an unwritable folder costs the notice, never an install or a rollback; the file keeps its
   newest 200 lines; `--check` records nothing;
