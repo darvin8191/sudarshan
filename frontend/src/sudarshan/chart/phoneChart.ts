@@ -8,7 +8,7 @@
  * re-sync is `HistoryResync`, the feed's state is `LiveStatusTracker` and the
  * day's volume is read off each frame by `FrameExtrasTap`
  * (`lib/trading/live*.ts`). What this file adds is the phone's own small host:
- * no drawing tools, no order lines, no panels.
+ * no panels, and lines that are only ever read (`setOverlays`, C5).
  *
  * Framework-agnostic, like the terminal: the page drives it through plain
  * methods and hears back through callbacks, and the tick path never goes
@@ -25,13 +25,16 @@ import {
   INDICATOR_SOURCES,
   type IndicatorApi,
   InvalidationLevel,
+  type IPrimitive,
   indicatorDefaults,
   type LtpEvent,
   type MarketDepth,
   OpenAlgoDataFeed,
   OpenAlgoWsFeed,
+  type PriceLine,
   registeredIndicators,
   type SeriesApi,
+  type SeriesMarkers,
   withBarCache,
 } from 'openalgo-charts'
 import { chartMotionOptions } from '@/lib/trading/chartMotion'
@@ -41,7 +44,7 @@ import {
   chartLoadFailed,
   chartNoData,
 } from '@/lib/trading/chartState'
-import { buildChartTheme, quietVolumeStyle } from '@/lib/trading/chartTheme'
+import { buildChartTheme, quietVolumeStyle, resolveCssColor } from '@/lib/trading/chartTheme'
 import { watchIstDay } from '@/lib/trading/dayWatch'
 import { instrumentSessionFor } from '@/lib/trading/instrumentSession'
 import { lookbackDays } from '@/lib/trading/intervals'
@@ -62,6 +65,7 @@ import { applySessionHours, sessionCalendarFor } from '@/lib/trading/sessionHour
 import { volumePoint } from '@/lib/trading/volumeSettings'
 import type { AppMode } from '@/stores/themeStore'
 import { CHART_BRANDING } from '@/sudarshan/brand'
+import type { LineY, OverlayLine, OverlayMarker, Overlays } from './overlays'
 import {
   type CatalogueEntry,
   legendValues,
@@ -217,6 +221,18 @@ export class PhoneChart {
   private dayWatch: (() => void) | null = null
   private destroyed = false
   private readonly offs: Array<() => void> = []
+  /** What is laid over the candles (C5), kept for every chart this host builds. */
+  private overlays: { lines: readonly OverlayLine[]; markers: readonly OverlayMarker[] } = {
+    lines: [],
+    markers: [],
+  }
+  /** Each line on the current chart, by its id. */
+  private readonly lineApis = new Map<string, PriceLine>()
+  private markerLayer: SeriesMarkers | null = null
+  /** Where each line stands on screen, as last painted, and who reads it. */
+  private lineYs: readonly LineY[] = []
+  private layoutQueued = false
+  private readonly layoutListeners = new Set<() => void>()
   /** History as the candle clock repairs it: never read while the page is hidden. */
   private readonly whenShown = {
     bars: () => this.data.bars(),
@@ -322,6 +338,7 @@ export class PhoneChart {
     this.chart.setDataContext({ symbol, exchange, interval: this.interval })
     applySessionHours(this.chart, exchange, this.apiKey, this.stopsAt)
     this.applyStudies()
+    this.applyOverlays()
     const to = this.frames.clock.nowSec()
     const request = {
       symbol,
@@ -530,6 +547,90 @@ export class PhoneChart {
     return this.indicatorsReady
   }
 
+  /**
+   * Lay price lines and bar marks over the candles (C5); see `overlays.ts` for
+   * the shapes. A half left out stays as it is, an empty array clears it, and
+   * what is set here is put back on every chart this host builds, so a caller
+   * sets a half once and again only when it changes. Lines are read-only: none
+   * can be dragged and none carries a close button.
+   */
+  setOverlays(next: Overlays): void {
+    if (this.destroyed) return
+    this.overlays = {
+      lines: next.lines ?? this.overlays.lines,
+      markers: next.markers ?? this.overlays.markers,
+    }
+    this.applyOverlays()
+  }
+
+  /** Each line's y on the candles' pane, in the chart's own pixels, for the ones in view. */
+  readonly overlayLayout = (): readonly LineY[] => this.lineYs
+
+  /** Hear when a line moved on screen: the scale changed, or the lines did. */
+  readonly onOverlayLayout = (listener: () => void): (() => void) => {
+    this.layoutListeners.add(listener)
+    return () => {
+      this.layoutListeners.delete(listener)
+    }
+  }
+
+  /** The lines and marks as they are now, on the chart as it is now. */
+  private applyOverlays(): void {
+    const chart = this.chart
+    const seen = new Set<string>()
+    for (const line of this.overlays.lines) {
+      seen.add(line.id)
+      const look = lineLook(line)
+      const drawn = this.lineApis.get(line.id)
+      if (drawn) {
+        if (drawn.price !== line.price) drawn.setPrice(line.price)
+        drawn.setOptions(look)
+      } else {
+        this.lineApis.set(line.id, chart.addPriceLine({ id: line.id, price: line.price, ...look }))
+      }
+    }
+    for (const [id, drawn] of this.lineApis) {
+      if (seen.has(id)) continue
+      chart.removePrimitive(drawn)
+      this.lineApis.delete(id)
+    }
+    if (this.overlays.markers.length || this.markerLayer) {
+      this.markerLayer ??= this.price.createMarkers(() => this.bars)
+      this.markerLayer.setMarkers(this.overlays.markers.map(markerLook))
+    }
+    this.measureOverlays()
+  }
+
+  /**
+   * Read each line's y again and tell the labels when one moved. Asked after
+   * every paint of the candles' pane (the tap below), a microtask later, so
+   * nothing is measured while the engine is drawing.
+   */
+  private queueOverlayLayout(): void {
+    if (this.layoutQueued || !this.overlays.lines.length) return
+    this.layoutQueued = true
+    queueMicrotask(() => {
+      this.layoutQueued = false
+      if (!this.destroyed) this.measureOverlays()
+    })
+  }
+
+  private measureOverlays(): void {
+    const rect = this.overlays.lines.length ? this.chart.plotRect(0) : null
+    const next: LineY[] = []
+    if (rect)
+      for (const line of this.overlays.lines) {
+        const y = this.chart.priceToCoordinate(line.price, 0)
+        if (y === null || !Number.isFinite(y) || y < rect.top || y > rect.top + rect.height)
+          continue
+        next.push({ id: line.id, y: Math.round(y) })
+      }
+    const before = this.lineYs
+    if (next.length === before.length && next.every((l, i) => same(l, before[i]))) return
+    this.lineYs = next
+    for (const listener of [...this.layoutListeners]) listener()
+  }
+
   /** The instrument's tick: the price axis is written in it, and a study reads it. */
   setTick(tick: number): void {
     if (!(tick > 0) || this.destroyed) return
@@ -687,6 +788,7 @@ export class PhoneChart {
     })
     applySessionHours(this.chart, sym.exchange, this.apiKey, this.stopsAt)
     this.applyStudies()
+    this.applyOverlays()
     if (!this.bars.length) return
     this.draw()
     if (range) this.chart.setVisibleLogicalRange(range)
@@ -904,9 +1006,14 @@ export class PhoneChart {
     }
     chart.setHistoryLoader(() => void this.loadOlder())
     if (this.tick > 0) chart.setPriceScaleOptions({ minMove: this.tick })
-    // The studies of the chart before went with it.
+    // The studies of the chart before went with it, and so did its lines and marks.
     this.studyApis = []
     this.volumeMa = null
+    this.lineApis.clear()
+    this.markerLayer = null
+    // Draws nothing: each paint of the candles' pane says the lines may have moved (C5).
+    const tap: IPrimitive = { zOrder: () => 'top', draw: () => this.queueOverlayLayout() }
+    chart.addPrimitive(tap, 0)
     return { chart, price, volume }
   }
 
@@ -1329,6 +1436,53 @@ function cleanError(error: unknown): string {
     .replace(/^(?:openalgo\s+)?history request failed\b(?:\s*\(\d+\))?:?\s*/i, '')
     .replace(/^\/api\/v1\/[\w/]+\s+failed\s+\(\d+\)(:\s*)?/i, '')
     .trim()
+}
+
+const same = (a: LineY, b: LineY | undefined) => b !== undefined && a.id === b.id && a.y === b.y
+
+/**
+ * How a line is drawn (C5): its side's colour, and a dash that tells its kind
+ * without the colour: a position solid, an order dashed, an alert dotted. A
+ * stale one is grey. Never a drag cursor and never a close button.
+ */
+function lineLook(line: OverlayLine) {
+  const token = line.stale
+    ? '--stale'
+    : line.side === 'BUY'
+      ? '--buy-solid'
+      : line.side === 'SELL'
+        ? '--sell-solid'
+        : '--info'
+  return {
+    color: resolveCssColor(`var(${token})`),
+    lineWidth: line.kind === 'position' ? 1.5 : 1,
+    lineStyle:
+      line.kind === 'position'
+        ? ('solid' as const)
+        : line.kind === 'order'
+          ? ('dashed' as const)
+          : ('dotted' as const),
+  }
+}
+
+/** A mark at a bar: an arrow up under a buy, down over a sell, in the side's colour. */
+function markerLook(marker: OverlayMarker) {
+  const buy = marker.side === 'BUY'
+  return {
+    id: marker.id,
+    time: marker.time,
+    position:
+      marker.price === undefined
+        ? buy
+          ? ('belowBar' as const)
+          : ('aboveBar' as const)
+        : ('atPrice' as const),
+    ...(marker.price === undefined ? {} : { price: marker.price }),
+    shape: buy ? ('arrowUp' as const) : ('arrowDown' as const),
+    size: 'small' as const,
+    color: resolveCssColor(`var(${buy ? '--buy-solid' : '--sell-solid'})`),
+    ...(marker.text ? { text: marker.text } : {}),
+  }
 }
 
 const compactVolume = new Intl.NumberFormat('en-IN', {
