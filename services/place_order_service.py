@@ -297,7 +297,11 @@ def place_order_with_auth(
             if isinstance(response_data, dict)
             else "Failed to place order"
         )
-        if unanswered:
+        # SUDARSHAN M6.9: the Upstox module's own "not confirmed" sentence is kept, as
+        # place_smart_order_service keeps it; any other words for an order whose reply was lost
+        # (an exception's, say) give way to upstream's. Only the sentence is passed on.
+        fork_said = isinstance(response_data, dict) and response_data.get("not_confirmed") is True
+        if unanswered and not fork_said:
             # The broker caught the lost response itself and reported a failure.
             message = UNANSWERED_ORDER_MESSAGE
         error_response = {"status": "error", "message": message}
