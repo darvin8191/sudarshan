@@ -896,12 +896,6 @@ class Finding(NamedTuple):
 #: goes, and a route that starts to answer anything else fails at once. The family view is switched
 #: on only after the G5 suite is green (P6 1), and that includes this list being empty.
 FINDINGS: dict[tuple[str, str, str], Finding] = {
-    ("/auth/broker", "auth.broker_login", "POST"): Finding(
-        302,
-        "did not return a valid response",
-        "a POST without a session raises (the view returns nothing for it), so the error page's "
-        "redirect to /error answers (blueprints/auth.py)",
-    ),
     ("/test_chart", "pnltracker_bp.test_chart", "GET"): Finding(
         302,
         "TemplateNotFound",
