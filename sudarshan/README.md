@@ -360,13 +360,28 @@ archive. The newest complete archive is never removed, whatever else is true: a 
 archives cannot push the last good one out.
 
 **One archive per financial year, kept 8 years (M19.10).** The first complete archive made from
-4 April on is the archive of the financial year that ended on 31 March, whatever the counts
-above say; one made more than 92 days later (after 4 July) is never taken for it. It waits those
-four days so that the year's own papers are in it: the journal builds the year's Tax pack on
-1 April at 07:00, Upstox's charges for the last trading days arrive two nights after each, and
-March's charges are read from 3 April. An archive of 31 March's evening would hold none of them. The newest 8 are kept
-(`SUDARSHAN_BACKUP_KEEP_YEARLY`), for the years the tax records must be kept. Its offsite copy is
-uploaded under a name of its own, `sudarshan-fy-2026-27-YYYYMMDD-HHMMSS-<release>.tar.gz.cms`,
+4 April, 08:00 on is the archive of the financial year that ended on 31 March, whatever the
+counts above say: normally the nightly backup of 4 April at 16:30. One made more than 92 days
+later (from 5 July, 08:00) is never taken for it. It waits those four days so that the year's
+own papers are in it: the journal builds the year's Tax pack on 1 April at 07:00, Upstox's
+charges for the last trading days arrive two nights after each, and March's charges are read
+from 3 April. An archive of 31 March's evening would hold none of them.
+
+The Tax pack of 1 April is printed before those last charges arrive, so the journal builds the
+year's Tax pack again by itself on 4 April at 07:00, in the same job, with nothing for you to
+press. If the tax working paper cannot be read just then, it keeps the pack it has and tries
+again every 15 minutes that day; it never puts a pack without the paper in its place. The first
+backup of 4 April runs at 16:30, after it, so the archive kept 8 years holds the complete pack.
+Telegram does not get the new pack a second time, and the copy it got on 1 April has estimates
+for the charges of the year's last days: give your CA the Tax pack from the Journal's Reports
+on or after 4 April. (If the journal was not running at all on 4 April, it builds the pack at
+its next start within three days, and that year's archive may then hold the pack of 1 April:
+build the Tax pack once more from the Journal's Reports and keep that file with the year's
+papers.)
+
+The newest 8 of these archives are kept (`SUDARSHAN_BACKUP_KEEP_YEARLY`), for the years the tax
+records must be kept. A year's archive goes offsite under a name of its own,
+`sudarshan-fy-2026-27-YYYYMMDD-HHMMSS-<release>.tar.gz.cms`,
 so that the bucket's delete rules, which name the nightly prefix (step 3 below), never remove
 it. The System page shows the newest year's archive and its size: eight of them must fit the
 size cap and the bucket.
@@ -472,8 +487,9 @@ empty settings file, with `install`; the settings are written by `sudarshan`, th
    Each has Lifecycle action Delete, Number of days 30 (or what you like, the same in both), the
    State switch on, and under Object name filters one filter of the kind **Include by prefix**
    with the text `sudarshan-backup-` (so the rule deletes the nightly copies only, and never a
-   financial year's archive, whose name starts `sudarshan-fy-`; if you made the two rules before
-   v0.13.1 without this filter, edit both and add it before the first 31 March):
+   financial year's archive, whose name starts `sudarshan-fy-`; if you made the two rules
+   without this filter, edit both and add it before 4 April, the day the year's archive is made
+   and uploaded):
    - Target **Latest version of objects**: after 30 days the newest version of a copy becomes a
      previous version;
    - Target **Previous versions of objects**: a previous version is deleted 30 days after it

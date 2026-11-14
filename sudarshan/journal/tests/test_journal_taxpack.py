@@ -299,6 +299,67 @@ def test_the_portfolio_down_is_a_sentence_too(on):
     assert "could not be read from the portfolio" in kept(on, "fy")["text"]
 
 
+def test_the_build_of_4_april_never_puts_a_pack_without_the_paper_over_one_with_it(on):
+    """v0.13.0 verify N3: the year's pack is built again on 4 April, for the archive kept 8 years.
+    When the paper cannot be read then, the run fails and is asked again, and the pack of 1 April
+    stays whole; once the paper answers, the year is built over with it. A kept pack without the
+    paper is built over whatever the paper says: nothing is lost."""
+    from test_journal_period_reports import at
+
+    from sudarshan.journal.jobs import fypack
+    from sudarshan.journal.schedule import once_a_day
+
+    def job(day):
+        return on.svc.store.read(OWNER, lambda tx: tx.job_get("fy", day))
+
+    async def go():
+        run = [await once_a_day(on.svc, "fy", at(20270401, "07:05"), fypack.fy_job)]
+        first = kept(on, "fy")
+        blob = file_of(on, first)
+        on.portfolio.down = True
+        run.append(await once_a_day(on.svc, "fy", at(20270404, "07:05"), fypack.fy_job))
+        down = kept(on, "fy"), file_of(on, kept(on, "fy")), job(20270404)["detail"]
+        on.svc.settings = dataclasses.replace(on.svc.settings, tax=False)
+        run.append(await once_a_day(on.svc, "fy", at(20270404, "07:25"), fypack.fy_job))
+        off = kept(on, "fy")["built_ms"], job(20270404)["detail"]
+        on.svc.settings = dataclasses.replace(on.svc.settings, tax=True)
+        on.portfolio.down = False
+        later = copy.deepcopy(PACK)
+        later["as_of_ms"] = ist_ms(20270404, "07:45:00")
+        on.portfolio.answers["tax_pack"] = later
+        run.append(await once_a_day(on.svc, "fy", at(20270404, "07:45"), fypack.fy_job))
+        return run, first, blob, down, off, later
+
+    run, first, blob, (held, held_blob, said), off, later = scenario(on, go)
+    assert run == ["ok", "failed", "failed", "late"]
+    assert held["built_ms"] == first["built_ms"] and held["rows"]["tax_pack"] == PACK
+    assert held_blob == blob and said == periods.PAPER_KEPT
+    assert off == (first["built_ms"], periods.PAPER_KEPT_OFF)
+    again = kept(on, "fy")
+    assert again["id"] == first["id"] and again["rows"]["tax_pack"] == later
+    assert "as of 4 Apr 2027, 07:45" in again["text"]
+
+
+def test_a_kept_pack_without_the_paper_is_built_over_on_4_april(on):
+    from test_journal_period_reports import at
+
+    from sudarshan.journal.jobs import fypack
+    from sudarshan.journal.schedule import once_a_day
+
+    on.portfolio.down = True
+
+    async def go():
+        first = await once_a_day(on.svc, "fy", at(20270401, "07:05"), fypack.fy_job)
+        made = kept(on, "fy")["built_ms"]
+        again = await once_a_day(on.svc, "fy", at(20270404, "07:05"), fypack.fy_job)
+        return first, made, again
+
+    first, made, again = scenario(on, go)
+    assert (first, again) == ("ok", "ok")
+    row = kept(on, "fy")
+    assert row["built_ms"] > made and row["rows"]["tax_pack"] is None
+
+
 def test_the_family_never_gets_the_paper(on):
     build(on, "fy", period="FY2627")
     row = kept(on, "fy")

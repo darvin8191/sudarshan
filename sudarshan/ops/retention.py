@@ -19,9 +19,10 @@ Rules, in this order:
            represented for a year after its dailies are gone.
   Yearly   A financial year ends on 31 March, but its papers are not whole that evening: the
            journal builds the year's Tax pack on 1 April at 07:00, Upstox's charges for a day
-           are read two nights later, and March's own charges row from 3 April. The first
-           complete archive made from 4 April 00:00 on is that financial year's archive (one
-           made earlier holds no Tax pack and no March charges, and does not belong to the
+           are read two nights later, March's own charges row from 3 April, and the journal
+           builds the Tax pack again with them on 4 April at 07:00. The first complete archive
+           made from 4 April 08:00 on is that financial year's archive (one made earlier holds
+           the Tax pack of 1 April, or none, and no March charges, and does not belong to the
            year that has ended; a partial one never counts; nor does one made more than 92 days
            later). The archives of the ``yearly`` most recent financial years that have one
            are kept (M18.11, M19.10: 8 years, for the tax records).
@@ -44,13 +45,15 @@ STAMP = "%Y%m%d-%H%M%S"
 #: The newest archives the cap may not touch: last night's, the one before, and one more.
 PROTECT_NEWEST = 3
 #: The moment (month, day, hour, IST) from which an archive holds a financial year's papers
-#: whole: 4 April 00:00. By then the journal has built the year's Tax pack (1 April 07:00,
-#: ``journal/schedule.py`` ``FY_AT``), the charges of the year's last trading days have been
-#: read (two nights after each) and March's own charges row has been asked for (from 3 April,
-#: ``journal/jobs/charges.py`` ``MONTH_FROM_DAY``). An archive made on the evening of 31 March
-#: held none of them (review M3).
-FY_FROM = (4, 4, 0)
-#: How long after that an archive can still become the year's (to 4 July).
+#: whole: 4 April 08:00. By then the charges of the year's last trading days have been read (two
+#: nights after each), March's own charges row has been asked for (from 3 April,
+#: ``journal/jobs/charges.py`` ``MONTH_FROM_DAY``), and the journal has built the year's Tax pack
+#: again with them (4 April 07:00, ``journal/schedule.py`` ``FY_AGAIN_AT``; first built 1 April,
+#: ``FY_AT``). An archive made on the evening of 31 March held none of them (review M3); one made
+#: in the night before 4 April 07:00 (a run missed at a reboot, or one started by hand) holds the
+#: pack of 1 April (v0.13.0 verify N3). The nightly run of 4 April, 16:30, is the year's.
+FY_FROM = (4, 4, 8)
+#: How long after that an archive can still become the year's (to 5 July 08:00).
 FY_WINDOW_DAYS = 92
 
 
@@ -97,7 +100,7 @@ def parse(name: str, size: int) -> Backup | None:
 def fy_label(at: datetime) -> str | None:
     """The financial year an archive made at ``at`` (naive IST) can be the archive of: the one
     whose papers became whole (``FY_FROM``) in the ``FY_WINDOW_DAYS`` before it, else None.
-    ``2026-27`` ends on 31 March 2027 and is whole from 4 April 2027. The window keeps an
+    ``2026-27`` ends on 31 March 2027 and is whole from 4 April 2027, 08:00. The window keeps an
     archive made months later (a server first installed in November) from being taken for a
     year's archive."""
     month, day, hour = FY_FROM

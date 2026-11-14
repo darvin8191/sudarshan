@@ -49,7 +49,7 @@ from .render import tables
 from .render.pdf import render_pdf
 from .render.png import render_equity_png
 from .reports import OWNER, _thread, announce_once, archive, report_switch
-from .schedule import schedule_for
+from .schedule import JobFailed, schedule_for
 
 PERIOD_KINDS = ("weekly", "monthly", "fy")
 SWITCHES = {"weekly": "weekly_on", "monthly": "monthly_on", "fy": "fy_on"}
@@ -138,7 +138,7 @@ def current_fy_start(day: date) -> int:
 
 def span_for_job(kind: str, today: int) -> Span:
     """What a job builds on ``today``: this week (Sunday), last month (the 1st), the year just
-    ended (1 April)."""
+    ended (1 April, and again 4 April)."""
     d = to_date(today)
     if kind == "weekly":
         return week_span(d, today)
@@ -215,6 +215,30 @@ async def read_pack(service: Any, fy_start: int) -> tuple[dict[str, Any] | None,
     except PortfolioUnavailable as exc:
         return None, exc.kind
     return (dict(answer), None) if taxpack.usable(answer) else (None, "unreadable")
+
+
+#: Why the build of 4 April left the kept pack as it was (v0.13.0 verify N3): the job log's line.
+PAPER_KEPT = (
+    "The year's Tax pack was not built again: the tax working paper could not be read just now. "
+    "The one already kept stays as it was; this is tried again shortly."
+)
+PAPER_KEPT_OFF = (
+    "The year's Tax pack was not built again: the tax working paper is switched off on the "
+    "server. The one already kept stays as it was."
+)
+
+
+async def _keep_kept_paper(service: Any, span: Span, why: str | None) -> None:
+    """Raise ``JobFailed`` when the report kept for ``span`` holds the tax working paper: a build
+    that cannot read the paper now must not put a pack without it in that one's place."""
+
+    def held(tx) -> bool:
+        have = tx.rows("report", kind="fy", period_key=span.key)
+        kept = (have[0].get("rows") or {}) if have else {}
+        return isinstance(kept, Mapping) and kept.get("tax_pack") is not None
+
+    if await _thread(lambda: service.store.read(OWNER, held)):
+        raise JobFailed(PAPER_KEPT_OFF if why in ("switched_off", "not_ready") else PAPER_KEPT)
 
 
 def leaves_out(rows: list[dict[str, Any]], aside: Mapping[str, int]) -> tuple[str, ...]:
@@ -345,10 +369,15 @@ def fy_pdf(span: Span, text: str, rows: list[dict[str, Any]], now: int,
 
 
 # ---- the build -------------------------------------------------------------------------------
-async def build_period(service: Any, kind: str, span: Span, now: int, announce: bool = True) -> int:
+async def build_period(service: Any, kind: str, span: Span, now: int, announce: bool = True,
+                       keep_paper: bool = False) -> int:  # fmt: skip
     """Build (or rebuild) the report of ``kind`` for ``span``: words, file, archive row, and one
     line for the report desk when this build is due one (``reports.announce_once``: never
-    announced, or announced as a part period and this is the whole). Returns the report's id."""
+    announced, or announced as a part period and this is the whole). Returns the report's id.
+
+    ``keep_paper`` (the year's build of 4 April): when the tax working paper cannot be read now
+    and the report already kept holds it, nothing is written and ``JobFailed`` is raised, so the
+    run is asked again and the archive keeps the paper (v0.13.0 verify N3)."""
     # The analytics op's own helpers; imported here because the ops package imports this module.
     from .ops.analytics_ops import beta_of, for_core, trading_days
 
@@ -380,6 +409,8 @@ async def build_period(service: Any, kind: str, span: Span, now: int, announce: 
         file = ("pdf", await _thread(lambda: monthly_pdf(span, text, rows, now)))
     else:
         pack, why = await read_pack(service, 2000 + int(span.key[2:4]))
+        if pack is None and keep_paper:
+            await _keep_kept_paper(service, span, why)
         no_pack = None if pack is not None else taxpack.no_pack_words(why)
         paper = taxpack.pack_lines(pack) if pack is not None else [no_pack]
         text = words.fy(span.label, len(days), block, paper=paper, **extra)
@@ -443,9 +474,10 @@ def family_variant(kind: str, period_key: str, rows: Mapping[str, Any]) -> dict[
 
 
 # ---- the jobs --------------------------------------------------------------------------------
-async def period_job(service: Any, kind: str, today: int, now: int) -> str:
+async def period_job(service: Any, kind: str, today: int, now: int,
+                     keep_paper: bool = False) -> str:  # fmt: skip
     if not await report_switch(service, SWITCHES[kind]):
         return f"the {kinds.REPORT_TITLES[kind].lower()} is switched off"
     span = span_for_job(kind, today)
-    report_id = await build_period(service, kind, span, now)
+    report_id = await build_period(service, kind, span, now, keep_paper=keep_paper)
     return f"{span.key} kept as report {report_id}"
