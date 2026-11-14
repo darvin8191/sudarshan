@@ -479,7 +479,8 @@ def test_the_link_seals_as_the_journal_and_refuses_a_port_another_account_holds(
 # ---- the debounce and the nudge ----------------------------------------------------------------
 def test_a_burst_of_nudges_starts_one_read():
     """Mutation target 21: eight nudges in two seconds are one read, three seconds after the
-    first."""
+    first (here 0.3 s). Order and counts, never an upper bound on real time (review M4): the
+    read comes no sooner than the first wait after the first nudge, and only one comes."""
     reads: list[float] = []
 
     async def go():
@@ -496,13 +497,16 @@ def test_a_burst_of_nudges_starts_one_read():
         for _ in range(8):
             debounce.note()
             await asyncio.sleep(0.025)
-        await asyncio.sleep(0.6)
+        deadline = clock() + 5.0  # a generous cap for a loaded runner, never a measured bound
+        while not reads and clock() < deadline:
+            await asyncio.sleep(0.05)
+        await asyncio.sleep(0.3)  # room for a second read, if one were (wrongly) started
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
         return debounce.noted
 
     noted = asyncio.run(go())
-    assert noted == 8 and len(reads) == 1 and 0.28 <= reads[0] < 0.5
+    assert noted == 8 and len(reads) == 1 and reads[0] >= 0.28
 
 
 def test_reads_are_at_least_the_gap_apart_while_nudges_keep_coming():

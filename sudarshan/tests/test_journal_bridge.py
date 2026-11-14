@@ -367,12 +367,13 @@ def slow(seconds: float):
 
 
 def test_a_slow_read_is_not_answering_within_its_timeout(bridge, journal, monkeypatch):
-    journal.answers["state"] = slow(1.0)
+    journal.answers["state"] = slow(3.0)
     monkeypatch.setitem(bp_module.TIMEOUTS_S, "read", 0.2)
     as_owner(bridge)
     start = time.monotonic()
     response = bridge.get(PREFIX + "/state", headers=JSON)
-    assert time.monotonic() - start < 0.9
+    # the 0.2 s timeout, not the 3 s answer (review M4: a generous bound only)
+    assert time.monotonic() - start < 2.5
     assert response.status_code == 503
     assert error_of(response)["message"] == WORDS["not_answering"]
 

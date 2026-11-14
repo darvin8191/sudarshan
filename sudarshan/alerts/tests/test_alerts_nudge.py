@@ -252,7 +252,7 @@ def test_at_most_one_post_a_second_for_each_receiver(tmp_path, monkeypatch):
 
 def test_the_post_times_out_and_is_not_retried(tmp_path, quick, caplog):
     async def scenario():
-        fake = Receiving(delay=5.0)
+        fake = Receiving(delay=30.0)
         async with fake.client() as client:
             sender = NudgeSender([family()], client, tables=proc(tmp_path, row(5585, FAMILY_UID)))
             task = await running(sender)
@@ -260,7 +260,8 @@ def test_the_post_times_out_and_is_not_retried(tmp_path, quick, caplog):
             sender.note("orders", False)
             while sender.stats["failed"] == 0:
                 await asyncio.sleep(0.02)
-            assert asyncio.get_running_loop().time() - started < 1.0  # the 0.3 s timeout, not 5 s
+            # the 0.3 s timeout, not the 30 s answer (review M4: a generous bound only)
+            assert asyncio.get_running_loop().time() - started < 5.0
             await asyncio.sleep(0.6)  # time to retry, if it did
             await stop(sender, task)
         assert len(fake.posts) == 1
@@ -323,7 +324,7 @@ class LosingCancel(Receiving):
         self.posts.append((str(request.url), request.content))
         self.entered.set()
         try:
-            await asyncio.sleep(5.0)
+            await asyncio.sleep(30.0)  # far past any bound below: a lost cancel would show
         except asyncio.CancelledError:
             self.lost += 1  # swallowed
         return httpx.Response(204)
@@ -342,8 +343,9 @@ def test_a_stop_with_a_nudge_in_flight_ends_in_bounded_time_when_a_cancel_is_los
             await asyncio.wait_for(fake.entered.wait(), 2.0)
             try:
                 began = asyncio.get_running_loop().time()
-                await asyncio.wait_for(sender.close(), 2.0)
-                assert asyncio.get_running_loop().time() - began < 1.5
+                await asyncio.wait_for(sender.close(), 10.0)
+                # bounded by the stop, not the 30 s request (review M4: a generous bound only)
+                assert asyncio.get_running_loop().time() - began < 5.0
                 assert fake.lost == 1 and all(t.done() for t in sender._tasks)
             finally:
                 await cancel_and_wait(task, *sender._tasks)
