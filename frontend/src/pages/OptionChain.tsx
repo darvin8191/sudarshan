@@ -112,6 +112,46 @@ function greekMutedClass(num: number | undefined | null): string {
     : ''
 }
 
+// SUDARSHAN T3a (M1.18): the chain's colours from the D look's tokens. A bid
+// is where buyers stand and an ask where sellers do, as the app's depth sheets
+// colour them; the column headings name each.
+const BID_TEXT = 'text-[color:var(--buy-solid)]'
+const ASK_TEXT = 'text-[color:var(--sell-solid)]'
+const QUICK_ORDER = 'px-1.5 py-0.5 text-[10px] font-bold rounded text-white hover:opacity-90'
+const QUICK_BUY = cn(QUICK_ORDER, 'bg-[color:var(--buy-solid)]')
+const QUICK_SELL = cn(QUICK_ORDER, 'bg-[color:var(--sell-solid)]')
+
+type SpreadLook = { className: string; word: string } | null
+
+/** How wide a quoted spread is, in a colour and a word; nothing for a leg with no bid or no ask. */
+function spreadLook(quoted: boolean, spread: number): SpreadLook {
+  if (!quoted) return null
+  if (spread <= 1) return { className: 'text-[color:var(--up)]', word: 'tight' }
+  if (spread <= 2) return { className: 'text-[color:var(--warning-text)]', word: 'fair' }
+  return { className: 'text-[color:var(--down)]', word: 'wide' }
+}
+
+/** A spread, its width told by the word as well as the colour. */
+function SpreadCell({
+  className,
+  spread,
+  look,
+}: {
+  className: string
+  spread: number
+  look: SpreadLook
+}) {
+  return (
+    <span
+      className={cn(className, look?.className)}
+      title={look ? `Spread ${look.word}` : undefined}
+    >
+      {formatPrice(spread)}
+      {look && <span className="sr-only"> {look.word}</span>}
+    </span>
+  )
+}
+
 function convertExpiryForAPI(expiry: string): string {
   if (!expiry) return ''
   const parts = expiry.split('-')
@@ -224,13 +264,12 @@ const OptionChainRow = React.memo(function OptionChainRow({
   const ceFlashClass = stale ? 'text-muted-foreground' : ceTick ? TREND_TEXT[ceTick] : ''
   const peFlashClass = stale ? 'text-muted-foreground' : peTick ? TREND_TEXT[peTick] : ''
 
-  const ceSpread = ce && ce.bid > 0 && ce.ask > 0 ? ce.ask - ce.bid : 0
-  const peSpread = pe && pe.bid > 0 && pe.ask > 0 ? pe.ask - pe.bid : 0
-
-  const ceSpreadClass =
-    ceSpread <= 1 ? 'text-green-500' : ceSpread <= 2 ? 'text-yellow-500' : 'text-red-500'
-  const peSpreadClass =
-    peSpread <= 1 ? 'text-green-500' : peSpread <= 2 ? 'text-yellow-500' : 'text-red-500'
+  const ceQuoted = !!ce && ce.bid > 0 && ce.ask > 0
+  const peQuoted = !!pe && pe.bid > 0 && pe.ask > 0
+  const ceSpread = ceQuoted && ce ? ce.ask - ce.bid : 0
+  const peSpread = peQuoted && pe ? pe.ask - pe.bid : 0
+  const ceSpreadLook = spreadLook(ceQuoted, ceSpread)
+  const peSpreadLook = spreadLook(peQuoted, peSpread)
 
   // Bar values based on data source
   const ceBarValue = barDataSource === 'oi' ? ce?.oi : ce?.volume
@@ -238,13 +277,16 @@ const OptionChainRow = React.memo(function OptionChainRow({
   const ceBarPercent = ceBarValue ? Math.min((ceBarValue / maxBarValue) * 100, 100) : 0
   const peBarPercent = peBarValue ? Math.min((peBarValue / maxBarValue) * 100, 100) : 0
 
-  // Bar styles
+  // Bar styles. SUDARSHAN T3a (M1.18): calls in the up token, puts in the down
+  // token; which side a bar is on says which it is.
   const ceBarClass =
     barStyle === 'gradient'
-      ? 'bg-gradient-to-r from-green-500/25 to-transparent'
-      : 'bg-green-500/20'
+      ? 'bg-gradient-to-r from-[color:var(--up)]/25 to-transparent'
+      : 'bg-[color:var(--up)]/20'
   const peBarClass =
-    barStyle === 'gradient' ? 'bg-gradient-to-l from-red-500/25 to-transparent' : 'bg-red-500/20'
+    barStyle === 'gradient'
+      ? 'bg-gradient-to-l from-[color:var(--down)]/25 to-transparent'
+      : 'bg-[color:var(--down)]/20'
 
   // Use tabular-nums for consistent number widths to prevent layout shifts
   const numClass = 'font-mono tabular-nums text-xs'
@@ -258,7 +300,7 @@ const OptionChainRow = React.memo(function OptionChainRow({
       case 'ce_bid_qty':
         return <span className={numClass}>{ce?.bid_qty ?? 0}</span>
       case 'ce_bid':
-        return <span className={cn(numClass, 'text-red-500')}>{formatPrice(ce?.bid)}</span>
+        return <span className={cn(numClass, BID_TEXT)}>{formatPrice(ce?.bid)}</span>
       case 'ce_ltp':
         return (
           <span
@@ -270,11 +312,11 @@ const OptionChainRow = React.memo(function OptionChainRow({
           </span>
         )
       case 'ce_ask':
-        return <span className={cn(numClass, 'text-green-500')}>{formatPrice(ce?.ask)}</span>
+        return <span className={cn(numClass, ASK_TEXT)}>{formatPrice(ce?.ask)}</span>
       case 'ce_ask_qty':
         return <span className={numClass}>{ce?.ask_qty ?? 0}</span>
       case 'ce_spread':
-        return <span className={cn(numClass, ceSpreadClass)}>{formatPrice(ceSpread)}</span>
+        return <SpreadCell className={numClass} spread={ceSpread} look={ceSpreadLook} />
       case 'ce_iv':
         return (
           <span className={cn(numClass, 'font-semibold', greekMutedClass(ce?.implied_volatility))}>
@@ -319,7 +361,7 @@ const OptionChainRow = React.memo(function OptionChainRow({
       case 'pe_bid_qty':
         return <span className={numClass}>{pe?.bid_qty ?? 0}</span>
       case 'pe_bid':
-        return <span className={cn(numClass, 'text-red-500')}>{formatPrice(pe?.bid)}</span>
+        return <span className={cn(numClass, BID_TEXT)}>{formatPrice(pe?.bid)}</span>
       case 'pe_ltp':
         return (
           <span
@@ -331,11 +373,11 @@ const OptionChainRow = React.memo(function OptionChainRow({
           </span>
         )
       case 'pe_ask':
-        return <span className={cn(numClass, 'text-green-500')}>{formatPrice(pe?.ask)}</span>
+        return <span className={cn(numClass, ASK_TEXT)}>{formatPrice(pe?.ask)}</span>
       case 'pe_ask_qty':
         return <span className={numClass}>{pe?.ask_qty ?? 0}</span>
       case 'pe_spread':
-        return <span className={cn(numClass, peSpreadClass)}>{formatPrice(peSpread)}</span>
+        return <SpreadCell className={numClass} spread={peSpread} look={peSpreadLook} />
       case 'pe_iv':
         return (
           <span className={cn(numClass, 'font-semibold', greekMutedClass(pe?.implied_volatility))}>
@@ -420,7 +462,8 @@ const OptionChainRow = React.memo(function OptionChainRow({
                     tickSize: ce.tick_size ?? 0.05,
                   })
                 }}
-                className="px-1.5 py-0.5 text-[10px] font-bold rounded bg-green-600 text-white hover:bg-green-700"
+                aria-label={`Buy ${ce.symbol}`}
+                className={QUICK_BUY}
               >
                 B
               </button>
@@ -436,7 +479,8 @@ const OptionChainRow = React.memo(function OptionChainRow({
                     tickSize: ce.tick_size ?? 0.05,
                   })
                 }}
-                className="px-1.5 py-0.5 text-[10px] font-bold rounded bg-amber-600 text-white hover:bg-amber-700"
+                aria-label={`Sell ${ce.symbol}`}
+                className={QUICK_SELL}
               >
                 S
               </button>
@@ -511,7 +555,8 @@ const OptionChainRow = React.memo(function OptionChainRow({
                     tickSize: pe.tick_size ?? 0.05,
                   })
                 }}
-                className="px-1.5 py-0.5 text-[10px] font-bold rounded bg-green-600 text-white hover:bg-green-700"
+                aria-label={`Buy ${pe.symbol}`}
+                className={QUICK_BUY}
               >
                 B
               </button>
@@ -527,7 +572,8 @@ const OptionChainRow = React.memo(function OptionChainRow({
                     tickSize: pe.tick_size ?? 0.05,
                   })
                 }}
-                className="px-1.5 py-0.5 text-[10px] font-bold rounded bg-amber-600 text-white hover:bg-amber-700"
+                aria-label={`Sell ${pe.symbol}`}
+                className={QUICK_SELL}
               >
                 S
               </button>
@@ -823,8 +869,8 @@ export default function OptionChain() {
       <div className="flex items-center justify-center py-16">
         <Card className="max-w-md">
           <CardContent className="p-6">
-            <div className="text-center text-red-500">
-              <h2 className="text-xl font-bold mb-2">Error Loading Option Chain</h2>
+            <div className="text-center text-[color:var(--down)]">
+              <h2 className="text-xl font-bold mb-2">The option chain did not load</h2>
               <p>{error}</p>
               <Button onClick={handleRefresh} className="mt-4">
                 <RefreshCw className="h-4 w-4 mr-2" />
@@ -972,28 +1018,37 @@ export default function OptionChain() {
               <CardContent className="p-4">
                 <div className="text-sm text-muted-foreground">PCR</div>
                 <div
-                  className={`text-2xl font-bold ${pcr > 1 ? 'text-green-500' : 'text-yellow-500'}`}
+                  className={cn(
+                    'text-2xl font-bold',
+                    pcr > 1 ? 'text-[color:var(--up)]' : 'text-[color:var(--warning-text)]'
+                  )}
                 >
                   {pcr.toFixed(2)}
                 </div>
-                <div className="text-xs text-muted-foreground">Put/Call Ratio</div>
+                {/* SUDARSHAN T3a (M1.18): what the colour says, in words. */}
+                <div className="text-xs text-muted-foreground">
+                  Put/Call Ratio
+                  {pcr > 1 ? ' · more put OI' : pcr < 1 ? ' · more call OI' : ''}
+                </div>
               </CardContent>
             </Card>
             <Card>
               <CardContent className="p-4">
                 <div className="text-sm text-muted-foreground">Total OI</div>
                 <div className="text-sm mt-1">
-                  <span className="text-green-500 font-mono tabular-nums">
+                  <span className="text-xs text-muted-foreground">CE </span>
+                  <span className="text-[color:var(--up)] font-mono tabular-nums">
                     {formatInLakhs(totals.ceOi)}
                   </span>
                   <span className="mx-2 text-muted-foreground">|</span>
-                  <span className="text-red-500 font-mono tabular-nums">
+                  <span className="text-xs text-muted-foreground">PE </span>
+                  <span className="text-[color:var(--down)] font-mono tabular-nums">
                     {formatInLakhs(totals.peOi)}
                   </span>
                 </div>
                 <div className="h-2 bg-muted rounded-full overflow-hidden mt-2">
                   <div
-                    className="h-full bg-gradient-to-r from-green-500 to-primary transition-all duration-500"
+                    className="h-full bg-gradient-to-r from-[color:var(--up)] to-primary transition-all duration-500"
                     style={{
                       width:
                         totals.ceOi + totals.peOi > 0
@@ -1017,13 +1072,13 @@ export default function OptionChain() {
                     {/* Section headers row */}
                     <TableRow className="bg-muted/30 border-b-0">
                       {visibleCeColumns.length > 0 && (
-                        <TableHead className="text-center text-green-500 font-bold text-sm border-r border-border">
+                        <TableHead className="text-center text-[color:var(--up)] font-bold text-sm border-r border-border">
                           CALLS
                         </TableHead>
                       )}
                       <TableHead className="text-center w-20 min-w-20" />
                       {visiblePeColumns.length > 0 && (
-                        <TableHead className="text-center text-red-500 font-bold text-sm border-l border-border">
+                        <TableHead className="text-center text-[color:var(--down)] font-bold text-sm border-l border-border">
                           PUTS
                         </TableHead>
                       )}

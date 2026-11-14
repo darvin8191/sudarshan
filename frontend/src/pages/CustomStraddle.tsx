@@ -106,6 +106,16 @@ function formatINR(value: number): string {
   return value < 0 ? `-${formatted}` : formatted
 }
 
+// SUDARSHAN T3b (M1.18): a P&L figure carries its sign, so a gain and a loss
+// differ by more than the up and down tokens they are drawn in.
+function signedINR(value: number): string {
+  return value > 0 ? `+${formatINR(value)}` : formatINR(value)
+}
+
+function pnlTone(value: number): string {
+  return value > 0 ? 'text-[color:var(--up)]' : value < 0 ? 'text-[color:var(--down)]' : ''
+}
+
 export default function CustomStraddle() {
   const { mode, appMode } = useThemeStore()
   const {
@@ -222,10 +232,10 @@ export default function CustomStraddle() {
       crosshair: 'rgba(0, 0, 0, 0.3)',
       crosshairLabel: '#2563eb',
       spot: '#1e293b',
-      profitLine: '#16a34a',
+      profitLine: '#067A45', // SUDARSHAN T3b: the D look's up
       profitFill1: 'rgba(22, 163, 106, 0.28)',
       profitFill2: 'rgba(22, 163, 106, 0.05)',
-      lossLine: '#dc2626',
+      lossLine: '#C3282E', // SUDARSHAN T3b: the D look's down
       lossFill1: 'rgba(220, 38, 38, 0.05)',
       lossFill2: 'rgba(220, 38, 38, 0.28)',
       watermark: 'rgba(0, 0, 0, 0.06)',
@@ -434,7 +444,7 @@ export default function CustomStraddle() {
       tt.innerHTML = `
         <div style="display:flex;justify-content:space-between;gap:16px">
           <span style="color:${pnlColor};font-weight:600">P&L</span>
-          <span style="color:${pnlColor};font-weight:600">${formatINR(point.pnl)}</span>
+          <span style="color:${pnlColor};font-weight:600">${signedINR(point.pnl)}</span>
         </div>
         <div style="display:flex;justify-content:space-between;gap:16px">
           <span style="color:${c.tooltipMuted}">Spot</span>
@@ -828,10 +838,8 @@ export default function CustomStraddle() {
             <div className="flex flex-wrap items-center gap-x-6 gap-y-1 mb-4 text-sm">
               <div>
                 <span className="text-muted-foreground">P&L </span>
-                <span
-                  className={`font-semibold ${summary.total_pnl >= 0 ? 'text-green-500' : 'text-red-500'}`}
-                >
-                  {formatINR(summary.total_pnl)}
+                <span className={`font-semibold ${pnlTone(summary.total_pnl)}`}>
+                  {signedINR(summary.total_pnl)}
                 </span>
               </div>
               <div>
@@ -840,11 +848,15 @@ export default function CustomStraddle() {
               </div>
               <div>
                 <span className="text-muted-foreground">Max </span>
-                <span className="font-medium text-green-500">{formatINR(summary.max_pnl)}</span>
+                <span className={`font-medium ${pnlTone(summary.max_pnl)}`}>
+                  {signedINR(summary.max_pnl)}
+                </span>
               </div>
               <div>
                 <span className="text-muted-foreground">Min </span>
-                <span className="font-medium text-red-500">{formatINR(summary.min_pnl)}</span>
+                <span className={`font-medium ${pnlTone(summary.min_pnl)}`}>
+                  {signedINR(summary.min_pnl)}
+                </span>
               </div>
               <div>
                 <span className="text-muted-foreground">Spot </span>
@@ -957,12 +969,11 @@ function TradeRow({ trade }: { trade: TradeEntry }) {
     trade.type === 'ENTRY'
       ? 'text-blue-500'
       : trade.type === 'ADJUSTMENT'
-        ? 'text-amber-500'
+        ? 'text-[color:var(--warning-text)]'
         : 'text-purple-500'
 
-  const pnlColor = trade.leg_pnl > 0 ? 'text-green-500' : trade.leg_pnl < 0 ? 'text-red-500' : ''
-  const cumColor =
-    trade.cumulative_pnl > 0 ? 'text-green-500' : trade.cumulative_pnl < 0 ? 'text-red-500' : ''
+  const pnlColor = pnlTone(trade.leg_pnl)
+  const cumColor = pnlTone(trade.cumulative_pnl)
 
   const strikeDisplay =
     trade.type === 'ADJUSTMENT' && trade.old_strike
@@ -981,9 +992,9 @@ function TradeRow({ trade }: { trade: TradeEntry }) {
       <td className="py-2 pr-4 text-right font-mono">{trade.straddle.toFixed(2)}</td>
       <td className="py-2 pr-4 text-right font-mono">{trade.spot.toFixed(2)}</td>
       <td className={`py-2 pr-4 text-right font-mono ${pnlColor}`}>
-        {trade.type === 'ENTRY' ? '-' : formatINR(trade.leg_pnl)}
+        {trade.type === 'ENTRY' ? '-' : signedINR(trade.leg_pnl)}
       </td>
-      <td className={`py-2 text-right font-mono ${cumColor}`}>{formatINR(trade.cumulative_pnl)}</td>
+      <td className={`py-2 text-right font-mono ${cumColor}`}>{signedINR(trade.cumulative_pnl)}</td>
     </tr>
   )
 }

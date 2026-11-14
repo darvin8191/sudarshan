@@ -196,8 +196,9 @@ export default function GEXDashboard() {
           ? 'rgba(180,160,255,0.1)'
           : 'rgba(255,255,255,0.1)'
         : 'rgba(0,0,0,0.08)',
-      ceBar: '#22c55e',
-      peBar: '#ef4444',
+      // SUDARSHAN T3b (M1.18): the D look's up and down.
+      ceBar: '#067A45',
+      peBar: '#C3282E',
       positiveGex: '#3b82f6',
       negativeGex: '#f97316',
       atmLine: isDark ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.5)',
@@ -674,7 +675,9 @@ export default function GEXDashboard() {
                     <span className="text-muted-foreground">
                       {idx + 1}. {item.strike}
                     </span>
-                    <span className="font-medium text-red-500">{formatNumber(item.value)}</span>
+                    <span className="font-medium text-[color:var(--down)]">
+                      {formatNumber(item.value)}
+                    </span>
                   </div>
                 ))}
               </div>
@@ -694,7 +697,9 @@ export default function GEXDashboard() {
                     <span className="text-muted-foreground">
                       {idx + 1}. {item.strike}
                     </span>
-                    <span className="font-medium text-green-500">{formatNumber(item.value)}</span>
+                    <span className="font-medium text-[color:var(--up)]">
+                      {formatNumber(item.value)}
+                    </span>
                   </div>
                 ))}
               </div>
@@ -757,16 +762,20 @@ export default function GEXDashboard() {
                     return (
                       <tr
                         key={item.strike}
-                        className={`border-b border-border/30 ${isATM ? 'bg-yellow-500/10 font-semibold' : 'hover:bg-muted/50'}`}
+                        className={`border-b border-border/30 ${isATM ? 'bg-[color:var(--gold-tint)] font-semibold' : 'hover:bg-muted/50'}`}
                       >
                         <td className="py-1.5 px-3">
                           {item.strike}
-                          {isATM && <span className="ml-2 text-xs text-yellow-500">ATM</span>}
+                          {isATM && (
+                            <span className="ml-2 text-xs text-[color:var(--warning-text)]">
+                              ATM
+                            </span>
+                          )}
                         </td>
-                        <td className="py-1.5 px-3 text-right text-red-500">
+                        <td className="py-1.5 px-3 text-right text-[color:var(--down)]">
                           {item.ce_gex.toFixed(2)}
                         </td>
-                        <td className="py-1.5 px-3 text-right text-green-500">
+                        <td className="py-1.5 px-3 text-right text-[color:var(--up)]">
                           {item.pe_gex.toFixed(2)}
                         </td>
                         <td
@@ -782,10 +791,10 @@ export default function GEXDashboard() {
                 <tfoot className="sticky bottom-0 bg-background border-t-2 border-border">
                   <tr className="font-semibold">
                     <td className="py-2 px-3">Total</td>
-                    <td className="py-2 px-3 text-right text-red-500">
+                    <td className="py-2 px-3 text-right text-[color:var(--down)]">
                       {(gexData.total_ce_gex || 0).toFixed(2)}
                     </td>
-                    <td className="py-2 px-3 text-right text-green-500">
+                    <td className="py-2 px-3 text-right text-[color:var(--up)]">
                       {(gexData.total_pe_gex || 0).toFixed(2)}
                     </td>
                     <td

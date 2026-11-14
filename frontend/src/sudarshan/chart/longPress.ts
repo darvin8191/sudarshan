@@ -16,6 +16,12 @@
 export const HOLD_MS = 450
 /** How far a finger may drift, in CSS pixels, and still be holding still. */
 export const SLOP_PX = 8
+/**
+ * Marks a control laid over the chart, such as the reading's own buttons
+ * (Buy at a held price, C10): a touch on it is that control's, so it neither
+ * clears the reading nor starts another, and its tap lands.
+ */
+export const OVER_CHART = 'data-over-chart'
 
 export interface PressPoint {
   /** Pixels from the element's left and top edges. */
@@ -79,6 +85,7 @@ export class LongPress {
 
   private readonly onDown = (event: PointerEvent): void => {
     if (event.pointerType !== 'touch') return
+    if (event.target instanceof Element && event.target.closest(`[${OVER_CHART}]`)) return
     this.pointers.add(event.pointerId)
     if (this.shown) {
       this.shown = false
