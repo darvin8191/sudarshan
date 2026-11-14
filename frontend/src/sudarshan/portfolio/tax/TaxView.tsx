@@ -13,6 +13,7 @@ import { dayOfInstant } from '../days'
 import { PORTFOLIO_KEY } from '../tab/ActivityTab'
 import { type Member, REPORT_YEARS, type TaxPack } from '../types'
 import { asOf, fyLabel, fyOfDay } from './format'
+import { ChargesCard, Downloads, LeftOutCard, LossesCard, ReadsCard, readingOf } from './MoreCards'
 import { CARD, Card, OUTLINE, Sentences } from './parts'
 import { ScheduleSheet } from './ScheduleSheet'
 import { BusinessCard, CapitalGainsCard } from './TaxCards'
@@ -23,6 +24,9 @@ export const TAX_OFF =
   'The tax working paper is switched off on the server. It opens here once a release switches it on.'
 export const TAX_NOTICE =
   'Working paper. Verify with your CA. Upstox’s own report is the filing source.'
+
+/** How often the paper is asked for again while a part of the year is being read. */
+const READING_MS = 5000
 
 export function taxOptions(fy: number, member: number | undefined) {
   return {
@@ -87,7 +91,7 @@ export function needsYou(pack: TaxPack): string[] {
   ]
 }
 
-function Paper({ pack }: { pack: TaxPack }) {
+function Paper({ pack, onRead }: { pack: TaxPack; onRead: () => void }) {
   const now = useNow(60_000)
   const [schedule, setSchedule] = useState(false)
   const meta = asOf(pack, now)
@@ -103,6 +107,7 @@ function Paper({ pack }: { pack: TaxPack }) {
         )}
         <span>{meta.words}</span>
       </p>
+      <ReadsCard pack={pack} onRead={onRead} />
       {needs.length > 0 && (
         <Card title="Needs you">
           <Sentences lines={needs} warn />
@@ -110,6 +115,10 @@ function Paper({ pack }: { pack: TaxPack }) {
       )}
       <CapitalGainsCard cg={pack.capital_gains} onSchedule={() => setSchedule(true)} />
       <BusinessCard business={pack.business} />
+      <LossesCard pack={pack} />
+      <ChargesCard pack={pack} />
+      <LeftOutCard pack={pack} />
+      <Downloads pack={pack} />
       <ScheduleSheet
         open={schedule}
         onClose={() => setSchedule(false)}
@@ -124,7 +133,15 @@ export function TaxView({ members }: { members: readonly Member[] }) {
   const current = fyOfDay(dayOfInstant(Date.now()))
   const [fy, setFy] = useState(current)
   const [member, setMember] = useState<number | undefined>(undefined)
-  const query = useQuery({ ...taxOptions(fy, member), placeholderData: keepPreviousData })
+  const query = useQuery({
+    ...taxOptions(fy, member),
+    placeholderData: keepPreviousData,
+    // A read in progress is asked after again (the reader's progress, not market data).
+    refetchInterval: (q) =>
+      q.state.data && readingOf(q.state.data.inputs.sources).reading.length > 0
+        ? READING_MS
+        : false,
+  })
   const years = Array.from({ length: REPORT_YEARS }, (_, n) => current - n)
   const problem = query.error ? problemOf(query.error) : null
   return (
@@ -161,7 +178,7 @@ export function TaxView({ members }: { members: readonly Member[] }) {
           Working out {fyLabel(fy)}.
         </p>
       ) : (
-        <Paper pack={query.data} />
+        <Paper pack={query.data} onRead={() => void query.refetch()} />
       )}
       <p
         role="note"
