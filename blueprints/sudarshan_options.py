@@ -9,6 +9,12 @@ subscribes. ``state`` is ``ok``, ``signin`` (today's Upstox login is needed), ``
 asked us to slow down), ``unavailable`` (no usable answer) or ``none`` (no such chain; MCX is not
 offered), each with its sentence in ``words``.
 
+    GET /sudarshan/options/api/expiries?exchange=NFO&underlying=NIFTY
+
+answers ``{"state", "words", "listing"}``: the underlying's expiries that still trade with when
+each stops, its own symbol and its nearest future, read from the master and the calendar (Upstox
+is not asked).
+
 Read-only: it places, changes and cancels nothing, and writes nothing. Each request is checked in
 this order: an OpenAlgo session (401), the owner himself (403; a family phone has no OpenAlgo
 session at all and is refused at the first), then the limit, counted per owner so a refused caller
@@ -76,8 +82,22 @@ def _chain():
     return _answer({"status": "success", "data": data})
 
 
-@sudarshan_options_bp.route("/chain", methods=["GET"])
-def chain():
+@limiter.limit(LIMIT, key_func=_owner_key)
+def _expiries():
+    exchange = (request.args.get("exchange") or "").strip().upper()
+    underlying = (request.args.get("underlying") or "").strip().upper()
+    if exchange not in EXCHANGES or not _NAME.fullmatch(underlying):
+        return _refuse(words.PICK_AGAIN, 400)
+    try:
+        data = snapshot.listing(exchange, underlying)
+    except Exception:
+        logger.exception("Options: the expiries of %s could not be read", underlying)
+        data = {"state": "unavailable", "words": words.EXPIRIES_FAILED, "listing": None}
+    return _answer({"status": "success", "data": data})
+
+
+def _owner_only(view):
+    """The checks every route meets first: an OpenAlgo session, then the owner himself."""
     try:
         if not is_session_valid():
             return _refuse(words.SESSION, 401)
@@ -86,7 +106,17 @@ def chain():
     except Exception:
         logger.exception("Options: the session could not be checked")
         return _refuse(words.SESSION, 401)
-    return _chain()
+    return view()
+
+
+@sudarshan_options_bp.route("/chain", methods=["GET"])
+def chain():
+    return _owner_only(_chain)
+
+
+@sudarshan_options_bp.route("/expiries", methods=["GET"])
+def expiries():
+    return _owner_only(_expiries)
 
 
 @sudarshan_options_bp.errorhandler(429)

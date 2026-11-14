@@ -78,15 +78,49 @@ def _unreadable(answer: Any, why: str) -> None:
         )  # fmt: skip
 
 
-def _stops_at(target: mapping.Target) -> int:
-    """When the expiry's contracts stop trading (epoch ms): the one rule of the watchlists
+def _stop_of(underlying: str, exchange: str, expiries: list[str]) -> dict[str, int]:
+    """When each expiry's contracts stop trading (epoch ms): the one rule of the watchlists
     package (the calendar's dated close of a special day, else the regime of the day)."""
     from sudarshan.watchlists import dynamic, sessions
     from sudarshan.watchlists import expiry as stops
 
-    closes = sessions.closes([target.expiry], target.exchange)
-    index = stops.is_index(target.underlying, sessions.index_underlyings())
-    return dynamic.close_ms(target.expiry, closes, index=index, exchange=target.exchange)
+    closes = sessions.closes(expiries, exchange)
+    index = stops.is_index(underlying, sessions.index_underlyings())
+    return {e: dynamic.close_ms(e, closes, index=index, exchange=exchange) for e in expiries}
+
+
+def _stops_at(target: mapping.Target) -> int:
+    return _stop_of(target.underlying, target.exchange, [target.expiry])[target.expiry]
+
+
+def listing(exchange: str, underlying: str) -> dict:
+    """``{"state", "words", "listing"}``: the expiries of an underlying that still trade, each
+    with when it stops, the underlying's own symbol and the nearest future still trading. Read
+    from the master and the calendar; Upstox is never asked, so no sign-in is needed."""
+    if exchange == "MCX":
+        return {"state": "none", "words": words.NO_MCX, "listing": None}
+    from sudarshan.watchlists import master  # not at import: the bridge loads no master
+
+    ix = master.shared().index()
+    if ix is None:
+        return {"state": "unavailable", "words": words.NOT_LOADED, "listing": None}
+    found = mapping.listing_of(ix, exchange, underlying)
+    if found is None:
+        return {"state": "none", "words": words.no_options(underlying), "listing": None}
+    now = now_ms()
+    name = found["underlying"]
+    stops = _stop_of(name, exchange, found["expiries"])
+    live = [{"date": e, "stops_at": stops[e]} for e in found["expiries"] if stops[e] > now]
+    if not live:
+        return {"state": "none", "words": words.no_options(name), "listing": None}
+    dated = [iso for iso, _ in found["futures"]]
+    ends = _stop_of(name, exchange, dated)
+    future = next(({"symbol": symbol, "exchange": exchange, "expiry": iso}
+                   for iso, symbol in found["futures"] if ends[iso] > now), None)  # fmt: skip
+    return {"state": "ok", "words": None, "listing": {
+        "underlying": name, "exchange": exchange,
+        "spot": {"symbol": found["symbol"], "exchange": found["underlying_exchange"]},
+        "future": future, "expiries": live, "now": now}}  # fmt: skip
 
 
 def _read(token: str, target: mapping.Target, by_token) -> dict:

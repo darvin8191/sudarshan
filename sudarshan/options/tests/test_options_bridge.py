@@ -33,6 +33,7 @@ PASSWORD = "Fake-Pass-123!"  # pragma: allowlist secret
 TOKEN = "tok-" + "A1b2" * 8  # synthetic, test only
 TOKEN_2 = "tok-" + "Z9y8" * 8
 STOPS_AT = 1_794_909_600_000
+NOW = STOPS_AT - 3 * 86_400_000
 
 
 class Clock:
@@ -122,7 +123,10 @@ def upstox(monkeypatch, users):
     monkeypatch.setattr(chainsnap, "get_httpx_client", lambda: fake)
     monkeypatch.setattr(plugin_limiter, "apply_rate_limit", lambda category: None)
     monkeypatch.setattr(snapshot, "owner_token", lambda user: token["now"])
-    monkeypatch.setattr(snapshot, "_stops_at", lambda target: STOPS_AT)
+    monkeypatch.setattr(
+        snapshot, "_stop_of", lambda name, exchange, days: dict.fromkeys(days, STOPS_AT)
+    )
+    monkeypatch.setattr(snapshot, "now_ms", lambda: NOW)
     monkeypatch.setattr(
         snapshot, "_fresh", LockedTTLCache(64, snapshot.CACHE_S, timer=clock.monotonic)
     )
@@ -192,7 +196,7 @@ def test_the_owner_reads_the_chain_as_openalgo_symbols(client, upstox):
         "2026-11-17",
     )
     assert chain["underlying_exchange"] == "NSE_INDEX" and chain["expiry_ts"] == STOPS_AT
-    assert abs(chain["as_of"] - time.time() * 1000) < 60_000
+    assert chain["as_of"] == NOW
     ((url, kw),) = upstox.fake.calls
     assert kw["params"] == {"instrument_key": "NSE_INDEX|Nifty 50", "expiry_date": "2026-11-17"}
     assert TOKEN not in answer.get_data(as_text=True)
@@ -281,11 +285,93 @@ def test_a_failure_inside_the_read_is_a_sentence_never_the_error_s_text(
     def broken(*args):
         raise RuntimeError("calendar table locked")
 
-    monkeypatch.setattr(snapshot, "_stops_at", broken)
+    monkeypatch.setattr(snapshot, "_stop_of", broken)
     upstox.fake.replies.append(ok())
     answer = client.get(PATH + NIFTY)
     assert data(answer) == {"state": "unavailable", "words": words.FAILED, "chain": None}
     assert "locked" not in answer.get_data(as_text=True)
+
+
+# -- the expiries ------------------------------------------------------------------------------
+EXPIRIES = "/sudarshan/options/api/expiries"
+
+
+def test_the_expiries_route_meets_the_same_checks(upstox):
+    anonymous = make_app().test_client()
+    assert anonymous.get(EXPIRIES + "?exchange=NFO&underlying=NIFTY").status_code == 401
+    viewer = sign_in(make_app().test_client(), VIEWER)
+    assert viewer.get(EXPIRIES + "?exchange=NFO&underlying=NIFTY").status_code == 403
+    owner = sign_in(make_app().test_client())
+    assert owner.get(EXPIRIES + "?exchange=NFO").status_code == 400
+    assert owner.post(EXPIRIES + "?exchange=NFO&underlying=NIFTY").status_code == 405
+
+
+def test_the_expiries_that_still_trade_with_the_spot_and_the_nearest_future(
+    client, upstox, monkeypatch
+):
+    day = 86_400_000
+    stops = {"2026-11-17": NOW - 1, "2026-11-24": NOW + 7 * day, "2026-12-29": NOW + 42 * day}
+    monkeypatch.setattr(
+        snapshot, "_stop_of", lambda name, exchange, days: {d: stops[d] for d in days}
+    )
+    upstox.token["now"] = None  # no Upstox sign-in is needed: the master and the calendar answer
+    got = data(client.get(EXPIRIES + "?exchange=nfo&underlying=nifty"))
+    assert got["state"] == "ok" and got["words"] is None
+    assert got["listing"] == {
+        "underlying": "NIFTY", "exchange": "NFO", "now": NOW,
+        "spot": {"symbol": "NIFTY", "exchange": "NSE_INDEX"},
+        "future": {"symbol": "NIFTY24NOV26FUT", "exchange": "NFO", "expiry": "2026-11-24"},
+        "expiries": [{"date": "2026-11-24", "stops_at": NOW + 7 * day}],
+    }  # fmt: skip
+    stock = data(client.get(EXPIRIES + "?exchange=NFO&underlying=ACME"))["listing"]
+    assert stock["spot"] == {"symbol": "ACME", "exchange": "NSE"} and stock["future"] is None
+    assert upstox.fake.calls == []
+
+
+@pytest.mark.parametrize(
+    ("query", "said"),
+    [
+        ("?exchange=MCX&underlying=CRUDEOIL", words.NO_MCX),
+        ("?exchange=NFO&underlying=NOSUCH", words.no_options("NOSUCH")),
+        ("?exchange=BFO&underlying=NIFTY", words.no_options("NIFTY")),
+    ],
+)
+def test_an_underlying_with_no_options_says_so(client, query, said):
+    assert data(client.get(EXPIRIES + query)) == {"state": "none", "words": said, "listing": None}
+
+
+def test_an_underlying_whose_every_expiry_has_stopped_has_none(client, monkeypatch):
+    monkeypatch.setattr(snapshot, "_stop_of", lambda name, exchange, days: dict.fromkeys(days, NOW))
+    got = data(client.get(EXPIRIES + "?exchange=BFO&underlying=SENSEX"))
+    assert got == {"state": "none", "words": words.no_options("SENSEX"), "listing": None}
+
+
+def test_the_expiries_say_in_words_when_they_cannot_be_read(client, monkeypatch):
+    def broken(*args):
+        raise RuntimeError("calendar table locked")
+
+    monkeypatch.setattr(snapshot, "_stop_of", broken)
+    answer = client.get(EXPIRIES + "?exchange=NFO&underlying=NIFTY")
+    assert data(answer) == {"state": "unavailable", "words": words.EXPIRIES_FAILED, "listing": None}
+    assert "locked" not in answer.get_data(as_text=True)
+
+
+def test_a_contract_stops_by_the_regime_of_its_expiry_day(monkeypatch):
+    from datetime import timedelta, timezone
+
+    from sudarshan.watchlists import sessions
+
+    ist = timezone(timedelta(hours=5, minutes=30))
+    monkeypatch.setattr(sessions, "closes", lambda days, exchange: {})
+    monkeypatch.setattr(sessions, "index_underlyings", lambda: frozenset({"NIFTY"}))
+    at = lambda *t: int(datetime(*t, tzinfo=ist).timestamp() * 1000)  # noqa: E731
+    got = snapshot._stop_of("NIFTY", "NFO", ["2026-11-17", "2026-12-08"])
+    assert got == {"2026-11-17": at(2026, 11, 17, 15, 40), "2026-12-08": at(2026, 12, 8, 15, 30)}
+    assert snapshot._stop_of("ACME", "NFO", ["2026-12-29"]) == {
+        "2026-12-29": at(2026, 12, 29, 15, 45)
+    }
+    monkeypatch.setattr(sessions, "closes", lambda days, exchange: {"2026-11-17": 42})
+    assert snapshot._stop_of("NIFTY", "NFO", ["2026-11-17"]) == {"2026-11-17": 42}
 
 
 # -- the cache and the single flight -----------------------------------------------------------

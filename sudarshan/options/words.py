@@ -12,10 +12,15 @@ NOT_LOADED = (
 )
 NO_MCX = "Upstox has no option chain for MCX. Use the wide option chain for it."
 PICK_AGAIN = "Pick the underlying and the expiry again: one of them did not come with the request."
-SESSION = "Sign in to SUDARSHAN again to read the option chain."
+SESSION = "Sign in to SUDARSHAN again to read option chains."
 OWNER_ONLY = "The option chain is for the owner's sign-in only."
+EXPIRIES_FAILED = "The expiries could not be read. Try again in a moment."
 BUSY = "Too many reads at once. Try again in a moment."
 
 
 def not_listed(underlying: str, expiry: str) -> str:
     return f"No options are listed for {underlying} expiring on {expiry}."
+
+
+def no_options(underlying: str) -> str:
+    return f"No options that still trade are listed for {underlying}."

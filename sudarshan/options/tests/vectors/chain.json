@@ -200,6 +200,26 @@
    102.5,
    500,
    "NSE_FO|41016"
+  ],
+  [
+   "NIFTY24NOV26FUT",
+   "NFO",
+   "FUT",
+   "NIFTY",
+   "24-NOV-26",
+   null,
+   65,
+   "NSE_FO|49001"
+  ],
+  [
+   "NIFTY29DEC26FUT",
+   "NFO",
+   "FUT",
+   "NIFTY",
+   "29-DEC-26",
+   null,
+   65,
+   "NSE_FO|49002"
   ]
  ],
  "answer": {

@@ -29,6 +29,18 @@ def test_the_target_names_the_underlying_s_own_key_and_the_expiry_s_ladder():
     assert mapping.target_of(IX, "BFO", "SENSEX", "2026-11-19").instrument_key == "BSE_INDEX|SENSEX"
 
 
+def test_the_listing_names_the_spot_every_expiry_and_every_future():
+    got = mapping.listing_of(IX, "NFO", "nifty")
+    assert got == {
+        "underlying": "NIFTY", "exchange": "NFO", "underlying_exchange": "NSE_INDEX",
+        "symbol": "NIFTY", "expiries": ["2026-11-17", "2026-11-24"],
+        "futures": [("2026-11-24", "NIFTY24NOV26FUT"), ("2026-12-29", "NIFTY29DEC26FUT")],
+    }  # fmt: skip
+    assert mapping.listing_of(IX, "BFO", "SENSEX")["futures"] == []
+    for exchange, name in (("MCX", "MCXONLY"), ("NFO", "NOSUCH"), ("BFO", "NIFTY")):
+        assert mapping.listing_of(IX, exchange, name) is None
+
+
 @pytest.mark.parametrize(
     ("exchange", "underlying", "expiry"),
     [

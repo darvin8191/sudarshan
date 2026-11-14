@@ -74,6 +74,17 @@ def number(value: Any) -> float | None:
     return float(value)
 
 
+def _home(ix: search.Index, name: str, exchange: str) -> tuple[Any, str] | None:
+    """``(the underlying's own row, its exchange)``: the index listing first, else the stock's."""
+    cash = {r.exchange: r for r in ix.cash.get(search.key_of(name), ())}
+    for home in UNDERLYING_ON[exchange]:
+        row = cash.get(home)
+        token = getattr(row, "token", None)
+        if isinstance(token, str) and token:
+            return row, home
+    return None
+
+
 def target_of(ix: search.Index, exchange: str, underlying: str, expiry: str) -> Target | None:
     """What to ask Upstox for, or ``None`` when the master lists no such chain on ``exchange``."""
     if exchange not in FO_EXCHANGES:
@@ -81,15 +92,28 @@ def target_of(ix: search.Index, exchange: str, underlying: str, expiry: str) -> 
     name = ix.display.get(search.key_of(underlying), underlying)
     rows = [r for r in ix.options.get(name, {}).get(expiry, ()) if r.exchange == exchange]
     ladder = {(float(r.strike), r.instrumenttype): r for r in rows if r.strike is not None}
-    if not ladder:
+    home = _home(ix, name, exchange) if ladder else None
+    if home is None:
         return None
-    cash = {r.exchange: r for r in ix.cash.get(search.key_of(name), ())}
-    for home in UNDERLYING_ON[exchange]:
-        row = cash.get(home)
-        token = getattr(row, "token", None)
-        if isinstance(token, str) and token:
-            return Target(name, exchange, token, home, expiry, ladder)
-    return None
+    return Target(name, exchange, home[0].token, home[1], expiry, ladder)
+
+
+def listing_of(ix: search.Index, exchange: str, underlying: str) -> dict | None:
+    """What the master lists for an underlying's options on ``exchange``: the underlying's own
+    symbol and exchange (what the phone follows for the spot), every option expiry (ISO,
+    soonest first) and every future ``(iso, symbol)``; ``None`` when it lists no options there.
+    Which of them still trade is the caller's question (it knows the time)."""
+    if exchange not in FO_EXCHANGES:
+        return None
+    name = ix.display.get(search.key_of(underlying), underlying)
+    by = ix.options.get(name, {})
+    expiries = sorted(iso for iso, rows in by.items() if any(r.exchange == exchange for r in rows))
+    home = _home(ix, name, exchange) if expiries else None
+    if home is None:
+        return None
+    futures = [(iso, r.symbol) for iso, r in ix.futures.get(name, ()) if r.exchange == exchange]
+    return {"underlying": name, "exchange": exchange, "underlying_exchange": home[1],
+            "symbol": home[0].symbol, "expiries": expiries, "futures": futures}  # fmt: skip
 
 
 def rows_of(answer: Any) -> list | None:
