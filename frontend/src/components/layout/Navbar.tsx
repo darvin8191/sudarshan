@@ -16,10 +16,11 @@ import {
   SheetTitle,
   SheetTrigger,
 } from '@/components/ui/sheet'
-import { isActiveRoute, mobileSheetItems, navItems } from '@/config/navigation'
+import { isActiveRoute, menuGroups, mobileSheetItems, navItems } from '@/config/navigation'
 import { useProfileMenuItems } from '@/hooks/useProfileMenuItems'
 import { cn } from '@/lib/utils'
 import { BrandLockup } from '@/sudarshan/BrandLockup'
+import { usePhoneLayout } from '@/sudarshan/chart/usePhoneLayout' // SUDARSHAN T1
 import { AccountControls } from './AccountControls'
 
 // Desktop tab: full bar height so the current-page underline lands on the
@@ -30,6 +31,12 @@ const TAB =
 const TAB_IDLE = 'text-muted-foreground hover:text-foreground'
 const TAB_CURRENT =
   'text-foreground after:absolute after:inset-x-2.5 xl:after:inset-x-3 after:-bottom-px after:h-0.5 after:rounded-t-full after:bg-primary'
+
+// SUDARSHAN T1: a menu sheet row, a full 48dp target (owner rule), the current page filled.
+const SHEET_LINK =
+  'flex min-h-12 items-center gap-3 rounded-lg px-3 py-3 text-sm transition-colors touch-manipulation'
+const SHEET_CURRENT = 'bg-primary text-primary-foreground'
+const SHEET_IDLE = 'hover:bg-muted active:bg-muted'
 
 // Literal class names, so Tailwind sees them when it scans this file.
 const COLLAPSE = { lg: 'hidden lg:flex', xl: 'hidden xl:flex' } as const
@@ -68,6 +75,7 @@ export function Navbar({ fluid = false }: NavbarProps = {}) {
 
   // Profile menu filtered by broker capabilities (shared hook, issue #1480)
   const filteredProfileMenuItems = useProfileMenuItems()
+  const phone = usePhoneLayout() // SUDARSHAN T1: the menu's Trading opens the phone chart
 
   const isActive = (href: string) => isActiveRoute(location.pathname, href)
 
@@ -96,98 +104,90 @@ export function Navbar({ fluid = false }: NavbarProps = {}) {
               <span className="sr-only">Toggle menu</span>
             </Button>
           </SheetTrigger>
-          <SheetContent side="left" className="w-72 overflow-y-auto">
+          {/* SUDARSHAN T1: the sheet's close button a 48dp target, as every row is. */}
+          <SheetContent
+            side="left"
+            className="w-72 overflow-y-auto [&>button:last-child]:top-2 [&>button:last-child]:right-2 [&>button:last-child]:flex [&>button:last-child]:size-12 [&>button:last-child]:items-center [&>button:last-child]:justify-center"
+          >
             {/* Visually hidden but accessible for screen readers */}
             <SheetHeader className="sr-only">
               <SheetTitle>Navigation Menu</SheetTitle>
-              <SheetDescription>Main navigation and quick access links</SheetDescription>
+              <SheetDescription>
+                Every page, under Trade, Analyse, Automate and System
+              </SheetDescription>
             </SheetHeader>
             <div className="flex flex-col gap-4 py-4">
               <Link
                 to="/dashboard"
-                className="flex items-center gap-2 px-2"
+                className="flex min-h-12 items-center gap-2 px-2"
                 onClick={() => setMobileOpen(false)}
               >
                 <BrandLockup />
               </Link>
 
-              {/* Secondary nav items (not in bottom nav) */}
-              <nav className="flex flex-col gap-1">
-                <div className="px-3 py-2 text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                  Navigation
-                </div>
-                {mobileSheetItems.map((item) => {
-                  const active = isActive(item.href)
-                  const cls = cn(
-                    'flex items-center gap-3 rounded-lg px-3 py-3 text-sm transition-colors min-h-[44px] touch-manipulation',
-                    active ? 'bg-primary text-primary-foreground' : 'hover:bg-muted active:bg-muted'
-                  )
-                  const inner = (
-                    <>
-                      <item.icon className="h-4 w-4" />
-                      {item.label}
-                    </>
-                  )
-                  return item.external ? (
-                    <a
-                      key={item.href}
-                      href={item.href}
-                      onClick={() => setMobileOpen(false)}
-                      className={cls}
-                      aria-current={active ? 'page' : undefined}
+              {/* SUDARSHAN M1.11 (T1): the profile menu and the navbar's pages the bottom
+                  bar does not hold, under four headings (config/navigation.ts, menuGroups).
+                  The profile menu's entries come first, so on a phone the terminal folds
+                  into Chart. */}
+              {menuGroups([...filteredProfileMenuItems, ...mobileSheetItems], { phone }).map(
+                ({ group, items }) => (
+                  <nav
+                    key={group}
+                    aria-labelledby={`sd-menu-${group}`}
+                    className="flex flex-col gap-1 border-t pt-4"
+                  >
+                    <h3
+                      id={`sd-menu-${group}`}
+                      className="px-3 py-2 text-xs font-medium text-muted-foreground uppercase tracking-wider"
                     >
-                      {inner}
-                    </a>
-                  ) : (
-                    <Link
-                      key={item.href}
-                      to={item.href}
-                      onClick={() => setMobileOpen(false)}
-                      className={cls}
-                      aria-current={active ? 'page' : undefined}
-                    >
-                      {inner}
-                    </Link>
-                  )
-                })}
-              </nav>
-
-              {/* Profile menu items for mobile access */}
-              <nav className="flex flex-col gap-1 border-t pt-4">
-                <div className="px-3 py-2 text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                  Quick Access
-                </div>
-                {filteredProfileMenuItems.map((item) => {
-                  const active = isActive(item.href)
-                  return (
-                    <Link
-                      key={item.href}
-                      to={item.href}
-                      onClick={() => setMobileOpen(false)}
-                      className={cn(
-                        'flex items-center gap-3 rounded-lg px-3 py-3 text-sm transition-colors min-h-[44px] touch-manipulation',
-                        active
-                          ? 'bg-primary text-primary-foreground'
-                          : 'hover:bg-muted active:bg-muted'
-                      )}
-                      aria-current={active ? 'page' : undefined}
-                    >
-                      <item.icon className="h-4 w-4" />
-                      {item.label}
-                    </Link>
-                  )
-                })}
-                <a
-                  href="https://docs.openalgo.in"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-3 rounded-lg px-3 py-3 text-sm transition-colors min-h-[44px] touch-manipulation hover:bg-muted active:bg-muted"
-                  onClick={() => setMobileOpen(false)}
-                >
-                  <BookOpen className="h-4 w-4" />
-                  Docs
-                </a>
-              </nav>
+                      {group}
+                    </h3>
+                    {items.map((item) => {
+                      const active = isActive(item.href)
+                      const cls = cn(SHEET_LINK, active ? SHEET_CURRENT : SHEET_IDLE)
+                      const inner = (
+                        <>
+                          <item.icon aria-hidden="true" className="h-4 w-4" />
+                          {item.label}
+                        </>
+                      )
+                      return item.external ? (
+                        <a
+                          key={item.href}
+                          href={item.href}
+                          onClick={() => setMobileOpen(false)}
+                          className={cls}
+                          aria-current={active ? 'page' : undefined}
+                        >
+                          {inner}
+                        </a>
+                      ) : (
+                        <Link
+                          key={item.href}
+                          to={item.href}
+                          onClick={() => setMobileOpen(false)}
+                          className={cls}
+                          aria-current={active ? 'page' : undefined}
+                        >
+                          {inner}
+                        </Link>
+                      )
+                    })}
+                    {group === 'System' && (
+                      <a
+                        href="https://docs.openalgo.in"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className={cn(SHEET_LINK, SHEET_IDLE)}
+                        onClick={() => setMobileOpen(false)}
+                      >
+                        <BookOpen aria-hidden="true" className="h-4 w-4" />
+                        Docs
+                      </a>
+                    )}
+                  </nav>
+                )
+              )}
             </div>
           </SheetContent>
         </Sheet>
@@ -195,7 +195,7 @@ export function Navbar({ fluid = false }: NavbarProps = {}) {
         {/* Wordmark: both scripts at every width (owner rule 2). */}
         <Link
           to="/dashboard"
-          className="ml-1 mr-2 flex shrink-0 items-center rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-ring md:ml-0 md:mr-6"
+          className="ml-1 mr-2 flex min-h-12 shrink-0 items-center rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-ring md:ml-0 md:mr-6"
         >
           <BrandLockup />
         </Link>
