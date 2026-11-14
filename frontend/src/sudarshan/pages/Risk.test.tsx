@@ -3,9 +3,9 @@
  * one before it leaves the page, and nothing polls (rule 7): the status is read once and again
  * when the server announces a change.
  */
-import { fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const api = vi.hoisted(() => ({
   status: vi.fn(),
@@ -227,6 +227,98 @@ describe('a wrong confirm phrase for the daily limit', () => {
     expect(api.saveSettings).toHaveBeenLastCalledWith({ daily_loss_limit: 9000 }, 'hunter2')
     expect(card.getByLabelText('Confirm phrase')).toHaveValue('')
     expect(card.getByText('The confirm phrase does not match. Nothing was changed.')).toBeVisible()
+  })
+})
+
+describe('a tab in the background', () => {
+  // Backlog 2e (Analyzer session): a background tab's screen did not move until it was focused
+  // (a hidden tab runs no animation frame). Nothing here runs one after the tab is hidden.
+  function sandboxDay(lock: object | null = null) {
+    return {
+      figure: -4100,
+      approximate: false,
+      read_at: new Date().toISOString(),
+      in_session: true,
+      opens_at: null,
+      reached: lock !== null,
+      lock,
+      unchecked: false,
+    }
+  }
+  const OFF = { ...status({ known: true, on: false }), daily: { sandbox: sandboxDay() } }
+  const ON_AND_LOCKED = {
+    ...status({ known: true, on: true, since: new Date().toISOString(), surface: 'telegram' }),
+    daily: {
+      sandbox: sandboxDay({ at: new Date().toISOString(), figure: -4100, limit: 4000 }),
+    },
+  }
+  const killSwitch = () => within(screen.getByRole('region', { name: 'Kill switch' }))
+  const locked = () =>
+    screen.queryByText(/^Locked at \d\d:\d\d: new orders refused until tomorrow$/)
+
+  function setVisibility(state: 'visible' | 'hidden') {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => state })
+    // As a browser fires it: at the document, bubbling up to the window.
+    act(() => {
+      document.dispatchEvent(new Event('visibilitychange', { bubbles: true }))
+    })
+  }
+
+  /** Let a read land and React draw it, with no animation frame run. */
+  async function landWithoutAFrame() {
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(50)
+    })
+  }
+
+  async function openThenHide() {
+    api.status.mockResolvedValue(OFF)
+    renderBook('/risk', <Risk />)
+    await settle()
+    await pass(100)
+    expect(killSwitch().getByRole('button', { name: 'Turn kill switch on' })).toBeInTheDocument()
+    expect(locked()).toBeNull()
+    setVisibility('hidden')
+  }
+
+  afterEach(() => {
+    Reflect.deleteProperty(document, 'visibilityState')
+  })
+
+  it('draws a change announced while it is hidden, without waiting for a frame', async () => {
+    await openThenHide()
+    api.status.mockResolvedValue(ON_AND_LOCKED)
+    act(() => socket.handlers.get('sudarshan_risk')?.())
+    await landWithoutAFrame()
+    expect(killSwitch().getByRole('button', { name: 'Resume trading' })).toBeInTheDocument()
+    expect(locked()).toBeInTheDocument()
+  })
+
+  it('reads again the moment it is seen, so a change it missed while hidden shows at once', async () => {
+    await openThenHide()
+    // Turned on from Telegram while the phone slept: the announcement reached nobody.
+    api.status.mockResolvedValue(ON_AND_LOCKED)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000) // well inside the app's one-minute freshness
+    })
+    expect(api.status).toHaveBeenCalledTimes(1)
+    setVisibility('visible')
+    await landWithoutAFrame()
+    expect(api.status).toHaveBeenCalledTimes(2)
+    expect(killSwitch().getByRole('button', { name: 'Resume trading' })).toBeInTheDocument()
+    expect(locked()).toBeInTheDocument()
+  })
+
+  it('reads again when the live connection comes back after a drop', async () => {
+    api.status.mockResolvedValue(OFF)
+    renderBook('/risk', <Risk />)
+    await settle()
+    await pass(100)
+    api.status.mockResolvedValue(ON_AND_LOCKED)
+    act(() => socket.handlers.get('connect')?.())
+    await landWithoutAFrame()
+    expect(killSwitch().getByRole('button', { name: 'Resume trading' })).toBeInTheDocument()
+    expect(locked()).toBeInTheDocument()
   })
 })
 
