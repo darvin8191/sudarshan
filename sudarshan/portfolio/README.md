@@ -193,6 +193,10 @@ two types, and a test holds this table, that map and `kinds.py` to each other.
 | `report_years` | GET | `/reports/years` | upstox | | `NoArgs` | `ReportYears` | |
 | `report_trades` | GET | `/reports/trades` | upstox | `fy:int, segment:str, force:bool` | `ReportArgs` | `TradesReport` | reads Upstox, cached per year |
 | `report_pnl` | GET | `/reports/pnl` | upstox | `fy:int, segment:str, force:bool` | `ReportArgs` | `PnlReport` | reads Upstox, cached per year |
+| `shares_list` | GET | `/family/shares` | read | `tab_id:int, viewer:str` | `SharesListArgs` | `SharesList` | the Family page: the tab shares and every member's privacy floor |
+| `share_set` | PUT | `/family/shares` | write | | `ShareSetArgs` | `TabShare` | a new share has no version; a change names its version |
+| `share_remove` | DELETE | `/family/shares` | write | | `ShareRemoveArgs` | `ShareRemoved` | |
+| `member_privacy_set` | PUT | `/family/privacy` | write | | `MemberPrivacySetArgs` | `MemberPrivacy` | a member's privacy floor (cross-design Y6) |
 
 The bridge builds all of these routes from one table (`OPS` in `kinds.py`), so a later op never
 means editing it. An op the service does not have yet answers `not_ready` ("This part of the
@@ -324,7 +328,7 @@ two exists in this release. Each purpose has its own principal and its own list 
 
 | purpose | principal | ops |
 |---|---|---|
-| owner (`PORTFOLIO_API_INFO`) | `owner` | the contract's ops, plus `share_set`, `share_remove`, `shares_list`, `member_privacy_set` |
+| owner (`PORTFOLIO_API_INFO`) | `owner` | the contract's ops, the four sharing ops among them (`shares_list`, `share_set`, `share_remove`, `member_privacy_set`) |
 | family (`PORTFOLIO_FAMILY_API_INFO`) | `viewer:<member id>` | reads: `state`, `summary`, `tab_get`, `performance`, `upstox_book`, `upstox_history`, `shares_for_viewer` |
 | journal (`PORTFOLIO_JOURNAL_API_INFO`) | `sudarshan-journal` | reads: `trades_day`, `order_history`, `historical_trades`, `pnl_report`, `positions`, `funds`, `benchmark_closes` |
 
@@ -347,6 +351,14 @@ two exists in this release. Each purpose has its own principal and its own list 
   got from retrieve-all, get-trades-for-day and order history. Read it with
   `journalctl -u sudarshan-portfolio | grep "Analytics Token probe"`.
 * **Schema step 4** adds `tab_share` and `member_privacy`.
+* **Set from the owner's Family page** (v0.12.0). The four sharing ops are routes of the owner's
+  bridge (`/sudarshan/portfolio/api/family/shares` and `/family/privacy`), sealed under the owner's
+  purpose like every other route and never under the family's. The page writes a member's floor in
+  the same action as the family service's own record of their privacy: what the edit hides is
+  written to the floor first, what it shows is written to the floor last, after the family service
+  confirmed its own write, so a half-done edit can only leave the member seeing less. "Every member"
+  is a share for each role (`role:viewer`, `role:child`); a role share reaches a member once their
+  floor names their role.
 
 ### Import and export
 
