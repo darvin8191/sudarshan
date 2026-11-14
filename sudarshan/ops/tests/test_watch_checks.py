@@ -16,6 +16,10 @@ VECTORS = json.loads((HERE / "watch_vectors.json").read_text(encoding="utf-8"))
 SOURCE = HERE.parent / "watch" / "checks.py"
 
 
+#: Checks that count and tell news; they have no failing level.
+COUNTED = {"assistant", "telegram_links"}
+
+
 def _one(name: str, readings: dict, memory: dict) -> checks.Result:
     found = [r for r in checks.run_checks(readings, {name: memory}) if r.name == name]
     assert len(found) == 1, name
@@ -30,6 +34,7 @@ def test_a_check_over_its_vector(vector):
         assert dict(result.facts) == vector["facts"]
     if "keep" in vector:
         assert dict(result.keep) == vector["keep"]
+    assert dict(result.news) == vector.get("news", {})
     assert all(isinstance(value, str) for value in result.facts.values())
 
 
@@ -47,13 +52,16 @@ def test_once_per_cause_over_a_sequence_of_runs(sequence):
 def test_every_check_has_vectors_for_each_level_it_can_give():
     by_check: dict[str, set] = {}
     for vector in VECTORS["checks"]:
-        by_check.setdefault(vector["check"].split("_")[0], set()).add(vector["level"])
+        family = vector["check"] if vector["check"] in COUNTED else vector["check"].split("_")[0]
+        by_check.setdefault(family, set()).add(vector["level"])
     for family, levels in by_check.items():
         assert {"fine", "unread"} <= levels, family
-        assert levels & {"warning", "failing"}, family
+        assert family in COUNTED or levels & {"warning", "failing"}, family
     names = {result.name for result in checks.run_checks({}, {})}
     assert names == {f"service_{n}" for n in checks.SERVICES} | {
         "openalgo", "login", "feed", "instrument_list", "disk", "memory", "certificate",
+        "posture_locks", "posture_debug", "posture_modes", "posture_ports", "posture_reboot",
+        "posture_updates", "assistant", "telegram_links", "backup", "drill", "historify",
     }  # fmt: skip
 
 
@@ -114,3 +122,14 @@ def test_the_checks_are_pure():
         if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
     }
     assert not banned & called
+
+
+def test_what_the_watch_tells_and_what_it_only_shows():
+    for name in checks.SHOWN_ONLY:
+        assert not checks.told_by({"check": name, "level": "warning", "facts": {}})
+    for cause, told in (("late", True), ("failed", False), ("never", False)):
+        change = {"check": "drill", "level": "warning", "facts": {"cause": cause}}
+        assert checks.told_by(change) is told, cause
+    assert not checks.told_by({"check": "drill", "level": "fine", "facts": {}})
+    assert checks.told_by({"check": "posture_locks", "level": "warning", "facts": {}})
+    assert checks.told_by({"check": "disk", "level": "fine", "facts": {}})

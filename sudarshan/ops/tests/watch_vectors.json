@@ -889,6 +889,637 @@
    },
    "memory": {},
    "level": "unread"
+  },
+  {
+   "name": "locks hold and it is off",
+   "check": "posture_locks",
+   "readings": {
+    "posture": {
+     "mcp": {
+      "switched_on": false,
+      "locked": true,
+      "approval": true
+     }
+    }
+   },
+   "memory": {},
+   "level": "fine"
+  },
+  {
+   "name": "locks missing warn even while it is off",
+   "check": "posture_locks",
+   "readings": {
+    "posture": {
+     "mcp": {
+      "switched_on": false,
+      "locked": false,
+      "approval": true
+     }
+    }
+   },
+   "memory": {},
+   "level": "warning",
+   "facts": {
+    "cause": "locks"
+   }
+  },
+  {
+   "name": "switched on without approval warns",
+   "check": "posture_locks",
+   "readings": {
+    "posture": {
+     "mcp": {
+      "switched_on": true,
+      "locked": true,
+      "approval": false
+     }
+    }
+   },
+   "memory": {},
+   "level": "warning",
+   "facts": {
+    "cause": "approval"
+   }
+  },
+  {
+   "name": "approval off while it is off is not yet a fault",
+   "check": "posture_locks",
+   "readings": {
+    "posture": {
+     "mcp": {
+      "switched_on": false,
+      "locked": true,
+      "approval": false
+     }
+    }
+   },
+   "memory": {},
+   "level": "fine"
+  },
+  {
+   "name": "settings that could not be read",
+   "check": "posture_locks",
+   "readings": {
+    "posture": {
+     "mcp": null
+    }
+   },
+   "memory": {},
+   "level": "unread"
+  },
+  {
+   "name": "debug off",
+   "check": "posture_debug",
+   "readings": {
+    "posture": {
+     "debug": false
+    }
+   },
+   "memory": {},
+   "level": "fine"
+  },
+  {
+   "name": "debug on",
+   "check": "posture_debug",
+   "readings": {
+    "posture": {
+     "debug": true
+    }
+   },
+   "memory": {},
+   "level": "warning"
+  },
+  {
+   "name": "debug unread",
+   "check": "posture_debug",
+   "readings": {},
+   "memory": {},
+   "level": "unread"
+  },
+  {
+   "name": "all closed",
+   "check": "posture_modes",
+   "readings": {
+    "posture": {
+     "loose": []
+    }
+   },
+   "memory": {},
+   "level": "fine"
+  },
+  {
+   "name": "the vault open to others",
+   "check": "posture_modes",
+   "readings": {
+    "posture": {
+     "loose": [
+      "vault",
+      "env"
+     ]
+    }
+   },
+   "memory": {},
+   "level": "warning",
+   "facts": {
+    "what": "env"
+   }
+  },
+  {
+   "name": "nothing could be looked at",
+   "check": "posture_modes",
+   "readings": {
+    "posture": {
+     "loose": null
+    }
+   },
+   "memory": {},
+   "level": "unread"
+  },
+  {
+   "name": "every port inside",
+   "check": "posture_ports",
+   "readings": {
+    "posture": {
+     "open_ports": []
+    }
+   },
+   "memory": {},
+   "level": "fine"
+  },
+  {
+   "name": "a port on the network",
+   "check": "posture_ports",
+   "readings": {
+    "posture": {
+     "open_ports": [
+      "5584"
+     ]
+    }
+   },
+   "memory": {},
+   "level": "warning",
+   "facts": {
+    "port": "5584"
+   }
+  },
+  {
+   "name": "the table could not be read",
+   "check": "posture_ports",
+   "readings": {
+    "posture": {
+     "open_ports": null
+    }
+   },
+   "memory": {},
+   "level": "unread"
+  },
+  {
+   "name": "no restart asked",
+   "check": "posture_reboot",
+   "readings": {
+    "posture": {
+     "reboot": false
+    }
+   },
+   "memory": {},
+   "level": "fine"
+  },
+  {
+   "name": "a restart is asked for",
+   "check": "posture_reboot",
+   "readings": {
+    "posture": {
+     "reboot": true
+    }
+   },
+   "memory": {},
+   "level": "warning"
+  },
+  {
+   "name": "the flag unread",
+   "check": "posture_reboot",
+   "readings": {
+    "posture": {}
+   },
+   "memory": {},
+   "level": "unread"
+  },
+  {
+   "name": "only ordinary updates wait",
+   "check": "posture_updates",
+   "readings": {
+    "posture": {
+     "updates": {
+      "all": 5,
+      "security": 0
+     }
+    }
+   },
+   "memory": {},
+   "level": "fine",
+   "facts": {
+    "all": "5",
+    "security": "0"
+   }
+  },
+  {
+   "name": "security updates wait",
+   "check": "posture_updates",
+   "readings": {
+    "posture": {
+     "updates": {
+      "all": 5,
+      "security": 3
+     }
+    }
+   },
+   "memory": {},
+   "level": "warning",
+   "facts": {
+    "all": "5",
+    "security": "3"
+   }
+  },
+  {
+   "name": "a system that keeps no count",
+   "check": "posture_updates",
+   "readings": {
+    "posture": {
+     "updates": null
+    }
+   },
+   "memory": {},
+   "level": "unread"
+  },
+  {
+   "name": "the first count tells nothing",
+   "check": "assistant",
+   "readings": {
+    "counts": {
+     "clients": 1,
+     "families": 1,
+     "links": 1
+    }
+   },
+   "memory": {},
+   "level": "fine",
+   "facts": {
+    "clients": "1",
+    "families": "1"
+   },
+   "keep": {
+    "clients": 1,
+    "families": 1
+   }
+  },
+  {
+   "name": "no connection at all is off",
+   "check": "assistant",
+   "readings": {
+    "counts": {
+     "clients": 0,
+     "families": 0,
+     "links": 1
+    }
+   },
+   "memory": {
+    "clients": 0,
+    "families": 0
+   },
+   "level": "off",
+   "keep": {
+    "clients": 0,
+    "families": 0
+   }
+  },
+  {
+   "name": "one more approved client is news",
+   "check": "assistant",
+   "readings": {
+    "counts": {
+     "clients": 1,
+     "families": 0,
+     "links": 1
+    }
+   },
+   "memory": {
+    "clients": 0,
+    "families": 0
+   },
+   "level": "fine",
+   "keep": {
+    "clients": 1,
+    "families": 0
+   },
+   "news": {
+    "what": "connection"
+   }
+  },
+  {
+   "name": "one more sign-in is news",
+   "check": "assistant",
+   "readings": {
+    "counts": {
+     "clients": 1,
+     "families": 2,
+     "links": 1
+    }
+   },
+   "memory": {
+    "clients": 1,
+    "families": 1
+   },
+   "level": "fine",
+   "news": {
+    "what": "connection"
+   }
+  },
+  {
+   "name": "one fewer is not news",
+   "check": "assistant",
+   "readings": {
+    "counts": {
+     "clients": 1,
+     "families": 0,
+     "links": 1
+    }
+   },
+   "memory": {
+    "clients": 1,
+    "families": 1
+   },
+   "level": "fine",
+   "keep": {
+    "clients": 1,
+    "families": 0
+   }
+  },
+  {
+   "name": "counts unread keep what was known",
+   "check": "assistant",
+   "readings": {
+    "counts": null
+   },
+   "memory": {
+    "clients": 1,
+    "families": 1
+   },
+   "level": "unread",
+   "keep": {
+    "clients": 1,
+    "families": 1
+   }
+  },
+  {
+   "name": "the first count of links tells nothing",
+   "check": "telegram_links",
+   "readings": {
+    "counts": {
+     "clients": 0,
+     "families": 0,
+     "links": 1
+    }
+   },
+   "memory": {},
+   "level": "fine",
+   "facts": {
+    "links": "1"
+   },
+   "keep": {
+    "links": 1
+   }
+  },
+  {
+   "name": "a link added",
+   "check": "telegram_links",
+   "readings": {
+    "counts": {
+     "clients": 0,
+     "families": 0,
+     "links": 2
+    }
+   },
+   "memory": {
+    "links": 1
+   },
+   "level": "fine",
+   "keep": {
+    "links": 2
+   },
+   "news": {
+    "what": "linked"
+   }
+  },
+  {
+   "name": "a link removed",
+   "check": "telegram_links",
+   "readings": {
+    "counts": {
+     "clients": 0,
+     "families": 0,
+     "links": 0
+    }
+   },
+   "memory": {
+    "links": 1
+   },
+   "level": "fine",
+   "keep": {
+    "links": 0
+   },
+   "news": {
+    "what": "unlinked"
+   }
+  },
+  {
+   "name": "links unread",
+   "check": "telegram_links",
+   "readings": {
+    "counts": {
+     "links": -1
+    }
+   },
+   "memory": {
+    "links": 1
+   },
+   "level": "unread",
+   "keep": {
+    "links": 1
+   }
+  },
+  {
+   "name": "last night's archive",
+   "check": "backup",
+   "readings": {
+    "backup": {
+     "age_h": 17.6,
+     "size_mb": 412,
+     "offsite": "ok",
+     "fy": "2026-27",
+     "fy_mb": 398
+    }
+   },
+   "memory": {},
+   "level": "fine",
+   "facts": {
+    "age_h": "17",
+    "size_mb": "412",
+    "offsite": "ok",
+    "fy": "2026-27",
+    "fy_mb": "398"
+   }
+  },
+  {
+   "name": "an archive older than 30 hours",
+   "check": "backup",
+   "readings": {
+    "backup": {
+     "age_h": 41.0,
+     "size_mb": 412
+    }
+   },
+   "memory": {},
+   "level": "warning",
+   "facts": {
+    "age_h": "41",
+    "size_mb": "412"
+   }
+  },
+  {
+   "name": "no archive yet is off",
+   "check": "backup",
+   "readings": {
+    "backup": {
+     "age_h": null
+    }
+   },
+   "memory": {},
+   "level": "off"
+  },
+  {
+   "name": "the folder unread",
+   "check": "backup",
+   "readings": {
+    "backup": null
+   },
+   "memory": {},
+   "level": "unread"
+  },
+  {
+   "name": "a drill that passed last month",
+   "check": "drill",
+   "readings": {
+    "now": 1800000000,
+    "drill": {
+     "at": 1797408000,
+     "ok": true
+    }
+   },
+   "memory": {},
+   "level": "fine",
+   "facts": {
+    "days": "30",
+    "when": "1797408000"
+   }
+  },
+  {
+   "name": "a drill that failed",
+   "check": "drill",
+   "readings": {
+    "now": 1800000000,
+    "drill": {
+     "at": 1799913600,
+     "ok": false
+    }
+   },
+   "memory": {},
+   "level": "warning",
+   "facts": {
+    "days": "1",
+    "when": "1799913600",
+    "cause": "failed"
+   }
+  },
+  {
+   "name": "a drill over 100 days old",
+   "check": "drill",
+   "readings": {
+    "now": 1800000000,
+    "drill": {
+     "at": 1791273600,
+     "ok": true
+    }
+   },
+   "memory": {},
+   "level": "warning",
+   "facts": {
+    "days": "101",
+    "when": "1791273600",
+    "cause": "late"
+   }
+  },
+  {
+   "name": "never drilled",
+   "check": "drill",
+   "readings": {
+    "now": 1800000000,
+    "drill": {}
+   },
+   "memory": {},
+   "level": "warning",
+   "facts": {
+    "cause": "never"
+   }
+  },
+  {
+   "name": "the drill's result unread",
+   "check": "drill",
+   "readings": {
+    "now": 1800000000,
+    "drill": null
+   },
+   "memory": {},
+   "level": "unread"
+  },
+  {
+   "name": "a small Historify",
+   "check": "historify",
+   "readings": {
+    "historify_gb": 0.8
+   },
+   "memory": {},
+   "level": "fine",
+   "facts": {
+    "gb": "0.8"
+   }
+  },
+  {
+   "name": "Historify at 3 GB",
+   "check": "historify",
+   "readings": {
+    "historify_gb": 3.0
+   },
+   "memory": {},
+   "level": "warning",
+   "facts": {
+    "gb": "3.0"
+   }
+  },
+  {
+   "name": "no Historify file is off",
+   "check": "historify",
+   "readings": {
+    "historify_gb": 0.0
+   },
+   "memory": {},
+   "level": "off"
+  },
+  {
+   "name": "Historify unread",
+   "check": "historify",
+   "readings": {},
+   "memory": {},
+   "level": "unread"
   }
  ],
  "sequences": [

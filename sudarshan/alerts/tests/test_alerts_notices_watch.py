@@ -38,7 +38,7 @@ def test_a_silent_service_names_what_stopped_and_when():
     assert said("watch_failing", "service_feed", service="feed", minutes="4") == (
         "SUDARSHAN's price feed stopped answering at 10:38 IST. Prices, market alerts and the "
         "screener are stopped. The server restarts it by itself; if this message comes again, "
-        "have the server looked at."
+        "open the System page and have the server looked at."
     )
     for name in checks.SERVICES:
         text = said("watch_failing", f"service_{name}", service=name, minutes="4")
@@ -228,3 +228,58 @@ def test_from_the_watchs_run_to_one_telegram_message_and_its_recovery(tmp_path, 
         assert len(send.texts) == 2, "each told once"
 
     asyncio.run(scenario())
+
+
+def test_posture_warnings_name_the_setting_and_wait_for_the_close():
+    locks = said("watch_warning", "posture_locks", cause="locks")
+    assert "OPENALGO_MCP_READ_ONLY=1" in locks and "stays switched off" in locks
+    approval = said("watch_warning", "posture_locks", cause="approval")
+    assert "MCP_OAUTH_REQUIRE_APPROVAL=True" in approval
+    assert "FLASK_DEBUG=False" in said("watch_warning", "posture_debug")
+    for what, begins in (("settings", "SUDARSHAN's settings folder"), ("vault", "The folder"),
+                         ("env", "OpenAlgo's settings file"), ("x", "One of")):  # fmt: skip
+        assert said("watch_warning", "posture_modes", what=what).startswith(begins)
+    assert "listening on the network" in said("watch_warning", "posture_ports", port="5584")
+    assert "grown to 3.4 GB" in said("watch_warning", "historify", gb="3.4")
+    assert "was 104 days ago" in said("watch_warning", "drill", cause="late", days="104")
+    for check in ("posture_locks", "posture_debug", "posture_modes", "posture_ports", "historify"):
+        assert not notices._at_once(event("watch_warning", check))
+        assert said("watch_fine", check, was="warning").endswith(("again.", "3 GB."))
+    for words in (locks, approval):
+        assert "sudarshan-" not in words and "posture" not in words
+
+
+def test_news_is_told_at_once_in_the_owners_words():
+    new = event("watch_new", "assistant", what="connection", clients="1", families="1")
+    assert notices._at_once(new)
+    assert compose([new], T0).splitlines()[1] == (
+        "A new AI connection to SUDARSHAN was approved shortly before 10:42 IST. If this was "
+        "not you, press Disconnect the assistant on the System page."
+    )
+    linked = said("watch_new", "telegram_links", what="linked", links="2")
+    assert linked.startswith("A Telegram account was linked to your bot shortly before 10:42 IST.")
+    assert "API key" in linked
+    assert said("watch_new", "telegram_links", what="unlinked", links="1") == (
+        "A Telegram account was unlinked from your bot shortly before 10:42 IST."
+    )
+    assert compose([event("watch_new", "assistant", what="other")], T0) == BRAND
+
+
+def test_the_restore_drills_result_in_the_owners_words():
+    def drill(kind: str, **facts) -> str:
+        made = Event(f"drill-{kind}", kind, T0.timestamp(), "drill-1", "backup", facts)
+        assert not notices._at_once(made), "a drill's result waits for the close"
+        return compose([made], T0).splitlines()[1]
+
+    assert drill("drill_passed", databases="9", archive="sudarshan-backup-x.tar.gz") == (
+        "The restore test of the backups passed: the newest backup reads back whole, its 9 "
+        "databases open, and the vault opens with the backup's own keys."
+    )
+    failed = drill("drill_failed", item="vault_key", name="")
+    assert failed.startswith(
+        "The restore test of the backups FAILED. The vault in the archive does not open with "
+        "the keys in the same archive. Until this is put right"
+    ) and failed.endswith("open the System page and have the server looked at.")
+    assert "(logs.db)" in drill("drill_failed", item="database", name="logs.db")
+    assert "<" not in drill("drill_failed", item="database", name="<b>x</b>")
+    assert "stopped unexpectedly" in drill("drill_failed", item="something-new")

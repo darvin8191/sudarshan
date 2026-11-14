@@ -30,6 +30,7 @@ import {
   NotebookPen,
   ScanSearch,
   Search,
+  ServerCog,
   Settings,
   ShieldAlert,
   TrendingUp,
@@ -149,6 +150,8 @@ export const profileMenuItems: NavItem[] = [
   { href: '/sandbox', label: 'Sandbox', icon: FlaskConical, group: 'System' },
   { href: '/leverage', label: 'Leverage', icon: Gauge, group: 'System' },
   { href: '/admin', label: 'Admin', icon: Settings, group: 'System' },
+  // SUDARSHAN M20.8: what the server's watch last saw, and Disconnect the assistant.
+  { href: '/system', label: 'System', icon: ServerCog, group: 'System' },
   // SUDARSHAN: version, build and licences (M1.16).
   { href: '/about', label: 'About', icon: Info, group: 'System' },
 ]
@@ -197,10 +200,10 @@ export function menuGroups(items: NavItem[], { phone }: { phone: boolean }): Men
 }
 
 /**
- * SUDARSHAN: entries whose page owns addresses under its own (`/options/NFO/NIFTY`). Only these
- * match by prefix; every other entry is a leaf and matches exactly.
+ * SUDARSHAN: entries whose page owns addresses under its own (`/options/NFO/NIFTY`,
+ * `/chart/NSE/INFY`). Only these match by prefix; every other entry is a leaf and matches exactly.
  */
-export const NAV_WITH_CHILDREN: ReadonlySet<string> = new Set(['/options'])
+export const NAV_WITH_CHILDREN: ReadonlySet<string> = new Set(['/options', '/chart'])
 
 const owns = (pathname: string, href: string): boolean =>
   pathname === href || (NAV_WITH_CHILDREN.has(href) && pathname.startsWith(`${href}/`))

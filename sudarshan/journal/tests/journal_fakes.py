@@ -136,7 +136,8 @@ class FakeFeed(_Server):
 
 class FakePortfolio(_Server):
     """sudarshan-portfolio's sealed API as the journal uses it: ``POST /v1/<op>`` under the
-    journal purpose. ``answers[op]`` is the ``data`` of the envelope (or ``(status, body)``);
+    journal purpose. ``answers[op]`` is the ``data`` of the envelope (or ``(status, body)``, or a
+    function of the request's args that returns either);
     every call is recorded as (op, args, principal)."""
 
     def __init__(self, key=None):
@@ -174,6 +175,8 @@ class FakePortfolio(_Server):
                     return self._send(403, {"status": "error", "code": "forbidden"})
                 fake.calls.append((op, message.get("args") or {}, message.get("principal")))
                 answer = fake.answers.get(op)
+                if callable(answer):  # an answer that depends on what was asked
+                    answer = answer(message.get("args") or {})
                 if isinstance(answer, tuple):
                     return self._send(*answer)
                 if answer is None:

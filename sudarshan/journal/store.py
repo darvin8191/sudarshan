@@ -58,7 +58,17 @@ OWNER = "owner"
 #: Columns that hold JSON (decoded at the boundary), and columns that are flags. ``checklist`` is
 #: JSON too but leaves the store as the text it was saved as (the contract's ``checklist:string``).
 JSON_COLUMNS = frozenset(
-    {"mistakes", "screenshots", "rules", "positions_overnight", "rows", "delivery", "value"}
+    {
+        "mistakes",
+        "screenshots",
+        "rules",
+        "positions_overnight",
+        "rows",
+        "delivery",
+        "value",
+        "parts",
+        "charges_actual_parts",
+    }
 )
 FLAG_COLUMNS = frozenset(
     {
@@ -446,6 +456,17 @@ class Tx:
         found = self.conn.execute(query.order_by(t.c.exch_ts_ms, t.c.trade_id)).mappings()
         return [self.out(row) for row in found]
 
+    def fills_between(self, mode: str, start_day: int, end_day: int) -> list[dict[str, Any]]:
+        """The fills of a mode from ``start_day`` to ``end_day``, withdrawn ones aside."""
+        t = self._t("fill")
+        query = (
+            select(t)
+            .where(self._mine(t), t.c.mode == mode, t.c.day >= start_day, t.c.day <= end_day,
+                   t.c.source != "withdrawn")
+            .order_by(t.c.exch_ts_ms, t.c.trade_id)
+        )  # fmt: skip
+        return [self.out(row) for row in self.conn.execute(query).mappings()]
+
     def fills_of_orders(self, mode: str, order_ids: Iterable[str]) -> list[dict[str, Any]]:
         """Every fill of the named orders (withdrawn ones aside), oldest first: an order is
         priced whole, whichever trades hold its fills (review M1)."""
@@ -637,25 +658,6 @@ class Tx:
         return {"unmatched": int(unmatched or 0), "expired": int(expired or 0),
                 "unclosed": int(unclosed or 0)}  # fmt: skip
 
-    def trips_sold_in(self, mode: str, start_day: int, end_day: int) -> list[dict[str, Any]]:
-        """The carry trades (open or closed) with an exit leg on a day from ``start_day`` to
-        ``end_day``: the tax pack books each such sale in its own year (review H1)."""
-        t, legs, fills = self._t("round_trip"), self._t("fill_leg"), self._t("fill")
-        sold = (
-            select(legs.c.round_trip_id)
-            .select_from(legs.join(fills, fills.c.id == legs.c.fill_id))
-            .where(
-                self._mine(legs), fills.c.principal == self.who, legs.c.role == "exit",
-                fills.c.day >= start_day, fills.c.day <= end_day,
-            )
-        )  # fmt: skip
-        query = select(t).where(
-            self._mine(t), t.c.mode == mode, t.c.product_class == "carry",
-            t.c.status.in_(("open", "closed")), t.c.id.in_(sold),
-        )  # fmt: skip
-        return [self.out(r) for r in self.conn.execute(query.order_by(t.c.id)).mappings()]
-
-    # ---- what was held before the journal's first fill of an instrument (review B1) ----
     def openings_of(self, mode: str) -> dict[tuple[str, str, str], dict[str, Any]]:
         """The kept openings of a mode by (exchange, symbol, product class)."""
         t = self._t("key_opening")
@@ -960,9 +962,74 @@ class Tx:
         where = (self._mine(t), t.c.segment == row["segment"],
                  t.c.period_from == row["period_from"], t.c.period_to == row["period_to"])  # fmt: skip
         self.conn.execute(delete(t).where(*where))
+        row = {"basis": migrations.basis_of(row["period_from"], row["period_to"]), **row}
         self.conn.execute(
             insert(t).values(**row, principal=self.who, created_at=now, updated_at=now)
         )
+
+    def upstox_charges_get(self, segment: str, period_from: int,
+                           period_to: int) -> dict[str, Any] | None:  # fmt: skip
+        t = self._t("upstox_charges")
+        row = self.conn.execute(
+            select(t).where(self._mine(t), t.c.segment == segment,
+                            t.c.period_from == period_from, t.c.period_to == period_to)
+        ).mappings().first()  # fmt: skip
+        return self.out(row)
+
+    # ---- Upstox's actual charges, order by order (M14.2) ----
+    def fill_days(self, mode: str) -> list[tuple[int, str]]:
+        """Each (day, exchange) the mode holds a fill of, withdrawn ones aside, oldest first."""
+        t = self._t("fill")
+        query = (
+            select(t.c.day, t.c.exchange)
+            .where(self._mine(t), t.c.mode == mode, t.c.source != "withdrawn")
+            .distinct()
+            .order_by(t.c.day, t.c.exchange)
+        )
+        return [(int(day), str(exchange)) for day, exchange in self.conn.execute(query)]
+
+    def charges_orders_put(self, mode: str, day: int, segment: str,
+                           rows: Iterable[Mapping[str, Any]], now: int) -> int:  # fmt: skip
+        """A day's and segment's orders with their share of Upstox's charges (``order_id``,
+        ``parts``, ``total_paise``, ``basis``), in place of what was kept of them."""
+        t = self._t("charges_order")
+        self.conn.execute(
+            delete(t).where(self._mine(t), t.c.mode == mode, t.c.day == day,
+                            t.c.segment == segment)
+        )  # fmt: skip
+        made = [
+            {**self.encode(row), "principal": self.who, "mode": mode, "day": day,
+             "segment": segment, "created_at": now, "updated_at": now}
+            for row in rows
+        ]  # fmt: skip
+        if made:
+            self.conn.execute(insert(t), made)
+        return len(made)
+
+    def charges_orders_of(self, mode: str,
+                          order_ids: Iterable[str]) -> dict[tuple[str, int], dict[str, Any]]:  # fmt: skip
+        """The named orders' shares of Upstox's charges, by (order id, day)."""
+        t = self._t("charges_order")
+        out: dict[tuple[str, int], dict[str, Any]] = {}
+        for batch in chunks(sorted(set(order_ids))):
+            for row in self.conn.execute(
+                select(t).where(self._mine(t), t.c.mode == mode, t.c.order_id.in_(batch))
+            ).mappings():
+                out[(row["order_id"], int(row["day"]))] = self.out(row)
+        return out
+
+    def charges_order_days(self, mode: str, segment: str, start: int,
+                           end: int) -> dict[int, str]:  # fmt: skip
+        """The days of ``start`` to ``end`` whose orders of a segment carry an actual, each
+        with its basis."""
+        t = self._t("charges_order")
+        query = (
+            select(t.c.day, t.c.basis)
+            .where(self._mine(t), t.c.mode == mode, t.c.segment == segment,
+                   t.c.day >= start, t.c.day <= end)
+            .distinct()
+        )  # fmt: skip
+        return {int(day): str(basis) for day, basis in self.conn.execute(query)}
 
     # ---- the job log (shared: belongs to no one) ----
     def job_get(self, name: str, day: int) -> dict[str, Any] | None:

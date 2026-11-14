@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router'
@@ -30,6 +32,27 @@ function currentLinks(container: HTMLElement) {
 }
 
 describe('Navbar', () => {
+  // SUDARSHAN (SCR-P item 5): at 360 px the account end grew past the screen in Analyze mode and
+  // before the fonts arrived, and the page scrolled sideways. Measured in e2e/sd-dashboard.spec.ts;
+  // pinned here, where CI runs, by what makes it hold: the lockup's link is the part that may
+  // shrink on a phone, the account end never is, and the bar's lockup wraps its icon away.
+  it('lets the lockup, never the account controls, give way on a phone', () => {
+    renderNavbar('/dashboard')
+    const row = screen.getByTestId('navbar-row')
+    const lockup = within(row).getByRole('link', { name: /सुदर्शन\s*SUDARSHAN/ })
+    const classes = lockup.className.split(/\s+/)
+    expect(classes).toContain('min-w-0')
+    expect(classes).not.toContain('shrink-0')
+    expect(classes).toContain('md:shrink-0')
+    expect(row.lastElementChild?.className.split(/\s+/)).toContain('shrink-0')
+
+    const css = readFileSync(join(process.cwd(), 'src/sudarshan/theme.css'), 'utf8')
+    const bar = /\.sd-lockup--bar \{([^}]*)\}/.exec(css)?.[1] ?? ''
+    expect(bar).toMatch(/flex-flow:\s*row-reverse wrap/)
+    expect(bar).toMatch(/overflow:\s*clip/)
+    expect(bar).toMatch(/min-width:\s*0/)
+  })
+
   it('marks only the active route as current in desktop navigation', () => {
     renderNavbar('/positions')
 

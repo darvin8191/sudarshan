@@ -4,7 +4,10 @@
       -> events.jsonl   one line per change, for the notice desk (sudarshan/alerts/notices.py)
       -> state.json     what each check remembers and what was last told (private, 600)
       -> report.json    every check's level now, for the System page (640)
+      -> log/<year>.jsonl  the diary: every notice of every producer, kept 8 years (diary.py)
       -> the outside heartbeat (heartbeat.py), when the owner has set one up
+
+On Sunday evening one more event, the week's summary (summary.py).
 
 All three are in the unit's state folder, ``/var/lib/sudarshan-watch``. The watch only records:
 it holds no key to Telegram or OpenAlgo and sends nothing itself, as the deploy tool and the
@@ -28,15 +31,12 @@ from sudarshan.ops import events
 from sudarshan.ops.files import read_regular
 from sudarshan.ops.release import installed_release
 
-from . import checks, heartbeat, readers
+from . import checks, diary, heartbeat, readers, summary
 
 STATE_DIR = "/var/lib/sudarshan-watch"
 APP_DIR = "/opt/sudarshan/apps/openalgo"
 FORMAT = 1
 MAX_STATE = 1 << 18
-#: Checks whose change is never an event: OpenAlgo carries the notices, so its own silence is told
-#: by the outside heartbeat alone.
-NO_EVENT = frozenset({"openalgo"})
 KIND = {checks.FAILING: "watch_failing", checks.WARNING: "watch_warning", checks.FINE: "watch_fine"}
 
 
@@ -110,6 +110,7 @@ def judge(readings: Mapping, state: Mapping) -> tuple[list[checks.Result], list[
         "memory": {result.name: dict(result.keep) for result in results},
         "since": since,
         "master_date": master if master else state.get("master_date"),
+        "posture": readings.get("posture") or state.get("posture"),
     }
     return results, moved, kept
 
@@ -135,22 +136,38 @@ def report_of(results: list[checks.Result], state: Mapping, now: float, release,
     }
 
 
-def record_changes(spool: Path, moved: list[dict], now: float) -> int:
-    """One event per change, all of one run together; returns how many are in the file."""
+def due_events(results: list[checks.Result], moved: list[dict]) -> list[dict]:
+    """What a run has to record: each change of level that is the watch's to tell
+    (``checks.told_by``), and each check's news (a new AI connection, a Telegram link)."""
+    due = [
+        {"kind": KIND[change["level"]], "check": change["check"], "tag": change["level"],
+         "facts": {"was": change["was"], **change["facts"]}}
+        for change in moved
+        if checks.told_by(change)
+    ]  # fmt: skip
+    due += [
+        {"kind": "watch_new", "check": result.name, "tag": "new",
+         "facts": {**result.facts, **result.news}}
+        for result in results
+        if result.news
+    ]  # fmt: skip
+    return due
+
+
+def record_changes(spool: Path, due: list[dict], now: float) -> int:
+    """One event per entry of ``due_events``, all of one run together; returns how many are in
+    the file."""
     run, written = f"watch-{int(now)}", 0
-    for change in moved:
-        if change["check"] in NO_EVENT:
-            continue
+    for entry in due:
         written += events.record(
             spool,
-            kind=KIND[change["level"]],
-            event_id=f"watch-{change['check']}-{change['level']}-{int(now) // 60}",
+            kind=entry["kind"],
+            event_id=f"watch-{entry['check']}-{entry['tag']}-{int(now) // 60}",
             at=now,
             run=run,
             src="watch",
-            check=change["check"],
-            was=change["was"],
-            **change["facts"],
+            check=entry["check"],
+            **entry["facts"],
         )
     return written
 
@@ -163,6 +180,7 @@ def run_once(
     installing: Callable[[], bool] = readers.installing,
     env: Mapping[str, str] | None = None,
     send: Callable[[str], bool] = heartbeat.request,
+    measure: Callable[[Path], dict] = summary.sizes,
 ) -> int:
     """One run. 0 when it finished (whatever the checks said), 1 when its files could not be
     written, 0 with nothing done when another run holds the folder or while the deploy tool is
@@ -180,10 +198,21 @@ def run_once(
             return 0
         now = clock()
         state = load_state(settings.state_file)
-        readings = gather(now, settings.app_dir, settings.env_file, state.get("master_date"))
+        readings = gather(
+            now, settings.app_dir, settings.env_file, state.get("master_date"), state.get("posture")
+        )
         results, moved, kept = judge(readings, state)
-        due = sum(change["check"] not in NO_EVENT for change in moved)
-        kept_ok = record_changes(settings.spool, moved, now) == due
+        due = due_events(results, moved)
+        kept["usage"] = summary.sample(state.get("usage"), readings)
+        kept["summary_week"] = state.get("summary_week")
+        if summary.due(now, kept["summary_week"]):  # Sunday evening, once
+            told = summary.facts(results, kept["usage"], measure(settings.app_dir))
+            due.append({"kind": "watch_summary", "check": "summary", "tag": "week", "facts": told})
+            kept["summary_week"] = summary.week_of(now)
+            kept["usage"] = {"cpu_prev": kept["usage"]["cpu_prev"]}  # a new week starts counting
+        kept_ok = record_changes(settings.spool, due, now) == len(due)
+        others = [spool for spool in diary.SPOOLS if spool != events.WATCH_SPOOL]
+        diary.keep(settings.state_dir, now, [*others, settings.spool])
         if kept_ok:  # else not kept either: the next run finds the same change and tells it
             try:
                 write_json(settings.state_file, kept, 0o600)

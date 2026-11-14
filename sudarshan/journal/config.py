@@ -11,6 +11,7 @@ returned by ``read_pepper`` and kept out of ``Settings``. The journal never read
 | setting | default |
 |---|---|
 | ``SUDARSHAN_JOURNAL`` | ``off`` (the release sets it) |
+| ``SUDARSHAN_TAX`` | ``off`` (the P7 release sets it, in OpenAlgo's ``.env``, where the portfolio reads the same name): Upstox's actual charges by day and month, their comparison with the estimate, and the tax working paper in the Tax pack |
 | ``SUDARSHAN_JOURNAL_HTTP_PORT`` | ``5586`` (127.0.0.1 only) |
 | ``SUDARSHAN_JOURNAL_FEED_URL`` | ``http://127.0.0.1:5580`` (loopback only) |
 | ``SUDARSHAN_JOURNAL_FEED_ZMQ`` | ``tcp://127.0.0.1:5581`` (loopback only) |
@@ -173,6 +174,9 @@ def _app_path(raw: str, app_dir: Path) -> Path:
 @dataclass(frozen=True)
 class Settings:
     enabled: bool
+    #: The P7 switch the portfolio reads too (``SUDARSHAN_TAX``): off means no charges are read
+    #: of Upstox by day or month, nothing is compared and the Tax pack asks for no working paper.
+    tax: bool = False
     http_port: int = PORT
     feed_url: str = FEED_URL
     feed_zmq: str = FEED_ZMQ
@@ -212,6 +216,7 @@ class Settings:
         state_dir = get("SUDARSHAN_JOURNAL_STATE_DIR") or get("STATE_DIRECTORY") or STATE_DIR
         return cls(
             enabled=_switch(env, "SUDARSHAN_JOURNAL", False),
+            tax=_switch(env, "SUDARSHAN_TAX", False),
             http_port=_number(env, "SUDARSHAN_JOURNAL_HTTP_PORT", PORT, 1, 65535),
             feed_url=_loopback_url(env, "SUDARSHAN_JOURNAL_FEED_URL", FEED_URL),
             feed_zmq=_loopback_url(env, "SUDARSHAN_JOURNAL_FEED_ZMQ", FEED_ZMQ, "tcp"),

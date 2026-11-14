@@ -1,8 +1,10 @@
 // SUDARSHAN P7 F2 (M7.27): the owner's inputs to the tax working paper (design p7 9.1; owner
 // decisions 5, 7, 8, 9): losses brought forward from his filed returns beside SUDARSHAN's own
 // figure, the prices of 31 Jan 2018 of the old holdings the paper lists, days marked as delivery,
-// and how each account counts. Nothing is saved before its dry run has said, in the service's
-// sentences, what it changes in the year on screen; a changed field asks for the dry run again.
+// purchases from before Upstox's records, buyback tenders, his readings of the open rules,
+// and how each account counts (an account of his own tabs can be set as not for tax). Nothing is
+// saved before its dry run has said, in the service's sentences, what it changes in the year on
+// screen; a changed field asks for the dry run again.
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ChevronRight, Plus } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
@@ -12,44 +14,57 @@ import { dayOfInstant } from '../days'
 import { Box } from '../sheets/EntryFields'
 import { DANGER, FIELD, LABEL, PRIMARY, ProblemLine, SECONDARY } from '../sheets/TabFields'
 import { useSend } from '../sheets/useSend'
-import { dayText, priceText } from '../tab/format'
+import { dayText, priceText, quantityText } from '../tab/format'
 import { ACCOUNT_KIND_LABELS, CARRY_BUCKETS, type TaxInputs, type TaxPack } from '../types'
 import { fyLabel, fyOfDay, rs } from './format'
 import {
+  ALLOCATE,
   BUCKET_LABELS,
   countedAccounts,
   type Draft,
   draftOf,
+  FORM_TITLES,
   fmvWanted,
   type InputKind,
   KIND_WORDS,
+  type ListKind,
   MODE_WORDS,
+  modeDraft,
   newDraft,
+  OWN_MODES,
   ownFigure,
+  READINGS,
+  readingWords,
   rowOf,
+  settingsDraft,
 } from './inputs'
 import { TAX_KEY } from './keys'
 
 const ROW =
   'flex min-h-12 w-full items-center gap-2 py-1.5 text-left outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50'
 const ADD = `${SECONDARY} w-full text-[color:var(--brand)]`
+/** The kinds entered against one of the taxpayer's accounts that count. */
+const ON_ACCOUNT: ReadonlySet<InputKind> = new Set(['day_override', 'opening_lot', 'trade_mark'])
 
 function Choice({
   label,
   value,
   onChange,
   options,
+  none = 'Choose',
 }: {
   label: string
   value: string
   onChange: (value: string) => void
   options: readonly { value: string; label: string }[]
+  /** What the empty choice says; null when there is none. */
+  none?: string | null
 }) {
   return (
     <label className="flex min-w-0 flex-col gap-1.5">
       <span className={LABEL}>{label}</span>
       <select className={FIELD} value={value} onChange={(e) => onChange(e.target.value)}>
-        <option value="">Choose</option>
+        {none !== null && <option value="">{none}</option>}
         {options.map((option) => (
           <option key={option.value} value={option.value}>
             {option.label}
@@ -105,7 +120,24 @@ function Form({
   const running = fyOfDay(dayOfInstant(Date.now()))
   return (
     <div className="flex flex-col gap-3">
-      <h3 className="text-base font-bold">{KIND_WORDS[draft.kind].title}</h3>
+      <h3 className="text-base font-bold">{FORM_TITLES[draft.kind]}</h3>
+      {draft.kind === 'account_mode' && (
+        <>
+          <p className="text-[0.9375rem] font-semibold break-words">
+            {inputs.accounts.find((a) => a.id === draft.id)?.name}
+          </p>
+          <Choice
+            label="How it counts for tax"
+            value={fields.tax_mode ?? ''}
+            onChange={set('tax_mode')}
+            options={OWN_MODES.map((mode) => ({ value: mode, label: MODE_WORDS[mode] }))}
+          />
+          <p className="text-xs text-[color:var(--text-tertiary)]">
+            An account that is not for tax is left out of the working paper: its sales, its
+            dividends and its losses. Its entries stay in its tab.
+          </p>
+        </>
+      )}
       {draft.kind === 'carry' && (
         <>
           <Choice
@@ -134,7 +166,37 @@ function Form({
           />
         </>
       )}
-      {draft.kind === 'day_override' && (
+      {draft.kind === 'settings' && (
+        <>
+          {READINGS.map((reading) => {
+            const words: Record<string, string> = reading.words
+            return (
+              <Choice
+                key={reading.name}
+                label={reading.label}
+                value={fields[reading.name] ?? ''}
+                onChange={set(reading.name)}
+                none={`${words[reading.values[0]]} (the usual reading)`}
+                options={reading.values.slice(1).map((value) => ({ value, label: words[value] }))}
+              />
+            )
+          })}
+          <Choice
+            label={ALLOCATE.label}
+            value={fields.allocate_expenses ?? 'yes'}
+            onChange={set('allocate_expenses')}
+            none={null}
+            options={[
+              { value: 'yes', label: `${ALLOCATE.yes} (the usual reading)` },
+              { value: 'no', label: ALLOCATE.no },
+            ]}
+          />
+          <p className="text-xs text-[color:var(--text-tertiary)]">
+            The law leaves these open. Ask your CA which reading to use.
+          </p>
+        </>
+      )}
+      {ON_ACCOUNT.has(draft.kind) && (
         <Choice
           label="Account"
           value={fields.account_id ?? ''}
@@ -142,7 +204,7 @@ function Form({
           options={countedAccounts(inputs).map((a) => ({ value: String(a.id), label: a.name }))}
         />
       )}
-      {draft.kind !== 'carry' && (
+      {(draft.kind === 'fmv' || ON_ACCOUNT.has(draft.kind)) && (
         <Box
           label="ISIN of the share"
           value={fields.isin ?? ''}
@@ -166,6 +228,57 @@ function Form({
           value={fields.day ?? ''}
           onChange={set('day')}
         />
+      )}
+      {draft.kind === 'opening_lot' && (
+        <>
+          <Box
+            label="Day it was bought"
+            type="date"
+            value={fields.acquired_day ?? ''}
+            onChange={set('acquired_day')}
+          />
+          <Box
+            label="Quantity bought"
+            value={fields.qty ?? ''}
+            onChange={set('qty')}
+            hint="As bought on that day, before any later split or bonus."
+          />
+          <Box
+            label="What it cost in all, in rupees"
+            value={fields.cost ?? ''}
+            onChange={set('cost')}
+            hint="For the whole quantity, not for one share."
+          />
+          <Box
+            label="Note (optional)"
+            value={fields.note ?? ''}
+            onChange={set('note')}
+            inputMode="text"
+          />
+        </>
+      )}
+      {draft.kind === 'trade_mark' && (
+        <>
+          <Box
+            label="Day of the tender"
+            type="date"
+            value={fields.day ?? ''}
+            onChange={set('day')}
+          />
+          <Box label="Quantity tendered" value={fields.qty ?? ''} onChange={set('qty')} />
+          <Box
+            label="Buyback price for one share, in rupees"
+            value={fields.price ?? ''}
+            onChange={set('price')}
+          />
+          <Box
+            label="Upstox’s trade id (optional)"
+            value={fields.trade_id ?? ''}
+            onChange={set('trade_id')}
+            inputMode="text"
+            hint="Fill it when Upstox’s trade history lists the tender as a sale: that sale is then counted as the buyback. Leave it empty when the history has no row for it."
+          />
+        </>
       )}
       <ProblemLine problem={send.problem} />
       {effect !== null && (
@@ -207,6 +320,8 @@ function Form({
         Back to the list
       </button>
       {draft.id !== undefined &&
+        draft.kind !== 'account_mode' &&
+        draft.kind !== 'settings' &&
         (removing ? (
           <button
             type="button"
@@ -231,7 +346,7 @@ function Group({
   onAdd,
   empty,
 }: {
-  kind: InputKind
+  kind: ListKind
   children: React.ReactNode
   onAdd: () => void
   empty: boolean
@@ -363,6 +478,59 @@ function Lists({
           />
         ))}
       </Group>
+      <Group
+        kind="opening_lot"
+        empty={inputs.opening_lots.length === 0}
+        onAdd={() => onDraft(newDraft('opening_lot'))}
+      >
+        {inputs.opening_lots.map((row) => (
+          <Item
+            key={row.id}
+            title={row.isin}
+            sub={`${quantityText(row.qty_u)} bought ${dayText(row.acquired_day)} · ${
+              row.source === 'owner' ? (names.get(row.account_id) ?? '') : 'From Upstox’s report'
+            }`}
+            figure={rs(row.cost_paise)}
+            onOpen={row.source === 'owner' ? () => onDraft(draftOf('opening_lot', row)) : undefined}
+          />
+        ))}
+      </Group>
+      <Group
+        kind="trade_mark"
+        empty={inputs.trade_marks.length === 0}
+        onAdd={() => onDraft(newDraft('trade_mark'))}
+      >
+        {inputs.trade_marks.map((row) => (
+          <Item
+            key={row.id}
+            title={`${row.isin} on ${dayText(row.day)}`}
+            sub={`${quantityText(row.qty_u)} at ${priceText(row.price_u)} · ${names.get(row.account_id) ?? ''}`}
+            onOpen={() => onDraft(draftOf('trade_mark', row))}
+          />
+        ))}
+      </Group>
+      <section aria-label={FORM_TITLES.settings} className="flex flex-col gap-1">
+        <h3 className="text-base font-bold">{FORM_TITLES.settings}</h3>
+        <ul className="flex flex-col divide-y divide-[color:var(--divider)]">
+          {READINGS.map((reading) => (
+            <Item
+              key={reading.name}
+              title={reading.label}
+              sub={readingWords(reading, inputs.settings)}
+              onOpen={() => onDraft(settingsDraft(inputs.settings))}
+            />
+          ))}
+          <Item
+            title={ALLOCATE.label}
+            sub={
+              inputs.settings.allocate_expenses
+                ? `${ALLOCATE.yes} (the usual reading)`
+                : ALLOCATE.no
+            }
+            onOpen={() => onDraft(settingsDraft(inputs.settings))}
+          />
+        </ul>
+      </section>
       <section aria-label="Accounts" className="flex flex-col gap-1">
         <h3 className="text-base font-bold">Accounts</h3>
         <ul className="flex flex-col divide-y divide-[color:var(--divider)]">
@@ -371,11 +539,14 @@ function Lists({
               key={account.id}
               title={account.name}
               sub={`${ACCOUNT_KIND_LABELS[account.kind]} · ${MODE_WORDS[account.tax_mode]}`}
+              figure={account.kind === 'upstox' ? undefined : 'Change'}
+              onOpen={account.kind === 'upstox' ? undefined : () => onDraft(modeDraft(account))}
             />
           ))}
         </ul>
         <p className="text-xs text-[color:var(--text-tertiary)]">
-          How an account counts cannot be changed on this screen yet.
+          The Upstox account always counts from Upstox’s reports. An account of your own tabs counts
+          from its entries, or can be set as not for tax.
         </p>
       </section>
     </div>

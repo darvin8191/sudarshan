@@ -254,7 +254,7 @@
   },
   {
    "id": "C3e",
-   "note": "a day before the whole card begins uses the earliest row",
+   "note": "a day before the whole card begins (1 Apr 2024) uses the earliest row: the F&O STT of before 1 Oct 2024, 7,312.50 x 0.000625 = 4.57",
    "plan": "plus",
    "fills": [
     {
@@ -272,7 +272,7 @@
    ],
    "orders": 1,
    "parts_only": {
-    "stt_paise": 731,
+    "stt_paise": 457,
     "exchange_paise": 256
    }
   },
@@ -432,6 +432,117 @@
    ],
    "orders": 2,
    "brokerage_paise": 6000
+  },
+  {
+   "id": "C8",
+   "note": "an option trade of July 2024, before F&O STT rose on 1 Oct 2024: the sale pays 0.0625% (10,000.00 x 0.000625 = 6.25), where the later row would charge 10.00",
+   "plan": "plus",
+   "fills": [
+    {
+     "order_id": "P1",
+     "trade_id": "P1t",
+     "day": 20240715,
+     "action": "BUY",
+     "qty": 50,
+     "price_u": 1800000,
+     "exchange": "NFO",
+     "symbol": "NIFTY25JUL2424500CE",
+     "product": "NRML",
+     "surface": "api"
+    },
+    {
+     "order_id": "P2",
+     "trade_id": "P2t",
+     "day": 20240715,
+     "action": "SELL",
+     "qty": 50,
+     "price_u": 2000000,
+     "exchange": "NFO",
+     "symbol": "NIFTY25JUL2424500CE",
+     "product": "NRML",
+     "surface": "api"
+    }
+   ],
+   "orders": 2,
+   "expect": {
+    "brokerage_paise": 6000,
+    "stt_paise": 625,
+    "exchange_paise": 665,
+    "sebi_paise": 2,
+    "stamp_paise": 27,
+    "gst_paise": 1200,
+    "total_paise": 8519
+   }
+  },
+  {
+   "id": "C9",
+   "note": "a long option exercised at expiry on 26 Nov 2026: settlement value 65 x 150.00 = 9,750.00; the holder's STT at 0.15% is 14.625, half-up 14.63; brokerage 30.00 and its GST 5.40; no exchange, SEBI or stamp charge modelled",
+   "plan": "plus",
+   "fills": [
+    {
+     "order_id": "X1",
+     "trade_id": "X1t",
+     "day": 20261126,
+     "action": "SELL",
+     "qty": 65,
+     "price_u": 1500000,
+     "exchange": "NFO",
+     "symbol": "NIFTY26NOV2625000CE",
+     "product": "NRML",
+     "surface": "api",
+     "exercise": true
+    }
+   ],
+   "orders": 1,
+   "expect": {
+    "brokerage_paise": 3000,
+    "stt_paise": 1463,
+    "exchange_paise": 0,
+    "sebi_paise": 0,
+    "stamp_paise": 0,
+    "gst_paise": 540,
+    "total_paise": 5003
+   }
+  },
+  {
+   "id": "C10",
+   "note": "the same exercise before 1 Apr 2026 pays 0.125%: 9,750.00 x 0.00125 = 12.1875, half-up 12.19; and the writer who is assigned (a BUY) pays none",
+   "plan": "plus",
+   "fills": [
+    {
+     "order_id": "X2",
+     "trade_id": "X2t",
+     "day": 20260326,
+     "action": "SELL",
+     "qty": 65,
+     "price_u": 1500000,
+     "exchange": "NFO",
+     "symbol": "NIFTY26MAR2625000CE",
+     "product": "NRML",
+     "surface": "api",
+     "exercise": true
+    },
+    {
+     "order_id": "X3",
+     "trade_id": "X3t",
+     "day": 20260326,
+     "action": "BUY",
+     "qty": 65,
+     "price_u": 1500000,
+     "exchange": "NFO",
+     "symbol": "NIFTY26MAR2625000CE",
+     "product": "NRML",
+     "surface": "api",
+     "exercise": true
+    }
+   ],
+   "orders": 2,
+   "parts_only": {
+    "stt_paise": 1219,
+    "exchange_paise": 0,
+    "stamp_paise": 0,
+    "brokerage_paise": 6000
+   }
   }
  ],
  "gap": [

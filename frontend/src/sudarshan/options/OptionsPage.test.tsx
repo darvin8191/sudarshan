@@ -43,12 +43,18 @@ vi.mock('@/components/trading/PlaceOrderDialog', () => ({
     )
   },
 }))
-const same = vi.hoisted(() => ({ rows: [] as unknown[] }))
+const same = vi.hoisted(() => ({
+  rows: [] as unknown[],
+  state: 'ready' as 'ready' | 'error',
+  off: false,
+  retry: vi.fn(),
+}))
 vi.mock('@/sudarshan/watchlist/useSameStrike', () => ({
   useSameStrike: (args: unknown) => ({
-    state: 'ready',
+    state: same.state,
     rows: args ? same.rows : [],
-    retry: () => {},
+    off: same.off,
+    retry: same.retry,
   }),
 }))
 // The Straddle tab's chart is the chart lane's: here it is a stand-in that draws nothing.
@@ -128,6 +134,9 @@ vi.setConfig({ testTimeout: 30_000 })
 
 beforeEach(() => {
   same.rows = []
+  same.state = 'ready'
+  same.off = false
+  same.retry.mockClear()
   localStorage.clear()
   feed.reset()
   frames.install()
@@ -429,6 +438,29 @@ describe('the options page', () => {
     expect(feed.live()).toHaveLength(84)
     same.rows = []
   }, 20_000)
+
+  it('says the other expiries could not be read, with Try again, when their read fails', async () => {
+    same.state = 'error'
+    await open()
+    fireEvent.click(document.querySelector('[data-strike="25900"] [data-leg="CE"]') as HTMLElement)
+    await settle()
+    const sheet = screen.getByRole('dialog', { name: 'NIFTY 25,900' })
+    expect(sheet).toHaveTextContent('Same strike, other expiries')
+    expect(sheet).toHaveTextContent('The other expiries could not be read.')
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Try again' }))
+    expect(same.retry).toHaveBeenCalledTimes(1)
+  })
+
+  it('leaves the other expiries out when the watchlists switch is off, where asking again cannot help', async () => {
+    same.state = 'error'
+    same.off = true
+    await open()
+    fireEvent.click(document.querySelector('[data-strike="25900"] [data-leg="CE"]') as HTMLElement)
+    await settle()
+    const sheet = screen.getByRole('dialog', { name: 'NIFTY 25,900' })
+    expect(sheet).not.toHaveTextContent('other expiries')
+    expect(within(sheet).queryByRole('button', { name: 'Try again' })).toBeNull()
+  })
 
   it('switches between the Chain and the OI tab, kept in the address beside the expiry', async () => {
     await open('/options/NFO/NIFTY?expiry=2026-11-24')

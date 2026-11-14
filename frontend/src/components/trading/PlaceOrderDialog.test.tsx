@@ -98,6 +98,26 @@ describe('PlaceOrderDialog', () => {
     expect(body.contains(screen.getByRole('button', { name: 'Cancel' }))).toBe(false)
   })
 
+  // SUDARSHAN (SCR-P item 7): the three number boxes had no accessible name, so a screen reader
+  // read "spin button" for each and the browser specs found the price by its position.
+  it('names its quantity, price and trigger boxes by their labels', () => {
+    render(<PlaceOrderDialog {...nifty} priceType="SL" />)
+    const boxes = screen.getAllByRole('spinbutton')
+    expect(boxes).toHaveLength(3)
+    expect(screen.getByRole('spinbutton', { name: 'Quantity' })).toBe(boxes[0])
+    expect(screen.getByRole('spinbutton', { name: 'Price' })).toBe(boxes[1])
+    expect(screen.getByRole('spinbutton', { name: 'Trigger Price' })).toBe(boxes[2])
+    // One box a label: none is named twice, none shares an id.
+    expect(new Set(boxes.map((box) => box.id)).size).toBe(3)
+  })
+
+  it('names the quantity box alone on a market order', () => {
+    render(<PlaceOrderDialog {...nifty} />)
+    expect(screen.getByRole('spinbutton', { name: 'Quantity' })).toHaveValue(2)
+    expect(screen.queryByRole('spinbutton', { name: 'Price' })).toBeNull()
+    expect(screen.queryByRole('spinbutton', { name: 'Trigger Price' })).toBeNull()
+  })
+
   it('shows the lots a units quantity stands for, over the same total', () => {
     render(<PlaceOrderDialog {...nifty} />)
     expect(screen.getByRole('spinbutton')).toHaveValue(2)

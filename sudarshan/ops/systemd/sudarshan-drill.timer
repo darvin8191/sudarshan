@@ -1,0 +1,18 @@
+# सुदर्शन / SUDARSHAN restore drill schedule (M19.8): the first Sunday of each month, 11:00 IST.
+# A Sunday morning: no market, no nightly backup (16:30 and 22:30), no release install window
+# in use. The program itself does nothing on a listed trading day (a Sunday special session).
+# Persistent: a run missed while the server was down happens at boot, and the program steps
+# aside if that is a trading day; the watch tells the owner when the last drill is over 100
+# days old.
+
+[Unit]
+Description=SUDARSHAN restore drill schedule (first Sunday of the month, IST)
+
+[Timer]
+OnCalendar=Sun *-*-01..07 11:00:00 Asia/Kolkata
+AccuracySec=1min
+Persistent=true
+Unit=sudarshan-drill.service
+
+[Install]
+WantedBy=timers.target

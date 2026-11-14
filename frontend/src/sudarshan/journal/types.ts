@@ -84,6 +84,7 @@ export const OP_NAMES = [
   'settings_get',
   'settings_set',
   'reconcile_now',
+  'charges_reconcile',
   'delivery',
   'family_day',
   'nudge',
@@ -123,7 +124,9 @@ export type ChargeSegment =
   | 'equity_delivery'
   | 'equity_intraday'
   | 'not_modelled'
+  | 'options_exercise'
 export type ChargePlan = 'plus' | 'standard'
+export type ChargeBasis = 'day' | 'month'
 export type DeskState = 'on' | 'starting' | 'journal_off' | 'journal_down' | 'off' | 'unknown'
 export type HoldBucket = 'under_5m' | '5_30m' | '30m_2h' | 'over_2h' | '1_5d' | 'over_5d'
 export type RatioState =
@@ -202,6 +205,7 @@ export interface Trip {
   excursion_note: string | null
   version: number
   charges_modelled: boolean
+  charges_actual_basis: ChargeBasis | null
 }
 
 export interface TripNote {
@@ -382,6 +386,76 @@ export interface ChargeEstimate {
   orders: number
 }
 
+export interface ChargeActualPart {
+  part: string
+  label: string
+  paise: number
+}
+
+export interface ChargeActual {
+  parts: ChargeActualPart[]
+  total_paise: number
+  basis: ChargeBasis
+  partial: boolean
+  missing: string[]
+}
+
+export interface ReconcilePart {
+  part: string
+  label: string
+  estimate_paise: number
+  actual_paise: number
+  diff_paise: number
+}
+
+export interface ReconcileSegment {
+  segment: string
+  label: string
+  orders: number
+  estimate_paise: number
+  modelled: boolean
+  actual_paise: number | null
+  diff_paise: number | null
+  diff_pct: string | null
+  flagged: boolean
+  unestimated_paise: number
+  parts: ReconcilePart[]
+  words: string | null
+  read_at: number | null
+}
+
+export interface ReconcileMonth {
+  month: number
+  label: string
+  orders: number
+  estimate_paise: number
+  actual_paise: number | null
+  diff_paise: number | null
+  diff_pct: string | null
+  flagged: boolean
+  words: string | null
+  segments: ReconcileSegment[]
+}
+
+export interface ReconcileYear {
+  months: number
+  estimate_paise: number
+  actual_paise: number | null
+  diff_paise: number | null
+  diff_pct: string | null
+  flagged: boolean
+}
+
+export interface ChargesReconcile {
+  fy: number
+  fy_label: string
+  running: boolean
+  months: ReconcileMonth[]
+  year: ReconcileYear
+  note: string | null
+  rate_card: RateCard
+}
+
 export interface Analytics {
   metrics: Metrics
   hold: HoldBucketRow[]
@@ -558,6 +632,7 @@ export interface TripRow {
   excursion_note: string | null
   version: number
   charges_modelled: boolean
+  charges_actual_basis: ChargeBasis | null
   mistakes: number[]
 }
 
@@ -618,6 +693,7 @@ export interface TripDetail {
   excursion_note: string | null
   version: number
   charges_modelled: boolean
+  charges_actual_basis: ChargeBasis | null
   legs: TripLeg[]
   fills: TripFill[]
   note: TripNote | null
@@ -625,6 +701,7 @@ export interface TripDetail {
   charges: ChargeEstimate | null
   latency_ms: number | null
   orders: OrderRef[]
+  charges_actual: ChargeActual | null
 }
 
 export interface OpSpec {
@@ -653,6 +730,7 @@ export const OPS: readonly OpSpec[] = [
   { name: 'settings_get', method: 'GET', route: '/settings', cls: 'read' },
   { name: 'settings_set', method: 'PUT', route: '/settings', cls: 'write' },
   { name: 'reconcile_now', method: 'POST', route: '/reconcile', cls: 'reconcile' },
+  { name: 'charges_reconcile', method: 'GET', route: '/charges/reconcile', cls: 'read' },
 ]
 
 export type OpName = (typeof OP_NAMES)[number]
@@ -772,6 +850,10 @@ export interface SettingsSetReq {
 
 export type ReconcileNowReq = Record<string, never>
 
+export interface ChargesReconcileReq {
+  fy?: number
+}
+
 export interface DeliveryReq {
   report_id: number
   channel: string
@@ -808,6 +890,7 @@ export interface JournalOps {
   settings_get: { req: SettingsGetReq; res: Settings }
   settings_set: { req: SettingsSetReq; res: Done }
   reconcile_now: { req: ReconcileNowReq; res: Done }
+  charges_reconcile: { req: ChargesReconcileReq; res: ChargesReconcile }
   delivery: { req: DeliveryReq; res: Done }
   family_day: { req: FamilyDayReq; res: FamilyCounts }
   nudge: { req: NudgeReq; res: Done }

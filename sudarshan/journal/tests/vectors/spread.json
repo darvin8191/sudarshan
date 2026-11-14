@@ -1,0 +1,580 @@
+{
+ "note": "synthetic; Upstox's actual charges shared among orders and trades; paise",
+ "spread": [
+  {
+   "id": "C1",
+   "note": "one part, 153.20, three orders estimated at 40.00, 60.00 and 50.00",
+   "actual": {
+    "stt": 15320
+   },
+   "orders": [
+    {
+     "key": "A",
+     "estimate": {
+      "stt": 4000
+     },
+     "turnover": 0,
+     "dp_group": null
+    },
+    {
+     "key": "B",
+     "estimate": {
+      "stt": 6000
+     },
+     "turnover": 0,
+     "dp_group": null
+    },
+    {
+     "key": "C",
+     "estimate": {
+      "stt": 5000
+     },
+     "turnover": 0,
+     "dp_group": null
+    }
+   ],
+   "expect": {
+    "A": {
+     "stt": 4085
+    },
+    "B": {
+     "stt": 6128
+    },
+    "C": {
+     "stt": 5107
+    }
+   },
+   "missing": [],
+   "partial": false
+  },
+  {
+   "id": "C1-tie",
+   "note": "1.01 between two orders of equal weight: the paisa left goes to the lower key",
+   "actual": {
+    "brokerage": 101
+   },
+   "orders": [
+    {
+     "key": "B",
+     "estimate": {
+      "brokerage": 3000
+     },
+     "turnover": 0,
+     "dp_group": null
+    },
+    {
+     "key": "A",
+     "estimate": {
+      "brokerage": 3000
+     },
+     "turnover": 0,
+     "dp_group": null
+    }
+   ],
+   "expect": {
+    "A": {
+     "brokerage": 51
+    },
+    "B": {
+     "brokerage": 50
+    }
+   },
+   "missing": [],
+   "partial": false
+  },
+  {
+   "id": "C1-day",
+   "note": "every part of a day over a buy and a sell order",
+   "actual": {
+    "brokerage": 4000,
+    "gst": 850,
+    "stt": 625,
+    "stamp": 27,
+    "transaction": 665,
+    "clearing": 10,
+    "ipft": 3,
+    "sebi": 2,
+    "others": 7
+   },
+   "orders": [
+    {
+     "key": "P1",
+     "estimate": {
+      "brokerage": 3000,
+      "stt": 0,
+      "exchange": 315,
+      "sebi": 1,
+      "stamp": 27,
+      "gst": 597,
+      "total": 3940
+     },
+     "turnover": 900000,
+     "dp_group": null
+    },
+    {
+     "key": "P2",
+     "estimate": {
+      "brokerage": 3000,
+      "stt": 625,
+      "exchange": 350,
+      "sebi": 1,
+      "stamp": 0,
+      "gst": 603,
+      "total": 4579
+     },
+     "turnover": 1000000,
+     "dp_group": null
+    }
+   ],
+   "expect": {
+    "P1": {
+     "brokerage": 2000,
+     "gst": 423,
+     "stt": 0,
+     "stamp": 27,
+     "transaction": 315,
+     "clearing": 5,
+     "ipft": 1,
+     "sebi": 1,
+     "others": 3
+    },
+    "P2": {
+     "brokerage": 2000,
+     "gst": 427,
+     "stt": 625,
+     "stamp": 0,
+     "transaction": 350,
+     "clearing": 5,
+     "ipft": 2,
+     "sebi": 1,
+     "others": 4
+    }
+   },
+   "totals": {
+    "P1": 2775,
+    "P2": 3414
+   },
+   "missing": [],
+   "partial": false
+  },
+  {
+   "id": "C3",
+   "note": "every weight zero (two sell orders pay no stamp by the card): turnover weighs",
+   "actual": {
+    "stamp": 30
+   },
+   "orders": [
+    {
+     "key": "A",
+     "estimate": {
+      "brokerage": 3000,
+      "stt": 625,
+      "exchange": 350,
+      "sebi": 1,
+      "stamp": 0,
+      "gst": 603,
+      "total": 4579
+     },
+     "turnover": 900000,
+     "dp_group": null
+    },
+    {
+     "key": "B",
+     "estimate": {
+      "brokerage": 3000,
+      "stt": 625,
+      "exchange": 350,
+      "sebi": 1,
+      "stamp": 0,
+      "gst": 603,
+      "total": 4579
+     },
+     "turnover": 1000000,
+     "dp_group": null
+    }
+   ],
+   "expect": {
+    "A": {
+     "stamp": 14
+    },
+    "B": {
+     "stamp": 16
+    }
+   },
+   "missing": [],
+   "partial": false
+  },
+  {
+   "id": "C3-unmodelled",
+   "note": "a segment the card does not model (no estimate at all) still gets its actual",
+   "actual": {
+    "brokerage": 4000,
+    "stt": 999
+   },
+   "orders": [
+    {
+     "key": "A",
+     "estimate": {},
+     "turnover": 250000,
+     "dp_group": null
+    },
+    {
+     "key": "B",
+     "estimate": {},
+     "turnover": 750000,
+     "dp_group": null
+    }
+   ],
+   "expect": {
+    "A": {
+     "brokerage": 1000,
+     "stt": 250
+    },
+    "B": {
+     "brokerage": 3000,
+     "stt": 749
+    }
+   },
+   "missing": [],
+   "partial": false
+  },
+  {
+   "id": "C3-nothing",
+   "note": "no estimate and no turnover: the orders weigh the same",
+   "actual": {
+    "others": 5
+   },
+   "orders": [
+    {
+     "key": "A",
+     "estimate": {},
+     "turnover": 0,
+     "dp_group": null
+    },
+    {
+     "key": "B",
+     "estimate": {},
+     "turnover": 0,
+     "dp_group": null
+    }
+   ],
+   "expect": {
+    "A": {
+     "others": 3
+    },
+    "B": {
+     "others": 2
+    }
+   },
+   "missing": [],
+   "partial": false
+  },
+  {
+   "id": "C4",
+   "note": "a part Upstox left empty is skipped, never 0, and the day is partial",
+   "actual": {
+    "brokerage": 6000,
+    "stt": null,
+    "gst": 1080,
+    "clearing": null
+   },
+   "orders": [
+    {
+     "key": "P1",
+     "estimate": {
+      "brokerage": 3000,
+      "stt": 0,
+      "exchange": 315,
+      "sebi": 1,
+      "stamp": 27,
+      "gst": 597,
+      "total": 3940
+     },
+     "turnover": 900000,
+     "dp_group": null
+    },
+    {
+     "key": "P2",
+     "estimate": {
+      "brokerage": 3000,
+      "stt": 625,
+      "exchange": 350,
+      "sebi": 1,
+      "stamp": 0,
+      "gst": 603,
+      "total": 4579
+     },
+     "turnover": 1000000,
+     "dp_group": null
+    }
+   ],
+   "expect": {
+    "P1": {
+     "brokerage": 3000,
+     "gst": 537
+    },
+    "P2": {
+     "brokerage": 3000,
+     "gst": 543
+    }
+   },
+   "missing": [
+    "stt",
+    "clearing"
+   ],
+   "partial": true
+  },
+  {
+   "id": "C4-extras",
+   "note": "an empty clearing charge alone does not make the day partial, and the depository's charge is only missed on a day with a delivery sale",
+   "actual": {
+    "brokerage": 6000,
+    "clearing": null,
+    "dp": null
+   },
+   "orders": [
+    {
+     "key": "P1",
+     "estimate": {
+      "brokerage": 3000,
+      "stt": 0,
+      "exchange": 315,
+      "sebi": 1,
+      "stamp": 27,
+      "gst": 597,
+      "total": 3940
+     },
+     "turnover": 900000,
+     "dp_group": null
+    },
+    {
+     "key": "P2",
+     "estimate": {
+      "brokerage": 3000,
+      "stt": 625,
+      "exchange": 350,
+      "sebi": 1,
+      "stamp": 0,
+      "gst": 603,
+      "total": 4579
+     },
+     "turnover": 1000000,
+     "dp_group": null
+    }
+   ],
+   "expect": {
+    "P1": {
+     "brokerage": 3000
+    },
+    "P2": {
+     "brokerage": 3000
+    }
+   },
+   "missing": [
+    "clearing",
+    "dp"
+   ],
+   "partial": false
+  },
+  {
+   "id": "C4-dp-missed",
+   "note": "the depository's charge left empty on a day with a delivery sale: partial",
+   "actual": {
+    "brokerage": 3000,
+    "dp": null
+   },
+   "orders": [
+    {
+     "key": "S",
+     "estimate": {
+      "brokerage": 3000,
+      "stt": 625,
+      "exchange": 350,
+      "sebi": 1,
+      "stamp": 0,
+      "gst": 603,
+      "total": 4579
+     },
+     "turnover": 1000000,
+     "dp_group": "INE000A01010"
+    }
+   ],
+   "expect": {
+    "S": {
+     "brokerage": 3000
+    }
+   },
+   "missing": [
+    "dp"
+   ],
+   "partial": true
+  },
+  {
+   "id": "C5-dp",
+   "note": "the depository's charge: once a share sold, so two shares weigh the same and the two sell orders of one share halve its weight; a buy order takes none",
+   "actual": {
+    "dp": 3186
+   },
+   "orders": [
+    {
+     "key": "A",
+     "estimate": {
+      "brokerage": 3000
+     },
+     "turnover": 100,
+     "dp_group": "INE000A01010"
+    },
+    {
+     "key": "B",
+     "estimate": {
+      "brokerage": 3000
+     },
+     "turnover": 900000,
+     "dp_group": "INE000A01010"
+    },
+    {
+     "key": "C",
+     "estimate": {
+      "brokerage": 3000
+     },
+     "turnover": 50,
+     "dp_group": "INE000B01018"
+    },
+    {
+     "key": "D",
+     "estimate": {
+      "brokerage": 3000
+     },
+     "turnover": 5000000,
+     "dp_group": null
+    }
+   ],
+   "expect": {
+    "A": {
+     "dp": 797
+    },
+    "B": {
+     "dp": 796
+    },
+    "C": {
+     "dp": 1593
+    },
+    "D": {
+     "dp": 0
+    }
+   },
+   "missing": [],
+   "partial": false
+  },
+  {
+   "id": "C6-negative",
+   "note": "a part below zero (a reversal) is shared the same way and keeps its sign",
+   "actual": {
+    "others": -7,
+    "unlisted": 5
+   },
+   "orders": [
+    {
+     "key": "P1",
+     "estimate": {
+      "brokerage": 3000,
+      "stt": 0,
+      "exchange": 315,
+      "sebi": 1,
+      "stamp": 27,
+      "gst": 597,
+      "total": 3940
+     },
+     "turnover": 900000,
+     "dp_group": null
+    },
+    {
+     "key": "P2",
+     "estimate": {
+      "brokerage": 3000,
+      "stt": 625,
+      "exchange": 350,
+      "sebi": 1,
+      "stamp": 0,
+      "gst": 603,
+      "total": 4579
+     },
+     "turnover": 1000000,
+     "dp_group": null
+    }
+   ],
+   "expect": {
+    "P1": {
+     "others": -3,
+     "unlisted": 2
+    },
+    "P2": {
+     "others": -4,
+     "unlisted": 3
+    }
+   },
+   "missing": [],
+   "partial": false
+  }
+ ],
+ "to_trips": [
+  {
+   "id": "C2",
+   "note": "a flip: 130 sold against a long of 65, so the order's fills sit in two trades, 65 each",
+   "parts": {
+    "brokerage": 3000,
+    "stt": 1463
+   },
+   "holders": {
+    "7": 65,
+    "8": 65
+   },
+   "expect": {
+    "7": {
+     "brokerage": 1500,
+     "stt": 732
+    },
+    "8": {
+     "brokerage": 1500,
+     "stt": 731
+    }
+   }
+  },
+  {
+   "id": "C2-uneven",
+   "note": "100 of the order in one trade and 30 in the next",
+   "parts": {
+    "gst": 101
+   },
+   "holders": {
+    "7": 100,
+    "8": 30
+   },
+   "expect": {
+    "7": {
+     "gst": 78
+    },
+    "8": {
+     "gst": 23
+    }
+   }
+  },
+  {
+   "id": "C2-one",
+   "note": "an order wholly in one trade gives it everything",
+   "parts": {
+    "brokerage": 2000,
+    "others": -3
+   },
+   "holders": {
+    "7": 65
+   },
+   "expect": {
+    "7": {
+     "brokerage": 2000,
+     "others": -3
+    }
+   }
+  }
+ ]
+}

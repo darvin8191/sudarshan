@@ -833,6 +833,12 @@ def react_automation():
     return serve_react_app()
 
 
+# SUDARSHAN M20.8: the System page (its API is /sudarshan/system/api/*)
+@react_bp.route("/system", strict_slashes=False)
+def react_system():
+    return serve_react_app()
+
+
 # SUDARSHAN M4.15: the phone chart. A bare /chart opens the last instrument.
 @react_bp.route("/chart", strict_slashes=False)
 def react_phone_chart():

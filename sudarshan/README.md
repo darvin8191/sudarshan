@@ -357,7 +357,18 @@ each night's archive into a root-owned folder is possible later and is the owner
 nights that have one, and the newest of each of the 12 most recent months, so a month is still
 represented a year after its nights are gone. A night is represented by its newest *complete*
 archive. The newest complete archive is never removed, whatever else is true: a run of partial
-archives cannot push the last good one out. Then a size cap (10 GB for all of them):
+archives cannot push the last good one out.
+
+**One archive per financial year, kept 8 years (M19.10).** The first complete archive made once
+the market has closed on 31 March (from 16:00) is that financial year's archive, whatever the
+counts above say; one made more than 92 days later is never taken for it. The newest 8 are kept
+(`SUDARSHAN_BACKUP_KEEP_YEARLY`), for the years the tax records must be kept. Its offsite copy is
+uploaded under a name of its own, `sudarshan-fy-2026-27-YYYYMMDD-HHMMSS-<release>.tar.gz.cms`,
+so that the bucket's delete rules, which name the nightly prefix (step 3 below), never remove
+it. The System page shows the newest year's archive and its size: eight of them must fit the
+size cap and the bucket.
+
+Then a size cap (10 GB for all of them), which never takes a monthly or a year's archive:
 
 - before anything is written, what is outside the counts goes, and then the oldest nights, never a
   month's archive, never the three newest and never the newest complete one, until the new
@@ -393,6 +404,7 @@ value that cannot be used is refused by name and the owner is told):
 | --- | --- | --- |
 | `SUDARSHAN_BACKUP_KEEP_DAILY` | 30 | nights kept (1 to 366) |
 | `SUDARSHAN_BACKUP_KEEP_MONTHLY` | 12 | months kept (0 to 120) |
+| `SUDARSHAN_BACKUP_KEEP_YEARLY` | 8 | financial-year archives kept (0 to 50; 0 keeps none) |
 | `SUDARSHAN_BACKUP_MAX_GB` | 10 | size cap for all archives (0.01 and up) |
 | `SUDARSHAN_BACKUP_MIN_FREE_GB` | 2 | free space to leave beyond the archive (0 and up) |
 | `SUDARSHAN_BACKUP_MIN_GAP_HOURS` | 8 | a complete archive newer than this ends a run (0 to 72) |
@@ -447,8 +459,11 @@ empty settings file, with `install`; the settings are written by `sudarshan`, th
    bucket: under Features, Object versioning must read Enabled. (For a bucket made earlier,
    choose Enable there, then Enable versioning.)
 3. In the bucket, open Policies, then Lifecycle policy rules, and make two rules with Create rule.
-   Each has Lifecycle action Delete, Number of days 30 (or what you like, the same in both), and
-   the State switch on:
+   Each has Lifecycle action Delete, Number of days 30 (or what you like, the same in both), the
+   State switch on, and under Object name filters one filter of the kind **Include by prefix**
+   with the text `sudarshan-backup-` (so the rule deletes the nightly copies only, and never a
+   financial year's archive, whose name starts `sudarshan-fy-`; if you made the two rules before
+   v0.13.1 without this filter, edit both and add it before the first 31 March):
    - Target **Latest version of objects**: after 30 days the newest version of a copy becomes a
      previous version;
    - Target **Previous versions of objects**: a previous version is deleted 30 days after it
@@ -609,6 +624,50 @@ Tests: `sudarshan/ops/tests/test_backup_retention.py`, `test_backup_run.py`,
 `test_backup_policy.py`, `test_backup_command.py` and `test_backup_unit.py`, with the notice
 wording in `sudarshan/alerts/tests/test_alerts_notices.py`.
 
+### The restore drill (M19.8)
+
+A backup that has never been restored is not a backup. `sudarshan-drill` reads the newest
+complete archive back, by itself, on the first Sunday of each month at 11:00
+(`sudarshan-drill.timer`; never on a listed trading day, never in or just before market hours),
+and tells you the result on Telegram. It restores nothing over live files, stops no service and
+uses no network. In a private scratch folder inside the backup's own folder
+(`/var/lib/sudarshan-backup/drill`, removed again on every outcome) it:
+
+1. reads the archive back against the record it carries, and refuses an incomplete one;
+2. unpacks it;
+3. opens every database read-only, runs SQLite's own check on it, and refuses a store that is
+   newer than this release understands;
+4. checks that OpenAlgo's database holds exactly one owner account, an API key and an Upstox
+   login;
+5. checks that the archive's `.env` has the keys the app cannot start without (never printed);
+6. opens the vault of sealed sign-in details with the key derived from that same `.env`: the
+   step that proves the two restore together.
+
+The result is on the System page, with the first thing that failed in plain words, and in
+`/var/lib/sudarshan-backup/drill.json`. The watch tells you when the last drill is over 100 days
+old. What it proves: the archive can be read back into a working set of files; it does not
+prove that a new server boots ("If the server is lost" below).
+
+To run it by hand, outside market hours, as the service user from the app folder:
+
+```sh
+cd /opt/sudarshan/apps/openalgo && sudo -u sudarshan .venv/bin/python -m sudarshan.ops.drill
+```
+
+It prints one line (`restore drill: passed ...`, or `FAILED:` and the cause) and sends the same
+on Telegram. Without a file name it does nothing on a trading day; give it an archive to test
+that one on any day after the close:
+`sudo -u sudarshan .venv/bin/python -m sudarshan.ops.drill /var/lib/sudarshan-backup/archive/<name>`.
+The deploy tool restarts the unit after an install like every other, so an install on a day
+without trading runs one more drill.
+
+**Your own drill, once a quarter.** The monthly drill never touches the bucket, the encryption
+or your private key. Once a quarter: download a copy from the bucket, decrypt it on the laptop
+and copy it to the server ("Restoring from the offsite copy" above, steps 1 to 3, into a folder
+only `sudarshan` can read), then run the drill on that file with the line above and delete the
+decrypted file from the server and the laptop. This is the only test of the bucket, the
+encryption and the key together.
+
 ## Server notices on Telegram (M18.x)
 
 After an install, a rollback, a service file the unit policy refused, a release that waits for
@@ -662,6 +721,12 @@ deploy tool installs both with the release). Nothing needs setting up for it.
 | the server's memory | under 1 GB available for three looks in a row | after the market closes |
 | the security certificate | under 48 hours left and not renewed | at once |
 | OpenAlgo itself | it has not answered for two looks in a row | only through the outside heartbeat, because Telegram notices go through OpenAlgo |
+| AI connections (OpenAlgo's own tables, read-only) | one more approved AI client, or one more live AI sign-in, than at the last look | at once: "press Disconnect the assistant on the System page" if it was not you |
+| Telegram accounts linked to your bot | one was linked or unlinked | at once (a linked account can run the bot's commands) |
+| the server's posture, once an hour: the assistant's safety settings, OpenAlgo's debug setting, the settings folder, the vault and the `.env` closed to other accounts, every SUDARSHAN port listening inside the server only | any of them is not as it should be | after the market closes, once per cause |
+| the restore test of the backups ("The restore drill" below) | the last one is over 100 days old | after the market closes (the drill tells its own pass or failure) |
+| Historify's downloaded history | it has reached 3 GB | after the market closes |
+| shown only, on the System page and in the Sunday summary: the nightly backup's age and its offsite copy, operating-system updates waiting, a restart the system asks for | never a notice of their own: the backup job tells its own late night, and updates are applied by you, by hand, on a non-trading day | - |
 
 - **Once per cause.** A failure is told once and its recovery once, however long it lasts. A
   service that was never set up on this server (the family view before its set-up) is not a fault.
@@ -677,6 +742,21 @@ deploy tool installs both with the release). Nothing needs setting up for it.
   until it is back; if the whole server is down, nothing here runs at all. The outside heartbeat
   below is for those two cases.
 
+**The Sunday summary.** On Sunday from 18:00 one message sums the week up: what needs you (or
+"Nothing needs you."), how many checks are fine, free disk space and the sizes of OpenAlgo's
+databases and logs, Historify, SUDARSHAN's own stores and the backups, the newest backup's age
+and the last restore test, system updates waiting and whether the system asks for a restart, and
+how busy the server was: the level its processor and its memory stayed under for 95% of the
+week. Those two are the whole server's figures, as the kernel gives them to every program (the
+tenancy's idle rule is about them); the size of the system's own journal is not in it, because
+that journal is not SUDARSHAN's to read.
+
+**The server diary.** The notice files keep their newest 200 lines. The watch copies every
+notice of every producer (installs, rollbacks, backups, drills, family sign-ins, reports made,
+its own) once into `/var/lib/sudarshan-watch/log/<year>.jsonl`, one small text file a year,
+keeps 8 years of them and never anything secret, and the nightly backup takes the folder. It is
+the server's part of the "Records to keep each year".
+
 To see what it sees, at any time, as the service user from the app folder (it writes nothing):
 
 ```
@@ -685,8 +765,19 @@ cd /opt/sudarshan/apps/openalgo && sudo -u sudarshan .venv/bin/python -m sudarsh
 
 One line per check: `fine`, `warning`, `failing`, `unread` (could not be read just now) or `off`
 (not expected now: the market is closed, or the service is not set up). The last look is also in
-`/var/lib/sudarshan-watch/report.json` (`sudo cat` it), which the System page will show in a
-later release.
+`/var/lib/sudarshan-watch/report.json` (`sudo cat` it), and on the System page.
+
+**The System page (M20.8).** Menu, System (`/system`, the owner's account only) shows the last
+look in one list, each line with an icon, a word and what to do: the services, the market day's
+connections, the disk, memory, the certificate, updates, the outside heartbeat, the nightly
+backup and the year's archive, the last restore test with the first thing that failed, the
+safety settings, AI connections, Telegram links and your signed-in devices. It says so when the
+watch has not looked for over 10 minutes. It is the page a support session asks you to open.
+**Disconnect the assistant** on it ends every AI connection at once: every sign-in is revoked
+and every token already handed out is refused at its next call. Use it whenever an AI
+connection should end and the kill switch is not the tool: while the risk guard checks the
+sandbox only, the kill switch leaves the assistant alone. Nothing comes back by itself; you
+connect and approve again.
 
 **After the release that brings the watch is installed, once:** run the `--check` line above and
 read it; then, outside market hours, stop the screener for 5 minutes
@@ -1075,6 +1166,81 @@ name this cannot be chosen, and the watch reads the certificate nginx serves fir
 
 Tests: `sudarshan/ops/tests/test_ops_nginx.py`.
 
+## The security audit (M19)
+
+Three things look at the security of the install, each where it can see:
+
+- **Before every release and after every rebase on upstream**, a Claude session runs the
+  repository's `security-audit` skill on the release branch and reads its report, failures
+  first. The report stays on that machine.
+- **Once a month on GitHub** (`.github/workflows/sudarshan-security.yml`, the 3rd at 03:10 IST,
+  and by hand from the Actions page) the same script runs on the default branch. This
+  repository is public, so the run shows only whether the audit passed and the counts per sheet
+  (`python -m sudarshan.ops.audit_counts`): the script's own output and its report are never
+  published, and a failed run opens nothing. A red run means: ask a session to reproduce it
+  privately with the skill.
+- **On the server, every hour**, the watch's posture checks ("Watching the server") look at what
+  GitHub cannot see: the real settings, the assistant's locks, the private folders, the ports.
+
+## The restart page (M1.17)
+
+While a deploy restarts the app, a page load is answered by nginx alone for some seconds, with
+its bare "502 Bad Gateway". SUDARSHAN ships one page for that moment,
+`frontend/public/images/restarting.html`: the name in both scripts, "SUDARSHAN is restarting. It
+is back within a minute.", and it tries the same address again by itself every 15 seconds. It is
+one plain file with no script, font or image of its own, because the app that would serve those
+is what is down.
+
+Two things show it:
+
+- **The family app, with no step of yours.** Its service worker keeps the page on the phone and
+  shows it when a page load is answered 502, 503 or 504. It applies from the release that carries
+  it, on phones that have opened the family view since.
+- **nginx, once you install the lines below.** They cover the owner's pages too, and a family
+  phone that has not kept the page yet. Until then nginx's own error page is shown, as today.
+
+As for the assistant's lines above: nginx is not SUDARSHAN's alone, the deploy tool never touches
+it, and these lines go into SUDARSHAN's own site and nowhere else. On the server, from the app
+folder (`cd /opt/sudarshan/apps/openalgo`):
+
+1. Copy the page and the lines into root's folders. nginx never reads the app folder itself.
+
+   ```
+   sudo install -D -m 644 -o root -g root frontend/public/images/restarting.html /usr/share/sudarshan/restarting.html
+   sudo install -m 644 -o root -g root sudarshan/ops/nginx/sudarshan-restart.conf /etc/nginx/snippets/sudarshan-restart.conf
+   ```
+
+2. Open SUDARSHAN's own site file in nginx and add one line inside its `server { }` block, above
+   its `location /` line (below the family view's and the assistant's `include` lines, if they are
+   there). Add it to no other site:
+
+   ```
+   include snippets/sudarshan-restart.conf;
+   ```
+
+   If that block already has an `error_page` line naming 502 or 504, take those two numbers out
+   of it first, or nginx keeps the older line.
+
+3. Test, then reload; never restart. If `nginx -t` reports an error, undo step 2 and stop.
+
+   ```
+   sudo nginx -t
+   sudo systemctl reload nginx
+   ```
+
+4. See it at the next deploy: open any page while the app restarts. It keeps the same address,
+   says it is restarting, and becomes the app by itself within about 15 seconds of it being back.
+
+What the lines do not change: the answer keeps its status (a restart never reads as success to
+TradingView or to the app's own order calls), anything the app itself answers is passed on as it
+is, and the family view's API keeps its own "did not answer" sentence. After a release that
+changes the page (the changelog says so), run the first `install` line of step 1 again; no reload
+is needed for the page alone. To take the lines out, remove the `include` line, then
+`sudo nginx -t` and `sudo systemctl reload nginx`.
+
+Tests: `sudarshan/ops/tests/test_ops_restart_page.py`, `frontend/src/sudarshan/pwa/restartPage.test.ts`
+and `frontend/src/sudarshan/pwa/sw.test.ts`.
+
 ## Secrets: where each one lives and what changing it breaks (M19.4)
 
 Every secret the server holds, in one place. Nothing here is a value: this table says where a
@@ -1212,11 +1378,11 @@ Each April, for the year just ended:
 | every order request and the broker's answer | OpenAlgo's `logs.db` | SUDARSHAN, for ever |
 | what the risk layer refused, and the kill switch's history | `sudarshan_risk.db` (Settings > Risk > History) | SUDARSHAN, for ever |
 | market alerts that fired | the alerts' history | SUDARSHAN |
-| one full archive of the server from just after 31 March | the nightly backup and its offsite copy | you: download that offsite copy before it expires (about 60 days) and keep it with the year, encrypted as it is |
+| one full archive of the server from just after 31 March | the nightly backup: the first complete archive made once 31 March's market has closed, and its offsite copy under a name starting `sudarshan-fy-` ("Nightly backups") | SUDARSHAN, for 8 years on the server and in the bucket (once both delete rules carry the prefix filter of step 3); a copy with the year's papers costs nothing |
+| installs, rollbacks, backup failures, restore drills, family sign-ins and every notice the watch told | the server diary, `/var/lib/sudarshan-watch/log/<year>.jsonl` ("Watching the server"), which the nightly backup takes | SUDARSHAN, for 8 years |
 
 A later release adds one records pack a year (the journal's statements with the order, risk and
-alert history as files) and keeps one archive per financial year by itself; until then the last
-row is done by hand.
+alert history as files).
 
 ## The AI assistant (M17)
 

@@ -226,7 +226,7 @@
      "kind": "trades",
      "fy": 2026,
      "segment": "EQ",
-     "state": "ready",
+     "state": "ok",
      "read_at": 1794670000000
     }
    ]
@@ -246,7 +246,7 @@
       "kind": "trades",
       "fy": 2026,
       "segment": "EQ",
-      "state": "ready",
+      "state": "ok",
       "read_at": 1794670000000
      }
     ],
@@ -484,7 +484,7 @@
       "stt_paise": 21000
      }
     },
-    "state": "ready"
+    "state": "ok"
    },
    "not_computed": [
     "Tax at slab rates, surcharge, rebate and the choice of regime.",

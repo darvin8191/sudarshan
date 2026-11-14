@@ -243,11 +243,20 @@ JOB_NAMES = (
 JOB_STATUSES = ("ok", "late", "failed", "skipped")
 
 # ---- the money features of phase P7: tax, insights, goals ------------------------------------
-#: What a tax input is (one op writes the six small tables, ``kind`` checked against this list),
+#: What a tax input is (one op writes the six small tables, ``kind`` checked against this list;
+#: ``account_mode`` sets how an account of the owner's own counts, owner decision 9),
 #: how an account counts for tax, and the schedules the tax CSV gives. The buckets, methods and
 #: readings are the tax core's (sudarshan/tax: model.BUCKETS and the rule rows); a test holds the
 #: two copies together once both are in the tree.
-TAX_INPUT_KINDS = ("opening_lot", "fmv", "carry", "day_override", "trade_mark", "settings")
+TAX_INPUT_KINDS = (
+    "opening_lot",
+    "fmv",
+    "carry",
+    "day_override",
+    "trade_mark",
+    "settings",
+    "account_mode",
+)
 TAX_MODES = ("reports", "ledger", "none")
 TAX_SCHEDULES = ("capital_gains", "business", "losses", "dividends")
 CARRY_BUCKETS = ("stcl", "ltcl", "business", "speculative")

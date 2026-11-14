@@ -181,6 +181,64 @@ describe('what happened', () => {
     expect(charges?.textContent).not.toContain('est.')
   })
 
+  it('says which of Upstox’s figures the actual came from, and opens its parts on a tap', async () => {
+    const user = userEvent.setup()
+    serve(
+      detail({
+        charges_actual_paise: 3414,
+        charges_actual_basis: 'day',
+        net_paise: 85299 - 3414,
+        charges_actual: {
+          parts: [
+            { part: 'brokerage', label: 'Brokerage', paise: 2000 },
+            { part: 'stt', label: 'STT', paise: 1418 },
+            { part: 'others', label: 'Other charges', paise: -4 },
+          ],
+          total_paise: 3414,
+          basis: 'day',
+          partial: true,
+          missing: ['Stamp duty'],
+        },
+      })
+    )
+    show()
+    const result = await screen.findByRole('region', { name: 'Result' })
+    const charges = within(result).getByText('Charges').nextElementSibling
+    expect(charges?.textContent).toContain('₹34.14')
+    expect(charges?.textContent).toContain('actual, from Upstox’s figures for the day')
+    // Net follows the actual and no longer says it is an estimate.
+    const net = within(result).getByText('Net').nextElementSibling
+    expect(net?.textContent).toContain('+₹818.85')
+    expect(net?.textContent).not.toContain('est.')
+    const toggle = within(result).getByRole('button', { name: 'Show the parts' })
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    expect(toggle.className).toContain('min-h-12')
+    expect(within(result).queryByRole('list', { name: 'Charges, part by part' })).toBeNull()
+    await user.click(toggle)
+    const parts = within(result).getByRole('list', { name: 'Charges, part by part' })
+    const rows = within(parts).getAllByRole('listitem')
+    expect(rows.map((row) => row.textContent)).toEqual([
+      'Brokerage₹20.00',
+      'STT₹14.18',
+      'Other charges−₹0.04',
+    ])
+    expect(
+      within(result).getByText('Upstox left these empty, so this total may be short: Stamp duty.')
+    ).toBeTruthy()
+    expect(within(result).getByText('The journal’s estimate was ₹40.49.')).toBeTruthy()
+    await user.click(within(result).getByRole('button', { name: 'Hide the parts' }))
+    expect(within(result).queryByRole('list', { name: 'Charges, part by part' })).toBeNull()
+  })
+
+  it('says the month’s figures when a day was never given by itself, and nothing to open without parts', async () => {
+    serve(detail({ charges_actual_paise: 4100, charges_actual_basis: 'month' }))
+    show()
+    const result = await screen.findByRole('region', { name: 'Result' })
+    const charges = within(result).getByText('Charges').nextElementSibling
+    expect(charges?.textContent).toContain('actual, from Upstox’s figures for the month')
+    expect(within(result).queryByRole('button', { name: 'Show the parts' })).toBeNull()
+  })
+
   it('shows the worst and best points with their times and what was kept of the best', async () => {
     serve()
     show()

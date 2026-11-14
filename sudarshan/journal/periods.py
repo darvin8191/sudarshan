@@ -16,8 +16,15 @@ announced (JB9, M15.3 to M15.5; design 3.5 and 3.6, cross-design Y8, Y22, Y32, Y
   of a key replaces its text and file. A build is announced when the report was never announced,
   or was announced as a part period and this build is the whole (review M2).
 * **The tax pack is a working paper**: it says to verify it with a CA and that the broker's own
-  report is the filing source, and it carries no section number of any Act. Its trades are
-  grouped by kind and holding period, never by a legal term.
+  report is the filing source, and it carries no section number of any Act. Its tax figures are
+  the portfolio's (``sudarshan/tax``, asked for as one answer, the pack, through the journal's
+  link and only while ``SUDARSHAN_TAX`` is on); ``taxpack.py`` lays them out and this module
+  works out none of them. The pack printed is kept whole in the archive row (``rows.tax_pack``,
+  with its time and its rules edition), so an archived paper never changes when a rule or a late
+  trade does; building the pack again makes a new one. Under it, headed "Trading activity
+  recorded by the journal", are the journal's own blocks: month by month, by strategy and by
+  kind of trade (the kind by ``sudarshan.tax.classify``, the one rule for it). When the paper
+  cannot be had the pack says why in a sentence and holds the journal's blocks alone.
 * **The family variant** (``family_variant``) is the counts of the period and nothing else: no
   money, price, quantity, ratio, percentage or report text, as the viewer's mask sees it. A
   family member is never sent the file, which carries amounts.
@@ -33,9 +40,8 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Any
 
-from . import serialize
-from .core import benchmark, equity, kinds, lots, metrics, words
-from .core import charges as charges_core
+from . import serialize, taxpack
+from .core import benchmark, equity, kinds, metrics, words
 from .core.money import ist_clock, ist_day, to_date, to_day
 from .portfolio import PortfolioUnavailable, link_for
 from .render import doc as D
@@ -59,17 +65,18 @@ PERIOD_HINT = {
     "fy": "a financial year such as FY2526",
 }
 CAPITAL_LINE = "Charges are estimates until Upstox's own figures are read."
-FY_CHARGES_NOT_READ = (
-    "Upstox's own charges for this financial year have not been read yet; the figures above use "
-    "the journal's estimates."
-)
 FY_TRADES_NOTE = (
     "The trades themselves are listed in each Monthly statement, with a CSV of the month."
 )
-#: The tax pack's "What this paper leaves out" block (review H1): always the estimate line,
-#: and a line for each kind of trade that has no figure in it when the year has any.
+FY_ACTIVITY = "Trading activity recorded by the journal"
+#: Under that heading: what the journal's blocks are, so nobody reads them as the tax figures.
+FY_ACTIVITY_NOTE = (
+    "These blocks are the journal's own record of the trades it saw close, from the day it was "
+    "switched on. They are not the tax figures: those are the working paper's."
+)
 FY_ESTIMATES = (
-    "Charges are the journal's estimates from Upstox's published rates, not Upstox's own figures."
+    "Where Upstox's own charges for a trade are not read yet, its charges here are the "
+    "journal's estimate from Upstox's published rates."
 )
 MIME = {"pdf": "application/pdf", "png": "image/png", "csv": "text/csv"}
 
@@ -178,7 +185,7 @@ def resolve_span(kind: str, period: str | None, today: int) -> Span:
 
 
 # ---- reading what the period holds -----------------------------------------------------------
-def _read(span: Span, fy_start: int | None):
+def _read(span: Span):
     def read(tx):
         trips = [t for t in tx.trips_page("live", status="closed", from_day=span.start,
                                           to_day=span.end, limit=1_000_000)
@@ -191,63 +198,30 @@ def _read(span: Span, fy_start: int | None):
         tags = {t["id"]: t["name"] for t in tx.rows("tag")}
         books = {b["id"]: b["name"] for b in tx.rows("playbook")}
         first = tx.min_of("round_trip", "close_day", mode="live", status="closed")
-        charges = (tx.rows("upstox_charges", order="segment", financial_year=fy_start)
-                   if fy_start is not None else [])  # fmt: skip
         aside = tx.left_out("live", span.start, span.end)
-        sold = _sold(tx, span) if fy_start is not None else []
-        return trips, beta_trips, notes, tags, books, first, tx.settings(), charges, aside, sold
+        return trips, beta_trips, notes, tags, books, first, tx.settings(), aside
 
     return read
 
 
-def _sold(tx: Any, span: Span) -> list[tuple[dict[str, Any], list[dict[str, Any]], dict]]:
-    """The carry trades with a sale in the year, each with its legs as ``core/lots`` reads them
-    and its charges per day and side (the estimate of those orders, as the trade's own)."""
-    from .book import charges_of, shares_of
-
-    plan = tx.settings().get("charges_plan") or charges_core.DEFAULT_PLAN
-    out = []
-    for trip in tx.trips_sold_in("live", span.start, span.end):
-        legs = tx.legs_of(trip["id"])
-        order_ids = {leg["order_id"] for leg in legs}
-        refs = tx.order_refs("live", order_ids)
-        shares = shares_of(tx, trip, order_ids)  # an order shared with another trade: its share
-        by_trade = {leg["trade_id"]: leg for leg in legs}
-        groups: dict[tuple[int, str], list[dict[str, Any]]] = {}
-        for leg in legs:
-            groups.setdefault((int(leg["day"]), leg["action"]), []).append(
-                {"trade_id": leg["trade_id"], "qty": leg["leg_qty"]}
-            )
-        fees = {
-            k: int(charges_of(v, by_trade, refs, "live", plan, shares)["parts"]["total_paise"])
-            for k, v in groups.items()
-        }
-        rows = [{"day": leg["day"], "action": leg["action"], "qty": leg["leg_qty"],
-                 "price_u": leg["price_u"]} for leg in legs]  # fmt: skip
-        out.append((trip, rows, fees))
-    return out
-
-
-def tax_entries(span: Span, rows: list[dict[str, Any]], sold: list) -> list[dict[str, Any]]:
-    """The kinds table's rows for the year (review H1): every sale of a carried position in the
-    year, matched to its purchases by ``core/lots``, under its own kind and holding period; and
-    every other trade closed in the year (intraday) as one row."""
-    entries = []
-    for trip, legs, fees in sold:
-        found = lots.lots_of(legs, trip["side"], fees)
-        entries += tables.lot_entries(str(trip["exchange"]), found, span.start, span.end)
-    for trip in rows:
-        if trip.get("product_class") == "carry":
-            continue  # booked sale by sale above
-        gross = trip["gross_paise"] if trip.get("gross_paise") is not None else trip["net_paise"]
-        entries.append(tables.tax_entry(tables.kind_of_trade(trip), gross,
-                                        int(trip.get("charges_paise") or 0)))  # fmt: skip
-    return entries
+async def read_pack(service: Any, fy_start: int) -> tuple[dict[str, Any] | None, str | None]:
+    """The tax working paper of the year starting in ``fy_start``, from the portfolio: the pack,
+    or None and why (a key of ``taxpack.NO_PACK`` or of the link's causes). Asked only while
+    ``SUDARSHAN_TAX`` is on."""
+    if not getattr(service.settings, "tax", False):
+        return None, "switched_off"
+    try:
+        answer = await link_for(service).tax_pack(fy_start)
+    except PortfolioUnavailable as exc:
+        return None, exc.kind
+    return (dict(answer), None) if taxpack.usable(answer) else (None, "unreadable")
 
 
 def leaves_out(rows: list[dict[str, Any]], aside: Mapping[str, int]) -> tuple[str, ...]:
-    """The tax pack's "What this paper leaves out" lines (review H1)."""
-    lines = [FY_ESTIMATES]
+    """What the journal's own blocks of the tax pack are and leave out (review H1)."""
+    lines = [FY_ACTIVITY_NOTE]
+    if any(t.get("charges_actual_paise") is None and not tables.unpriced(t) for t in rows):
+        lines.append(FY_ESTIMATES)
     unpriced = sum(1 for t in rows if tables.unpriced(t))
     if unpriced:
         lines.append(
@@ -302,11 +276,11 @@ def built_label(now: int) -> str:
     return f"Built {words.day_label_year(ist_day(now))}, {h:02d}:{m:02d}"
 
 
-def _paragraph(text: str, kind: str) -> D.Paragraph:
+def _paragraph(text: str, kind: str, also: tuple[str, ...] = ()) -> D.Paragraph:
     """The words as a PDF paragraph: without the brand line and the title line (the page has
     both), the pointer to this very report and the working-paper line (its own note); the tax
     pack's line of what its figures leave out is in its own block."""
-    drop = {words.OPEN_FULL_REPORT, words.FY_NOTE}
+    drop = {words.OPEN_FULL_REPORT, words.FY_NOTE, *also}
     title = f"{kinds.REPORT_TITLES[kind]}{words.SEP}"
     aside = "Not in these figures:" if kind == "fy" else None
     para = D.Paragraph.from_words(text)
@@ -337,32 +311,33 @@ def monthly_pdf(span: Span, text: str, rows: list[dict[str, Any]], now: int) -> 
                                   built_label(now), blocks, CAPITAL_LINE))  # fmt: skip
 
 
-def fy_pdf(span: Span, text: str, rows: list[dict[str, Any]], charges: list[dict[str, Any]],
-           now: int, entries: list[dict[str, Any]] | None = None,
+def fy_pdf(span: Span, text: str, rows: list[dict[str, Any]], now: int,
+           pack: Mapping[str, Any] | None = None, no_pack: str | None = None,
            left_out: tuple[str, ...] = ()) -> bytes:  # fmt: skip
+    """The tax pack: the working paper as the portfolio computed it (``pack``), or the sentence
+    saying why it is not here (``no_pack``), then the journal's own blocks."""
     m = metrics.compute(rows)
     cal = metrics.calendar(rows)
-    charges_block: tuple[D.Block, ...] = (
-        (tables.broker_charges_table(charges),) if charges
-        else (D.Paragraph((FY_CHARGES_NOT_READ,)),)
-    )  # fmt: skip
-    kinds_rows = entries if entries is not None else tax_entries(span, rows, [])
+    paper: tuple[D.Block, ...]
+    if pack is not None:
+        paper, said = taxpack.pack_blocks(pack), tuple(taxpack.pack_lines(pack))
+    else:
+        said = (no_pack or taxpack.no_pack_words(None),)
+        paper = (D.Heading("Tax working paper"), D.Paragraph(said))
     blocks = (
         D.Note(words.FY_NOTE),
-        D.Heading("What this paper leaves out"),
-        D.Paragraph(left_out or (FY_ESTIMATES,)),
+        *paper,
+        D.Heading(FY_ACTIVITY),
+        D.Paragraph(left_out or (FY_ACTIVITY_NOTE,)),
         tables.summary_figures(m),
         D.Heading("Summary"),
-        _paragraph(text, "fy"),
+        _paragraph(text, "fy", said),
         D.Heading("Month by month"),
         tables.months_table(cal["months"]),
         D.Heading("By strategy"),
         tables.strategy_table(metrics.blocks(rows, "strategy")),
         D.Heading("By kind of trade"),
-        tables.kinds_table(kinds_rows),
-        D.Paragraph((tables.KINDS_NOTE,)),
-        D.Heading("Charges as Upstox reports them"),
-        *charges_block,
+        tables.kinds_table(rows),
         D.Paragraph((FY_TRADES_NOTE,)),
     )
     return render_pdf(D.ReportDoc("fy", span.key, kinds.REPORT_TITLES["fy"], span.label,
@@ -377,10 +352,10 @@ async def build_period(service: Any, kind: str, span: Span, now: int, announce: 
     # The analytics op's own helpers; imported here because the ops package imports this module.
     from .ops.analytics_ops import beta_of, for_core, trading_days
 
-    read = _read(span, 2000 + int(span.key[2:4]) if kind == "fy" else None)
-    trips, beta_trips, notes, tags, books, first, settings, charges, aside, sold = await _thread(
-        lambda: service.store.read(OWNER, read)
+    trips, beta_trips, notes, tags, books, first, settings, aside = await _thread(
+        lambda: service.store.read(OWNER, _read(span))
     )
+    pack = no_pack = None
     rows = [for_core(t, tags, books, notes.get(t["id"])) for t in trips]
     plan = schedule_for(service)
     capital = settings.get("capital_base_paise")
@@ -404,10 +379,12 @@ async def build_period(service: Any, kind: str, span: Span, now: int, announce: 
         text = words.monthly(span.label, len(days), block, **extra)
         file = ("pdf", await _thread(lambda: monthly_pdf(span, text, rows, now)))
     else:
-        text = words.fy(span.label, len(days), block, **extra)
-        entries = tax_entries(span, rows, sold)
+        pack, why = await read_pack(service, 2000 + int(span.key[2:4]))
+        no_pack = None if pack is not None else taxpack.no_pack_words(why)
+        paper = taxpack.pack_lines(pack) if pack is not None else [no_pack]
+        text = words.fy(span.label, len(days), block, paper=paper, **extra)
         aside_lines = leaves_out(rows, aside)
-        file = ("pdf", await _thread(lambda: fy_pdf(span, text, rows, charges, now, entries,
+        file = ("pdf", await _thread(lambda: fy_pdf(span, text, rows, now, pack, no_pack,
                                                     aside_lines)))  # fmt: skip
     summary = {"start": span.start, "end": span.end, "trading_days": len(days),
                "trades": block["trips"], "wins": block["wins"], "losses": block["losses"],
@@ -416,6 +393,9 @@ async def build_period(service: Any, kind: str, span: Span, now: int, announce: 
                "left_out": aside}  # fmt: skip
     if kind == "monthly":
         summary["csv"] = tables.trades_csv(rows)
+    if kind == "fy":
+        # The paper as printed, frozen: its time and rules edition are inside it.
+        summary["tax_pack"], summary["tax_note"] = pack, no_pack
     report_id, _ = await archive(service, kind, span.key, text, summary, now, announce=False)
     sha = await keep_file(service, report_id, kind, span.key, file[0], file[1], now)
     if announce:  # after the file is kept, so a fault before here announces on the retry (M2)

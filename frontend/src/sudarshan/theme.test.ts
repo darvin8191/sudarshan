@@ -12,6 +12,7 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { SD_TOAST_COLOURS } from '@/components/ui/sonner'
 
 const css = readFileSync(join(process.cwd(), 'src/sudarshan/theme.css'), 'utf8')
 
@@ -228,6 +229,42 @@ describe('SUDARSHAN tokens', () => {
     // The chips (parts.tsx STATUS_LOOK) as colour-blind mode draws them.
     expect(contrast(ink('--down'), ink('--down-tint'))).toBeGreaterThanOrEqual(4.5)
     expect(contrast(ink('--up'), ink('--up-tint'))).toBeGreaterThanOrEqual(4.5)
+  })
+
+  // SCR-P item 6: the shell's toasts. The library's own success green read 3.9:1 on its fill.
+  it.each([
+    'success',
+    'error',
+    'warning',
+    'info',
+  ])('draws a %s toast from D tokens, its sentence at 4.5:1 or better on its fill', (kind) => {
+    const token = (part: 'text' | 'bg') =>
+      /^var\((--[\w-]+)\)$/.exec(SD_TOAST_COLOURS[`--${kind}-${part}`] ?? '')?.[1] ?? ''
+    const text = byName.get(token('text'))
+    const fill = byName.get(token('bg'))
+    expect(text, `--${kind}-text is a D token`).toBeDefined()
+    expect(fill, `--${kind}-bg is a D token`).toBeDefined()
+    expect(contrast(text as string, fill as string)).toBeGreaterThanOrEqual(4.5)
+    // Colour-blind mode swaps the down tint under the error toast; the sentence must still read.
+    if (token('bg') === '--down-tint') {
+      expect(
+        contrast(text as string, byName.get('--down-cvd-tint') as string)
+      ).toBeGreaterThanOrEqual(4.5)
+    }
+  })
+
+  it('makes the toast’s close button a 48 dp target, level with the sentence', () => {
+    const rule =
+      /\[data-sonner-toaster\]\.toaster \[data-sonner-toast\]\[data-styled='true'\] \[data-close-button\] \{([^}]*)\}/.exec(
+        css
+      )?.[1] ?? ''
+    expect(rule).toMatch(/width:\s*3rem/)
+    expect(rule).toMatch(/height:\s*3rem/)
+    // Outside every layer: the library's sheet is unlayered, and a layered rule would lose to it.
+    const before = css.slice(0, css.indexOf('Shell toast (M1.18)'))
+    const opened = (before.match(/\{/g) ?? []).length
+    const closed = (before.match(/\}/g) ?? []).length
+    expect(opened).toBe(closed)
   })
 
   it('keeps --profit and --loss the same colours as --up and --down', () => {

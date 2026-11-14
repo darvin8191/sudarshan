@@ -192,10 +192,12 @@ export function Navbar({ fluid = false }: NavbarProps = {}) {
           </SheetContent>
         </Sheet>
 
-        {/* Wordmark: both scripts at every width (owner rule 2). */}
+        {/* Wordmark: both scripts at every width (owner rule 2). SUDARSHAN: it is the one part of
+            the row that gives way (`min-w-0`, and the lockup's own rule in theme.css), so a wider
+            account end (Analyze, the kill switch chip, a fallback font) never widens the page. */}
         <Link
           to="/dashboard"
-          className="ml-1 mr-2 flex min-h-12 shrink-0 items-center rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-ring md:ml-0 md:mr-6"
+          className="ml-1 mr-2 flex min-h-12 min-w-0 items-center rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-ring md:ml-0 md:mr-6 md:shrink-0"
         >
           <BrandLockup />
         </Link>

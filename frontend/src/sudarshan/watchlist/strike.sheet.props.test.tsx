@@ -103,6 +103,26 @@ describe('the strike sheet as every caller had it', () => {
   })
 })
 
+describe('the strike sheet’s chain link', () => {
+  it('takes the row’s expiry and strike in its own prop type, and opens the phone’s chain on them', () => {
+    // The prop is typed as `chainPath` reads it: an object literal with both fields is accepted here.
+    show({
+      chain: { exchange: 'NSE_INDEX', underlying: 'TEST', expiry: '2026-11-17', strike: 25_900 },
+    })
+    const link = screen.getByRole('link', { name: 'Open option chain' })
+    expect(link.getAttribute('href')).toMatch(
+      /^\/options\/[A-Z_]+\/TEST\?expiry=2026-11-17&strike=25900$/
+    )
+  })
+
+  it('opens the option chain tool for an underlying alone', () => {
+    show({ chain: { exchange: 'NSE_INDEX', underlying: 'TEST' } })
+    expect(screen.getByRole('link', { name: 'Open option chain' }).getAttribute('href')).toBe(
+      '/optionchain?exchange=NSE_INDEX&underlying=TEST'
+    )
+  })
+})
+
 describe('the strike sheet for a host that is not a watchlist row', () => {
   it('draws neither Edit row nor Remove row when the host gives neither', () => {
     show({ onEdit: undefined, onRemove: undefined })

@@ -52,6 +52,7 @@ const MarketAlerts = lazy(() => import('@/sudarshan/pages/MarketAlerts')) // SUD
 const Screener = lazy(() => import('@/sudarshan/pages/Screener')) // SUDARSHAN M9
 const Risk = lazy(() => import('@/sudarshan/pages/Risk')) // SUDARSHAN M20.7
 const Automation = lazy(() => import('@/sudarshan/pages/Automation')) // SUDARSHAN M12.1
+const System = lazy(() => import('@/sudarshan/pages/System')) // SUDARSHAN M20.8
 const Journal = lazy(() => import('@/sudarshan/pages/Journal')) // SUDARSHAN M14
 const Reports = lazy(() => import('@/sudarshan/pages/Reports')) // SUDARSHAN M15.10
 
@@ -358,6 +359,8 @@ function App() {
                 <Route path="/risk" element={<Risk />} />
                 {/* SUDARSHAN M12.1: TradingView strategies through the alert intake */}
                 <Route path="/automation" element={<Automation />} />
+                {/* SUDARSHAN M20.8: the server's state, and Disconnect the assistant */}
+                <Route path="/system" element={<System />} />
                 {/* SUDARSHAN M14: the trade journal */}
                 <Route path="/journal" element={<Journal />} />
                 {/* SUDARSHAN M15.10: the reports archive and settings */}

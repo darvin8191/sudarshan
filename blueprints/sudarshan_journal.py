@@ -136,6 +136,7 @@ OPS = (
     OpSpec("settings_get", "GET", "/settings", "read"),
     OpSpec("settings_set", "PUT", "/settings", "write"),
     OpSpec("reconcile_now", "POST", "/reconcile", "reconcile"),
+    OpSpec("charges_reconcile", "GET", "/charges/reconcile", "read", (("fy", "int"),)),
 )
 
 #: The codes the page acts on. ``not_confirmed``, ``unauthorized``, ``forbidden`` and
