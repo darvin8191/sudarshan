@@ -286,19 +286,17 @@ class Dialect:
                 self._changed()
 
     def settle(self, member: Mapping[str, Any]) -> None:
-        """A source's answer for the member changed (F7: a list shared or no longer shared):
-        recheck now, and again once every source has an answer, the books being read for the
-        member when they have none (what may be let go is decided only on every answer)."""
+        """A source's answer for the member changed (F7: a list shared or no longer shared): with
+        a socket of theirs open, recheck now; and when a source has no answer for them yet (what
+        may be let go is decided only on every answer), ask for one as a waiting subscription
+        does (``_ensure``, at most every 30 s), which rechecks after it. With none open, nothing
+        follows and nothing is read."""
         member_id = int(member["id"])
-        self.recheck(member_id)
-        if all(source.known(member_id) for source in self.sources):
+        if not any(int(seat.member["id"]) == member_id for seat in self.seats.values()):
             return
-
-        async def go() -> None:
-            await asyncio.gather(*(s.ensure(member) for s in self.sources), return_exceptions=True)
-            self.recheck(member_id)
-
-        self._spawn(go())
+        self.recheck(member_id)
+        if not all(source.known(member_id) for source in self.sources):
+            self._ensure(member)
 
     def _ensure(self, member: Mapping[str, Any]) -> None:
         member_id, now = int(member["id"]), self.mono()

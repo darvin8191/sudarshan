@@ -438,8 +438,9 @@ def test_forwarded_headers_are_nginxs_own():
         ["X-Forwarded-For", "$remote_addr"],
         ["X-Forwarded-Proto", "$scheme"],
     ]
-    assert sorted(h.lower() for h, *_ in want[1:]) == sorted(
-        h.lower() for h in contract.FORWARDED_HEADERS)  # fmt: skip
+    # L7 (feat/family-c): the doors refuse all five headers nginx can set; these are the three
+    # this configuration sets, each of them refused.
+    assert {h.lower() for h, *_ in want[1:]} <= {h.lower() for h in contract.FORWARDED_HEADERS}
     assert proxy().values("proxy_set_header") == want
     wsloc = locations()[("=", contract.WS_PATH)]
     assert wsloc.values("proxy_set_header") == [

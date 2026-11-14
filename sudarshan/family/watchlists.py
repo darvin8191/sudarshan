@@ -46,6 +46,8 @@ FRESH_MS = 60_000
 OPENED_MS = 10_000
 #: How often the open watchlist screens are looked at.
 LOOK_S = 5.0
+#: After a read that failed, an open screen does not ask again for this long (a page still may).
+RETRY_MS = 30_000
 #: A member with no socket open, not looked at for this long, is forgotten.
 FORGET_MS = 10 * FRESH_MS
 MAX_ID = 2**31 - 1
@@ -186,6 +188,7 @@ class Watchlists:
         self.seen: dict[int, Seen] = {}
         self.dialect: Any = None  # seated by install: its sockets, and told what changed
         self.counts = {"reads": 0, "failed": 0}
+        self._failed: dict[int, int] = {}  # member id -> when their last read failed
         self._flights: dict[int, asyncio.Task] = {}
         self._tasks: set[asyncio.Task] = set()
 
@@ -217,6 +220,7 @@ class Watchlists:
                 if ids else {"lists": []}  # fmt: skip
         except Refusal:
             self.counts["failed"] += 1
+            self._failed[member_id] = now
             if kept is not None:
                 cut, kept.wanted = [lst for lst in kept.lists if lst["id"] in ids], ids
                 if cut != kept.lists:
@@ -227,6 +231,7 @@ class Watchlists:
         self.symbols.put(listing for lst in lists for row in lst["rows"]
                          if (listing := listing_of(row, now)) is not None)  # fmt: skip
         self.seen[member_id] = Seen(now, lists, ids)
+        self._failed.pop(member_id, None)
         self.counts["reads"] += 1
         if kept is None or kept.lists != lists:
             self._settle(member)
@@ -275,12 +280,19 @@ class Watchlists:
         return {int(seat.member["id"]): seat.member for seat in seats}
 
     # ---- what starts a read ----
+    def _due(self, member_id: int, now: int, after_ms: int) -> bool:
+        """Whether a screen should read the member's lists now: none kept, a share changed, or
+        older than ``after_ms``; never within ``RETRY_MS`` of a read that failed."""
+        failed = self._failed.get(member_id)
+        if failed is not None and now - failed < RETRY_MS:
+            return False
+        kept = self.seen.get(member_id)
+        return kept is None or kept.stale or now - kept.at >= after_ms
+
     def opened(self, seat: Any) -> None:
         """A socket's screen changed: the watchlist screen reads the lists unless they are new."""
-        if seat.screen != "watchlist":
-            return
-        kept = self.seen.get(int(seat.member["id"]))
-        if kept is None or kept.stale or self.clock() - kept.at >= OPENED_MS:
+        if seat.screen == "watchlist" and self._due(int(seat.member["id"]), self.clock(),
+                                                    OPENED_MS):  # fmt: skip
             self._spawn(seat.member)
 
     def changed(self) -> None:
@@ -300,13 +312,14 @@ class Watchlists:
             seats = self.dialect.seats.values() if self.dialect is not None else ()
             looking = {int(s.member["id"]): s.member for s in seats if s.screen == "watchlist"}
             for member_id, member in looking.items():
-                kept = self.seen.get(member_id)
-                if kept is None or kept.stale or now - kept.at >= FRESH_MS:
+                if self._due(member_id, now, FRESH_MS):
                     self._spawn(member)
             seated = self._seated()
             for member_id in [m for m, kept in self.seen.items()
                               if m not in seated and now - kept.at >= FORGET_MS]:  # fmt: skip
                 del self.seen[member_id]
+            for member_id in [m for m, at in self._failed.items() if now - at >= FORGET_MS]:
+                del self._failed[member_id]
 
     async def close(self) -> None:
         tasks = [*self._tasks, *self._flights.values()]

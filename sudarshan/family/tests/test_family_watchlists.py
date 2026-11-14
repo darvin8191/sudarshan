@@ -358,6 +358,45 @@ def test_an_open_watchlist_screen_reads_once_a_minute_and_no_other_screen_reads(
     run(go())
 
 
+def test_an_open_screen_asks_a_failing_openalgo_at_most_every_thirty_seconds(monkeypatch):
+    monkeypatch.setattr(watchlists, "LOOK_S", 0.01)
+
+    async def go():
+        clock, tries = Clock(ist(MONDAY, 10)), []
+
+        class Store:
+            async def read(self, fn):
+                return [7]
+
+        class Client:
+            async def lists(self, ids, *, member_id, role):
+                tries.append(clock())
+                raise Refusal("unreachable")
+
+        dialect = SimpleNamespace(seats={}, settle=lambda member: None)
+        lists = Watchlists(Store(), Client(), SimpleNamespace(put=lambda found: list(found)),
+                           clock=clock)  # fmt: skip
+        lists.dialect = dialect
+        seat = SimpleNamespace(member={"id": 3, "role": "viewer"}, screen="watchlist")
+        dialect.seats["sock"] = seat
+        task = asyncio.create_task(lists.run())
+        try:
+            lists.opened(seat)
+            await until(lambda: len(tries) == 1)
+            for _ in range(5):  # 25 s, looked at every 5 s, the screen opened again each time
+                clock.at += 5_000
+                lists.opened(seat)
+                await asyncio.sleep(0.03)
+            assert len(tries) == 1
+            clock.at += 5_000  # 30 s since the failure
+            await until(lambda: len(tries) == 2)
+        finally:
+            await cancel_and_wait(task)
+            await lists.close()
+
+    run(go())
+
+
 def test_an_ended_share_leaves_the_screen_at_once_even_while_openalgo_cannot_be_read(tmp_path):
     async def go():
         async with World(tmp_path) as world:
@@ -410,6 +449,24 @@ def test_a_phone_follows_a_shared_lists_rows_and_lets_go_when_the_share_ends(tmp
                 assert "NSE_EQ|LIST0000001" not in world.service.plane.dialect.by_key
             finally:
                 await sock.close()
+
+    run(go())
+
+
+def test_reading_the_lists_reads_no_book_for_a_member_with_no_socket_open(tmp_path):
+    """Design 7.2 (no read with no screen open): a page's read of the lists, and a share that
+    changes them, never make the books be read for a member with no socket open."""
+
+    async def go():
+        async with World(tmp_path) as world:
+            a, cookie = await signed_in(world.service, VIEWER, world.clock())
+            world.openalgo.add(7, "Swing", [list_row(1)])
+            share = await world.share(7, member_id=a["id"])
+            assert [x["id"] for x in (await world.get("/watchlists", cookie))[1]["data"]] == [7]
+            assert (await world.admin("share_remove", id=share["id"], version=1))[0] == 200
+            assert (await world.get("/watchlists", cookie))[1]["data"] == []
+            await asyncio.sleep(0.2)
+            assert world.portfolio.calls == []
 
     run(go())
 
