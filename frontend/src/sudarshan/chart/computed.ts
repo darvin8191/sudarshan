@@ -14,7 +14,6 @@
  * A computed chart is not an instrument: it has no order book, no volume and cannot be traded.
  */
 import type { Bar, BarsRequest, DataFeed } from 'openalgo-charts'
-import { evaluateExpression, parseExpression } from 'openalgo-charts/transform'
 
 export interface ComputedLeg {
   symbol: string
@@ -48,15 +47,33 @@ export function computedKey(spec: ComputedSpec): string {
   return spec.legs.map((leg) => `${leg.exchange}:${leg.symbol}`).join('+')
 }
 
+type TransformTier = typeof import('openalgo-charts/transform')
+/** What the fold needs of the engine's transform tier. */
+export type Evaluator = Pick<TransformTier, 'evaluateExpression' | 'parseExpression'>
+
+let tier: Promise<TransformTier> | null = null
+
+/**
+ * The engine's transform tier, downloaded the first time a computed chart is read and never with
+ * the page (`tiers.test.ts`). A download that failed is asked for again by the next read.
+ */
+export function transformTier(): Promise<TransformTier> {
+  tier ??= import('openalgo-charts/transform').catch((error) => {
+    tier = null
+    throw error
+  })
+  return tier
+}
+
 /** The legs' candles folded into the sum's: only the buckets every leg has. */
-export function foldBars(legBars: ReadonlyArray<readonly Bar[]>): Bar[] {
+export function foldBars(legBars: ReadonlyArray<readonly Bar[]>, engine: Evaluator): Bar[] {
   if (legBars.length < 2 || legBars.length > MAX_COMPUTED_LEGS) return []
   const names = NAMES.slice(0, legBars.length)
   const legs: Record<string, readonly Bar[]> = {}
   names.forEach((name, i) => {
     legs[name] = legBars[i]
   })
-  return evaluateExpression(parseExpression(names.join('+')), legs).map((bar) => ({
+  return engine.evaluateExpression(engine.parseExpression(names.join('+')), legs).map((bar) => ({
     time: bar.time,
     open: bar.open,
     high: bar.high,
@@ -132,6 +149,7 @@ export class ComputedFeed implements DataFeed {
   async getBars(req: BarsRequest): Promise<Bar[]> {
     const spec = this.spec
     if (!spec || req.symbol !== computedKey(spec)) return []
+    const engine = await transformTier()
     const legs = await Promise.all(
       spec.legs.map(async (leg) => {
         const bars = await this.inner.getBars({
@@ -144,6 +162,6 @@ export class ComputedFeed implements DataFeed {
       })
     )
     if (this.spec === spec) this.lastCloses = legs.map((bars) => bars[bars.length - 1].close)
-    return foldBars(legs)
+    return foldBars(legs, engine)
   }
 }

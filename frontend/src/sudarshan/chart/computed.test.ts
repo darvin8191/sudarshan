@@ -1,13 +1,15 @@
 /** A computed chart's arithmetic (M4.13, C11): the fold of two legs' candles and the combined tick. */
 import type { Bar, DataFeed } from 'openalgo-charts'
-import { describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it } from 'vitest'
 import {
   ComputedFeed,
   type ComputedSpec,
   computedKey,
-  foldBars,
+  type Evaluator,
+  foldBars as fold,
   LegPrices,
   specProblem,
+  transformTier,
 } from './computed'
 
 const bar = (time: number, open: number, high: number, low: number, close: number): Bar => ({
@@ -21,6 +23,12 @@ const bar = (time: number, open: number, high: number, low: number, close: numbe
 const CE = { symbol: 'NIFTY17NOV2625900CE', exchange: 'NFO' }
 const PE = { symbol: 'NIFTY17NOV2625900PE', exchange: 'NFO' }
 const spec: ComputedSpec = { legs: [CE, PE], op: 'sum' }
+
+let engine: Evaluator
+beforeAll(async () => {
+  engine = await transformTier()
+})
+const foldBars = (legs: ReadonlyArray<readonly Bar[]>) => fold(legs, engine)
 
 describe('foldBars', () => {
   it('keeps only the buckets both legs have, and sums their opens and closes', () => {
