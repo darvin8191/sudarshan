@@ -15,6 +15,7 @@ import {
 } from '@/components/ui/select'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useSupportedExchanges } from '@/hooks/useSupportedExchanges'
+import { TradingViewNotice } from '@/sudarshan/automation/TradingViewNotice' // SUDARSHAN M12.1
 import { showToast } from '@/utils/toast'
 
 interface SearchResult {
@@ -226,6 +227,9 @@ export default function TradingView() {
           Generate webhook configuration for TradingView strategy alerts
         </p>
       </div>
+
+      {/* SUDARSHAN M12.1: strategies go through Automation; this page stays for line alerts */}
+      <TradingViewNotice />
 
       {/* Localhost Warning - only show if HOST_SERVER is not configured to external URL */}
       {hostConfig?.is_localhost && (
