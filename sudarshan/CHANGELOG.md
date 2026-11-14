@@ -5,6 +5,96 @@ publish. The owner publishes each release on GitHub. The server's deploy timer t
 outside 08:30-16:00 IST on trading days (09:00-15:45 until v0.3.1), keeps backups, and rolls
 back if the app does not come up healthy.
 
+## v0.5.2 (14 Nov 2026)
+
+A small security release on top of v0.5.1: NSE's freeze limits from 2 November, three security
+fixes from OpenAlgo (the Telegram bot's /link, old logins on the market data helper pages, forged
+order postbacks), and the kill switch's Telegram command checking the same link. It includes
+everything in v0.5.1, and through it v0.5.0 and v0.4.1. **It is a security release, so by your
+choice it may be published before v0.5.1 has run a trading day. v0.5.1's checks still apply: its
+phone check after this install, and its first Live trading day's checks on Monday 16 Nov.**
+
+### What changes for you
+- **NSE's freeze limits from 2 November are set on install, and stay set.** NIFTY 1,800 (27 lots
+  of 65), BANKNIFTY 900 (30 lots of 30), FINNIFTY 1,800, MIDCPNIFTY 2,800, NIFTYNXT50 600 and
+  NIFTYFPI 8,500. v0.5.1 still had October's (NIFTY 3,510, BANKNIFTY 1,440), and every install put
+  them back, a value typed in on the Freeze Quantities page included. Now:
+  - the scalping terminal's Close, Close all and auto-exit split a NIFTY close above 27 lots
+    (BANKNIFTY above 30) into orders the exchange accepts, where one order of 28 to 54 NIFTY lots
+    (31 to 48 BANKNIFTY) was rejected and left the position open;
+  - /trading refuses an order above the limit on screen, naming the limit, where the exchange
+    rejected it after it was sent;
+  - a limit you set yourself that NSE never published (1,755 for NIFTY, say) is kept, on this
+    install and every later one.
+- **The Telegram bot's /link checks the key on this server.** /link used to ask the server typed
+  in the command whether the key was good, so anyone who found the bot could link a chat through a
+  server of their own. That chat could then switch you between Live and Analyze (in Analyze your
+  next orders go to the sandbox and report success) and stop your Python strategies. Now /link
+  takes only this server's API key, checked before anything is sent anywhere. /mode, /stoppython,
+  their buttons, "Close all + Stop strategies" and /killswitch check the chat's key again each
+  time: a chat whose key is not this server's API key now is asked to link again, and nothing
+  happens.
+- **Old logins cannot read the market data helper pages.** The pages that give the app's screens
+  your API key and the market data settings took any cookie with your user name in it, even one
+  from before the 03:00 logout, and from midnight to 03:00 a login of any age passed every check.
+  Now a login from before the most recent 03:00 is refused everywhere, at any hour; these pages
+  answer it as signed out and end nothing. Your ordinary day is unchanged: a login after 03:00
+  holds until the next 03:00, past midnight included.
+- **Forged order postbacks are refused.** Anyone who could reach the server could post a made-up
+  Upstox fill to its postback address. It went out as a live order update, which the strategy
+  module applies to its orders and which can start a Flow workflow that places orders. Every
+  Upstox postback is now refused before it is read. SUDARSHAN never used them: your order updates
+  come through Upstox's order stream, which OpenAlgo opens itself at login, so order alerts, the
+  books and the strategy module are unchanged.
+
+### What you must do
+- **Publish it** (the link is in your task list). On a Saturday the deploy timer installs it at
+  once.
+- **On the Telegram page (OpenAlgo, Telegram Bot), remove any linked chat that is not your own.**
+  A chat a stranger linked before this release can no longer act on the server, but it stays in
+  the list until you remove it, and while it is there your order alerts can go to it instead of
+  you.
+- **Send /link again only if you regenerated the API key since you linked.** Until you do, /mode,
+  /stoppython and /killswitch ask you to link again. A chat linked with your current key needs
+  nothing.
+- **If your risk confirm phrase is still the shipped one, set your own on the Risk page.** The
+  shipped phrase is in this public repository. Only you type the phrase, and once the guard checks
+  Live, /killswitch exit with it cancels your orders and exits every position.
+- **Check after the install (1 minute):** Freeze Quantities shows NIFTY 1800 and BANKNIFTY 900.
+  If it does not, the install rolled back (the database goes back as it was), so keep single NIFTY
+  orders within 27 lots and BANKNIFTY within 30 until it is installed. In Analyze mode, a 30-lot
+  NIFTY scalping Close goes as 27 lots and 3.
+- **Publish a release prepared before this one only once its notes say it includes v0.5.2.** One
+  that does not puts the October limits back when it installs.
+
+### What is refused now that used to be accepted
+- **Telegram /link with a key that is not this server's API key**, before anything is sent.
+- **/mode, /stoppython, their buttons, "Close all + Stop strategies" and /killswitch** from a chat
+  whose stored key is not this server's API key now: asked to link again, nothing done.
+- **A login from before the most recent 03:00**, between midnight and 03:00 as at any other hour:
+  the market data helper pages answer it as signed out, the app's live connection refuses it, and
+  any other page sends it to the login page.
+- **Every Upstox order postback** (and Dhan's, Fyers', Angel One's and AliceBlue's): refused before
+  it is read. Zerodha's, which carry a signature, are still checked and accepted.
+- **An order above the freeze limit from /trading**: refused on screen, naming the limit. The
+  exchange refused these anyway.
+- Everything else goes as before. Your TradingView alerts, scripts and API calls use the API key
+  and are not affected.
+
+### Not in this release yet
+- **The order ticket, Exit, Exit all, TradingView, scripts and the strategy module do not split at
+  the freeze limit.** Each sends one order, so closing a NIFTY position over 27 lots (BANKNIFTY over
+  30) that way is refused by Upstox, as it has been since 2 November. Close it in parts, or keep
+  positions within those sizes.
+- **A device signed out from another device, or a copied cookie, still counts as signed in until
+  03:00**, as in v0.5.1, so it can still read the market data helper pages until then.
+- **Between midnight and 03:00, a login refused for being old signs every device out.** A browser
+  that still holds a login from before the previous 03:00 and opens a page in that window now ends
+  the session on all your devices and the day's Upstox login in SUDARSHAN, up to three hours before
+  the usual 03:00, where v0.5.1 let that old login in. Markets are closed then and Upstox's login
+  ends at 03:30 anyway; the next morning's login is as usual.
+- Everything under v0.5.1's "Not in this release yet" still stands.
+
 ## v0.5.1 (8 Nov 2026)
 
 Live exits close what Upstox's positions do not show yet, reversals and the scalping and strategy
