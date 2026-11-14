@@ -250,6 +250,102 @@ def allocation(tab_view: Mapping[str, Any]) -> Sheet:
                  (WORDS["whole_tab"],))  # fmt: skip
 
 
+def _rate(pct: str | None, words: str | None) -> tuple[Cell, str]:
+    """A return figure and the sentence beside it (which stands alone when there is no figure)."""
+    return Pct(pct, True), words or ""
+
+
+def performance(tab: Mapping[str, Any], report: Mapping[str, Any], at: int) -> Sheet:
+    xirr, twr = report["xirr"], report["twr"]
+    facts = (
+        ("Valued on", Day(report["valuation_day"]), ""),
+        ("First entry", Day(report["first_flow_day"]), ""),
+        ("Value", Amount(report["value_paise"]), ""),
+        ("Money in", Amount(report["money_in_paise"]), ""),
+        ("Money out", Amount(report["money_out_paise"]), ""),
+        ("Fees", Amount(report["fee_paise"]), ""),
+        ("Net put in", Amount(report["net_put_in_paise"]), ""),
+        ("Total gain", Gain(report["total_gain_paise"]), ""),
+        ("Absolute return %", Pct(report["absolute_return_pct"], True), ""),
+        ("XIRR %", *_rate(xirr["pct"], xirr["words"])),
+        ("TWR %", *_rate(twr["pct"], twr["words"])),
+        ("TWR a year %", Pct(twr["annualised_pct"], True), ""),
+    )
+    index = tuple(
+        (b["label"], Amount(b["value_paise"]), Pct(b["xirr_pct"], True), Pct(b["twr_pct"], True),
+         Pct(b["excess_pct"], True), b["beta"] or "", b["correlation"] or "",
+         "; ".join([*b["words"], *([b["stat_note"]] if b["stat_note"] else [])]))
+        for b in report["benchmarks"]
+    )  # fmt: skip
+    years = tuple(
+        (fy["label"], Gain(fy["realised_paise"]), Amount(fy["income_paise"]),
+         Amount(fy["fees_paise"])) for fy in report["by_fy"]
+    )  # fmt: skip
+    series = report["series"]
+    days = tuple((Day(p["day"]), Amount(p["value_paise"]), Amount(p["net_put_in_paise"]))
+                 for p in series)  # fmt: skip
+    # Paper has no room for every day: the last value of each month, the latest day included.
+    ends = tuple(row for row, after in zip(days, [*days[1:], None], strict=True)
+                 if after is None or after[0].day // 100 != row[0].day // 100)  # fmt: skip
+    daily = (Col("Day", 1.2, "l"), Col("Value", 1.5), Col("Net put in", 1.5))
+    none_yet = report["series_words"] or "No daily history yet."
+    sections = (
+        Section("Figures", (_LABEL, _VALUE, _NOTE), facts),
+        Section(
+            "Against the index",
+            (Col("Index", 1.6, "l"), Col("Same money, value", 1.6), Col("XIRR %"), Col("TWR %"),
+             Col("Ahead by %"), Col("Beta"), Col("Correlation", 1.1), Col("Note", paper=False)),
+            index,
+        ),
+        Section("By financial year",
+                (Col("Year", 1.6, "l"), Col("Realised gain", 1.5), Col("Income", 1.5),
+                 Col("Fees", 1.5)), years, empty="No realised gain, income or fee yet."),
+        Section("Daily values", daily, days, on="csv", empty=none_yet),
+        Section("Month-end values", daily, ends, on="paper", empty=none_yet),
+    )  # fmt: skip
+    notes = [f"{b[0]}: {b[7]}" for b in index if b[7]]
+    if report["series_words"]:
+        notes.append(report["series_words"])
+    figures = (
+        ("Value", Amount(report["value_paise"])),
+        ("Net put in", Amount(report["net_put_in_paise"])),
+        ("Total gain", Gain(report["total_gain_paise"])),
+        ("XIRR %", Pct(xirr["pct"], True) if xirr["pct"] is not None else WORDS["not_yet"]),
+    )
+    return Sheet("performance", tab, at, figures, sections, tuple(notes))
+
+
+def income(tab: Mapping[str, Any], report: Mapping[str, Any], at: int) -> Sheet:
+    found = report["income"]
+    yield_pct = found["yield_on_cost_pct"]
+    facts = (
+        ("This financial year", Amount(found["this_fy_paise"]), ""),
+        ("Last 12 months", Amount(found["last_12m_paise"]), ""),
+        ("Earned by holdings still held", Amount(found["held_income_paise"]),
+         "In the last 12 months"),
+        ("Cost of those holdings", Amount(found["held_cost_paise"]), ""),
+        ("Yield on cost %", Pct(yield_pct), "" if yield_pct is not None else WORDS["not_yet"]),
+    )  # fmt: skip
+    months = tuple(
+        (f"{W.MONTHS[m['month'] % 100 - 1]} {m['month'] // 100}", Amount(m["paise"]))
+        for m in found["by_month"]
+    )
+    two = (Col("Period", 1.6, "l"), Col("Income", 1.5))
+    sections = (
+        Section("Figures", (_LABEL, _VALUE, _NOTE), facts),
+        Section("By month", two, months, ("Last 12 months", Amount(found["last_12m_paise"]))),
+        Section("By financial year", two,
+                tuple((fy["label"], Amount(fy["paise"])) for fy in found["by_fy"]),
+                empty="No income entered yet."),
+    )  # fmt: skip
+    figures = (
+        ("This financial year", Amount(found["this_fy_paise"])),
+        ("Last 12 months", Amount(found["last_12m_paise"])),
+        ("Yield on cost %", Pct(yield_pct) if yield_pct is not None else WORDS["not_yet"]),
+    )
+    return Sheet("income", tab, at, figures, sections)
+
+
 # ---- CSV ------------------------------------------------------------------------------------------
 def _plain(value: int | None, decimals: int, least: int) -> str:
     """A whole number of 10^-decimals as plain text, its sign kept: -105025, 2 is "-1050.25"."""
