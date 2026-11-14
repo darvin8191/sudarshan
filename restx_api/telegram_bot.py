@@ -332,6 +332,13 @@ class WebhookHandler(Resource):
             # Verify webhook secret token (Telegram sends this header when secret_token is configured)
             expected_secret = get_webhook_secret()
 
+            # SUDARSHAN: G5. With neither TELEGRAM_WEBHOOK_SECRET nor a bot token set, a call cannot
+            # be verified, so it is refused, as get_webhook_secret says it must be; it was answered
+            # as though it came from Telegram.
+            if not expected_secret:
+                logger.warning("Webhook request refused: no bot token or webhook secret to check it")
+                return make_response("Forbidden", 403)
+
             if expected_secret:
                 received_secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token")
 
@@ -599,13 +606,19 @@ class SendFileNotification(Resource):
             if (request.content_length or 0) > report_files.MAX_BODY_BYTES:
                 return _file_answer("size", 413)
             request.max_content_length = report_files.MAX_BODY_BYTES  # a body with no length too
+            # A key in the header is checked before the body is parsed (review L14); one in the
+            # form (the report desk's) after, as the body must be read to find it.
+            header_key = request.headers.get("X-API-KEY")
+            if header_key is not None and not verify_api_key(header_key):
+                return _file_answer("key", 401)
             try:
                 form, upload = request.form, request.files.get("file")
             except RequestEntityTooLarge:
                 return _file_answer("size", 413)
-            api_key = form.get("apikey") or request.headers.get("X-API-KEY")
-            if not api_key or not verify_api_key(api_key):
-                return _file_answer("key", 401)
+            if header_key is None:
+                api_key = form.get("apikey")
+                if not api_key or not verify_api_key(api_key):
+                    return _file_answer("key", 401)
             if not telegram_alert.is_bot_active():  # as /notify (GitHub issue #1577)
                 logger.info("Telegram bot is stopped; rejecting /notify-file request")
                 return _file_answer("bot_stopped", 409)

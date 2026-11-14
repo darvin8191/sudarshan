@@ -14,6 +14,11 @@ _URL_CREDENTIAL = re.compile(
     flags=re.IGNORECASE,
 )
 
+# SUDARSHAN M2.9 (review L8): a family invite link carries its one-time code in the path. The
+# shell route (/family/join/<code>) and the family API route (/family/api/join/<code>) both name
+# it, and the traffic log (logs.db) keeps paths, so the code is masked like a webhook secret.
+_INVITE_CODE = re.compile(r"(?P<prefix>/family/(?:api/)?join/)[^/\s?#'\"<>]+", re.IGNORECASE)
+
 # Broker OAuth callbacks carry short-lived but replayable credentials in query
 # parameters. Keep this URL-specific so an ordinary application line such as
 # ``HTTP status code=200`` remains untouched while callback ``code=...`` is
@@ -30,4 +35,5 @@ _QUERY_CREDENTIAL = re.compile(
 def redact_url_credentials(value: Any) -> str:
     """Return ``value`` with shipped path and query credentials masked."""
     redacted = _URL_CREDENTIAL.sub(r"\g<prefix><redacted>", str(value))
+    redacted = _INVITE_CODE.sub(r"\g<prefix><redacted>", redacted)  # SUDARSHAN M2.9
     return _QUERY_CREDENTIAL.sub(r"\g<prefix>[REDACTED]", redacted)

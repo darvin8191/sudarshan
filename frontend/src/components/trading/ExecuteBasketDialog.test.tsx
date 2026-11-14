@@ -1,8 +1,11 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import axios, { AxiosError } from 'axios'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { tradingApi } from '@/api/trading'
 import type { StrategyLeg } from '@/lib/strategyMath'
-import { ExecuteBasketDialog } from './ExecuteBasketDialog'
+import { axiosFailure } from '@/test/axiosAnswer'
+import { showToast } from '@/utils/toast'
+import { BASKET_NOT_CONFIRMED, ExecuteBasketDialog } from './ExecuteBasketDialog'
 
 vi.mock('@/api/trading', async () => {
   const actual = await vi.importActual<typeof import('@/api/trading')>('@/api/trading')
@@ -16,10 +19,11 @@ vi.mock('@/api/trading', async () => {
 })
 
 vi.mock('@/utils/toast', () => ({
-  showToast: { error: vi.fn(), success: vi.fn() },
+  showToast: { error: vi.fn(), success: vi.fn(), warning: vi.fn() },
 }))
 
 const submitBasket = vi.mocked(tradingApi.placeBasketOrder)
+const toast = vi.mocked(showToast)
 
 function leg(overrides: Partial<StrategyLeg> = {}): StrategyLeg {
   return {
@@ -43,8 +47,44 @@ function leg(overrides: Partial<StrategyLeg> = {}): StrategyLeg {
 
 describe('ExecuteBasketDialog', () => {
   beforeEach(() => {
+    vi.clearAllMocks()
     submitBasket.mockReset()
     submitBasket.mockResolvedValue({ status: 'success', results: [] })
+  })
+
+  function executeOne() {
+    render(
+      <ExecuteBasketDialog
+        open
+        onOpenChange={vi.fn()}
+        exchange="NFO"
+        strategyName="One leg"
+        apiKey="api-key"
+        legs={[leg({ contractValid: true })]}
+      />
+    )
+    fireEvent.click(screen.getByRole('button', { name: /Execute \(1\)/ }))
+  }
+
+  it("shows a refused basket in the server's own sentence, with nothing in front of it", async () => {
+    // SUDARSHAN backlog 2d: it read "Basket order error: Request failed with status code 403".
+    const sentence =
+      'New orders are refused: the kill switch is on. Nothing in this basket was sent.'
+    submitBasket.mockRejectedValue(
+      await axiosFailure((adapter) => axios.post('/api/v1/basketorder', {}, { adapter }), 403, {
+        status: 'error',
+        message: sentence,
+      })
+    )
+    executeOne()
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(sentence))
+  })
+
+  it("says a basket with no answer may have gone, never in the transport's words", async () => {
+    submitBasket.mockRejectedValue(new AxiosError('timeout of 30000ms exceeded', 'ECONNABORTED'))
+    executeOne()
+    await waitFor(() => expect(toast.warning).toHaveBeenCalledWith(BASKET_NOT_CONFIRMED))
+    expect(toast.error).not.toHaveBeenCalled()
   })
 
   it('submits only validated open legs with their own lot and tick metadata', async () => {

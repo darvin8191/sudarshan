@@ -23,7 +23,10 @@ Muhurat session of Sunday 8 November 2026) has its own window and so its own tim
 
 A trading job (brief, eod, check, excursion) is never due on a day without a session (mutation
 target 20). A job missed while the service was down runs at its next start that day and is marked
-late; nothing runs after midnight for the day before (M15.8: never 00:00-03:00). New jobs keep out
+late; nothing runs after midnight for the day before (M15.8: never 00:00-03:00). A period report
+(weekly, monthly, fy) missed for its whole day is built at the next start within CATCH_UP_DAYS,
+from 03:00, for the day it was due, when the journal was running in the week before that day
+(so a first install builds no report of the weeks before it: review L16). New jobs keep out
 of 16:00-16:35 unless they need under a second of CPU (Y20): the close check is one read through
 the portfolio and one day paired again.
 
@@ -59,6 +62,10 @@ FY_AT = (4, 1, 7 * 60)  # 1 April at 07:00
 LATE_AFTER_MS = 5 * MS_PER_MIN
 #: A failed run is asked again this long after it, while its window lasts.
 RETRY_MS = 15 * MS_PER_MIN
+#: The period reports, and how many days later a missed one is still built (review L16).
+PERIOD_JOBS = ("weekly", "monthly", "fy")
+CATCH_UP_DAYS = 3
+CATCH_UP_FROM_HOUR = 3
 
 
 @dataclass(frozen=True)
@@ -185,20 +192,56 @@ def _write(service: Any, fn: Callable[[Any], Any]) -> Awaitable[Any]:
     return asyncio.get_running_loop().run_in_executor(None, lambda: service.store.write(OWNER, fn))
 
 
+def _done(row: Any, now: int) -> bool:
+    """A job_run row that stops a run: ok or late, or failed less than RETRY_MS ago."""
+    return row is not None and (row["status"] != "failed" or now - int(row["at"]) < RETRY_MS)
+
+
+async def missed_day(service: Any, name: str, now: int) -> int | None:
+    """The day of a period report missed for its whole day within the last CATCH_UP_DAYS, when
+    the journal was running in the week before it (it has job rows there), and it is not yet
+    the hours after midnight; else None (review L16)."""
+    from .core.money import ist_clock
+
+    if name not in PERIOD_JOBS or ist_clock(now)[0] < CATCH_UP_FROM_HOUR:
+        return None
+    plan, today = schedule_for(service), to_date(ist_day(now))
+    for back in range(1, CATCH_UP_DAYS + 1):
+        day = today - timedelta(days=back)
+        if plan.due(name, day) is None:
+            continue
+        key, week = to_day(day), to_day(day - timedelta(days=7))
+        row, recent = await _read(
+            service, lambda tx, key=key, week=week: (tx.job_get(name, key), tx.job_runs(week))
+        )
+        if _done(row, now) or not any(r["day"] < key for r in recent):
+            return None
+        return key
+    return None
+
+
 async def once_a_day(service: Any, name: str, now: int, run: Run) -> str | None:
     """Run ``name`` for today when it is due, inside its window and not yet done today (a job_run
-    row of ok or late stops a second run: vector S6). ``run(service, day, now, late)`` returns the
-    line the job log keeps, or raises JobFailed. Returns the status written, or None."""
+    row of ok or late stops a second run: vector S6); a period report missed for its whole day
+    runs late for that day (``missed_day``). ``run(service, day, now, late)`` returns the line
+    the job log keeps, or raises JobFailed. Returns the status written, or None."""
     if service.store is None:
         return None
     today = ist_day(now)
     due = schedule_for(service).due(name, to_date(today))
     if due is None or not due.at <= now < due.until:
-        return None
+        missed = await missed_day(service, name, now)
+        if missed is None:
+            return None
+        return await _run(service, name, missed, now, True, run)
     row = await _read(service, lambda tx: tx.job_get(name, today))
-    if row is not None and (row["status"] != "failed" or now - int(row["at"]) < RETRY_MS):
+    if _done(row, now):
         return None
-    late = now - due.at > LATE_AFTER_MS
+    return await _run(service, name, today, now, now - due.at > LATE_AFTER_MS, run)
+
+
+async def _run(service: Any, name: str, today: int, now: int, late: bool, run: Run) -> str:
+    """One run of ``name`` for ``today``, recorded in the job log; returns the status."""
     try:
         detail = await run(service, today, now, late)
         status = "late" if late else "ok"

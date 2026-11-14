@@ -1,5 +1,6 @@
 /** The Journal shell: its states in words, its parts, and the Sandbox switch that never mixes modes. */
-import { screen, waitFor } from '@testing-library/react'
+import { focusManager } from '@tanstack/react-query'
+import { act, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -10,25 +11,50 @@ vi.mock('@/sudarshan/journal/api', async (original) => ({
 }))
 
 import { JournalError } from '@/sudarshan/journal/api'
+import { PART_FAILED } from '@/sudarshan/journal/PartBoundary'
 
+const boom = vi.hoisted(() => ({ on: false }))
 vi.mock('@/sudarshan/journal/TripsList', () => ({
-  TripsList: ({ mode }: { mode: string }) => <p data-testid="trips-of">{mode}</p>,
+  TripsList: ({ mode }: { mode: string }) => {
+    if (boom.on) throw new Error('Cannot read properties of undefined')
+    return <p data-testid="trips-of">{mode}</p>
+  },
 }))
+vi.mock('@/utils/errorReporter', () => ({ reportClientError: vi.fn() }))
 
 vi.mock('@/sudarshan/journal/TripSheet', () => ({
-  TripSheet: ({ tradeId, onClose }: { tradeId: number; onClose: () => void }) => (
-    <button type="button" onClick={onClose}>
-      {`Sheet of trade ${tradeId}`}
-    </button>
+  TripSheet: ({
+    tradeId,
+    onClose,
+    onDirty,
+    asked,
+  }: {
+    tradeId: number
+    onClose: () => void
+    onDirty?: (dirty: boolean) => void
+    asked?: number
+  }) => (
+    <div>
+      <button type="button" onClick={onClose}>
+        {`Sheet of trade ${tradeId}`}
+      </button>
+      <button type="button" onClick={() => onDirty?.(true)}>
+        Type a note
+      </button>
+      <p data-testid="asked">{asked}</p>
+    </div>
   ),
 }))
 
-import { renderBook, where } from '@/test/bookPages'
+import { back, renderBook, where } from '@/test/bookPages'
 import Journal from './Journal'
 
 const ON = { enabled: true, data: { enabled: true, fills_today: 0, open_trips: 0 } }
 
-beforeEach(() => call.mockReset())
+beforeEach(() => {
+  call.mockReset()
+  boom.on = false
+})
 
 describe('Journal', () => {
   it('says the journal is switched off, in the server’s words', async () => {
@@ -84,6 +110,85 @@ describe('Journal', () => {
     expect(on.getAttribute('aria-checked')).toBe('true')
     await user.click(on)
     await waitFor(() => expect(where()).toBe('/journal'))
+  })
+
+  it('lets Back close a sheet that holds nothing typed', async () => {
+    call.mockResolvedValue(ON)
+    // the sheet was opened from the list: its entry is the page's own
+    renderBook('/journal', <Journal />, [
+      '/dashboard',
+      '/journal',
+      { pathname: '/journal', search: '?trade=5', state: { sdOverlay: true } },
+    ])
+    await screen.findByRole('button', { name: 'Sheet of trade 5' })
+    expect(screen.getByTestId('asked').textContent).toBe('0')
+    // with nothing typed, Back closes it
+    back()
+    await waitFor(() => expect(where()).toBe('/journal'))
+    expect(screen.queryByRole('button', { name: /Sheet of trade/ })).toBeNull()
+  })
+
+  it('asks instead of closing when Back meets a sheet holding changes', async () => {
+    const user = userEvent.setup()
+    call.mockResolvedValue(ON)
+    renderBook('/journal', <Journal />, [
+      '/dashboard',
+      '/journal',
+      { pathname: '/journal', search: '?trade=5', state: { sdOverlay: true } },
+    ])
+    await user.click(await screen.findByRole('button', { name: 'Type a note' }))
+    back()
+    await waitFor(() => expect(screen.getByTestId('asked').textContent).toBe('1'))
+    expect(screen.getByRole('button', { name: 'Sheet of trade 5' })).toBeTruthy()
+    await waitFor(() => expect(where()).toBe('/journal?trade=5'))
+    // the answer closes it, and Back from the page then leaves the sheet's entry behind
+    await user.click(screen.getByRole('button', { name: 'Sheet of trade 5' }))
+    await waitFor(() => expect(where()).toBe('/journal'))
+    expect(screen.queryByRole('button', { name: /Sheet of trade/ })).toBeNull()
+  })
+
+  it('says a part that cannot be drawn in words, keeps the page, and tries again (review M6)', async () => {
+    const user = userEvent.setup()
+    const quiet = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      boom.on = true
+      call.mockResolvedValue(ON)
+      renderBook('/journal', <Journal />)
+      expect(await screen.findByText(PART_FAILED)).toBeTruthy()
+      expect(screen.getByRole('heading', { name: 'Journal' })).toBeTruthy()
+      expect(screen.getByRole('tablist', { name: 'Journal parts' })).toBeTruthy()
+      expect(screen.queryByText(/Cannot read properties/)).toBeNull()
+      boom.on = false
+      await user.click(screen.getByRole('button', { name: 'Try again' }))
+      expect(await screen.findByTestId('trips-of')).toBeTruthy()
+    } finally {
+      quiet.mockRestore()
+    }
+  })
+
+  it('keeps the page when a re-read of the journal’s state fails (review L9)', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      call.mockResolvedValueOnce(ON).mockRejectedValue(
+        new JournalError({
+          code: 'unavailable',
+          message: 'The journal service is not answering.',
+        })
+      )
+      renderBook('/journal', <Journal />)
+      expect(await screen.findByTestId('trips-of')).toBeTruthy()
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(31_000)
+        focusManager.setFocused(false)
+        focusManager.setFocused(true)
+      })
+      await waitFor(() => expect(call.mock.calls.length).toBeGreaterThan(1))
+      expect(screen.getByTestId('trips-of')).toBeTruthy()
+      expect(screen.queryByText('The journal service is not answering.')).toBeNull()
+    } finally {
+      focusManager.setFocused(undefined)
+      vi.useRealTimers()
+    }
   })
 
   it('opens a trade’s sheet from the address, and closing it leaves the page where it was', async () => {

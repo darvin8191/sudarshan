@@ -102,3 +102,22 @@ export function updateRequest(playbook: Playbook, form: PlaybookForm): PlaybookU
   }
   return changed ? update : null
 }
+
+/**
+ * The owner's changes laid over a newer read of the playbook, after a conflict: a field he changed
+ * keeps what he typed, every other field takes the newer value, so a Save never puts back a field
+ * he did not touch over what the other screen saved.
+ */
+export function rebasePlaybook(
+  base: PlaybookForm,
+  mine: PlaybookForm,
+  theirs: PlaybookForm
+): PlaybookForm {
+  const out: PlaybookForm = { ...theirs }
+  for (const key of Object.keys(base) as Array<keyof PlaybookForm>) {
+    if (JSON.stringify(mine[key]) !== JSON.stringify(base[key])) {
+      Object.assign(out, { [key]: mine[key] })
+    }
+  }
+  return out
+}

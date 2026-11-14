@@ -4,7 +4,8 @@
  * chip has, R as typed, Save sends once with the version and only what changed, a conflict is said
  * in one sentence and nothing is saved, and a tap just after the sheet opens does nothing.
  */
-import { act, screen, waitFor, within } from '@testing-library/react'
+import { onlineManager } from '@tanstack/react-query'
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -18,7 +19,7 @@ import { OPEN_GUARD } from '@/sudarshan/watchlist/openGuard'
 import { renderBook, where } from '@/test/bookPages'
 import { JournalError, WORDS } from './api'
 import { closedTrip } from './fixtures'
-import { ORPHAN_FILLS, ORPHAN_WORDS, TripSheet } from './TripSheet'
+import { EXPIRED_WORDS, ORPHAN_FILLS, ORPHAN_WORDS, TripSheet, UNMATCHED_WORDS } from './TripSheet'
 import type { Playbook, Tag } from './types'
 
 const T0 = Date.UTC(2026, 10, 13, 4, 30, 15) // 10:00:15 IST
@@ -122,6 +123,14 @@ function serve(trip = detail()) {
 const onClose = vi.fn()
 const show = () => renderBook('/journal', <TripSheet tradeId={7} open onClose={onClose} />)
 const updates = () => api.data.mock.calls.filter(([op]) => op === 'trip_update')
+const notesField = () => screen.getByRole('textbox', { name: 'Notes' }) as HTMLTextAreaElement
+
+beforeEach(() => {
+  api.data.mockReset()
+  onClose.mockReset()
+  sessionStorage.clear()
+  onlineManager.setOnline(true)
+})
 
 beforeEach(() => {
   api.data.mockReset()
@@ -188,10 +197,10 @@ describe('what happened', () => {
     expect(await screen.findByText('The price path was not recorded.')).toBeTruthy()
   })
 
-  it('says how fast the first entry order was answered, as the service measures it', async () => {
-    serve()
+  it('says how fast the first entry order was answered, in en-IN digits (review L1)', async () => {
+    serve(detail({ latency_ms: 1412 }))
     show()
-    expect(await screen.findByText('answered in 412 ms')).toBeTruthy()
+    expect(await screen.findByText('answered in 1,412 ms')).toBeTruthy()
     expect(screen.getByText('First entry order')).toBeTruthy()
     expect(screen.queryByText(/order answered/)).toBeNull()
   })
@@ -207,10 +216,126 @@ describe('what happened', () => {
     expect(screen.queryByText('Closed trade')).toBeNull()
   })
 
+  it('says a position opened before the journal is one: no side, no price it opened at, no figure', async () => {
+    serve(
+      detail({
+        status: 'unmatched',
+        side: 'long',
+        entry_qty: 0,
+        entry_avg_u: 0,
+        exit_qty: 65,
+        gross_paise: null,
+        net_paise: null,
+        hold_s: null,
+        mae_paise: null,
+        mfe_paise: null,
+        fills: [detail().fills[1]],
+      })
+    )
+    show()
+    expect(await screen.findByText(UNMATCHED_WORDS)).toBeTruthy()
+    expect(screen.getByText('Opened before the journal started')).toBeTruthy()
+    expect(screen.queryByText('LONG')).toBeNull()
+    expect(screen.queryByText('SHORT')).toBeNull()
+    const result = screen.getByRole('region', { name: 'Result' })
+    expect(within(result).getByText('Entry average').nextElementSibling?.textContent).toBe(
+      'Not known'
+    )
+    expect(within(result).getByText('Net').nextElementSibling?.textContent).toBe('Not known')
+    expect(within(result).queryByText('0.00')).toBeNull()
+    expect(screen.queryByRole('region', { name: 'How far it went' })).toBeNull()
+  })
+
+  it('says a contract that ended at expiry did, and works out no result for it', async () => {
+    serve(
+      detail({
+        status: 'expired',
+        exit_qty: 0,
+        exit_avg_u: null,
+        closed_ms: null,
+        close_day: 20261118,
+        gross_paise: null,
+        net_paise: null,
+        hold_s: null,
+        fills: [detail().fills[0]],
+      })
+    )
+    show()
+    expect(await screen.findByText(EXPIRED_WORDS)).toBeTruthy()
+    expect(screen.getByText('Ended at expiry', { selector: 'p' })).toBeTruthy()
+    const result = screen.getByRole('region', { name: 'Result' })
+    expect(within(result).getByText('Exit average').nextElementSibling?.textContent).toBe(
+      'Ended at expiry'
+    )
+    expect(within(result).getByText('Net').nextElementSibling?.textContent).toBe('Not worked out')
+    expect(within(result).getByText('Quantity').nextElementSibling?.textContent).toBe('65')
+    expect(screen.queryByText('Still open')).toBeNull()
+  })
+
+  it('shows a reversal fill as the part of it that is this trade’s, and where the rest went', async () => {
+    const [buy, sell] = detail().fills
+    serve(
+      detail({
+        qty_max: 650,
+        fills: [
+          { ...buy, qty: 650, trip_qty: 650 },
+          { ...sell, qty: 1300, trip_qty: 650 },
+        ],
+      })
+    )
+    show()
+    const fills = await screen.findByRole('table', { name: 'Fills' })
+    const qty = within(fills)
+      .getAllByTestId('fill-qty')
+      .map((cell) => cell.textContent)
+    expect(qty).toEqual(['650', '650 of 1,300'])
+    expect(
+      screen.getByText('The rest of the 10:14:15 SELL belongs to the next trade.')
+    ).toBeTruthy()
+  })
+
+  it('says a trade on an exchange the estimate does not cover has no charges counted', async () => {
+    serve(detail({ charges_modelled: false, charges_est_paise: 0, gross_paise: 81250 }))
+    show()
+    const result = await screen.findByRole('region', { name: 'Result' })
+    expect(within(result).getByText('Charges').nextElementSibling?.textContent).toBe(
+      'Not estimated for this exchange'
+    )
+    expect(within(result).getByText('Net').nextElementSibling?.textContent).toContain(
+      'no charges counted'
+    )
+    expect(within(result).queryByText('₹0.00')).toBeNull()
+  })
+
+  it('says charges rebuilt from Upstox’s history are an estimate from it', async () => {
+    const [buy, sell] = detail().fills
+    serve(
+      detail({
+        fills: [
+          { ...buy, source: 'history' },
+          { ...sell, source: 'history' },
+        ],
+      })
+    )
+    show()
+    const result = await screen.findByRole('region', { name: 'Result' })
+    expect(within(result).getByText('Charges').nextElementSibling?.textContent).toContain(
+      'est., from Upstox’s history'
+    )
+  })
+
   it('says a Sandbox trade is one', async () => {
     serve(detail({ mode: 'sandbox' }))
     show()
     expect(await screen.findByText('Sandbox trade')).toBeTruthy()
+  })
+
+  it('names the contract in its title as the books do, with its exchange and expiry (review H5)', async () => {
+    serve(detail({ exchange: 'NFO', symbol: 'NIFTY17NOV2625000CE' }))
+    show()
+    const title = await screen.findByRole('heading', { name: /NIFTY 25000 CE/ })
+    expect(title.textContent).not.toContain('NIFTY17NOV')
+    expect(screen.getByText('Closed trade').textContent).toBe('Closed trade · NFO · 17 Nov 2026')
   })
 
   it('links to the chart of the instrument', async () => {
@@ -356,12 +481,77 @@ describe('Save', () => {
       'More.'
     )
     await user.click(screen.getByRole('button', { name: 'Open it again' }))
-    await waitFor(() =>
-      expect((screen.getByRole('textbox', { name: 'Notes' }) as HTMLTextAreaElement).value).toBe(
-        'Waited for the retest.'
-      )
-    )
-    expect(screen.queryByText(/Nothing was saved/)).toBeNull()
+    // review M1: the other screen did not touch the notes, so what was typed stays in the field,
+    // now on the new version
+    await waitFor(() => expect(screen.queryByText(/Nothing was saved/)).toBeNull())
+    expect(notesField().value).toBe('Waited for the retest. More.')
+    expect(screen.getByText(/This trade was changed on another screen/)).toBeTruthy()
+    api.data.mockImplementation(async (op: string) => {
+      if (op === 'trip_update') return { id: 7, version: 5, words: null }
+      if (op === 'trip_get') return detail({ version: 4 })
+      if (op === 'tags_list') return TAGS
+      return PLAYBOOKS
+    })
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(onClose).toHaveBeenCalled())
+    expect(updates().at(-1)?.[1]).toEqual({
+      id: 7,
+      version: 4,
+      notes: 'Waited for the retest. More.',
+    })
+  })
+
+  it('says nothing of another screen when the read after its own Save comes back', async () => {
+    const user = userEvent.setup()
+    let version = 3
+    let notes = 'Waited for the retest.'
+    api.data.mockImplementation(async (op: string, args?: { notes?: string }) => {
+      if (op === 'trip_get') return detail({ version, note: { ...detail().note, notes, version } })
+      if (op === 'tags_list') return TAGS
+      if (op === 'playbooks_list') return PLAYBOOKS
+      if (op === 'trip_update') {
+        version = 4
+        notes = args?.notes ?? notes
+        return { id: 7, version: 4, words: null }
+      }
+      throw new Error(`unexpected op ${op}`)
+    })
+    show()
+    await user.type(await screen.findByRole('textbox', { name: 'Notes' }), ' Done.')
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(onClose).toHaveBeenCalled())
+    expect(screen.queryByText(/changed on another screen/)).toBeNull()
+    expect(notesField().value).toBe('Waited for the retest. Done.')
+  })
+
+  it('hands back the notes typed here when the other screen changed the notes too (review M1)', async () => {
+    const user = userEvent.setup()
+    serve()
+    show()
+    await user.type(await screen.findByRole('textbox', { name: 'Notes' }), ' Mine.')
+    await user.click(screen.getByRole('button', { name: 'Rushed' }))
+    const theirs = detail({
+      version: 4,
+      note: { ...detail().note, notes: 'Written on the laptop.', mood: 'tired', version: 4 },
+    })
+    api.data.mockImplementation(async (op: string) => {
+      if (op === 'trip_update')
+        throw new JournalError({ code: 'conflict', message: WORDS.conflict })
+      if (op === 'trip_get') return theirs
+      if (op === 'tags_list') return TAGS
+      return PLAYBOOKS
+    })
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+    await user.click(await screen.findByRole('button', { name: 'Open it again' }))
+    // nothing saved elsewhere is overwritten unseen, and nothing typed here is lost
+    await waitFor(() => expect(notesField().value).toBe('Written on the laptop.'))
+    const typed = screen.getByTestId('typed-notes')
+    expect(typed.textContent).toContain('Waited for the retest. Mine.')
+    expect(screen.getByText(/It also changed the mood/)).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Tired' }).getAttribute('aria-pressed')).toBe('true')
+    await user.click(within(typed).getByRole('button', { name: 'Add it to the notes' }))
+    expect(notesField().value).toBe('Written on the laptop.\n\nWaited for the retest. Mine.')
+    expect(screen.queryByTestId('typed-notes')).toBeNull()
   })
 
   it('adds a mistake tag by name and switches it on for this trade', async () => {
@@ -422,5 +612,135 @@ describe('the sheet itself', () => {
     show()
     await screen.findByRole('region', { name: 'Result' })
     expect(where()).toBe('/journal')
+  })
+})
+
+describe('what was typed is never lost (reviews H2 and H3)', () => {
+  it('asks before Close shuts a sheet holding changes, and Keep writing goes back to them', async () => {
+    const user = userEvent.setup()
+    serve()
+    show()
+    await user.type(await screen.findByRole('textbox', { name: 'Notes' }), ' Unsaved words.')
+    await user.click(screen.getByRole('button', { name: 'Close' }))
+    expect(onClose).not.toHaveBeenCalled()
+    expect(await screen.findByText('Your changes to this trade are not saved.')).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Keep writing' }))
+    expect(screen.queryByText('Your changes to this trade are not saved.')).toBeNull()
+    expect(notesField().value).toBe('Waited for the retest. Unsaved words.')
+    expect(onClose).not.toHaveBeenCalled()
+  })
+
+  it('asks before Escape or a tap outside shuts it too', async () => {
+    const user = userEvent.setup()
+    serve()
+    show()
+    await user.type(await screen.findByRole('textbox', { name: 'Notes' }), ' x')
+    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' })
+    expect(await screen.findByText('Your changes to this trade are not saved.')).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Keep writing' }))
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+    fireEvent.pointerDown(document.body)
+    expect(await screen.findByText('Your changes to this trade are not saved.')).toBeTruthy()
+    expect(onClose).not.toHaveBeenCalled()
+  })
+
+  it('closes at once when nothing was changed', async () => {
+    const user = userEvent.setup()
+    serve()
+    show()
+    await screen.findByRole('textbox', { name: 'Notes' })
+    await user.click(screen.getByRole('button', { name: 'Close' }))
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it('Discard changes closes and forgets them; Save from the question sends them and closes', async () => {
+    const user = userEvent.setup()
+    serve()
+    const first = show()
+    await user.type(await screen.findByRole('textbox', { name: 'Notes' }), ' Gone.')
+    await user.click(screen.getByRole('button', { name: 'Close' }))
+    await user.click(await screen.findByRole('button', { name: 'Discard changes' }))
+    expect(onClose).toHaveBeenCalledTimes(1)
+    expect(updates()).toHaveLength(0)
+    expect(sessionStorage.getItem('sd-journal-draft:7')).toBeNull()
+    first.unmount()
+
+    onClose.mockReset()
+    serve()
+    show()
+    await user.type(await screen.findByRole('textbox', { name: 'Notes' }), ' Kept.')
+    await user.click(screen.getByRole('button', { name: 'Close' }))
+    await user.click(await screen.findByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1))
+    expect(updates()[0][1]).toEqual({ id: 7, version: 3, notes: 'Waited for the retest. Kept.' })
+  })
+
+  it('keeps the changes in this tab, so a sheet opened again brings them back', async () => {
+    const user = userEvent.setup()
+    serve()
+    const first = show()
+    await user.type(await screen.findByRole('textbox', { name: 'Notes' }), ' Typed before.')
+    // the page left by Back, a reload, the phone stopping the tab: the sheet is gone unasked
+    first.unmount()
+    show()
+    await waitFor(() => expect(notesField().value).toBe('Waited for the retest. Typed before.'))
+    expect(screen.getByText(/What you typed on this trade before is back in the form/)).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Save' })).toBeTruthy()
+  })
+
+  it('keeps the editor when a background re-read fails, and says so (review H3)', async () => {
+    serve()
+    show()
+    await screen.findByRole('textbox', { name: 'Notes' })
+    api.data.mockImplementation(async (op: string) => {
+      if (op === 'trip_get')
+        throw new JournalError({ code: 'unavailable', message: WORDS.unavailable })
+      if (op === 'tags_list') return TAGS
+      return PLAYBOOKS
+    })
+    // a new network: the open trade is read again, and that read fails
+    await act(async () => {
+      onlineManager.setOnline(false)
+      onlineManager.setOnline(true)
+    })
+    expect(await screen.findByText(/What you see is from the last read/)).toBeTruthy()
+    expect(notesField().value).toBe('Waited for the retest.')
+    expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull()
+  })
+
+  it('reads nothing under a form holding changes when the network comes back', async () => {
+    const user = userEvent.setup()
+    serve()
+    show()
+    await user.type(await screen.findByRole('textbox', { name: 'Notes' }), ' Held too long.')
+    const reads = () => api.data.mock.calls.filter(([op]) => op === 'trip_get').length
+    const before = reads()
+    await act(async () => {
+      onlineManager.setOnline(false)
+      onlineManager.setOnline(true)
+    })
+    expect(reads()).toBe(before)
+    expect(notesField().value).toBe('Waited for the retest. Held too long.')
+  })
+
+  it('keeps what was typed when the read after a conflict fails', async () => {
+    const user = userEvent.setup()
+    serve()
+    show()
+    await user.type(await screen.findByRole('textbox', { name: 'Notes' }), ' Mine.')
+    api.data.mockImplementation(async (op: string) => {
+      if (op === 'trip_update')
+        throw new JournalError({ code: 'conflict', message: WORDS.conflict })
+      if (op === 'trip_get')
+        throw new JournalError({ code: 'unavailable', message: WORDS.unavailable })
+      if (op === 'tags_list') return TAGS
+      return PLAYBOOKS
+    })
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+    await user.click(await screen.findByRole('button', { name: 'Open it again' }))
+    expect(await screen.findByText(/What you see is from the last read/)).toBeTruthy()
+    expect(notesField().value).toBe('Waited for the retest. Mine.')
   })
 })

@@ -103,6 +103,65 @@ export function liveMove(
   return { delta, open: held.length, lastTickAt }
 }
 
+/** One open position as the P&L card lists it (SUDARSHAN M3.3, D4). */
+export interface PositionRow {
+  key: string
+  symbol: string
+  exchange: string
+  product: string
+  /** Signed: above zero long, below zero short. */
+  quantity: number
+  /** The broker's figure, moved by every tick newer than the read; null when it sent none. */
+  pnl: number | null
+  /** A WebSocket tick newer than the read moved it; otherwise it is the broker's as read. */
+  ticking: boolean
+}
+
+/**
+ * The open positions as rows: each one's P&L is the broker's, moved by the change in its
+ * `positionPnlAt` from the price the book carried to a price that arrived after it (the same move
+ * `liveMove` adds to the total). Largest P&L either way first, then by symbol; a position with no
+ * figure last. No read and no subscription of its own: the card's ticks are the prices.
+ */
+export function positionRows(
+  snapshot: PositionsSnapshot | null,
+  prices: Map<string, SymbolData>
+): PositionRow[] {
+  if (!snapshot) return []
+  const rows = openPositions(snapshot.positions).map((position): PositionRow => {
+    const base =
+      typeof position.pnl === 'number' || typeof position.pnl === 'string'
+        ? Number(position.pnl)
+        : Number.NaN
+    let pnl = Number.isFinite(base) ? base : null
+    let ticking = false
+    const price = priceOf(prices.get(keyOf(position.symbol, position.exchange)))
+    const reported = Number(position.ltp)
+    if (pnl !== null && price && price.at > snapshot.at && reported > 0) {
+      const now = positionPnlAt(position, price.ltp)
+      const then = positionPnlAt(position, reported)
+      if (now && then) {
+        pnl += now.pnl - then.pnl
+        ticking = price.live
+      }
+    }
+    return {
+      key: `${keyOf(position.symbol, position.exchange)}:${position.product}`,
+      symbol: position.symbol,
+      exchange: position.exchange,
+      product: position.product,
+      quantity: Number(position.quantity),
+      pnl,
+      ticking,
+    }
+  })
+  return rows.sort(
+    (a, b) =>
+      (b.pnl === null ? -1 : Math.abs(b.pnl)) - (a.pnl === null ? -1 : Math.abs(a.pnl)) ||
+      a.symbol.localeCompare(b.symbol)
+  )
+}
+
 /** One index as the strip shows it. */
 export interface IndexView {
   /** The level shown: the newest of the snapshot and the ticks. */

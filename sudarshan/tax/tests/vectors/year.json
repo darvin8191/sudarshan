@@ -1,0 +1,895 @@
+{
+ "schedule": [
+  {
+   "id": "Y1",
+   "note": "long-term gains 1,50,000 + 60,000 = 2,10,000, long-term loss 30,000, short-term gain 40,000: net long 1,80,000 less exemption 1,25,000 = 55,000 at 12.5% = 6,875; short 40,000 at 20% = 8,000; cess 4% of 14,875 = 595",
+   "in": {
+    "fy": 2026,
+    "gains": [
+     {
+      "term": "long",
+      "sale_day": 20260812,
+      "rate_bp": 1250,
+      "gain_paise": 15000000
+     },
+     {
+      "term": "long",
+      "sale_day": 20260812,
+      "rate_bp": 1250,
+      "gain_paise": 6000000
+     },
+     {
+      "term": "long",
+      "sale_day": 20260812,
+      "rate_bp": 1250,
+      "gain_paise": -3000000
+     },
+     {
+      "term": "short",
+      "sale_day": 20260812,
+      "rate_bp": 2000,
+      "gain_paise": 4000000
+     }
+    ]
+   },
+   "out": {
+    "taxable": {
+     "st_paise": 4000000,
+     "lt_paise": 5500000
+    },
+    "tax_paise": 1487500,
+    "cess_paise": 59500,
+    "exempt_used_paise": 12500000,
+    "carried": [],
+    "lapsed": []
+   }
+  },
+  {
+   "id": "Y2",
+   "note": "short-term loss 50,000 with no short-term gain goes against long-term gain 2,00,000: 1,50,000 less 1,25,000 = 25,000 at 12.5% = 3,125; cess 125",
+   "in": {
+    "fy": 2026,
+    "gains": [
+     {
+      "term": "short",
+      "sale_day": 20260812,
+      "rate_bp": 2000,
+      "gain_paise": -5000000
+     },
+     {
+      "term": "long",
+      "sale_day": 20260812,
+      "rate_bp": 1250,
+      "gain_paise": 20000000
+     }
+    ]
+   },
+   "out": {
+    "taxable": {
+     "st_paise": 0,
+     "lt_paise": 2500000
+    },
+    "tax_paise": 312500,
+    "cess_paise": 12500,
+    "exempt_used_paise": 12500000,
+    "carried": [],
+    "lapsed": []
+   }
+  },
+  {
+   "id": "Y3",
+   "note": "short-term gain 60,000 and long-term loss 40,000: a long-term loss never reduces short-term gain: 60,000 at 20% = 12,000, cess 480; the 40,000 is carried, usable to FY 2034-35",
+   "in": {
+    "fy": 2026,
+    "gains": [
+     {
+      "term": "short",
+      "sale_day": 20260812,
+      "rate_bp": 2000,
+      "gain_paise": 6000000
+     },
+     {
+      "term": "long",
+      "sale_day": 20260812,
+      "rate_bp": 1250,
+      "gain_paise": -4000000
+     }
+    ]
+   },
+   "out": {
+    "taxable": {
+     "st_paise": 6000000,
+     "lt_paise": 0
+    },
+    "tax_paise": 1200000,
+    "cess_paise": 48000,
+    "exempt_used_paise": 0,
+    "carried": [
+     {
+      "loss_fy": 2026,
+      "bucket": "ltcl",
+      "paise": 4000000,
+      "source": "computed",
+      "last_fy": 2034
+     }
+    ],
+    "lapsed": []
+   }
+  },
+  {
+   "id": "Y4",
+   "note": "FY 2024-25: long-term 80,000 before 23 Jul 2024 (10%) and 1,00,000 after (12.5%); the exemption 1,25,000 takes the 12.5% part first (1,00,000) and 25,000 of the 10% part: 55,000 at 10% = 5,500; cess 220",
+   "in": {
+    "fy": 2024,
+    "gains": [
+     {
+      "term": "long",
+      "sale_day": 20240610,
+      "rate_bp": 1000,
+      "gain_paise": 8000000
+     },
+     {
+      "term": "long",
+      "sale_day": 20240910,
+      "rate_bp": 1250,
+      "gain_paise": 10000000
+     }
+    ]
+   },
+   "out": {
+    "taxable": {
+     "st_paise": 0,
+     "lt_paise": 5500000
+    },
+    "tax_paise": 550000,
+    "cess_paise": 22000,
+    "exempt_used_paise": 12500000,
+    "carried": [],
+    "lapsed": [],
+    "out_by_rate": [
+     {
+      "rate_bp": 1250,
+      "paise": 10000000
+     },
+     {
+      "rate_bp": 1000,
+      "paise": 2500000
+     }
+    ]
+   }
+  },
+  {
+   "id": "Y4-chronological",
+   "note": "the other order: 80,000 of the earlier part gone, 45,000 of the later: 55,000 at 12.5% = 6,875; cess 275",
+   "in": {
+    "fy": 2024,
+    "gains": [
+     {
+      "term": "long",
+      "sale_day": 20240610,
+      "rate_bp": 1000,
+      "gain_paise": 8000000
+     },
+     {
+      "term": "long",
+      "sale_day": 20240910,
+      "rate_bp": 1250,
+      "gain_paise": 10000000
+     }
+    ],
+    "settings": {
+     "exempt_order": "chronological"
+    }
+   },
+   "out": {
+    "taxable": {
+     "st_paise": 0,
+     "lt_paise": 5500000
+    },
+    "tax_paise": 687500,
+    "cess_paise": 27500,
+    "exempt_used_paise": 12500000,
+    "carried": [],
+    "lapsed": [],
+    "out_by_rate": [
+     {
+      "rate_bp": 1000,
+      "paise": 8000000
+     },
+     {
+      "rate_bp": 1250,
+      "paise": 4500000
+     }
+    ]
+   }
+  },
+  {
+   "id": "Y5-brought-forward",
+   "note": "short gain 1,00,000, long gain 3,00,000; brought forward: long-term loss of FY 2021-22 50,000 (oldest, against long: 2,50,000), short-term loss of FY 2022-23 1,30,000 (1,00,000 against short, 30,000 against long: 2,20,000), and a short-term loss of FY 2017-18 whose 8 years ended with FY 2025-26: lapsed, not used. 2,20,000 less 1,25,000 = 95,000 at 12.5% = 11,875; cess 475",
+   "in": {
+    "fy": 2026,
+    "gains": [
+     {
+      "term": "short",
+      "sale_day": 20260812,
+      "rate_bp": 2000,
+      "gain_paise": 10000000
+     },
+     {
+      "term": "long",
+      "sale_day": 20260812,
+      "rate_bp": 1250,
+      "gain_paise": 30000000
+     }
+    ],
+    "carries": [
+     {
+      "taxpayer": 1,
+      "loss_fy": 2022,
+      "bucket": "stcl",
+      "paise": 13000000,
+      "source": "owner"
+     },
+     {
+      "taxpayer": 1,
+      "loss_fy": 2021,
+      "bucket": "ltcl",
+      "paise": 5000000,
+      "source": "owner"
+     },
+     {
+      "taxpayer": 1,
+      "loss_fy": 2017,
+      "bucket": "stcl",
+      "paise": 2000000,
+      "source": "owner"
+     },
+     {
+      "taxpayer": 1,
+      "loss_fy": 2023,
+      "bucket": "business",
+      "paise": 9900000,
+      "source": "owner"
+     }
+    ]
+   },
+   "out": {
+    "taxable": {
+     "st_paise": 0,
+     "lt_paise": 9500000
+    },
+    "tax_paise": 1187500,
+    "cess_paise": 47500,
+    "exempt_used_paise": 12500000,
+    "carried": [],
+    "lapsed": [
+     {
+      "loss_fy": 2017,
+      "bucket": "stcl",
+      "paise": 2000000,
+      "source": "owner",
+      "last_fy": 2025
+     }
+    ]
+   }
+  },
+  {
+   "id": "Y6-loss-before-exemption",
+   "note": "long gain 1,50,000 and long loss 1,00,000: the loss comes first (50,000 left), then the exemption uses only 50,000: nothing taxable and nothing carried. (Exemption first would wrongly carry 75,000.)",
+   "in": {
+    "fy": 2026,
+    "gains": [
+     {
+      "term": "long",
+      "sale_day": 20260812,
+      "rate_bp": 1250,
+      "gain_paise": 15000000
+     },
+     {
+      "term": "long",
+      "sale_day": 20260812,
+      "rate_bp": 1250,
+      "gain_paise": -10000000
+     }
+    ]
+   },
+   "out": {
+    "taxable": {
+     "st_paise": 0,
+     "lt_paise": 0
+    },
+    "tax_paise": 0,
+    "cess_paise": 0,
+    "exempt_used_paise": 5000000,
+    "carried": [],
+    "lapsed": []
+   }
+  },
+  {
+   "id": "Y7-more-loss-than-gain",
+   "note": "short loss 5,00,000 against short gain 1,00,000 and long gain 2,00,000: both nil, exemption unused, 2,00,000 short-term loss carried to FY 2034-35",
+   "in": {
+    "fy": 2026,
+    "gains": [
+     {
+      "term": "short",
+      "sale_day": 20260812,
+      "rate_bp": 2000,
+      "gain_paise": -50000000
+     },
+     {
+      "term": "short",
+      "sale_day": 20260812,
+      "rate_bp": 2000,
+      "gain_paise": 10000000
+     },
+     {
+      "term": "long",
+      "sale_day": 20260812,
+      "rate_bp": 1250,
+      "gain_paise": 20000000
+     }
+    ]
+   },
+   "out": {
+    "taxable": {
+     "st_paise": 0,
+     "lt_paise": 0
+    },
+    "tax_paise": 0,
+    "cess_paise": 0,
+    "exempt_used_paise": 0,
+    "carried": [
+     {
+      "loss_fy": 2026,
+      "bucket": "stcl",
+      "paise": 20000000,
+      "source": "computed",
+      "last_fy": 2034
+     }
+    ],
+    "lapsed": []
+   }
+  },
+  {
+   "id": "Y8-old-loss-partly-used",
+   "note": "long gain 1,00,000; a long-term loss of FY 2020-21 of 3,00,000 is set off before the exemption (1,00,000 used, exemption unused); 2,00,000 stays, usable to FY 2028-29. A loss of FY 2018-19 of 10,000 is older and goes first; it is used in full in its last year",
+   "in": {
+    "fy": 2026,
+    "gains": [
+     {
+      "term": "long",
+      "sale_day": 20260812,
+      "rate_bp": 1250,
+      "gain_paise": 10000000
+     }
+    ],
+    "carries": [
+     {
+      "taxpayer": 1,
+      "loss_fy": 2020,
+      "bucket": "ltcl",
+      "paise": 30000000,
+      "source": "owner"
+     },
+     {
+      "taxpayer": 1,
+      "loss_fy": 2018,
+      "bucket": "ltcl",
+      "paise": 1000000,
+      "source": "owner"
+     }
+    ]
+   },
+   "out": {
+    "taxable": {
+     "st_paise": 0,
+     "lt_paise": 0
+    },
+    "tax_paise": 0,
+    "cess_paise": 0,
+    "exempt_used_paise": 0,
+    "carried": [
+     {
+      "loss_fy": 2020,
+      "bucket": "ltcl",
+      "paise": 21000000,
+      "source": "owner",
+      "last_fy": 2028
+     }
+    ],
+    "lapsed": []
+   }
+  },
+  {
+   "id": "Y8-last-year-unused",
+   "note": "a long-term loss of FY 2018-19 of 3,00,000 in its last year (FY 2026-27) against long gain 1,00,000: 2,00,000 cannot go further and is listed as lapsed, not carried",
+   "in": {
+    "fy": 2026,
+    "gains": [
+     {
+      "term": "long",
+      "sale_day": 20260812,
+      "rate_bp": 1250,
+      "gain_paise": 10000000
+     }
+    ],
+    "carries": [
+     {
+      "taxpayer": 1,
+      "loss_fy": 2018,
+      "bucket": "ltcl",
+      "paise": 30000000,
+      "source": "owner"
+     }
+    ]
+   },
+   "out": {
+    "taxable": {
+     "st_paise": 0,
+     "lt_paise": 0
+    },
+    "tax_paise": 0,
+    "cess_paise": 0,
+    "exempt_used_paise": 0,
+    "carried": [],
+    "lapsed": [
+     {
+      "loss_fy": 2018,
+      "bucket": "ltcl",
+      "paise": 20000000,
+      "source": "owner",
+      "last_fy": 2026
+     }
+    ]
+   }
+  },
+  {
+   "id": "Y9-split-year-loss",
+   "note": "FY 2024-25: short gains 50,000 at 15% and 50,000 at 20%, short loss 30,000: against the 20% part first: 20,000 at 20% + 50,000 at 15% = 4,000 + 7,500 = 11,500; cess 460",
+   "in": {
+    "fy": 2024,
+    "gains": [
+     {
+      "term": "short",
+      "sale_day": 20240610,
+      "rate_bp": 1500,
+      "gain_paise": 5000000
+     },
+     {
+      "term": "short",
+      "sale_day": 20240910,
+      "rate_bp": 2000,
+      "gain_paise": 5000000
+     },
+     {
+      "term": "short",
+      "sale_day": 20241105,
+      "rate_bp": 2000,
+      "gain_paise": -3000000
+     }
+    ]
+   },
+   "out": {
+    "taxable": {
+     "st_paise": 7000000,
+     "lt_paise": 0
+    },
+    "tax_paise": 1150000,
+    "cess_paise": 46000,
+    "exempt_used_paise": 0,
+    "carried": [],
+    "lapsed": []
+   }
+  },
+  {
+   "id": "Y9-chronological",
+   "note": "the other order: 20,000 at 15% + 50,000 at 20% = 3,000 + 10,000 = 13,000; cess 520",
+   "in": {
+    "fy": 2024,
+    "gains": [
+     {
+      "term": "short",
+      "sale_day": 20240610,
+      "rate_bp": 1500,
+      "gain_paise": 5000000
+     },
+     {
+      "term": "short",
+      "sale_day": 20240910,
+      "rate_bp": 2000,
+      "gain_paise": 5000000
+     },
+     {
+      "term": "short",
+      "sale_day": 20241105,
+      "rate_bp": 2000,
+      "gain_paise": -3000000
+     }
+    ],
+    "settings": {
+     "exempt_order": "chronological"
+    }
+   },
+   "out": {
+    "taxable": {
+     "st_paise": 7000000,
+     "lt_paise": 0
+    },
+    "tax_paise": 1300000,
+    "cess_paise": 52000,
+    "exempt_used_paise": 0,
+    "carried": [],
+    "lapsed": []
+   }
+  },
+  {
+   "id": "Y10-left-out-rows",
+   "note": "long gain 2,00,000 and a buyback loss 40,000 (its receipt 60,000 a dividend); a sale that needs the 2018 price, one with no purchase record and an exempt buyback are listed and in no total: 1,60,000 less 1,25,000 = 35,000 at 12.5% = 4,375; cess 175",
+   "in": {
+    "fy": 2026,
+    "gains": [
+     {
+      "term": "long",
+      "sale_day": 20260812,
+      "rate_bp": 1250,
+      "gain_paise": 20000000
+     },
+     {
+      "term": "long",
+      "sale_day": 20260812,
+      "rate_bp": 1250,
+      "gain_paise": -4000000,
+      "dividend_paise": 6000000
+     },
+     {
+      "term": "long",
+      "sale_day": 20260812,
+      "rate_bp": 1250,
+      "gain_paise": null,
+      "status": "needs_fmv"
+     },
+     {
+      "term": null,
+      "sale_day": 20260812,
+      "rate_bp": null,
+      "gain_paise": null,
+      "status": "unknown_cost"
+     },
+     {
+      "term": "long",
+      "sale_day": 20260812,
+      "rate_bp": 1250,
+      "gain_paise": null,
+      "status": "exempt_buyback"
+     }
+    ]
+   },
+   "out": {
+    "taxable": {
+     "st_paise": 0,
+     "lt_paise": 3500000
+    },
+    "tax_paise": 437500,
+    "cess_paise": 17500,
+    "exempt_used_paise": 12500000,
+    "carried": [],
+    "lapsed": [],
+    "out_lists": {
+     "needs_fmv": 1,
+     "unknown_cost": 1,
+     "exempt_buybacks": 1,
+     "schedule": 2
+    },
+    "out_buyback_dividend_paise": 6000000
+   }
+  },
+  {
+   "id": "Y11-other-years-ignored",
+   "note": "a gain sold on 31 Mar 2026 belongs to FY 2025-26 and one on 1 Apr 2027 to FY 2027-28: FY 2026-27 has only the 30,000 short-term gain: 6,000; cess 240",
+   "in": {
+    "fy": 2026,
+    "gains": [
+     {
+      "term": "short",
+      "sale_day": 20260331,
+      "rate_bp": 2000,
+      "gain_paise": 90000000
+     },
+     {
+      "term": "short",
+      "sale_day": 20260401,
+      "rate_bp": 2000,
+      "gain_paise": 3000000
+     },
+     {
+      "term": "short",
+      "sale_day": 20270401,
+      "rate_bp": 2000,
+      "gain_paise": 90000000
+     }
+    ]
+   },
+   "out": {
+    "taxable": {
+     "st_paise": 3000000,
+     "lt_paise": 0
+    },
+    "tax_paise": 600000,
+    "cess_paise": 24000,
+    "exempt_used_paise": 0,
+    "carried": [],
+    "lapsed": []
+   }
+  },
+  {
+   "id": "Y12-own-loss-first",
+   "note": "short gain 1,00,000; this year's short loss 1,00,000 and a short-term loss of FY 2020-21 of 1,00,000: the year's own loss is used first, so the old one stays whole, usable to FY 2028-29 (the other way round would carry this year's to FY 2034-35)",
+   "in": {
+    "fy": 2026,
+    "gains": [
+     {
+      "term": "short",
+      "sale_day": 20260812,
+      "rate_bp": 2000,
+      "gain_paise": 10000000
+     },
+     {
+      "term": "short",
+      "sale_day": 20260812,
+      "rate_bp": 2000,
+      "gain_paise": -10000000
+     }
+    ],
+    "carries": [
+     {
+      "taxpayer": 1,
+      "loss_fy": 2020,
+      "bucket": "stcl",
+      "paise": 10000000,
+      "source": "owner"
+     }
+    ]
+   },
+   "out": {
+    "taxable": {
+     "st_paise": 0,
+     "lt_paise": 0
+    },
+    "tax_paise": 0,
+    "cess_paise": 0,
+    "exempt_used_paise": 0,
+    "carried": [
+     {
+      "loss_fy": 2020,
+      "bucket": "stcl",
+      "paise": 10000000,
+      "source": "owner",
+      "last_fy": 2028
+     }
+    ],
+    "lapsed": []
+   }
+  },
+  {
+   "id": "Y13-old-long-loss-short-gain",
+   "note": "short gain 50,000 and a long-term loss of FY 2022-23 of 80,000 brought forward: it cannot touch short-term gain: 50,000 at 20% = 10,000, cess 400; the 80,000 stays, usable to FY 2030-31",
+   "in": {
+    "fy": 2026,
+    "gains": [
+     {
+      "term": "short",
+      "sale_day": 20260812,
+      "rate_bp": 2000,
+      "gain_paise": 5000000
+     }
+    ],
+    "carries": [
+     {
+      "taxpayer": 1,
+      "loss_fy": 2022,
+      "bucket": "ltcl",
+      "paise": 8000000,
+      "source": "owner"
+     }
+    ]
+   },
+   "out": {
+    "taxable": {
+     "st_paise": 5000000,
+     "lt_paise": 0
+    },
+    "tax_paise": 1000000,
+    "cess_paise": 40000,
+    "exempt_used_paise": 0,
+    "carried": [
+     {
+      "loss_fy": 2022,
+      "bucket": "ltcl",
+      "paise": 8000000,
+      "source": "owner",
+      "last_fy": 2030
+     }
+    ],
+    "lapsed": []
+   }
+  },
+  {
+   "id": "Y14-fy-2023-24",
+   "note": "FY 2023-24, before the change: the exemption was 1,00,000 and the rates 10% and 15%: long 1,50,000 less 1,00,000 = 50,000 at 10% = 5,000; short 20,000 at 15% = 3,000; cess 320",
+   "in": {
+    "fy": 2023,
+    "gains": [
+     {
+      "term": "long",
+      "sale_day": 20231110,
+      "rate_bp": 1000,
+      "gain_paise": 15000000
+     },
+     {
+      "term": "short",
+      "sale_day": 20231110,
+      "rate_bp": 1500,
+      "gain_paise": 2000000
+     }
+    ]
+   },
+   "out": {
+    "taxable": {
+     "st_paise": 2000000,
+     "lt_paise": 5000000
+    },
+    "tax_paise": 800000,
+    "cess_paise": 32000,
+    "exempt_used_paise": 10000000,
+    "carried": [],
+    "lapsed": []
+   }
+  },
+  {
+   "id": "Y15-owner-figure-wins",
+   "note": "short gain 60,000; the owner entered a short-term loss of FY 2024-25 of 50,000 and 80,000 was computed here for the same year: the owner's is used (10,000 at 20% = 2,000, cess 80) and the computed one is only shown beside it",
+   "in": {
+    "fy": 2026,
+    "gains": [
+     {
+      "term": "short",
+      "sale_day": 20260812,
+      "rate_bp": 2000,
+      "gain_paise": 6000000
+     }
+    ],
+    "carries": [
+     {
+      "taxpayer": 1,
+      "loss_fy": 2024,
+      "bucket": "stcl",
+      "paise": 8000000,
+      "source": "computed"
+     },
+     {
+      "taxpayer": 1,
+      "loss_fy": 2024,
+      "bucket": "stcl",
+      "paise": 5000000,
+      "source": "owner"
+     }
+    ]
+   },
+   "out": {
+    "taxable": {
+     "st_paise": 1000000,
+     "lt_paise": 0
+    },
+    "tax_paise": 200000,
+    "cess_paise": 8000,
+    "exempt_used_paise": 0,
+    "carried": [],
+    "lapsed": [],
+    "out_own_figures": [
+     {
+      "loss_fy": 2024,
+      "bucket": "stcl",
+      "paise": 8000000,
+      "source": "computed",
+      "last_fy": 2032
+     }
+    ]
+   }
+  },
+  {
+   "id": "Y16-short-before-long-of-one-year",
+   "note": "VERIFY WITH CA. Long gain 60,000; from FY 2022-23 a short-term loss of 50,000 and a long-term loss of 50,000: within one loss year the short-term one goes first (50,000), then 10,000 of the long-term one; 40,000 long-term loss stays (to FY 2030-31). The other order would keep 40,000 of the short-term loss, which can meet more kinds of gain",
+   "in": {
+    "fy": 2026,
+    "gains": [
+     {
+      "term": "long",
+      "sale_day": 20260812,
+      "rate_bp": 1250,
+      "gain_paise": 6000000
+     }
+    ],
+    "carries": [
+     {
+      "taxpayer": 1,
+      "loss_fy": 2022,
+      "bucket": "ltcl",
+      "paise": 5000000,
+      "source": "owner"
+     },
+     {
+      "taxpayer": 1,
+      "loss_fy": 2022,
+      "bucket": "stcl",
+      "paise": 5000000,
+      "source": "owner"
+     }
+    ]
+   },
+   "out": {
+    "taxable": {
+     "st_paise": 0,
+     "lt_paise": 0
+    },
+    "tax_paise": 0,
+    "cess_paise": 0,
+    "exempt_used_paise": 0,
+    "carried": [
+     {
+      "loss_fy": 2022,
+      "bucket": "ltcl",
+      "paise": 4000000,
+      "source": "owner",
+      "last_fy": 2030
+     }
+    ],
+    "lapsed": []
+   }
+  }
+ ],
+ "allocate": [
+  {
+   "id": "A1",
+   "note": "1,234.56 of the year's non-STT charges over delivery sales of 50,000, 30,000 and 20,000: 61,728 / 37,036.8 / 24,691.2 paise; floors add to 1,23,455 and the spare paisa goes to the .8: 61,728 / 37,037 / 24,691. A buyback and a sale of another year take nothing",
+   "in": {
+    "fy": 2026,
+    "total_paise": 123456,
+    "sales": [
+     [
+      20260812,
+      5000000,
+      null
+     ],
+     [
+      20260901,
+      3000000,
+      null
+     ],
+     [
+      20260715,
+      6000000,
+      "buyback"
+     ],
+     [
+      20260331,
+      9000000,
+      null
+     ],
+     [
+      20270105,
+      2000000,
+      null
+     ]
+    ]
+   },
+   "out": [
+    61728,
+    37037,
+    0,
+    0,
+    24691
+   ]
+  }
+ ]
+}

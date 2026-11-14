@@ -473,6 +473,7 @@ def chat(monkeypatch, risk_store):
 
     import database.telegram_db as telegram_db
     import database.user_db as user_db
+    import services.telegram_bot_service as bot_service
 
     fresh = gate.Gate(store=risk_store)
     fresh.set_state(KillSwitchState())
@@ -484,6 +485,12 @@ def chat(monkeypatch, risk_store):
         telegram_db, "get_telegram_user", lambda tid: {"openalgo_username": "owner"}
     )
     monkeypatch.setattr(user_db, "find_user_by_username", lambda: SimpleNamespace(username="owner"))
+    # The owner's own chat, linked with this server's API key (v0.5.2: owner_of asks the bot's
+    # link check, which reads the chat's stored key and this server's keys).
+    monkeypatch.setattr(bot_service, "get_user_credentials", lambda tid: {"api_key": "owner-key"})
+    monkeypatch.setattr(
+        bot_service, "get_username_by_apikey", lambda key: "owner" if key == "owner-key" else None
+    )
     monkeypatch.setattr(telegram_db, "log_command", lambda *args, **kwargs: None)
     monkeypatch.setattr(
         killswitch,

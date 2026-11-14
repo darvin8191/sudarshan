@@ -1,0 +1,297 @@
+[
+ {
+  "id": "K1-exempt",
+  "note": "100 shares, cost 40,000, tendered at 600 = 60,000 on 15 Sep 2024: the company paid the tax; listed with receipt and cost, in no total",
+  "in": {
+   "disposal": {
+    "taxpayer": 1,
+    "account": 1,
+    "isin": "INE000A01010",
+    "sale_day": 20240915,
+    "seq": 1,
+    "qty_u": 100000000,
+    "sale_paise": 6000000,
+    "acquired_day": 20230105,
+    "cost_paise": 4000000,
+    "basis_qty_u": 100000000,
+    "kind_hint": "buyback"
+   },
+   "fmv": {}
+  },
+  "out": {
+   "status": "exempt_buyback",
+   "gain_paise": null,
+   "buyback": "exempt",
+   "receipt_paise": 6000000,
+   "cost_paise": 4000000,
+   "dividend_paise": 0
+  }
+ },
+ {
+  "id": "K1-last-exempt-day",
+  "note": "30 Sep 2024 is still the first regime",
+  "in": {
+   "disposal": {
+    "taxpayer": 1,
+    "account": 1,
+    "isin": "INE000A01010",
+    "sale_day": 20240930,
+    "seq": 1,
+    "qty_u": 100000000,
+    "sale_paise": 6000000,
+    "acquired_day": 20230105,
+    "cost_paise": 4000000,
+    "basis_qty_u": 100000000,
+    "kind_hint": "buyback"
+   },
+   "fmv": {}
+  },
+  "out": {
+   "status": "exempt_buyback",
+   "gain_paise": null,
+   "buyback": "exempt",
+   "receipt_paise": 6000000,
+   "cost_paise": 4000000,
+   "dividend_paise": 0
+  }
+ },
+ {
+  "id": "K2-first-dividend-day",
+  "note": "1 Oct 2024: the whole 60,000 is a dividend and the sale value is nil: a loss of the cost 40,000, long-term (bought 5 Jan 2023)",
+  "in": {
+   "disposal": {
+    "taxpayer": 1,
+    "account": 1,
+    "isin": "INE000A01010",
+    "sale_day": 20241001,
+    "seq": 1,
+    "qty_u": 100000000,
+    "sale_paise": 6000000,
+    "acquired_day": 20230105,
+    "cost_paise": 4000000,
+    "basis_qty_u": 100000000,
+    "kind_hint": "buyback"
+   },
+   "fmv": {}
+  },
+  "out": {
+   "status": "ok",
+   "gain_paise": -4000000,
+   "term": "long",
+   "rate_bp": 1250,
+   "buyback": "dividend_and_loss",
+   "sale_paise": 0,
+   "receipt_paise": 6000000,
+   "dividend_paise": 6000000
+  }
+ },
+ {
+  "id": "K2-dividend-and-loss",
+  "note": "bought 5 Jan 2025, tendered 10 Feb 2026: dividend 60,000; 0 - 40,000 = long-term loss 40,000 (held past 5 Jan 2026)",
+  "in": {
+   "disposal": {
+    "taxpayer": 1,
+    "account": 1,
+    "isin": "INE000A01010",
+    "sale_day": 20260210,
+    "seq": 1,
+    "qty_u": 100000000,
+    "sale_paise": 6000000,
+    "acquired_day": 20250105,
+    "cost_paise": 4000000,
+    "basis_qty_u": 100000000,
+    "kind_hint": "buyback"
+   },
+   "fmv": {}
+  },
+  "out": {
+   "status": "ok",
+   "gain_paise": -4000000,
+   "term": "long",
+   "rate_bp": 1250,
+   "buyback": "dividend_and_loss",
+   "sale_paise": 0,
+   "receipt_paise": 6000000,
+   "dividend_paise": 6000000
+  }
+ },
+ {
+  "id": "K2-short",
+  "note": "bought 5 Jun 2025, tendered 10 Feb 2026: the same loss is short-term",
+  "in": {
+   "disposal": {
+    "taxpayer": 1,
+    "account": 1,
+    "isin": "INE000A01010",
+    "sale_day": 20260210,
+    "seq": 1,
+    "qty_u": 100000000,
+    "sale_paise": 6000000,
+    "acquired_day": 20250605,
+    "cost_paise": 4000000,
+    "basis_qty_u": 100000000,
+    "kind_hint": "buyback"
+   },
+   "fmv": {}
+  },
+  "out": {
+   "status": "ok",
+   "gain_paise": -4000000,
+   "term": "short",
+   "rate_bp": 2000,
+   "buyback": "dividend_and_loss",
+   "sale_paise": 0,
+   "receipt_paise": 6000000,
+   "dividend_paise": 6000000
+  }
+ },
+ {
+  "id": "K2-last-dividend-day",
+  "note": "31 Mar 2026 is still the second regime",
+  "in": {
+   "disposal": {
+    "taxpayer": 1,
+    "account": 1,
+    "isin": "INE000A01010",
+    "sale_day": 20260331,
+    "seq": 1,
+    "qty_u": 100000000,
+    "sale_paise": 6000000,
+    "acquired_day": 20250105,
+    "cost_paise": 4000000,
+    "basis_qty_u": 100000000,
+    "kind_hint": "buyback"
+   },
+   "fmv": {}
+  },
+  "out": {
+   "status": "ok",
+   "gain_paise": -4000000,
+   "term": "long",
+   "rate_bp": 1250,
+   "buyback": "dividend_and_loss",
+   "sale_paise": 0,
+   "receipt_paise": 6000000,
+   "dividend_paise": 6000000
+  }
+ },
+ {
+  "id": "K2-old-lot",
+  "note": "bought 2016 for 20,000, 2018 value 35,000, tendered 10 Jun 2025: the sale value is nil, so min(35,000, 0) = 0 and the loss is the cost 20,000, not 35,000",
+  "in": {
+   "disposal": {
+    "taxpayer": 1,
+    "account": 1,
+    "isin": "INE000A01010",
+    "sale_day": 20250610,
+    "seq": 1,
+    "qty_u": 100000000,
+    "sale_paise": 6000000,
+    "acquired_day": 20160310,
+    "cost_paise": 2000000,
+    "basis_qty_u": 100000000,
+    "kind_hint": "buyback"
+   },
+   "fmv": {
+    "INE000A01010": 3500000
+   }
+  },
+  "out": {
+   "status": "ok",
+   "gain_paise": -2000000,
+   "term": "long",
+   "rate_bp": 1250,
+   "buyback": "dividend_and_loss",
+   "sale_paise": 0,
+   "receipt_paise": 6000000,
+   "dividend_paise": 6000000
+  }
+ },
+ {
+  "id": "K3-first-gain-day",
+  "note": "1 Apr 2026: an ordinary disposal: 60,000 - 40,000 = 20,000 long-term",
+  "in": {
+   "disposal": {
+    "taxpayer": 1,
+    "account": 1,
+    "isin": "INE000A01010",
+    "sale_day": 20260401,
+    "seq": 1,
+    "qty_u": 100000000,
+    "sale_paise": 6000000,
+    "acquired_day": 20250105,
+    "cost_paise": 4000000,
+    "basis_qty_u": 100000000,
+    "kind_hint": "buyback"
+   },
+   "fmv": {}
+  },
+  "out": {
+   "status": "ok",
+   "gain_paise": 2000000,
+   "term": "long",
+   "rate_bp": 1250,
+   "buyback": "capital_gain",
+   "sale_paise": 6000000,
+   "dividend_paise": 0
+  }
+ },
+ {
+  "id": "K3-capital-gain",
+  "note": "bought 5 Jan 2025, tendered 20 Jul 2026: long-term gain 20,000",
+  "in": {
+   "disposal": {
+    "taxpayer": 1,
+    "account": 1,
+    "isin": "INE000A01010",
+    "sale_day": 20260720,
+    "seq": 1,
+    "qty_u": 100000000,
+    "sale_paise": 6000000,
+    "acquired_day": 20250105,
+    "cost_paise": 4000000,
+    "basis_qty_u": 100000000,
+    "kind_hint": "buyback"
+   },
+   "fmv": {}
+  },
+  "out": {
+   "status": "ok",
+   "gain_paise": 2000000,
+   "term": "long",
+   "rate_bp": 1250,
+   "buyback": "capital_gain",
+   "sale_paise": 6000000,
+   "dividend_paise": 0
+  }
+ },
+ {
+  "id": "K3-short",
+  "note": "bought 5 Jan 2026, tendered 20 Jul 2026: short-term gain 20,000 at 20%",
+  "in": {
+   "disposal": {
+    "taxpayer": 1,
+    "account": 1,
+    "isin": "INE000A01010",
+    "sale_day": 20260720,
+    "seq": 1,
+    "qty_u": 100000000,
+    "sale_paise": 6000000,
+    "acquired_day": 20260105,
+    "cost_paise": 4000000,
+    "basis_qty_u": 100000000,
+    "kind_hint": "buyback"
+   },
+   "fmv": {}
+  },
+  "out": {
+   "status": "ok",
+   "gain_paise": 2000000,
+   "term": "short",
+   "rate_bp": 2000,
+   "buyback": "capital_gain",
+   "sale_paise": 6000000,
+   "dividend_paise": 0
+  }
+ }
+]

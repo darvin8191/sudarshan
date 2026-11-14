@@ -74,6 +74,9 @@ WORDS: dict[str, str] = {
         "The family data cannot be read on the server just now. Check that the server has free "
         "disk space; the family view tries again at its next start."
     ),
+    # What a family member is told while the store is off (review L4): the two sentences above
+    # are the owner's, and a member can act on neither.
+    "viewer_unavailable": "The family view is not available right now. Ask the account owner.",
 }
 
 

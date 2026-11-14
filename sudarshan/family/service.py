@@ -7,6 +7,8 @@ one listener on 127.0.0.1:5585 and the jobs.
   up so that the owner's page learns the switch from it.
 * **A store a newer release wrote**, or one that will not open, keeps the view off the same way with
   its own sentence (a restart loop would only repeat it, and a newer file must not be written to).
+  That sentence is the owner's, on his Family page and in /health; a family phone is told "The
+  family view is not available right now. Ask the account owner." (review L4).
 * **Port taken** (cross-design P23): an ERROR in plain words, the jobs keep running, and the port is
   tried again every minute; never another port (X2). Exit status 2 is for a setting or key it
   cannot use, which a restart would not mend.
@@ -26,7 +28,7 @@ from typing import Any
 from sudarshan.tasks import cancel_and_wait
 
 from . import accounts as accounts_module
-from . import audit, backup, health, sessions, ws
+from . import audit, backup, books, health, lockout, sessions, ws  # F5 (feat/family-c): books
 from . import store as store_module
 from .accounts import Accounts, Hasher
 from .admin_api import SealedDoors
@@ -74,8 +76,10 @@ class FamilyService(Router):
         hasher: Hasher | None = None,
         dialect: ws.Dialect | None = None,
         jobs: dict[str, Job] | None = None,
+        data_plane: Any = None,  # F5 (feat/family-c): the data plane's keys; None: no data plane
     ):
         self.settings, self.keys = settings, keys
+        self.data_plane, self.plane = data_plane, None  # F5 (feat/family-c): books.install
         self.enabled = settings.enabled
         #: Why viewers are refused while the view is off: the switch, or the store's sentence.
         self.off_error: FamilyError | None = None if self.enabled else FamilyError("off")
@@ -122,8 +126,8 @@ class FamilyService(Router):
             return call
 
         names = ("member_create", "member_update", "member_status", "member_remove",
-                 "invite_create", "invite_revoke", "signin_reset", "device_list",
-                 "device_revoke")  # fmt: skip
+                 "invite_create", "invite_revoke", "signin_reset", "signin_unlock",
+                 "device_list", "device_revoke")  # fmt: skip
         built = {name: via(name) for name in names}
         built["member_list"] = self._member_list
         built["state"] = self._admin_state
@@ -162,7 +166,8 @@ class FamilyService(Router):
     def nudged(self, kind: str, sandbox: bool, at: int) -> bool:
         """An "orders changed" nudge: whether it made a book read due. The data plane takes it (F5);
         until then none is taken, and a sandbox one never will be (the books are the real account)."""
-        return False
+        # F5 (feat/family-c): the data plane takes it (nudge.Nudges).
+        return self.plane.nudged(kind, sandbox, at) if self.plane is not None else False
 
     def revoked(self, hashes: list[str]) -> None:
         """Sessions just revoked: their sockets are closed now (4401, "Signed out on this device.")."""
@@ -193,23 +198,40 @@ class FamilyService(Router):
             return await self.doors.nudge(request)
         if door == "viewer":
             if not self.enabled:
-                raise self.off_error or FamilyError("off")
+                raise self.viewer_off()
             return await self.viewer.http(request)
         raise FamilyError("not_found")  # /family/ws without an upgrade
 
+    def viewer_off(self) -> FamilyError:
+        """What a family phone is told while the view is off: the switch in its own words, and
+        for a store that cannot be used one sentence a member can act on, never the owner's."""
+        if self.off_error is None or self.off_error.code == "off":
+            return self.off_error or FamilyError("off")
+        return FamilyError("off", "viewer_unavailable")
+
     async def upgrade(self, request: Request, reader, writer) -> Response | None:
         if not self.enabled:
-            return Response.refused(self.off_error or FamilyError("off"))
-        if self.registry.full():
+            return Response.refused(self.viewer_off())
+        # M1 (feat/family-c): the slot is taken before the first await and given back on every
+        # path that does not end in an open socket; the shares are judged with no await between.
+        if not self.registry.reserve():
             return Response.refused(FamilyError("busy"))
         try:
             session = await self.viewer.authorize(request)
-        except FamilyError as exc:
-            return Response.refused(exc)
+        except BaseException as exc:
+            self.registry.release()
+            if isinstance(exc, FamilyError):
+                return Response.refused(exc)
+            raise
         sock = ws.ViewerSocket(reader, writer, session=session.id_hash,
                                member_id=session.member_id, dialect=self.dialect,
                                registry=self.registry)  # fmt: skip
-        await sock.run(request.head)
+        if not self.registry.admit(sock):
+            return Response.refused(FamilyError("busy"))
+        try:
+            await sock.run(request.head)
+        finally:
+            self.registry.discard(sock)
         return None
 
     # ---- what /health shows ---------------------------------------------------------------------
@@ -222,7 +244,10 @@ class FamilyService(Router):
             counts = await self.counts()
         except StoreError:
             counts = {}
-        return health.document(self, counts)
+        doc = health.document(self, counts)
+        if self.plane is not None:  # F5 (feat/family-c): the data plane's counts and states
+            doc["family_state"]["data"] = self.plane.health()
+        return doc
 
     def _set_state(self, state: str) -> None:
         if state != self._state:
@@ -283,6 +308,9 @@ class FamilyService(Router):
                                  max_devices=self.settings.max_devices)  # fmt: skip
         if isinstance(self.viewer, Viewer):  # a test may have seated its own
             self.viewer = ViewerApi(self.accounts, self.keys.store)
+        # F5 (feat/family-c): the data plane, seated in the viewer API when its keys were given.
+        if self.data_plane is not None and isinstance(self.viewer, ViewerApi):
+            self.plane = books.install(self, self.data_plane)
 
     def _keep_off(self, error: FamilyError) -> None:
         self.enabled, self.off_error = False, error
@@ -313,16 +341,23 @@ class FamilyService(Router):
 
 
 async def _prune(service: FamilyService) -> None:
-    """Forget sessions that ended more than 90 days ago, now and every six hours."""
+    """Forget sessions that ended more than 90 days ago and counts of wrong sign-ins a day old,
+    now and every six hours."""
     while True:
         if service.store is not None:
             try:
-                gone = await service.store.write(lambda tx: sessions.prune(tx, service.clock()))
+                gone = await service.store.write(lambda tx: _forget(tx, service.clock()))
                 if gone:
                     log.info("forgot %d sessions that ended more than 90 days ago", gone)
             except StoreError as exc:
                 log.error("old sessions could not be forgotten this time (%s)", exc.cause)
         await asyncio.sleep(PRUNE_EVERY_S)
+
+
+def _forget(tx: store_module.Tx, now: int) -> int:
+    """The prune job's one transaction: old counts of wrong sign-ins, then old sessions (counted)."""
+    lockout.prune(tx, now)
+    return sessions.prune(tx, now)
 
 
 async def _sweep(service: FamilyService) -> None:
@@ -368,11 +403,12 @@ def main() -> int:
         settings = Settings.from_env()
         setup_logging(settings.log_level)
         keys = Keys.load(settings)
+        plane = books.PlaneKeys.load(settings) if settings.enabled else None  # F5 (feat/family-c)
     except ConfigError as exc:
         log.error("sudarshan-family cannot run: %s", exc)
         return 2
     try:
-        asyncio.run(_run_with_signals(FamilyService(settings, keys)))
+        asyncio.run(_run_with_signals(FamilyService(settings, keys, data_plane=plane)))
     except Exception:  # a bug: systemd restarts it
         log.exception("sudarshan-family stopped unexpectedly")
         return 1

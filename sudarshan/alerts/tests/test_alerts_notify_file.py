@@ -245,6 +245,27 @@ def test_the_key_may_come_in_the_header_as_at_notify(client, telegram):
     assert response.status_code == 200 and len(telegram.requests) == 1
 
 
+def test_a_wrong_key_in_the_header_is_refused_before_the_body_is_parsed(
+    client, telegram, monkeypatch
+):
+    """Review L14: the form was parsed before the key was looked at."""
+    import flask
+
+    parsed = []
+    real = flask.Request.form
+
+    def spy(self):
+        parsed.append(1)
+        return real.fget(self)
+
+    monkeypatch.setattr(flask.Request, "form", property(spy))
+    form = {"username": OWNER, "file": (io.BytesIO(PDF), "a.pdf")}
+    response = client.post(
+        PATH, data=form, content_type="multipart/form-data", headers={"X-API-KEY": "wrong-key"}
+    )
+    assert response.status_code == 401 and parsed == [] and telegram.requests == []
+
+
 def test_a_stopped_bot_is_refused_as_notify_refuses(client, telegram, monkeypatch):
     monkeypatch.setattr(ROUTES.telegram_alert, "is_bot_active", lambda: False)
     refused(post(client), 409, "bot_stopped")

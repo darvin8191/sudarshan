@@ -17,6 +17,7 @@ const toast = vi.hoisted(() => ({
 vi.mock('@/api/risk', () => ({ riskApi: api }))
 vi.mock('@/utils/toast', () => ({ showToast: toast }))
 
+import { MASKED } from '@/sudarshan/masked'
 import { PHRASE_HINT } from './phrase'
 import { openNow, ResumeSheet, secondsLeft } from './ResumeSheet'
 
@@ -106,6 +107,26 @@ describe('resuming', () => {
     fireEvent.click(resume())
     expect(await screen.findByRole('alert')).toHaveTextContent('Exit all is still being placed')
     expect(onOpenChange).not.toHaveBeenCalledWith(false)
+  })
+
+  it('keeps the phrase in a masked box, and a wrong one out of every toast', async () => {
+    api.resume.mockResolvedValue({
+      code: 400,
+      ok: false,
+      message: 'The confirm phrase does not match. Nothing was changed.',
+      state: null,
+      activated: false,
+    })
+    renderSheet(state(-1))
+    const box = screen.getByLabelText('Confirm phrase')
+    expect(box.className).toContain(MASKED)
+    fireEvent.change(box, { target: { value: 'hunter2' } })
+    fireEvent.click(resume())
+    expect(await screen.findByRole('alert')).toHaveTextContent('does not match')
+    expect(box).toHaveValue('') // typed again, never left on the screen
+    for (const call of Object.values(toast).flatMap((fn) => fn.mock.calls)) {
+      expect(JSON.stringify(call)).not.toContain('hunter2')
+    }
   })
 
   it('counts and words', () => {

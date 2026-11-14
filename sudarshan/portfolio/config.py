@@ -21,6 +21,8 @@ later parts read, and the pepper is returned by ``read_pepper`` and kept out of 
 | ``SUDARSHAN_PORTFOLIO_AMFI_URL`` | AMFI's NAVAll.txt (a test points it at a fake on this server) |
 | ``SUDARSHAN_NSE_HOLIDAYS_FILE`` / ``SUDARSHAN_NSE_EXTRA_DAYS_FILE`` | the calendar files the other services read |
 | ``SUDARSHAN_PORTFOLIO_LOG_LEVEL`` | ``INFO`` |
+| ``SUDARSHAN_TAX``, ``SUDARSHAN_PORTFOLIO_INSIGHTS``, ``SUDARSHAN_PORTFOLIO_GOALS`` | ``off``: the
+  phase P7 switches (``kinds.SWITCH_ENV``), each set by the release that ships its part |
 """
 
 from __future__ import annotations
@@ -39,7 +41,7 @@ from sudarshan.autologin.schedule import EXTRA_TRADING_DAYS_FILE, HOLIDAYS_FILE
 from sudarshan.ops.release import DEPLOYED_TAG_FILE
 from sudarshan.vault import VaultKeyError, pepper_from
 
-from .core.kinds import DEFAULT_HTTP_PORT, LOCAL_HOST
+from .core.kinds import DEFAULT_HTTP_PORT, LOCAL_HOST, SWITCH_ENV
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 STATE_DIR = "/var/lib/sudarshan-portfolio"
@@ -175,6 +177,10 @@ class Settings:
     openalgo_db: Path | None = None
     holidays_file: Path = Path(HOLIDAYS_FILE)
     extra_days_file: Path = Path(EXTRA_TRADING_DAYS_FILE)
+    #: The phase P7 switches, off unless the release turns one on (``kinds.SWITCHED_OPS``).
+    tax: bool = False
+    insights: bool = False
+    goals: bool = False
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> Settings:
@@ -210,4 +216,11 @@ class Settings:
             openalgo_db=sqlite_path(get("DATABASE_URL") or "sqlite:///db/openalgo.db", app_dir),
             holidays_file=Path(get("SUDARSHAN_NSE_HOLIDAYS_FILE") or HOLIDAYS_FILE),
             extra_days_file=Path(get("SUDARSHAN_NSE_EXTRA_DAYS_FILE") or EXTRA_TRADING_DAYS_FILE),
+            **{name: _switch(env, key, False) for name, key in SWITCH_ENV.items()},
         )
+
+
+def switch_on(service: object, name: str) -> bool:
+    """Whether the phase switch ``name`` is on for a service (its ``settings``); off when the
+    service has no such setting, so anything unsure stays switched off."""
+    return getattr(getattr(service, "settings", None), name, False) is True

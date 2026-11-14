@@ -52,7 +52,9 @@ STATE_DIR = Path("/var/lib/sudarshan-portfolio")
 THREAD_PREFIX = "portfolio-store"
 
 #: Columns that hold JSON text, and columns that are flags; the store converts at the boundary.
-JSON_COLUMNS = frozenset({"tags", "charges_detail", "spec", "preview", "funds", "payload"})
+JSON_COLUMNS = frozenset(
+    {"tags", "charges_detail", "spec", "preview", "funds", "payload", "details", "tab_ids"}
+)
 FLAG_COLUMNS = frozenset(
     {
         "system",
@@ -70,8 +72,17 @@ FLAG_COLUMNS = frozenset(
 HIDDEN_COLUMNS = ("principal", "request_id")
 #: Tables whose rows carry a ``version`` the owner's write must name.
 VERSIONED = frozenset(
-    {"member", "account", "tab", "asset", "tab_layout", "saved_view", "tab_share", "member_privacy"}
-)
+    {
+        "member", "account", "tab", "asset", "tab_layout", "saved_view", "tab_share",
+        "member_privacy", "tax_opening_lot", "tax_fmv", "tax_carry", "tax_day_override",
+        "tax_trade_mark", "ca_decision", "dividend_line", "goal",
+    }
+)  # fmt: skip
+#: A taxpayer's own tax inputs, one table each (step 5); the 31 Jan 2018 prices are everyone's.
+TAX_MEMBER_TABLES = ("tax_opening_lot", "tax_carry", "tax_day_override", "tax_trade_mark")
+#: What a corporate action keeps of Upstox's row (step 5): public facts and their hash.
+CA_EVENT_FIELDS = ("isin", "kind", "ex_day", "amount_u", "ratio_num", "ratio_den", "details",
+                   "raw_hash")  # fmt: skip
 
 WORDS = {
     "opened": SHARED_WORDS["store_failed"],
@@ -821,6 +832,110 @@ class Tx:
 
     def user_version(self) -> int:
         return int(self.conn.exec_driver_sql("PRAGMA user_version").scalar() or 0)
+
+    # ---- phase P7 (step 5): the owner's settings, tax inputs, corporate actions ----
+    def setting_get(self, name: str) -> dict[str, Any] | None:
+        """One of the owner's settings (``tax:<member id>``, ``risk_free_bp`` ...), its value
+        decoded from JSON; None when it was never set."""
+        t = self._t("owner_setting")
+        row = self.conn.execute(select(t).where(t.c.name == name, self._mine(t))).mappings().first()
+        found = self._out(row)
+        if found is not None:
+            found["value"] = json.loads(found["value"])
+        return found
+
+    def setting_put(self, name: str, value: Any, version: int, now: int) -> dict[str, Any]:
+        """Write a setting only from the version it was read at (0: never set); VersionConflict
+        otherwise, and nothing is written."""
+        t = self._t("owner_setting")
+        text = json.dumps(value, sort_keys=True)
+        if self.setting_get(name) is None:
+            if version != 0:
+                raise VersionConflict("version_conflict_item")
+            self.conn.execute(
+                insert(t).values(
+                    principal=self.who, name=name, value=text, created_at=now, updated_at=now,
+                    version=1,
+                )
+            )  # fmt: skip
+        else:
+            done = self.conn.execute(
+                update(t)
+                .where(t.c.name == name, self._mine(t), t.c.version == version)
+                .values(value=text, updated_at=now, version=version + 1)
+            ).rowcount
+            if not done:
+                raise VersionConflict("version_conflict_item")
+        return self.setting_get(name)  # type: ignore[return-value]
+
+    def tax_inputs(self, member_id: int) -> dict[str, list[dict[str, Any]]]:
+        """A taxpayer's own inputs by table: purchases from before the records, losses brought
+        forward, days marked as delivery, buyback tenders (``TAX_MEMBER_TABLES``)."""
+        return {name: self.rows(name, "id", member_id=member_id) for name in TAX_MEMBER_TABLES}
+
+    def tax_accounts(self, member_id: int) -> list[dict[str, Any]]:
+        """A taxpayer's accounts, each with the mode it counts for tax by (``tax_mode_of``)."""
+        return [
+            {**row, "tax_mode": migrations.tax_mode_of(row)}
+            for row in self.rows("account", "id", member_id=member_id)
+        ]
+
+    def ca_event_put(self, values: Mapping[str, Any], read_at: int) -> tuple[dict[str, Any], bool]:
+        """Keep an event Upstox lists, once per ``raw_hash``: a new one is added; one seen before
+        has its read time moved on and is listed again if it had gone. The row, and whether it is
+        new. Public facts that belong to no one (``migrations.SHARED_TABLES``)."""
+        t = self._t("ca_event")
+        have = self.conn.execute(select(t.c.id).where(t.c.raw_hash == values["raw_hash"])).first()
+        if have is None:
+            fields = self._in({name: values.get(name) for name in CA_EVENT_FIELDS})
+            made = self.conn.execute(insert(t).values(**fields, read_at=read_at, gone_at=None))
+            key, new = made.inserted_primary_key[0], True
+        else:
+            key, new = have[0], False
+            self.conn.execute(update(t).where(t.c.id == key).values(read_at=read_at, gone_at=None))
+        row = self.conn.execute(select(t).where(t.c.id == key)).mappings().first()
+        return self._out(row), new  # type: ignore[return-value]
+
+    def ca_events(
+        self,
+        isins: list[str] | None = None,
+        from_day: int | None = None,
+        to_day: int | None = None,
+        gone: bool = False,
+    ) -> list[dict[str, Any]]:
+        """Events by ex-date, of these ISINs (None: all) between two days; with ``gone`` also the
+        ones Upstox no longer lists."""
+        t = self._t("ca_event")
+        query = select(t)
+        if isins is not None:
+            query = query.where(t.c.isin.in_(list(isins)))
+        if from_day is not None:
+            query = query.where(t.c.ex_day >= from_day)
+        if to_day is not None:
+            query = query.where(t.c.ex_day <= to_day)
+        if not gone:
+            query = query.where(t.c.gone_at.is_(None))
+        found = self.conn.execute(query.order_by(t.c.ex_day, t.c.id)).mappings()
+        return [self._out(row) for row in found]  # type: ignore[misc]
+
+    def ca_events_gone(self, isin: str, listed: list[str], at: int) -> int:
+        """Mark the events of ``isin`` whose hash Upstox no longer lists (``listed``): kept, never
+        deleted. How many were marked."""
+        t = self._t("ca_event")
+        query = update(t).where(t.c.isin == isin, t.c.gone_at.is_(None))
+        if listed:
+            query = query.where(t.c.raw_hash.notin_(list(listed)))
+        return int(self.conn.execute(query.values(gone_at=at)).rowcount)
+
+    def ca_read_put(self, isin: str, read_at: int | None, state: str, note: str | None) -> None:
+        """The one record of the last read of an ISIN's corporate actions (the weekly rotation)."""
+        t = self._t("ca_read")
+        self.conn.execute(delete(t).where(t.c.isin == isin))
+        self.conn.execute(insert(t).values(isin=isin, read_at=read_at, state=state, note=note))
+
+    def ca_reads(self) -> list[dict[str, Any]]:
+        t = self._t("ca_read")
+        return [dict(row) for row in self.conn.execute(select(t).order_by(t.c.isin)).mappings()]
 
 
 # ---- the store -----------------------------------------------------------------------------
