@@ -95,6 +95,8 @@ export class ComputedChart {
   private readonly clock: LiveBarClock
   private builder: LiveBarBuilder | null = null
   private prices: LegPrices | null = null
+  /** Ticks that came while history was being read: applied once the legs are seeded. */
+  private waiting: Array<{ price: number; time: number | null } | undefined> = []
   private bars: Bar[] = []
   private spec: ComputedSpec | null = null
   private key = ''
@@ -154,6 +156,7 @@ export class ComputedChart {
     this.clock.stop()
     this.builder = null
     this.prices = null
+    this.waiting = []
     this.bars = []
     this.interval = chip === '1D' ? 'D' : chip
     const label = intervalLabel(this.interval)
@@ -199,7 +202,11 @@ export class ComputedChart {
    * the exchange's time for it in UTC seconds when the feed sent one.
    */
   tick(leg: number, price: number, time: number | null): void {
-    if (this.destroyed || !this.prices) return
+    if (this.destroyed || !this.spec) return
+    if (!this.prices) {
+      this.waiting[leg] = { price, time }
+      return
+    }
     const combined = this.prices.set(leg, price, time)
     if (!combined) return
     this.cb.onValue?.(combined)
@@ -333,6 +340,9 @@ export class ComputedChart {
       if (close !== null) prices.seed(leg, close)
     })
     this.prices = prices
+    this.waiting.splice(0).forEach((held, leg) => {
+      if (held) this.tick(leg, held.price, held.time)
+    })
     if (!builder || !exchange) return
     const mine = () => !this.destroyed && ticket === this.ticket && this.builder === builder
     void sessionCalendarFor(exchange, this.apiKey)

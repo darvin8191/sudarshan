@@ -118,8 +118,11 @@ export class ComputedFeed implements DataFeed {
   /** Each leg's last close from the most recent read, for the first combined tick. */
   lastCloses: Array<number | null> = []
   private spec: ComputedSpec | null = null
+  private readonly inner: DataFeed
 
-  constructor(private readonly inner: DataFeed) {}
+  constructor(inner: DataFeed) {
+    this.inner = inner
+  }
 
   setSpec(spec: ComputedSpec): void {
     this.spec = spec
