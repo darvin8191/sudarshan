@@ -844,6 +844,31 @@ def test_n7_kept_figures_are_put_away_after_ten_minutes_without_an_answer_and_sa
     run(go())
 
 
+def test_n7_put_away_books_are_an_answer_so_shared_lists_do_not_wait_on_them():
+    """The sockets hold a new symbol back until the member's books have an answer. Put away is
+    one (no symbol of the books is theirs to follow), so a shared list's prices do not wait for a
+    portfolio that is not answering, and nothing asks the portfolio for the books meanwhile."""
+
+    async def go():
+        clock = Clock(ist(MONDAY, 19))
+        books, client = shelf(clock, {"holdings": [holding()], "positions": [position()]})
+        client.shares = shared_answer()
+        who = member()
+        await books.ensure(who)
+        assert books.known(1) and books.keys(1)
+        client.shares_down = True
+        clock.at += 61_000
+        await books.confirm(who)
+        clock.at += books_module.SHARES_KEEP_MS
+        await books.confirm(who)
+        assert books.keys(1) == set() and books.known(1)
+        reads = len(client.reads())
+        await books.ensure(who)
+        assert len(client.reads()) == reads
+
+    run(go())
+
+
 def test_n7_the_bound_is_kept_at_the_door_too_and_a_removed_share_still_wins():
     """Between the tenth minute and the next question the kept rows are still in memory: the
     answer leaves them out already. And an answer that the share is gone is "Not shared with

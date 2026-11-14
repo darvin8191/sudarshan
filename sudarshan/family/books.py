@@ -92,6 +92,8 @@ SHARES_WAIT_S = 3.0
 #: Verification N7: figures kept while the portfolio gives no answer about the share are put
 #: away after this long without one. The member sees less, never more.
 SHARES_KEEP_MS = 600_000
+#: Kept states that are an answer with no rows: nothing of the books is the member's to follow.
+SETTLED_EMPTY = ("not_shared", "unchecked")
 
 
 def clock_text(ms: int) -> str:
@@ -316,10 +318,12 @@ class Books:
         return set().union(*(self.keys(member_id) for member_id in {m for m, _ in self.memory}))
 
     def known(self, member_id: int) -> bool:
-        """Whether both the positions and the holdings of the member have an answer."""
+        """Whether both the positions and the holdings of the member have an answer. Put away
+        (N7) is an answer: the member follows none of the books' symbols, and their shared lists'
+        prices do not wait on a portfolio that is not answering."""
         for part in ("positions", "holdings"):
             memory = self.memory.get((member_id, part))
-            if memory is None or (memory.data is None and memory.state != "not_shared"):
+            if memory is None or (memory.data is None and memory.state not in SETTLED_EMPTY):
                 return False
         return True
 
@@ -327,7 +331,7 @@ class Books:
         """Read the member's positions and holdings that have no answer yet."""
         for part in ("positions", "holdings"):
             memory = self.memory.get((int(member["id"]), part))
-            if memory is None or (memory.data is None and memory.state != "not_shared"):
+            if memory is None or (memory.data is None and memory.state not in SETTLED_EMPTY):
                 await self.read(member, part)
 
     def watching(self, part: str, now: int) -> bool:
