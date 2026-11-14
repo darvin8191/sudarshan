@@ -52,7 +52,7 @@ import { listOf, planPrivacy, runPrivacySave } from './privacySave'
 import {
   CATEGORY_LABEL,
   FUNDS_WITHOUT_AMOUNTS,
-  PNL_HIDES_MONEY,
+  PNL_HIDDEN_NOTE,
   PNL_NEEDS_QTY,
   ROLE_WORDS,
   SENT_OK,
@@ -128,7 +128,7 @@ function sameRole(a: Role): Privacy {
 /** What a category's switch leaves the member, in the owner's words (Y24, H1). */
 function categoryLine(category: (typeof CATEGORIES)[number], privacy: Privacy): string {
   if (category === 'pnl' && !privacy.qty) return PNL_NEEDS_QTY
-  if (category === 'pnl' && !privacy.pnl) return PNL_HIDES_MONEY
+  if (category === 'pnl' && !privacy.pnl) return `Hidden. ${PNL_HIDDEN_NOTE}`
   if (category === 'funds' && privacy.funds && !privacy.pnl) return FUNDS_WITHOUT_AMOUNTS
   return privacy[category] ? 'Shown' : 'Hidden'
 }

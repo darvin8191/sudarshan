@@ -50,11 +50,23 @@ export function privacyLine(privacy: Privacy): string {
 export const PNL_NEEDS_QTY = 'P&L that moves with prices is worked out from quantities'
 
 /**
- * Review H1: beside a quantity, any rupee figure gives the P&L away, so hiding P&L hides them all
- * (the `cost` list of privacy_fields.json). Said under the switches while P&L is hidden.
+ * Under the P&L switch while P&L is hidden and quantities are shown: the server's own sentence,
+ * `pnl_hidden_note` of sudarshan/family/privacy_fields.json, word for word (words.test.ts reads
+ * the file and fails when the two differ). v0.12.0 server review M4: the line here said the day's
+ * change was hidden with P&L, which is not so for a member who is shown quantities.
  */
-export const PNL_HIDES_MONEY =
-  'Hidden, and every rupee figure with it: cost, value, the day’s change'
+export const PNL_HIDDEN_NOTE =
+  "With quantities shown, a member can still work out a day's change and a holding's value from the quantity and the price. Hide quantities to hide those too."
+
+/**
+ * What decides which books a member can open: the server's own sentence, `book_share` of
+ * sudarshan/family/words.py (`BOOK_SHARE_REFUSED`), word for word (words.test.ts reads the file
+ * and fails when the two differ). The service and the owner bridge answer a share of kind `book`
+ * with it; the Shares tab says it where the book switches were (v0.12.0 review H1).
+ */
+export const BOOK_SHARE_RULE =
+  "Which books a member can open is set by sharing the Upstox tab in Portfolio, and by that member's Orders and Funds switches."
+
 export const FUNDS_WITHOUT_AMOUNTS = 'Shown without amounts while P&L is hidden'
 
 /** The privacy as the page sends it: with quantities off, P&L goes off with them. */

@@ -40,7 +40,7 @@ import {
   UNLOCKED,
 } from './MemberSheet'
 import { FLOOR_CHANGED } from './privacySave'
-import { FUNDS_WITHOUT_AMOUNTS, PNL_HIDES_MONEY } from './words'
+import { FUNDS_WITHOUT_AMOUNTS, PNL_HIDDEN_NOTE } from './words'
 
 /** The portfolio's floor of the default card: in step with it. */
 const floorRow = (over: Record<string, unknown> = {}) => ({
@@ -346,13 +346,20 @@ describe('editing a member', () => {
     })
   })
 
-  it('says that hiding P&L hides every rupee figure with it, funds amounts too (review H1)', async () => {
+  // v0.12.0 server review M4: the line said "every rupee figure with it: cost, value, the day's
+  // change". With quantities shown a member can still work out the day's change, so the owner is
+  // told that, in the server's sentence. Fails on the old line.
+  it('says under a hidden P&L what quantities still give away, in the server words', async () => {
     mount(cardOf({ privacy: { pnl: true, qty: true, funds: true, orders: true } }))
-    expect(screen.queryByText(PNL_HIDES_MONEY)).toBeNull()
+    expect(screen.queryByText(new RegExp(PNL_HIDDEN_NOTE.slice(0, 40)))).toBeNull()
     await userEvent.click(screen.getByRole('switch', { name: 'P&L' }))
-    expect(screen.getByText(PNL_HIDES_MONEY)).toBeInTheDocument()
+    const line = document.getElementById('privacy-pnl-line') as HTMLElement
+    expect(line.textContent).toBe(`Hidden. ${PNL_HIDDEN_NOTE}`)
+    expect(line.textContent).not.toMatch(/every rupee figure|the day’s change/)
     expect(screen.getByText(FUNDS_WITHOUT_AMOUNTS)).toBeInTheDocument()
-    expect(PNL_HIDES_MONEY).toMatch(/cost, value, the day’s change/)
+    // with quantities hidden too there is nothing left to work it out from, and the note goes
+    await userEvent.click(screen.getByRole('switch', { name: 'Quantities' }))
+    expect(line.textContent).not.toContain(PNL_HIDDEN_NOTE)
   })
 
   it('shows a refusal in the service words and reads the members again after a conflict', async () => {

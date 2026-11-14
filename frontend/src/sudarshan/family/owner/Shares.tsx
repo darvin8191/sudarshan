@@ -15,6 +15,7 @@ import { SHARES_KEY } from './keys'
 import { PortfolioTabShares } from './PortfolioTabShares'
 import { CARD, SaidLine, SwitchRow, useOnce } from './parts'
 import { coveredByAll, rowFor, type Target } from './shareRules'
+import { BOOK_SHARE_RULE } from './words'
 
 const SELECT =
   'h-12 w-full rounded-md border border-[color:var(--input)] bg-card px-3 text-base outline-none focus-visible:ring-2 focus-visible:ring-ring'
@@ -163,8 +164,8 @@ function Watchlists({ members, shares }: { members: MemberCard[]; shares: readon
   )
 }
 
-export const BOOKS_RULE =
-  'Books are not switched on one by one. A member can open your books only while the Upstox tab is shared with them. Orders and trades also need their Orders switch, and funds their Funds switch.'
+/** The line that stands where the book switches were: the server's own sentence. */
+export const BOOKS_RULE = BOOK_SHARE_RULE
 
 const LINK =
   'flex min-h-12 w-full items-center justify-between gap-3 rounded-xl border px-3 text-left text-[0.9375rem] font-semibold outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring'
@@ -195,7 +196,7 @@ function Books({
       </h2>
       <p className="text-[0.9375rem] leading-snug">{BOOKS_RULE}</p>
       <button type="button" className={LINK} onClick={toTabs}>
-        <span>Upstox tab share</span>
+        <span>Share the Upstox tab</span>
         <span className="flex shrink-0 items-center gap-1 text-[0.8125rem] font-medium text-[color:var(--text-tertiary)]">
           Portfolio tabs
           <ArrowDown aria-hidden="true" className="size-4" />

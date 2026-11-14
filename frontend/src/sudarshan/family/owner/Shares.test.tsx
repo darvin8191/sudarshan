@@ -259,6 +259,16 @@ describe('books', () => {
     expect(within(books).getByText(BOOKS_RULE)).toBeInTheDocument()
   })
 
+  it('shows a refusal of a share as the server gave it', async () => {
+    // The server refuses kind `book` with this sentence; no control here sends one, and any
+    // refusal a share switch does get is shown word for word.
+    api.shareSet.mockRejectedValue(new OwnerError('invalid', BOOKS_RULE))
+    mount()
+    await userEvent.click(await screen.findByRole('switch', { name: 'Share Morning list' }))
+    const said = await screen.findAllByText(BOOKS_RULE)
+    expect(said.some((el) => el.closest('output') !== null)).toBe(true)
+  })
+
   it('never writes a share of kind book, whatever is tapped in the section', async () => {
     const opened: number[] = []
     mount((id) => opened.push(id))
@@ -285,7 +295,7 @@ describe('books', () => {
     mount()
     const books = await section()
     const tabs = await screen.findByRole('heading', { name: 'Portfolio tabs' })
-    await userEvent.click(within(books).getByRole('button', { name: /Upstox tab share/ }))
+    await userEvent.click(within(books).getByRole('button', { name: /Share the Upstox tab/ }))
     expect(tabs).toHaveFocus()
   })
 
