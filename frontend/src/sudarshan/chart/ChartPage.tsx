@@ -582,11 +582,13 @@ const ChartScreen = memo(function ChartScreen({
   }, [location.key])
 
   // SUDARSHAN M10.2: an alert form restored with the page (a reload, the phone bringing the app
-  // back) is not reopened: it opens only from a tap, as the watchlist's does.
-  const restoredAlert = useRef(sheet?.sheet === 'alert')
+  // back) is not reopened: it opens only from a tap, as the watchlist's does. An order ticket
+  // the same (v0.13.0 review M1): its history entry carries a limit price and a product, and
+  // the phone can bring the page back the next morning with both.
+  const restoredForm = useRef(sheet?.sheet === 'alert' || sheet?.sheet === 'ticket')
   useEffect(() => {
-    if (!restoredAlert.current) return
-    restoredAlert.current = false
+    if (!restoredForm.current) return
+    restoredForm.current = false
     closeSheet()
   }, [closeSheet])
 
