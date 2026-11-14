@@ -88,6 +88,9 @@ def probe_environment(here: Path) -> dict[str, str]:
         # Off by default, switched on here so its routes are classified and walked too.
         "MCP_HTTP_ENABLED": "True",
         "MCP_PUBLIC_URL": "https://g5.invalid",
+        # The two locks the release ships (M17.9): without them the app starts without MCP.
+        "OPENALGO_MCP_READ_ONLY": "1",
+        "MCP_OAUTH_WRITE_SCOPE_ENABLED": "False",
         "VALID_BROKERS": "upstox",
         "REDIRECT_URL": "https://g5.invalid/upstox/callback",
         "BROKER_API_KEY": "g5-fake-key",  # fake, test only
