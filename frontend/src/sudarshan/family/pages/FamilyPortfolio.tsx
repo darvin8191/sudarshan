@@ -4,7 +4,7 @@
 // with the time the service took it, and re-read when the service says it has (Y11), on return to
 // the page and every 45 s while the market is open. A tab shared as restricted shows holdings and allocation by count only.
 import { useQuery } from '@tanstack/react-query'
-import { Check, Lock } from 'lucide-react'
+import { Check, Clock, Lock } from 'lucide-react'
 import { useSearchParams } from 'react-router'
 import { cn } from '@/lib/utils'
 import { Hidden } from '@/sudarshan/books/cards/Hidden'
@@ -184,6 +184,24 @@ function TabBody({ tab }: { tab: SharedTab }) {
                   <span className="text-sm font-semibold">{holding.name}</span>
                   {holding.symbol && holding.symbol !== holding.name && (
                     <span className="text-xs text-muted-foreground">{holding.symbol}</span>
+                  )}
+                  {(holding.age || holding.old) && (
+                    // How old the price is: shown whatever the member's privacy hides. An old
+                    // one carries an icon and the word, never colour alone (rule 6).
+                    <span
+                      data-testid="holding-age"
+                      data-old={holding.old ? '' : undefined}
+                      className={cn(
+                        'flex items-center gap-1 text-xs',
+                        holding.old
+                          ? 'font-semibold text-[color:var(--warning-text)]'
+                          : 'text-muted-foreground'
+                      )}
+                    >
+                      {holding.old && <Clock aria-hidden="true" className="size-3.5 shrink-0" />}
+                      {holding.old && <span className="sr-only">Old price: </span>}
+                      {holding.age ?? 'Old price'}
+                    </span>
                   )}
                 </li>
               ))}
