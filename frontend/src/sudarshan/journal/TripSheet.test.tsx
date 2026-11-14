@@ -18,7 +18,7 @@ import { OPEN_GUARD } from '@/sudarshan/watchlist/openGuard'
 import { renderBook, where } from '@/test/bookPages'
 import { JournalError, WORDS } from './api'
 import { closedTrip } from './fixtures'
-import { ORPHAN_FILLS, ORPHAN_WORDS, TripSheet } from './TripSheet'
+import { EXPIRED_WORDS, ORPHAN_FILLS, ORPHAN_WORDS, TripSheet, UNMATCHED_WORDS } from './TripSheet'
 import type { Playbook, Tag } from './types'
 
 const T0 = Date.UTC(2026, 10, 13, 4, 30, 15) // 10:00:15 IST
@@ -205,6 +205,62 @@ describe('what happened', () => {
     expect(screen.queryByText('Still open')).toBeNull()
     expect(screen.queryByText(/not available yet/)).toBeNull()
     expect(screen.queryByText('Closed trade')).toBeNull()
+  })
+
+  it('says a position opened before the journal is one: no side, no price it opened at, no figure', async () => {
+    serve(
+      detail({
+        status: 'unmatched',
+        side: 'long',
+        entry_qty: 0,
+        entry_avg_u: 0,
+        exit_qty: 65,
+        gross_paise: null,
+        net_paise: null,
+        hold_s: null,
+        mae_paise: null,
+        mfe_paise: null,
+        fills: [detail().fills[1]],
+      })
+    )
+    show()
+    expect(await screen.findByText(UNMATCHED_WORDS)).toBeTruthy()
+    expect(screen.getByText('Opened before the journal started')).toBeTruthy()
+    expect(screen.queryByText('LONG')).toBeNull()
+    expect(screen.queryByText('SHORT')).toBeNull()
+    const result = screen.getByRole('region', { name: 'Result' })
+    expect(within(result).getByText('Entry average').nextElementSibling?.textContent).toBe(
+      'Not known'
+    )
+    expect(within(result).getByText('Net').nextElementSibling?.textContent).toBe('Not known')
+    expect(within(result).queryByText('0.00')).toBeNull()
+    expect(screen.queryByRole('region', { name: 'How far it went' })).toBeNull()
+  })
+
+  it('says a contract that ended at expiry did, and works out no result for it', async () => {
+    serve(
+      detail({
+        status: 'expired',
+        exit_qty: 0,
+        exit_avg_u: null,
+        closed_ms: null,
+        close_day: 20261118,
+        gross_paise: null,
+        net_paise: null,
+        hold_s: null,
+        fills: [detail().fills[0]],
+      })
+    )
+    show()
+    expect(await screen.findByText(EXPIRED_WORDS)).toBeTruthy()
+    expect(screen.getByText('Ended at expiry', { selector: 'p' })).toBeTruthy()
+    const result = screen.getByRole('region', { name: 'Result' })
+    expect(within(result).getByText('Exit average').nextElementSibling?.textContent).toBe(
+      'Ended at expiry'
+    )
+    expect(within(result).getByText('Net').nextElementSibling?.textContent).toBe('Not worked out')
+    expect(within(result).getByText('Quantity').nextElementSibling?.textContent).toBe('65')
+    expect(screen.queryByText('Still open')).toBeNull()
   })
 
   it('says a Sandbox trade is one', async () => {

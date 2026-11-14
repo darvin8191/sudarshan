@@ -146,8 +146,9 @@ def _close_check(close: Mapping[str, Any], more: int) -> tuple[dict | None, str 
 
 
 def eod_text(day: int, close: Mapping[str, Any], trips: list[Mapping[str, Any]], more: int,
-             check_at: str | None) -> str:  # fmt: skip
-    """The day report's words from the day's close and the trips closed that day."""
+             check_at: str | None, left_out: Mapping[str, int] | None = None) -> str:  # fmt: skip
+    """The day report's words from the day's close and the trips closed that day; ``left_out``
+    what the trade count leaves out (positions not seen opened, contracts ended at expiry)."""
     check, extra = _close_check(close, more)
     kill = close.get("kill_switch")
     text = words.eod(
@@ -169,6 +170,7 @@ def eod_text(day: int, close: Mapping[str, Any], trips: list[Mapping[str, Any]],
         fills_recorded=int(close.get("fills_live") or 0),
         check_at=None if check or extra else check_at,
         close_check=check,
+        left_out=left_out,
     )
     lines = [text]
     if close.get("read_at") is None:
@@ -190,14 +192,14 @@ async def build_eod(service: Any, day: int, now: int, announce: bool = True,
             return None
         trips = tx.trips_page("live", status="closed", from_day=day, to_day=day, limit=100_000)
         more = sum(1 for f in tx.fills_of("live", day=day) if f["source"] == "close_reconcile")
-        return close, trips, more
+        return close, trips, more, tx.left_out("live", day, day)
 
     found = await _thread(lambda: service.store.read(OWNER, read))
     if found is None:
         return None
-    close, trips, more = found
+    close, trips, more, aside = found
     check_at = clock_text(schedule_for(service).check_at(to_date(day)))
-    text = eod_text(day, close, trips, more, check_at)
+    text = eod_text(day, close, trips, more, check_at, aside)
     rows = {"trades": len(trips), "fills_live": close.get("fills_live"), "more": more}
     report_id, _ = await archive(service, "eod", str(day), text, rows, now, announce, create)
     if report_id is not None and close.get("reconciled_at") is not None:

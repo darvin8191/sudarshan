@@ -1,10 +1,24 @@
-"""Pairing fills into round trips (JA1, M14.1; design 5.1).
+"""Pairing fills into round trips (JA1, M14.1; design 5.1, review B1).
 
 Fills of one mode are replayed per key (mode, exchange, symbol, product class) in time order
 with a running net quantity ``q``. A fill that moves ``q`` away from zero is an entry leg, one that
 moves it toward zero an exit leg, and one that crosses zero is split into an exit leg of ``|q|``
 and an entry leg of the rest: a new round trip opens at that same fill. A trip opens at the first
 entry leg from ``q = 0`` and closes when ``q`` returns to 0.
+
+The journal pairs only the fills it has seen, so two cases are kept out of every figure:
+
+* **Unmatched.** A position held before the journal's first fill of the instrument: ``openings``
+  gives the quantity held then (signed, a short is negative) and ``q`` starts there. The trip
+  that runs from it until ``q`` is back at 0 is ``unmatched``: its entry is not known here, so it
+  has no average, no gross and no hold, and it is never a LONG or a SHORT on a screen (its
+  ``side`` is only the direction of the position it reduces). In the cash market's carry class a
+  sale never opens a short (a delivery sale is a sale from holdings): the part of a sale beyond
+  what the journal saw bought goes to an unmatched trip, the one just reduced to 0 when that was
+  one, else one of its own, ended at once.
+* **Expired.** A contract left open past its own expiry day: an expiry has no fill, so the trip
+  never closes by itself. ``past_expiry`` says when its status becomes ``expired`` (the replay
+  and the close check apply it); its result waits for a settlement value.
 
 Rules that each pin a defect:
 
@@ -23,10 +37,22 @@ pass the fills from the open trip's first entry onward.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable, Mapping
+from datetime import date
 from typing import Any
 
 from sudarshan.journal.core import kinds, money
+
+OPEN, CLOSED, UNMATCHED, EXPIRED = "open", "closed", "unmatched", "expired"
+#: The cash market: a sale in its carry class (delivery) is a sale from holdings, never a short.
+CASH_EXCHANGES = frozenset({"NSE", "BSE"})
+#: Exchanges whose contracts stop trading before the close check (16:05) on their expiry day.
+CLOSED_BY_CHECK = frozenset({"NFO", "BFO"})
+MONTHS = ("JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC")
+#: An OpenAlgo derivative symbol ends with its expiry (DDMMMYY), then a strike and CE or PE, or
+#: FUT: NIFTY25NOV2625000CE, VEDL25APR24292.5CE, CRUDEOILM20MAY24FUT.
+_EXPIRY = re.compile(r"(\d{2})(" + "|".join(MONTHS) + r")(\d{2})(?:\d+(?:\.\d+)?(?:CE|PE)|FUT)$")
 
 
 def product_class(product: str) -> str:
@@ -37,6 +63,61 @@ def product_class(product: str) -> str:
     if p in kinds.CARRY_PRODUCTS:
         return "carry"
     raise ValueError(f"unknown product: {product!r}")
+
+
+def cash_carry(exchange: str, pclass: str) -> bool:
+    """True for the cash market's carry class (delivery): a sale there never opens a short."""
+    return pclass == "carry" and str(exchange).upper() in CASH_EXCHANGES
+
+
+def symbol_expiry(symbol: str) -> int | None:
+    """The expiry day (YYYYMMDD) an OpenAlgo derivative symbol carries, or None (a share, or a
+    symbol of another form). The master drops a contract after it expires, so this is what tells
+    the day once the master no longer can."""
+    found = _EXPIRY.search(str(symbol).upper())
+    if not found:
+        return None
+    dd, mon, yy = int(found.group(1)), MONTHS.index(found.group(2)) + 1, int(found.group(3))
+    try:
+        return money.to_day(date(2000 + yy, mon, dd))
+    except ValueError:
+        return None
+
+
+def past_expiry(exchange: str, expiry_day: int | None, today: int, after_close: bool) -> bool:
+    """Whether a contract with this expiry day can no longer trade: its day has passed, or (with
+    ``after_close``, the close check at 16:05) it is today and its exchange's derivatives closed
+    at 15:30. A currency or commodity contract can still trade after 16:05 on its expiry day, so
+    it waits for the next day."""
+    if expiry_day is None:
+        return False
+    if expiry_day < today:
+        return True
+    return after_close and expiry_day == today and str(exchange).upper() in CLOSED_BY_CHECK
+
+
+def held_before(opening: Mapping[str, Any] | None, fills: Iterable[Mapping[str, Any]], *,
+                cash: bool, expiry_day: int | None = None) -> int:  # fmt: skip
+    """The quantity held before the first of ``fills`` (a key's fills from its first one on),
+    from the opening read at first sight: ``qty`` held at the start of ``day``. Fills of days
+    before the read (a day rebuilt from Upstox's history after it) are already in that figure,
+    so they are taken back out. A contract that expired before the day of the read is gone from
+    it whatever was held, so the read says nothing then: 0. A share is never held short: 0."""
+    if opening is None:
+        return 0
+    qty, day = int(opening["qty"]), int(opening["day"])
+    if expiry_day is not None and expiry_day < day:
+        return 0
+    seen: set[str] = set()
+    before = 0
+    for fill in fills:
+        ident = str(fill["trade_id"])
+        if fill.get("source") == "withdrawn" or ident in seen or int(fill["day"]) >= day:
+            continue
+        seen.add(ident)
+        before += int(fill["qty"]) if str(fill["action"]).upper() == "BUY" else -int(fill["qty"])
+    start = qty - before
+    return max(start, 0) if cash else start
 
 
 def _clean(fill: Mapping[str, Any]) -> dict[str, Any]:
@@ -78,7 +159,7 @@ def _usable(fills: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 
-def _new_trip(fill: dict[str, Any], side: str) -> dict[str, Any]:
+def _new_trip(fill: dict[str, Any], side: str, status: str = OPEN) -> dict[str, Any]:
     return {
         "mode": fill["mode"],
         "exchange": fill["exchange"],
@@ -90,7 +171,7 @@ def _new_trip(fill: dict[str, Any], side: str) -> dict[str, Any]:
         "open_day": fill["day"],
         "closed_ms": None,
         "close_day": None,
-        "status": "open",
+        "status": status,
         "qty_max": 0,
         "entry_qty": 0,
         "exit_qty": 0,
@@ -100,37 +181,50 @@ def _new_trip(fill: dict[str, Any], side: str) -> dict[str, Any]:
     }
 
 
-def _leg(fill: dict[str, Any], role: str, qty: int) -> dict[str, Any]:
-    return {
-        "trade_id": fill["trade_id"],
-        "role": role,
-        "qty": qty,
-        "price_u": fill["price_u"],
-        "exch_ts_ms": fill["exch_ts_ms"],
-        "day": fill["day"],
-    }
-
-
 def _add_leg(trip: dict[str, Any], fill: dict[str, Any], role: str, qty: int) -> None:
-    trip["legs"].append(_leg(fill, role, qty))
+    """A leg of ``qty`` of ``fill``; a second part of the same fill in the same role (a sale that
+    goes on past what an unmatched trip held) is added to its leg, so a fill has one leg a trip."""
+    last = trip["legs"][-1] if trip["legs"] else None
+    if last is not None and last["trade_id"] == fill["trade_id"] and last["role"] == role:
+        last["qty"] += qty
+    else:
+        trip["legs"].append({
+            "trade_id": fill["trade_id"],
+            "role": role,
+            "qty": qty,
+            "price_u": fill["price_u"],
+            "exch_ts_ms": fill["exch_ts_ms"],
+            "day": fill["day"],
+        })  # fmt: skip
     value = money.value_u(qty, fill["price_u"])
     if role == "entry":
         trip["entry_qty"] += qty
         trip["entry_value_u"] += value
-        trip["qty_max"] = max(trip["qty_max"], trip["entry_qty"] - trip["exit_qty"])
     else:
         trip["exit_qty"] += qty
         trip["exit_value_u"] += value
 
 
+def _end(trip: dict[str, Any], fill: dict[str, Any]) -> None:
+    """The position is back at 0 at ``fill``: a trip closes; an unmatched one ends, unmatched."""
+    if trip["status"] == OPEN:
+        trip["status"] = CLOSED
+    trip["closed_ms"] = fill["exch_ts_ms"]
+    trip["close_day"] = fill["day"]
+
+
 def _finish(trip: dict[str, Any]) -> dict[str, Any]:
-    """Averages, gross and hold, from the exact sums."""
-    trip["entry_avg_u"] = money.avg_price_u(trip["entry_value_u"], trip["entry_qty"])
+    """Averages, gross and hold, from the exact sums. An unmatched trip's entry is not known:
+    its average is 0 (from the entries seen, when there were some), its gross and hold None."""
+    if trip["entry_qty"]:
+        trip["entry_avg_u"] = money.avg_price_u(trip["entry_value_u"], trip["entry_qty"])
+    else:
+        trip["entry_avg_u"] = 0
     if trip["exit_qty"]:
         trip["exit_avg_u"] = money.avg_price_u(trip["exit_value_u"], trip["exit_qty"])
     else:
         trip["exit_avg_u"] = None
-    if trip["status"] == "closed":
+    if trip["status"] == CLOSED:
         diff = trip["exit_value_u"] - trip["entry_value_u"]
         if trip["side"] == "short":
             diff = -diff
@@ -139,46 +233,75 @@ def _finish(trip: dict[str, Any]) -> dict[str, Any]:
     else:
         trip["gross_paise"] = None
         trip["hold_s"] = None
+    if trip["status"] == UNMATCHED:
+        trip["qty_max"] = max(trip["qty_max"], trip["exit_qty"])
     return trip
 
 
-def pair_fills(fills: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
-    """Round trips from fills, closed and open, ordered by (opened_ms, key).
+def _pair_key(group: list[dict[str, Any]], opening: int, cash: bool) -> list[dict[str, Any]]:
+    """The trips of one key's fills (in order), starting from ``opening`` held before them."""
+    out: list[dict[str, Any]] = []
+    q = max(opening, 0) if cash else opening
+    trip: dict[str, Any] | None = None
+    if q:
+        trip = _new_trip(group[0], "long" if q > 0 else "short", UNMATCHED)
+        trip["qty_max"] = abs(q)
+    for fill in group:
+        step = 1 if fill["action"] == "BUY" else -1
+        remaining = fill["qty"]
+        ended: dict[str, Any] | None = None
+        if trip is not None and q and (q > 0) != (step > 0):
+            exit_qty = min(remaining, abs(q))
+            _add_leg(trip, fill, "exit", exit_qty)
+            q += step * exit_qty
+            remaining -= exit_qty
+            if q == 0:
+                _end(trip, fill)
+                out.append(trip)
+                ended, trip = trip, None
+        if not remaining:
+            continue
+        if cash and step < 0:
+            # A delivery sale past what the journal saw bought: shares held before it.
+            if ended is not None and ended["status"] == UNMATCHED:
+                _add_leg(ended, fill, "exit", remaining)
+            else:
+                lone = _new_trip(fill, "long", UNMATCHED)
+                _add_leg(lone, fill, "exit", remaining)
+                _end(lone, fill)
+                out.append(lone)
+            continue
+        if trip is None:
+            trip = _new_trip(fill, "long" if step > 0 else "short")
+        _add_leg(trip, fill, "entry", remaining)
+        q += step * remaining
+        trip["qty_max"] = max(trip["qty_max"], abs(q))
+    if trip is not None:
+        out.append(trip)
+    return [_finish(t) for t in out]
 
-    Each trip is a dict with the key fields, ``side``, quantities, ``entry_avg_u``,
+
+def pair_fills(
+    fills: Iterable[Mapping[str, Any]],
+    openings: Mapping[tuple[str, str, str, str], int] | None = None,
+) -> list[dict[str, Any]]:
+    """Round trips from fills, closed, open and unmatched, ordered by (opened_ms, key).
+
+    ``openings`` maps a key (mode, exchange, symbol, product class) to the quantity held before
+    the first of its fills given here (see the module's words); a key it does not name starts at
+    0. Each trip is a dict with the key fields, ``side``, quantities, ``entry_avg_u``,
     ``exit_avg_u`` (None until a fill exits), the exact ``entry_value_u`` and ``exit_value_u``,
-    ``gross_paise`` and ``hold_s`` (None while open), ``status`` and its ``legs``.
+    ``gross_paise`` and ``hold_s`` (None unless closed), ``status`` and its ``legs``.
     """
+    known = openings or {}
     groups: dict[tuple[str, str, str, str], list[dict[str, Any]]] = {}
     for fill in _usable(fills):
         key = (fill["mode"], fill["exchange"], fill["symbol"], fill["pclass"])
         groups.setdefault(key, []).append(fill)
     trips: list[dict[str, Any]] = []
-    for group in groups.values():
+    for key, group in groups.items():
         group.sort(key=lambda f: (f["exch_ts_ms"], f["trade_id"]))
-        q = 0
-        trip: dict[str, Any] | None = None
-        for fill in group:
-            signed = fill["qty"] if fill["action"] == "BUY" else -fill["qty"]
-            remaining = fill["qty"]
-            if trip is not None and (q > 0) != (signed > 0):
-                exit_qty = min(remaining, abs(q))
-                _add_leg(trip, fill, "exit", exit_qty)
-                q += signed // abs(signed) * exit_qty
-                remaining -= exit_qty
-                if q == 0:
-                    trip["status"] = "closed"
-                    trip["closed_ms"] = fill["exch_ts_ms"]
-                    trip["close_day"] = fill["day"]
-                    trips.append(_finish(trip))
-                    trip = None
-            if remaining:
-                if trip is None:
-                    trip = _new_trip(fill, "long" if signed > 0 else "short")
-                _add_leg(trip, fill, "entry", remaining)
-                q += (1 if signed > 0 else -1) * remaining
-        if trip is not None:
-            trips.append(_finish(trip))
+        trips += _pair_key(group, int(known.get(key) or 0), cash_carry(key[1], key[3]))
     trips.sort(
         key=lambda t: (
             t["opened_ms"],

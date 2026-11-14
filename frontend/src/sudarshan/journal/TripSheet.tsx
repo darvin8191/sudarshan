@@ -8,6 +8,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   ArrowDown,
   ArrowUp,
+  CalendarX,
   ChartCandlestick,
   Check,
   FlaskConical,
@@ -81,6 +82,14 @@ export const ORPHAN_WORDS =
   'This trade’s fills changed after you wrote on it, so the journal paired them again. This is the record as it was, kept so your notes are not lost; the trade as it is now is in the list.'
 export const ORPHAN_FILLS =
   'This earlier record keeps no fills: they belong to the trade as it is now.'
+/**
+ * The two kinds of position the journal pairs no result for (the service's "unmatched" and
+ * "expired"): never a LONG or SHORT, never a live figure, never in the analytics or a report.
+ */
+export const UNMATCHED_WORDS =
+  'This position was opened before the journal started, so the price it was opened at is not known here. Upstox’s own report has it. It is not in your figures.'
+export const EXPIRED_WORDS =
+  'This contract ended at expiry. An expiry has no fill, so the journal cannot work out its result; Upstox’s own report has it. It is not in your figures.'
 
 function FillsTable({ fills, kept }: { fills: readonly Fill[] | undefined; kept: boolean }) {
   if (!fills || fills.length === 0) {
@@ -172,6 +181,15 @@ function Excursion({ trip, capture }: { trip: Trip; capture: string | null }) {
       )}
     </dl>
   )
+}
+
+/** What kind of record the sheet shows, under its title. */
+export function sheetDescription(status: Trip['status']): string {
+  if (status === 'open') return 'Open trade'
+  if (status === 'orphan') return 'Earlier record, kept for your notes'
+  if (status === 'unmatched') return 'Opened before the journal started'
+  if (status === 'expired') return 'Ended at expiry'
+  return 'Closed trade'
 }
 
 /** net / best point as a percentage, when there is a best point above zero. */
@@ -548,9 +566,13 @@ export function TripSheet({
       </div>
     )
   } else {
-    const closed = trip.status !== 'open'
     const kept = trip.status === 'orphan'
-    const stillOpen = kept ? '-' : 'Still open'
+    const unseen = trip.status === 'unmatched'
+    const expired = trip.status === 'expired'
+    const aside = unseen || expired
+    const closed = trip.status !== 'open' && !expired
+    const stillOpen = kept || unseen ? '-' : 'Still open'
+    const notKnown = unseen ? 'Not known' : 'Not worked out'
     const charges = trip.charges_actual_paise ?? trip.charges_est_paise
     const capture = captureOf(trip.net_paise, trip.mfe_paise, trip.excursion?.capture_pct)
     body = (
@@ -570,15 +592,39 @@ export function TripSheet({
             {ORPHAN_WORDS}
           </p>
         )}
+        {aside && (
+          <p
+            role="note"
+            data-testid="aside-note"
+            className="flex items-start gap-2 rounded-[0.875rem] border border-[color:var(--border-strong)] px-3 py-2 text-sm font-medium"
+          >
+            {unseen ? (
+              <History aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+            ) : (
+              <CalendarX aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+            )}
+            {unseen ? UNMATCHED_WORDS : EXPIRED_WORDS}
+          </p>
+        )}
         <Section title="Result">
           <dl className="flex flex-col gap-1.5">
             <Row label="Quantity">{closed ? trip.qty_max : openQty(trip)}</Row>
-            <Row label="Entry average">{priceText(trip.entry_avg_u)}</Row>
+            <Row label="Entry average">{unseen ? notKnown : priceText(trip.entry_avg_u)}</Row>
             <Row label="Exit average">
-              {trip.exit_avg_u === null ? stillOpen : priceText(trip.exit_avg_u)}
+              {expired
+                ? 'Ended at expiry'
+                : trip.exit_avg_u === null
+                  ? stillOpen
+                  : priceText(trip.exit_avg_u)}
             </Row>
             <Row label="Gross">
-              {trip.gross_paise === null ? '-' : <Signed paise={trip.gross_paise} />}
+              {aside ? (
+                notKnown
+              ) : trip.gross_paise === null ? (
+                '-'
+              ) : (
+                <Signed paise={trip.gross_paise} />
+              )}
             </Row>
             <Row label="Charges">
               {charges === null ? (
@@ -593,7 +639,9 @@ export function TripSheet({
               )}
             </Row>
             <Row label="Net">
-              {trip.net_paise === null ? (
+              {aside ? (
+                notKnown
+              ) : trip.net_paise === null ? (
                 '-'
               ) : (
                 <span className="inline-flex items-baseline gap-1.5">
@@ -607,7 +655,7 @@ export function TripSheet({
               )}
             </Row>
             <Row label="Held">
-              {trip.hold_s === null ? stillOpen : holdWords(trip.hold_s * 1000)}
+              {aside ? '-' : trip.hold_s === null ? stillOpen : holdWords(trip.hold_s * 1000)}
             </Row>
             {trip.latency_ms !== null && trip.latency_ms !== undefined && (
               <Row label="First entry order">answered in {trip.latency_ms} ms</Row>
@@ -617,9 +665,11 @@ export function TripSheet({
         <Section title="Fills">
           <FillsTable fills={trip.fills} kept={kept} />
         </Section>
-        <Section title="How far it went">
-          <Excursion trip={trip} capture={capture} />
-        </Section>
+        {!aside && (
+          <Section title="How far it went">
+            <Excursion trip={trip} capture={capture} />
+          </Section>
+        )}
         <Editor
           key={`${trip.id}:${trip.version}`}
           trip={trip}
@@ -648,18 +698,10 @@ export function TripSheet({
       title={
         <span className="inline-flex items-center gap-2">
           {trip ? trip.symbol : 'Trade'}
-          {trip && <SideChip side={trip.side} />}
+          {trip && trip.status !== 'unmatched' && <SideChip side={trip.side} />}
         </span>
       }
-      description={
-        trip
-          ? trip.status === 'open'
-            ? 'Open trade'
-            : trip.status === 'orphan'
-              ? 'Earlier record, kept for your notes'
-              : 'Closed trade'
-          : undefined
-      }
+      description={trip ? sheetDescription(trip.status) : undefined}
     >
       {body}
     </BottomSheet>

@@ -45,18 +45,21 @@ import { renderBook } from '@/test/bookPages'
 import { fakeClock, frames } from '@/test/frames'
 import { feed } from '@/test/marketDataHarness'
 import { closedTrip, trip } from './fixtures'
-import { EMPTY_WORDS, NO_TOKEN_WORDS, TripsList } from './TripsList'
+import { ASIDE_WORDS, EMPTY_WORDS, NO_TOKEN_WORDS, TripsList } from './TripsList'
 import type { Tag, Trip } from './types'
 
 const TAGS: Tag[] = [
   { id: 1, kind: 'mistake', name: 'Chased entry', colour: 'gold', archived: false, version: 1 },
 ]
 
-function serve(open: Trip[], closed: Array<Trip & { mistakes?: number[] }>) {
+function serve(open: Trip[], closed: Array<Trip & { mistakes?: number[] }>, aside: Trip[] = []) {
   api.data.mockImplementation(async (op: string, args?: { status?: string }) => {
     if (op === 'tags_list') return TAGS
-    if (op === 'trips') return args?.status === 'open' ? open : closed
-    throw new Error(`unexpected op ${op}`)
+    if (op !== 'trips') throw new Error(`unexpected op ${op}`)
+    if (args?.status === 'open') return open
+    if (args?.status === 'unmatched' || args?.status === 'expired')
+      return aside.filter((t) => t.status === args.status)
+    return closed
   })
 }
 
@@ -99,6 +102,56 @@ describe('TripsList', () => {
     expect(within(open[1]).getByText('40 qty at 104.00')).toBeTruthy()
     const order = screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)
     expect(order).toEqual(['Open', 'Closed'])
+  })
+
+  it('lists positions not in the figures apart, in words, never as LONG or SHORT for one not seen opened, with no figure and no price', async () => {
+    serve(
+      [trip({ id: 1, symbol: 'SBIN' })],
+      [closedTrip({ id: 3, net_paise: 81250, close_day: 20261112 })],
+      [
+        trip({
+          id: 7,
+          symbol: 'ACME',
+          product: 'CNC',
+          product_class: 'carry',
+          status: 'unmatched',
+          side: 'long',
+          qty_max: 10,
+          entry_qty: 0,
+          entry_avg_u: 0,
+          exit_qty: 10,
+          exit_avg_u: 13_000_000,
+          open_day: 20261110,
+          close_day: 20261110,
+          closed_ms: Date.UTC(2026, 10, 10, 5, 0),
+        }),
+        trip({
+          id: 8,
+          symbol: 'NIFTY18NOV2625000CE',
+          status: 'expired',
+          side: 'long',
+          close_day: 20261118,
+        }),
+      ]
+    )
+    show()
+    const aside = await screen.findAllByTestId('aside-trip')
+    expect(aside).toHaveLength(2)
+    expect(screen.getByText(ASIDE_WORDS)).toBeTruthy()
+    const [expired, unseen] = aside // newest first: 18 Nov, then 10 Nov
+    expect(within(unseen).getByText('Opened before the journal')).toBeTruthy()
+    expect(within(unseen).queryByText('LONG')).toBeNull()
+    expect(within(unseen).queryByText(/₹/)).toBeNull()
+    expect(within(unseen).getByText(/Sold 10 qty/)).toBeTruthy()
+    expect(within(expired).getByText('Ended at expiry')).toBeTruthy()
+    expect(within(expired).getByText('LONG')).toBeTruthy()
+    expect(within(expired).queryByTestId('live-pnl')).toBeNull()
+    const order = screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)
+    expect(order).toEqual(['Open', 'Not in the figures', 'Closed'])
+    // Never priced: the live feed is asked about the open trade only.
+    act(() => feed.push('NIFTY18NOV2625000CE', 'NFO', { ltp: 50 }))
+    flush()
+    expect(within(expired).queryByText(/Profit|Loss/)).toBeNull()
   })
 
   it('moves an open trade’s P&L with every tick, signed, with its arrow and its word', async () => {
@@ -267,7 +320,8 @@ describe('TripsList', () => {
     )
     api.data.mockImplementation(async (op: string, args: { status?: string; before?: number }) => {
       if (op === 'tags_list') return TAGS
-      if (args.status === 'open') return []
+      if (args.status === 'open' || args.status === 'unmatched' || args.status === 'expired')
+        return []
       if (args.before !== undefined)
         return [
           closedTrip({ id: 7, net_paise: -100, close_day: 20261110, closed_ms: 10 }),
@@ -301,7 +355,8 @@ describe('TripsList', () => {
     api.data.mockImplementation(
       async (op: string, args: { status?: string; before?: number; limit?: number }) => {
         if (op === 'tags_list') return TAGS
-        if (args.status === 'open') return []
+        if (args.status === 'open' || args.status === 'unmatched' || args.status === 'expired')
+          return []
         const before = args.before
         const rows = before === undefined ? all : all.filter((t) => (t.closed_ms ?? 0) < before)
         return rows.slice(0, args.limit ?? 100)

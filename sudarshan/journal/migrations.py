@@ -326,8 +326,36 @@ def _v1(conn: Connection) -> None:
         conn.exec_driver_sql(sql)
 
 
+#: Step 2 (review B1): what the account held of an instrument before the journal's first fill of
+#: it, read once from Upstox's overnight positions (derivatives) or holdings (shares) at first
+#: sight. ``qty`` is signed (a short is negative) and describes the position at the start of
+#: ``day``, the IST day of the read. A trip's two new states (``unmatched``, ``expired``) need no
+#: change: ``round_trip.status`` is plain text with no CHECK.
+V2 = (
+    """CREATE TABLE IF NOT EXISTS key_opening (
+        principal TEXT NOT NULL,
+        mode TEXT NOT NULL,
+        exchange TEXT NOT NULL,
+        symbol TEXT NOT NULL,
+        product_class TEXT NOT NULL,
+        qty INTEGER NOT NULL,
+        day INTEGER NOT NULL,
+        source TEXT NOT NULL,
+        read_ms INTEGER NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY (principal, mode, exchange, symbol, product_class)
+    )""",
+)
+
+
+def _v2(conn: Connection) -> None:
+    for sql in V2:
+        conn.exec_driver_sql(sql)
+
+
 Step = tuple[int, Callable[[Connection], None]]
-STEPS: tuple[Step, ...] = ((1, _v1),)
+STEPS: tuple[Step, ...] = ((1, _v1), (2, _v2))
 LATEST = STEPS[-1][0]
 
 

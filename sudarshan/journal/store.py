@@ -46,6 +46,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from database.engine_factory import create_db_engine
 from sudarshan.alerts.owner import database_urls
 from sudarshan.journal import migrations
+from sudarshan.journal.core import kinds as core_kinds
 
 log = logging.getLogger("sudarshan.journal")
 
@@ -420,19 +421,38 @@ class Tx:
         return counts
 
     def fills_of(self, mode: str, *, day: int | None = None, since_ms: int | None = None,
-                 key: tuple[str, str] | None = None) -> list[dict[str, Any]]:  # fmt: skip
-        """Fills of a mode, oldest first: of one day, from an instant on, and of one instrument
-        (exchange, symbol) when asked."""
+                 key: tuple[str, str] | None = None,
+                 before_ms: int | None = None) -> list[dict[str, Any]]:  # fmt: skip
+        """Fills of a mode, oldest first: of one day, from an instant on, before an instant, and
+        of one instrument (exchange, symbol) when asked."""
         t = self._t("fill")
         query = select(t).where(self._mine(t), t.c.mode == mode)
         if day is not None:
             query = query.where(t.c.day == day)
         if since_ms is not None:
             query = query.where(t.c.exch_ts_ms >= since_ms)
+        if before_ms is not None:
+            query = query.where(t.c.exch_ts_ms < before_ms)
         if key is not None:
             query = query.where(t.c.exchange == key[0], t.c.symbol == key[1])
         found = self.conn.execute(query.order_by(t.c.exch_ts_ms, t.c.trade_id)).mappings()
         return [self.out(row) for row in found]
+
+    def fill_before(self, mode: str, exchange: str, symbol: str, product_class: str,
+                    before_ms: int) -> bool:  # fmt: skip
+        """Whether the journal holds a fill of the instrument in that product class before an
+        instant (withdrawn ones aside): a window that starts later is not the key's first."""
+        t = self._t("fill")
+        products = kinds_products(product_class)
+        row = self.conn.execute(
+            select(t.c.id)
+            .where(
+                self._mine(t), t.c.mode == mode, t.c.exchange == exchange, t.c.symbol == symbol,
+                t.c.exch_ts_ms < before_ms, t.c.source != "withdrawn", t.c.product.in_(products),
+            )
+            .limit(1)
+        ).first()  # fmt: skip
+        return row is not None
 
     def fills_withdraw(self, mode: str, day: int, listed: Iterable[str], now: int) -> int:
         """Mark the day's fills of ``mode`` that Upstox's whole list for the day no longer holds
@@ -511,8 +531,9 @@ class Tx:
     def trips_of_key(
         self, mode: str, exchange: str, symbol: str, product_class: str, from_ms: int
     ) -> list[dict[str, Any]]:
-        """The trips of one instrument and product class that reach ``from_ms`` or later: open,
-        orphaned, opened on or after it, or closed on or after it."""
+        """The trips of one instrument and product class that reach ``from_ms`` or later: not
+        ended (open, expired, an unmatched one still holding), orphaned, opened on or after it,
+        or ended on or after it."""
         t = self._t("round_trip")
         query = select(t).where(
             self._mine(t),
@@ -520,9 +541,76 @@ class Tx:
             t.c.exchange == exchange,
             t.c.symbol == symbol,
             t.c.product_class == product_class,
-            (t.c.status != "closed") | (t.c.opened_ms >= from_ms) | (t.c.closed_ms >= from_ms),
+            t.c.closed_ms.is_(None)
+            | (t.c.status == "orphan")
+            | (t.c.opened_ms >= from_ms)
+            | (t.c.closed_ms >= from_ms),
         )
         return [self.out(r) for r in self.conn.execute(query.order_by(t.c.opened_ms)).mappings()]
+
+    def left_out(self, mode: str, start_day: int, end_day: int) -> dict[str, int]:
+        """What a period's figures leave out (review B1): ``unmatched``, the positions the
+        journal did not see opened that have a fill in the period; ``expired``, the contracts
+        that ended at expiry in it (an expired trip's ``close_day`` is its expiry day)."""
+        t, legs, fills = self._t("round_trip"), self._t("fill_leg"), self._t("fill")
+        joined = t.join(legs, legs.c.round_trip_id == t.c.id).join(
+            fills, fills.c.id == legs.c.fill_id
+        )
+        unmatched = self.conn.execute(
+            select(func.count(func.distinct(t.c.id)))
+            .select_from(joined)
+            .where(
+                self._mine(t),
+                legs.c.principal == self.who,
+                fills.c.principal == self.who,
+                t.c.mode == mode,
+                t.c.status == "unmatched",
+                fills.c.day >= start_day,
+                fills.c.day <= end_day,
+            )
+        ).scalar()
+        expired = self.conn.execute(
+            select(func.count())
+            .select_from(t)
+            .where(
+                self._mine(t),
+                t.c.mode == mode,
+                t.c.status == "expired",
+                t.c.close_day >= start_day,
+                t.c.close_day <= end_day,
+            )
+        ).scalar()
+        return {"unmatched": int(unmatched or 0), "expired": int(expired or 0)}
+
+    # ---- what was held before the journal's first fill of an instrument (review B1) ----
+    def openings_of(self, mode: str) -> dict[tuple[str, str, str], dict[str, Any]]:
+        """The kept openings of a mode by (exchange, symbol, product class)."""
+        t = self._t("key_opening")
+        found = self.conn.execute(select(t).where(self._mine(t), t.c.mode == mode)).mappings()
+        return {(r["exchange"], r["symbol"], r["product_class"]): self.out(r) for r in found}
+
+    def opening_put(self, mode: str, key: tuple[str, str, str], qty: int, day: int, source: str,
+                    read_ms: int, now: int) -> bool:  # fmt: skip
+        """Keep the opening of a key read at first sight; one already kept is never replaced
+        (the first read is the one that saw the account before the journal). True if kept."""
+        t = self._t("key_opening")
+        exchange, symbol, pclass = key
+        have = self.conn.execute(
+            select(t.c.qty).where(
+                self._mine(t), t.c.mode == mode, t.c.exchange == exchange, t.c.symbol == symbol,
+                t.c.product_class == pclass,
+            )
+        ).first()  # fmt: skip
+        if have is not None:
+            return False
+        self.conn.execute(
+            insert(t).values(
+                principal=self.who, mode=mode, exchange=exchange, symbol=symbol,
+                product_class=pclass, qty=int(qty), day=int(day), source=source,
+                read_ms=int(read_ms), created_at=now, updated_at=now,
+            )
+        )  # fmt: skip
+        return True
 
     def trip_insert(self, values: Mapping[str, Any], now: int) -> int:
         """A new trip the pairing made; returns its id."""
@@ -854,6 +942,13 @@ class JournalStore:
         """Rows of the main tables (the health page and the tests)."""
         names = ("fill", "round_trip", "tag", "playbook", "report")
         return self.read(scope, lambda tx: {n: tx.count(n) for n in names})
+
+
+def kinds_products(product_class: str) -> tuple[str, ...]:
+    """The products a fill of a product class is written with (the pairing's classes)."""
+    if product_class == "intraday":
+        return core_kinds.INTRADAY_PRODUCTS
+    return core_kinds.CARRY_PRODUCTS
 
 
 def tables_of(conn: Connection) -> Iterator[str]:

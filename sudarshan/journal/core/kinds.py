@@ -87,7 +87,11 @@ OUTSIDE_ORDER_WAIT_S = 60
 MODES = ("live", "sandbox")
 ACTIONS = ("BUY", "SELL")
 SIDES = ("long", "short")
-TRIP_STATUSES = ("open", "closed", "orphan")
+#: ``unmatched``: a position the journal did not see opened (held before its first fill of the
+#: instrument), so its entry and its result are not known here; ``expired``: an open contract
+#: whose own expiry day has passed with no closing fill (an expiry has none). Neither is shown as
+#: a position, priced live, claimed at the feed or counted in a figure (review B1).
+TRIP_STATUSES = ("open", "closed", "orphan", "unmatched", "expired")
 LEG_ROLES = ("entry", "exit")
 #: MIS and I are intraday; NRML, CNC and D are one carry class (Upstox maps D to CNC).
 PRODUCT_CLASSES = ("intraday", "carry")

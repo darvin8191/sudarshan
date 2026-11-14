@@ -3,7 +3,9 @@ announced (JB9, M15.3 to M15.5; design 3.5 and 3.6, cross-design Y8, Y22, Y32, Y
 
 * **Words** are ``core/words.py``'s (``weekly``, ``monthly``, ``fy``), every figure from ``core/``:
   the metrics of the period's closed live trips, the equity curve and its deepest drawdown on the
-  trading capital, the week against NIFTY 50 and beta through the portfolio.
+  trading capital, the week against NIFTY 50 and beta through the portfolio. One line says what
+  the figures leave out when the period has any (review B1): positions the journal did not see
+  opened with a fill in the period, and contracts that ended at expiry in it.
 * **The file** is the renderer's (JB8) and one per report, as the archive keeps one: the week's is
   the equity-curve PNG (Telegram shows it as a photo), the month's and the year's a PDF. The
   month's trades as CSV (stdlib ``csv``, Y32) are kept in the row's own ``rows`` and answered by
@@ -184,7 +186,8 @@ def _read(span: Span, fy_start: int | None):
         first = tx.min_of("round_trip", "close_day", mode="live", status="closed")
         charges = (tx.rows("upstox_charges", order="segment", financial_year=fy_start)
                    if fy_start is not None else [])  # fmt: skip
-        return trips, beta_trips, notes, tags, books, first, tx.settings(), charges
+        aside = tx.left_out("live", span.start, span.end)
+        return trips, beta_trips, notes, tags, books, first, tx.settings(), charges, aside
 
     return read
 
@@ -293,7 +296,7 @@ async def build_period(service: Any, kind: str, span: Span, now: int, announce: 
     from .ops.analytics_ops import beta_of, for_core, trading_days
 
     read = _read(span, 2000 + int(span.key[2:4]) if kind == "fy" else None)
-    trips, beta_trips, notes, tags, books, first, settings, charges = await _thread(
+    trips, beta_trips, notes, tags, books, first, settings, charges, aside = await _thread(
         lambda: service.store.read(OWNER, read)
     )
     rows = [for_core(t, tags, books, notes.get(t["id"])) for t in trips]
@@ -304,6 +307,7 @@ async def build_period(service: Any, kind: str, span: Span, now: int, announce: 
     curve = equity.equity_curve(rows, days, capital)
     extra = _words_inputs(span, rows, days)
     extra["drawdown"] = curve["drawdown"]
+    extra["left_out"] = aside
     if kind == "weekly":
         extra["benchmark"] = await _index_week(service, plan, span, block["net_paise"], capital)
         beta_rows = [for_core(t, tags, books, None) for t in beta_trips]
@@ -323,7 +327,8 @@ async def build_period(service: Any, kind: str, span: Span, now: int, announce: 
     summary = {"start": span.start, "end": span.end, "trading_days": len(days),
                "trades": block["trips"], "wins": block["wins"], "losses": block["losses"],
                "flats": block["flats"], "net_paise": block["net_paise"],
-               "charges_paise": block["charges_paise"], "partial": span.partial}  # fmt: skip
+               "charges_paise": block["charges_paise"], "partial": span.partial,
+               "left_out": aside}  # fmt: skip
     if kind == "monthly":
         summary["csv"] = tables.trades_csv(rows)
     report_id, new = await archive(service, kind, span.key, text, summary, now, announce=False)
