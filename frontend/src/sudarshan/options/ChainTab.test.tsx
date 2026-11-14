@@ -128,13 +128,20 @@ describe('the Chain tab', () => {
     expect(onOpen).toHaveBeenLastCalledWith(25_900, 'ce')
   })
 
-  it('shows the direction of a leg’s last tick as an arrow beside its price, never a flash', () => {
+  it('keeps one meaning for an arrow: the premium carries none, the day’s change carries its own (review L2)', () => {
     const model = modelOf()
     const key = model.rows.find((each) => each.strike === 25_900)?.ce?.key ?? ''
+    // The last tick was down; whatever the day's change says, the premium shows no arrow of its own.
     show(model, { directions: new Map([[key, 'down']]) })
     const price = row(25_900).querySelector('[data-leg="CE"] [data-tick]') as HTMLElement
     expect(price).toHaveAttribute('data-tick', 'down')
-    expect(price.querySelector('[data-direction="down"]')).not.toBeNull()
+    expect(price.querySelector('[data-direction]')).toBeNull()
+    expect(price.className).toContain('--text-primary')
+    expect(price.className).not.toMatch(/--(up|down)\)/)
+    // Every arrow left in the cell sits in the line that states the change it stands for.
+    const cell = row(25_900).querySelector('[data-leg="CE"]') as HTMLElement
+    for (const arrow of cell.querySelectorAll('[data-direction]'))
+      expect(arrow.parentElement?.textContent ?? '').toMatch(/[+\u2212-]/)
     expect(document.querySelector('[class*="animate-"]')).toBeNull()
   })
 
