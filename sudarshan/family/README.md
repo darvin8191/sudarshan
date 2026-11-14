@@ -29,7 +29,7 @@ the deploy, the owner   -> GET  127.0.0.1:5585/health                 (counts an
 | unit | `sudarshan-family.service` (`ops/systemd/`), started only once `/etc/sudarshan-family/provisioned` exists |
 | account | `sudarshan-family`: no login shell, no home, not in the group `sudarshan` |
 | port | 5585 on 127.0.0.1, one listener for everything above (no second port, never another port) |
-| switch | `SUDARSHAN_FAMILY` in `/etc/sudarshan-family/family.env`, off by default |
+| switch | `SUDARSHAN_FAMILY` in `/etc/sudarshan-family/family.env`, off by default ("Switching the family view on", below) |
 | contract | `contract.py`; its twin on the phone `frontend/src/sudarshan/family/types.ts` (`python -m sudarshan.family.gentypes`) |
 | privacy table | `privacy_fields.json`: what each of the four categories hides (one table for every reader) |
 
@@ -44,7 +44,7 @@ the deploy, the owner   -> GET  127.0.0.1:5585/health                 (counts an
 | `telegram_bot_token` | the family bot's token (one line, as BotFather shows it): read again when the file changes | the owner, once (Channels, below); the deploy never writes it |
 | `feed-token` | this service's token for the price feed's write calls | provision |
 | `nse_holidays.txt`, `nse_extra_trading_days.txt` | copies of the exchange's day files | provision, when they change |
-| `family.env` | the settings, read as the unit's environment | the owner |
+| `family.env` | the settings, read as the unit's environment | the deploy makes it from `ops/deploy/family-env.conf` (the switch, off); every value in it is the owner's from then on |
 | `provisioned` | written only after `python -m sudarshan.family.check` passed as this account | provision |
 | `/var/lib/sudarshan-family/family.db` | the store (folder 700, file 600) | this service only |
 | `/var/lib/sudarshan-family-export/` | sudarshan-family:sudarshan 2750: what the ring may read | this service |
@@ -53,6 +53,73 @@ the deploy, the owner   -> GET  127.0.0.1:5585/health                 (counts an
 
 The one-time set-up that makes the account, the folders and the firewall allow-list is
 `ops/family/bootstrap.sh`; `sudarshan/README.md` says how the owner runs it.
+
+## Switching the family view on (the owner's steps, in order)
+
+The release installs with the view switched off: no family member can see anything until every
+step below is done. Do them outside market hours the first time. Each step says what you should
+see; stop at the first one that does not.
+
+1. **The release is installed.** The Family page in your own menu opens and says the family view
+   is not set up (or is switched off). Nothing else is needed for the install itself.
+2. **The one-time family set-up**, if this server has not had it: "Running the set-up" in
+   `sudarshan/README.md` (one pasted line, as root). You should see `PASS.` at the end. Within ten
+   minutes the deploy tool's next run makes `/etc/sudarshan-family/family.env` (root:
+   sudarshan-family, mode 640) holding `SUDARSHAN_FAMILY='off'`, from the list this release ships
+   (`sudarshan/ops/deploy/family-env.conf`), and starts the service, which answers "switched off".
+3. **The nginx lines**: "Installing the nginx lines" below, steps 1 to 7. You should see
+   `nginx: PASS. The family view's nginx lines are installed, loaded and this release's.`
+4. **The family bot's token** (optional; the view works without it): "The family bot" below,
+   "The owner's steps, once".
+5. **The switch.** Paste this line in the SSH session. It sets `SUDARSHAN_FAMILY=on` in the family
+   view's own settings file and in the alerts' (`/etc/sudarshan/alerts.env`, so a fill on your side
+   reaches a family screen at once), keeps both files closed to other accounts, and restarts those
+   two services and nothing else:
+
+   ```sh
+   sudo bash -c 'set -e; f=/etc/sudarshan-family/family.env; a=/etc/sudarshan/alerts.env; test -f "$f" || { echo "There is no $f yet: do step 2, wait ten minutes for the next deploy run, then run this again. Nothing was changed."; exit 1; }; test -e "$a" || install -m 640 -o root -g sudarshan /dev/null "$a"; for x in "$f" "$a"; do sed -i "/^[[:space:]]*SUDARSHAN_FAMILY[[:space:]]*=/d" "$x"; echo "SUDARSHAN_FAMILY=on" >> "$x"; done; chown root:sudarshan-family "$f"; chmod 640 "$f"; systemctl restart sudarshan-family sudarshan-alerts; echo "The family view is switched on."'
+   ```
+
+   You should see `The family view is switched on.` A later release never moves the switch back:
+   a value you chose in either file stays.
+6. **The Family page** now shows the service on and its check passed. Add a member, choose what
+   their privacy hides, share the Upstox tab with them in Portfolio (and any watchlists on the
+   Family page), and send the invite link yourself: it works once, for two hours.
+7. **First-day checks.** A test member on your own phone joins and sees only what you shared; the
+   server's address without `/family` shows the refusal page on that phone; a fill appears on the
+   family positions within a few seconds; a list you stop sharing leaves the member's screen; and
+   the deploy log has no line starting `WARNING: family`.
+
+To switch it off again, run the line of step 5 with `SUDARSHAN_FAMILY=off` in place of
+`SUDARSHAN_FAMILY=on` (it appears once in the line): every family screen then reads that the view
+is switched off, and members, shares and privacy are kept as they are.
+
+### What decides what a member sees
+
+| what | where you set it | enforced by |
+|---|---|---|
+| positions and holdings | the Upstox tab's share, in Portfolio (view or restricted, with an optional end) | the portfolio service |
+| orders and trades | that share, and the member's Orders switch | the portfolio service, and again here |
+| funds | that share, and the member's Funds switch | the portfolio service, and again here |
+| figures inside them (P&L, quantities) | the member's P&L and Quantities switches | the portfolio service, and again here |
+| watchlists | the list's share, on the Family page | OpenAlgo's own note of shared lists |
+| your other portfolio tabs | each tab's share, in Portfolio | the portfolio service |
+
+- There is no separate share for a single book: a "book share" decided nothing, so the service
+  refuses one ("Which books a member can open is set by sharing the Upstox tab in Portfolio, and
+  by that member's Orders and Funds switches.") and the Family page no longer offers it.
+- A share you remove, let expire or make restricted stops showing within a minute, at any hour:
+  the family service asks the portfolio what each member is shared before it serves a figure it
+  kept, once a minute at most, and drops what it kept when that changed.
+- P&L hidden puts the overall P&L out of reach, with every rupee figure and cost price. What
+  it cannot hide beside a quantity: "With quantities shown, a member can still work out a day's
+  change and a holding's value from the quantity and the price. Hide quantities to hide those
+  too." (the privacy table's `pnl_hidden_note`, for the Family page to show under the switch).
+- Signing in and joining are limited for everyone together (12 a minute) as well as for each
+  connection (5 a minute), so that nobody can make the server do password work without end. The
+  price: three connections trying 4 times a minute each can keep sign-in and join answering "Too
+  many tries" for as long as they keep at it. A member already signed in is not affected (a
+  session lasts 30 days), and nginx's error log names the addresses.
 
 ## For the pages
 
