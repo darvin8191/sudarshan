@@ -12,7 +12,15 @@ import { describe, expect, it } from 'vitest'
  * `var(--profit)` and `var(--loss)` are upstream's HSL channel triplets, not
  * colours: written as a colour the browser drops the declaration silently.
  */
-const PAGES = ['OptionChain', 'IVChart']
+const PAGES = [
+  'OptionChain',
+  'IVChart',
+  'CustomStraddle',
+  'GEXDashboard',
+  'GammaDensity',
+  'Arbitrage',
+  'IVSmile',
+]
 
 const RAW =
   /\b(?:text|bg|border|from|to|via|fill|stroke|ring|divide|outline|decoration)-(?:red|green|emerald|rose|lime)-\d{2,3}\b/g
