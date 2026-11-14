@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import {
+  CHART_STYLES,
   chartPath,
   DEFAULT_INSTRUMENT,
   DEFAULT_INTERVAL,
   DEFAULT_PINNED,
+  DEFAULT_STYLE,
   intervalLabel,
   intervalName,
   isCalendarInterval,
@@ -13,9 +15,11 @@ import {
   readInterval,
   readLastInstrument,
   readPinned,
+  readStyle,
   saveInterval,
   saveLastInstrument,
   savePinned,
+  saveStyle,
   togglePin,
 } from './prefs'
 
@@ -123,6 +127,32 @@ describe('the pinned timeframes', () => {
       refused: 'full',
     })
     expect(togglePin(['5m'], '5m')).toEqual({ pinned: ['5m'], refused: 'last' })
+  })
+})
+
+describe('the chart style', () => {
+  it('offers five, candles first, Heikin Ashi through the engine transform', () => {
+    expect(CHART_STYLES.map((style) => style.label)).toEqual([
+      'Candles',
+      'Hollow candles',
+      'Bars',
+      'Line',
+      'Heikin Ashi',
+    ])
+    expect(CHART_STYLES.find((style) => style.value === 'heikin-ashi')).toMatchObject({
+      series: 'candlestick',
+      transform: 'heikin-ashi',
+    })
+  })
+
+  it('is one choice for every instrument on this phone, read defensively', () => {
+    expect(readStyle()).toBe(DEFAULT_STYLE)
+    saveStyle('heikin-ashi')
+    expect(readStyle()).toBe('heikin-ashi')
+    localStorage.setItem('sudarshan-chart-style', 'renko')
+    expect(readStyle()).toBe(DEFAULT_STYLE)
+    expect(readStyle(refusing)).toBe(DEFAULT_STYLE)
+    expect(() => saveStyle('line', refusing)).not.toThrow()
   })
 })
 

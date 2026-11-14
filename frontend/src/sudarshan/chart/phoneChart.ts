@@ -56,7 +56,7 @@ import { applySessionHours, sessionCalendarFor } from '@/lib/trading/sessionHour
 import { volumePoint } from '@/lib/trading/volumeSettings'
 import type { AppMode } from '@/stores/themeStore'
 import { CHART_BRANDING } from '@/sudarshan/brand'
-import { intervalLabel } from './prefs'
+import { type ChartStyle, DEFAULT_STYLE, intervalLabel, styleOf } from './prefs'
 
 /** How often the quote fallback asks while the stream is down: the same as /trading's. */
 export const QUOTE_FALLBACK_MS = 4000
@@ -116,6 +116,8 @@ export interface PhoneChartOptions {
   apiKey: string
   wsUrl: string
   appMode: AppMode
+  /** Candles unless the phone chose another style (C2). */
+  style?: ChartStyle
   callbacks: PhoneChartCallbacks
 }
 
@@ -124,6 +126,9 @@ export class PhoneChart {
   private readonly cb: PhoneChartCallbacks
   private readonly container: HTMLElement
   private appMode: AppMode
+  private style: ChartStyle
+  /** The transform tier is loaded: Heikin Ashi can be drawn. */
+  private transformReady = false
   private chart: Chart
   private price: SeriesApi
   private volume: SeriesApi | null = null
@@ -175,6 +180,7 @@ export class PhoneChart {
     this.cb = opts.callbacks
     this.container = opts.container
     this.appMode = opts.appMode
+    this.style = opts.style ?? DEFAULT_STYLE
     ;({ chart: this.chart, price: this.price, volume: this.volume } = this.buildChart(''))
 
     const rest = new OpenAlgoDataFeed({ baseUrl: '', apiKey: this.apiKey })
@@ -247,6 +253,9 @@ export class PhoneChart {
   async load(symbol: string, exchange: string, chip: string): Promise<void> {
     if (this.destroyed) return
     const ticket = ++this.ticket
+    // A saved Heikin Ashi needs its tier before the first build (C2).
+    if (styleOf(this.style).transform) await this.loadTransformTier()
+    if (ticket !== this.ticket || this.destroyed) return
     const same = this.sym?.symbol === symbol && this.sym.exchange === exchange
     this.stopLive()
     if (!same) {
@@ -308,8 +317,35 @@ export class PhoneChart {
   setAppMode(mode: AppMode): void {
     if (mode === this.appMode || this.destroyed) return
     this.appMode = mode
+    this.rebuild()
+  }
+
+  /**
+   * Draw in another style (C2), keeping the candles and the view. Heikin Ashi
+   * loads the engine's transform tier the first time it is chosen.
+   */
+  async setStyle(style: ChartStyle): Promise<void> {
+    if (style === this.style || this.destroyed) return
+    this.style = style
+    if (styleOf(style).transform) await this.loadTransformTier()
+    if (this.destroyed || this.style !== style) return
+    this.rebuild()
+  }
+
+  private async loadTransformTier(): Promise<void> {
+    if (this.transformReady) return
+    try {
+      await import('openalgo-charts/transform')
+      this.transformReady = true
+    } catch {
+      /* drawn as candles until the next choice or load asks again */
+    }
+  }
+
+  /** The chart built anew for a mode or a style, as /trading does, keeping the bars and the view. */
+  private rebuild(): void {
     const sym = this.sym
-    if (!sym) return
+    if (!sym || this.destroyed) return
     const range = this.bars.length ? this.chart.getVisibleLogicalRange() : null
     this.chart.destroy()
     ;({ chart: this.chart, price: this.price, volume: this.volume } = this.buildChart(sym.exchange))
@@ -346,12 +382,23 @@ export class PhoneChart {
     this.chart.destroy()
   }
 
-  /** The chart the page's long-press reads from: bar under an x, price under a y. */
+  /**
+   * The candle the page's long-press reads under an x: the one drawn, so on
+   * Heikin Ashi its own open, high, low and close (one element a bar).
+   */
   barAt(x: number): Bar | null {
-    if (!this.bars.length) return null
+    const drawn = this.drawnBars()
+    if (!drawn.length) return null
     const index = Math.round(this.chart.timeScale.xToIndex(x))
-    if (index < 0 || index >= this.bars.length) return null
-    return this.bars[index]
+    if (index < 0 || index >= drawn.length) return null
+    const bar = drawn[index]
+    // The volume traded under it, which a transform does not carry.
+    return bar.volume === undefined ? { ...bar, volume: this.bars[index]?.volume } : bar
+  }
+
+  /** What is drawn: the bars, or the elements a transform formed from them. */
+  private drawnBars(): readonly Bar[] {
+    return this.chart.seriesTransform(this.price) ? this.chart.primaryBars() : this.bars
   }
 
   /** The x, in the chart's own pixels, of the bar a long-press is on. */
@@ -492,7 +539,10 @@ export class PhoneChart {
       ...chartMotionOptions(),
       branding: CHART_BRANDING,
     })
-    const price = chart.addSeries('candlestick')
+    // Heikin Ashi waits for its tier; meanwhile, and should the tier not load, candles.
+    const style = styleOf(this.style)
+    const transform = style.transform && this.transformReady ? { type: style.transform } : null
+    const price = chart.addSeries(style.series, transform ? { transform } : undefined)
     let volume: SeriesApi | null = null
     if (exchange && !isQuoteOnly(exchange)) {
       volume = chart.addSeries('histogram', {

@@ -7,6 +7,7 @@
  * A timeframe is the broker's own name for it, as `/api/v1/intervals` lists
  * them: 1m, 15m, 1h, D, W, M. Its chip reads 1D, 1W and 1M for the last three.
  */
+import type { SeriesType } from 'openalgo-charts'
 import { intervalSeconds } from '@/lib/trading/intervals'
 
 /** What is pinned on a phone that has pinned nothing yet, short to long. */
@@ -20,8 +21,52 @@ export const DEFAULT_INTERVAL = '5m'
 /** What a bare /chart opens when nothing was opened on this device before. */
 export const DEFAULT_INSTRUMENT = { symbol: 'NIFTY', exchange: 'NSE_INDEX' } as const
 
+/**
+ * The chart styles the phone offers (C2). Renko, Kagi and the rest stay in the
+ * full terminal. Heikin Ashi is the engine's transform of the candles, one
+ * element a bar, so its tier is loaded the first time it is chosen.
+ */
+export const CHART_STYLES = [
+  { value: 'candlestick', label: 'Candles', series: 'candlestick', glyph: 'chart-candlestick' },
+  {
+    value: 'hollow-candle',
+    label: 'Hollow candles',
+    series: 'hollow-candle',
+    glyph: 'chart-hollow-candle',
+  },
+  { value: 'bar', label: 'Bars', series: 'bar', glyph: 'chart-bar' },
+  { value: 'line', label: 'Line', series: 'line', glyph: 'chart-line' },
+  {
+    value: 'heikin-ashi',
+    label: 'Heikin Ashi',
+    series: 'candlestick',
+    glyph: 'chart-heikin-ashi',
+    transform: 'heikin-ashi',
+  },
+] as const satisfies ReadonlyArray<{
+  value: string
+  label: string
+  series: SeriesType
+  glyph: string
+  transform?: string
+}>
+
+export type ChartStyle = (typeof CHART_STYLES)[number]['value']
+export type ChartStyleDef = (typeof CHART_STYLES)[number] & { transform?: string }
+
+export const DEFAULT_STYLE: ChartStyle = 'candlestick'
+
+export function isChartStyle(value: unknown): value is ChartStyle {
+  return CHART_STYLES.some((style) => style.value === value)
+}
+
+export function styleOf(style: ChartStyle): ChartStyleDef {
+  return CHART_STYLES.find((def) => def.value === style) ?? CHART_STYLES[0]
+}
+
 const INTERVAL_KEY = 'sudarshan-chart-interval'
 const PINNED_KEY = 'sudarshan-chart-pinned'
+const STYLE_KEY = 'sudarshan-chart-style'
 const LAST_KEY = 'sudarshan-chart-last'
 
 type Store = Pick<Storage, 'getItem' | 'setItem'>
@@ -136,6 +181,24 @@ export function togglePin(
   }
   if (pinned.length >= MAX_PINNED) return { pinned: [...pinned], refused: 'full' }
   return { pinned: ordered([...pinned, interval]) }
+}
+
+/** The chart style chosen on this device, for every instrument. */
+export function readStyle(storage: Store | null = store()): ChartStyle {
+  try {
+    const saved = storage?.getItem(STYLE_KEY)
+    return isChartStyle(saved) ? saved : DEFAULT_STYLE
+  } catch {
+    return DEFAULT_STYLE
+  }
+}
+
+export function saveStyle(style: ChartStyle, storage: Store | null = store()): void {
+  try {
+    storage?.setItem(STYLE_KEY, style)
+  } catch {
+    /* kept for this visit only */
+  }
 }
 
 /** The instrument last opened on this device, or the default. */

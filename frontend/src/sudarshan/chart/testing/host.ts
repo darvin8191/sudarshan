@@ -16,6 +16,7 @@ import { resetInstrumentSessions } from '@/lib/trading/instrumentSession'
 import type { LiveStatus } from '@/lib/trading/liveStatus'
 import { FakeProxySocket } from '@/test/tickTape'
 import { PhoneChart, type PhoneTick } from '../phoneChart'
+import type { ChartStyle } from '../prefs'
 
 export type Reply = { status?: string; data?: unknown; message?: string }
 
@@ -115,7 +116,11 @@ export interface Heard {
   closes: Array<number | null>
 }
 
-export function mountChart(): { chart: PhoneChart; heard: Heard; container: HTMLDivElement } {
+export function mountChart(options: { style?: ChartStyle } = {}): {
+  chart: PhoneChart
+  heard: Heard
+  container: HTMLDivElement
+} {
   const heard: Heard = { ticks: [], prevClose: [], statuses: [], loads: [], closes: [] }
   const container = document.createElement('div')
   Object.defineProperty(container, 'clientWidth', { configurable: true, value: 360 })
@@ -126,6 +131,7 @@ export function mountChart(): { chart: PhoneChart; heard: Heard; container: HTML
     apiKey: 'test-key',
     wsUrl: 'ws://test.invalid',
     appMode: 'live',
+    style: options.style,
     callbacks: {
       onTick: (tick) => heard.ticks.push(tick),
       onPrevClose: (value) => heard.prevClose.push(value),

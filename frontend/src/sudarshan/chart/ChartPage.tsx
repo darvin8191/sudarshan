@@ -38,6 +38,7 @@ import { Switch } from '@/components/ui/switch'
 import { chartHref } from '@/lib/trading/chartLink'
 import { type ChartStateView, chartStateCopy, createChartStateGate } from '@/lib/trading/chartState'
 import { priceDp } from '@/lib/trading/format'
+import { ChromeIcon } from '@/lib/trading/glyphs'
 import { type IntervalGroup, pickInterval as offeredInterval } from '@/lib/trading/intervals'
 import type { LiveStatus } from '@/lib/trading/liveStatus'
 import { cn } from '@/lib/utils'
@@ -63,18 +64,23 @@ import {
 import { LongPress } from './longPress'
 import { isQuoteOnly, PhoneChart } from './phoneChart'
 import {
+  type ChartStyle,
   chartPath,
   intervalLabel,
   isCalendarInterval,
   readInterval,
   readLastInstrument,
   readPinned,
+  readStyle,
   saveInterval,
   saveLastInstrument,
   savePinned,
+  saveStyle,
+  styleOf,
   togglePin,
 } from './prefs'
 import { PriceStore, tickLine } from './prices'
+import { StyleSheet } from './StyleSheet'
 import { TimeframeSheet } from './TimeframeSheet'
 import { useWakeLock } from './useWakeLock'
 
@@ -138,6 +144,7 @@ type Sheet =
   | { sheet: 'search' }
   | { sheet: 'alert' }
   | { sheet: 'timeframe' }
+  | { sheet: 'style' }
 
 function readSheet(state: unknown): Sheet | null {
   if (!state || typeof state !== 'object') return null
@@ -145,6 +152,7 @@ function readSheet(state: unknown): Sheet | null {
   if (value.sheet === 'search') return { sheet: 'search' }
   if (value.sheet === 'alert') return { sheet: 'alert' }
   if (value.sheet === 'timeframe') return { sheet: 'timeframe' }
+  if (value.sheet === 'style') return { sheet: 'style' }
   if (value.sheet === 'ticket' && (value.side === 'BUY' || value.side === 'SELL'))
     return { sheet: 'ticket', side: value.side }
   return null
@@ -182,6 +190,10 @@ function PhoneChartScreen({
   const [groups, setGroups] = useState<IntervalGroup[] | null>(null)
   /** Why the last pin was refused, shown in the timeframe sheet. */
   const [pinNotice, setPinNotice] = useState<string | null>(null)
+  const [style, setStyle] = useState<ChartStyle>(() => readStyle())
+  /** The style as it is now, for a chart built later; a change reaches a built one through setStyle. */
+  const styleNow = useRef(style)
+  styleNow.current = style
   const [prevClose, setPrevClose] = useState<number | null>(null)
   const [status, setStatus] = useState<LiveStatus | null>(null)
   const [load, setLoad] = useState<ChartStateView | null>(null)
@@ -243,6 +255,7 @@ function PhoneChartScreen({
       wsUrl: config.wsUrl,
       // The mode as it is now; a later switch reaches the chart through setAppMode.
       appMode: useThemeStore.getState().appMode,
+      style: styleNow.current,
       callbacks: {
         onTick: (tick) => prices.set(tick),
         onPrevClose: setPrevClose,
@@ -262,6 +275,10 @@ function PhoneChartScreen({
   useEffect(() => {
     owner?.setAppMode(appMode)
   }, [owner, appMode])
+
+  useEffect(() => {
+    void owner?.setStyle(style)
+  }, [owner, style])
 
   useEffect(() => {
     if (!config) return
@@ -460,6 +477,19 @@ function PhoneChartScreen({
         }}
       />
 
+      <div className="flex shrink-0 gap-1 border-b bg-card px-1 py-0.5" data-testid="chart-tools">
+        <button
+          type="button"
+          onClick={() => openSheet({ sheet: 'style' })}
+          aria-label={`Chart style: ${styleOf(style).label}`}
+          className="inline-flex h-12 min-w-12 items-center gap-1.5 rounded-full px-3 text-sm font-semibold hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <ChromeIcon id={styleOf(style).glyph} size={18} className="shrink-0" />
+          {styleOf(style).label}
+          <ChevronDown aria-hidden="true" className="size-3.5 shrink-0" />
+        </button>
+      </div>
+
       <div
         ref={surface}
         className="relative min-h-0 flex-1 touch-none bg-card"
@@ -561,6 +591,16 @@ function PhoneChartScreen({
           }}
         />
       )}
+      <StyleSheet
+        open={sheet?.sheet === 'style'}
+        onOpenChange={(open) => !open && closeSheet()}
+        current={style}
+        onPick={(next) => {
+          setStyle(next)
+          saveStyle(next)
+          closeSheet()
+        }}
+      />
       <TimeframeSheet
         open={sheet?.sheet === 'timeframe'}
         onOpenChange={(open) => !open && closeSheet()}

@@ -18,9 +18,10 @@ import type { PhoneChartCallbacks, PhoneTick } from './phoneChart'
 
 const fakes = vi.hoisted(() => ({
   charts: [] as Array<{
-    opts: { callbacks: PhoneChartCallbacks; appMode: string }
+    opts: { callbacks: PhoneChartCallbacks; appMode: string; style?: string }
     load: ReturnType<typeof vi.fn>
     setAppMode: ReturnType<typeof vi.fn>
+    setStyle: ReturnType<typeof vi.fn>
     destroy: ReturnType<typeof vi.fn>
     barAt: ReturnType<typeof vi.fn>
     barX: ReturnType<typeof vi.fn>
@@ -45,6 +46,7 @@ vi.mock('./phoneChart', () => ({
     opts: unknown
     load = vi.fn(async () => {})
     setAppMode = vi.fn()
+    setStyle = vi.fn(async () => {})
     destroy = vi.fn()
     barAt = vi.fn(() => ({
       time: Date.UTC(2026, 9, 20, 4, 45) / 1000,
@@ -393,6 +395,29 @@ describe('the phone chart page at 390 px', () => {
     await opened()
     expect(chart().load).toHaveBeenCalledWith('SBIN', 'NSE', 'D')
     expect(screen.getByRole('button', { name: '1D' })).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  it('changes the chart style from its sheet, for every instrument, and says which is in use', async () => {
+    await opened()
+    expect(chart().opts.style).toBe('candlestick')
+    await userEvent.click(screen.getByRole('button', { name: 'Chart style: Candles' }))
+    const sheet = await screen.findByRole('dialog', { name: 'Chart style' })
+    expect(within(sheet).getByRole('button', { name: 'Candles' })).toHaveAttribute(
+      'aria-pressed',
+      'true'
+    )
+    await userEvent.click(within(sheet).getByRole('button', { name: 'Heikin Ashi' }))
+    expect(chart().setStyle).toHaveBeenLastCalledWith('heikin-ashi')
+    expect(localStorage.getItem('sudarshan-chart-style')).toBe('heikin-ashi')
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Chart style' })).toBeNull())
+    expect(screen.getByRole('button', { name: 'Chart style: Heikin Ashi' })).toBeVisible()
+  })
+
+  it('builds the chart in the style chosen before', async () => {
+    localStorage.setItem('sudarshan-chart-style', 'bar')
+    await opened()
+    expect(chart().opts.style).toBe('bar')
+    expect(screen.getByRole('button', { name: 'Chart style: Bars' })).toBeVisible()
   })
 
   it("opens the app's own order ticket from Buy and Sell, on Delivery for a share until a pick", async () => {
