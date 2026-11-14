@@ -143,6 +143,51 @@ describe('Analytics', () => {
     expect(screen.getByTestId('charges-line').textContent).toContain('est.')
   })
 
+  it('keeps every net whole on a phone: two columns, the net on one line, nothing scrolled sideways (review B1)', async () => {
+    serve(
+      analytics({
+        by_strategy: [
+          {
+            name: 'ORB breakout long name',
+            metrics: metrics({ trips: 30, net_paise: 12_345_678, win_rate: '62.50' }),
+          },
+          { name: '', metrics: metrics({ trips: 12, net_paise: -123_456_700 }) },
+        ],
+        by_tag: [{ name: '', metrics: metrics({ trips: 5, net_paise: -500_000 }) }],
+      })
+    )
+    show()
+    const strategies = await screen.findByRole('region', { name: 'By strategy' })
+    for (const region of [strategies, screen.getByRole('region', { name: 'By tag' })]) {
+      const table = within(region).getByRole('table')
+      expect(table.className).not.toContain('min-w-')
+      expect(region.querySelector('.overflow-x-auto')).toBeNull()
+      const heads = within(table)
+        .getAllByRole('columnheader')
+        .map((h) => h.textContent)
+      expect(heads.at(-1)).toBe('Net')
+      for (const cell of within(table).getAllByTestId('net')) {
+        expect(cell.className).toContain('whitespace-nowrap')
+      }
+    }
+    const [orb, unnamed] = within(within(strategies).getByRole('table'))
+      .getAllByRole('row')
+      .slice(1)
+    expect(orb.textContent).toContain('ORB breakout long name')
+    expect(orb.textContent).toContain('30 trades · Win rate 62.50%')
+    expect(within(orb).getByTestId('net').textContent).toBe('+₹1,23,456.78')
+    expect(unnamed.textContent).toContain('No strategy')
+    expect(within(unnamed).getByTestId('net').textContent).toBe('−₹12,34,567.00')
+    // A tag row with no name is not a strategy (review L4).
+    const tags = screen.getByRole('region', { name: 'By tag' })
+    expect(tags.textContent).toContain('No tag')
+    expect(tags.textContent).not.toContain('No strategy')
+    // The expiry tables take the same two columns.
+    const expiry = screen.getByRole('region', { name: 'Expiry days' })
+    expect(expiry.querySelector('.overflow-x-auto')).toBeNull()
+    expect(within(expiry).getAllByTestId('net').length).toBe(4)
+  })
+
   it('says there is no charges figure without a winning trade', async () => {
     serve(analytics({ metrics: metrics({ charges_impact_pct: null }) }))
     show()

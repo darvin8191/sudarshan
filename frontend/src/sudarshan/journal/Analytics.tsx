@@ -343,97 +343,53 @@ function HoldBars({ rows }: { rows: AnalyticsAnswer['hold'] }) {
   )
 }
 
-function BlockTable({
-  title,
-  rows,
+/**
+ * Results by name (a strategy, a tag, a kind of day) in two columns, so a phone 360 px wide holds
+ * them whole (review B1): the name, with its trades and win rate under it, takes what room is left
+ * and wraps; the net keeps its full figure on one line and never scrolls out of sight.
+ */
+function ResultTable({
+  label,
   first,
+  rows,
+  unnamed,
 }: {
-  title: string
-  rows: readonly BlockRow[]
+  label: string
   first: string
+  rows: ReadonlyArray<{ name: string; metrics: Metrics }>
+  /** What a row with no name reads. */
+  unnamed: string
 }) {
-  if (rows.length === 0) return null
   return (
-    <section aria-label={title} className={`${SECTION} flex flex-col gap-2`}>
-      <h2 className="text-base font-bold">{title}</h2>
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[19rem] text-left text-[0.8125rem]">
-          <thead className="text-[color:var(--text-secondary)]">
-            <tr>
-              <th scope="col" className="py-1 pr-2 font-semibold">
-                {first}
-              </th>
-              <th scope="col" className="py-1 pr-2 text-right font-semibold">
-                Trades
-              </th>
-              <th scope="col" className="py-1 pr-2 text-right font-semibold">
-                Win rate
-              </th>
-              <th scope="col" className="py-1 text-right font-semibold">
-                Net
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => (
-              <tr key={row.name} className="border-t border-[color:var(--divider)]">
-                <th scope="row" className="py-2 pr-2 text-left font-semibold">
-                  {row.name || 'No strategy'}
-                </th>
-                <td className="py-2 pr-2 text-right">{row.metrics.trips}</td>
-                <td className="py-2 pr-2 text-right">
-                  {ratioWords(row.metrics.win_rate, row.metrics.win_rate_state, '%')}
-                </td>
-                <td className="py-2 text-right font-semibold">
-                  <Signed paise={row.metrics.net_paise} />
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </section>
-  )
-}
-
-function ExpirySplit({ split }: { split: AnalyticsAnswer['expiry'] }) {
-  const rows: Array<[string, Metrics]> = [
-    ['Index expiry day', split.index_expiry],
-    ['Other days', split.not_index_expiry],
-  ]
-  const own: Array<[string, Metrics]> = [
-    ['Own expiry day', split.own_expiry],
-    ['Not its expiry', split.not_own_expiry],
-  ]
-  const table = (title: string, list: Array<[string, Metrics]>) => (
-    <table className="w-full text-left text-[0.8125rem]" aria-label={title}>
+    <table aria-label={label} className="w-full text-left text-[0.8125rem]">
       <thead className="text-[color:var(--text-secondary)]">
         <tr>
-          <th scope="col" className="py-1 pr-2 font-semibold">
-            {title}
+          <th scope="col" className="py-1 pr-3 font-semibold">
+            {first}
           </th>
-          <th scope="col" className="py-1 pr-2 text-right font-semibold">
-            Trades
-          </th>
-          <th scope="col" className="py-1 pr-2 text-right font-semibold">
-            Win rate
-          </th>
-          <th scope="col" className="py-1 text-right font-semibold">
+          <th scope="col" className="py-1 text-right font-semibold whitespace-nowrap">
             Net
           </th>
         </tr>
       </thead>
       <tbody>
-        {list.map(([name, m]) => (
-          <tr key={name} className="border-t border-[color:var(--divider)]">
-            <th scope="row" className="py-2 pr-2 text-left font-semibold">
-              {name}
+        {rows.map(({ name, metrics: m }) => (
+          <tr key={name} className="border-t border-[color:var(--divider)] align-top">
+            <th scope="row" className="py-2 pr-3 text-left font-semibold [overflow-wrap:anywhere]">
+              {name || unnamed}
+              <span className="mt-0.5 block text-xs font-medium text-[color:var(--text-tertiary)]">
+                {m.trips} {m.trips === 1 ? 'trade' : 'trades'}
+                {' · '}
+                {m.win_rate_state === 'ok' && m.win_rate !== null ? (
+                  <>
+                    Win rate <span>{ratioWords(m.win_rate, m.win_rate_state, '%')}</span>
+                  </>
+                ) : (
+                  ratioWords(m.win_rate, m.win_rate_state, '%')
+                )}
+              </span>
             </th>
-            <td className="py-2 pr-2 text-right">{m.trips}</td>
-            <td className="py-2 pr-2 text-right">
-              {ratioWords(m.win_rate, m.win_rate_state, '%')}
-            </td>
-            <td className="py-2 text-right font-semibold">
+            <td className="py-2 text-right font-semibold whitespace-nowrap" data-testid="net">
               <Signed paise={m.net_paise} />
             </td>
           </tr>
@@ -441,14 +397,45 @@ function ExpirySplit({ split }: { split: AnalyticsAnswer['expiry'] }) {
       </tbody>
     </table>
   )
+}
+
+function BlockTable({
+  title,
+  rows,
+  first,
+  unnamed,
+}: {
+  title: string
+  rows: readonly BlockRow[]
+  first: string
+  unnamed: string
+}) {
+  if (rows.length === 0) return null
+  return (
+    <section aria-label={title} className={`${SECTION} flex flex-col gap-2`}>
+      <h2 className="text-base font-bold">{title}</h2>
+      <ResultTable label={title} first={first} rows={rows} unnamed={unnamed} />
+    </section>
+  )
+}
+
+function ExpirySplit({ split }: { split: AnalyticsAnswer['expiry'] }) {
+  const rows = [
+    { name: 'Index expiry day', metrics: split.index_expiry },
+    { name: 'Other days', metrics: split.not_index_expiry },
+  ]
+  const own = [
+    { name: 'Own expiry day', metrics: split.own_expiry },
+    { name: 'Not its expiry', metrics: split.not_own_expiry },
+  ]
   return (
     <section aria-label="Expiry days" className={`${SECTION} flex flex-col gap-3`}>
       <h2 className="text-base font-bold">Expiry days</h2>
       <p className="text-[0.8125rem] text-[color:var(--text-secondary)]">
         By the day each trade opened.
       </p>
-      <div className="overflow-x-auto">{table('Index expiry', rows)}</div>
-      <div className="overflow-x-auto">{table('Instrument expiry', own)}</div>
+      <ResultTable label="Index expiry" first="Index expiry" rows={rows} unnamed="-" />
+      <ResultTable label="Instrument expiry" first="Instrument expiry" rows={own} unnamed="-" />
     </section>
   )
 }
@@ -573,8 +560,13 @@ export function Analytics({ mode }: { mode: Mode }) {
         <CalendarGrid calendar={answer.calendar} />
         <HeatMap cells={answer.heat} />
         <HoldBars rows={answer.hold} />
-        <BlockTable title="By strategy" rows={answer.by_strategy} first="Strategy" />
-        <BlockTable title="By tag" rows={answer.by_tag} first="Tag" />
+        <BlockTable
+          title="By strategy"
+          rows={answer.by_strategy}
+          first="Strategy"
+          unnamed="No strategy"
+        />
+        <BlockTable title="By tag" rows={answer.by_tag} first="Tag" unnamed="No tag" />
         <ExpirySplit split={answer.expiry} />
         <ChargesLine metrics={answer.metrics} />
         {answer.beta && <BetaLine beta={answer.beta} />}
