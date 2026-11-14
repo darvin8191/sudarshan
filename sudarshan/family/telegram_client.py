@@ -23,6 +23,8 @@ from typing import Any
 
 import httpx
 
+from . import safe_http
+
 log = logging.getLogger("sudarshan.family")
 
 API = "https://api.telegram.org"
@@ -88,7 +90,7 @@ class AllowList(httpx.AsyncBaseTransport):
     def __init__(self, allowed: frozenset[tuple[str, str, int]],
                  inner: httpx.AsyncBaseTransport | None = None):  # fmt: skip
         self.allowed = frozenset(allowed)
-        self.inner = inner if inner is not None else httpx.AsyncHTTPTransport(retries=0)
+        self.inner = inner if inner is not None else safe_http.transport(retries=0)
 
     def permits(self, url: httpx.URL) -> bool:
         port = url.port if url.port is not None else {"https": 443, "http": 80}.get(url.scheme)

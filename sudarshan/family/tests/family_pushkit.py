@@ -21,6 +21,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 
 from sudarshan.family import push as push_module
+from sudarshan.family import safe_http
 from sudarshan.family.push import make_http as push_http  # bound once: tests patch the module's
 from sudarshan.push import Vapid
 
@@ -88,7 +89,7 @@ class ToLocalPush(httpx.AsyncBaseTransport):
     httpx's real transport (real sockets), keeping the endpoint in a header for the fake."""
 
     def __init__(self, port: int):
-        self.port, self.inner = port, httpx.AsyncHTTPTransport(retries=0)
+        self.port, self.inner = port, safe_http.transport(retries=0)  # as the push client's
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
         url = request.url.copy_with(scheme="http", host="127.0.0.1", port=self.port)

@@ -78,6 +78,7 @@ The one-time set-up that makes the account, the folders and the firewall allow-l
 | `derive.py`, `check.py` | the one-time set-up's pieces (the deploy runs them) | O2' |
 | `bot.py`, `bot_words.py`, `telegram_client.py`, `quiet.py` (market hours) | the family bot: link codes, the read-only command table, two languages, its own pacer per chat | F8 |
 | `push.py`, `quiet.py`, `digest.py`, `outbox.py`, `timers.py` | Web Push, quiet hours and Settings, the day's summary, the outbox, and the `channels` job that runs them with the bot | F10 |
+| `safe_http.py` | the channels' HTTP transport: a request a stop cancels while it connects leaves no socket open (httpx 0.28 with anyio 4.14 loses it otherwise) | F8, F10 |
 
 ## Channels
 

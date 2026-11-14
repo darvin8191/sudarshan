@@ -51,7 +51,7 @@ from sudarshan.push import (
     VapidKeyError,
 )
 
-from . import audit
+from . import audit, safe_http
 from .bot_words import PAGE, Refused
 from .errors import Invalid
 from .listener import Response
@@ -112,7 +112,7 @@ class PushOnly(httpx.AsyncBaseTransport):
     in the address: the family's push client cannot reach anything else."""
 
     def __init__(self, inner: httpx.AsyncBaseTransport | None = None):
-        self.inner = inner if inner is not None else httpx.AsyncHTTPTransport(retries=0)
+        self.inner = inner if inner is not None else safe_http.transport(retries=0)
 
     @staticmethod
     def permits(url: httpx.URL) -> bool:

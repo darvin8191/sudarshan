@@ -21,6 +21,7 @@ from typing import Any
 import httpx
 
 from sudarshan.family import bot as bot_module
+from sudarshan.family import safe_http
 from sudarshan.family.quiet import MarketHours
 from sudarshan.family.telegram_client import TelegramClient, make_http
 
@@ -103,7 +104,7 @@ class ToLocal(httpx.AsyncBaseTransport):
     transport: real sockets, so a descriptor that is not closed shows."""
 
     def __init__(self, port: int):
-        self.port, self.inner = port, httpx.AsyncHTTPTransport(retries=0)
+        self.port, self.inner = port, safe_http.transport(retries=0)  # as the bot's own
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
         url = request.url.copy_with(scheme="http", host="127.0.0.1", port=self.port)
