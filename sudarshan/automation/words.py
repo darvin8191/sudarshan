@@ -456,6 +456,10 @@ SENDER_HIDDEN = (
     "An alert reached this server without its sender's address, so it was refused. The server's "
     "proxy setting needs a check: see The fence around the alert links in the README."
 )
+SENDER_BANNED = (
+    "A TradingView address is on this server's ban list, so alerts from it never arrive. Remove "
+    "it under Security, in Banned addresses."
+)
 STAGE_WORDS = {
     "off": "Automation is switched off.",
     "sandbox": "Automation is in Sandbox only.",

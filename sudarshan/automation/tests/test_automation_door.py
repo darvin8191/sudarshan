@@ -410,3 +410,81 @@ def test_the_traffic_log_never_keeps_the_token():
     assert redact_url_credentials("/strategy/webhook/abc") == "/strategy/webhook/<redacted>"
     assert redact_url_credentials("/flow/webhook/abc/NIFTY") == "/flow/webhook/<redacted>/NIFTY"
     assert redact_url_credentials("/sudarshan/risk/state") == "/sudarshan/risk/state"
+
+
+# ---- M1: TradingView's addresses are never auto-banned -------------------------------------------
+
+OTHER = "203.0.113.9"  # a documentation address: anyone else
+
+
+@pytest.fixture
+def auto_ban():
+    """The app's abuse trackers with auto-ban switched on, in the throwaway databases."""
+    from database import settings_db, traffic_db
+
+    settings_db.init_db()
+    traffic_db.init_logs_db()
+    settings_db.set_security_settings(auto_ban_enabled=True)
+
+    def forget():
+        for table in (
+            traffic_db.IPBan,
+            traffic_db.Error404Tracker,
+            traffic_db.InvalidAPIKeyTracker,
+        ):
+            table.query.delete()
+        traffic_db.logs_session.commit()
+        traffic_db._ip_ban_cache.clear()
+
+    forget()
+    yield traffic_db
+    forget()
+    settings_db.set_security_settings(auto_ban_enabled=False)
+    traffic_db.logs_session.remove()
+    settings_db.db_session.remove()
+
+
+def test_m1_missing_paths_and_bad_keys_from_tradingview_never_ban_it(store, desk, auto_ban):
+    """Any TradingView user can point alerts at a missing path or a wrong key on this host. They
+    are not counted against TradingView's address, and the owner's next alert is taken."""
+    for n in range(150):
+        assert auto_ban.Error404Tracker.track_404(TV, f"/sudarshan/tv/a/b{n}") is False
+        assert auto_ban.InvalidAPIKeyTracker.track_invalid_api_key(TV, f"{n:016x}") is False
+    assert auto_ban.IPBan.is_ip_banned(TV) is False
+    assert auto_ban.Error404Tracker.query.filter_by(ip_address=TV).count() == 0
+    assert auto_ban.InvalidAPIKeyTracker.query.filter_by(ip_address=TV).count() == 0
+    strategy, token = make(store)
+    assert send(store, desk, token, indicator_alert("long", NOW - 1)).verdict == "sent"
+
+
+@pytest.mark.parametrize("tracker", ["404", "key"])
+def test_m1_every_other_address_is_still_counted_and_banned(auto_ban, tracker):
+    for n in range(101):
+        if tracker == "404":
+            auto_ban.Error404Tracker.track_404(OTHER, f"/nope{n}")
+        else:
+            auto_ban.InvalidAPIKeyTracker.track_invalid_api_key(OTHER, f"{n:016x}")
+    assert auto_ban.IPBan.is_ip_banned(OTHER) is True
+
+
+def test_m1_the_owners_own_sender_list_is_the_one_left_alone(auto_ban, monkeypatch):
+    from sudarshan.automation.desk import SENDERS_ENV
+
+    monkeypatch.setenv(SENDERS_ENV, OTHER)
+    for n in range(101):
+        auto_ban.Error404Tracker.track_404(OTHER, f"/nope{n}")
+        auto_ban.Error404Tracker.track_404(TV, f"/nope{n}")
+    assert auto_ban.IPBan.is_ip_banned(OTHER) is False
+    assert auto_ban.IPBan.is_ip_banned(TV) is True  # no longer a sender: counted as anyone is
+
+
+def test_m1_a_sender_banned_by_hand_is_said_on_the_page(store, auto_ban):
+    from sudarshan.automation import control, words
+    from sudarshan.automation.desk import Desk
+
+    class PageDesk(FakeDesk):
+        sender_banned = Desk.sender_banned
+
+    assert words.SENDER_BANNED not in control.listing(desk=PageDesk(), store=store)["notes"]
+    assert auto_ban.IPBan.ban_ip(TV, "by hand", permanent=True, created_by="owner") is True
+    assert words.SENDER_BANNED in control.listing(desk=PageDesk(), store=store)["notes"]

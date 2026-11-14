@@ -153,6 +153,25 @@ class TrafficLog(LogBase):
             return {"total_requests": 0, "error_requests": 0, "avg_duration": 0}
 
 
+def _never_tracked(ip_address):
+    """SUDARSHAN M12.1 (v0.14.0 review, M1): the addresses TradingView's alerts come from are
+    never counted by the abuse trackers, so never banned by them.
+
+    Any TradingView user can point an alert at a missing path, or at an API route with a wrong
+    key, on this host. Counted against TradingView's address, a hundred of those banned it for
+    good, and the owner's own alerts, exits included, were then answered 403 before the app with
+    nobody told. The list is ``sudarshan.automation.desk.senders()``; the owner can still ban
+    one of them by hand on the Security page.
+    """
+    try:
+        from sudarshan.automation.desk import senders
+
+        return ip_address in senders()
+    except Exception:
+        logger.exception("The alert sender list could not be read")
+        return False
+
+
 class IPBan(LogBase):
     """Model for banned IPs"""
 
@@ -327,6 +346,8 @@ class Error404Tracker(LogBase):
 
         Serialised per address, so parallel 404s from one scanner each count.
         """
+        if _never_tracked(ip_address):  # SUDARSHAN M12.1: an alert sender is never auto-banned
+            return False
         with _tracker_locks.hold(("404", ip_address)):
             return Error404Tracker._track_404_locked(ip_address, path)
 
@@ -449,6 +470,8 @@ class InvalidAPIKeyTracker(LogBase):
 
         Serialised per address, so parallel attempts from one address each count.
         """
+        if _never_tracked(ip_address):  # SUDARSHAN M12.1: an alert sender is never auto-banned
+            return False
         with _tracker_locks.hold(("api", ip_address)):
             return InvalidAPIKeyTracker._track_invalid_api_key_locked(ip_address, api_key_hash)
 

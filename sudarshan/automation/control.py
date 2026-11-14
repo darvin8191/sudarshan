@@ -290,6 +290,8 @@ def listing(*, desk: Desk | None = None, store: AutomationStore | None = None) -
     notes = []
     if now_ms - local_sender_seen_ms() < 86_400_000 and local_sender_seen_ms():
         notes.append(words.SENDER_HIDDEN)
+    if desk.sender_banned():
+        notes.append(words.SENDER_BANNED)
     return {
         "status": "success",
         "stage": stage,

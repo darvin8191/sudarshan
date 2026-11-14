@@ -78,6 +78,7 @@ class FakeDesk:
         self.key: str | None = API_KEY
         self.semi = False
         self.kill_switch = False
+        self.banned = False
         self.phrase = "STOP"
         self.phrases_asked: list[tuple[str, str]] = []
         self.positions: dict[tuple, int] = {}
@@ -157,6 +158,9 @@ class FakeDesk:
 
     def kill_switch_on(self) -> bool:
         return self.kill_switch
+
+    def sender_banned(self) -> bool:
+        return self.banned
 
     def phrase_ok(self, typed, asked: str, surface: str) -> bool:
         self.phrases_asked.append((asked, surface))

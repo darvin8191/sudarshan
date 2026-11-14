@@ -145,6 +145,17 @@ class Desk:
 
         return bool(should_route_to_pending(api_key, "smartorder"))
 
+    def sender_banned(self) -> bool:
+        """Whether an address alerts come from is on the app's ban list (put there by hand, or
+        before the abuse trackers left these addresses alone). The page says so."""
+        try:
+            from database.traffic_db import IPBan
+
+            return any(IPBan.is_ip_banned(address) for address in sorted(senders()))
+        except Exception:
+            logger.exception("Automation: the ban list could not be read")
+            return False
+
     def kill_switch_on(self) -> bool:
         try:
             from sudarshan.guard import gate
