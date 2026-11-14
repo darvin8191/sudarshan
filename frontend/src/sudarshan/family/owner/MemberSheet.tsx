@@ -4,15 +4,29 @@
 // tapped, carries the card's `version` (or a `request_id` for a create, an invite, a reset), and
 // shows the answer's sentence. A destructive action asks first. A write that was not answered
 // says "Not confirmed" and the page reads the members again; it never says "failed".
+//
+// M2.8 (cross-design Y6): a privacy or role change also writes the portfolio's floor for the
+// member, through the portfolio bridge, in the order of privacySave.ts; the sheet says "Saved"
+// only when both are confirmed, and says so when the portfolio's floor is behind the card.
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { CirclePause, KeyRound, Loader2, Play, Smartphone, Trash2, UserPlus } from 'lucide-react'
+import {
+  CirclePause,
+  KeyRound,
+  Loader2,
+  Play,
+  Smartphone,
+  Trash2,
+  TriangleAlert,
+  UserPlus,
+} from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
+import type { SharesList } from '@/sudarshan/portfolio/types'
 import { BottomSheet } from '@/sudarshan/watchlist/BottomSheet'
-import { newRequestId, ownerApi, ownerProblem } from '../ownerApi'
+import { newRequestId, OwnerError, ownerApi, ownerProblem } from '../ownerApi'
 import {
   CATEGORIES,
   type Invite,
@@ -23,8 +37,17 @@ import {
   type Privacy,
   type Role,
 } from '../types'
-import { devicesKey, MEMBERS_KEY } from './keys'
+import { devicesKey, MEMBERS_KEY, PORTFOLIO_SHARES_KEY } from './keys'
 import { Ask, ROW, SaidLine, useOnce } from './parts'
+import {
+  driftOf,
+  type FloorDrift,
+  floorOf,
+  fromPortfolio,
+  memberKey,
+  portfolioShares,
+} from './portfolioShares'
+import { listOf, planPrivacy, runPrivacySave } from './privacySave'
 import {
   CATEGORY_LABEL,
   FUNDS_WITHOUT_AMOUNTS,
@@ -41,6 +64,43 @@ export const REMOVE_ASK =
 export const RESET_ASK =
   'Reset sign-in? Their devices are signed out, and their password and code app stop working until they use the new invite link.'
 export const SIGN_OUT_ASK = 'Sign out this device? They can sign in again on it.'
+
+/** The portfolio's floor of a member, against the card (cross-design Y6). */
+export const FLOOR_MISSING =
+  'The portfolio does not have their privacy yet, so it shows them no figures and no tab shared with every member. Save to send it.'
+export const FLOOR_FOLLOW = 'Save to make it follow these switches.'
+export const FLOOR_UNREAD =
+  'Their privacy in the portfolio is still being read, so nothing was saved. Try again in a moment.'
+export const FLOOR_WAITS =
+  'Their privacy is kept in the portfolio too, so it cannot be changed until the portfolio answers.'
+export const MADE_NO_FLOOR =
+  'Member added. Their privacy did not reach the portfolio, so it shows them no figures until you save the member again.'
+export const MADE_FLOOR_UNSURE =
+  'Member added; whether their privacy reached the portfolio is not confirmed. Open the member to check.'
+
+/** What the sheet says of a floor that is not the card's, or null when they agree. */
+export function floorNotice(drift: FloorDrift | null): string | null {
+  if (drift === null || drift.kind === 'same') return null
+  if (drift.kind === 'missing') return FLOOR_MISSING
+  const hides = CATEGORIES.filter((c) => drift.hidesMore[c])
+  const shows = CATEGORIES.filter((c) => drift.showsMore[c])
+  const parts = [
+    hides.length ? `still hides ${listOf(hides)} from them` : null,
+    shows.length ? `shows them ${listOf(shows)}, which these switches hide` : null,
+  ].filter(Boolean)
+  if (parts.length === 0) return `The portfolio has another role for them. ${FLOOR_FOLLOW}`
+  return `The portfolio ${parts.join(' and ')}. ${FLOOR_FOLLOW}`
+}
+
+function FloorNotice({ text }: { text: string | null }) {
+  if (!text) return null
+  return (
+    <p className="flex items-start gap-2 rounded-xl bg-[color:var(--gold-tint)] px-3 py-2 text-[0.875rem] leading-snug text-[color:var(--warning-text)]">
+      <TriangleAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+      <span>{text}</span>
+    </p>
+  )
+}
 
 const LANGUAGES: ReadonlyArray<{ value: Language; label: string }> = [
   { value: 'en', label: 'English' },
@@ -65,11 +125,14 @@ function categoryLine(category: (typeof CATEGORIES)[number], privacy: Privacy): 
 function Fields({
   card,
   busy,
+  behind = false,
   onSave,
   saveLabel,
 }: {
   card: MemberCard | undefined
   busy: boolean
+  /** The portfolio's floor is not the card's: a save with nothing changed here sends it. */
+  behind?: boolean
   onSave: (fields: {
     display_name: string
     role: Role
@@ -97,6 +160,7 @@ function Fields({
   const clean = name.trim()
   const dirty =
     !card ||
+    behind ||
     clean !== card.display_name ||
     role !== card.role ||
     language !== card.language ||
@@ -328,9 +392,22 @@ export function MemberSheet({
     }
   }
   const reread = () => queryClient.invalidateQueries({ queryKey: MEMBERS_KEY })
+  const rereadFloors = () => queryClient.invalidateQueries({ queryKey: PORTFOLIO_SHARES_KEY })
   const once = useOnce((_said, error) => {
     if (error === null || error.unconfirmed || error.code === 'conflict') void reread()
   })
+  // The portfolio's floors (and tab shares), read through the portfolio bridge (Y6).
+  const floors = useQuery({
+    queryKey: PORTFOLIO_SHARES_KEY,
+    queryFn: ({ signal }) => portfolioShares.list(signal),
+    enabled: open,
+    retry: false,
+    refetchOnWindowFocus: true,
+  })
+  const drift = card && floors.data ? driftOf(floorOf(floors.data, card.id), card) : null
+  const behind = drift !== null && drift.kind !== 'same'
+  const floorProblem = floors.error ? fromPortfolio(floors.error) : null
+  const floorWords = floorProblem ? `${floorProblem.message} ${FLOOR_WAITS}` : floorNotice(drift)
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: a different member starts clean
   useEffect(() => {
@@ -350,16 +427,39 @@ export function MemberSheet({
     if (!card) {
       void once
         .run(
-          () =>
-            attempt('create', () =>
+          async () => {
+            const made = await attempt('create', () =>
               ownerApi.memberCreate({ ...fields, request_id: idFor('create') })
-            ),
-          () => 'Member added. Make an invite link next.'
+            )
+            // The floor goes after the member exists: it is named by the new id, and a floor
+            // where there was none can only show more (privacySave.ts, step 3).
+            let problem: OwnerError | null = null
+            try {
+              const known = queryClient.getQueryData<SharesList>(PORTFOLIO_SHARES_KEY)
+              const stale = floorOf(known, made.id)
+              await portfolioShares.floor({
+                member: memberKey(made.id),
+                role: made.role,
+                shown: made.privacy,
+                version: stale?.version ?? null,
+              })
+            } catch (caught) {
+              problem = fromPortfolio(caught)
+            }
+            void rereadFloors()
+            return { made, problem }
+          },
+          ({ problem }) =>
+            problem === null
+              ? 'Member added. Make an invite link next.'
+              : problem.unconfirmed
+                ? { kind: 'unconfirmed', text: MADE_FLOOR_UNSURE }
+                : { kind: 'problem', text: `${MADE_NO_FLOOR} ${problem.message}` }
         )
-        .then((made) => {
-          if (!made) return
+        .then((result) => {
+          if (!result) return
           void reread()
-          onCreated(made)
+          onCreated(result.made)
         })
       return
     }
@@ -369,14 +469,56 @@ export function MemberSheet({
     if (fields.language !== card.language) changed.language = fields.language
     if (CATEGORIES.some((c) => fields.privacy[c] !== card.privacy[c]))
       changed.privacy = fields.privacy
-    void once
-      .run(
-        () => ownerApi.memberUpdate({ id: card.id, version: card.version, ...changed }),
-        () => 'Saved.'
-      )
-      .then((saved) => {
-        if (saved) void reread()
-      })
+    if (!('privacy' in changed) && !('role' in changed) && !behind) {
+      // Nothing the portfolio keeps: the family service's row alone.
+      void once
+        .run(
+          () => ownerApi.memberUpdate({ id: card.id, version: card.version, ...changed }),
+          () => 'Saved.'
+        )
+        .then((saved) => {
+          if (saved) void reread()
+        })
+      return
+    }
+    void once.run(
+      async () => {
+        if (!floors.data) {
+          throw floorProblem
+            ? new OwnerError(floorProblem.code, `${floorProblem.message} ${FLOOR_WAITS}`)
+            : new OwnerError('unavailable', FLOOR_UNREAD)
+        }
+        const row = floorOf(floors.data, card.id)
+        const start = row ? { shown: row.shown, role: row.role } : null
+        const steps = planPrivacy({
+          floor: start,
+          next: { privacy: fields.privacy, role: fields.role },
+          familyChanged: Object.keys(changed).length > 0,
+        })
+        try {
+          await runPrivacySave(
+            steps,
+            {
+              family: () =>
+                ownerApi.memberUpdate({ id: card.id, version: card.version, ...changed }),
+              floor: (plan, version) =>
+                portfolioShares.floor({
+                  member: memberKey(card.id),
+                  role: plan.role,
+                  shown: plan.shown,
+                  version,
+                }),
+            },
+            { floor: start, version: row?.version ?? null }
+          )
+        } finally {
+          void reread()
+          void rereadFloors()
+        }
+        return true
+      },
+      () => 'Saved.'
+    )
   }
 
   const invite = (kind: 'invite' | 'reset') => {
@@ -471,10 +613,12 @@ export function MemberSheet({
     >
       <div className="flex flex-col gap-5">
         <SaidLine said={once.said} />
+        {card ? <FloorNotice text={floorWords} /> : null}
         <Fields
           key={fieldsKey}
           card={card}
           busy={once.pending}
+          behind={behind}
           onSave={save}
           saveLabel={card ? 'Save changes' : 'Add member'}
         />
