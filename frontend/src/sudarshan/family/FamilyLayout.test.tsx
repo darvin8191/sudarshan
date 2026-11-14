@@ -129,12 +129,49 @@ describe('the app bar on a narrow phone', () => {
     const badge = screen.getByTestId('family-badge')
     const family = badge.querySelector('[data-part="family"]') as HTMLElement
     expect(family.textContent).toContain('FAMILY')
-    expect(family.className).toBe(WIDE_ONLY)
+    expect(family.className.split(/\s+/)).toEqual(expect.arrayContaining(WIDE_ONLY.split(' ')))
     expect(WIDE_ONLY.split(' ')).toContain('hidden')
     // what is left when that part is hidden
     expect(badge.textContent?.replace(family.textContent ?? '', '')).toBe('VIEW ONLY · LIMITED')
     expect(badge).toHaveAccessibleName('Family, view only, limited')
     expect(badge.querySelector('svg')).not.toBeNull()
+  })
+
+  // Verification N9 (v0.12.0): with text at 130% the badge's words were one line cut with an
+  // ellipsis, which hid "VIEW ONLY". jsdom lays nothing out, so these pin what the fit rests on
+  // (each fails on the old badge and bar); the widths are measured in a browser.
+  it.each([
+    [true, ['VIEW ONLY ·', 'LIMITED']],
+    [false, ['FAMILY ·', 'VIEW ONLY']],
+  ] as const)('never cuts the badge words (limited: %s): whole words that wrap', (limited, words) => {
+    render(<FamilyBadge limited={limited} />)
+    const badge = screen.getByTestId('family-badge')
+    for (const el of [badge, ...badge.querySelectorAll('*')]) {
+      const classes = String(el.getAttribute('class') ?? '').split(/\s+/)
+      expect(classes).not.toContain('truncate')
+      expect(classes).not.toContain('overflow-hidden')
+      expect(classes).not.toContain('text-ellipsis')
+    }
+    // no fixed height: a second line has room
+    expect(badge.className.split(/\s+/)).toContain('min-h-7')
+    expect(badge.className.split(/\s+/)).not.toContain('h-7')
+    const box = badge.querySelector('[data-part="words"]') as HTMLElement
+    expect(box.className.split(/\s+/)).toEqual(expect.arrayContaining(['flex', 'flex-wrap']))
+    const parts = [...box.children].filter((el) => el.getAttribute('data-part') !== 'family')
+    expect(parts.map((el) => el.textContent?.trim())).toEqual([...words])
+    for (const part of parts) expect(part.className.split(/\s+/)).toContain('whitespace-nowrap')
+  })
+
+  it('lets the badge and the initial move under the lockup together when the row is short', async () => {
+    routeFetch({ '/family/api/me': ok(meOf('child')) })
+    mount('/family')
+    const bar = await screen.findByTestId('family-bar')
+    const classes = bar.className.split(/\s+/)
+    expect(classes).toContain('flex-wrap')
+    expect(classes).not.toContain('h-[3.25rem]')
+    const who = within(bar).getByTestId('family-who')
+    expect(who.contains(screen.getByTestId('family-badge'))).toBe(true)
+    expect(who.contains(screen.getByRole('img', { name: 'Signed in as member_one' }))).toBe(true)
   })
 
   it('never shortens a viewer badge', () => {
