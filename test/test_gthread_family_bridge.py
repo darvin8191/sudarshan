@@ -11,8 +11,10 @@ after them is the production code, talking to a stand-in admin door that opens e
 
 Held: twelve cold owner reads at once each answer for themselves and each reaches the service
 once; one sealed internal request sent twelve times at once is taken exactly once; twelve
-different internal requests at once each read their own lists from a real database; and the write
-limit lets exactly its count through when the writes arrive together.
+different internal requests at once each read their own lists from a real database; the write
+limit lets exactly its count through when the writes arrive together; and twelve lists shared at
+once are all noted in OpenAlgo's note of shared lists (review M3: the note is read, changed and
+written back, a check-then-act that loses shares without its lock).
 
 Linux with gunicorn installed only (the production server); skipped elsewhere.
 """
@@ -74,6 +76,16 @@ APP = textwrap.dedent(
                                           items=[{"symbol": f"SYM{i}", "exchange": "NSE"}])
     watchlist_db.db_session.remove()
 
+    def note_all(shares):  # M3 (feat/family-c): each list shared with member 2 by the owner
+        for row in watchlist_db.get_watchlists("owner"):
+            made = bridge._list_made(str(row["id"]))[1]
+            shares[f"t{row['id']}"] = {"list": row["id"], "made": made, "member": 2,
+                                       "role": None, "until": None}
+        return True
+
+    bridge._note_change(note_all)
+    watchlist_db.db_session.remove()
+
     @app.teardown_appcontext
     def release(exception=None):
         from utils.db_sessions import remove_all_scoped_sessions
@@ -88,6 +100,10 @@ APP = textwrap.dedent(
     def lists():
         found = {row["name"]: row["id"] for row in watchlist_db.get_watchlists("owner")}
         return jsonify(found)
+
+    @app.route("/note")
+    def note():
+        return jsonify(sorted(k for k in bridge._note() if not k.startswith("t")))
 
     @app.route("/login")
     def login():
@@ -146,8 +162,15 @@ class FamilyDoor:
                               if k not in ("op", "nonce", "principal")}  # fmt: skip
                     with door.lock:
                         door.calls.append((op, fields))
+                        share_id = 100 + len(door.calls)
                     time.sleep(0.05)  # long enough for the other threads to be in flight
-                    answer = {"status": "success", "data": {"op": op, "fields": fields}}
+                    data = {"op": op, "fields": fields}
+                    if op == "share_set":  # the service's Share, which the bridge notes (M3)
+                        data = {"id": share_id, "kind": fields["kind"], "ref": fields["ref"],
+                                "member_id": fields.get("member_id"), "role": fields.get("role"),
+                                "level": fields["level"], "expires_at": None, "created_at": 1,
+                                "version": 1}  # fmt: skip
+                    answer = {"status": "success", "data": data}
                     status = 200
                 else:
                     answer = {"status": "error", "code": "forbidden", "message": "Refused."}
@@ -187,6 +210,7 @@ class Server:
             DATABASE_URL=f"sqlite:///{tmp_path}/openalgo-test.db",
             LOG_DIR=str(tmp_path / "log"),
             SUDARSHAN_FAMILY_API_URL=door.url,
+            SUDARSHAN_VAULT_DB=str(tmp_path / "vault" / "vault.db"),  # the note of shared lists
         )
         self.port = _free_port()
         self.log = tmp_path / "gunicorn.log"
@@ -290,7 +314,8 @@ def internal_blob(list_ids) -> bytes:
     from sudarshan.vault import FAMILY_INTERNAL_INFO, fernet_for
 
     return seal(fernet_for(PEPPER, FAMILY_INTERNAL_INFO), "watchlists",
-                principal="sudarshan-family", list_ids=list_ids)  # fmt: skip
+                principal="sudarshan-family", list_ids=list_ids, member_id=2,
+                role="viewer")  # fmt: skip
 
 
 def test_the_harness_sees_a_lost_update_in_a_counter_that_checks_then_acts():
@@ -397,3 +422,23 @@ def test_the_write_limit_lets_exactly_its_count_through_when_writes_arrive_toget
     refused = [json.loads(body) for status, body, _ in results if status == 429]
     assert {(r["code"], r["status"]) for r in refused} == {("busy", "error")}
     assert len(door.calls) == 30  # a refused write never reached the service
+
+
+def test_twelve_lists_shared_at_once_are_all_noted(server, door):
+    """Review M3 (feat/family-c): each share the service confirms is noted in OpenAlgo's note of
+    shared lists, which is read, changed and written back: twelve at once must all be there."""
+    headers = server.login()
+    _, payload, _ = server.request("GET", "/lists")
+    ids = json.loads(payload)
+    results = at_once(
+        12,
+        lambda i: server.request(
+            "POST",
+            "/sudarshan/family/api/share_set",
+            {"kind": "watchlist", "ref": str(ids[f"List {i}"]), "role": "child", "level": "view"},
+            headers,
+        ),
+    )
+    assert [status for status, _, _ in results] == [200] * 12, results
+    _, payload, _ = server.request("GET", "/note")
+    assert json.loads(payload) == sorted(str(101 + i) for i in range(12))

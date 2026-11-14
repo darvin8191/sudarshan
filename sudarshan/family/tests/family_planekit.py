@@ -21,7 +21,7 @@ from cryptography.fernet import Fernet
 from sudarshan.autologin.handoff import HandoffRejected, NonceBook, open_sealed
 from sudarshan.autologin.schedule import IST
 from sudarshan.family import sessions
-from sudarshan.family.contract import COOKIE
+from sudarshan.family.contract import COOKIE, INTERNAL_PATH
 
 #: The portfolio's family ops and principal (a test holds them to sudarshan/portfolio/core/kinds).
 FAMILY_OPS = ("state", "summary", "tab_get", "performance", "upstox_book", "upstox_history",
@@ -280,3 +280,82 @@ class FakeFeed:
 def frame(ltp: float, close: float = 100.0, ltt: int = 1_763_265_600_000) -> dict:
     """A feed frame in ltpc mode."""
     return {"ltp": ltp, "cp": close, "ltt": ltt, "ltq": 1, "ts_recv": ltt + 5}
+
+
+# ---- F7: OpenAlgo's internal watchlist route ------------------------------------------------------
+def list_row(n: int, exchange: str = "NSE") -> dict[str, Any]:
+    """A row of a shared list as OpenAlgo's internal route answers it (synthetic)."""
+    return {"symbol": f"LIST{n}", "exchange": exchange, "instrument_key": f"NSE_EQ|LIST{n:07d}",
+            "name": f"List Stock {n}", "tick_size": 0.05, "lot_size": 1}  # fmt: skip
+
+
+class FakeOpenAlgo:
+    """OpenAlgo's internal watchlist route as the family service meets it: the seal opened with the
+    internal key (60 s, once), op ``watchlists``, principal ``sudarshan-family``, the member it is
+    for named. Like the real one (review M3), it answers only the lists its own note (``shared``:
+    ``("member", id, list)`` or ``("role", role, list)``) gives that member or role, and every
+    other id as gone (``("all", None, list)``: every member's). ``down``: each request is answered
+    500. ``calls`` holds what each asked."""
+
+    def __init__(self, fernet: Fernet):
+        self.fernet = fernet
+        self.lists: dict[int, dict[str, Any]] = {}
+        self.shared: set[tuple[str, Any, int]] = set()
+        self.calls: list[dict[str, Any]] = []
+        self.refused: list[str] = []
+        self.down = False
+        self.nonces = NonceBook(4096)
+        self.server: asyncio.Server | None = None
+
+    def add(self, list_id: int, name: str, rows: list[dict[str, Any]]) -> None:
+        self.lists[list_id] = {"name": name, "created_at": "2026-11-02 09:15:00", "rows": rows}
+
+    async def start(self) -> str:
+        self.server = await asyncio.start_server(self._serve, "127.0.0.1", 0)
+        return f"http://127.0.0.1:{self.server.sockets[0].getsockname()[1]}"
+
+    async def close(self) -> None:
+        if self.server is not None:
+            self.server.close()
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(self.server.wait_closed(), 2)
+
+    async def _serve(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        try:
+            head = await reader.readuntil(b"\r\n\r\n")
+            lines = head.decode("latin-1").split("\r\n")
+            path = lines[0].split(" ")[1]
+            length = next(int(v) for k, _, v in (line.partition(":") for line in lines[1:])
+                          if k.strip().lower() == "content-length")  # fmt: skip
+            body = await reader.readexactly(length)
+            status, payload = self._judge(body) if path == INTERNAL_PATH else (404, {})
+            data = json.dumps(payload).encode()
+            writer.write(f"HTTP/1.1 {status} X\r\nContent-Type: application/json\r\n"
+                         f"Content-Length: {len(data)}\r\nConnection: close\r\n\r\n".encode() + data)  # fmt: skip
+            await writer.drain()
+        finally:
+            writer.close()
+
+    def _judge(self, body: bytes) -> tuple[int, Any]:
+        refused = {"status": "error", "code": "forbidden", "message": "refused"}
+        try:
+            message = open_sealed(self.fernet, body, op="watchlists", seen=self.nonces)
+        except HandoffRejected as exc:
+            self.refused.append(str(exc))
+            return 403, refused
+        if message.get("principal") != "sudarshan-family":
+            self.refused.append("principal")
+            return 403, refused
+        member_id, role, ids = message.get("member_id"), message.get("role"), message["list_ids"]
+        self.calls.append({"list_ids": ids, "member_id": member_id, "role": role})
+        if self.down:
+            return 500, {"status": "error", "code": "failed", "message": "Not now."}
+        found, gone = [], []
+        for list_id in ids:
+            mine = {("member", member_id, list_id), ("role", role, list_id),
+                    ("all", None, list_id)} & self.shared  # fmt: skip
+            if list_id in self.lists and mine:
+                found.append({"id": list_id, **self.lists[list_id]})
+            else:
+                gone.append(list_id)
+        return 200, {"status": "success", "data": {"lists": found, "gone": gone}}

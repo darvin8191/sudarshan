@@ -27,12 +27,15 @@ and one call out, the family service's only route into OpenAlgo (lane FB serves 
 
     POST /sudarshan/family/internal/watchlists   one token sealed for ``watchlists`` under
                           ``sudarshan/family/internal/v1``, principal ``sudarshan-family``, with
-                          1 to 50 distinct ``list_ids`` (at most 4 KiB); the answer names each list
-                          found with its ``created_at`` (OpenAlgo reuses a deleted list's id, so a
-                          share is tied to the id and the ``created_at`` together) and the ids gone
+                          1 to 50 distinct ``list_ids`` and the member they are for (``member_id``,
+                          ``role``), at most 4 KiB; the answer names each list OpenAlgo's own note
+                          says the owner shared with that member or role, with its ``created_at``
+                          (OpenAlgo reuses a deleted list's id, so a share is tied to the id and the
+                          ``created_at`` together), and every other id as gone (F7, review M3)
 
-The sealed doors and /health refuse a request that carries X-Forwarded-For, X-Forwarded-Proto or
-X-Real-IP with 404: nginx sets them, and nothing it forwards may reach those doors.
+The sealed doors and /health refuse a request that carries any header in ``FORWARDED_HEADERS`` with
+404: nginx sets them, and nothing it forwards may reach those doors. OpenAlgo's internal route
+refuses the same list (review L7).
 
 Every answer is an envelope: ``{"status": "success", "data": ...}`` or ``{"status": "error",
 "code": ..., "message": ..., "field": ...}`` with the message in the reader's words. Switched off,
@@ -65,8 +68,10 @@ WS_PATH = "/family/ws"
 ADMIN_PREFIX = "/v1/admin/"
 NUDGE_PATH = "/v1/nudge"
 HEALTH_PATH = "/health"
-#: Headers nginx sets: their presence on a sealed door or /health answers 404.
-FORWARDED_HEADERS = ("X-Forwarded-For", "X-Forwarded-Proto", "X-Real-IP")
+#: Headers nginx sets: their presence on a sealed door or /health answers 404. L7 (feat/family-c):
+#: the five OpenAlgo's internal route refuses, one list for both (the bridge reads this one).
+FORWARDED_HEADERS = ("X-Forwarded-For", "X-Real-IP", "Forwarded", "X-Forwarded-Proto",
+                     "X-Forwarded-Host")  # fmt: skip
 COOKIE = "__Host-sudarshan_family"
 CSRF_COOKIE = "__Host-sudarshan_family_csrf"
 CSRF_HEADER = "X-Family-CSRF"
@@ -412,8 +417,11 @@ ADMIN_OPS = (
     SealedOp("share_remove", "id:int, version:int", "Done"),
 )  # fmt: skip
 NUDGE_OPS = (SealedOp("nudge", "kind:NudgeKind, sandbox:bool, at:int", "NudgeTaken"),)
-#: The one call out: ``list_ids`` are 1 to ``LIMITS["internal_lists"]`` distinct positive ids.
-INTERNAL_OPS = (SealedOp("watchlists", "list_ids:int[]", "InternalWatchlists"),)
+#: The one call out: ``list_ids`` are 1 to ``LIMITS["internal_lists"]`` distinct positive ids, for
+#: one member (F7, review M3: OpenAlgo answers only what its own note shares with them).
+INTERNAL_OPS = (
+    SealedOp("watchlists", "list_ids:int[], member_id:int, role:Role", "InternalWatchlists"),
+)
 
 VIEWER_OP_NAMES = tuple(op.name for op in VIEWER_OPS)
 ADMIN_OP_NAMES = tuple(op.name for op in ADMIN_OPS)

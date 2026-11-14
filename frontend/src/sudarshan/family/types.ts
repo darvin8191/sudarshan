@@ -751,6 +751,8 @@ export interface AdminNudgeReq {
 
 export interface InternalWatchlistsReq {
   list_ids: number[]
+  member_id: number
+  role: Role
 }
 
 export interface ViewerOps {
