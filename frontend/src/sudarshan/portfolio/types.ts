@@ -2004,7 +2004,10 @@ export interface TaxCharges {
 
 /** A sale the paper does not compute (a manual asset, a fund that is not equity). */
 export interface TaxSaleOutside {
+  /** The ISIN of what trades on the exchange; a contract or a manual asset names itself. */
   instrument: string
+  /** What the ISIN is (an ETF, a REIT, a gold bond), where a record names it; else null or absent. */
+  name?: string | null
   day: Day
   amount_paise: Paise
 }
