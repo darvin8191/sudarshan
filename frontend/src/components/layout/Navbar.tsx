@@ -195,12 +195,17 @@ export function Navbar({ fluid = false }: NavbarProps = {}) {
         {/* Wordmark: both scripts at every width (owner rule 2). SUDARSHAN: it is the one part of
             the row that gives way (`min-w-0`, and the lockup's own rule in theme.css), so a wider
             account end (Analyze, the kill switch chip, a fallback font) never widens the page. */}
-        <Link
-          to="/dashboard"
-          className="ml-1 mr-2 flex min-h-12 min-w-0 items-center rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-ring md:ml-0 md:mr-6 md:shrink-0"
-        >
-          <BrandLockup />
-        </Link>
+        {/* SUDARSHAN (v0.13.0 delta review L5): the room the account controls leave is measured
+            here (`sd-lockup-room`, a size container on a phone), so the Latin name tightens its
+            tracking to fit it and is never cut mid-word. */}
+        <div className="sd-lockup-room ml-1 mr-2 flex min-w-0 flex-1 md:ml-0 md:mr-6 md:flex-none md:shrink-0">
+          <Link
+            to="/dashboard"
+            className="flex min-h-12 min-w-0 items-center rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <BrandLockup />
+          </Link>
+        </div>
 
         {/* Desktop Navigation: text tabs, the current page underlined on the
             bar's bottom edge.
