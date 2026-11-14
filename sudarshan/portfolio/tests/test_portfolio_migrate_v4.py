@@ -16,6 +16,9 @@ from sudarshan.portfolio.store import DB_FILENAME, PortfolioStore
 NOW = 1_794_296_000_000
 FIXTURE = Path(__file__).parent / "fixtures" / "v050_store.sql"
 OWNED = ("member", "account", "tab", "asset", "activity", "price_point", "tab_liability")
+#: The latest step, and the steps from 4 on that a file at step 3 still needs (later steps stack).
+LATEST = migrations.LATEST
+LATER = list(range(4, LATEST + 1))
 
 
 @pytest.fixture(autouse=True)
@@ -42,8 +45,8 @@ def status(path, capsys):
     return capsys.readouterr().out
 
 
-def test_step_four_is_the_latest_and_adds_two_tables_and_nothing_else():
-    assert [n for n, _ in migrations.STEPS][-1] == migrations.LATEST == 4
+def test_step_four_adds_two_tables_and_nothing_else():
+    assert 4 in dict(migrations.STEPS) and migrations.LATEST >= 4
     assert set(migrations.V4) and all(
         "tab_share" in s or "member_privacy" in s for s in migrations.V4
     )
@@ -52,12 +55,12 @@ def test_step_four_is_the_latest_and_adds_two_tables_and_nothing_else():
 def test_an_empty_file_gets_the_two_tables_with_their_rules(tmp_path, capsys):
     path = tmp_path / "s" / DB_FILENAME
     assert (
-        "file none, code 4" in status(path, capsys) and not path.exists()
+        f"file none, code {LATEST}" in status(path, capsys) and not path.exists()
     )  # --status makes nothing
     opened = PortfolioStore(path, now=NOW)
     opened.close()
     assert {"tab_share", "member_privacy"} <= tables(path)
-    assert rows(path, "PRAGMA user_version") == [(4,)]
+    assert rows(path, "PRAGMA user_version") == [(LATEST,)]
     with sqlite3.connect(path) as conn:
         conn.execute("INSERT INTO tab_share (principal, tab_id, viewer, level, created_at, updated_at)"
                      " VALUES ('owner', 1, '7', 'view', 1, 1)")  # fmt: skip
@@ -89,7 +92,7 @@ def test_the_step_is_idempotent_and_a_second_open_does_nothing(tmp_path):
         migrations._v4(conn)
         migrations._v4(conn)
     again.close()
-    assert rows(path, "PRAGMA user_version") == [(4,)]
+    assert rows(path, "PRAGMA user_version") == [(LATEST,)]
 
 
 def test_a_populated_copy_forced_back_to_step_three_keeps_every_owner_row(tmp_path, capsys):
@@ -108,17 +111,17 @@ def test_a_populated_copy_forced_back_to_step_three_keeps_every_owner_row(tmp_pa
     before = snapshot(path)
     assert before["tab"] and before["activity"], "the fixture must carry owner data"
     said = status(path, capsys)
-    assert "version: file 3, code 4" in said and "pending: [4]" in said
+    assert f"version: file 3, code {LATEST}" in said and f"pending: {LATER}" in said
     assert snapshot(path) == before  # --status wrote nothing
     assert not ({"tab_share", "member_privacy"} & tables(path))
     opened = PortfolioStore(path, now=NOW)
-    assert opened.applied == [4]
+    assert opened.applied == LATER
     opened.close()
     assert snapshot(path) == before
     assert {"tab_share", "member_privacy"} <= tables(path)
     assert rows(path, "SELECT count(*) FROM tab_share") == [(0,)]
-    assert rows(path, "PRAGMA user_version") == [(4,)]
-    assert "version: file 4, code 4" in status(path, capsys)
+    assert rows(path, "PRAGMA user_version") == [(LATEST,)]
+    assert f"version: file {LATEST}, code {LATEST}" in status(path, capsys)
 
 
 def test_a_file_a_newer_release_wrote_is_refused(tmp_path, capsys):
@@ -126,7 +129,7 @@ def test_a_file_a_newer_release_wrote_is_refused(tmp_path, capsys):
     PortfolioStore(path, now=NOW).close()
     store_module.stop()
     with sqlite3.connect(path) as conn:
-        conn.execute("PRAGMA user_version = 5")
+        conn.execute(f"PRAGMA user_version = {LATEST + 1}")
     with pytest.raises(migrations.SchemaTooNew):
         PortfolioStore(path, now=NOW)
     assert migrate.main(["--status", "--path", str(path)]) == 2

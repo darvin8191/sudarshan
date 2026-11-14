@@ -365,6 +365,14 @@ two exists in this release. Each purpose has its own principal and its own list 
   got from retrieve-all, get-trades-for-day and order history. Read it with
   `journalctl -u sudarshan-portfolio | grep "Analytics Token probe"`.
 * **Schema step 4** adds `tab_share` and `member_privacy`.
+* **Schema step 5** (phase P7, one step for the whole phase) adds `owner_setting`, the tax inputs
+  (`tax_opening_lot`, `tax_fmv`, `tax_carry`, `tax_day_override`, `tax_trade_mark`), Upstox's
+  corporate actions (`ca_event`, `ca_read`: public facts, no principal) with the owner's
+  `ca_decision`, `dividend_line` and `goal`, and the column `account.tax_mode`, filled when it is
+  made from each account's own kind (Upstox counts by its reports, every other account by its
+  ledger) and never over a mode already there; an account made later counts by the same rule
+  (`migrations.tax_mode_of`). The deploy's copy of `portfolio.db`, taken before the step runs, is
+  the rollback.
 
 ### Phase P7: tax, insights and goals behind three switches
 
