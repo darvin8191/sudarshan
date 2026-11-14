@@ -115,6 +115,7 @@ export type AuditKind =
   | 'view'
   | 'digest_sent'
   | 'check_failed'
+  | 'notice_dropped'
 export type BotState = 'polling' | 'token_missing' | 'token_refused'
 export type ErrorCode = keyof typeof ERROR_STATUS
 

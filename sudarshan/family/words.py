@@ -74,6 +74,10 @@ WORDS: dict[str, str] = {
         "The family data cannot be read on the server just now. Check that the server has free "
         "disk space; the family view tries again at its next start."
     ),
+    # F10 (feat/family-t2): design 6.7, word for word
+    "push_failing": (
+        "Notifications may not arrive on this phone. Turn them off and on again in Settings."
+    ),
 }
 
 

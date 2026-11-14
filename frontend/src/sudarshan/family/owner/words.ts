@@ -128,6 +128,7 @@ export const AUDIT_WORDS: Record<AuditKind, string> = {
   view: 'Screen opened',
   digest_sent: 'Daily summary sent',
   check_failed: 'Install check failed',
+  notice_dropped: 'Notification dropped: quiet hours or failures outlasted it',
 }
 
 export const SENT_OK = 'Done.'

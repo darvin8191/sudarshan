@@ -21,7 +21,7 @@ import secrets
 from dataclasses import dataclass
 from typing import Any
 
-from . import audit
+from . import audit, words
 from .contract import LIMITS
 from .errors import FamilyError, Invalid, NotFound
 from .store import Tx
@@ -189,7 +189,9 @@ def rename(tx: Tx, member_id: int, device_id: Any, label: Any, now: int) -> None
                  member_id=member_id, session=row["id_hash"])  # fmt: skip
 
 
-def device(row: dict[str, Any], current: str | None = None) -> dict[str, Any]:
+def device(
+    row: dict[str, Any], current: str | None = None, notifications: str | None = None
+) -> dict[str, Any]:  # F10 (feat/family-t2)
     """A session row as the device list shows it (the contract's ``Device``)."""
     return {
         "id": row["id_hash"][:16],
@@ -198,7 +200,7 @@ def device(row: dict[str, Any], current: str | None = None) -> dict[str, Any]:
         "last_seen_at": row["last_seen_at"],
         "place": row["ip_hash"][:8] if row["ip_hash"] else None,
         "current": row["id_hash"] == current,
-        "notifications": None,
+        "notifications": notifications,
     }
 
 
@@ -206,7 +208,20 @@ def devices(tx: Tx, member_id: int, now: int, current: str | None = None) -> lis
     """The member's live devices, the one asking first, then the most recently used."""
     rows = tx.sessions_live(member_id, now)
     rows.sort(key=lambda r: (r["id_hash"] != current, -r["last_seen_at"]))
-    return [device(r, current) for r in rows]
+    marked = push_marks(tx, member_id)  # F10 (feat/family-t2)
+    return [device(r, current, marked.get(r["id_hash"])) for r in rows]
+
+
+#: F10 (feat/family-t2): failures in a row that mark a phone's notifications (push.FAILING_AFTER).
+PUSH_FAILURES = 3
+
+
+def push_marks(tx: Tx, member_id: int) -> dict[str, str]:
+    """The member's phones whose notifications failed three times in a row, by session hash,
+    with the sentence their device list shows (design 6.7)."""
+    return {r["session_hash"]: words.say("push_failing")
+            for r in tx.rows("push_subscription", member_id=member_id)
+            if r.get("session_hash") and int(r["failures"] or 0) >= PUSH_FAILURES}  # fmt: skip
 
 
 def prune(tx: Tx, now: int) -> int:

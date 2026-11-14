@@ -167,6 +167,7 @@ AUDIT_KINDS = (
     "view",
     "digest_sent",
     "check_failed",
+    "notice_dropped",  # F10 (feat/family-t2): a message dropped (quiet hours outlasted it, say)
 )
 
 # ---- errors -----------------------------------------------------------------------------------
@@ -216,6 +217,7 @@ WORD_KEYS = (
     "password_changed",
     "signed_out_everywhere",
     "store_failed",
+    "push_failing",  # F10 (feat/family-t2): a phone's device line after three failures in a row
 )
 
 PRIMITIVES = ("string", "int", "number", "bool", "json")

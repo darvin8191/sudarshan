@@ -8,8 +8,8 @@ runs as its own account and can read none of the owner's secrets.
 Status: on this branch (`feat/family-a`): the contract (F0), the store (F1), the accounts (F3), the
 service and its unit (F2), the viewer API for sign-in and the member's own account (F4), and the
 owner's notices, the store's nightly copy and the audit op (F11). On `feat/family-t2`: the family
-bot (F8, "Channels" below). The data plane, the WebSocket dialect and Web Push are other lanes;
-their routes answer "not ready" until they land.
+bot (F8), Web Push, quiet hours, the day's summary and the outbox (F10; "Channels" below). The
+data plane and the WebSocket dialect are other lanes; their routes answer "not ready" until they land.
 `sudarshan/STATUS.md` has one row per feature. The service ships switched off
 (`SUDARSHAN_FAMILY=off`).
 
@@ -77,6 +77,7 @@ The one-time set-up that makes the account, the folders and the firewall allow-l
 | `notices.py`, `backup.py` | the owner's notices, the store's copy for the nightly backup | F11 |
 | `derive.py`, `check.py` | the one-time set-up's pieces (the deploy runs them) | O2' |
 | `bot.py`, `bot_words.py`, `telegram_client.py`, `quiet.py` (market hours) | the family bot: link codes, the read-only command table, two languages, its own pacer per chat | F8 |
+| `push.py`, `quiet.py`, `digest.py`, `outbox.py`, `timers.py` | Web Push, quiet hours and Settings, the day's summary, the outbox, and the `channels` job that runs them with the bot | F10 |
 
 ## Channels
 
@@ -141,3 +142,29 @@ mistyped; in @BotFather send `/token` (or `/revoke`, if it may have leaked), the
 the new one. You also get one Telegram notice from the owner's bot when Telegram refuses a token.
 If the service's journal says another program is using the token, a second copy of the bot is
 running somewhere: stop it, or revoke the token and save a new one.
+
+### Web Push, quiet hours and the day's summary (F10, M10.6, M10.9, M20.4)
+
+A member turns notifications on per phone in Settings; the phone subscribes with this service's
+own key (`vapid_public.txt`; the pair is made once by the provision step and held only here). Each
+subscription is checked before it is kept: a known push service (Google, Mozilla, Apple, Microsoft),
+https, no numeric address. A phone that signs out gets nothing more; three failed sends in a row
+mark the phone ("Notifications may not arrive on this phone") and tell the owner once.
+
+| message | when | push | Telegram | quiet hours |
+|---|---|---|---|---|
+| sign-in notice (a new phone, a locked sign-in) | at once | urgency high, topic `security-<kind>` | yes, when linked | never quiet |
+| the day's summary | the last close + 25 min on trading days (16:05; 16:10 from 7 Dec 2026) | urgency low, TTL 6 h, topic `digest-<day>` | when chosen | held to the window's end inside its 6 h, else dropped with an audit line |
+| a test (Settings, Send a test) | at once, this phone and the chat | urgency normal, TTL 60 s | when linked | never quiet |
+
+Quiet hours are 21:00 to 08:00 unless the member changes them (Settings, or `/quiet on|off`). A
+child is quiet outside the market session as well, so a child's 16:05 summary is dropped (with an
+audit line) as the rules stand. The summary is six lines at most, through the member's privacy,
+in their language: the day, the indices, positions (P&L when shown), the holdings' move today (when
+P&L is shown), the journal's trades count (Y16: when orders are shown; won and lost with P&L too)
+and the next trading day. Its text is made when it is sent, never stored; a summary the service
+missed runs at its next start until 21:00, then the day is recorded as skipped.
+
+`SUDARSHAN_FAMILY_JOURNAL_URL` (default `http://127.0.0.1:5586`) is where the summary asks the
+journal for the day's counts; without the journal's family key (`seal-journal-family.key`) or an
+answer, the summary goes without that line.

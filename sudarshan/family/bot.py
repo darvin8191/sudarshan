@@ -48,9 +48,10 @@ from sudarshan.tasks import cancel_and_wait
 
 from . import audit, sessions
 from . import bot_words as words
+from .bot_words import Refused
 from .errors import FamilyError
 from .listener import Response
-from .quiet import MarketHours, day_of
+from .quiet import MarketHours, day_of, quiet_of
 from .telegram_client import (
     BAD_REQUEST,
     BLOCKED,
@@ -95,8 +96,6 @@ WARN_EVERY_S = 600.0
 SEND_TRIES = 3
 #: Telegram's own limit: one message a second to a chat (Y43).
 CHAT_GAP_S = 1.0
-#: The page's sentences for a link that cannot be made (English: the app stays in English).
-NOT_SET_UP = "The family bot is not set up on the server yet. Ask the account owner."
 
 Sleep = Callable[[float], Awaitable[None]]
 
@@ -130,14 +129,6 @@ def parse(text: Any, username: str | None = None) -> tuple[str | None, str]:
     if not name or not name.isascii() or not name.replace("_", "").isalnum():
         return None, ""
     return name.lower(), rest.strip()
-
-
-class Refused(FamilyError):
-    """A viewer route's refusal with a sentence of this module's own."""
-
-    def __init__(self, code: str, text: str):
-        super().__init__(code)
-        self.args = (text,)
 
 
 class Bot:
@@ -643,7 +634,7 @@ class Bot:
 
         def change(tx) -> dict[str, Any]:
             now, row = self.clock(), tx.member(member["id"])
-            quiet = {**default_quiet(), **(row.get("quiet") or {}), "digest": on, "alerts": on}
+            quiet = {**quiet_of(row), "digest": on, "alerts": on}
             tx.member_change(row["id"], row["version"], {"quiet": quiet}, now)
             audit.record(tx, at=now, actor=audit.member_actor(row["id"]), kind="member_updated",
                          member_id=row["id"], detail={"fields": ["quiet"], "via": "telegram"})  # fmt: skip
@@ -766,7 +757,7 @@ class Bot:
     async def route_telegram_link(self, request: Any, args: dict, session: Any) -> Response:
         """A one-time link for the member's Telegram: ``TelegramLink``."""
         if not self.ready:
-            raise Refused("not_ready", NOT_SET_UP)
+            raise Refused("not_ready", words.PAGE["bot_not_set_up"])
         code, now = secrets.token_urlsafe(LINK_CODE_BYTES), self.clock()
         ends, member_id = now + LINK_MS, session.member_id
 
@@ -791,11 +782,6 @@ class Bot:
         if now - self._warned.get(kind, -1e9) >= WARN_EVERY_S:
             self._warned[kind] = now
             log.warning(text)
-
-
-def default_quiet() -> dict[str, Any]:
-    """Quiet hours when a member has not chosen (design 2.6, decision 11)."""
-    return {"from": "21:00", "to": "08:00", "digest": True, "alerts": True}
 
 
 def install_check(etc_dir: Path) -> dict[str, Any]:
@@ -842,41 +828,3 @@ def hook_notices(service: Any, on_notice: Callable[..., None]) -> None:
             log.exception("a family notice could not be passed to the channels")
 
     service.accounts.notify = both
-
-
-class Seat:
-    """What the service holds of the bot: the admin ``state`` blocks and /health."""
-
-    def __init__(self, bot: Bot):
-        self.bot = bot
-
-    def admin_blocks(self) -> dict[str, Any]:
-        return {"bot": self.bot.report(), "check": install_check(self.bot.service.settings.etc_dir)}
-
-    def health(self) -> dict[str, Any]:
-        return {"bot": self.bot.health()}
-
-
-def install(service: Any) -> Seat:
-    """Seat the bot in the service: the two Telegram routes, the removal notice and the job
-    ``channels`` (which closes its HTTP client when it ends)."""
-    made = build(service)
-    service.viewer._telegram_link = made.route_telegram_link
-    service.viewer._telegram_unlink = made.route_telegram_unlink
-
-    def heard(kind: str, member: Any = None, **facts: Any) -> None:
-        if kind == "member_removed" and member:
-            made.member_removed(member)
-
-    hook_notices(service, heard)
-
-    async def job(_service: Any) -> None:
-        http = make_http()
-        made.client = TelegramClient(http)
-        try:
-            await made.run()
-        finally:
-            await finish([http.aclose])
-
-    service._job_makers["channels"] = job
-    return Seat(made)

@@ -27,8 +27,8 @@ from sudarshan.tasks import cancel_and_wait
 
 from . import accounts as accounts_module
 from . import audit, backup, books, health, sessions, ws  # F5 (feat/family-c): books
-from . import bot as bot_module  # F8 (feat/family-t2): the family bot
 from . import store as store_module
+from . import timers as channels_module  # F8/F10 (feat/family-t2): bot, push, summary
 from .accounts import Accounts, Hasher
 from .admin_api import SealedDoors
 from .config import ConfigError, Keys, Settings, setup_logging
@@ -79,7 +79,7 @@ class FamilyService(Router):
     ):
         self.settings, self.keys = settings, keys
         self.data_plane, self.plane = data_plane, None  # F5 (feat/family-c): books.install
-        self.channels: Any = None  # F8 (feat/family-t2): the bot and its notices (bot.install)
+        self.channels: Any = None  # F8/F10 (feat/family-t2): the channels (timers.install)
         self.enabled = settings.enabled
         #: Why viewers are refused while the view is off: the switch, or the store's sentence.
         self.off_error: FamilyError | None = None if self.enabled else FamilyError("off")
@@ -298,8 +298,8 @@ class FamilyService(Router):
         # F5 (feat/family-c): the data plane, seated in the viewer API when its keys were given.
         if self.data_plane is not None and isinstance(self.viewer, ViewerApi):
             self.plane = books.install(self, self.data_plane)
-        if isinstance(self.viewer, ViewerApi):  # F8 (feat/family-t2): the family bot
-            self.channels = bot_module.install(self)
+        if isinstance(self.viewer, ViewerApi):  # F8/F10 (feat/family-t2): the channels
+            self.channels = channels_module.install(self)
 
     def _keep_off(self, error: FamilyError) -> None:
         self.enabled, self.off_error = False, error

@@ -17,6 +17,8 @@ from datetime import UTC, date, datetime
 
 from sudarshan.autologin.schedule import IST
 
+from .errors import FamilyError
+
 LANGUAGES = ("en", "gu")
 HEADER = "सुदर्शन / SUDARSHAN · Family"
 MINUS = "−"
@@ -178,6 +180,32 @@ LINES: dict[str, tuple[str, str]] = {
         "આ એક ટેસ્ટ છે. ફેમિલી વ્યૂના સંદેશા આ ચેટમાં આવે છે.",
     ),
 }
+
+#: What the family pages read from the channels' routes: English only, as the app is.
+PAGE: dict[str, str] = {
+    "bot_not_set_up": "The family bot is not set up on the server yet. Ask the account owner.",
+    "push_not_set_up": "Notifications are not set up on the server yet. Ask the account owner.",
+    "quiet_rule": "Quiet hours need a start and an end time, like 21:00 and 08:00.",
+    "test_busy": "A test was sent a moment ago. Try again in a few seconds.",
+    "test_sent": "Sent {time}",
+    "test_push_off": "Not sent: notifications are off on this phone",
+    "test_push_no_server": "Not sent: notifications are not set up on the server",
+    "test_failed": "Not sent: {reason}",
+    "test_not_linked": "Not linked",
+    "test_bot_down": "Not sent: the family bot is not running on the server",
+    "test_blocked": "Not sent: the bot is blocked in this chat. Unblock it in Telegram, then try again.",
+    "test_later": "Not sent: Telegram did not take the message. Try again in a minute.",
+}
+
+
+class Refused(FamilyError):
+    """A refusal of a channel's route with a sentence of the channels' own (``PAGE``): the code
+    gives the status, the sentence is what the page shows."""
+
+    def __init__(self, code: str, text: str, *, field: str | None = None):
+        super().__init__(code, field=field)
+        self.args = (text,)
+
 
 DAYS = (
     ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"),
