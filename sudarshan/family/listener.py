@@ -13,7 +13,11 @@ asked, so that no door can forget one:
   4 KiB, viewer 64 KiB; X9), and a chunked body is refused, so a request cannot be smuggled;
 * the head is at most 16 KiB and must arrive within 10 s;
 * a head it cannot read (a target urlsplit refuses, a length that is not ASCII digits) is answered
-  400 in words, never a traceback and a 500.
+  400 in words, never a traceback and a 500;
+* at most ``MAX_CONNECTIONS`` connections are open at a time (each holds a task and a socket until
+  it ends, a WebSocket for hours): past them a new one is answered busy at once, before its head is
+  read, and drained for a moment after the answer so that the close does not reset the connection
+  before the answer is read (review H2).
 
 A taken port raises OSError from ``start``; the service says so in words and tries again every
 minute, never another port (X2).
@@ -47,6 +51,10 @@ LOCAL_PEERS = {"127.0.0.1", "::1", "::ffff:127.0.0.1"}
 MAX_HEAD = 16 * 1024
 READ_TIMEOUT_S = 10.0
 WRITE_TIMEOUT_S = 30.0
+#: Open connections at most; a WebSocket counts as one (review H2).
+MAX_CONNECTIONS = 200
+#: How long a connection refused as busy is drained after its answer.
+LINGER_S = 1.0
 CAPS = {
     "admin": LIMITS["admin_bytes"],
     "nudge": LIMITS["nudge_bytes"],
@@ -127,10 +135,19 @@ class Router:
 
 
 class Listener:
-    def __init__(self, router: Router, *, read_timeout: float = READ_TIMEOUT_S):
+    def __init__(
+        self,
+        router: Router,
+        *,
+        read_timeout: float = READ_TIMEOUT_S,
+        max_connections: int = MAX_CONNECTIONS,
+    ):
         self.router, self.read_timeout = router, read_timeout
+        self.max_connections = max_connections
         self.server: asyncio.Server | None = None
         self._connections: set[asyncio.Task] = set()
+        self._refusing: set[asyncio.Task] = set()  # answered busy, drained for a moment
+        self.refused = 0
 
     async def start(self, port: int) -> None:
         """Bind 127.0.0.1:<port>; OSError when it is taken (never another port)."""
@@ -145,7 +162,7 @@ class Listener:
         if self.server is None:
             return
         self.server.close()
-        live = [task for task in self._connections if not task.done()]
+        live = [task for task in self._connections | self._refusing if not task.done()]
         if live:
             await asyncio.wait(live, timeout=wait_s)
         for task in live:
@@ -156,6 +173,16 @@ class Listener:
 
     async def _serve(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         task = asyncio.current_task()
+        if len(self._connections) >= self.max_connections:
+            self.refused += 1
+            if task is not None:
+                self._refusing.add(task)
+            try:
+                await _refuse(reader, writer)
+            finally:
+                if task is not None:
+                    self._refusing.discard(task)
+            return
         if task is not None:
             self._connections.add(task)
         try:
@@ -274,6 +301,21 @@ async def write(writer: asyncio.StreamWriter, response: Response) -> None:
         await asyncio.wait_for(writer.drain(), WRITE_TIMEOUT_S)
     except (ConnectionError, TimeoutError, OSError):
         writer.transport.abort()
+
+
+async def _refuse(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+    """Busy, before the head is read; then the request is drained for a moment (a close with its
+    bytes unread would reset the connection, and the answer would be lost with it)."""
+    try:
+        await write(writer, Response.refused(FamilyError("busy")))
+        if not writer.is_closing() and writer.can_write_eof():
+            writer.write_eof()
+        with contextlib.suppress(Exception):
+            async with asyncio.timeout(LINGER_S):
+                while await reader.read(MAX_HEAD):
+                    pass
+    finally:
+        await finish(writer)
 
 
 async def finish(writer: asyncio.StreamWriter) -> None:

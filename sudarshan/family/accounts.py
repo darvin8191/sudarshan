@@ -5,6 +5,13 @@
   the event loop or the store thread, and one at a time bounds the memory to one verify's. A
   sign-in name nobody has (or a member who has not joined) is verified against a fixed dummy hash
   with the same parameters, so the answer's timing does not tell names apart.
+* **The password work is bounded** (review H2: this is the one door strangers reach, on a box that
+  also runs the owner's trading): at most ``PASSWORD_SLOTS`` checks are taken at a time, running
+  or waiting, counted on the event loop that takes them. A sign-in, join or password change past
+  them is answered at once that the view is busy, before any name is looked up (so a busy answer
+  says nothing about names), and a check that waited ``PASSWORD_WAIT_S`` without starting is
+  dropped unrun with the same answer. A burst is paid for with at most that many checks, whoever
+  is still waiting for them; nginx's own limit per address is the outer layer, not this one.
 * **Codes** are TOTP (RFC 6238: 6 digits, 30 s, SHA-1, the code apps' default) accepted in a window
   of one step either side, and a step once: the last step accepted is kept per member and a code
   must be for a later one, so a code seen over a shoulder cannot be used again.
@@ -26,6 +33,7 @@ import hmac
 import re
 import secrets
 import threading
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta, timezone
@@ -51,6 +59,11 @@ TOTP_ISSUER, TOTP_LABEL = "SUDARSHAN", "Family view"
 NEW_DEVICE_MS = 90 * sessions.DAY_MS
 IST = timezone(timedelta(hours=5, minutes=30))
 THREAD_PREFIX = "family-argon2"
+#: Password checks taken at a time, running or waiting: a burst costs at most this many (H2).
+PASSWORD_SLOTS = 8
+#: A check that waited this long for the password thread is dropped unrun (the box is too busy).
+PASSWORD_WAIT_S = 5.0
+_LATE = object()
 
 Notify = Callable[..., None]  # notify(kind, member_row, **facts)
 Revoked = Callable[[list[str]], None]  # revoked(session hashes)
@@ -159,11 +172,45 @@ def stop_hasher() -> None:
 
 class Hasher:
     """argon2id on the password thread. ``verify(None, ...)`` checks the dummy hash, which is made
-    once with the same parameters and never matches anything a person can type."""
+    once with the same parameters and never matches anything a person can type.
 
-    def __init__(self, hasher: PasswordHasher | None = None):
+    ``hash`` and ``verify`` take one of ``slots`` (FamilyError ``busy`` when none is free) and give
+    it back when they end; a check still waiting after ``wait_s`` is dropped unrun (``busy`` too).
+    The slots are counted only on the event loop that awaits them, so they need no lock."""
+
+    def __init__(
+        self,
+        hasher: PasswordHasher | None = None,
+        *,
+        slots: int = PASSWORD_SLOTS,
+        wait_s: float = PASSWORD_WAIT_S,
+        clock: Callable[[], float] = time.monotonic,
+    ):
         self.argon = hasher or PasswordHasher(**ARGON2, type=Type.ID)
         self._dummy: str | None = None
+        self.slots, self.wait_s, self._clock = slots, wait_s, clock
+        self.taken = 0
+
+    def full(self) -> bool:
+        """Every slot is taken: a new check would be refused."""
+        return self.taken >= self.slots
+
+    async def _bounded(self, work: Callable[..., Any], *args: Any) -> Any:
+        if self.full():
+            raise FamilyError("busy")
+        self.taken += 1
+        deadline = self._clock() + self.wait_s
+
+        def run() -> Any:
+            return _LATE if self._clock() > deadline else work(*args)
+
+        try:
+            done = await asyncio.wrap_future(_executor().submit(run))
+        finally:
+            self.taken -= 1
+        if done is _LATE:
+            raise FamilyError("busy")
+        return done
 
     def hash_now(self, password: str) -> str:
         return self.argon.hash(password)
@@ -180,10 +227,10 @@ class Hasher:
             return False
 
     async def hash(self, password: str) -> str:
-        return await asyncio.wrap_future(_executor().submit(self.hash_now, password))
+        return await self._bounded(self.hash_now, password)
 
     async def verify(self, stored: str | None, password: str) -> bool:
-        return await asyncio.wrap_future(_executor().submit(self.verify_now, stored, password))
+        return await self._bounded(self.verify_now, stored, password)
 
     async def warm(self) -> None:
         """Make the dummy hash now, so that the first unknown name costs one verify too."""
@@ -246,6 +293,8 @@ class Accounts:
 
     async def login(self, handle: Any, password: Any, code: Any, device: Device) -> Outcome:
         now = self.clock()
+        if self.hasher.full():  # before any name is looked up: busy says nothing about names
+            raise FamilyError("busy")
         try:
             name = handle_of(handle)
         except Invalid:
@@ -314,6 +363,8 @@ class Accounts:
                    device: Device) -> Outcome:  # fmt: skip
         name = handle_of(handle)
         check_password(password)
+        if self.hasher.full():
+            raise FamilyError("busy")
         now = self.clock()
 
         def before(tx: Tx) -> None:  # refuse a dead link or a taken name before the slow hash
@@ -347,6 +398,8 @@ class Accounts:
     async def change_password(self, session: Session, current: Any, new: Any,
                               code: Any) -> Outcome:  # fmt: skip
         check_password(new)
+        if self.hasher.full():
+            raise FamilyError("busy")
         now = self.clock()
         credential = await self.store.read(
             lambda tx: tx.row("credential", member_id=session.member_id)
