@@ -138,4 +138,21 @@ describe('the money views beside the tabs', () => {
     expect(screen.queryByText(TAX_OFF)).toBeNull()
     expect(screen.getByRole('tab', { name: /Upstox/ }).getAttribute('aria-selected')).toBe('true')
   })
+
+  it('offers Export on one of the owner’s own tabs, never on the Upstox tab or a money view', async () => {
+    serve(state({ tax: true, goals: true }))
+    show('/portfolio?tab=2')
+    await userEvent.click(await screen.findByRole('button', { name: 'Export this tab' }))
+    await waitFor(() => expect(where).toBe('?tab=2&sheet=export'))
+    expect(await screen.findByRole('dialog', { name: 'Export' })).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Close' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    await userEvent.click(screen.getByRole('tab', { name: /Upstox/ }))
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: 'Export this tab' })).toBeNull()
+    )
+    await userEvent.click(screen.getByRole('tab', { name: 'Tax' }))
+    await waitFor(() => expect(where).toBe('?view=tax'))
+    expect(screen.queryByRole('button', { name: 'Export this tab' })).toBeNull()
+  })
 })

@@ -7,6 +7,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Archive,
+  Download,
   LoaderCircle,
   Plus,
   Power,
@@ -19,6 +20,7 @@ import { useMemo } from 'react'
 import { useNavigate, useSearchParams } from 'react-router'
 import { portfolioCall, problemOf, switchesOf } from '@/sudarshan/portfolio/api'
 import { CalendarView } from '@/sudarshan/portfolio/calendar/CalendarView'
+import { ExportSheet } from '@/sudarshan/portfolio/export/ExportSheet'
 import { GoalsView } from '@/sudarshan/portfolio/goals/GoalsView'
 import { RiskView } from '@/sudarshan/portfolio/risk/RiskView'
 import {
@@ -37,6 +39,7 @@ import { ActivityTab, PORTFOLIO_KEY } from '@/sudarshan/portfolio/tab/ActivityTa
 import { TabOverview } from '@/sudarshan/portfolio/tab/Overview'
 import { PerformanceTab } from '@/sudarshan/portfolio/tab/PerformanceTab'
 import { TaxView } from '@/sudarshan/portfolio/tax/TaxView'
+import { useAddressSheet } from '@/sudarshan/portfolio/tax/useTaxSheet'
 import { WORDS } from '@/sudarshan/portfolio/types'
 import { UpstoxTab } from '@/sudarshan/portfolio/upstox/UpstoxTab'
 import {
@@ -51,6 +54,7 @@ import { BottomSheet } from '@/sudarshan/watchlist/BottomSheet'
 export const PORTFOLIO_STATE_KEY = [...PORTFOLIO_KEY, 'state'] as const
 
 const CARD = 'rounded-[1.125rem] border bg-card px-4 py-6 text-center shadow-[var(--shadow-card)]'
+const EXPORT_SHEET = ['export'] as const
 /** The tab strip with nothing selected: a money view is open instead of a tab. */
 const NO_TAB = -1
 const ACTION =
@@ -122,6 +126,7 @@ export default function Portfolio() {
     after.set('view', next)
     navigate({ search: `?${after.toString()}` }, { replace: true })
   }
+  const exportSheet = useAddressSheet(EXPORT_SHEET)
   const shown = money === null && tab !== null && custom.some((t) => t.id === tab) ? tab : null
   const current = shown === null ? null : (custom.find((t) => t.id === shown) ?? null)
   const queries = useQueryClient()
@@ -293,6 +298,23 @@ export default function Portfolio() {
         </div>
       )}
       {body}
+      {/* SUDARSHAN P7 F9 (M7.40): the export of one of the owner's own tabs; never the Upstox tab. */}
+      {usable && money === null && current !== null && (
+        <button
+          type="button"
+          onClick={() => exportSheet.open('export')}
+          className={`${ACTION} border border-input bg-card hover:bg-accent`}
+        >
+          <Download aria-hidden="true" className="size-4" />
+          Export this tab
+        </button>
+      )}
+      <ExportSheet
+        open={exportSheet.sheet === 'export'}
+        onClose={exportSheet.close}
+        tab={money === null ? current : null}
+        on={moneyViews.includes('goals')}
+      />
       <NewTabSheet
         open={overlay?.kind === 'new-tab'}
         onClose={close}

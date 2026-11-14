@@ -7,17 +7,22 @@ import { useLocation, useNavigate, useSearchParams } from 'react-router'
 export const TAX_SHEETS = ['tax-sales', 'tax-inputs'] as const
 export type TaxSheet = (typeof TAX_SHEETS)[number]
 
-export function useTaxSheet(): {
-  sheet: TaxSheet | null
-  open: (name: TaxSheet) => void
+export const useTaxSheet = () => useAddressSheet(TAX_SHEETS)
+
+/** One of `names` open as a sheet, kept in the address under `sheet`. */
+export function useAddressSheet<N extends string>(
+  names: readonly N[]
+): {
+  sheet: N | null
+  open: (name: N) => void
   close: () => void
 } {
   const [params] = useSearchParams()
   const location = useLocation()
   const navigate = useNavigate()
-  const sheet = TAX_SHEETS.find((name) => name === params.get('sheet')) ?? null
+  const sheet = names.find((name) => name === params.get('sheet')) ?? null
   const pushed = (location.state as { sdTaxSheet?: unknown } | null)?.sdTaxSheet === true
-  const go = (name: TaxSheet | null, replace: boolean) => {
+  const go = (name: N | null, replace: boolean) => {
     const after = new URLSearchParams(params)
     if (name) after.set('sheet', name)
     else after.delete('sheet')
