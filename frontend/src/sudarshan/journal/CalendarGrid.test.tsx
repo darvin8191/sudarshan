@@ -25,16 +25,19 @@ describe('the month grid', () => {
 })
 
 describe('CalendarGrid', () => {
-  it('shows each day’s net as text with its sign, a true minus and an arrow, and its count', () => {
+  it('shows each day’s net as text with its sign, a true minus and a tint, and its count', () => {
     render(<CalendarGrid calendar={analytics().calendar} />)
     const cell = (day: number) =>
       screen
         .getAllByTestId('calendar-cell')
         .find((c) => c.getAttribute('data-day') === String(day)) as HTMLElement
     expect(cell(20261110).textContent).toContain('+488')
-    expect(cell(20261110).querySelector('[data-direction="up"]')).toBeTruthy()
+    expect(cell(20261110).className).toContain('--up-tint')
     expect(cell(20261112).textContent).toContain('−1k')
-    expect(cell(20261112).querySelector('[data-direction="down"]')).toBeTruthy()
+    expect(cell(20261112).className).toContain('--down-tint')
+    // review M4: no arrow in a cell this small, and nothing runs into the next cell
+    expect(cell(20261112).querySelector('svg')).toBeNull()
+    expect(cell(20261112).className).toContain('overflow-hidden')
     expect(cell(20261112).getAttribute('aria-label')).toBe('12 Nov: net −₹1,000.00, 1 trade, 0 won')
     expect(cell(20261111).getAttribute('aria-label')).toBe('11 Nov: no trades')
     expect(cell(20261111).textContent).toBe('11')

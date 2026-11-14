@@ -84,10 +84,11 @@ function FilterRow({
   const narrowed = narrowedBy(filter)
   return (
     <section aria-label="Filters" className="flex flex-col gap-2">
+      {/* Review M4: two rows of three on a phone, so Custom is never off the edge. */}
       <div
         role="tablist"
         aria-label="Period"
-        className="flex gap-1 overflow-x-auto rounded-[0.875rem] border bg-card p-1 shadow-[var(--shadow-card)]"
+        className="grid grid-cols-3 gap-1 rounded-[0.875rem] border bg-card p-1 shadow-[var(--shadow-card)] sm:flex"
       >
         {PERIODS.map((p) => {
           const on = filter.period === p.id
@@ -218,24 +219,45 @@ function FilterRow({
   )
 }
 
+/**
+ * The size of a tile's figure by its length (review M4): a lakh or a crore keeps its whole figure
+ * on one line in half a phone's width, a step smaller, rather than breaking its sign away.
+ */
+export function figureSize(text: string): string {
+  if (text.length >= 12) return 'text-[1.125rem]'
+  if (text.length >= 10) return 'text-[1.375rem]'
+  return 'text-[1.625rem]'
+}
+
 function Tile({
   label,
   note,
+  words = false,
+  size = 'text-[1.625rem]',
   children,
 }: {
   label: string
   note?: string
+  /** Words in place of a figure: Barlow, which reads lighter than the display face. */
+  words?: boolean
+  size?: string
   children: React.ReactNode
 }) {
   return (
     <div
       data-testid="tile"
-      className="flex min-h-[5.5rem] flex-col justify-between gap-1 rounded-[1.125rem] border bg-card px-3.5 py-3 shadow-[var(--shadow-card)]"
+      className="flex min-h-[5.5rem] min-w-0 flex-col justify-between gap-1 rounded-[1.125rem] border bg-card px-3.5 py-3 shadow-[var(--shadow-card)]"
     >
       <span className="text-[0.8125rem] font-semibold text-[color:var(--text-secondary)]">
         {label}
       </span>
-      <span className="sd-display text-[1.625rem] leading-none font-semibold">{children}</span>
+      {words ? (
+        <span className="text-base leading-tight font-bold">{children}</span>
+      ) : (
+        <span className={cn('sd-display leading-none font-semibold whitespace-nowrap', size)}>
+          {children}
+        </span>
+      )}
       {note && (
         <span className="text-[0.75rem] font-medium text-[color:var(--text-tertiary)]">{note}</span>
       )}
@@ -247,7 +269,7 @@ function Tile({
 function SignedFigure({ paise, word }: { paise: number; word?: boolean }) {
   const dir = directionOf(paise / PAISE_PER_RUPEE)
   return (
-    <span className={cn('inline-flex items-center gap-1', TREND_TEXT[dir])}>
+    <span className={cn('inline-flex items-center gap-1 whitespace-nowrap', TREND_TEXT[dir])}>
       <TrendArrow direction={dir} className="size-3" />
       {tileRupees(paise)}
       {word && (
@@ -266,17 +288,31 @@ function Tiles({ answer }: { answer: AnalyticsAnswer }) {
   return (
     <section aria-label="Results" className="flex flex-col gap-2">
       <div className="grid grid-cols-2 gap-2">
-        <Tile label="Net" note={`${m.trips} ${m.trips === 1 ? 'trade' : 'trades'}`}>
+        <Tile
+          label="Net"
+          note={`${m.trips} ${m.trips === 1 ? 'trade' : 'trades'}`}
+          size={figureSize(tileRupees(m.net_paise))}
+        >
           <SignedFigure paise={m.net_paise} word />
         </Tile>
-        <Tile label="Win rate" note={`${m.wins} Profit, ${m.losses} Loss, ${m.flats} Flat`}>
+        <Tile
+          label="Win rate"
+          note={`${m.wins} Profit, ${m.losses} Loss, ${m.flats} Flat`}
+          words={m.win_rate_state !== 'ok'}
+        >
           {ratioWords(m.win_rate, m.win_rate_state, '%')}
         </Tile>
-        <Tile label="Profit factor">{ratioWords(m.profit_factor, m.profit_factor_state)}</Tile>
-        <Tile label="Expectancy" note="per trade">
+        <Tile label="Profit factor" words={m.profit_factor_state !== 'ok'}>
+          {ratioWords(m.profit_factor, m.profit_factor_state)}
+        </Tile>
+        <Tile
+          label="Expectancy"
+          note="per trade"
+          size={figureSize(m.expectancy_paise === null ? '-' : tileRupees(m.expectancy_paise))}
+        >
           {m.expectancy_paise === null ? '-' : <SignedFigure paise={m.expectancy_paise} />}
         </Tile>
-        <Tile label="Average R" note={r.note}>
+        <Tile label="Average R" note={r.note} words={m.r_avg === null || m.r_known === 0}>
           {r.figure}
         </Tile>
         <Tile
@@ -286,11 +322,16 @@ function Tiles({ answer }: { answer: AnalyticsAnswer }) {
               ? `${dd.max_drawdown_pct.replace('-', '−')}% of capital`
               : undefined
           }
+          size={figureSize(tileRupees(dd.max_drawdown_paise))}
         >
           {dd.max_drawdown_paise === 0 ? 'None' : <SignedFigure paise={dd.max_drawdown_paise} />}
         </Tile>
       </div>
-      <dl className={`${SECTION} grid grid-cols-2 gap-x-4 gap-y-1.5 text-[0.9375rem]`}>
+      {/* Review M4: one column on a phone, so a figure never runs under the next label. */}
+      <dl
+        data-testid="averages"
+        className={`${SECTION} grid grid-cols-1 gap-x-4 gap-y-1.5 text-[0.9375rem] sm:grid-cols-2`}
+      >
         {[
           ['Average win', m.avg_win_paise],
           ['Average loss', m.avg_loss_paise],
@@ -304,7 +345,7 @@ function Tiles({ answer }: { answer: AnalyticsAnswer }) {
             </dd>
           </div>
         ))}
-        <div className="col-span-2 flex items-baseline justify-between gap-2">
+        <div className="flex items-baseline justify-between gap-2 sm:col-span-2">
           <dt className="font-medium text-[color:var(--text-secondary)]">
             Payoff (average win over average loss)
           </dt>
@@ -324,7 +365,7 @@ function HoldBars({ rows }: { rows: AnalyticsAnswer['hold'] }) {
         {rows.map((row) => (
           <li key={row.bucket} data-testid="hold-row" className="flex flex-col gap-1">
             <span className="flex items-baseline justify-between gap-2 text-[0.8125rem] font-semibold text-[color:var(--text-secondary)]">
-              {HOLD_BUCKET_LABELS[row.bucket]}
+              {HOLD_BUCKET_LABELS[row.bucket] ?? '-'}
               <span className="inline-flex items-baseline gap-2 text-foreground">
                 {row.trips} {row.trips === 1 ? 'trade' : 'trades'}
                 {row.trips > 0 && <Signed paise={row.net_paise} />}

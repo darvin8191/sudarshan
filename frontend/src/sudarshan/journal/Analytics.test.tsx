@@ -101,6 +101,22 @@ describe('Analytics', () => {
     expect(tile('Max drawdown').querySelector('[data-direction="down"]')).toBeTruthy()
   })
 
+  it('keeps every figure clear of its neighbour on a phone (review M4)', async () => {
+    serve(analytics({ metrics: metrics({ net_paise: 12_345_678 }) }))
+    show()
+    await screen.findAllByTestId('tile')
+    // the averages take one column on a phone, two from a wider screen
+    expect(screen.getByTestId('averages').className).toContain('grid-cols-1 ')
+    expect(screen.getByTestId('averages').className).toContain('sm:grid-cols-2')
+    // the period row wraps to two rows of three, so Custom is never off the edge
+    expect(screen.getByRole('tablist', { name: 'Period' }).className).toContain('grid-cols-3')
+    // a big net keeps its sign on its line, a step smaller
+    const net = tile('Net').children[1] as HTMLElement
+    expect(net.className).toContain('whitespace-nowrap')
+    expect(net.className).toContain('text-[1.375rem]')
+    expect(net.textContent).toContain('+₹1,23,457')
+  })
+
   it('says why a ratio has no number, and what to do for R', async () => {
     serve(
       analytics({

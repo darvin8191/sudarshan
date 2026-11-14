@@ -5,7 +5,7 @@ import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { cn } from '@/lib/utils'
 import { directionOf, formatRupees } from '@/sudarshan/dashboard/format'
-import { TREND_TEXT, TrendArrow } from '@/sudarshan/dashboard/Trend'
+import { TREND_TEXT } from '@/sudarshan/dashboard/Trend'
 import { Signed } from '@/sudarshan/portfolio/Signed'
 import { compactPaise, digitsOf, monthWords } from './analyticsWords'
 import { type Calendar, PAISE_PER_RUPEE, type PeriodRow } from './types'
@@ -77,7 +77,7 @@ function Cell({ day, row }: { day: number; row: PeriodRow | undefined }) {
       data-testid="calendar-cell"
       data-day={day}
       className={cn(
-        'flex min-h-14 flex-col items-center justify-start gap-0.5 rounded-lg border border-[color:var(--divider)] px-0.5 py-1 text-center',
+        'flex min-h-14 min-w-0 flex-col items-center justify-start gap-0.5 overflow-hidden rounded-lg border border-[color:var(--divider)] px-0.5 py-1 text-center',
         TINT[dir]
       )}
     >
@@ -85,13 +85,14 @@ function Cell({ day, row }: { day: number; row: PeriodRow | undefined }) {
         {day % 100}
       </span>
       {row && (
+        // Review M4: no arrow inside a cell this small; the sign and the tint still carry the
+        // direction, and the figure is at most five characters, so it never runs into the next.
         <span
           className={cn(
-            'inline-flex items-center gap-0.5 text-[0.75rem] leading-none font-bold',
+            'text-[0.6875rem] leading-none font-bold whitespace-nowrap',
             TREND_TEXT[dir]
           )}
         >
-          <TrendArrow direction={dir} className="size-[0.4375rem]" />
           {compactPaise(net)}
         </span>
       )}

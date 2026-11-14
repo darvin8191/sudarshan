@@ -25,7 +25,7 @@ describe('the grid’s hours and days', () => {
 })
 
 describe('HeatMap', () => {
-  it('writes each cell’s net and count as text, with a true minus and an arrow', () => {
+  it('writes each cell’s net and count as text, with a true minus and a tint', () => {
     render(<HeatMap cells={analytics().heat} />)
     const cells = screen.getAllByTestId('heat-cell')
     const named = (label: string) =>
@@ -33,12 +33,26 @@ describe('HeatMap', () => {
     const tue9 = named('Tue 9:00')
     expect(tue9.getAttribute('aria-label')).toBe('Tue 9:00: net +₹487.50, 2 trades')
     expect(tue9.textContent).toContain('+488')
-    expect(tue9.querySelector('[data-direction="up"]')).toBeTruthy()
+    expect(tue9.style.background).toContain('--up')
     const thu10 = named('Thu 10:00')
     expect(thu10.textContent).toContain('−1k')
-    expect(thu10.querySelector('[data-direction="down"]')).toBeTruthy()
+    expect(thu10.style.background).toContain('--down')
+    // review M4: no arrow in a cell this small, and nothing runs into the next cell
+    expect(thu10.querySelector('svg')).toBeNull()
+    expect(thu10.className).toContain('overflow-hidden')
     expect(named('Mon 9:00').textContent).toBe('-')
     expect(named('Mon 9:00').getAttribute('aria-label')).toBe('Mon 9:00: no trades')
+  })
+
+  it('fits the market’s seven hours on a phone, and says to swipe when there are more', () => {
+    const first = render(<HeatMap cells={analytics().heat} />)
+    const table = screen.getByRole('table')
+    expect(table.className).not.toContain('min-w-')
+    expect(table.style.minWidth).toBe('16rem')
+    expect(screen.queryByText(/Swipe the grid sideways/)).toBeNull()
+    first.unmount()
+    render(<HeatMap cells={[{ weekday: 0, hour: 18, trips: 1, net_paise: 100 }]} />)
+    expect(screen.getByText('Swipe the grid sideways for the other hours.')).toBeTruthy()
   })
 
   it('says what it is for before there is a trade', () => {
