@@ -209,9 +209,11 @@ def test_the_state_after_an_order():
 
 
 @pytest.mark.parametrize(
-    ("fired_s", "mark"), [(500, 500), (502, 502), (503, 502), (507, 502), (2_592_502, 502)]
+    ("fired_s", "mark"),
+    [(500, 500), (502, 502), (503, 503), (507, 507), (508, 502), (2_592_502, 502)],
 )
-def test_h2_the_mark_an_alert_leaves_never_runs_ahead_of_the_servers_clock(fired_s, mark):
+def test_h2_the_mark_an_alert_leaves_never_runs_past_the_slack_ahead_of_the_clock(fired_s, mark):
+    """N3: up to the 5 s slack ahead the mark is the alert's own time; further ahead it is now."""
     alert = m.Alert(position="flat", fired_s=fired_s)
     assert rules.mark_of(alert, AT) == mark
     for verdict in sorted(m.MOVED):
@@ -240,6 +242,7 @@ SAMPLES = {
     "wanted": "NIFTY29DEC26FUT", "confirmed": False, "state": "active", "surface": "the app",
     "mode": "live", "other": "Second", "side_": "long", "epoch_s": 1794804302, "seconds": 130,
     "product": "MIS", "strategy": m.Strategy(id=1, name="ORB", underlying="NIFTY"), "option": False,
+    "days": 2, "yesterday": True,
 }  # fmt: skip
 REASONS = {
     "bad_message": [*payload.REASONS],
@@ -334,3 +337,26 @@ def test_sentences_as_the_design_words_them():
 def test_a_service_sentence_is_passed_on_without_braces_or_length():
     said = words.order_refused("ORB", "x {a} " + "y" * 900)
     assert "{" not in said and len(said) < 360
+
+
+@pytest.mark.parametrize("ahead", [1, 2, 3, 4, 5])
+def test_n3_an_alert_inside_the_slack_keeps_its_own_time_as_the_mark(ahead):
+    """The server's clock a few seconds behind TradingView's: the entry's mark is the second it
+    fired, so an exit that fired before it is out of order and one fired with or after it goes."""
+    now_s = AT // 1000
+    strategy = m.Strategy(id=1, name="ORB", underlying="NIFTY", state=m.ACTIVE)
+    entry = m.Alert(position="long", fired_s=now_s + ahead)
+    assert rules.decide(strategy, m.State(1), entry, now_s, "2026-11-16").verdict is None
+    mark = rules.mark_of(entry, AT)
+    assert mark == now_s + ahead
+    state = m.State(1, last_target=1, last_fired_s=mark)
+    older = m.Alert(position="flat", fired_s=now_s + ahead - 1)
+    assert rules.decide(strategy, state, older, now_s, "2026-11-16").verdict == "out_of_order"
+    newer = m.Alert(position="flat", fired_s=now_s + ahead)
+    assert rules.decide(strategy, state, newer, now_s, "2026-11-16").verdict is None
+    # the same clamp for a row settled from the books
+    books = rules.Books(("NFO", "X"), None, {("NFO", "X"): 65})
+    settled = rules.state_settled(
+        books, {"target": 1, "fired_s": now_s + ahead}, False, AT, m.State(1)
+    )
+    assert settled["last_fired_s"] == now_s + ahead
