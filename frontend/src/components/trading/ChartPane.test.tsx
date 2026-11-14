@@ -135,6 +135,29 @@ beforeEach(() => {
 })
 afterEach(cleanup)
 
+// SUDARSHAN (SCR-P item 9): a new pane of a grid opens on the focused pane's instrument.
+describe('a pane’s starting instrument', () => {
+  it('hands the terminal the focused pane’s instrument to open on when it has none of its own', () => {
+    render(<ChartPane {...props} seedSymbol="NSE:TESTCO" />)
+    expect(fake.owners).toHaveLength(1)
+    expect(fake.owners[0].options.seedSymbol).toEqual({ exchange: 'NSE', symbol: 'TESTCO' })
+  })
+
+  it('hands it none where the page knows of none', () => {
+    render(<ChartPane {...props} />)
+    expect(fake.owners[0].options.seedSymbol).toBeNull()
+  })
+
+  it('never rebuilds a chart that is up because the focus moved to another instrument', async () => {
+    const view = render(<ChartPane {...props} seedSymbol="NSE:TESTCO" />)
+    await act(async () => fake.owners[0].resolve())
+    view.rerender(<ChartPane {...props} seedSymbol="NSE:OTHERCO" />)
+    view.rerender(<ChartPane {...props} seedSymbol={null} />)
+    expect(fake.owners).toHaveLength(1)
+    expect(fake.owners[0].destroy).not.toHaveBeenCalled()
+  })
+})
+
 describe('chart pane preparation ownership', () => {
   it('disables CSV during replay selection and history loading, then allows the active prefix', async () => {
     const snapshot = {

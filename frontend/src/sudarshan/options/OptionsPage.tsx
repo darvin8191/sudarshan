@@ -393,6 +393,8 @@ export default function OptionsPage() {
               model={model}
               expiry={expiry}
               leg={legOpen}
+              adding={sheets.sheet?.sheet === 'addToList' ? sheets.sheet : null}
+              onAddToList={(leg) => sheets.open({ ...leg, sheet: 'addToList' })}
               alert={sheets.sheet?.sheet === 'alert' ? sheets.sheet.alert : null}
               apiKey={access.apiKey}
               feed={sheetFeed}

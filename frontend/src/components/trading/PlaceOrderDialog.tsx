@@ -2,7 +2,7 @@
 // Reusable order placement dialog with real-time quotes and market depth
 // Uses WebSocket for real-time data with REST API fallback (like Holdings/Positions)
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useId, useState } from 'react'
 import { tradingApi } from '@/api/trading'
 import { Button } from '@/components/ui/button'
 import {
@@ -170,6 +170,8 @@ export function PlaceOrderDialog({
   const guard = useOpenGuard(open)
 
   // Form state
+  // SUDARSHAN (SCR-P item 7): each number box is its label's, so it has a name to be found and read by.
+  const fieldId = useId()
   const [formAction, setFormAction] = useState<'BUY' | 'SELL'>(initialAction)
   const [formQuantity, setFormQuantity] = useState(initialQuantity ?? lotSize)
   const [formPriceType, setFormPriceType] = useState(initialPriceType)
@@ -479,7 +481,9 @@ export function PlaceOrderDialog({
           {/* Quantity with Mode Toggle */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <Label className="text-xs">Quantity</Label>
+              <Label htmlFor={`${fieldId}-quantity`} className="text-xs">
+                Quantity
+              </Label>
               {/* Cash equity trades in shares - there is no lot. Showing a
                   Lots/Shares toggle and "Lot size: 1" on NSE/BSE is noise that
                   implies a concept the segment does not have. */}
@@ -513,6 +517,7 @@ export function PlaceOrderDialog({
               )}
             </div>
             <Input
+              id={`${fieldId}-quantity`}
               type="number"
               value={displayQuantity}
               onChange={(e) => handleQuantityChange(e.target.value)}
@@ -601,7 +606,9 @@ export function PlaceOrderDialog({
           {/* Price Input (conditional) */}
           {needsPrice && (
             <div className="space-y-2">
-              <Label className="text-xs">Price</Label>
+              <Label htmlFor={`${fieldId}-price`} className="text-xs">
+                Price
+              </Label>
               <div className="flex gap-2">
                 <Button
                   type="button"
@@ -613,6 +620,7 @@ export function PlaceOrderDialog({
                   -
                 </Button>
                 <Input
+                  id={`${fieldId}-price`}
                   type="number"
                   value={formPrice}
                   onChange={(e) => setFormPrice(parseFloat(e.target.value) || 0)}
@@ -638,7 +646,9 @@ export function PlaceOrderDialog({
           {/* Trigger Price Input (conditional) */}
           {needsTrigger && (
             <div className="space-y-2">
-              <Label className="text-xs">Trigger Price</Label>
+              <Label htmlFor={`${fieldId}-trigger`} className="text-xs">
+                Trigger Price
+              </Label>
               <div className="flex gap-2">
                 <Button
                   type="button"
@@ -652,6 +662,7 @@ export function PlaceOrderDialog({
                   -
                 </Button>
                 <Input
+                  id={`${fieldId}-trigger`}
                   type="number"
                   value={formTriggerPrice}
                   onChange={(e) => setFormTriggerPrice(parseFloat(e.target.value) || 0)}

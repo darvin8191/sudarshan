@@ -6,6 +6,7 @@ import {
   Copy,
   FolderInput,
   Layers,
+  ListPlus,
   Pencil,
   Pin,
   PinOff,
@@ -330,6 +331,7 @@ export function SymbolSheet({
   onOrder,
   onAlert,
   onRemove,
+  onAddToList,
   pin,
   arrange,
   flags,
@@ -350,6 +352,8 @@ export function SymbolSheet({
   onAlert: (alert: AlertPrefill) => void
   /** Absent where the instrument is not in a list the owner keeps (a screener's results). */
   onRemove?: (item: WatchlistItem) => void
+  /** Where the instrument is not a list's row (an option leg on the options screen): "Add to watchlist", drawn only when given. */
+  onAddToList?: (item: WatchlistItem) => void
   /** A row a screener put here: Pin keeps it in the list while it stops matching (M9 UI7). */
   pin?: PinControl | null
   /** v2 (F5): Move to section and Copy to another list; absent where the list is not an own one. */
@@ -377,6 +381,7 @@ export function SymbolSheet({
       onOrder={onOrder}
       onAlert={onAlert}
       onRemove={onRemove}
+      onAddToList={onAddToList}
       pin={pin}
       arrange={arrange}
       flags={flags}
@@ -398,6 +403,7 @@ function Sheet({
   onOrder,
   onAlert,
   onRemove,
+  onAddToList,
   pin,
   arrange,
   flags,
@@ -551,6 +557,12 @@ function Sheet({
             <BellPlus aria-hidden="true" className="size-5" />
             Set alert
           </button>
+          {onAddToList && !readOnly && (
+            <button type="button" onClick={() => onAddToList(item)} className={OUTLINED}>
+              <ListPlus aria-hidden="true" className="size-5" />
+              Add to watchlist
+            </button>
+          )}
         </div>
         <WhyNot why={alertWhy.why} id={alertWhy.id} told={alertWhy.told} />
 

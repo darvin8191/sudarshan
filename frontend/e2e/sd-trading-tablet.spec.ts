@@ -129,6 +129,19 @@ async function serve(page: Page, analyze: boolean) {
       )
     if (path === 'quotes')
       return route.fulfill(json({ status: 'success', data: { ltp: 812.4, prev_close: 810, volume: 4_210_000 } }))
+    // The master has SBIN and nothing else: a pane that asks for any other instrument stays empty.
+    if (path === 'search') {
+      const asked = (route.request().postDataJSON() ?? {}) as { query?: string }
+      return route.fulfill(
+        json({
+          status: 'success',
+          data:
+            asked.query === 'SBIN'
+              ? [{ symbol: 'SBIN', exchange: 'NSE', name: 'STATE BANK OF INDIA', lotsize: 1, tick_size: 0.05 }]
+              : [],
+        })
+      )
+    }
     return route.fulfill(json({ status: 'success', data: [] }))
   })
   await page.routeWebSocket(/\/proxy$/, (ws) => {
@@ -223,6 +236,8 @@ for (const [name, viewport] of [
           await page.clock.runFor(2000)
           await expect(page.locator('[data-chart-pane]')).toHaveCount(charts)
           for (const each of await page.locator('[data-chart-pane]').all()) {
+            // A new pane opens on the focused pane's instrument, not empty (SCR-P item 9).
+            await expect(each, 'each pane shows the instrument the grid was opened from').toContainText('SBIN')
             const box = (await each.boundingBox()) as DOMRect
             expect(box.width, 'a pane wide enough to read').toBeGreaterThan(200)
             expect(box.height, 'a pane tall enough to read').toBeGreaterThan(150)

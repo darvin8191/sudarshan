@@ -198,10 +198,10 @@ export function menuGroups(items: NavItem[], { phone }: { phone: boolean }): Men
 }
 
 /**
- * SUDARSHAN: entries whose page owns addresses under its own (`/options/NFO/NIFTY`). Only these
- * match by prefix; every other entry is a leaf and matches exactly.
+ * SUDARSHAN: entries whose page owns addresses under its own (`/options/NFO/NIFTY`,
+ * `/chart/NSE/INFY`). Only these match by prefix; every other entry is a leaf and matches exactly.
  */
-export const NAV_WITH_CHILDREN: ReadonlySet<string> = new Set(['/options'])
+export const NAV_WITH_CHILDREN: ReadonlySet<string> = new Set(['/options', '/chart'])
 
 const owns = (pathname: string, href: string): boolean =>
   pathname === href || (NAV_WITH_CHILDREN.has(href) && pathname.startsWith(`${href}/`))

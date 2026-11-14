@@ -388,8 +388,6 @@ async function checkScreen(page: Page) {
         if (box.width === 0 && box.height === 0) return false
         if (style.visibility === 'hidden' || style.display === 'none') return false
         if (el.closest('.tsqd-parent-container')) return false
-        // The app shell's toast, which is not this screen's: its close button is the shell's to size.
-        if (el.closest('[data-sonner-toaster]')) return false
         // A control inside a 48 px label row counts by the row it sits in.
         const row = el.closest('label')?.getBoundingClientRect()
         const w = Math.max(box.width, row?.width ?? 0)
@@ -411,7 +409,6 @@ async function checkScreen(page: Page) {
   const contrast = await new AxeBuilder({ page })
     .withRules(['color-contrast', 'link-in-text-block'])
     .exclude('.tsqd-parent-container')
-    .exclude('[data-sonner-toaster]')
     .analyze()
   expect(
     contrast.violations.flatMap((v) => v.nodes.map((n) => `${v.id}: ${n.target.join(' ')}`)),
@@ -633,7 +630,10 @@ test.describe('the phone chart on its side, 800 x 360', () => {
     await settled(page, ticket)
     await expect(ticket.getByRole('combobox').nth(1)).toHaveText('Limit')
     await expect(ticket.getByRole('combobox').nth(2)).toHaveText('CNC')
-    await expect(ticket.getByRole('spinbutton').nth(1)).toHaveValue(String(Number(held.replaceAll(',', ''))))
+    await expect(ticket.getByRole('spinbutton', { name: 'Quantity' })).toBeVisible()
+    await expect(ticket.getByRole('spinbutton', { name: 'Price', exact: true })).toHaveValue(
+      String(Number(held.replaceAll(',', '')))
+    )
     await page.screenshot({ path: info.outputPath('sideways-ticket.png') })
   })
 

@@ -55,9 +55,10 @@ export function Wordmark({ className }: BrandMarkProps) {
 
 interface BrandLockupProps {
   /**
-   * `bar`: the app bar's lockup, the icon beside सुदर्शन over SUDARSHAN. On
-   * the narrowest phones the icon steps aside so the account controls fit;
-   * both scripts stay at every width (owner rule 2).
+   * `bar`: the app bar's lockup, the icon beside सुदर्शन over SUDARSHAN. Where
+   * the account controls leave too little room for both, the icon steps aside
+   * (the stylesheet's wrapping row); both scripts stay at every width (owner
+   * rule 2).
    * `stacked`: the icon above the name, for the login, broker and About screens.
    */
   variant?: 'bar' | 'stacked'

@@ -140,6 +140,7 @@ import {
 import { parseRangeChoice, type RangeChoice, serializeRangeChoice } from './rangeChoice'
 import { replayTiming } from './replayTiming'
 import { applySessionHours, sessionCalendarFor } from './sessionHours' // SUDARSHAN M4.1: the hours
+import type { SymbolRef } from './startSymbol'
 import { TerminalComparisons } from './terminalComparisons'
 import type { PreparedReplayMember } from './workspaceReplay'
 import {
@@ -873,6 +874,11 @@ export interface TerminalOptions {
   preferences?: Pick<Storage, 'getItem' | 'setItem'> | null
   /** A named workspace starts in isolated preferences and rejects incomplete restoration. */
   initialWorkspacePane?: WorkspacePane
+  /**
+   * SUDARSHAN: the instrument a pane with none of its own kept opens on, before the default:
+   * the pane the grid was opened from (`startSymbol.ts`).
+   */
+  seedSymbol?: SymbolRef | null
   /** Reads the app's current theme so the canvas chrome tracks it. */
   getTheme: () => { mode: ThemeMode; appMode: AppMode }
   callbacks: TerminalCallbacks
@@ -1409,6 +1415,8 @@ export class TradingTerminal {
   private chartCommandQueue: Promise<void> = Promise.resolve()
   private destroyed = false
   private initialWorkspacePane: WorkspacePane | null = null
+  /** SUDARSHAN: see `TerminalOptions.seedSymbol`. */
+  private seedSymbol: SymbolRef | null = null
   private preparingWorkspace = false
   private workspaceTransitionLocked = false
   private comparisons: TerminalComparisons | null = null
@@ -1661,6 +1669,7 @@ export class TradingTerminal {
     this.getTheme = opts.getTheme
     this.cb = opts.callbacks
     this.sk = opts.storageKey || 'oa-trading'
+    this.seedSymbol = opts.seedSymbol ?? null
     this.preferences = initial ? createWorkspacePanePreferences(initial, this.sk) : opts.preferences
     this.interval = this.lsGet('interval') || '5m'
     this.ctype = this.lsGet('ctype') || 'candlestick'
@@ -8329,6 +8338,23 @@ export class TradingTerminal {
       }
     } catch {
       /* fall through to the default */
+    }
+    // SUDARSHAN (SCR-P item 9): a pane with nothing of its own opens on the pane the grid was
+    // opened from, and only then on the default.
+    const seed = this.seedSymbol
+    if (!loaded && !this.destroyed && seed) {
+      try {
+        // An exchange is what says it is an instrument (`loadSymbol`): a hyphenated name reads
+        // as arithmetic, so only a seed without one is taken for a computed chart.
+        const rows =
+          !seed.exchange && isChartExpression(seed.symbol)
+            ? [{ symbol: seed.symbol, exchange: '', expression: true }]
+            : await this.search(seed.symbol, seed.exchange)
+        const row = rows.find((r) => r.symbol === seed.symbol && r.exchange === seed.exchange)
+        if (row) loaded = await this.loadSymbol(row, { silent: true })
+      } catch {
+        /* fall through to the default */
+      }
     }
     if (!loaded && !this.destroyed) {
       try {

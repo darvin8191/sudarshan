@@ -6,9 +6,10 @@
  *
  * A chain row is not a watchlist row, so the sheet is asked for what fits (its four optional props):
  * no "Edit row" or "Remove row"; the side that was tapped first; a button a leg to that leg's own
- * sheet (`LegSheets.tsx`); and the same strike's other expiries only when they could be read (they
- * come from the watchlists' own route, which answers only while that switch is on). Its link to the
- * option chain is left out: this is the chain.
+ * sheet (`LegSheets.tsx`); and the same strike's other expiries, which come from the watchlists' own
+ * route. That route answers only while the watchlists switch is on: with it off the section is left
+ * out, and any other failed read says so with Try again. Its link to the option chain is left out:
+ * this is the chain.
  */
 import { useEffect } from 'react'
 import type { QuotesData } from '@/api/trading'
@@ -146,9 +147,7 @@ export function StrikeEntry({
       expiry={expiry}
       legs={legs}
       lines={feed.lines}
-      others={
-        same.state === 'error' ? undefined : { state: same.state, rows: others, retry: same.retry }
-      }
+      others={same.off ? undefined : { state: same.state, rows: others, retry: same.retry }}
       chain={null}
       first={side}
       onLeg={onLeg}

@@ -14,6 +14,8 @@ export type Sheet =
   | { sheet: 'strike'; strike: number; side: 'ce' | 'pe' }
   /** One leg's own sheet (chart, alert, depth), reached from the strike sheet. */
   | { sheet: 'leg'; strike: number; side: 'ce' | 'pe' }
+  /** "Add to watchlist" for one leg, reached from the leg's own sheet. */
+  | { sheet: 'addToList'; strike: number; side: 'ce' | 'pe' }
   | { sheet: 'alert'; alert: AlertPrefill }
   | { sheet: 'ticket'; order: OrderRequest }
 
@@ -28,7 +30,7 @@ export function readSheet(state: unknown): Sheet | null {
   }
   if (value.sheet === 'underlying') return { sheet: 'underlying' }
   if (
-    (value.sheet === 'strike' || value.sheet === 'leg') &&
+    (value.sheet === 'strike' || value.sheet === 'leg' || value.sheet === 'addToList') &&
     typeof value.strike === 'number' &&
     (value.side === 'ce' || value.side === 'pe')
   )

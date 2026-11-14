@@ -1,5 +1,6 @@
 /**
- * SUDARSHAN D9 (screens design 8.3): the dashboard on a phone, 360 x 800 with touch, in each state
+ * SUDARSHAN D9 (screens design 8.3): the dashboard on a phone, 360 x 800 with touch (320 and 412
+ * wide with `SD_WIDTH`), in each state
  * of its table (market open with ticks, market closed, the feed down, the Upstox login lapsed)
  * and back from sleep. Every REST call is answered here and the market-data socket is a feed
  * synthesised in the proxy's message shape: nothing reaches Upstox, NSE or Telegram, and no
@@ -15,7 +16,9 @@
 import AxeBuilder from '@axe-core/playwright'
 import { expect, type Page, test } from '@playwright/test'
 
-test.use({ viewport: { width: 360, height: 800 }, deviceScaleFactor: 3, hasTouch: true, isMobile: true })
+/** The phone's width: 360 unless said (`SD_WIDTH=320`, `SD_WIDTH=412`). */
+const WIDTH = Number(process.env.SD_WIDTH) || 360
+test.use({ viewport: { width: WIDTH, height: 800 }, deviceScaleFactor: 3, hasTouch: true, isMobile: true })
 
 const WS_PATH = '/__sd_market'
 const IST_MS = 5.5 * 3_600_000
@@ -71,6 +74,8 @@ interface State {
   lapsed?: boolean
   next: string
   expiries?: string[]
+  /** The platform is in Analyze mode (the sandbox): the app bar's chip is the wider one. */
+  analyze?: boolean
 }
 
 /** Answers the app's calls and plays the feed; returns a way to send the open sockets a tick. */
@@ -100,7 +105,9 @@ async function serve(page: Page, state: State) {
       }),
     '/auth/csrf-token': () => json({ csrf_token: 'test' }),
     '/auth/app-info': () => json({ status: 'success', data: {} }),
-    '/auth/analyzer-mode': () => json({ status: 'success', data: { analyze_mode: false } }),
+    '/auth/analyzer-toggle': () =>
+      json({ status: 'success', data: { analyze_mode: true, message: 'Analyze mode on' } }),
+    '/auth/analyzer-mode': () => json({ status: 'success', data: { analyze_mode: state.analyze === true } }),
     '/api/broker/capabilities': () =>
       json({ status: 'success', data: { broker_type: 'equity', leverage_config: false } }),
     '/auth/dashboard-data': () =>
@@ -302,7 +309,69 @@ const STATES: Array<State & { words: Array<string | RegExp>; live: boolean }> = 
   },
 ]
 
-test.describe('the dashboard at 360 x 800', () => {
+test.describe(`the dashboard at ${WIDTH} x 800`, () => {
+  // The app bar (SCR-P item 5). Its account end grows: "Analyze" is wider than "Live", and until
+  // the faces arrive the lockup's tracked caps are a fifth wider in the fallback face. Before the
+  // fix each widened the page by 5 to 12 px at 360 (and the faces are refused on a dev server
+  // whose node_modules is a link, which is how the four states above first failed). The lockup's
+  // icon now steps aside instead; both scripts and every control stay inside the screen.
+  for (const bar of [
+    { name: 'in Analyze mode', analyze: true, fonts: true },
+    { name: 'before the fonts arrive', analyze: false, fonts: false },
+    { name: 'in Analyze mode before the fonts arrive', analyze: true, fonts: false },
+  ]) {
+    test(`the app bar never widens the page: ${bar.name}`, async ({ page }, info) => {
+      if (!bar.fonts) await page.route('**/*.woff2', (route) => route.abort())
+      await serve(page, { ...STATES[0], analyze: bar.analyze })
+      await expect(page.getByTestId('status-row')).toHaveAttribute('data-ready', 'true')
+      await expect(page.getByTestId('navbar-row').getByText(bar.analyze ? 'Analyze' : 'Live').last()).toBeVisible()
+      const measured = await page.evaluate(() => {
+        const doc = document.documentElement
+        const row = document.querySelector('[data-testid="navbar-row"]') as HTMLElement
+        const right = (el: Element | null) => el?.getBoundingClientRect().right ?? Number.NaN
+        const link = row.querySelector('a[href="/dashboard"]')
+        return {
+          sideways: doc.scrollWidth - doc.clientWidth,
+          menu: right(row.querySelector('[aria-label="Open user menu"]')) - doc.clientWidth,
+          // How far each script reaches past the link that clips it: none for the Devanagari.
+          wordmark: right(row.querySelector('.sd-lockup__wordmark')) - right(link),
+        }
+      })
+      await page.screenshot({ path: info.outputPath(`bar-${bar.name.replaceAll(' ', '-')}.png`) })
+      expect(measured.sideways, 'no sideways scroll').toBeLessThanOrEqual(0)
+      expect(measured.menu, 'the profile menu ends inside the screen').toBeLessThanOrEqual(0)
+      expect(measured.wordmark, 'the Devanagari name is whole').toBeLessThanOrEqual(0.5)
+      await expect(page.getByTestId('navbar-row').getByText('SUDARSHAN')).toBeVisible()
+    })
+  }
+
+  // The app shell's toast (SCR-P item 6): its close button was a 20 px circle on the toast's corner
+  // and a success sentence read 3.9:1 on its fill. Switching mode raises a success toast.
+  test('the shell toast: a 48 dp close button and a success sentence that keeps its contrast', async ({ page }, info) => {
+    await serve(page, STATES[0])
+    await expect(page.getByTestId('status-row')).toHaveAttribute('data-ready', 'true')
+    await page.getByRole('button', { name: 'Switch to Analyze mode' }).tap()
+    const toast = page.locator('[data-sonner-toast][data-type="success"]').first()
+    await expect(toast).toContainText('Switched to Analyze mode')
+    await expect(toast).toHaveAttribute('data-mounted', 'true')
+    await page.waitForTimeout(600) // the toast's own slide, so axe reads it at full opacity
+    const close = toast.getByRole('button', { name: 'Close toast' })
+    const box = await close.boundingBox()
+    const around = await toast.boundingBox()
+    expect(box?.width, 'close button width').toBeGreaterThanOrEqual(47.5)
+    expect(box?.height, 'close button height').toBeGreaterThanOrEqual(47.5)
+    // Inside the toast, and clear of the sentence.
+    expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual((around?.x ?? 0) + (around?.width ?? 0) + 0.5)
+    const words = await toast.locator('[data-title]').boundingBox()
+    expect((words?.x ?? 0) + (words?.width ?? 0)).toBeLessThanOrEqual((box?.x ?? 0) + 0.5)
+    const scan = await new AxeBuilder({ page }).include('[data-sonner-toaster]').withRules(['color-contrast']).analyze()
+    expect(scan.violations.map((each) => `${each.id}: ${each.nodes.map((node) => node.failureSummary).join(' ')}`)).toEqual([])
+    expect(scan.passes.some((each) => each.id === 'color-contrast'), 'the toast was read').toBe(true)
+    await page.screenshot({ path: info.outputPath('toast.png') })
+    await close.tap()
+    await expect(toast).toHaveCount(0)
+  })
+
   for (const state of STATES) {
     test(state.name, async ({ page }, info) => {
       await serve(page, state)

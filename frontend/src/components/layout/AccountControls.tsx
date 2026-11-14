@@ -121,7 +121,9 @@ export function AccountControls({ variant = 'navbar' }: { variant?: 'navbar' | '
           aria-hidden="true"
           className={cn(
             'shrink-0 rounded-full',
-            toolbar ? 'size-1.5' : 'size-2',
+            // SUDARSHAN: under 360 px the word alone says the mode, so "Analyze" leaves the
+            // app bar's name whole.
+            toolbar ? 'size-1.5' : 'size-2 max-[359.98px]:hidden',
             MODE_DOT[appMode]
           )}
         />

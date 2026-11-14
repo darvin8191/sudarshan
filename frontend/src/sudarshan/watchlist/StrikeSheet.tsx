@@ -9,7 +9,7 @@ import { ticketProduct } from '@/sudarshan/ticket/productPref'
 import { BottomSheet } from './BottomSheet'
 import { dayLabel } from './followRows'
 import { priceDecimals, statusLine } from './rows'
-import { chainPath, type OrderRequest } from './SymbolSheet'
+import { type ChainTarget, chainPath, type OrderRequest } from './SymbolSheet'
 import { NO_IV, pairGreeks, straddleOf } from './strikeSheet'
 import type { LiveRow } from './useLiveRows'
 import type { Contract } from './v2/types'
@@ -46,7 +46,8 @@ export interface StrikeSheetProps {
   lines: ReadonlyMap<string, SymbolData>
   /** Absent where the same strike's other expiries are not read (the options screen without the watchlists switch): no section. */
   others?: { state: 'loading' | 'error' | 'ready'; rows: OtherRow[]; retry: () => void }
-  chain: { exchange: string; underlying: string } | null
+  /** The chain the sheet links to; with the row's expiry and strike it opens the phone's chain on them (`chainPath`). */
+  chain: ChainTarget | null
   feed: FeedState
   now: number
   marketOpen: boolean | null

@@ -100,6 +100,7 @@ import {
 } from '@/lib/trading/gridSizes'
 import { idForScript } from '@/lib/trading/openscriptFiles'
 import type { PreparedChartGrid } from '@/lib/trading/preparedGrid'
+import { panesForLayout } from '@/lib/trading/startSymbol'
 import type {
   AlertFire,
   AlertsView,
@@ -1126,10 +1127,8 @@ function TradingWorkspace({ account }: { account: string | null }) {
     }
     try {
       const current = captureWorkspace()
-      const panes = next.cells.map((_, index) => ({
-        ...(current.panes[index] ?? current.panes[0]),
-        id: `p${index}`,
-      }))
+      // SUDARSHAN: each new pane is the focused pane again, not the first one.
+      const panes = panesForLayout(current.panes, focusedPane, next.cells.length)
       const focusedIndex = current.panes.findIndex((pane) => pane.id === focusedPane)
       const nextFocus = focusedIndex >= 0 && focusedIndex < panes.length ? `p${focusedIndex}` : 'p0'
       const payload = capturePresetWorkspace(next, panes, nextFocus, sync)
@@ -1587,6 +1586,8 @@ function TradingWorkspace({ account }: { account: string | null }) {
                           focused={focusedPane === `p${i}`}
                           apiKey={apiKey}
                           wsUrl={wsUrl}
+                          // SUDARSHAN: a new pane of a grid opens on the focused pane's instrument.
+                          seedSymbol={paneSymbols[focusedPane] ?? null}
                           style={{ gridArea: cell }}
                           sharedTool={tool}
                           sharedMagnet={magnet}
