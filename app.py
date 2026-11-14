@@ -116,6 +116,7 @@ from blueprints.sudarshan_screener import (  # SUDARSHAN M9 screener bridge
     sudarshan_screener_internal_bp,
 )
 from blueprints.sudarshan_session import sudarshan_session_bp  # SUDARSHAN: an instrument's hours
+from blueprints.sudarshan_system import sudarshan_system_bp  # SUDARSHAN M20.8 system status
 from blueprints.sudarshan_watchlists import sudarshan_watchlists_bp  # SUDARSHAN M8.4 watchlists v2
 from blueprints.system_permissions import (
     system_permissions_bp,  # Import the system permissions blueprint
@@ -375,6 +376,7 @@ def create_app():
     app.register_blueprint(sudarshan_journal_bp)  # SUDARSHAN M14.1: the journal (sudarshan-journal)
     app.register_blueprint(sudarshan_options_bp)  # SUDARSHAN M11.1: sudarshan/options (chain snapshot)
     app.register_blueprint(sudarshan_family_bp)  # SUDARSHAN M20.6: the family view's two doors
+    app.register_blueprint(sudarshan_system_bp)  # SUDARSHAN M20.8: the System page, Disconnect
 
     # Remote MCP (HTTP + OAuth) — opt-in via MCP_HTTP_ENABLED. Off by default.
     # Pre-flight refusal: must NEVER coexist with FLASK_DEBUG=True (debug-mode

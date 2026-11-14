@@ -848,6 +848,8 @@ protected     /sudarshan/screener/api/today                                     
 protected     /sudarshan/screener/api/universes                                         sudarshan_screener.universes
 protected     /sudarshan/session/instrument                                             sudarshan_session_bp.instrument
 protected     /sudarshan/session/today                                                  sudarshan_session_bp.today
+protected     /sudarshan/system/api/assistant/disconnect                                sudarshan_system.disconnect
+protected     /sudarshan/system/api/status                                              sudarshan_system.status
 protected     /sudarshan/watchlists/api/copy                                            sudarshan_watchlists.copy
 protected     /sudarshan/watchlists/api/favourites                                      sudarshan_watchlists.favourites
 protected     /sudarshan/watchlists/api/flags                                           sudarshan_watchlists.flags

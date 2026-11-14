@@ -199,10 +199,8 @@ def backup(now: float, folder: Path = BACKUP_DIR) -> dict | None:
     """The nightly backup as its own folder shows it: the newest complete archive's age and size,
     the newest financial-year archive, and the last run's word on the offsite copy."""
     try:
-        entries = [
-            (entry.name, entry.stat(follow_symlinks=False))
-            for entry in os.scandir(folder / "archive")
-        ]
+        with os.scandir(folder / "archive") as listing:
+            entries = [(entry.name, entry.stat(follow_symlinks=False)) for entry in listing]
     except FileNotFoundError:
         entries = []
     except OSError:
