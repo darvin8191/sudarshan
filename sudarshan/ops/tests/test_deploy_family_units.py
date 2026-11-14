@@ -561,7 +561,7 @@ def test_n1_the_set_up_itself_makes_family_env_once_the_release_is_installed(tmp
     condition_skips(box)
     assert box.run().returncode == 0
     fam_dir(box).mkdir(mode=0o750)
-    made = f"family: made {fam_dir(box)}/family.env, with the family view switched off"
+    made = f"family: written in {fam_dir(box)}: family.env, with the family view switched off"
     done = box.run("--family-provision")
     assert made in done.stdout.splitlines(), done.stdout + done.stderr
     assert (fam_dir(box) / "family.env").read_text() == "SUDARSHAN_FAMILY='off'\n"

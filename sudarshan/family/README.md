@@ -66,7 +66,7 @@ see; stop at the first one that does not.
    `sudarshan/README.md` (one pasted line, as root). You should see `PASS.` at the end. The set-up
    makes `/etc/sudarshan-family/family.env` (root: sudarshan-family, mode 640) holding
    `SUDARSHAN_FAMILY='off'`, from the list this release ships
-   (`sudarshan/ops/deploy/family-env.conf`), and says `family: made ... family.env` when it did.
+   (`sudarshan/ops/deploy/family-env.conf`), and says `family: written in /etc/sudarshan-family: family.env` when it did.
    If it could not (GitHub not answering), the deploy tool makes the file at its next run: that
    step runs on every run, every ten minutes, also when there is nothing to install, and never
    changes a value you chose. The service then starts and answers "switched off".
@@ -119,6 +119,14 @@ they are.
 - A share you remove, let expire or make restricted stops showing within a minute, at any hour:
   the family service asks the portfolio what each member is shared before it serves a figure it
   kept, once a minute at most, and drops what it kept when that changed.
+- While the portfolio does not answer that question, a page waits three seconds for it, not the
+  twelve a read may take, and says "What is shared with you could not be checked just now."
+  over the figures it kept, with their time: they are never shown as current. After ten minutes
+  without an answer the kept figures are put away and the screen says so; they come back when
+  the portfolio answers again. A member sees less in that time, never more.
+- How old a holding's price is (`fresh`: "Value from 1 Oct · 45 days old") is hidden by no
+  privacy category: it carries no amount and no quantity, and a member who is shown no figures
+  still has to know a number's age.
 - P&L hidden puts the overall P&L out of reach, with every rupee figure and cost price. What
   it cannot hide beside a quantity: "With quantities shown, a member can still work out a day's
   change and a holding's value from the quantity and the price. Hide quantities to hide those

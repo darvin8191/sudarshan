@@ -1496,10 +1496,10 @@ if [[ "${MODE}" == "nginx" ]]; then rc=0; ngx_check report || rc=$?; exit "${rc}
 if [[ "${MODE}" == "family" ]]; then
     feed_tokens || true
     # the settings file the switch-on steps name, at once when the set-up comes after the install (review
-    # N1; a run makes it otherwise). Said only when it was made here.
+    # N1; a run makes it otherwise). Said only when it was made here, in the words the set-up counts as a change.
     had_env=0; if [[ -e "${FAM_DIR}/family.env" || -L "${FAM_DIR}/family.env" ]]; then had_env=1; fi
     fam_env_run > /dev/null 2>&1 || true
-    if [[ ${had_env} -eq 0 && -f "${FAM_DIR}/family.env" ]]; then echo "family: made ${FAM_DIR}/family.env, with the family view switched off"; fi
+    if [[ ${had_env} -eq 0 && -f "${FAM_DIR}/family.env" ]]; then echo "family: written in ${FAM_DIR}: family.env, with the family view switched off"; fi
     rc=0; fam_provision setup || rc=$?
     if [[ ${rc} -eq 2 ]]; then echo "family: there is no ${FAM_DIR} yet; the family set-up (sudarshan/ops/family/bootstrap.sh) makes it"; fi
     exit "${rc}"
