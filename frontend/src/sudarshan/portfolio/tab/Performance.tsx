@@ -6,6 +6,7 @@
 import { cn } from '@/lib/utils'
 import { directionOf, formatPercent } from '@/sudarshan/dashboard/format'
 import { TREND_TEXT, TrendArrow } from '@/sudarshan/dashboard/Trend'
+import { BenchmarkStats } from '../risk/BenchmarkStats'
 import { pctNumber, Signed } from '../Signed'
 import type { BenchmarkFigure, PerformanceReport } from '../types'
 import { dayText, rupeesText } from './format'
@@ -76,6 +77,8 @@ function Benchmark({ b, report }: { b: BenchmarkFigure; report: PerformanceRepor
           )}
         </dl>
       )}
+      {/* SUDARSHAN P7 F6 (M7.31): beta, correlation and excess return, and what they rest on. */}
+      <BenchmarkStats b={b} />
       {b.words.map((w) => (
         <p key={w} className={NOTE}>
           {w}
