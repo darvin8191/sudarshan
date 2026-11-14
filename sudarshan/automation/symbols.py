@@ -115,6 +115,18 @@ def held_expired(
     return stop <= now_ms
 
 
+def day_ended(product: str, held_since_ms: int | None, today: str) -> bool:
+    """Whether a held note is of an intraday (MIS) position entered on an earlier India date.
+
+    Such a position is gone: an intraday position is squared off before its session's close,
+    with no alert. A carried product (NRML, CNC) keeps its note until its exit or its expiry.
+    ``today`` is the date in India, YYYY-MM-DD; a note with no time is kept.
+    """
+    if product != "MIS" or not held_since_ms:
+        return False
+    return india_date(held_since_ms) < today
+
+
 def _pick(
     strategy: m.Strategy,
     exchange: str,

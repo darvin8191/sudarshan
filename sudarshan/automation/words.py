@@ -318,6 +318,14 @@ def expired(name: str, symbol: str) -> str:
     return f"{contract_name(symbol)} expired. {name} now holds nothing."
 
 
+def day_ended(name: str, symbol: str) -> str:
+    return (
+        f"{contract_name(symbol)} was an intraday position of an earlier day, and intraday "
+        f"positions are closed before the session ends. {name} now holds nothing. If it is "
+        "still open, close it in Positions."
+    )
+
+
 # ---- the order's answer -------------------------------------------------------------------------
 
 

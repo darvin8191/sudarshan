@@ -320,3 +320,122 @@ def test_the_check_sheet_says_both_steps_and_sends_nothing(store, desk):
         "Would send an order to the Sandbox to buy 65 NIFTY 17 Nov 25000 PE."
     )
     assert got["order"]["action"] == "BUY" and len(desk.placed) == 1
+
+
+# ---- M3: an intraday strategy's held note does not outlive its day ------------------------------
+
+WED, THU = "2026-11-18 10:00:00", "2026-11-19 10:00:00"  # the nearest expiry is Tue 24 Nov
+YESTERDAY, TODAY = "NIFTY24NOV2625000CE", "NIFTY24NOV2624800CE"
+
+
+def _squared_off(desk, when=THU, price=24810.0):
+    """The broker squares the intraday position off before the close; no flat alert comes."""
+    desk.positions.clear()
+    desk.clock = at(when)
+    desk.price["NIFTY"] = price
+
+
+def test_m3_the_day_after_a_square_off_the_entry_reads_the_price_and_picks_todays_strike(
+    store, desk
+):
+    desk.clock = at(WED)
+    strategy, token = make(store)
+    assert send(store, desk, token, "long").verdict == "sent"
+    assert orders(desk) == [(YESTERDAY, "BUY", "65")] and desk.price_reads == 1
+    _squared_off(desk)
+    got = send(store, desk, token, "long")
+    assert got.verdict == "sent" and desk.price_reads == 2
+    assert orders(desk)[1:] == [(TODAY, "BUY", "65")]  # one order: nothing is sent for the old one
+    assert (
+        "NIFTY 24 Nov 25000 CE was an intraday position of an earlier day, and intraday "
+        "positions are closed before the session ends. OPT now holds nothing."
+    ) in got.sentence
+    state = store.state(strategy.id)
+    assert (state.held_symbol, state.last_target) == (TODAY, 1)
+    assert state.held_since_ms == int(at(THU) * 1000)
+    assert ("day_ended" in [t[1] for t in desk.told]) and "expired" not in [t[1] for t in desk.told]
+
+
+def test_m3_the_other_side_the_next_day_is_one_order_not_a_two_step(store, desk):
+    desk.clock = at(WED)
+    strategy, token = make(store)
+    send(store, desk, token, "long")
+    _squared_off(desk)
+    assert send(store, desk, token, "short").verdict == "sent"
+    assert orders(desk)[1:] == [("NIFTY24NOV2624800PE", "BUY", "65")]
+
+
+def test_m3_a_flat_alert_the_next_day_says_so_and_sends_nothing(store, desk):
+    desk.clock = at(WED)
+    strategy, token = make(store)
+    send(store, desk, token, "long")
+    _squared_off(desk)
+    got = send(store, desk, token, "flat")
+    assert got.verdict == "no_action" and len(desk.placed) == 1
+    assert got.sentence.endswith("OPT now holds nothing. If it is still open, close it in "
+                                 "Positions. OPT holds no option. Nothing to send.")  # fmt: skip
+    state = store.state(strategy.id)
+    assert (state.held_symbol, state.held_side, state.last_target) == (None, None, 0)
+
+
+def test_m3_the_same_day_keeps_the_note_whatever_the_hour(store, desk):
+    """Until the date changes the note stays: a flat alert at 15:29 still exits the held one."""
+    desk.clock = at(WED)
+    strategy, token = make(store)
+    send(store, desk, token, "long")
+    desk.clock = at("2026-11-18 23:59:58")
+    assert send(store, desk, token, "flat").verdict == "sent"
+    assert orders(desk) == [(YESTERDAY, "BUY", "65"), (YESTERDAY, "SELL", "0")]
+
+
+def test_m3_a_carry_strategy_keeps_its_note_overnight(store, desk):
+    desk.clock = at(WED)
+    strategy, token = make(store, product="NRML")
+    send(store, desk, token, "long")
+    held = desk.placed[0]["symbol"]
+    desk.clock = at(THU)
+    desk.price["NIFTY"] = 24810.0
+    reads = desk.price_reads
+    got = send(store, desk, token, "long")
+    assert got.verdict == "no_action" and desk.price_reads == reads  # the held contract is asked
+    assert desk.placed[-1]["symbol"] == held and "intraday" not in got.sentence
+    assert store.state(strategy.id).held_symbol == held
+    assert send(store, desk, token, "flat").verdict == "sent"
+    assert desk.placed[-1]["symbol"] == held
+
+
+def test_m3_an_intraday_future_strategys_note_is_cleared_too(store, desk):
+    """Every MIS kind: with the note kept, the next day's flat alert would send an exit for a
+    position the strategy no longer has (and close one the owner opened by hand)."""
+    desk.clock = at(WED)
+    strategy, token = store.create(
+        contract.clean({"name": "ORB", "kind": "future", "underlying": "NIFTY", "product": "MIS",
+                        "lots": 1})
+    )  # fmt: skip
+    store.set_state(strategy.id, strategy.version, m.ACTIVE)
+    assert send(store, desk, token, "short").verdict == "sent"
+    _squared_off(desk)
+    desk.positions[(True, "NFO", "NIFTY24NOV26FUT", "MIS")] = 65  # the owner's own, by hand
+    got = send(store, desk, token, "flat")
+    assert got.verdict == "no_action" and len(desk.placed) == 1
+    assert "NIFTY 24 Nov FUT was an intraday position of an earlier day" in got.sentence
+    assert desk.position("NIFTY24NOV26FUT") == 65
+
+
+@pytest.mark.parametrize(
+    ("product", "since", "today", "ended"),
+    [
+        ("MIS", "2026-11-18 15:29:59", "2026-11-18", False),
+        ("MIS", "2026-11-18 23:59:59", "2026-11-19", True),
+        ("MIS", "2026-11-18 09:15:00", "2026-11-19", True),
+        ("MIS", "2026-11-19 00:00:00", "2026-11-19", False),
+        ("NRML", "2026-11-18 09:15:00", "2026-11-25", False),
+        ("CNC", "2026-11-18 09:15:00", "2026-11-25", False),
+        ("MIS", None, "2026-11-19", False),
+    ],
+)
+def test_m3_day_ended_vectors(product, since, today, ended):
+    from sudarshan.automation import symbols
+
+    since_ms = int(at(since) * 1000) if since else None
+    assert symbols.day_ended(product, since_ms, today) is ended

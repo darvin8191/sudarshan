@@ -183,6 +183,7 @@ def plan(
     indices = desk.indices()
     state_values: dict[str, Any] = {}
     notes: list[str] = []
+    cleared = "expired"  # why a held note was cleared with no order, for the owner's Telegram
     if state.held_symbol and symbols.held_expired(
         state.held_symbol, state.held_exchange, now_ms, indices,
         _closes(desk, state.held_symbol, state.held_exchange),
@@ -190,13 +191,17 @@ def plan(
         # The held contract stopped trading for good: the strategy holds nothing, and the chain
         # rule is silent for this one alert.
         notes.append(words.expired(name, state.held_symbol))
-        state_values = {
-            "held_exchange": None,
-            "held_symbol": None,
-            "held_side": None,
-            "held_since_ms": None,
-            "last_target": 0,
-        }
+        state_values = dict(_NOTHING_HELD)
+        state = replace(state, **state_values)
+        alert = replace(alert, before=None)
+    elif state.held_symbol and symbols.day_ended(strategy.product, state.held_since_ms, day):
+        # An intraday position does not outlive its session: the broker (and the sandbox) squared
+        # it off before the close. The note of it is cleared at the first alert of a later day,
+        # so a flat alert sends nothing for it and an entry reads the price and picks today's
+        # contract, never yesterday's strike. The chain rule is silent for this one alert.
+        cleared = "day_ended"
+        notes.append(words.day_ended(name, state.held_symbol))
+        state_values = dict(_NOTHING_HELD)
         state = replace(state, **state_values)
         alert = replace(alert, before=None)
     decision = rules.decide(strategy, state, alert, now, day, waited=waited)
@@ -224,7 +229,7 @@ def plan(
     if decision.verdict == "late":
         said = words.late(name, target, decision.late_s or 0, state.last_target)
         return _refuse("late", said, target, **common)
-    tells: list[tuple[str, str]] = [("expired", note) for note in notes]
+    tells: list[tuple[str, str]] = [(cleared, note) for note in notes]
     if decision.capped_now:
         notes.append(words.capped(name, strategy.max_alerts_day))
         tells.append(("capped", notes[-1]))
@@ -274,6 +279,14 @@ def plan(
     )
 
 
+#: The state's values when a held note is cleared with no order of the strategy's own.
+_NOTHING_HELD: dict[str, Any] = {
+    "held_exchange": None,
+    "held_symbol": None,
+    "held_side": None,
+    "held_since_ms": None,
+    "last_target": 0,
+}
 _NO_KEY = "No API key is set up in the app. Make one under API Key, then try again."
 
 
