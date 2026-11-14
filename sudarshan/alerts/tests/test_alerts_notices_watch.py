@@ -191,7 +191,9 @@ def test_from_the_watchs_run_to_one_telegram_message_and_its_recovery(tmp_path, 
     def watch(readings):
         at = clock().timestamp()
         seen = {**readings, "now": at}
-        once = run.run_once(settings, clock=lambda: at, gather=lambda *a: seen, installing=bool)
+        once = run.run_once(
+            settings, clock=lambda: at, gather=lambda *a: seen, installing=bool, env={}
+        )
         assert once == 0
 
     desk = NoticeDesk(

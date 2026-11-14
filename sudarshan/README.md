@@ -693,8 +693,63 @@ read it; then, outside market hours, stop the screener for 5 minutes
 (`sudo systemctl stop sudarshan-screener`, wait for the Telegram message, then
 `sudo systemctl start sudarshan-screener` and wait for the second one).
 
+### The outside heartbeat: the owner's steps
+
+The watch runs on the server, and its notices go through OpenAlgo. If the whole server stops, or
+OpenAlgo does, nothing on the server can tell you. An outside heartbeat can: a service on the
+internet that expects a call from the server every 2 minutes and tells you, through its own
+channel, when the calls stop. Without it the watch does everything else, and its report says "No
+outside heartbeat is set up: nobody is told if the whole server stops."
+
+SUDARSHAN creates no account anywhere. These are your steps, once, about ten minutes:
+
+1. **Pick a heartbeat service** (they are also called "dead man's switch" or "cron monitoring"
+   services) that gives each check a secret web address to call and alerts you when the calls
+   stop. Healthchecks.io is one whose free plan is enough for one check; any service that works
+   the same way will do. Create the account yourself, with your own email address.
+2. **Create one check.** Name it something plain such as `server`; do not put your name, the
+   broker or the server's address in it. Set **Period 2 minutes** and **Grace 8 minutes**, so you
+   are told when nothing has arrived for 10 minutes.
+3. **Choose how it tells you:** email at least, and the service's own phone or Telegram
+   notification if it has one (that is the service's bot, not SUDARSHAN's).
+4. **Copy the check's address** (it starts with `https://`). Treat it as a secret: whoever has it
+   can keep the check green or raise a false alarm. Never paste it in a chat or a screenshot.
+5. **Put it on the server,** in a file only root and the service user can read:
+
+   ```
+   sudo install -m 640 -o root -g sudarshan /dev/null /etc/sudarshan/watch.env
+   sudo nano /etc/sudarshan/watch.env
+   ```
+
+   The file holds one line, with your address in place of the example:
+
+   ```
+   SUDARSHAN_WATCH_PING_URL=https://hc.example/your-check-address
+   ```
+
+6. **See it arrive.** Within 2 minutes the service's page shows the check as up. On the server,
+   the `--check` line above ends with `heartbeat set`.
+7. **Test it once,** outside market hours: `sudo systemctl stop sudarshan-watch.timer`, wait for
+   the service's message (a little over 10 minutes), then
+   `sudo systemctl start sudarshan-watch.timer` and see the check come back up.
+
+How it behaves:
+
+- While notices can go out, each look calls your address. While OpenAlgo or the alerts service has
+  not answered for two looks in a row, or the watch cannot write its own files, it calls the
+  address with `/fail` added, which Healthchecks.io and services like it read as "failing now",
+  so you are told at once and not after 10 minutes. If your service uses a different address for
+  failure, add a second line, `SUDARSHAN_WATCH_PING_FAIL_URL=https://...`.
+- While a release is being installed the plain address is still called: the server is alive.
+- Nothing is sent with the call: no figure, no name, no account. The service sees the server's
+  address and the time, nothing else. The address is never written to a log, the report or
+  Telegram, and it is in the nightly backup with the rest of `/etc/sudarshan`.
+- An address that does not start with `https://`, or that carries a user name or a `?`, is not
+  used; `--check` then says `bad_link`.
+
 Tests: `sudarshan/ops/tests/test_watch_checks.py` (the vectors), `test_watch_run.py`,
-`test_watch_reach.py`, `test_watch_unit.py` and `sudarshan/alerts/tests/test_alerts_notices_watch.py`.
+`test_watch_reach.py`, `test_watch_unit.py`, `test_watch_heartbeat.py` and
+`sudarshan/alerts/tests/test_alerts_notices_watch.py`.
 
 ## The family view's one-time set-up (P6)
 

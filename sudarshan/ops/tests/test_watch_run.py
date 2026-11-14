@@ -238,8 +238,12 @@ def _runs(settings, readings_by_run):
         seen = {**readings, "now": at}
         codes.append(
             run.run_once(
-                settings, clock=lambda at=at: at, gather=lambda *a, s=seen: s, installing=bool
-            )
+                settings,
+                clock=lambda at=at: at,
+                gather=lambda *a, s=seen: s,
+                installing=bool,
+                env={},
+            )  # fmt: skip
         )
     return codes
 
@@ -276,7 +280,11 @@ def test_the_reports_shape_is_pinned_for_the_system_page(tmp_path):
     low = {**FINE, "disk": {"free_gb": 12.0, "inodes_free_pct": 80.0}}
     assert _runs(settings, [low]) == [0]
     report = json.loads(settings.report_file.read_text())
-    assert set(report) == {"v", "at", "release", "checks"} and report["v"] == 1
+    assert set(report) == {"v", "at", "release", "heartbeat", "checks"} and report["v"] == 1
+    assert report["heartbeat"] == {
+        "state": "not_set",
+        "words": "No outside heartbeat is set up: nobody is told if the whole server stops.",
+    }
     assert report["at"] == int(NOW + 120) and report["release"] is None
     assert [c["name"] for c in report["checks"]] == [
         *(f"service_{name}" for name in checks.SERVICES),
@@ -338,10 +346,15 @@ def test_the_check_option_prints_and_writes_nothing(tmp_path, monkeypatch, capsy
     monkeypatch.setattr(readers, "gather", lambda *a, **k: dict(FINE))
     assert main(["--check"]) == 0
     printed = capsys.readouterr().out.splitlines()
-    assert len(printed) == len(checks.SERVICES) + 7 and printed[0].split()[:2] == [
+    assert len(printed) == len(checks.SERVICES) + 8 and printed[0].split()[:2] == [
         "service_feed",
         "fine",
     ]
+    assert printed[-1].split()[:2] == ["heartbeat", "not_set"]
+    monkeypatch.setenv("SUDARSHAN_WATCH_PING_URL", "https://beat.example.invalid/ping/abc123")
+    assert main(["--check"]) == 0
+    last = capsys.readouterr().out.splitlines()[-1]
+    assert last.split()[:2] == ["heartbeat", "set"] and "abc123" not in last
     assert not (tmp_path / "state").exists()
 
 
@@ -388,8 +401,9 @@ def test_nothing_is_judged_while_a_release_is_being_installed(tmp_path):
         assert readers.installing(lock) is True
         for _ in range(3):
             code = run.run_once(
-                settings, gather=lambda *a: down, installing=lambda: readers.installing(lock)
-            )
+                settings, gather=lambda *a: down, installing=lambda: readers.installing(lock),
+                env={},
+            )  # fmt: skip
             assert code == 0
     finally:
         os.close(held)

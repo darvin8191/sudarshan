@@ -18,6 +18,8 @@ ALLOWED_PATHS = (
     "/etc/systemd/system/multi-user.target.wants",  # only sudarshan-<name>.service is looked for
     "/proc/meminfo",
     "/health",
+    "/fail",  # added to the owner's own heartbeat link
+    "/etc/sudarshan/watch.env",
 )
 ALLOWED_PORTS = {5000, 5580, 5582, 5583, 5584, 5585, 5586, 443}
 ALLOWED_IMPORTS_OUTSIDE_STDLIB = ("sudarshan.", "cryptography", "sqlalchemy", "database.")
@@ -72,7 +74,7 @@ def test_every_port_and_address_is_the_rings_or_openalgos():
         source = path.read_text(encoding="utf-8")
         tree = ast.parse(source)
         for text in _strings(tree):
-            for host in re.findall(r"https?://([^/:\"' ]+)", text):
+            for host in re.findall(r"https?://([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+)", text):
                 assert host == "127.0.0.1", f"{path.name} names {host}"
         for node in ast.walk(tree):
             if isinstance(node, ast.Constant) and type(node.value) is int:

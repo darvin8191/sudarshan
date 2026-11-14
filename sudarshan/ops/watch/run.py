@@ -4,6 +4,7 @@
       -> events.jsonl   one line per change, for the notice desk (sudarshan/alerts/notices.py)
       -> state.json     what each check remembers and what was last told (private, 600)
       -> report.json    every check's level now, for the System page (640)
+      -> the outside heartbeat (heartbeat.py), when the owner has set one up
 
 All three are in the unit's state folder, ``/var/lib/sudarshan-watch``. The watch only records:
 it holds no key to Telegram or OpenAlgo and sends nothing itself, as the deploy tool and the
@@ -27,7 +28,7 @@ from sudarshan.ops import events
 from sudarshan.ops.files import read_regular
 from sudarshan.ops.release import installed_release
 
-from . import checks, readers
+from . import checks, heartbeat, readers
 
 STATE_DIR = "/var/lib/sudarshan-watch"
 APP_DIR = "/opt/sudarshan/apps/openalgo"
@@ -113,13 +114,14 @@ def judge(readings: Mapping, state: Mapping) -> tuple[list[checks.Result], list[
     return results, moved, kept
 
 
-def report_of(results: list[checks.Result], state: Mapping, now: float, release) -> dict:
+def report_of(results: list[checks.Result], state: Mapping, now: float, release, beat: str) -> dict:
     """The report for the System page. Its shape is pinned by test_watch_run.py."""
     told, since = state.get("told") or {}, state.get("since") or {}
     return {
         "v": FORMAT,
         "at": int(now),
         "release": release,
+        "heartbeat": {"state": beat, "words": heartbeat.WORDS[beat]},
         "checks": [
             {
                 "name": result.name,
@@ -159,6 +161,8 @@ def run_once(
     clock: Callable[[], float] = time.time,
     gather: Callable[..., dict] = readers.gather,
     installing: Callable[[], bool] = readers.installing,
+    env: Mapping[str, str] | None = None,
+    send: Callable[[str], bool] = heartbeat.request,
 ) -> int:
     """One run. 0 when it finished (whatever the checks said), 1 when its files could not be
     written, 0 with nothing done when another run holds the folder or while the deploy tool is
@@ -170,22 +174,27 @@ def run_once(
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError:
             return 0
+        env = os.environ if env is None else env
         if installing():
+            heartbeat.beat(env, True, send)  # the server is alive; the install is on purpose
             return 0
         now = clock()
         state = load_state(settings.state_file)
         readings = gather(now, settings.app_dir, settings.env_file, state.get("master_date"))
         results, moved, kept = judge(readings, state)
         due = sum(change["check"] not in NO_EVENT for change in moved)
-        if record_changes(settings.spool, moved, now) != due:
-            return 1  # not kept either: the next run finds the same change and tells it
+        kept_ok = record_changes(settings.spool, moved, now) == due
+        if kept_ok:  # else not kept either: the next run finds the same change and tells it
+            try:
+                write_json(settings.state_file, kept, 0o600)
+            except OSError:
+                kept_ok = False
+        beat = heartbeat.beat(env, kept_ok and heartbeat.notices_can_go(results), send)
         try:
-            write_json(settings.state_file, kept, 0o600)
-            write_json(
-                settings.report_file, report_of(results, kept, now, installed_release()), 0o640
-            )
+            report = report_of(results, kept if kept_ok else state, now, installed_release(), beat)
+            write_json(settings.report_file, report, 0o640)
         except OSError:
             return 1
-        return 0
+        return 0 if kept_ok else 1
     finally:
         os.close(lock)
