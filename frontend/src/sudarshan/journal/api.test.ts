@@ -4,7 +4,16 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const client = vi.hoisted(() => ({ get: vi.fn(), request: vi.fn() }))
 vi.mock('@/api/client', () => ({ webClient: client }))
 
-import { JournalError, journalCall, journalData, problemOf, reportFileUrl, WORDS } from './api'
+import {
+  FILE_UNREADABLE,
+  JournalError,
+  journalCall,
+  journalData,
+  problemOf,
+  reportFile,
+  reportFileUrl,
+  WORDS,
+} from './api'
 
 const PREFIX = '/sudarshan/journal/api'
 
@@ -107,5 +116,58 @@ describe('journalCall', () => {
   it('names the bridge’s file route for a download, and its CSV form', () => {
     expect(reportFileUrl(12)).toBe(`${PREFIX}/reports/12/file`)
     expect(reportFileUrl(12, 'csv')).toBe(`${PREFIX}/reports/12/file?format=csv`)
+  })
+})
+
+describe('reportFile (review H4)', () => {
+  const blob = (body: string, type: string) => new Blob([body], { type })
+  const json = (body: object) => blob(JSON.stringify(body), 'application/json')
+  const file = (data: Blob, type: string) => ({ data, headers: { 'content-type': type } })
+
+  it('asks the file route for a blob within the download’s wait, and gives back the file', async () => {
+    client.get.mockResolvedValue(file(blob('%PDF-1.7', 'application/pdf'), 'application/pdf'))
+    const got = await reportFile(12)
+    expect(got.type).toBe('application/pdf')
+    const [url, config] = client.get.mock.calls[0]
+    expect(url).toBe(`${PREFIX}/reports/12/file`)
+    expect(config.responseType).toBe('blob')
+    expect(config.timeout).toBeGreaterThanOrEqual(30_000)
+    client.get.mockResolvedValue(file(blob('day,net', ''), 'text/csv'))
+    expect((await reportFile(12, 'csv')).type).toBe('text/csv')
+    expect(client.get.mock.calls[1][0]).toBe(`${PREFIX}/reports/12/file?format=csv`)
+    client.get.mockResolvedValue(file(blob('png', 'image/png'), 'image/png; charset=binary'))
+    expect((await reportFile(3)).type).toBe('image/png')
+  })
+
+  it('throws the switched-off sentence of a 200 that is not a file, never handing it back', async () => {
+    client.get.mockResolvedValue(
+      file(json({ status: 'success', enabled: false, data: null }), 'application/json')
+    )
+    const error = await reportFile(12).catch((e) => e)
+    expect(error).toBeInstanceOf(JournalError)
+    expect(error.message).toBe(WORDS.off)
+  })
+
+  it.each([
+    [401, 'unauthorized', 'Your session has ended. Log in again.'],
+    [404, 'not_found', 'This report has no CSV to download. Open it to read its text.'],
+    [429, 'rate_limited', 'Too many requests. Wait a minute, then try again.'],
+    [503, 'unavailable', 'The journal is switched off on the server.'],
+  ])('throws a refusal (%i) in the bridge’s own words', async (status, code, message) => {
+    client.get.mockRejectedValue(
+      refused(status, json({ status: 'error', error: { code, message } }))
+    )
+    const error = await reportFile(12, 'csv').catch((e) => e)
+    expect(error).toBeInstanceOf(JournalError)
+    expect(error.message).toBe(message)
+  })
+
+  it('refuses what no phone could open: another type, or a PDF where the CSV was asked for', async () => {
+    client.get.mockResolvedValue(file(blob('<html></html>', 'text/html'), 'text/html'))
+    expect((await reportFile(12).catch((e) => e)).message).toBe(FILE_UNREADABLE)
+    client.get.mockResolvedValue(file(blob('%PDF-1.7', 'application/pdf'), 'application/pdf'))
+    expect((await reportFile(12, 'csv').catch((e) => e)).message).toBe(FILE_UNREADABLE)
+    client.get.mockRejectedValue(new AxiosError('x', 'ECONNABORTED'))
+    expect((await reportFile(12).catch((e) => e)).message).toBe(WORDS.noAnswer)
   })
 })

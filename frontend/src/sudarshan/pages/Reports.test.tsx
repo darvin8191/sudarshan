@@ -1,7 +1,7 @@
 /** The Reports page in jsdom, the bridge a stand-in answering as the contract says. */
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const api = vi.hoisted(() => ({ data: vi.fn(), call: vi.fn() }))
 vi.mock('@/sudarshan/journal/api', async (importOriginal) => ({
@@ -9,7 +9,11 @@ vi.mock('@/sudarshan/journal/api', async (importOriginal) => ({
   journalData: api.data,
   journalCall: api.call,
 }))
+// The download itself goes through the real `reportFile`; only the web client is a stand-in.
+const client = vi.hoisted(() => ({ get: vi.fn() }))
+vi.mock('@/api/client', () => ({ webClient: client }))
 
+import { AxiosError } from 'axios'
 import { JournalError } from '@/sudarshan/journal/api'
 import type { Report } from '@/sudarshan/journal/types'
 import { renderBook } from '@/test/bookPages'
@@ -80,7 +84,35 @@ const calls = (op: string) => api.data.mock.calls.filter(([name]) => name === op
 beforeEach(() => {
   api.data.mockReset()
   api.call.mockReset()
+  client.get.mockReset()
 })
+afterEach(() => {
+  vi.restoreAllMocks()
+})
+
+/** The bridge's envelope as the browser hands it to a download: a blob of JSON. */
+const jsonBlob = (body: object) => new Blob([JSON.stringify(body)], { type: 'application/json' })
+const refusal = (status: number, code: string, message: string) =>
+  new AxiosError('x', 'ERR', undefined, {}, {
+    status,
+    data: jsonBlob({ status: 'error', error: { code, message } }),
+    statusText: '',
+    headers: { 'content-type': 'application/json' },
+    config: {} as never,
+  } as never)
+
+function saving() {
+  const made = vi.fn(() => 'blob:report')
+  const clicked: string[] = []
+  vi.spyOn(URL, 'createObjectURL').mockImplementation(made)
+  vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
+  vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (
+    this: HTMLAnchorElement
+  ) {
+    clicked.push(this.download)
+  })
+  return { made, clicked }
+}
 
 describe('Archive', () => {
   it('lists reports newest first with kind, period, delivery and the two buttons', async () => {
@@ -91,11 +123,10 @@ describe('Archive', () => {
     expect(within(items[0]).getByText('Day report')).toBeTruthy()
     expect(within(items[0]).getByText('Mon 9 Nov 2026')).toBeTruthy()
     expect(within(items[0]).getByTestId('delivery').textContent).toBe('Sent')
-    const link = within(items[0]).getByRole('link', { name: /Download Day report/ })
-    expect(link.getAttribute('download')).toBe('SUDARSHAN_Day_report_20261109.pdf')
-    expect(link.getAttribute('href')).toMatch(/\/reports\/1\/file$/)
+    expect(within(items[0]).getByRole('button', { name: /Download Day report/ })).toBeTruthy()
     expect(within(items[1]).getByTestId('delivery').textContent).toMatch(/^Text only/)
-    expect(within(items[1]).queryByRole('link')).toBeNull()
+    expect(within(items[1]).queryByRole('button', { name: /Download/ })).toBeNull()
+    expect(within(items[1]).getByText('No file')).toBeTruthy()
   })
 
   it('offers a monthly statement as a CSV too, next to Download, and no other report', async () => {
@@ -112,16 +143,102 @@ describe('Archive', () => {
     const items = await screen.findAllByTestId('report')
     const monthly = within(items[0])
     expect(monthly.getByText('Monthly statement')).toBeTruthy()
-    const csv = monthly.getByRole('link', {
+    const csv = monthly.getByRole('button', {
       name: 'Download CSV of Monthly statement October 2026',
     })
-    expect(csv.getAttribute('href')).toMatch(/\/reports\/5\/file\?format=csv$/)
-    expect(csv.getAttribute('download')).toBe('SUDARSHAN_Monthly_statement_202610.csv')
     expect(csv.textContent).toBe('Download CSV')
-    const pdf = monthly.getByRole('link', { name: 'Download Monthly statement October 2026' })
-    expect(pdf.getAttribute('href')).toMatch(/\/reports\/5\/file$/)
+    expect(
+      monthly.getByRole('button', { name: 'Download Monthly statement October 2026' })
+    ).toBeTruthy()
     expect(within(items[1]).getByText('Day report')).toBeTruthy()
-    expect(within(items[1]).queryByRole('link', { name: /CSV/ })).toBeNull()
+    expect(within(items[1]).queryByRole('button', { name: /CSV/ })).toBeNull()
+  })
+
+  it('saves the file under its ASCII name, once however it is tapped (review H4)', async () => {
+    const user = userEvent.setup()
+    const { made, clicked } = saving()
+    let answer: (value: unknown) => void = () => {}
+    client.get.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          answer = resolve
+        })
+    )
+    serve([row({ id: 5, kind: 'monthly', period_key: '202610', file_name: 'm.pdf' })])
+    renderBook('/reports', <Reports />)
+    const button = await screen.findByRole('button', {
+      name: 'Download Monthly statement October 2026',
+    })
+    await user.click(button)
+    expect(button.textContent).toBe('Preparing the file')
+    await user.click(button)
+    expect(client.get).toHaveBeenCalledTimes(1)
+    const [url, config] = client.get.mock.calls[0]
+    expect(url).toMatch(/\/reports\/5\/file$/)
+    expect(config).toMatchObject({ responseType: 'blob' })
+    answer({
+      data: new Blob(['%PDF-1.7'], { type: 'application/pdf' }),
+      headers: { 'content-type': 'application/pdf' },
+    })
+    await waitFor(() => expect(clicked).toEqual(['SUDARSHAN_Monthly_statement_202610.pdf']))
+    expect(made).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole('button', { name: /^Download Monthly/ }).textContent).toBe('Download')
+    // The CSV asks for its own form and is saved under its own name.
+    client.get.mockResolvedValue({
+      data: new Blob(['day,net'], { type: 'text/csv' }),
+      headers: { 'content-type': 'text/csv' },
+    })
+    await user.click(screen.getByRole('button', { name: /Download CSV/ }))
+    await waitFor(() => expect(clicked).toHaveLength(2))
+    expect(client.get.mock.calls[1][0]).toMatch(/\/reports\/5\/file\?format=csv$/)
+    expect(clicked[1]).toBe('SUDARSHAN_Monthly_statement_202610.csv')
+  })
+
+  it('never saves a switched-off answer as the file, and says why on the page (review H4)', async () => {
+    const user = userEvent.setup()
+    const { made, clicked } = saving()
+    // A bridge before this release answered switched off as a 200 holding its envelope.
+    client.get.mockResolvedValue({
+      data: jsonBlob({
+        status: 'success',
+        enabled: false,
+        data: null,
+        message: 'The journal is switched off on the server.',
+      }),
+      headers: { 'content-type': 'application/json' },
+    })
+    serve([row({ id: 5, kind: 'monthly', period_key: '202610', file_name: 'm.pdf' })])
+    renderBook('/reports', <Reports />)
+    await user.click(
+      await screen.findByRole('button', { name: 'Download Monthly statement October 2026' })
+    )
+    const report = screen.getByTestId('report')
+    expect(
+      await within(report).findByText('The journal is switched off on the server.')
+    ).toBeTruthy()
+    expect(made).not.toHaveBeenCalled()
+    expect(clicked).toEqual([])
+  })
+
+  it.each([
+    [404, 'not_found', 'This report has no CSV to download. Open it to read its text.'],
+    [401, 'unauthorized', 'Your session has ended. Log in again.'],
+    [429, 'rate_limited', 'Too many requests. Wait a minute, then try again.'],
+    [
+      503,
+      'unavailable',
+      'The journal service is not answering. Your trades are safe; try again in a minute.',
+    ],
+  ])('says a refused download (%i) in the bridge’s words and saves nothing', async (status, code, message) => {
+    const user = userEvent.setup()
+    const { made } = saving()
+    client.get.mockRejectedValue(refusal(status, code, message))
+    serve([row({ id: 5, kind: 'monthly', period_key: '202610', file_name: 'm.pdf' })])
+    renderBook('/reports', <Reports />)
+    await user.click(await screen.findByRole('button', { name: /Download CSV/ }))
+    expect(await within(screen.getByTestId('report')).findByText(message)).toBeTruthy()
+    expect(made).not.toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: /Download CSV/ }).textContent).toBe('Download CSV')
   })
 
   it('says the alerts service is off when the server says so', async () => {

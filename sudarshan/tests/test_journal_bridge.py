@@ -571,7 +571,38 @@ def test_a_report_without_a_file_and_a_download_refused_by_the_service(bridge, j
     assert error_of(gone) == {"code": "not_found", "message": "This report is not in the archive."}
     journal.answers["report_file"] = (200, {"status": "success", "data": {"enabled": False}})
     off = bridge.get(PREFIX + "/reports/3/file", headers=JSON)
-    assert off.get_json()["enabled"] is False and off.get_json()["message"] == WORDS["off"]
+    assert off.status_code == 503
+    assert error_of(off) == {"code": "unavailable", "message": WORDS["off"]}
+
+
+def test_a_download_while_switched_off_is_refused_in_words_never_a_200(bridge, journal, monkeypatch):
+    """Review H4 (v0.11.0): a browser saves a 200 under the name it asked for, so a switched-off
+    answer of 200 came to the phone as a "PDF" holding JSON. Every way of saying off is a 503 with
+    the sentence, and no file name goes with it."""
+    reason = "The journal is switched off until the owner turns it on in OpenAlgo's .env."
+    journal.answers["report_file"] = (
+        200, {"status": "success", "data": {"enabled": False, "message": reason}},
+    )  # fmt: skip
+    as_owner(bridge)
+    answers = [bridge.get(PREFIX + "/reports/3/file", headers=JSON),
+               bridge.get(PREFIX + "/reports/3/file?format=csv", headers=JSON)]  # fmt: skip
+    # the service does not answer in time, and its /health says it is switched off
+    journal.answers["report_file"] = slow(1.0)
+    journal.health = (200, {"journal_state": {"enabled": False, "reason": reason}})
+    monkeypatch.setitem(bp_module.TIMEOUTS_S, "download", 0.2)
+    answers.append(bridge.get(PREFIX + "/reports/3/file", headers=JSON))
+    for response in answers:
+        assert response.status_code == 503
+        assert response.mimetype == "application/json"
+        assert error_of(response) == {"code": "unavailable", "message": reason}
+        assert "Content-Disposition" not in response.headers
+    # a read keeps its switched-off success: the pages say it on their own card
+    journal.answers["state"] = (
+        200, {"status": "success", "data": {"enabled": False, "message": reason}},
+    )  # fmt: skip
+    assert bridge.get(PREFIX + "/state", headers=JSON).get_json() == {
+        "status": "success", "enabled": False, "data": None, "message": reason,
+    }  # fmt: skip
 
 
 def test_a_download_answer_over_its_limit_is_not_sent(bridge, journal, monkeypatch):

@@ -14,7 +14,7 @@ import {
   Sunset,
 } from 'lucide-react'
 import { type ReactNode, useEffect, useRef, useState } from 'react'
-import { journalData, problemOf, reportFileUrl } from '../journal/api'
+import { journalData, problemOf, reportFile, saveFile } from '../journal/api'
 import { Problem } from '../journal/parts'
 import type { ReportKind } from '../journal/types'
 import { REPORTS_KEY, useArchive, useReportSettings } from './queries'
@@ -58,6 +58,28 @@ function Row({
   onOpen: (id: number) => void
 }) {
   const delivery = deliveryOf(report, alertsOn)
+  const named = `${kindTitle(report.kind)} ${periodWords(report.period_key)}`
+  // Review H4: the file is fetched and checked before it is saved, so a refusal is a sentence
+  // under the row and never a file that will not open. One download at a time per row.
+  const [busy, setBusy] = useState<'file' | 'csv' | null>(null)
+  const [problem, setProblem] = useState<string | null>(null)
+  const fetching = useRef(false)
+  const download = async (format?: 'csv') => {
+    if (fetching.current) return
+    fetching.current = true
+    setBusy(format ?? 'file')
+    setProblem(null)
+    try {
+      saveFile(await reportFile(report.id, format), downloadName(report, format))
+    } catch (error) {
+      setProblem(problemOf(error).message)
+    } finally {
+      fetching.current = false
+      setBusy(null)
+    }
+  }
+  const glyph = (which: 'file' | 'csv', icon: ReactNode) =>
+    busy === which ? <LoaderCircle aria-hidden="true" className="size-4 animate-spin" /> : icon
   return (
     <li
       data-testid="report"
@@ -92,15 +114,17 @@ function Row({
           Open
         </button>
         {report.file_name ? (
-          <a
+          <button
+            type="button"
             className={BUTTON}
-            href={reportFileUrl(report.id)}
-            download={downloadName(report)}
-            aria-label={`Download ${kindTitle(report.kind)} ${periodWords(report.period_key)}`}
+            disabled={busy !== null}
+            aria-busy={busy === 'file'}
+            onClick={() => void download()}
+            aria-label={busy === 'file' ? `Preparing the file of ${named}` : `Download ${named}`}
           >
-            <Download aria-hidden="true" className="size-4" />
-            Download
-          </a>
+            {glyph('file', <Download aria-hidden="true" className="size-4" />)}
+            {busy === 'file' ? 'Preparing the file' : 'Download'}
+          </button>
         ) : (
           <span
             className={`${BUTTON} opacity-60`}
@@ -111,17 +135,22 @@ function Row({
           </span>
         )}
         {hasCsv(report) && (
-          <a
+          <button
+            type="button"
             className={`${BUTTON} col-span-2`}
-            href={reportFileUrl(report.id, 'csv')}
-            download={downloadName(report, 'csv')}
-            aria-label={`Download CSV of ${kindTitle(report.kind)} ${periodWords(report.period_key)}`}
+            disabled={busy !== null}
+            aria-busy={busy === 'csv'}
+            onClick={() => void download('csv')}
+            aria-label={
+              busy === 'csv' ? `Preparing the CSV of ${named}` : `Download CSV of ${named}`
+            }
           >
-            <FileSpreadsheet aria-hidden="true" className="size-4" />
-            Download CSV
-          </a>
+            {glyph('csv', <FileSpreadsheet aria-hidden="true" className="size-4" />)}
+            {busy === 'csv' ? 'Preparing the file' : 'Download CSV'}
+          </button>
         )}
       </div>
+      {problem && <Problem>{problem}</Problem>}
     </li>
   )
 }

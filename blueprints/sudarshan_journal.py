@@ -47,6 +47,9 @@ How it forwards:
   ``?format=csv`` asks for a monthly statement's trades as its CSV instead (JB9); that is the one
   value it takes (any other is refused in words and nothing is sent), and the answer must be a
   CSV, ``text/csv`` under a ``.csv`` name, or it is not sent either.
+- A download never answers 200 with anything but the file: a browser saves a 200 under the name
+  it was asked for. The journal switched off is 503 with the service's sentence in the envelope
+  there (review H4 of v0.11.0), as every other refusal of a download already is.
 """
 
 import base64
@@ -227,6 +230,14 @@ def _off(message=None):
     """The journal switched off is not an error: the page says so with the service's words."""
     words = _sentence(message) or WORDS["off"]
     return jsonify({"status": "success", "enabled": False, "data": None, "message": words}), 200
+
+
+def _off_for(spec: OpSpec, message=None):
+    """Switched off, as this op may say it: a download is refused with the sentence, never a 200
+    a browser would save as the report's file."""
+    if spec.cls == "download":
+        return _error("unavailable", _sentence(message) or WORDS["off"])
+    return _off(message)
 
 
 def _unknown_op(status: int, code, message) -> bool:
@@ -419,7 +430,7 @@ def _not_answered(spec: OpSpec, sent: bool):
     """The service took no request, or gave no usable answer: what the page is told."""
     off = _health_off() if sent else None
     if off is not None:
-        return _off(off)
+        return _off_for(spec, off)
     if sent and spec.cls in ("write", "reconcile"):  # it may have been done: never say it was not
         return _error("not_confirmed")
     return _error("unavailable", WORDS["not_answering"])
@@ -502,7 +513,7 @@ def _call(spec: OpSpec, args: dict):
     if spec.cls == "download" and reply.body.get("status") == "success":
         data = reply.body.get("data")
         if isinstance(data, dict) and data.get("enabled") is False:
-            return _off(data.get("message"))
+            return _off_for(spec, data.get("message"))
         return _file(data, csv=args.get("format") == "csv")
     return _answer(reply.status, reply.body)
 
