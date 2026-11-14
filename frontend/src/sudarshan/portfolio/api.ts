@@ -7,11 +7,32 @@ import axios from 'axios'
 import { webClient } from '@/api/client'
 import {
   API_PREFIX,
+  type CaDecideArgs,
+  type CaListArgs,
+  type CalendarArgs,
+  type DividendSetArgs,
+  type DividendsArgs,
   type ErrorCode,
+  type ExportArgs,
+  type ExportFile,
+  type ExportPdf,
+  type GoalCreateArgs,
+  type GoalUpdateArgs,
   OPS,
   type OpName,
   type OpSpec,
   type PortfolioOps,
+  type PortfolioState,
+  type ReportCsvArgs,
+  type RiskArgs,
+  type SettingsSetArgs,
+  SWITCH_NAMES,
+  type SwitchName,
+  type TaxCsvArgs,
+  type TaxGetArgs,
+  type TaxInputDeleteArgs,
+  type TaxInputSetArgs,
+  type TaxInputsArgs,
   WORDS,
 } from './types'
 
@@ -209,4 +230,60 @@ export async function portfolioCall<N extends OpName>(
   throw new PortfolioError(
     problemFrom(body) ?? { code: 'unreadable', message: UNREADABLE, entryId: null }
   )
+}
+
+// ---- SUDARSHAN P7 F0 (M7.27): phase P7's ops, one function each ----
+// The views of tax, insights and goals land one at a time in their own folders and call these, so
+// none of them edits this file. Each answers `not_ready` until its part is built and while its
+// switch is off on the server.
+
+/** Which of phase P7's switches the service says are on; a switch it does not name is off. */
+export function switchesOf(state: PortfolioState | null | undefined): Record<SwitchName, boolean> {
+  const said: Partial<Record<SwitchName, unknown>> = state?.switches ?? {}
+  const out = {} as Record<SwitchName, boolean>
+  for (const name of SWITCH_NAMES) out[name] = said[name] === true
+  return out
+}
+
+export const getTax = (args: TaxGetArgs = {}, signal?: AbortSignal) =>
+  portfolioCall('tax_get', args, signal)
+export const getTaxInputs = (args: TaxInputsArgs = {}, signal?: AbortSignal) =>
+  portfolioCall('tax_inputs', args, signal)
+export const saveTaxInput = (args: TaxInputSetArgs) => portfolioCall('tax_input_set', args)
+export const deleteTaxInput = (args: TaxInputDeleteArgs) => portfolioCall('tax_input_delete', args)
+export const getTaxCsv = (args: TaxCsvArgs) => portfolioCall('tax_csv', args)
+export const getReportCsv = (args: ReportCsvArgs) => portfolioCall('report_csv', args)
+export const listCorporateActions = (args: CaListArgs = {}, signal?: AbortSignal) =>
+  portfolioCall('ca_list', args, signal)
+export const decideCorporateAction = (args: CaDecideArgs) => portfolioCall('ca_decide', args)
+export const getDividends = (args: DividendsArgs = {}, signal?: AbortSignal) =>
+  portfolioCall('dividends', args, signal)
+export const setDividend = (args: DividendSetArgs) => portfolioCall('dividend_set', args)
+export const getCalendar = (args: CalendarArgs = {}, signal?: AbortSignal) =>
+  portfolioCall('calendar', args, signal)
+export const getRisk = (args: RiskArgs = {}, signal?: AbortSignal) =>
+  portfolioCall('risk', args, signal)
+export const getSettings = (signal?: AbortSignal) => portfolioCall('settings_get', {}, signal)
+export const saveSettings = (args: SettingsSetArgs) => portfolioCall('settings_set', args)
+export const listGoals = (signal?: AbortSignal) => portfolioCall('goals_list', {}, signal)
+export const createGoal = (args: GoalCreateArgs) => portfolioCall('goal_create', args)
+export const updateGoal = (args: GoalUpdateArgs) => portfolioCall('goal_update', args)
+export const getExportPdf = (args: ExportArgs) => portfolioCall('export_pdf', args)
+
+/** A downloaded file handed to the phone to keep: CSV text as UTF-8, a PDF from its base64. */
+export function saveDownload(file: ExportFile | ExportPdf): void {
+  const blob =
+    'base64' in file
+      ? new Blob([Uint8Array.from(atob(file.base64), (c) => c.charCodeAt(0))], {
+          type: 'application/pdf',
+        })
+      : new Blob([file.text], { type: 'text/csv;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = file.filename
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(url)
 }
