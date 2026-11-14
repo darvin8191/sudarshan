@@ -74,9 +74,10 @@ LIMITS = dict.fromkeys(kinds.SERVICE_OP_NAMES, kinds.API_MAX_BYTES) | {
     spec.name: kinds.IMPORT_MAX_BYTES if spec.upload else kinds.API_MAX_BYTES for spec in kinds.OPS
 }
 OWNER_PURPOSE, FAMILY, JOURNAL = "owner", "family", "journal"
-#: The ops each purpose opens (the family and journal lists are all reads).
+#: The ops each purpose opens (the family and journal lists are all reads; the owner's sharing ops
+#: are among the owner's own, ``kinds.SHARING_OPS``).
 ALLOWED = {
-    OWNER_PURPOSE: frozenset((*kinds.OP_NAMES, *kinds.OWNER_EXTRA_OPS)),
+    OWNER_PURPOSE: frozenset(kinds.OP_NAMES),
     FAMILY: frozenset(kinds.FAMILY_OPS),
     JOURNAL: frozenset(kinds.JOURNAL_OPS),
 }
