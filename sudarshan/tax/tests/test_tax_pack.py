@@ -99,6 +99,82 @@ def test_what_cannot_be_worked_out_is_listed_in_words_and_in_no_total():
     assert known["capital_gains"]["lt_gain_paise"] > 2_000_000 + 1_490_000  # 50,000 - 35,000 more
 
 
+#: What trades in the cash segment and is no company's equity share, by its ISIN.
+NOT_SHARES = {
+    "gold ETF": "INF000B01019",
+    "liquid ETF": "INF000C01017",
+    "equity ETF": "INF000D01015",
+    "REIT": "INE000R25014",
+    "InvIT": "INE000V23012",
+    "gold bond": "IN0020200013",
+    "debenture": "INE000A07017",
+    "unknown": "XX0000000000",
+}
+
+
+@pytest.mark.parametrize("isin", NOT_SHARES.values(), ids=NOT_SHARES.keys())
+def test_a_cash_segment_sale_of_what_is_no_share_is_listed_and_changes_no_figure(isin):
+    base = inputs(charges={})  # the charges have their own test below
+    extra = (  # bought in an earlier year, sold in this one at a profit of Rs 5,00,000
+        share(20240610, "BUY", 1000, 1000, isin, asset_class="equity"),
+        share(20260610, "SELL", 1000, 1500, isin, asset_class="equity"),
+        share(20260611, "BUY", 10, 1500, isin),  # and a same-day round trip: no intraday either
+        share(20260611, "SELL", 10, 1600, isin),
+    )
+    lot = OpeningLot(1, 1, isin, 20160310, 5 * 10**6, 100_000)
+    before = pack.build_pack(base)
+    got = pack.build_pack(replace(base, trades=base.trades + extra, opening=base.opening + (lot,)))
+    for part in ("capital_gains", "business", "dividends"):
+        assert got[part] == before[part], part
+    assert got["not_computed"][0] == words.not_computed_sales(2, "Rs 15,16,000")
+    assert got["not_computed_sales"] == [
+        {"instrument": isin, "day": 20260610, "amount_paise": 150_000_000},
+        {"instrument": isin, "day": 20260611, "amount_paise": 1_600_000},
+    ]
+    assert any("only a company's equity share is computed" in line for line in got["not_computed"])
+
+
+@pytest.mark.parametrize("isin", NOT_SHARES.values(), ids=NOT_SHARES.keys())
+def test_the_yearly_exemption_never_reaches_what_is_no_share(isin):
+    """A long-term profit of Rs 5,00,000 on such a unit alone: no gain, no exemption, no tax,
+    though the same trades in a share use the whole Rs 1,25,000."""
+
+    def year(instrument):
+        trades = (
+            share(20240610, "BUY", 1000, 1000, instrument),
+            share(20260610, "SELL", 1000, 1500, instrument),
+        )
+        return pack.build_pack(pack.PackInputs(2026, 1, 20261114, 0, trades=trades))
+
+    as_share, got = year("INE000Z01019")["capital_gains"], year(isin)["capital_gains"]
+    assert as_share["lt_gain_paise"] == 50_000_000
+    assert as_share["exemption"]["used_paise"] == 12_500_000
+    assert got["exemption"]["used_paise"] == 0
+    assert (got["st_gain_paise"], got["lt_gain_paise"]) == (0, 0)
+    assert got["taxable"] == {**got["taxable"], "st_paise": 0, "lt_paise": 0}
+    assert got["schedule"] == [] and got["needs_fmv"] == [] and got["unknown_cost"] == []
+    assert not any(v for k, v in got["indicative_tax"].items() if k.endswith("_paise"))
+
+
+def test_the_charges_of_what_is_not_computed_are_taken_off_nothing():
+    """Upstox's Rs 1,000 covers Rs 1,00,000 of a share and Rs 3,00,000 of a gold ETF: the share's
+    sale takes its own quarter, by traded value, and never the ETF's part."""
+
+    def year(*more):
+        trades = (share(20260610, "BUY", 100, 400), share(20260710, "SELL", 100, 600), *more)
+        charges = {"EQ": {"total_paise": 100_000, "stt_paise": 0}}
+        return pack.build_pack(pack.PackInputs(2026, 1, 20261114, 0, trades=trades,
+                                               charges=charges))  # fmt: skip
+
+    alone = year()
+    etf = NOT_SHARES["gold ETF"]
+    mixed = year(share(20260611, "BUY", 100, 1400, etf), share(20260712, "SELL", 100, 1600, etf))
+    assert alone["capital_gains"]["st_gain_paise"] == 2_000_000 - 100_000
+    assert mixed["capital_gains"]["st_gain_paise"] == 2_000_000 - 25_000
+    assert words.CHARGES_OF_OTHERS in mixed["notes"]
+    assert words.CHARGES_OF_OTHERS not in alone["notes"]
+
+
 def test_a_buyback_of_the_dividend_years_puts_its_receipt_under_dividends():
     base = inputs(fy=2025, as_of_day=20261114)
     tender = share(20260210, "SELL", 100, 600, "INE000C01016", kind_hint="buyback")

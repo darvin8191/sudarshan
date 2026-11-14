@@ -18,6 +18,281 @@
    "out": "delivery_equity"
   },
   {
+   "id": "H-EQ-PARTLY-PAID",
+   "note": "a company's partly paid equity share (IN9, kind 01) is a share",
+   "in": {
+    "taxpayer": 1,
+    "account": 1,
+    "day": 20260803,
+    "seq": 1,
+    "side": "BUY",
+    "qty_u": 1000000,
+    "segment": "EQ",
+    "instrument": "IN9000A01018",
+    "price_u": 1000000,
+    "amount_paise": 10000
+   },
+   "out": "delivery_equity"
+  },
+  {
+   "id": "H-EQ-TAGGED",
+   "note": "a share tagged equity by its ledger is a share",
+   "in": {
+    "taxpayer": 1,
+    "account": 1,
+    "day": 20260803,
+    "seq": 1,
+    "side": "BUY",
+    "qty_u": 1000000,
+    "segment": "EQ",
+    "instrument": "INE000A01010",
+    "price_u": 1000000,
+    "amount_paise": 10000,
+    "asset_class": "equity"
+   },
+   "out": "delivery_equity"
+  },
+  {
+   "id": "H-GOLD-ETF",
+   "note": "a gold ETF's unit (INF) trades in the cash segment and is no share",
+   "in": {
+    "taxpayer": 1,
+    "account": 1,
+    "day": 20260803,
+    "seq": 1,
+    "side": "BUY",
+    "qty_u": 1000000,
+    "segment": "EQ",
+    "instrument": "INF000B01019",
+    "price_u": 1000000,
+    "amount_paise": 10000
+   },
+   "out": "not_computed"
+  },
+  {
+   "id": "H-LIQUID-ETF",
+   "note": "a liquid ETF's unit, often held as F&O margin, is taxed at slab",
+   "in": {
+    "taxpayer": 1,
+    "account": 1,
+    "day": 20260803,
+    "seq": 1,
+    "side": "BUY",
+    "qty_u": 1000000,
+    "segment": "EQ",
+    "instrument": "INF000C01017",
+    "price_u": 1000000,
+    "amount_paise": 10000
+   },
+   "out": "not_computed"
+  },
+  {
+   "id": "H-EQUITY-ETF",
+   "note": "an equity ETF's unit is a fund unit; no list of them is kept here",
+   "in": {
+    "taxpayer": 1,
+    "account": 1,
+    "day": 20260803,
+    "seq": 1,
+    "side": "BUY",
+    "qty_u": 1000000,
+    "segment": "EQ",
+    "instrument": "INF000D01015",
+    "price_u": 1000000,
+    "amount_paise": 10000
+   },
+   "out": "not_computed"
+  },
+  {
+   "id": "H-ETF-TAGGED",
+   "note": "a listed asset's class is equity until changed, so the class of an ETF unit cannot make it a share",
+   "in": {
+    "taxpayer": 1,
+    "account": 1,
+    "day": 20260803,
+    "seq": 1,
+    "side": "BUY",
+    "qty_u": 1000000,
+    "segment": "EQ",
+    "instrument": "INF000B01019",
+    "price_u": 1000000,
+    "amount_paise": 10000,
+    "asset_class": "equity"
+   },
+   "out": "not_computed"
+  },
+  {
+   "id": "H-REIT",
+   "note": "a REIT's unit: a company's ISIN (INE) of another kind (25)",
+   "in": {
+    "taxpayer": 1,
+    "account": 1,
+    "day": 20260803,
+    "seq": 1,
+    "side": "BUY",
+    "qty_u": 1000000,
+    "segment": "EQ",
+    "instrument": "INE000R25014",
+    "price_u": 1000000,
+    "amount_paise": 10000
+   },
+   "out": "not_computed"
+  },
+  {
+   "id": "H-INVIT",
+   "note": "an InvIT's unit: a company's ISIN of another kind (23)",
+   "in": {
+    "taxpayer": 1,
+    "account": 1,
+    "day": 20260803,
+    "seq": 1,
+    "side": "BUY",
+    "qty_u": 1000000,
+    "segment": "EQ",
+    "instrument": "INE000V23012",
+    "price_u": 1000000,
+    "amount_paise": 10000
+   },
+   "out": "not_computed"
+  },
+  {
+   "id": "H-GOLD-BOND",
+   "note": "a sovereign gold bond is a government security (IN0)",
+   "in": {
+    "taxpayer": 1,
+    "account": 1,
+    "day": 20260803,
+    "seq": 1,
+    "side": "BUY",
+    "qty_u": 1000000,
+    "segment": "EQ",
+    "instrument": "IN0020200013",
+    "price_u": 1000000,
+    "amount_paise": 10000
+   },
+   "out": "not_computed"
+  },
+  {
+   "id": "H-GSEC",
+   "note": "a government security or treasury bill",
+   "in": {
+    "taxpayer": 1,
+    "account": 1,
+    "day": 20260803,
+    "seq": 1,
+    "side": "BUY",
+    "qty_u": 1000000,
+    "segment": "EQ",
+    "instrument": "IN0020230010",
+    "price_u": 1000000,
+    "amount_paise": 10000
+   },
+   "out": "not_computed"
+  },
+  {
+   "id": "H-DEBENTURE",
+   "note": "a company's debenture: kind 07",
+   "in": {
+    "taxpayer": 1,
+    "account": 1,
+    "day": 20260803,
+    "seq": 1,
+    "side": "BUY",
+    "qty_u": 1000000,
+    "segment": "EQ",
+    "instrument": "INE000A07017",
+    "price_u": 1000000,
+    "amount_paise": 10000
+   },
+   "out": "not_computed"
+  },
+  {
+   "id": "H-PREFERENCE",
+   "note": "a company's preference share: kind 04",
+   "in": {
+    "taxpayer": 1,
+    "account": 1,
+    "day": 20260803,
+    "seq": 1,
+    "side": "BUY",
+    "qty_u": 1000000,
+    "segment": "EQ",
+    "instrument": "INE000A04014",
+    "price_u": 1000000,
+    "amount_paise": 10000
+   },
+   "out": "not_computed"
+  },
+  {
+   "id": "H-UNKNOWN-ISIN",
+   "note": "an ISIN of no known shape is never assumed to be a share",
+   "in": {
+    "taxpayer": 1,
+    "account": 1,
+    "day": 20260803,
+    "seq": 1,
+    "side": "BUY",
+    "qty_u": 1000000,
+    "segment": "EQ",
+    "instrument": "XX0000000000",
+    "price_u": 1000000,
+    "amount_paise": 10000
+   },
+   "out": "not_computed"
+  },
+  {
+   "id": "H-FOREIGN-ISIN",
+   "note": "another country's ISIN, though its later characters match",
+   "in": {
+    "taxpayer": 1,
+    "account": 1,
+    "day": 20260803,
+    "seq": 1,
+    "side": "BUY",
+    "qty_u": 1000000,
+    "segment": "EQ",
+    "instrument": "US000A010100",
+    "price_u": 1000000,
+    "amount_paise": 10000
+   },
+   "out": "not_computed"
+  },
+  {
+   "id": "H-NAME",
+   "note": "a ledger asset with no ISIN goes by its name: unknown, so not computed",
+   "in": {
+    "taxpayer": 1,
+    "account": 1,
+    "day": 20260803,
+    "seq": 1,
+    "side": "BUY",
+    "qty_u": 1000000,
+    "segment": "EQ",
+    "instrument": "Some Company Ltd",
+    "price_u": 1000000,
+    "amount_paise": 10000,
+    "asset_class": "equity"
+   },
+   "out": "not_computed"
+  },
+  {
+   "id": "H-SHORT",
+   "note": "a cut-off ISIN is unknown",
+   "in": {
+    "taxpayer": 1,
+    "account": 1,
+    "day": 20260803,
+    "seq": 1,
+    "side": "BUY",
+    "qty_u": 1000000,
+    "segment": "EQ",
+    "instrument": "INE000A0101",
+    "price_u": 1000000,
+    "amount_paise": 10000
+   },
+   "out": "not_computed"
+  },
+  {
    "id": "H-FO-FUT",
    "note": "a future is business, not speculative",
    "in": {
