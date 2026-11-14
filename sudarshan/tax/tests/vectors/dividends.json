@@ -1,0 +1,430 @@
+{
+ "entitled": [
+  {
+   "id": "D1-QTY",
+   "note": "D1: 300 bought in June are held at the close of 13 Aug; ex-date 14 Aug: 300",
+   "in": {
+    "changes": [
+     [
+      20260610,
+      300000000
+     ]
+    ],
+    "ex_day": 20260814
+   },
+   "out": 300000000
+  },
+  {
+   "id": "D2",
+   "note": "D2: bought on the ex-date itself: nothing held the day before: 0",
+   "in": {
+    "changes": [
+     [
+      20260814,
+      300000000
+     ]
+    ],
+    "ex_day": 20260814
+   },
+   "out": 0
+  },
+  {
+   "id": "D-EVE",
+   "note": "bought on the day before the ex-date: held at its close: 300",
+   "in": {
+    "changes": [
+     [
+      20260813,
+      300000000
+     ]
+    ],
+    "ex_day": 20260814
+   },
+   "out": 300000000
+  },
+  {
+   "id": "D-SOLD-EVE",
+   "note": "300 held, 100 sold the day before the ex-date: 300 - 100 = 200",
+   "in": {
+    "changes": [
+     [
+      20260610,
+      300000000
+     ],
+     [
+      20260813,
+      -100000000
+     ]
+    ],
+    "ex_day": 20260814
+   },
+   "out": 200000000
+  },
+  {
+   "id": "D-SOLD-EX",
+   "note": "300 held, all sold on the ex-date: the sale is cum-dividend no more: 300",
+   "in": {
+    "changes": [
+     [
+      20260610,
+      300000000
+     ],
+     [
+      20260814,
+      -300000000
+     ]
+    ],
+    "ex_day": 20260814
+   },
+   "out": 300000000
+  },
+  {
+   "id": "D-ADD-EX",
+   "note": "300 held, 200 more bought on the ex-date: only the 300 count",
+   "in": {
+    "changes": [
+     [
+      20260610,
+      300000000
+     ],
+     [
+      20260814,
+      200000000
+     ]
+    ],
+    "ex_day": 20260814
+   },
+   "out": 300000000
+  },
+  {
+   "id": "D-NONE",
+   "note": "nothing ever held: 0",
+   "in": {
+    "changes": [],
+    "ex_day": 20260814
+   },
+   "out": 0
+  },
+  {
+   "id": "D-OVERSOLD",
+   "note": "a sale with no purchase on record never gives a negative holding: 0",
+   "in": {
+    "changes": [
+     [
+      20260610,
+      -50000000
+     ]
+    ],
+    "ex_day": 20260814
+   },
+   "out": 0
+  }
+ ],
+ "expected": [
+  {
+   "id": "D1",
+   "note": "D1: Rs 5.50 a share on 300 shares = Rs 1,650",
+   "in": {
+    "qty_u": 300000000,
+    "amount_u": 55000
+   },
+   "out": 165000
+  },
+  {
+   "id": "D1-SECOND",
+   "note": "the second dividend of D1: Rs 30 a share on 300 = Rs 9,000",
+   "in": {
+    "qty_u": 300000000,
+    "amount_u": 300000
+   },
+   "out": 900000
+  },
+  {
+   "id": "D-FRACTION",
+   "note": "Rs 0.0125 a unit on 2.5 units = Rs 0.03125 = 3.125 paise: 3",
+   "in": {
+    "qty_u": 2500000,
+    "amount_u": 125
+   },
+   "out": 3
+  },
+  {
+   "id": "D-HALF",
+   "note": "Rs 0.05 a unit on 0.1 unit = 0.5 paisa: half away from zero, 1",
+   "in": {
+    "qty_u": 100000,
+    "amount_u": 500
+   },
+   "out": 1
+  }
+ ],
+ "year": [
+  {
+   "id": "D1-TDS",
+   "note": "D1: one payer, 1,650 + 9,000 = 10,650, above 10,000: TDS likely, 10% = 1,065",
+   "in": {
+    "fy": 2026,
+    "lines": [
+     {
+      "isin": "INE000A01010",
+      "fy": 2026,
+      "state": "expected",
+      "expected_paise": 165000,
+      "credited_paise": null,
+      "tds_paise": null
+     },
+     {
+      "isin": "INE000A01010",
+      "fy": 2026,
+      "state": "expected",
+      "expected_paise": 900000,
+      "credited_paise": null,
+      "tds_paise": null
+     }
+    ]
+   },
+   "out": {
+    "payers": [
+     {
+      "isin": "INE000A01010",
+      "expected_paise": 1065000,
+      "confirmed_paise": 0,
+      "total_paise": 1065000,
+      "tds_likely": true,
+      "tds_expected_paise": 106500,
+      "unconfirmed_count": 2,
+      "lines": 2
+     }
+    ],
+    "total_paise": 1065000,
+    "tds_expected_paise": 106500,
+    "unconfirmed_count": 2,
+    "tds_threshold_paise": 1000000
+   }
+  },
+  {
+   "id": "D-PER-PAYER",
+   "note": "two payers of 6,000 each: 12,000 in the year, but neither payer is above 10,000, so no TDS is flagged: the test is per payer",
+   "in": {
+    "fy": 2026,
+    "lines": [
+     {
+      "isin": "INE000A01010",
+      "fy": 2026,
+      "state": "expected",
+      "expected_paise": 600000,
+      "credited_paise": null,
+      "tds_paise": null
+     },
+     {
+      "isin": "INE000B01018",
+      "fy": 2026,
+      "state": "expected",
+      "expected_paise": 600000,
+      "credited_paise": null,
+      "tds_paise": null
+     }
+    ]
+   },
+   "out": {
+    "payers": [
+     {
+      "isin": "INE000A01010",
+      "expected_paise": 600000,
+      "confirmed_paise": 0,
+      "total_paise": 600000,
+      "tds_likely": false,
+      "tds_expected_paise": null,
+      "unconfirmed_count": 1,
+      "lines": 1
+     },
+     {
+      "isin": "INE000B01018",
+      "expected_paise": 600000,
+      "confirmed_paise": 0,
+      "total_paise": 600000,
+      "tds_likely": false,
+      "tds_expected_paise": null,
+      "unconfirmed_count": 1,
+      "lines": 1
+     }
+    ],
+    "total_paise": 1200000,
+    "tds_expected_paise": 0,
+    "unconfirmed_count": 2,
+    "tds_threshold_paise": 1000000
+   }
+  },
+  {
+   "id": "D-AT-LIMIT",
+   "note": "exactly 10,000 from one payer is not above 10,000: no flag",
+   "in": {
+    "fy": 2026,
+    "lines": [
+     {
+      "isin": "INE000A01010",
+      "fy": 2026,
+      "state": "expected",
+      "expected_paise": 1000000,
+      "credited_paise": null,
+      "tds_paise": null
+     }
+    ]
+   },
+   "out": {
+    "payers": [
+     {
+      "isin": "INE000A01010",
+      "expected_paise": 1000000,
+      "confirmed_paise": 0,
+      "total_paise": 1000000,
+      "tds_likely": false,
+      "tds_expected_paise": null,
+      "unconfirmed_count": 1,
+      "lines": 1
+     }
+    ],
+    "total_paise": 1000000,
+    "tds_expected_paise": 0,
+    "unconfirmed_count": 1,
+    "tds_threshold_paise": 1000000
+   }
+  },
+  {
+   "id": "D-OLD-LIMIT",
+   "note": "FY 2024-25: the limit was 5,000; 6,000 from one payer is above it: 10% of 6,000 = 600",
+   "in": {
+    "fy": 2024,
+    "lines": [
+     {
+      "isin": "INE000A01010",
+      "fy": 2024,
+      "state": "expected",
+      "expected_paise": 600000,
+      "credited_paise": null,
+      "tds_paise": null
+     }
+    ]
+   },
+   "out": {
+    "payers": [
+     {
+      "isin": "INE000A01010",
+      "expected_paise": 600000,
+      "confirmed_paise": 0,
+      "total_paise": 600000,
+      "tds_likely": true,
+      "tds_expected_paise": 60000,
+      "unconfirmed_count": 1,
+      "lines": 1
+     }
+    ],
+    "total_paise": 600000,
+    "tds_expected_paise": 60000,
+    "unconfirmed_count": 1,
+    "tds_threshold_paise": 500000
+   }
+  },
+  {
+   "id": "D-CONFIRMED",
+   "note": "expected 9,000; confirmed with 8,640 credited and 960 deducted: the dividend is 8,640 + 960 = 9,600, which replaces the expected figure. A second line of 1,650 marked not received counts as nothing. Total 9,600, not above 10,000",
+   "in": {
+    "fy": 2026,
+    "lines": [
+     {
+      "isin": "INE000A01010",
+      "fy": 2026,
+      "state": "confirmed",
+      "expected_paise": 900000,
+      "credited_paise": 864000,
+      "tds_paise": 96000
+     },
+     {
+      "isin": "INE000A01010",
+      "fy": 2026,
+      "state": "not_received",
+      "expected_paise": 165000,
+      "credited_paise": null,
+      "tds_paise": null
+     }
+    ]
+   },
+   "out": {
+    "payers": [
+     {
+      "isin": "INE000A01010",
+      "expected_paise": 1065000,
+      "confirmed_paise": 960000,
+      "total_paise": 960000,
+      "tds_likely": false,
+      "tds_expected_paise": null,
+      "unconfirmed_count": 0,
+      "lines": 2
+     }
+    ],
+    "total_paise": 960000,
+    "tds_expected_paise": 0,
+    "unconfirmed_count": 0,
+    "tds_threshold_paise": 1000000
+   }
+  },
+  {
+   "id": "D-OTHER-YEAR",
+   "note": "a line of another year is passed over: only the 2,000 of FY 2026-27",
+   "in": {
+    "fy": 2026,
+    "lines": [
+     {
+      "isin": "INE000A01010",
+      "fy": 2025,
+      "state": "expected",
+      "expected_paise": 5000000,
+      "credited_paise": null,
+      "tds_paise": null
+     },
+     {
+      "isin": "INE000A01010",
+      "fy": 2026,
+      "state": "expected",
+      "expected_paise": 200000,
+      "credited_paise": null,
+      "tds_paise": null
+     }
+    ]
+   },
+   "out": {
+    "payers": [
+     {
+      "isin": "INE000A01010",
+      "expected_paise": 200000,
+      "confirmed_paise": 0,
+      "total_paise": 200000,
+      "tds_likely": false,
+      "tds_expected_paise": null,
+      "unconfirmed_count": 1,
+      "lines": 1
+     }
+    ],
+    "total_paise": 200000,
+    "tds_expected_paise": 0,
+    "unconfirmed_count": 1,
+    "tds_threshold_paise": 1000000
+   }
+  },
+  {
+   "id": "D-EMPTY",
+   "note": "no dividend lines: nothing, and no flag",
+   "in": {
+    "fy": 2026,
+    "lines": []
+   },
+   "out": {
+    "payers": [],
+    "total_paise": 0,
+    "tds_expected_paise": 0,
+    "unconfirmed_count": 0,
+    "tds_threshold_paise": 1000000
+   }
+  }
+ ]
+}

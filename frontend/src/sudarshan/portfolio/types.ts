@@ -64,6 +64,11 @@ export const XIRR_MIN_DAYS = 365
 export const IMPORT_MAX_FILE_BYTES = 900_000
 export const IMPORT_MAX_ROWS = 5_000
 export const LAYOUT_VERSION = 1
+export const GOALS_MAX = 20
+export const STAT_DAYS = 60
+export const STAT_MIN_DAYS = 20
+export const CALENDAR_PAST_DAYS = 90
+export const CALENDAR_NEXT_DAYS = 180
 
 // ---- lists: the same members, in the same order, as core/kinds.py ----
 export const ACTIVITY_KINDS = [
@@ -184,6 +189,7 @@ export const JOB_NAMES = [
   'benchmark',
   'resolve',
   'reports',
+  'corporate_actions',
 ] as const
 export type JobName = (typeof JOB_NAMES)[number]
 export const JOB_STATUSES = ['ok', 'late', 'failed', 'skipped'] as const
@@ -250,6 +256,48 @@ export type ShareLevel = (typeof SHARE_LEVELS)[number]
 /** The four categories of a family member's privacy (sudarshan/family/privacy_fields.json). */
 export const PRIVACY_CATEGORIES = ['pnl', 'qty', 'funds', 'orders'] as const
 export type PrivacyCategory = (typeof PRIVACY_CATEGORIES)[number]
+// The money features of phase P7: tax, insights, goals (the buckets, methods and readings are the
+// tax core's, sudarshan/tax).
+export const TAX_INPUT_KINDS = [
+  'opening_lot',
+  'fmv',
+  'carry',
+  'day_override',
+  'trade_mark',
+  'settings',
+] as const
+export type TaxInputKind = (typeof TAX_INPUT_KINDS)[number]
+export const TAX_MODES = ['reports', 'ledger', 'none'] as const
+export type TaxMode = (typeof TAX_MODES)[number]
+export const TAX_SCHEDULES = ['capital_gains', 'business', 'losses', 'dividends'] as const
+export type TaxSchedule = (typeof TAX_SCHEDULES)[number]
+export const CARRY_BUCKETS = ['stcl', 'ltcl', 'business', 'speculative'] as const
+export type CarryBucket = (typeof CARRY_BUCKETS)[number]
+export const TURNOVER_METHODS = ['abs_pnl', 'abs_pnl_plus_sale_premium'] as const
+export type TurnoverMethod = (typeof TURNOVER_METHODS)[number]
+export const EXEMPT_ORDERS = ['highest_rate_first', 'chronological'] as const
+export type ExemptOrder = (typeof EXEMPT_ORDERS)[number]
+export const LT_BOUNDARIES = ['after_anniversary', 'on_anniversary'] as const
+export type LtBoundary = (typeof LT_BOUNDARIES)[number]
+export const CA_KINDS = ['dividend', 'bonus', 'split', 'rights'] as const
+export type CaKind = (typeof CA_KINDS)[number]
+export const CA_DECISIONS = ['applied', 'dismissed'] as const
+export type CaDecision = (typeof CA_DECISIONS)[number]
+export const DIVIDEND_STATES = ['expected', 'confirmed', 'not_received'] as const
+export type DividendState = (typeof DIVIDEND_STATES)[number]
+export const EXPORT_VIEWS = ['holdings', 'activity', 'performance', 'allocation', 'income'] as const
+export type ExportView = (typeof EXPORT_VIEWS)[number]
+export const SETTING_KEYS = [
+  'risk_free_bp',
+  'max_holding_pct',
+  'max_sector_pct',
+  'monthly_expenses_paise',
+  'months_target',
+] as const
+export type SettingKey = (typeof SETTING_KEYS)[number]
+/** The phase's switches, each off on the server until a release turns it on. */
+export const SWITCH_NAMES = ['tax', 'insights', 'goals'] as const
+export type SwitchName = (typeof SWITCH_NAMES)[number]
 
 // ---- strings ----
 export const API_PREFIX = '/sudarshan/portfolio/api'
@@ -326,6 +374,9 @@ export const WORDS = {
   forbidden: 'Only the account owner can use the portfolio.',
   unauthorized: 'Your session has ended. Log in again.',
   rate_limited: 'Too many requests. Wait a minute, then try again.',
+  tax_reading:
+    "The tax working paper needs Upstox's trade history for this year. It is being read; this takes a moment.",
+  tax_years: 'Upstox keeps the last three financial years only.',
 } as const
 export type WordKey = keyof typeof WORDS
 
@@ -396,6 +447,7 @@ export const OPS: readonly OpSpec[] = [
     method: 'GET',
     route: '/tabs/<id>/export.csv',
     cls: 'read',
+    query: [['view', 'str']],
     download: true,
   },
   { name: 'performance', method: 'GET', route: '/tabs/<id>/performance', cls: 'read' },
@@ -458,6 +510,98 @@ export const OPS: readonly OpSpec[] = [
   { name: 'share_set', method: 'PUT', route: '/family/shares', cls: 'write' },
   { name: 'share_remove', method: 'DELETE', route: '/family/shares', cls: 'write' },
   { name: 'member_privacy_set', method: 'PUT', route: '/family/privacy', cls: 'write' },
+  // Phase P7: each answers "not ready" until its part lands and while its switch is off.
+  {
+    name: 'tax_get',
+    method: 'GET',
+    route: '/tax',
+    cls: 'read',
+    query: [
+      ['fy', 'int'],
+      ['member', 'int'],
+    ],
+  },
+  {
+    name: 'tax_inputs',
+    method: 'GET',
+    route: '/tax/inputs',
+    cls: 'read',
+    query: [['member', 'int']],
+  },
+  { name: 'tax_input_set', method: 'POST', route: '/tax/inputs', cls: 'write' },
+  { name: 'tax_input_delete', method: 'DELETE', route: '/tax/inputs/<id>', cls: 'write' },
+  {
+    name: 'tax_csv',
+    method: 'GET',
+    route: '/tax/export.csv',
+    cls: 'read',
+    query: [
+      ['fy', 'int'],
+      ['member', 'int'],
+      ['schedule', 'str'],
+    ],
+    download: true,
+  },
+  {
+    name: 'report_csv',
+    method: 'GET',
+    route: '/reports/export.csv',
+    cls: 'read',
+    query: [
+      ['kind', 'str'],
+      ['fy', 'int'],
+      ['segment', 'str'],
+    ],
+    download: true,
+  },
+  {
+    name: 'ca_list',
+    method: 'GET',
+    route: '/corporate-actions',
+    cls: 'read',
+    query: [
+      ['scope', 'str'],
+      ['from', 'day'],
+      ['to', 'day'],
+      ['isin', 'str'],
+    ],
+  },
+  { name: 'ca_decide', method: 'POST', route: '/corporate-actions/<id>', cls: 'write' },
+  {
+    name: 'dividends',
+    method: 'GET',
+    route: '/dividends',
+    cls: 'read',
+    query: [
+      ['fy', 'int'],
+      ['member', 'int'],
+    ],
+  },
+  { name: 'dividend_set', method: 'POST', route: '/dividends/<id>', cls: 'write' },
+  {
+    name: 'calendar',
+    method: 'GET',
+    route: '/calendar',
+    cls: 'read',
+    query: [
+      ['from', 'day'],
+      ['to', 'day'],
+    ],
+  },
+  { name: 'risk', method: 'GET', route: '/risk', cls: 'read', query: [['tab', 'int']] },
+  { name: 'settings_get', method: 'GET', route: '/settings', cls: 'read' },
+  { name: 'settings_set', method: 'PUT', route: '/settings', cls: 'write' },
+  { name: 'goals_list', method: 'GET', route: '/goals', cls: 'read' },
+  { name: 'goal_create', method: 'POST', route: '/goals', cls: 'write' },
+  { name: 'goal_update', method: 'PATCH', route: '/goals/<id>', cls: 'write' },
+  {
+    name: 'export_pdf',
+    method: 'GET',
+    route: '/tabs/<id>/export.pdf',
+    cls: 'read',
+    query: [['view', 'str']],
+    download: true,
+  },
 ]
 
 // ---- the answer every op gives ----
@@ -1001,6 +1145,18 @@ export interface ExportFile {
   text: string
 }
 
+/** A tab's export (M7.40): the entries in the import format, or one view (phase P7, lane X). */
+export interface ExportArgs extends Targets {
+  view?: ExportView
+}
+
+/** A PDF export, as base64 (the answer is JSON). */
+export interface ExportPdf {
+  /** ASCII: SUDARSHAN_Portfolio_<tab-slug>_<view>_<YYYY-MM-DD>.pdf */
+  filename: string
+  base64: string
+}
+
 // ---- mutual funds ----
 
 export interface MfScheme {
@@ -1201,6 +1357,9 @@ export interface PortfolioState {
   accounts: Account[]
   jobs: JobState[]
   amfi: { on: boolean; nav_day: Day | null }
+  /** Phase P7: which of its views the service has switched on (the owner's answer only). Absent
+   *  or false: the view stays hidden and its ops answer `not_ready`. */
+  switches?: Record<SwitchName, boolean>
 }
 
 export interface UpstoxSummary {
@@ -1624,6 +1783,698 @@ export interface MemberPrivacySetArgs {
   version: number | null
 }
 
+// ---- phase P7: the tax working paper (M7.6, M7.7, M7.27, M7.28, M15.5) ----
+// Every figure is computed by the tax core (sudarshan/tax) in the service; the phone formats them
+// and computes none. Not market data: each answer carries when it was worked out. The pack is the
+// core's own (tax/pack.py, design p7 4.9), the one shape the phone and the journal read.
+
+export interface TaxGetArgs {
+  /** The year the financial year starts in (2026 is FY 2026-27); none is the year running. */
+  fy?: number
+  /** The taxpayer, a member's id; none is the owner. */
+  member?: number
+}
+
+/** One input the paper was worked out from, and how complete it is. */
+export interface TaxSource {
+  kind: ReportKind | 'ledger'
+  fy: number
+  segment: ReportSegment | null
+  state: ReportState
+  read_at: EpochMs | null
+}
+
+export type TaxTerm = 'short' | 'long'
+
+/** One sale, or the part of one taken from one purchase, worked out. */
+export interface TaxGain {
+  taxpayer: number
+  account: number
+  isin: string
+  /** null: no purchase record; such a sale is listed apart and never costed at zero. */
+  acquired_day: Day | null
+  sale_day: Day
+  qty_u: QtyU
+  /** What was received. */
+  receipt_paise: Paise
+  /** The sale value used: nil for a buyback taxed as a dividend. */
+  sale_paise: Paise
+  cost_paise: Paise | null
+  expenses_paise: Paise
+  /** Negative is a loss; null when the sale is left out of the totals. */
+  gain_paise: Paise | null
+  term: TaxTerm | null
+  rate_bp: number | null
+  status: 'ok' | 'needs_fmv' | 'unknown_cost' | 'exempt_buyback'
+  /** The 31 Jan 2018 price set the cost. */
+  fmv_used: boolean
+  /** The expenses are the year's charges shared over its sales. */
+  allocated: boolean
+  /** A buyback's regime on its day; null for a sale. */
+  buyback: 'exempt' | 'dividend_and_loss' | 'capital_gain' | null
+  dividend_paise: Paise
+}
+
+/** The year's gains and losses at one term and rate. */
+export interface TaxBucket {
+  term: TaxTerm
+  rate_bp: number
+  gain_paise: Paise
+  loss_paise: Paise
+}
+
+/** One step of a set-off: a loss used against a gain or a profit. */
+export interface TaxSetOffStep {
+  step: 'same_year' | 'brought_forward'
+  bucket: CarryBucket
+  loss_fy: number
+  against: TaxTerm | 'business' | 'speculative'
+  /** Capital gains only: the rate of the gain it reduced. */
+  rate_bp?: number
+  paise: Paise
+}
+
+/** A loss carried to later years, lapsed, or computed beside the owner's own figure. */
+export interface TaxCarry {
+  loss_fy: number
+  bucket: CarryBucket
+  paise: Paise
+  source: 'owner' | 'computed'
+  /** The last financial year it can be set off in. */
+  last_fy: number
+}
+
+export interface TaxExemption {
+  limit_paise: Paise
+  used_paise: Paise
+  order: ExemptOrder
+  by_rate: { rate_bp: number; paise: Paise }[]
+}
+
+export interface TaxLine {
+  term: TaxTerm
+  rate_bp: number
+  taxable_paise: Paise
+  tax_paise: Paise
+}
+
+export interface IndicativeTax {
+  lines: TaxLine[]
+  tax_paise: Paise
+  cess_bp: number
+  cess_paise: Paise
+  cess_label: string
+}
+
+export interface CapitalGains {
+  fy: number
+  schedule: TaxGain[]
+  by_bucket: TaxBucket[]
+  st_gain_paise: Paise
+  st_loss_paise: Paise
+  lt_gain_paise: Paise
+  lt_loss_paise: Paise
+  set_off: TaxSetOffStep[]
+  /** What was set off against what, as sentences. */
+  set_off_words: string[]
+  exemption: TaxExemption
+  taxable: { st_paise: Paise; lt_paise: Paise }
+  indicative_tax: IndicativeTax
+  carried: TaxCarry[]
+  lapsed: TaxCarry[]
+  own_figures: TaxCarry[]
+  needs_fmv: TaxGain[]
+  unknown_cost: TaxGain[]
+  exempt_buybacks: TaxGain[]
+  expenses_allocated: boolean
+}
+
+export interface BusinessKind {
+  gross_paise: Paise
+  turnover_paise: Paise
+  count: number
+}
+
+export interface BusinessBlock {
+  gross_paise: Paise
+  /** Every part of the charges given, STT included. */
+  charges_paise: Paise
+  net_paise: Paise
+  turnover_paise: Paise
+  by_kind: Partial<Record<'futures' | 'options' | 'speculative', BusinessKind>>
+}
+
+/** A derivative contract: exchange, scrip, expiry, strike (0 for a future), CE, PE or FUT. */
+export type TaxContract = [string, string, Day, PriceU, 'CE' | 'PE' | 'FUT']
+/** A position still open, or past expiry with no settlement price: taxpayer, account,
+ * contract, side, the day it opened, quantity and value. */
+export type TaxPosition = [number, number, TaxContract, 'BUY' | 'SELL', Day, QtyU, Paise]
+
+/** A scrip whose profit or loss differs from Upstox's report by more than a rupee. */
+export interface TaxDiffers {
+  scrip: string
+  own_paise: Paise | null
+  upstox_paise: Paise | null
+}
+
+export interface BusinessIncome {
+  non_speculative: BusinessBlock
+  speculative: BusinessBlock
+  turnover_method: TurnoverMethod
+  turnover_method_label: string
+  turnover_paise: Paise
+  /** Sentences that ask the owner to check with the CA, never a verdict. */
+  flags: string[]
+  taxable: { non_speculative_paise: Paise; speculative_paise: Paise }
+  available_other_heads_paise: Paise
+  set_off: TaxSetOffStep[]
+  set_off_words: string[]
+  carried: TaxCarry[]
+  lapsed: TaxCarry[]
+  own_figures: TaxCarry[]
+  differs: TaxDiffers[]
+  unknown_settlement: TaxPosition[]
+  open: TaxPosition[]
+  assumed_zero_count: number
+}
+
+/** One company's dividends of the year to the taxpayer's accounts that count (M7.29). */
+export interface TaxPayer {
+  isin: string
+  name: string | null
+  /** What every line of the year was expected to pay. */
+  expected_paise: Paise
+  /** What the confirmed lines paid: the credit and the tax deducted from it. */
+  confirmed_paise: Paise
+  /** What the year counts from this payer: a confirmed line as paid, one not received as
+   * nothing, any other at its expected amount. */
+  total_paise: Paise
+  tds_likely: boolean
+}
+
+export interface TaxDividends {
+  /** Every payer of the year; a buyback's receipt taxed as a dividend is beside them. */
+  by_payer: TaxPayer[]
+  buyback_paise: Paise
+  total_paise: Paise
+  tds_expected_paise: Paise | null
+  unconfirmed_count: number
+}
+
+export interface TaxCharges {
+  /** Upstox's own breakdown per segment for the year; a segment not read is absent. */
+  by_segment: Partial<Record<ReportSegment, ChargesBreakdown>>
+  state: ReportState
+}
+
+/** A sale the paper does not compute (a manual asset, a fund that is not equity). */
+export interface TaxSaleOutside {
+  instrument: string
+  day: Day
+  amount_paise: Paise
+}
+
+export interface TaxInputsUsed {
+  sources: TaxSource[]
+  /** What the paper lacks, as lines the owner can act on. */
+  missing: string[]
+}
+
+/** The working paper of one financial year and one taxpayer (design p7 4.9). */
+export interface TaxPack {
+  fy: number
+  fy_label: string
+  taxpayer: number
+  as_of_ms: EpochMs
+  as_of_day: Day
+  /** The year running: every figure is to date. */
+  running: boolean
+  /** The working-paper sentence. */
+  note: string
+  rules_version: string
+  inputs: TaxInputsUsed
+  capital_gains: CapitalGains
+  business: BusinessIncome
+  dividends: TaxDividends
+  charges: TaxCharges
+  not_computed: string[]
+  not_computed_sales: TaxSaleOutside[]
+  notes: string[]
+}
+
+export interface TaxInputsArgs {
+  member?: number
+}
+
+export interface TaxOpeningLot {
+  id: number
+  member_id: number
+  account_id: number
+  isin: string
+  acquired_day: Day
+  qty_u: QtyU
+  cost_paise: Paise
+  source: 'owner' | 'upstox_pair'
+  note: string | null
+  version: number
+}
+
+/** The highest price of a share on 31 Jan 2018. */
+export interface TaxFmv {
+  id: number
+  isin: string
+  fmv_u: PriceU
+  source: 'owner' | 'file'
+  version: number
+}
+
+export interface TaxCarryInput {
+  id: number
+  member_id: number
+  loss_fy: number
+  bucket: CarryBucket
+  paise: Paise
+  source: 'owner' | 'computed'
+  note: string | null
+  version: number
+}
+
+/** A day's trading in one share that the owner marked as delivery, not intraday. */
+export interface TaxDayOverride {
+  id: number
+  member_id: number
+  account_id: number
+  isin: string
+  day: Day
+  treat: 'delivery'
+  version: number
+}
+
+/** A sale the owner marked as a buyback tender, or one the history does not list. */
+export interface TaxTradeMark {
+  id: number
+  member_id: number
+  account_id: number
+  isin: string
+  day: Day
+  qty_u: QtyU
+  price_u: PriceU
+  mark: 'buyback'
+  trade_id: string | null
+  version: number
+}
+
+/** A taxpayer's readings of the open rules; null is the rule's own default reading. */
+export interface TaxSettings {
+  member_id: number
+  turnover_method: TurnoverMethod | null
+  exempt_order: ExemptOrder | null
+  lt_boundary: LtBoundary | null
+  allocate_expenses: boolean
+  /** 0 until first saved. */
+  version: number
+}
+
+/** An account of the taxpayer and how it counts: by Upstox's reports, by its ledger, or not. */
+export interface TaxAccount {
+  id: number
+  name: string
+  kind: AccountKind
+  tax_mode: TaxMode
+}
+
+export interface TaxInputs {
+  member_id: number
+  accounts: TaxAccount[]
+  opening_lots: TaxOpeningLot[]
+  fmvs: TaxFmv[]
+  carries: TaxCarryInput[]
+  day_overrides: TaxDayOverride[]
+  trade_marks: TaxTradeMark[]
+  settings: TaxSettings
+}
+
+export type TaxInputRecord =
+  | TaxOpeningLot
+  | TaxFmv
+  | TaxCarryInput
+  | TaxDayOverride
+  | TaxTradeMark
+  | TaxSettings
+
+export interface TaxInputSetArgs {
+  kind: TaxInputKind
+  /** The row's own fields, as the matching record holds them (no id, source or version). */
+  row: Record<string, unknown>
+  /** An existing row and the version it was read at; none for a new one. The readings always
+   * send the version they were read at (0 before the first save). */
+  id?: number
+  version?: number
+  request_id?: string
+  /** Change nothing; answer what the change would do to the paper of ``fy``. */
+  dry_run?: boolean
+  /** The year whose figures a dry run compares; none is the year running. */
+  fy?: number
+}
+
+export interface TaxInputSaved {
+  kind: TaxInputKind
+  /** null for a dry run. */
+  row: TaxInputRecord | null
+  /** "This changes long-term gain from Rs 30,000 to Rs 15,000." */
+  effect: string[]
+}
+
+export interface TaxInputDeleteArgs extends Targets, Versioned {
+  kind: TaxInputKind
+}
+
+export interface TaxCsvArgs {
+  fy?: number
+  member?: number
+  schedule: TaxSchedule
+}
+
+export interface ReportCsvArgs {
+  kind: ReportKind
+  fy: number
+  segment: ReportSegment
+}
+
+// ---- phase P7: corporate actions, dividends, the calendar (M7.13, M7.29, M7.36) ----
+
+export interface CaListArgs {
+  /** `upstox` or `tab:<id>`; none is every scope. */
+  scope?: string
+  from?: Day
+  to?: Day
+  /** One instrument the owner opened: read again from Upstox, at most once a minute. */
+  isin?: string
+}
+
+/** One reading of a bonus's or a split's ratio, on the owner's own quantity when it is known. */
+export interface CaWay {
+  /** A bonus: `ratio_num` new for every `ratio_den` held. A split: every `ratio_den` become `ratio_num`. */
+  ratio_num: number
+  ratio_den: number
+  /** "Bonus 1:1: you held 100, you get 100 more, 200 in all. Is that right?" */
+  words: string
+  added_qty_u?: QtyU
+  after_qty_u?: QtyU
+  /** Part of a share is left over. */
+  fraction?: boolean
+}
+
+/** One holding's side of an event that waits for the owner's tap (design p7 6.3). */
+export interface CaExpected {
+  /** `upstox` or `tab:<id>`. */
+  scope: string
+  tab_id?: number
+  name?: string
+  /** Held the day before the ex-date; null when no record says. */
+  held_qty_u: QtyU | null
+  /** The proposed reading; null when Upstox gave no ratio (the owner types one). */
+  ratio_num: number | null
+  ratio_den: number | null
+  words: string
+  added_qty_u?: QtyU
+  after_qty_u?: QtyU
+  fraction?: boolean
+  /** "The other way round"; null when the ratio reads one way only. */
+  other: CaWay | null
+  /** A tab only: the entries for the entry form's dry run ("Add this to <tab>"). */
+  entries?: ActivityInput[]
+}
+
+export interface CaDecisionRow {
+  id: number
+  event_id: number
+  scope: string
+  state: CaDecision
+  /** The reading the owner applied; null on a dismissed one. */
+  ratio_num: number | null
+  ratio_den: number | null
+  /** The entry a tab got from it, when the owner added one. */
+  activity_id: number | null
+  version: number
+}
+
+export interface CaDetail {
+  name: string
+  value: string
+}
+
+/** One event as Upstox lists it: public facts, no quantity. */
+export interface CaEvent {
+  id: number
+  isin: string
+  name: string | null
+  kind: CaKind
+  ex_day: Day
+  /** Per share (a dividend); null when none is given. */
+  amount_u: PriceU | null
+  ratio_num: number | null
+  ratio_den: number | null
+  details: CaDetail[]
+  read_at: EpochMs
+  /** Upstox no longer lists it; it is kept, never deleted. */
+  gone_at: EpochMs | null
+  decisions: CaDecisionRow[]
+  /** Only in `to_confirm`: each holding the event waits on, with the reading proposed for it. */
+  expected?: CaExpected[]
+}
+
+export interface CaRead {
+  isin: string
+  read_at: EpochMs | null
+  state: string
+  note: string | null
+}
+
+export interface CaList {
+  events: CaEvent[]
+  /** Bonuses and splits waiting for the owner's one tap. */
+  to_confirm: CaEvent[]
+  reads: CaRead[]
+}
+
+export interface CaDecideArgs extends Targets {
+  scope: string
+  state: CaDecision
+  ratio_num: number
+  ratio_den: number
+  version?: number
+  request_id?: string
+}
+
+export interface DividendsArgs {
+  fy?: number
+  member?: number
+}
+
+export interface DividendLine {
+  id: number
+  member_id: number
+  account_id: number
+  isin: string
+  name: string | null
+  event_id: number | null
+  fy: number
+  ex_day: Day
+  qty_u: QtyU
+  expected_paise: Paise
+  state: DividendState
+  credited_paise: Paise | null
+  tds_paise: Paise | null
+  credited_day: Day | null
+  version: number
+}
+
+export interface DividendPayer {
+  isin: string
+  name: string | null
+  lines: DividendLine[]
+  expected_paise: Paise
+  confirmed_paise: Paise
+  tds_likely: boolean
+  tds_expected_paise: Paise | null
+}
+
+export interface DividendsYear {
+  payers: DividendPayer[]
+  total_paise: Paise
+  tds_expected_paise: Paise
+  unconfirmed_count: number
+}
+
+export interface DividendsReport {
+  fy: number
+  member_id: number
+  as_of: EpochMs
+  dividends: DividendsYear
+}
+
+export interface DividendSetArgs extends Targets, Versioned {
+  state: DividendState
+  credited_paise?: Paise | null
+  tds_paise?: Paise | null
+  credited_day?: Day | null
+}
+
+export interface CalendarArgs {
+  from?: Day
+  to?: Day
+}
+
+export interface CalendarRow {
+  event_id: number
+  isin: string
+  name: string | null
+  kind: CaKind
+  ex_day: Day
+  amount_u: PriceU | null
+  ratio_num: number | null
+  ratio_den: number | null
+  /** What is held the day before the ex-date; null for an instrument not held. */
+  held_qty_u: QtyU | null
+  expected_paise: Paise | null
+  checked_at: EpochMs | null
+}
+
+export interface CalendarReport {
+  from: Day
+  to: Day
+  /** Upstox lists events to come; false: only those already announced. */
+  listed_future: boolean
+  calendar: CalendarRow[]
+}
+
+// ---- phase P7: risk, settings and goals (M7.32, M7.34) ----
+
+export interface RiskArgs {
+  /** A custom tab; none is every tab together. */
+  tab?: number
+}
+
+/** A figure, or null with the sentence that says how many more days it needs. */
+export interface RiskStat {
+  value: Pct | null
+  note: string | null
+}
+
+export interface RiskDrawdown {
+  pct: Pct | null
+  peak_day: Day | null
+  trough_day: Day | null
+  recovered_day: Day | null
+  note: string | null
+}
+
+export interface RiskWeight {
+  label: string
+  weight_pct: Pct
+  over_limit: boolean
+}
+
+export interface RiskConcentration {
+  holdings: RiskWeight[]
+  sectors: RiskWeight[]
+  untagged_pct: Pct | null
+  flags: string[]
+}
+
+export interface RiskOverlap {
+  tab_id: number
+  weight_pct: Pct
+  names: string[]
+}
+
+export interface RiskEmergency {
+  months: Pct | null
+  target_months: number
+  note: string | null
+}
+
+export interface RiskFigures {
+  days: number
+  drawdown: RiskDrawdown
+  volatility: RiskStat
+  sharpe: RiskStat
+  sortino: RiskStat
+  calmar: RiskStat
+  concentration: RiskConcentration
+  overlap: RiskOverlap[]
+  emergency: RiskEmergency
+}
+
+export interface RiskReport {
+  tab_id: number | null
+  as_of_day: Day
+  /** "On closing values up to 13 Nov 2026." */
+  basis: string
+  risk: RiskFigures
+}
+
+export interface OwnerSettings {
+  risk_free_bp: number
+  max_holding_pct: Pct
+  max_sector_pct: Pct
+  monthly_expenses_paise: Paise | null
+  months_target: number
+  version: number
+}
+
+export interface SettingsSetArgs extends Versioned {
+  values: Partial<Omit<OwnerSettings, 'version'>>
+}
+
+export interface Goal {
+  id: number
+  member_id: number
+  name: string
+  name_alt: string | null
+  target_paise: Paise
+  target_day: Day
+  /** The owner's assumed return, basis points a year. */
+  rate_bp: number
+  tab_ids: number[]
+  fixed_paise: Paise | null
+  archived: boolean
+  version: number
+  value_now_paise: Paise
+  progress_pct: Pct
+  required_monthly_paise: Paise
+  months_left: number
+  on_track: boolean
+}
+
+export interface GoalsList {
+  as_of: EpochMs
+  goals: Goal[]
+}
+
+export interface GoalCreateArgs extends Creates {
+  name: string
+  name_alt?: string | null
+  member_id?: number
+  target_paise: Paise
+  target_day: Day
+  rate_bp?: number
+  tab_ids?: number[]
+  fixed_paise?: Paise | null
+}
+
+export interface GoalUpdateArgs extends Targets, Versioned {
+  name?: string
+  name_alt?: string | null
+  target_paise?: Paise
+  target_day?: Day
+  rate_bp?: number
+  tab_ids?: number[]
+  fixed_paise?: Paise | null
+  archived?: boolean
+}
+
 /** The op name to what it is sent and what its `data` is. The test holds this to OPS. */
 export interface PortfolioOps {
   state: { args: NoArgs; data: PortfolioState }
@@ -1648,7 +2499,7 @@ export interface PortfolioOps {
   import_preview: { args: ImportPreviewArgs; data: ImportPreview }
   import_commit: { args: ImportCommitArgs; data: ImportCommitted }
   import_discard: { args: ImportDiscardArgs; data: ImportDiscarded }
-  export_csv: { args: Targets; data: ExportFile }
+  export_csv: { args: ExportArgs; data: ExportFile }
   performance: { args: Targets; data: PerformanceReport }
   layout_get: { args: Targets; data: LayoutState }
   layout_set: { args: LayoutSetArgs; data: LayoutState }
@@ -1665,6 +2516,24 @@ export interface PortfolioOps {
   share_set: { args: ShareSetArgs; data: TabShare }
   share_remove: { args: ShareRemoveArgs; data: ShareRemoved }
   member_privacy_set: { args: MemberPrivacySetArgs; data: MemberPrivacy }
+  tax_get: { args: TaxGetArgs; data: TaxPack }
+  tax_inputs: { args: TaxInputsArgs; data: TaxInputs }
+  tax_input_set: { args: TaxInputSetArgs; data: TaxInputSaved }
+  tax_input_delete: { args: TaxInputDeleteArgs; data: Deleted }
+  tax_csv: { args: TaxCsvArgs; data: ExportFile }
+  report_csv: { args: ReportCsvArgs; data: ExportFile }
+  ca_list: { args: CaListArgs; data: CaList }
+  ca_decide: { args: CaDecideArgs; data: CaDecisionRow }
+  dividends: { args: DividendsArgs; data: DividendsReport }
+  dividend_set: { args: DividendSetArgs; data: DividendLine }
+  calendar: { args: CalendarArgs; data: CalendarReport }
+  risk: { args: RiskArgs; data: RiskReport }
+  settings_get: { args: NoArgs; data: OwnerSettings }
+  settings_set: { args: SettingsSetArgs; data: OwnerSettings }
+  goals_list: { args: NoArgs; data: GoalsList }
+  goal_create: { args: GoalCreateArgs; data: GoalsList }
+  goal_update: { args: GoalUpdateArgs; data: GoalsList }
+  export_pdf: { args: ExportArgs; data: ExportPdf }
 }
 
 export type OpName = keyof PortfolioOps

@@ -69,6 +69,13 @@ ACTIVITIES_PAGE_MAX = 500
 MF_SEARCH_MAX = 20
 IMPORT_PREVIEW_ROWS = 500
 UPSTOX_HISTORY_DAYS = 400
+#: The money features (design p7): goals a member may keep; the trading days beta, correlation and
+#: the risk figures rest on, and the fewest they are shown from; the calendar's reach back and on.
+GOALS_MAX = 20
+STAT_DAYS = 60
+STAT_MIN_DAYS = 20
+CALENDAR_PAST_DAYS = 90
+CALENDAR_NEXT_DAYS = 180
 
 # ---- the service and its bridge (cross-design X2, X9, P19) ---------------------------------
 LOCAL_HOST = "127.0.0.1"
@@ -223,8 +230,77 @@ XIRR_STATES = ("shown", "later", "none")
 BENCHMARKS = ("nifty50", "nifty500")
 BENCHMARK_LABELS = {"nifty50": "NIFTY 50", "nifty500": "NIFTY 500"}
 
-JOB_NAMES = ("eod", "settle", "nav_fetch", "nav_settle", "benchmark", "resolve", "reports")
+JOB_NAMES = (
+    "eod",
+    "settle",
+    "nav_fetch",
+    "nav_settle",
+    "benchmark",
+    "resolve",
+    "reports",
+    "corporate_actions",
+)
 JOB_STATUSES = ("ok", "late", "failed", "skipped")
+
+# ---- the money features of phase P7: tax, insights, goals ------------------------------------
+#: What a tax input is (one op writes the six small tables, ``kind`` checked against this list),
+#: how an account counts for tax, and the schedules the tax CSV gives. The buckets, methods and
+#: readings are the tax core's (sudarshan/tax: model.BUCKETS and the rule rows); a test holds the
+#: two copies together once both are in the tree.
+TAX_INPUT_KINDS = ("opening_lot", "fmv", "carry", "day_override", "trade_mark", "settings")
+TAX_MODES = ("reports", "ledger", "none")
+TAX_SCHEDULES = ("capital_gains", "business", "losses", "dividends")
+CARRY_BUCKETS = ("stcl", "ltcl", "business", "speculative")
+TURNOVER_METHODS = ("abs_pnl", "abs_pnl_plus_sale_premium")
+EXEMPT_ORDERS = ("highest_rate_first", "chronological")
+LT_BOUNDARIES = ("after_anniversary", "on_anniversary")
+#: Corporate actions as Upstox names them, the owner's decision on one, a dividend line's state.
+CA_KINDS = ("dividend", "bonus", "split", "rights")
+CA_DECISIONS = ("applied", "dismissed")
+DIVIDEND_STATES = ("expected", "confirmed", "not_received")
+#: The views a tab exports, and the owner's settings of the risk view.
+EXPORT_VIEWS = ("holdings", "activity", "performance", "allocation", "income")
+SETTING_KEYS = (
+    "risk_free_bp",
+    "max_holding_pct",
+    "max_sector_pct",
+    "monthly_expenses_paise",
+    "months_target",
+)
+#: The phase's three switches, each off in code; a release turns one on through
+#: ops/deploy/openalgo-env.conf (amendment P2). Off, every op it covers answers "not ready" and the
+#: phone shows that view's stub, none of its jobs runs and nothing is read from Upstox for it.
+SWITCH_NAMES = ("tax", "insights", "goals")
+SWITCH_ENV = {
+    "tax": "SUDARSHAN_TAX",
+    "insights": "SUDARSHAN_PORTFOLIO_INSIGHTS",
+    "goals": "SUDARSHAN_PORTFOLIO_GOALS",
+}
+SWITCHED_OPS = {
+    "tax": (
+        "tax_get",
+        "tax_inputs",
+        "tax_input_set",
+        "tax_input_delete",
+        "tax_csv",
+        "report_csv",
+        "tax_pack",
+    ),
+    "insights": (
+        "ca_list",
+        "ca_decide",
+        "dividends",
+        "dividend_set",
+        "calendar",
+        "risk",
+        "settings_get",
+        "settings_set",
+    ),
+    "goals": ("goals_list", "goal_create", "goal_update", "export_pdf"),
+}
+SWITCHED_JOBS = {"insights": ("corporate_actions",)}
+#: The switch an op of the phase waits for; an op not named here is on whenever the portfolio is.
+SWITCH_OF = {name: switch for switch, names in SWITCHED_OPS.items() for name in names}
 
 # ---- layout (M7.25) ------------------------------------------------------------------------
 WIDGETS = (
@@ -332,6 +408,11 @@ WORDS = {
     "forbidden": "Only the account owner can use the portfolio.",
     "unauthorized": "Your session has ended. Log in again.",
     "rate_limited": "Too many requests. Wait a minute, then try again.",
+    "tax_reading": (
+        "The tax working paper needs Upstox's trade history for this year. It is being read; "
+        "this takes a moment."
+    ),
+    "tax_years": "Upstox keeps the last three financial years only.",
 }
 
 #: How an op's query string is read: a whole number, a day (YYYYMMDD), text, a comma-separated
@@ -399,7 +480,14 @@ OPS = (
     OpSpec("import_preview", "POST", "/tabs/<id>/imports", "import", upload=True),
     OpSpec("import_commit", "POST", "/imports/<id>/commit", "write"),
     OpSpec("import_discard", "DELETE", "/imports/<id>", "write"),
-    OpSpec("export_csv", "GET", "/tabs/<id>/export.csv", "read", download=True),
+    OpSpec(
+        "export_csv",
+        "GET",
+        "/tabs/<id>/export.csv",
+        "read",
+        query=(("view", "str"),),
+        download=True,
+    ),
     OpSpec("performance", "GET", "/tabs/<id>/performance", "read"),
     OpSpec("layout_get", "GET", "/tabs/<id>/layout", "read"),
     OpSpec("layout_set", "PUT", "/tabs/<id>/layout", "write"),
@@ -442,11 +530,59 @@ OPS = (
     OpSpec("share_set", "PUT", "/family/shares", "write"),
     OpSpec("share_remove", "DELETE", "/family/shares", "write"),
     OpSpec("member_privacy_set", "PUT", "/family/privacy", "write"),
+    # Phase P7 (registered by its contract, P0): each answers "not ready" until its lane lands and
+    # while its switch is off (SWITCHED_OPS). ``member`` is the taxpayer; none is the owner.
+    OpSpec("tax_get", "GET", "/tax", "read", query=(("fy", "int"), ("member", "int"))),
+    OpSpec("tax_inputs", "GET", "/tax/inputs", "read", query=(("member", "int"),)),
+    OpSpec("tax_input_set", "POST", "/tax/inputs", "write"),
+    OpSpec("tax_input_delete", "DELETE", "/tax/inputs/<id>", "write"),
+    OpSpec(
+        "tax_csv",
+        "GET",
+        "/tax/export.csv",
+        "read",
+        query=(("fy", "int"), ("member", "int"), ("schedule", "str")),
+        download=True,
+    ),
+    OpSpec(
+        "report_csv",
+        "GET",
+        "/reports/export.csv",
+        "read",
+        query=(("kind", "str"), ("fy", "int"), ("segment", "str")),
+        download=True,
+    ),
+    OpSpec(
+        "ca_list",
+        "GET",
+        "/corporate-actions",
+        "read",
+        query=(("scope", "str"), ("from", "day"), ("to", "day"), ("isin", "str")),
+    ),
+    OpSpec("ca_decide", "POST", "/corporate-actions/<id>", "write"),
+    OpSpec("dividends", "GET", "/dividends", "read", query=(("fy", "int"), ("member", "int"))),
+    OpSpec("dividend_set", "POST", "/dividends/<id>", "write"),
+    OpSpec("calendar", "GET", "/calendar", "read", query=(("from", "day"), ("to", "day"))),
+    OpSpec("risk", "GET", "/risk", "read", query=(("tab", "int"),)),
+    OpSpec("settings_get", "GET", "/settings", "read"),
+    OpSpec("settings_set", "PUT", "/settings", "write"),
+    OpSpec("goals_list", "GET", "/goals", "read"),
+    OpSpec("goal_create", "POST", "/goals", "write"),
+    OpSpec("goal_update", "PATCH", "/goals/<id>", "write"),
+    OpSpec(
+        "export_pdf",
+        "GET",
+        "/tabs/<id>/export.pdf",
+        "read",
+        query=(("view", "str"),),
+        download=True,
+    ),
 )
 OP_NAMES = tuple(op.name for op in OPS)
 #: A write op whose body may carry ``dry_run``: the bridge counts those against the dry-run
-#: limiter instead of the write limiter, and the service changes nothing.
-DRY_RUN_OPS = ("activity_create", "activity_update")
+#: limiter instead of the write limiter, and the service changes nothing. A tax input's dry run
+#: answers what the change would do to the working paper, before it is saved.
+DRY_RUN_OPS = ("activity_create", "activity_update", "tax_input_set")
 
 # ---- the other purposes of the sealed API (cross-design Y4, Y6; P1, P2, PJ) -----------------------
 #: The owner's sharing ops (M7.37; cross-design Y6): which tabs each family member is given and the
@@ -465,7 +601,8 @@ FAMILY_OPS = (
     "upstox_history",
     "shares_for_viewer",
 )
-#: The only ops under the journal purpose (principal ``sudarshan-journal``): account reads.
+#: The only ops under the journal purpose (principal ``sudarshan-journal``): account reads, and
+#: the tax working paper the journal's FY pack prints (``tax_pack``, the owner's own pack).
 JOURNAL_OPS = (
     "trades_day",
     "order_history",
@@ -475,6 +612,7 @@ JOURNAL_OPS = (
     "holdings",
     "funds",
     "benchmark_closes",
+    "tax_pack",
 )
 FAMILY_PRINCIPAL_PREFIX = "viewer:"
 JOURNAL_PRINCIPAL = "sudarshan-journal"
@@ -518,6 +656,11 @@ SHARED_NUMBERS = {
     "IMPORT_MAX_FILE_BYTES": IMPORT_MAX_FILE_BYTES,
     "IMPORT_MAX_ROWS": IMPORT_MAX_ROWS,
     "LAYOUT_VERSION": LAYOUT_VERSION,
+    "GOALS_MAX": GOALS_MAX,
+    "STAT_DAYS": STAT_DAYS,
+    "STAT_MIN_DAYS": STAT_MIN_DAYS,
+    "CALENDAR_PAST_DAYS": CALENDAR_PAST_DAYS,
+    "CALENDAR_NEXT_DAYS": CALENDAR_NEXT_DAYS,
 }
 SHARED_LISTS = {
     "ACTIVITY_KINDS": ACTIVITY_KINDS,
@@ -560,6 +703,19 @@ SHARED_LISTS = {
     "QUERY_TYPES": QUERY_TYPES,
     "SHARE_LEVELS": SHARE_LEVELS,
     "PRIVACY_CATEGORIES": PRIVACY_CATEGORIES,
+    "TAX_INPUT_KINDS": TAX_INPUT_KINDS,
+    "TAX_MODES": TAX_MODES,
+    "TAX_SCHEDULES": TAX_SCHEDULES,
+    "CARRY_BUCKETS": CARRY_BUCKETS,
+    "TURNOVER_METHODS": TURNOVER_METHODS,
+    "EXEMPT_ORDERS": EXEMPT_ORDERS,
+    "LT_BOUNDARIES": LT_BOUNDARIES,
+    "CA_KINDS": CA_KINDS,
+    "CA_DECISIONS": CA_DECISIONS,
+    "DIVIDEND_STATES": DIVIDEND_STATES,
+    "EXPORT_VIEWS": EXPORT_VIEWS,
+    "SETTING_KEYS": SETTING_KEYS,
+    "SWITCH_NAMES": SWITCH_NAMES,
 }
 SHARED_STRINGS = {"API_PREFIX": API_PREFIX}
 SHARED_LABELS = {

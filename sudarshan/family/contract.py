@@ -143,6 +143,8 @@ SHARE_LEVELS = ("view", "restricted")
 CHANNELS = ("push", "telegram")
 NUDGE_KINDS = ("orders", "holdings")
 AUTHS = ("public", "session")
+#: F8 (feat/family-t2): the family bot as the owner's page reads it (the admin ``state``).
+BOT_STATES = ("polling", "token_missing", "token_refused")
 WS_ACTIONS = ("authenticate", "subscribe", "unsubscribe", "screen")
 WS_TYPES = ("auth", "market_data", "feed_state", "subscribe", "book", "error")
 AUDIT_KINDS = (
@@ -178,6 +180,7 @@ AUDIT_KINDS = (
     "view",
     "digest_sent",
     "check_failed",
+    "notice_dropped",  # F10 (feat/family-t2): a message dropped (quiet hours outlasted it, say)
 )
 
 # ---- errors -----------------------------------------------------------------------------------
@@ -228,6 +231,7 @@ WORD_KEYS = (
     "signed_out_everywhere",
     "store_failed",
     "viewer_unavailable",
+    "push_failing",  # F10 (feat/family-t2): a phone's device line after three failures in a row
 )
 
 PRIMITIVES = ("string", "int", "number", "bool", "json")
@@ -249,6 +253,7 @@ ENUMS = {
     "WsAction": WS_ACTIONS,
     "WsType": WS_TYPES,
     "AuditKind": AUDIT_KINDS,
+    "BotState": BOT_STATES,  # F8 (feat/family-t2)
 }
 
 _READ = "read_at:int|null, state:ReadState, words:string|null, hidden:Category[]"
@@ -312,8 +317,12 @@ RECORDS = {
     "AuditPage": "lines:AuditLine[], older:int|null",
     "Share": "id:int, kind:ShareKind, ref:string, member_id:int|null, role:Role|null, "
     "level:ShareLevel, expires_at:int|null, created_at:int, version:int",
+    # F8 (feat/family-t2): ``bot`` and ``check``, sent while the view is on (the owner's page reads
+    # them as optional): the family bot's state, and whether the install check passed and when.
     "AdminState": "enabled:bool, message:string|null, store_version:int|null, members:int, "
-    "sessions:int, sockets:int",
+    "sessions:int, sockets:int, bot?:BotReport|null, check?:InstallCheck|null",
+    "BotReport": "state:BotState, last_message_at:int|null",
+    "InstallCheck": "ok:bool, at:int|null",
     "NudgeTaken": "taken:bool",
 }
 

@@ -16,6 +16,8 @@ import os
 import shutil
 import socket
 import stat
+import subprocess
+import sys
 import tempfile
 from collections.abc import Callable
 from pathlib import Path
@@ -24,6 +26,8 @@ import pytest
 
 from sudarshan.family import check
 from sudarshan.tests.fdwatch import FdWatch
+
+REPO = Path(__file__).resolve().parents[3]
 
 NOBODY = 65534
 SECRET = "API_KEY_PEPPER=not-a-real-pepper-but-it-must-never-be-shown"
@@ -369,7 +373,44 @@ def test_the_check_leaves_no_file_or_socket_open(base):
 def test_the_python_line_names_the_account_it_ran_as():
     passed, line = check.python_line()
     assert passed and line.startswith("PASS the app's Python: it runs as ")
-    assert line.endswith(" and imports sudarshan.family")
+    assert line.endswith(" and loads the family service")
+
+
+# ---- L6 (review, feat/family-t2): the check loads the service's code, not only the package ----------
+def test_the_python_line_fails_when_the_service_module_cannot_be_loaded():
+    def missing(name):
+        assert name == "sudarshan.family.service"
+        raise ModuleNotFoundError("No module named 'argon2'", name="argon2")
+
+    def closed(name):
+        raise PermissionError(13, "Permission denied", "/opt/sudarshan/apps/openalgo/.env")
+
+    def broken(name):
+        raise ValueError("a fault in the release")
+
+    passed, line = check.python_line(missing)
+    assert not passed and line.startswith("FAIL the app's Python: as ")
+    assert "argon2 is missing" in line and "run the deploy again" in line
+    passed, line = check.python_line(closed)
+    assert not passed and "/opt/sudarshan/apps/openalgo/.env cannot be opened" in line
+    passed, line = check.python_line(broken)
+    assert not passed and "install the previous release" in line and "ValueError" not in line
+
+
+def test_the_check_fails_in_a_python_where_a_package_of_the_service_is_missing(tmp_path):
+    """In a fresh interpreter where argon2 (which the accounts import) cannot be imported, the
+    check's Python line fails: it truly loads the service and what the service imports."""
+    script = (
+        "import sys; sys.modules['argon2'] = None\n"
+        "from sudarshan.family import check\n"
+        "passed, line = check.python_line()\n"
+        "print(passed); print(line)\n"
+    )
+    done = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True,
+                          timeout=120, check=False, cwd=REPO)  # fmt: skip
+    assert done.returncode == 0, done.stderr
+    passed, line = done.stdout.splitlines()[:2]
+    assert passed == "False" and "argon2 is missing" in line, done.stdout
 
 
 def test_the_modes_this_file_relies_on_hold_for_the_account_it_runs_as(base):

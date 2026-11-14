@@ -95,10 +95,10 @@ def test_a_populated_copy_forced_back_a_version_is_migrated_without_losing_a_row
 
 
 def test_a_seed_never_touches_what_the_owner_changed(path, made):
-    made.write(OWNER, lambda tx: tx.change("member", 1, 1, {"name": "Darvin"}, NOW + 1))
+    made.write(OWNER, lambda tx: tx.change("member", 1, 1, {"name": "Account owner"}, NOW + 1))
     made.close()
     again = PortfolioStore(path, now=NOW + 9)
-    assert raw(path, "SELECT name, version FROM member") == [("Darvin", 2)]
+    assert raw(path, "SELECT name, version FROM member") == [("Account owner", 2)]
     again.close()
 
 

@@ -117,6 +117,8 @@ export type AuditKind =
   | 'view'
   | 'digest_sent'
   | 'check_failed'
+  | 'notice_dropped'
+export type BotState = 'polling' | 'token_missing' | 'token_refused'
 export type ErrorCode = keyof typeof ERROR_STATUS
 
 export interface Limits {
@@ -455,6 +457,18 @@ export interface AdminState {
   members: number
   sessions: number
   sockets: number
+  bot?: BotReport | null
+  check?: InstallCheck | null
+}
+
+export interface BotReport {
+  state: BotState
+  last_message_at: number | null
+}
+
+export interface InstallCheck {
+  ok: boolean
+  at: number | null
 }
 
 export interface NudgeTaken {
