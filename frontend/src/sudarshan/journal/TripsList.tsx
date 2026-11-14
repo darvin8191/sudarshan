@@ -15,6 +15,7 @@ import {
   useIstDay,
 } from '@/sudarshan/dashboard/MarketCalendar'
 import { Signed } from '@/sudarshan/portfolio/Signed'
+import { describe } from '@/sudarshan/watchlist/rows'
 import { journalData, problemOf } from './api'
 import { JOURNAL_KEY } from './keys'
 import {
@@ -29,7 +30,7 @@ import {
 } from './live'
 import { paiseText } from './money'
 import { OutcomeWord, SideChip, StrategyChip } from './parts'
-import { TagIcons } from './tags'
+import { MistakeCount } from './tags'
 import {
   dayBefore,
   overNewest,
@@ -74,6 +75,35 @@ function ExcursionBar({ trip }: { trip: Trip }) {
   )
 }
 
+/**
+ * The contract as the books and the watchlist name it (review H5): "NIFTY 25000 CE" with its side,
+ * over "NFO · 17 Nov 2026" beside the figure. Nothing is cut: the name wraps under its own width,
+ * and the figure moves under the detail line when the two do not fit side by side.
+ */
+function Contract({ trip, children }: { trip: Trip; children: React.ReactNode }) {
+  const named = describe(trip.symbol, trip.exchange)
+  return (
+    <>
+      <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+        <span
+          data-testid="trip-name"
+          title={trip.symbol}
+          className="min-w-0 text-base leading-tight font-bold [overflow-wrap:anywhere]"
+        >
+          {named.title}
+        </span>
+        <SideChip side={trip.side} />
+      </span>
+      <span className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
+        <span className="text-xs font-medium text-[color:var(--text-tertiary)]">
+          {named.detail}
+        </span>
+        <span className="ml-auto">{children}</span>
+      </span>
+    </>
+  )
+}
+
 function OpenCard({
   trip,
   live,
@@ -98,22 +128,21 @@ function OpenCard({
           'flex min-h-12 w-full flex-col gap-1.5 px-4 py-3 text-left outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50'
         )}
       >
-        <span className="flex items-center justify-between gap-2">
-          <span className="flex min-w-0 items-center gap-2">
-            <span className="truncate text-base font-bold">{trip.symbol}</span>
-            <SideChip side={trip.side} />
-          </span>
+        <Contract trip={trip}>
           {live?.pnl_paise !== null && live?.pnl_paise !== undefined ? (
-            <span className="text-base font-bold" data-testid="live-pnl">
+            <span
+              className="inline-flex items-baseline text-base font-bold whitespace-nowrap"
+              data-testid="live-pnl"
+            >
               <Signed paise={live.pnl_paise} stale={live.stale} />
               <OutcomeWord paise={live.pnl_paise} />
             </span>
           ) : (
-            <span className="text-sm font-semibold text-[color:var(--text-tertiary)]">
+            <span className="text-sm font-semibold whitespace-nowrap text-[color:var(--text-tertiary)]">
               Waiting for a price
             </span>
           )}
-        </span>
+        </Contract>
         <span className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[0.8125rem] font-medium text-[color:var(--text-secondary)]">
           <span>
             {qty} qty at {priceText(trip.entry_avg_u)}
@@ -156,17 +185,16 @@ function ClosedCard({
           'flex min-h-12 w-full flex-col gap-1.5 px-4 py-3 text-left outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50'
         )}
       >
-        <span className="flex items-center justify-between gap-2">
-          <span className="flex min-w-0 items-center gap-2">
-            <span className="truncate text-base font-bold">{trip.symbol}</span>
-            <SideChip side={trip.side} />
-          </span>
+        <Contract trip={trip}>
           {net === null ? (
-            <span className="text-sm font-semibold text-[color:var(--text-tertiary)]">
+            <span className="text-sm font-semibold whitespace-nowrap text-[color:var(--text-tertiary)]">
               Net not worked out yet
             </span>
           ) : (
-            <span className="inline-flex items-baseline gap-1.5 text-base font-bold">
+            <span
+              className="inline-flex items-baseline gap-1.5 text-base font-bold whitespace-nowrap"
+              data-testid="trip-net"
+            >
               <Signed paise={net} />
               <OutcomeWord paise={net} show={net === 0} />
               {trip.charges_actual_paise === null && (
@@ -176,7 +204,7 @@ function ClosedCard({
               )}
             </span>
           )}
-        </span>
+        </Contract>
         <span className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[0.8125rem] font-medium text-[color:var(--text-secondary)]">
           {trip.hold_s !== null && (
             <span className="inline-flex items-center gap-1">
@@ -186,7 +214,7 @@ function ClosedCard({
           )}
           <StrategyChip name={strategy} />
           <ExcursionBar trip={trip} />
-          <TagIcons tags={tags} />
+          <MistakeCount tags={tags} />
         </span>
       </button>
     </li>

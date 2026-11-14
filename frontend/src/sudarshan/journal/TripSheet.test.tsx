@@ -213,6 +213,14 @@ describe('what happened', () => {
     expect(await screen.findByText('Sandbox trade')).toBeTruthy()
   })
 
+  it('names the contract in its title as the books do, with its exchange and expiry (review H5)', async () => {
+    serve(detail({ exchange: 'NFO', symbol: 'NIFTY17NOV2625000CE' }))
+    show()
+    const title = await screen.findByRole('heading', { name: /NIFTY 25000 CE/ })
+    expect(title.textContent).not.toContain('NIFTY17NOV')
+    expect(screen.getByText('Closed trade').textContent).toBe('Closed trade · NFO · 17 Nov 2026')
+  })
+
   it('links to the chart of the instrument', async () => {
     serve()
     show()

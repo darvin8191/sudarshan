@@ -207,7 +207,50 @@ describe('TripsList', () => {
     expect(within(flat).getByText('est.')).toBeTruthy()
     const [win] = within(days[1]).getAllByTestId('closed-trip')
     expect(win.textContent).toContain('+₹812.50')
-    expect(within(win).getByText('Chased entry')).toBeTruthy()
+    // one chip with the count, the names read out (review L8)
+    const mistakes = within(win).getByTestId('trip-tags')
+    expect(mistakes.textContent).toContain('1 mistake')
+    expect(mistakes.getAttribute('title')).toBe('Chased entry')
+    expect(within(mistakes).getByText(/Chased entry/)).toBeTruthy()
+  })
+
+  it('names the contract as the books do, whole, with its strike and CE or PE (review H5)', async () => {
+    serve(
+      [trip({ id: 1, exchange: 'NFO', symbol: 'BANKNIFTY24NOV2655000PE', side: 'short' })],
+      [
+        closedTrip({
+          id: 2,
+          exchange: 'NFO',
+          symbol: 'NIFTY17NOV2625000CE',
+          net_paise: 4_245_451,
+          close_day: 20261113,
+          closed_ms: DAY2 + 1000,
+        }),
+        closedTrip({
+          id: 3,
+          exchange: 'NSE',
+          symbol: 'TATAMOTORS',
+          net_paise: -100,
+          close_day: 20261113,
+        }),
+      ]
+    )
+    show()
+    const card = await screen.findAllByTestId('closed-trip')
+    const name = within(card[0]).getByTestId('trip-name')
+    expect(name.textContent).toBe('NIFTY 25000 CE')
+    expect(name.getAttribute('title')).toBe('NIFTY17NOV2625000CE')
+    expect(name.className).not.toContain('truncate')
+    expect(card[0].textContent).toContain('NFO · 17 Nov 2026')
+    // the figure is not squeezed beside the name: it sits on the line under it
+    const net = within(card[0]).getByTestId('trip-net')
+    expect(name.parentElement?.contains(net)).toBe(false)
+    expect(net.textContent).toContain('+₹42,454.51')
+    expect(within(card[1]).getByTestId('trip-name').textContent).toBe('TATAMOTORS')
+    const open = screen.getByTestId('open-trip')
+    expect(within(open).getByTestId('trip-name').textContent).toBe('BANKNIFTY 55000 PE')
+    expect(open.textContent).toContain('NFO · 24 Nov 2026')
+    expect(within(open).getByText('SHORT')).toBeTruthy()
   })
 
   it('says it in words when there are no trades, and when there is no Upstox sign-in', async () => {

@@ -20,6 +20,7 @@ import { cn } from '@/lib/utils'
 import { istTime } from '@/sudarshan/books/time'
 import { Signed } from '@/sudarshan/portfolio/Signed'
 import { BottomSheet } from '@/sudarshan/watchlist/BottomSheet'
+import { describe } from '@/sudarshan/watchlist/rows'
 import { journalData, problemOf, WORDS } from './api'
 import { JOURNAL_KEY } from './keys'
 import { holdWords, openQty, priceText } from './live'
@@ -525,6 +526,8 @@ export function TripSheet({
     return recentStrategies(seen)
   })
   const start = useMemo(() => (trip ? formOf(trip, trip.note) : null), [trip])
+  // The contract as the books name it (review H5), never the code cut short in the title.
+  const named = trip ? describe(trip.symbol, trip.exchange) : null
 
   let body: React.ReactNode
   if (detail.isPending) {
@@ -647,18 +650,21 @@ export function TripSheet({
       onOpenChange={(next) => !next && onClose()}
       title={
         <span className="inline-flex items-center gap-2">
-          {trip ? trip.symbol : 'Trade'}
+          {named ? named.title : 'Trade'}
           {trip && <SideChip side={trip.side} />}
         </span>
       }
       description={
-        trip
-          ? trip.status === 'open'
-            ? 'Open trade'
-            : trip.status === 'orphan'
-              ? 'Earlier record, kept for your notes'
-              : 'Closed trade'
-          : undefined
+        trip && named ? (
+          <>
+            {trip.status === 'open'
+              ? 'Open trade'
+              : trip.status === 'orphan'
+                ? 'Earlier record, kept for your notes'
+                : 'Closed trade'}
+            <span>{` · ${named.detail}`}</span>
+          </>
+        ) : undefined
       }
     >
       {body}
