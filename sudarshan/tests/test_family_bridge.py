@@ -67,6 +67,7 @@ SAMPLE = {
     "invite_create": {"member_id": 2, "request_id": "req-2"},
     "invite_revoke": {"member_id": 2},
     "signin_reset": {"member_id": 2, "version": 4},
+    "signin_unlock": {"member_id": 2},
     "device_revoke": {"member_id": 2, "id": "a1b2c3d4e5f60718"},
     "share_set": {"kind": "watchlist", "ref": "7", "member_id": None, "role": "viewer",
                   "level": "view", "expires_at": None},

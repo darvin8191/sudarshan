@@ -17,6 +17,7 @@ import { getFamilyManager } from '../familyManager'
 import { DANGER, Field, OUTLINE, PRIMARY, Problem, Saved, Section } from '../forms'
 import { DEVICES_KEY, FAILING_WORDS, SETTINGS_KEY } from '../keys'
 import { Notifications } from '../Notifications'
+import { forgetMember } from '../session'
 import type { Device, Language } from '../types'
 import { LIMITS } from '../types'
 import { deviceWhen } from '../when'
@@ -35,7 +36,7 @@ function useLeave() {
   const navigate = useNavigate()
   return () => {
     getFamilyManager().disconnect()
-    client.removeQueries({ queryKey: ['family'] })
+    forgetMember(client)
     navigate('/family/login', { replace: true })
   }
 }
