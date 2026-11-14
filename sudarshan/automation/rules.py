@@ -181,12 +181,14 @@ def state_after(
     symbol: str,
     now_ms: int,
     state: m.State | None = None,
+    bought: bool = False,
 ) -> dict[str, object]:
     """The state's new values once an order's answer is in. Empty when nothing was sent: the state
     moves on only when an order went or may have gone.
 
     The held contract is set when an entry went or may have gone, cleared when an exit answered
-    success or found nothing to close, and kept when an exit is not confirmed.
+    success or found nothing to close, and kept when an exit is not confirmed. ``bought`` says
+    the strategy only buys (an option strategy): what it holds is long whichever way it points.
     """
     if verdict not in m.MOVED:
         return {}
@@ -195,7 +197,7 @@ def state_after(
         if verdict != NOT_CONFIRMED:
             values.update(held_exchange=None, held_symbol=None, held_side=None, held_since_ms=None)
         return values
-    side = m.LONG if target > 0 else m.SHORT
+    side = m.LONG if target > 0 or bought else m.SHORT
     same = state is not None and (state.held_symbol, state.held_side) == (symbol, side)
     values.update(
         held_exchange=exchange,

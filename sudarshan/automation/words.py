@@ -67,7 +67,13 @@ def trades(strategy: m.Strategy) -> str:
         size = f"{strategy.lots} lot" + ("" if strategy.lots == 1 else "s")
     else:
         size = f"{strategy.quantity} share" + ("" if strategy.quantity == 1 else "s")
-    if strategy.expiry_rule in ("month", "next_month"):
+    if strategy.kind == m.OPTION:
+        when = {"nearest": "nearest expiry", "next": "next expiry", "month": "this month"}
+        what = (
+            f"{strategy.underlying} option, {when.get(strategy.expiry_rule or '', 'nearest expiry')}, "
+            f"{strategy.strike_offset or 'ATM'}"
+        )
+    elif strategy.expiry_rule in ("month", "next_month"):
         when = "this month" if strategy.expiry_rule == "month" else "next month"
         what = f"{strategy.underlying} future, {when}"
     else:
@@ -183,6 +189,17 @@ def not_mapped(name: str, reason: str, what: str = "") -> str:
             f"{contract_name(what)} is not in today's contract list yet. Nothing was sent."
         ),
         "no_expiry": (f"no open {what} future is in today's contract list. Nothing was sent."),
+        "no_option_expiry": (
+            f"no open {what} option expiry is in today's contract list. Nothing was sent."
+        ),
+        "no_price": (
+            f"the last price of {what} could not be read, so no strike was chosen. Nothing was "
+            "sent."
+        ),
+        "no_strike": (
+            f"the strike this strategy asks for is not in today's contract list for {what}. "
+            "Nothing was sent."
+        ),
         "master": (
             "today's contract list is not loaded yet. Nothing was sent. It loads when you log in "
             "to Upstox."
@@ -251,8 +268,12 @@ def busy(name: str) -> str:
     )
 
 
-def expires_today() -> str:
-    return "expires today"
+def expires_today(symbol: str) -> str:
+    return f"{contract_name(symbol)} expires today."
+
+
+def holds_nothing(name: str) -> str:
+    return f"{name} holds no option. Nothing to send."
 
 
 def expired(name: str, symbol: str) -> str:
@@ -265,6 +286,8 @@ def expired(name: str, symbol: str) -> str:
 def sent(name: str, target: int, quantity: int, symbol: str) -> str:
     if target == 0:
         return f"{name}: exit sent for {contract_name(symbol)}."
+    if symbol.endswith(("CE", "PE")):
+        return f"{name}: order sent to buy {quantity} {contract_name(symbol)}."
     return f"{name}: order sent to be {side(target)} {quantity} {contract_name(symbol)}."
 
 
@@ -277,6 +300,8 @@ def cut_to_exit(name: str, symbol: str, said: str) -> str:
 def no_action(name: str, target: int, quantity: int, symbol: str, flat_found: bool) -> str:
     if target == 0 or flat_found:
         return f"{name}: no open position in {contract_name(symbol)}. Nothing to send."
+    if symbol.endswith(("CE", "PE")):
+        return f"{name}: already holds {quantity} {contract_name(symbol)}. Nothing to send."
     return f"{name}: already {side(target)} {quantity} {contract_name(symbol)}. Nothing to send."
 
 

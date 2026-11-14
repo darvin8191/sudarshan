@@ -67,7 +67,6 @@ def test_a_chart_future_and_a_named_future_are_one_contract():
         ({"name": ""}, "name", "Give the strategy a name"),
         ({"name": "x" * 41}, "name", "Give the strategy a name"),
         ({"name": "ORB {1}"}, "name", "Give the strategy a name"),
-        ({"kind": "option"}, "kind", "Option strategies come in a later release."),
         ({"kind": "basket"}, "kind", "Choose what the strategy trades."),
         ({"exchange": "MCX"}, "exchange", "Commodity strategies are not supported yet."),
         ({"chart": "MCX:CRUDEOIL1!"}, "chart", "Commodity strategies are not supported yet."),

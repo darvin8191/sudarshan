@@ -24,6 +24,7 @@ export interface StrategyForm {
   exchange?: string
   underlying?: string
   expiry_rule?: string | null
+  strike_offset?: string | null
   product: Product
   direction?: Direction
   lots?: number | null

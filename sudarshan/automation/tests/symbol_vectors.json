@@ -1,6 +1,6 @@
 {
  "master": {
-  "about": "Rows in the master's own form (symbol, exchange, lot size, expiry), written by hand for these tests from the published expiry days: NIFTY and BANKNIFTY monthly on the last Tuesday (24 Nov and 29 Dec 2026), January's moved from Tue 26 Jan 2027 (Republic Day) to Mon 25 Jan, SENSEX on the last Thursday. Not cut from a server's export.",
+  "about": "Rows in the master's own form (symbol, exchange, lot size, expiry), written by hand for these tests from the published expiry days: NIFTY and BANKNIFTY monthly on the last Tuesday (24 Nov and 29 Dec 2026), January's moved from Tue 26 Jan 2027 (Republic Day) to Mon 25 Jan, SENSEX on the last Thursday. Not cut from a server's export. Options: NIFTY weekly on Tuesdays (17 Nov, 1, 8 and 15 Dec 2026, 19 Jan 2027) with the monthly days above, RELIANCE monthly, SENSEX weekly on a Thursday; every listed strike has a call and a put, but for the one named in options_not_listed.",
   "symbols": {
    "NSE": [
     "RELIANCE",
@@ -72,6 +72,119 @@
    "MIDCPNIFTY",
    "SENSEX",
    "BANKEX"
+  ],
+  "options": {
+   "NIFTY": {
+    "2026-11-17": [
+     24800,
+     24850,
+     24900,
+     24950,
+     25000,
+     25050,
+     25100,
+     25150,
+     25200
+    ],
+    "2026-11-24": [
+     24800,
+     24850,
+     24900,
+     24950,
+     25000,
+     25050,
+     25100,
+     25150,
+     25200
+    ],
+    "2026-12-01": [
+     24800,
+     24850,
+     24900,
+     24950,
+     25000,
+     25050,
+     25100,
+     25150,
+     25200
+    ],
+    "2026-12-08": [
+     24800,
+     24850,
+     24900,
+     24950,
+     25000,
+     25050,
+     25100,
+     25150,
+     25200
+    ],
+    "2026-12-15": [
+     24800,
+     24850,
+     24900,
+     24950,
+     25000,
+     25050,
+     25100,
+     25150,
+     25200
+    ],
+    "2026-12-29": [
+     24800,
+     24850,
+     24900,
+     24950,
+     25000,
+     25050,
+     25100,
+     25150,
+     25200
+    ],
+    "2027-01-19": [
+     24800,
+     24850,
+     24900,
+     24950,
+     25000,
+     25050,
+     25100,
+     25150,
+     25200
+    ],
+    "2027-01-25": [
+     24800,
+     24850,
+     24900,
+     24950,
+     25000,
+     25050,
+     25100,
+     25150,
+     25200
+    ]
+   },
+   "RELIANCE": {
+    "2026-11-24": [
+     1380,
+     1400,
+     1410.5,
+     1420,
+     1440
+    ]
+   },
+   "SENSEX": {
+    "2026-11-19": [
+     84800,
+     84900,
+     85000,
+     85100,
+     85200
+    ]
+   }
+  },
+  "options_not_listed": [
+   "NIFTY01DEC2625100CE"
   ]
  },
  "cases": [
@@ -920,6 +1033,627 @@
     "exchange": "NFO",
     "symbol": "NIFTY24NOV26FUT",
     "stop": "2026-11-24 14:00:00"
+   }
+  },
+  {
+   "name": "option: a long target buys the nearest expiry's ATM call",
+   "strategy": {
+    "kind": "option",
+    "underlying": "NIFTY",
+    "exchange": "NFO",
+    "expiry_rule": "nearest",
+    "strike_offset": "ATM",
+    "product": "MIS"
+   },
+   "now": "2026-11-16 10:00:00",
+   "entering": true,
+   "target": 1,
+   "price": 25010,
+   "expect": {
+    "exchange": "NFO",
+    "symbol": "NIFTY17NOV2625000CE",
+    "expiry": "2026-11-17",
+    "expires_today": false,
+    "underlying": "NIFTY"
+   }
+  },
+  {
+   "name": "option: a short target buys the put, never sells a call",
+   "strategy": {
+    "kind": "option",
+    "underlying": "NIFTY",
+    "exchange": "NFO",
+    "expiry_rule": "nearest",
+    "strike_offset": "ATM",
+    "product": "MIS"
+   },
+   "now": "2026-11-16 10:00:00",
+   "entering": true,
+   "target": -1,
+   "price": 25010,
+   "expect": {
+    "exchange": "NFO",
+    "symbol": "NIFTY17NOV2625000PE",
+    "expiry": "2026-11-17",
+    "expires_today": false,
+    "underlying": "NIFTY"
+   }
+  },
+  {
+   "name": "option: a price midway between two strikes takes the lower",
+   "strategy": {
+    "kind": "option",
+    "underlying": "NIFTY",
+    "exchange": "NFO",
+    "expiry_rule": "nearest",
+    "strike_offset": "ATM",
+    "product": "MIS"
+   },
+   "now": "2026-11-16 10:00:00",
+   "entering": true,
+   "target": 1,
+   "price": 25025,
+   "expect": {
+    "exchange": "NFO",
+    "symbol": "NIFTY17NOV2625000CE",
+    "expiry": "2026-11-17",
+    "expires_today": false,
+    "underlying": "NIFTY"
+   }
+  },
+  {
+   "name": "option: just above the midpoint takes the higher strike",
+   "strategy": {
+    "kind": "option",
+    "underlying": "NIFTY",
+    "exchange": "NFO",
+    "expiry_rule": "nearest",
+    "strike_offset": "ATM",
+    "product": "MIS"
+   },
+   "now": "2026-11-16 10:00:00",
+   "entering": true,
+   "target": -1,
+   "price": 25025.05,
+   "expect": {
+    "exchange": "NFO",
+    "symbol": "NIFTY17NOV2625050PE",
+    "expiry": "2026-11-17",
+    "expires_today": false,
+    "underlying": "NIFTY"
+   }
+  },
+  {
+   "name": "option: ITM1 call is one strike lower",
+   "strategy": {
+    "kind": "option",
+    "underlying": "NIFTY",
+    "exchange": "NFO",
+    "expiry_rule": "nearest",
+    "strike_offset": "ITM1",
+    "product": "MIS"
+   },
+   "now": "2026-11-16 10:00:00",
+   "entering": true,
+   "target": 1,
+   "price": 25010,
+   "expect": {
+    "exchange": "NFO",
+    "symbol": "NIFTY17NOV2624950CE",
+    "expiry": "2026-11-17",
+    "expires_today": false,
+    "underlying": "NIFTY"
+   }
+  },
+  {
+   "name": "option: ITM1 put is one strike higher",
+   "strategy": {
+    "kind": "option",
+    "underlying": "NIFTY",
+    "exchange": "NFO",
+    "expiry_rule": "nearest",
+    "strike_offset": "ITM1",
+    "product": "MIS"
+   },
+   "now": "2026-11-16 10:00:00",
+   "entering": true,
+   "target": -1,
+   "price": 25010,
+   "expect": {
+    "exchange": "NFO",
+    "symbol": "NIFTY17NOV2625050PE",
+    "expiry": "2026-11-17",
+    "expires_today": false,
+    "underlying": "NIFTY"
+   }
+  },
+  {
+   "name": "option: OTM2 call is two strikes higher",
+   "strategy": {
+    "kind": "option",
+    "underlying": "NIFTY",
+    "exchange": "NFO",
+    "expiry_rule": "nearest",
+    "strike_offset": "OTM2",
+    "product": "MIS"
+   },
+   "now": "2026-11-16 10:00:00",
+   "entering": true,
+   "target": 1,
+   "price": 25010,
+   "expect": {
+    "exchange": "NFO",
+    "symbol": "NIFTY17NOV2625100CE",
+    "expiry": "2026-11-17",
+    "expires_today": false,
+    "underlying": "NIFTY"
+   }
+  },
+  {
+   "name": "option: OTM2 put is two strikes lower",
+   "strategy": {
+    "kind": "option",
+    "underlying": "NIFTY",
+    "exchange": "NFO",
+    "expiry_rule": "nearest",
+    "strike_offset": "OTM2",
+    "product": "MIS"
+   },
+   "now": "2026-11-16 10:00:00",
+   "entering": true,
+   "target": -1,
+   "price": 25010,
+   "expect": {
+    "exchange": "NFO",
+    "symbol": "NIFTY17NOV2624900PE",
+    "expiry": "2026-11-17",
+    "expires_today": false,
+    "underlying": "NIFTY"
+   }
+  },
+  {
+   "name": "option: the next expiry",
+   "strategy": {
+    "kind": "option",
+    "underlying": "NIFTY",
+    "exchange": "NFO",
+    "expiry_rule": "next",
+    "strike_offset": "ATM",
+    "product": "MIS"
+   },
+   "now": "2026-11-16 10:00:00",
+   "entering": true,
+   "target": 1,
+   "price": 25010,
+   "expect": {
+    "exchange": "NFO",
+    "symbol": "NIFTY24NOV2625000CE",
+    "expiry": "2026-11-24",
+    "expires_today": false,
+    "underlying": "NIFTY"
+   }
+  },
+  {
+   "name": "option: this month's expiry",
+   "strategy": {
+    "kind": "option",
+    "underlying": "NIFTY",
+    "exchange": "NFO",
+    "expiry_rule": "month",
+    "strike_offset": "ATM",
+    "product": "MIS"
+   },
+   "now": "2026-11-16 10:00:00",
+   "entering": true,
+   "target": 1,
+   "price": 25010,
+   "expect": {
+    "exchange": "NFO",
+    "symbol": "NIFTY24NOV2625000CE",
+    "expiry": "2026-11-24",
+    "expires_today": false,
+    "underlying": "NIFTY"
+   }
+  },
+  {
+   "name": "option: this month's expiry the day after it is December's",
+   "strategy": {
+    "kind": "option",
+    "underlying": "NIFTY",
+    "exchange": "NFO",
+    "expiry_rule": "month",
+    "strike_offset": "ATM",
+    "product": "MIS"
+   },
+   "now": "2026-11-25 10:00:00",
+   "entering": true,
+   "target": 1,
+   "price": 25010,
+   "expect": {
+    "exchange": "NFO",
+    "symbol": "NIFTY29DEC2625000CE",
+    "expiry": "2026-12-29",
+    "expires_today": false,
+    "underlying": "NIFTY"
+   }
+  },
+  {
+   "name": "option: expiry day morning, intraday: the expiring contract, marked",
+   "strategy": {
+    "kind": "option",
+    "underlying": "NIFTY",
+    "exchange": "NFO",
+    "expiry_rule": "nearest",
+    "strike_offset": "ATM",
+    "product": "MIS"
+   },
+   "now": "2026-11-17 10:00:00",
+   "entering": true,
+   "target": 1,
+   "price": 25010,
+   "expect": {
+    "exchange": "NFO",
+    "symbol": "NIFTY17NOV2625000CE",
+    "expiry": "2026-11-17",
+    "expires_today": true,
+    "underlying": "NIFTY"
+   }
+  },
+  {
+   "name": "option, old regime: 15 min before the 15:40 stop is allowed",
+   "strategy": {
+    "kind": "option",
+    "underlying": "NIFTY",
+    "exchange": "NFO",
+    "expiry_rule": "nearest",
+    "strike_offset": "ATM",
+    "product": "MIS"
+   },
+   "now": "2026-11-17 15:25:00",
+   "entering": true,
+   "target": 1,
+   "price": 25010,
+   "expect": {
+    "exchange": "NFO",
+    "symbol": "NIFTY17NOV2625000CE",
+    "expiry": "2026-11-17",
+    "expires_today": true,
+    "underlying": "NIFTY",
+    "stop": "2026-11-17 15:40:00"
+   }
+  },
+  {
+   "name": "option, old regime: inside the last 15 minutes is too close",
+   "strategy": {
+    "kind": "option",
+    "underlying": "NIFTY",
+    "exchange": "NFO",
+    "expiry_rule": "nearest",
+    "strike_offset": "ATM",
+    "product": "MIS"
+   },
+   "now": "2026-11-17 15:25:01",
+   "entering": true,
+   "target": 1,
+   "price": 25010,
+   "expect": {
+    "unmapped": "too_close",
+    "what": "NIFTY17NOV2625000CE",
+    "stop": "2026-11-17 15:40:00"
+   }
+  },
+  {
+   "name": "option, old regime: at the stop the nearest expiry is next week's",
+   "strategy": {
+    "kind": "option",
+    "underlying": "NIFTY",
+    "exchange": "NFO",
+    "expiry_rule": "nearest",
+    "strike_offset": "ATM",
+    "product": "MIS"
+   },
+   "now": "2026-11-17 15:40:00",
+   "entering": true,
+   "target": -1,
+   "price": 25010,
+   "expect": {
+    "exchange": "NFO",
+    "symbol": "NIFTY24NOV2625000PE",
+    "expiry": "2026-11-24",
+    "expires_today": false,
+    "underlying": "NIFTY"
+   }
+  },
+  {
+   "name": "option, new regime (from 7 Dec): the last instant, 15:29:59, with no window",
+   "strategy": {
+    "kind": "option",
+    "underlying": "NIFTY",
+    "exchange": "NFO",
+    "expiry_rule": "nearest",
+    "strike_offset": "ATM",
+    "product": "MIS",
+    "no_entry_before_stop_min": 0
+   },
+   "now": "2026-12-08 15:29:59",
+   "entering": true,
+   "target": 1,
+   "price": 25010,
+   "expect": {
+    "exchange": "NFO",
+    "symbol": "NIFTY08DEC2625000CE",
+    "expiry": "2026-12-08",
+    "expires_today": true,
+    "underlying": "NIFTY",
+    "stop": "2026-12-08 15:30:00"
+   }
+  },
+  {
+   "name": "option, new regime: 15:20 is too close to the 15:30 stop",
+   "strategy": {
+    "kind": "option",
+    "underlying": "NIFTY",
+    "exchange": "NFO",
+    "expiry_rule": "nearest",
+    "strike_offset": "ATM",
+    "product": "MIS"
+   },
+   "now": "2026-12-08 15:20:00",
+   "entering": true,
+   "target": 1,
+   "price": 25010,
+   "expect": {
+    "unmapped": "too_close",
+    "what": "NIFTY08DEC2625000CE",
+    "stop": "2026-12-08 15:30:00"
+   }
+  },
+  {
+   "name": "option, new regime: after the 15:30 stop, while F&O still trades, next week's contract",
+   "strategy": {
+    "kind": "option",
+    "underlying": "NIFTY",
+    "exchange": "NFO",
+    "expiry_rule": "nearest",
+    "strike_offset": "ATM",
+    "product": "MIS"
+   },
+   "now": "2026-12-08 15:31:00",
+   "entering": true,
+   "target": 1,
+   "price": 25010,
+   "expect": {
+    "exchange": "NFO",
+    "symbol": "NIFTY15DEC2625000CE",
+    "expiry": "2026-12-15",
+    "expires_today": false,
+    "underlying": "NIFTY"
+   }
+  },
+  {
+   "name": "option, carry product on expiry day: an entry goes to the next expiry from the morning",
+   "strategy": {
+    "kind": "option",
+    "underlying": "NIFTY",
+    "exchange": "NFO",
+    "expiry_rule": "nearest",
+    "strike_offset": "ATM",
+    "product": "NRML",
+    "roll_on_expiry_day": true
+   },
+   "now": "2026-11-17 09:20:00",
+   "entering": true,
+   "target": 1,
+   "price": 25010,
+   "expect": {
+    "exchange": "NFO",
+    "symbol": "NIFTY24NOV2625000CE",
+    "expiry": "2026-11-24",
+    "expires_today": false,
+    "underlying": "NIFTY"
+   }
+  },
+  {
+   "name": "option, carry product the day before expiry: the expiring contract",
+   "strategy": {
+    "kind": "option",
+    "underlying": "NIFTY",
+    "exchange": "NFO",
+    "expiry_rule": "nearest",
+    "strike_offset": "ATM",
+    "product": "NRML",
+    "roll_on_expiry_day": true
+   },
+   "now": "2026-11-16 10:00:00",
+   "entering": true,
+   "target": 1,
+   "price": 25010,
+   "expect": {
+    "exchange": "NFO",
+    "symbol": "NIFTY17NOV2625000CE",
+    "expiry": "2026-11-17",
+    "expires_today": false,
+    "underlying": "NIFTY"
+   }
+  },
+  {
+   "name": "option: a holiday-shifted expiry is read from the list (Mon 25 Jan 2027, not a Tuesday)",
+   "strategy": {
+    "kind": "option",
+    "underlying": "NIFTY",
+    "exchange": "NFO",
+    "expiry_rule": "nearest",
+    "strike_offset": "ATM",
+    "product": "MIS"
+   },
+   "now": "2027-01-20 10:00:00",
+   "entering": true,
+   "target": 1,
+   "price": 25010,
+   "expect": {
+    "exchange": "NFO",
+    "symbol": "NIFTY25JAN2725000CE",
+    "expiry": "2027-01-25",
+    "expires_today": false,
+    "underlying": "NIFTY"
+   }
+  },
+  {
+   "name": "option: the strike is listed but this contract is not yet",
+   "strategy": {
+    "kind": "option",
+    "underlying": "NIFTY",
+    "exchange": "NFO",
+    "expiry_rule": "nearest",
+    "strike_offset": "OTM2",
+    "product": "MIS"
+   },
+   "now": "2026-11-25 10:00:00",
+   "entering": true,
+   "target": 1,
+   "price": 25010,
+   "expect": {
+    "unmapped": "not_listed",
+    "what": "NIFTY01DEC2625100CE"
+   }
+  },
+  {
+   "name": "option: the underlying's price could not be read",
+   "strategy": {
+    "kind": "option",
+    "underlying": "NIFTY",
+    "exchange": "NFO",
+    "expiry_rule": "nearest",
+    "strike_offset": "ATM",
+    "product": "MIS"
+   },
+   "now": "2026-11-16 10:00:00",
+   "entering": true,
+   "target": 1,
+   "price": null,
+   "expect": {
+    "unmapped": "no_price",
+    "what": "NIFTY"
+   }
+  },
+  {
+   "name": "option: a price of 0 is no price",
+   "strategy": {
+    "kind": "option",
+    "underlying": "NIFTY",
+    "exchange": "NFO",
+    "expiry_rule": "nearest",
+    "strike_offset": "ATM",
+    "product": "MIS"
+   },
+   "now": "2026-11-16 10:00:00",
+   "entering": true,
+   "target": 1,
+   "price": 0,
+   "expect": {
+    "unmapped": "no_price",
+    "what": "NIFTY"
+   }
+  },
+  {
+   "name": "option: the offset runs past the last listed strike",
+   "strategy": {
+    "kind": "option",
+    "underlying": "NIFTY",
+    "exchange": "NFO",
+    "expiry_rule": "nearest",
+    "strike_offset": "OTM10",
+    "product": "MIS"
+   },
+   "now": "2026-11-16 10:00:00",
+   "entering": true,
+   "target": 1,
+   "price": 25010,
+   "expect": {
+    "unmapped": "no_strike",
+    "what": "NIFTY 17NOV26"
+   }
+  },
+  {
+   "name": "option: an underlying with no options listed",
+   "strategy": {
+    "kind": "option",
+    "underlying": "FINNIFTY",
+    "exchange": "NFO",
+    "expiry_rule": "nearest",
+    "strike_offset": "ATM",
+    "product": "MIS"
+   },
+   "now": "2026-11-16 10:00:00",
+   "entering": true,
+   "target": 1,
+   "price": 25010,
+   "expect": {
+    "unmapped": "no_option_expiry",
+    "what": "FINNIFTY"
+   }
+  },
+  {
+   "name": "option: a flat target names no contract",
+   "strategy": {
+    "kind": "option",
+    "underlying": "NIFTY",
+    "exchange": "NFO",
+    "expiry_rule": "nearest",
+    "strike_offset": "ATM",
+    "product": "MIS"
+   },
+   "now": "2026-11-16 10:00:00",
+   "entering": false,
+   "target": 0,
+   "price": 25010,
+   "expect": {
+    "unmapped": "nothing_held",
+    "what": "NIFTY"
+   }
+  },
+  {
+   "name": "option: a stock's option with a fractional strike",
+   "strategy": {
+    "kind": "option",
+    "underlying": "RELIANCE",
+    "exchange": "NFO",
+    "expiry_rule": "month",
+    "strike_offset": "ATM",
+    "product": "MIS"
+   },
+   "now": "2026-11-16 10:00:00",
+   "entering": true,
+   "target": 1,
+   "price": 1411,
+   "expect": {
+    "exchange": "NFO",
+    "symbol": "RELIANCE24NOV261410.5CE",
+    "expiry": "2026-11-24",
+    "expires_today": false,
+    "underlying": "RELIANCE"
+   }
+  },
+  {
+   "name": "option: SENSEX on BFO",
+   "strategy": {
+    "kind": "option",
+    "underlying": "SENSEX",
+    "exchange": "BFO",
+    "expiry_rule": "nearest",
+    "strike_offset": "ATM",
+    "product": "MIS"
+   },
+   "now": "2026-11-16 10:00:00",
+   "entering": true,
+   "target": -1,
+   "price": 85049,
+   "expect": {
+    "exchange": "BFO",
+    "symbol": "SENSEX19NOV2685000PE",
+    "expiry": "2026-11-19",
+    "expires_today": false,
+    "underlying": "SENSEX"
    }
   }
  ],

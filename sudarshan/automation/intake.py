@@ -71,6 +71,7 @@ class Step:
     target: int  # +1, 0, -1
     quantity: int
     order: dict[str, Any]
+    expires_today: bool = False
 
 
 @dataclass(frozen=True)
@@ -131,11 +132,15 @@ def order_data(strategy: m.Strategy, exchange: str, symbol: str, target: int, qu
                held_side: str | None = None) -> dict[str, Any]:  # fmt: skip
     """The smart order for one target. The quantity is the strategy's own, never the alert's: a
     smart order to a size other than 0 works out what to send from the account, and for an exit
-    the quantity only marks the order as an exit that must never open a position."""
+    the quantity only marks the order as an exit that must never open a position.
+
+    An option strategy only ever buys: a long target buys its call and a short target buys its
+    put, so its order is a BUY to a size above 0 either way, and its exit a SELL to 0."""
+    bought = strategy.kind == m.OPTION
     if target == 0:
-        action = "BUY" if held_side == m.SHORT else "SELL"
+        action = "BUY" if held_side == m.SHORT and not bought else "SELL"
     else:
-        action = "BUY" if target > 0 else "SELL"
+        action = "BUY" if target > 0 or bought else "SELL"
     return {
         "strategy": strategy.name,
         "exchange": exchange,
@@ -144,7 +149,7 @@ def order_data(strategy: m.Strategy, exchange: str, symbol: str, target: int, qu
         "action": action,
         "pricetype": "MARKET",
         "quantity": str(quantity),
-        "position_size": str(target * quantity),
+        "position_size": str((abs(target) if bought else target) * quantity),
         "price": "0",
         "trigger_price": "0",
         "disclosed_quantity": "0",
@@ -247,7 +252,17 @@ def plan(
     # the contract and the size
     steps = _steps(strategy, state, target, desk, now_ms, indices)
     if isinstance(steps, Plan):
+        if steps.verdict == rules.NO_ACTION:
+            # Nothing held and nothing to close: the state says flat. An option that expired
+            # since is said first.
+            state_values.update(last_target=0, last_fired_s=alert.fired_s)
+            said = " ".join([*notes, steps.sentence])
+            return replace(steps, sentence=said, tell="expired" if notes else None, **common)
         return replace(steps, **common)
+    for step in steps:
+        if step.expires_today and step.target != 0:
+            notes.append(words.expires_today(step.symbol))
+            tells.append(("expires_today", notes[-1]))
     return Plan(
         None,
         target=target,
@@ -267,7 +282,22 @@ def _closes(desk: Desk, symbol: str | None, exchange: str | None) -> dict[str, i
     return desk.closes([found[1]], exchange or "NFO") if found else {}
 
 
-def _resolve(strategy: m.Strategy, desk: Desk, now_ms: int, indices, entering: bool):
+def _resolve(strategy: m.Strategy, desk: Desk, now_ms: int, indices, entering: bool, target=1):
+    if strategy.kind == m.OPTION:
+        underlying, exchange = strategy.underlying, strategy.exchange
+        expiries = desk.option_expiries(underlying)
+        return symbols.resolve(
+            strategy,
+            now_ms,
+            known=desk.known,
+            expiries=expiries,
+            indices=indices,
+            closes=desk.closes(list(expiries), exchange) if expiries else {},
+            entering=entering,
+            target=target,
+            strikes_of=lambda iso: desk.strikes(underlying, iso),
+            price=desk.underlying_price(underlying, exchange) if expiries else None,
+        )
     underlying = symbols.futures_underlying(strategy)
     expiries = desk.future_expiries(underlying) if underlying else []
     exchange = strategy.exchange or "NFO"
@@ -290,9 +320,21 @@ def _steps(strategy: m.Strategy, state: m.State, target: int, desk: Desk, now_ms
         # An exit goes to the contract that was entered, whatever the rule resolves today.
         quantity = _size(strategy, desk, *held, exit_=True)
         return (_step(strategy, *held, 0, quantity, state.held_side),)
+    option = strategy.kind == m.OPTION
+    if target == 0 and option:
+        # An option strategy that holds nothing has no contract to ask: which strike its rule
+        # means now says nothing about what it once bought. Nothing is sent.
+        return Plan(rules.NO_ACTION, words.holds_nothing(name), 0)
     if not desk.master_loaded():
         return _refuse("not_mapped", words.not_mapped(name, "master"), target)
-    found = _resolve(strategy, desk, now_ms, indices, entering=target != 0)
+    if option and held and symbols.option_side(held[1]) == symbols.wanted_side(target):
+        # The same target with its option already bought: the held contract is asked, never a
+        # new strike or a later expiry. A strategy never rolls a held position by itself.
+        quantity = _size(strategy, desk, *held)
+        if isinstance(quantity, Plan):
+            return replace(quantity, target=target)
+        return (_step(strategy, *held, target, quantity, None),)
+    found = _resolve(strategy, desk, now_ms, indices, entering=target != 0, target=target)
     if isinstance(found, symbols.Unmapped):
         if found.reason == "too_close":
             said = words.too_close(name, found.what, (found.stop_ms or 0) // 1000)
@@ -302,17 +344,20 @@ def _steps(strategy: m.Strategy, state: m.State, target: int, desk: Desk, now_ms
         quantity = _size(strategy, desk, found.exchange, found.symbol, exit_=True)
         return (_step(strategy, found.exchange, found.symbol, 0, quantity, None),)
     same_side = state.held_side == (m.LONG if target > 0 else m.SHORT)
-    if held and held != (found.exchange, found.symbol) and same_side:
+    if not option and held and held != (found.exchange, found.symbol) and same_side:
         # A strategy never rolls a held position by itself: the same target with an older
         # contract held is asked of the held contract, and reads as already there.
         found = replace(found, exchange=held[0], symbol=held[1])
     quantity = _size(strategy, desk, found.exchange, found.symbol)
     if isinstance(quantity, Plan):
         return replace(quantity, target=target)
-    entry = _step(strategy, found.exchange, found.symbol, target, quantity, None)
+    entry = replace(
+        _step(strategy, found.exchange, found.symbol, target, quantity, None),
+        expires_today=found.expires_today,
+    )
     if held and held != (found.exchange, found.symbol):
-        # The other side, in another contract (a future after a roll): the held contract's exit
-        # first, and the entry only if that exit answered clearly.
+        # The other side, in another contract (an option strategy always; a future after a
+        # roll): the held contract's exit first, and the entry only if that exit answered clearly.
         out = _size(strategy, desk, *held, exit_=True)
         return (_step(strategy, *held, 0, out, state.held_side), entry)
     return (entry,)
@@ -380,8 +425,19 @@ def _would(strategy: m.Strategy, made: Plan) -> str:
     where = "the Sandbox" if made.analyze else "Upstox"
     if last.target == 0:
         return f"Would send an exit for {words.contract_name(last.symbol)} to {where}."
+    first = ""
+    if len(made.steps) > 1:
+        first = (
+            f"Would first send an exit for {words.contract_name(made.steps[0].symbol)}, and "
+            "only if that answers clearly: "
+        )
+    if strategy.kind == m.OPTION:
+        return (
+            f"{first}Would send an order to {where} to buy {last.quantity} "
+            f"{words.contract_name(last.symbol)}."
+        )
     return (
-        f"Would send an order to {where} to be {words.side(last.target)} {last.quantity} "
+        f"{first}Would send an order to {where} to be {words.side(last.target)} {last.quantity} "
         f"{words.contract_name(last.symbol)}."
     )
 
@@ -545,7 +601,7 @@ def _send(strategy, state, alert, alert_id, chosen: Plan, row, desk, store) -> O
         reached = 0 if cut else step.target
         moved = rules.state_after(
             verdict, flat_found, reached, alert, step.exchange, step.symbol,
-            int(desk.now() * 1000), now_state,
+            int(desk.now() * 1000), now_state, bought=strategy.kind == m.OPTION,
         )  # fmt: skip
         state_values.update(moved)
         now_state = replace(now_state, **moved)
@@ -587,6 +643,8 @@ def _send(strategy, state, alert, alert_id, chosen: Plan, row, desk, store) -> O
     )
     _after(desk, strategy, verdict, sentence, None)
     for reason, said in tells:
+        if reason == "expires_today" and verdict != rules.SENT:
+            continue  # nothing was bought, so there is nothing that expires today
         _tell(desk, strategy, reason, said)
     return _out(HANDLED, verdict=verdict, sentence=sentence, alert_id=alert_id)
 

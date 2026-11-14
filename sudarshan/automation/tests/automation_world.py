@@ -31,6 +31,19 @@ def iso(epoch_s: float) -> str:
 
 
 NOW = at("2026-11-16 10:15:02")
+_MONTHS = ("JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC")
+
+
+def option_symbols(options: dict[str, dict[str, list[float]]]) -> set[str]:
+    """Every call and put of a strike list, as OpenAlgo writes the symbol."""
+    out = set()
+    for underlying, by_expiry in options.items():
+        for day, strikes in by_expiry.items():
+            code = f"{day[8:10]}{_MONTHS[int(day[5:7]) - 1]}{day[2:4]}"
+            for strike in strikes:
+                written = str(int(strike)) if strike == int(strike) else str(strike)
+                out |= {f"{underlying}{code}{written}{side}" for side in ("CE", "PE")}
+    return out
 
 
 class FakeDesk:
@@ -45,6 +58,17 @@ class FakeDesk:
             "NIFTY": ["2026-11-24", "2026-12-29", "2027-01-25"],
             "BANKNIFTY": ["2026-11-24", "2026-12-29"],
         }
+        # NIFTY's weekly option expiries (Tuesdays; 24 Nov and 29 Dec are the monthly ones), every
+        # strike from 24800 to 25200 in steps of 50, a call and a put each.
+        self.options = {
+            "NIFTY": {
+                day: [24800.0 + 50 * n for n in range(9)]
+                for day in ("2026-11-17", "2026-11-24", "2026-12-01", "2026-12-08", "2026-12-15", "2026-12-29")
+            }
+        }  # fmt: skip
+        self.listed |= {("NFO", symbol) for symbol in option_symbols(self.options)}
+        self.price: dict[str, float | None] = {"NIFTY": 25010.0}
+        self.price_reads = 0
         self.lots = {"NIFTY": 65, "BANKNIFTY": 30}
         self.freeze = {"NIFTY": 1800, "BANKNIFTY": 600}
         self.loaded = True
@@ -83,6 +107,16 @@ class FakeDesk:
 
     def future_expiries(self, underlying: str) -> list[str]:
         return list(self.futures.get(underlying, []))
+
+    def option_expiries(self, underlying: str) -> list[str]:
+        return sorted(self.options.get(underlying, {}))
+
+    def strikes(self, underlying: str, expiry: str) -> list[float]:
+        return list(self.options.get(underlying, {}).get(expiry, []))
+
+    def underlying_price(self, underlying: str, exchange: str) -> float | None:
+        self.price_reads += 1
+        return self.price.get(underlying)
 
     def lot_size(self, exchange: str, symbol: str) -> int | None:
         for underlying, lot in self.lots.items():
@@ -154,7 +188,7 @@ class FakeDesk:
             return True, {"status": "success", "orderid": f"2611160000{self.order_seq:02d}"}, 200
 
     def position(self, symbol: str, analyze: bool = True, product: str = "MIS") -> int:
-        exchange = "NFO" if symbol.endswith("FUT") else "NSE"
+        exchange = "NFO" if symbol.endswith(("FUT", "CE", "PE")) else "NSE"
         return self.positions.get((analyze, exchange, symbol, product), 0)
 
     # telling

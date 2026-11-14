@@ -59,6 +59,33 @@ class Desk:
     def future_expiries(self, underlying: str) -> list[str]:
         return self._master().expiries(underlying, kind="futures")
 
+    def option_expiries(self, underlying: str) -> list[str]:
+        return self._master().expiries(underlying, kind="options")
+
+    def strikes(self, underlying: str, expiry: str) -> list[float]:
+        return self._master().strikes(underlying, expiry)
+
+    def underlying_price(self, underlying: str, exchange: str) -> float | None:
+        """The underlying's last price, for an option strategy's strike: the index's own for an
+        index, the share's for a stock. ``None`` when it cannot be read: no strike is guessed.
+        The read is cut off after a few seconds (the risk gate's own limit), because the alert
+        holds its strategy's lock while it waits."""
+        index = underlying in self.indices()
+        cash = "BSE" if exchange == "BFO" else "NSE"
+        try:
+            from services.quotes_service import get_quotes
+            from sudarshan.guard import readers
+
+            with readers.limited():
+                ok, answer, _status = get_quotes(
+                    underlying, f"{cash}_INDEX" if index else cash, api_key=self.api_key()
+                )
+            price = float((answer.get("data") or {}).get("ltp")) if ok else 0.0
+        except Exception:
+            logger.exception("Automation: the underlying's last price could not be read")
+            return None
+        return price if price > 0 else None
+
     def lot_size(self, exchange: str, symbol: str) -> int | None:
         row = self._master().row(exchange, symbol)
         try:

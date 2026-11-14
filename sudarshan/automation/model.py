@@ -20,6 +20,8 @@ POSITIONS = (LONG, SHORT, FLAT)
 FIXED, SCALED = "fixed", "scaled"
 SIZE_MODES = (FIXED, SCALED)
 PRODUCTS = ("MIS", "NRML", "CNC")
+FUTURE_RULES = ("month", "next_month")
+OPTION_RULES = ("nearest", "next", "month")
 
 #: What the intake decided about one alert. ``claimed`` is a row whose order is being placed: it
 #: is replaced when the order's answer is in, and stays only if the server stopped in between.

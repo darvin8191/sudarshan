@@ -567,6 +567,324 @@
      "disclosed_quantity": "0"
     }
    ]
+  },
+  {
+   "name": "option: long from flat buys the ATM call",
+   "form": {
+    "name": "OPT",
+    "kind": "option",
+    "underlying": "NIFTY",
+    "product": "MIS",
+    "lots": 1
+   },
+   "state": {},
+   "now": "2026-11-16 10:15:02",
+   "alert": {
+    "v": 1,
+    "position": "long",
+    "fired_offset_s": -1
+   },
+   "analyze": true,
+   "orders": [
+    {
+     "strategy": "OPT",
+     "exchange": "NFO",
+     "symbol": "NIFTY17NOV2625000CE",
+     "product": "MIS",
+     "action": "BUY",
+     "pricetype": "MARKET",
+     "quantity": "65",
+     "position_size": "65",
+     "price": "0",
+     "trigger_price": "0",
+     "disclosed_quantity": "0"
+    }
+   ]
+  },
+  {
+   "name": "option: short from flat BUYS the put, to a size above 0",
+   "form": {
+    "name": "OPT",
+    "kind": "option",
+    "underlying": "NIFTY",
+    "product": "MIS",
+    "lots": 1
+   },
+   "state": {},
+   "now": "2026-11-16 10:15:02",
+   "alert": {
+    "v": 1,
+    "position": "short",
+    "fired_offset_s": -1
+   },
+   "analyze": true,
+   "orders": [
+    {
+     "strategy": "OPT",
+     "exchange": "NFO",
+     "symbol": "NIFTY17NOV2625000PE",
+     "product": "MIS",
+     "action": "BUY",
+     "pricetype": "MARKET",
+     "quantity": "65",
+     "position_size": "65",
+     "price": "0",
+     "trigger_price": "0",
+     "disclosed_quantity": "0"
+    }
+   ]
+  },
+  {
+   "name": "option: flat sells the held put to 0, whatever the rule means now",
+   "form": {
+    "name": "OPT",
+    "kind": "option",
+    "underlying": "NIFTY",
+    "product": "MIS",
+    "lots": 1
+   },
+   "state": {
+    "last_target": -1,
+    "held_exchange": "NFO",
+    "held_symbol": "NIFTY17NOV2624900PE",
+    "held_side": "long"
+   },
+   "now": "2026-11-16 10:15:02",
+   "alert": {
+    "v": 1,
+    "position": "flat",
+    "fired_offset_s": -1
+   },
+   "analyze": true,
+   "orders": [
+    {
+     "strategy": "OPT",
+     "exchange": "NFO",
+     "symbol": "NIFTY17NOV2624900PE",
+     "product": "MIS",
+     "action": "SELL",
+     "pricetype": "MARKET",
+     "quantity": "65",
+     "position_size": "0",
+     "price": "0",
+     "trigger_price": "0",
+     "disclosed_quantity": "0"
+    }
+   ]
+  },
+  {
+   "name": "option: long with the put held: the put's exit first, then the call",
+   "form": {
+    "name": "OPT",
+    "kind": "option",
+    "underlying": "NIFTY",
+    "product": "MIS",
+    "lots": 1
+   },
+   "state": {
+    "last_target": -1,
+    "held_exchange": "NFO",
+    "held_symbol": "NIFTY17NOV2625000PE",
+    "held_side": "long"
+   },
+   "now": "2026-11-16 10:15:02",
+   "alert": {
+    "v": 1,
+    "position": "long",
+    "fired_offset_s": -1
+   },
+   "analyze": true,
+   "orders": [
+    {
+     "strategy": "OPT",
+     "exchange": "NFO",
+     "symbol": "NIFTY17NOV2625000PE",
+     "product": "MIS",
+     "action": "SELL",
+     "pricetype": "MARKET",
+     "quantity": "65",
+     "position_size": "0",
+     "price": "0",
+     "trigger_price": "0",
+     "disclosed_quantity": "0"
+    },
+    {
+     "strategy": "OPT",
+     "exchange": "NFO",
+     "symbol": "NIFTY17NOV2625000CE",
+     "product": "MIS",
+     "action": "BUY",
+     "pricetype": "MARKET",
+     "quantity": "65",
+     "position_size": "65",
+     "price": "0",
+     "trigger_price": "0",
+     "disclosed_quantity": "0"
+    }
+   ]
+  },
+  {
+   "name": "option: short with the call held: the call's exit first, then the put",
+   "form": {
+    "name": "OPT",
+    "kind": "option",
+    "underlying": "NIFTY",
+    "product": "MIS",
+    "lots": 1
+   },
+   "state": {
+    "last_target": 1,
+    "held_exchange": "NFO",
+    "held_symbol": "NIFTY17NOV2625000CE",
+    "held_side": "long"
+   },
+   "now": "2026-11-16 10:15:02",
+   "alert": {
+    "v": 1,
+    "position": "short",
+    "fired_offset_s": -1
+   },
+   "analyze": true,
+   "orders": [
+    {
+     "strategy": "OPT",
+     "exchange": "NFO",
+     "symbol": "NIFTY17NOV2625000CE",
+     "product": "MIS",
+     "action": "SELL",
+     "pricetype": "MARKET",
+     "quantity": "65",
+     "position_size": "0",
+     "price": "0",
+     "trigger_price": "0",
+     "disclosed_quantity": "0"
+    },
+    {
+     "strategy": "OPT",
+     "exchange": "NFO",
+     "symbol": "NIFTY17NOV2625000PE",
+     "product": "MIS",
+     "action": "BUY",
+     "pricetype": "MARKET",
+     "quantity": "65",
+     "position_size": "65",
+     "price": "0",
+     "trigger_price": "0",
+     "disclosed_quantity": "0"
+    }
+   ]
+  },
+  {
+   "name": "option: long again with an older call held asks the held call, never a new strike",
+   "form": {
+    "name": "OPT",
+    "kind": "option",
+    "underlying": "NIFTY",
+    "product": "MIS",
+    "lots": 1
+   },
+   "state": {
+    "last_target": 1,
+    "held_exchange": "NFO",
+    "held_symbol": "NIFTY17NOV2624900CE",
+    "held_side": "long"
+   },
+   "now": "2026-11-16 10:15:02",
+   "alert": {
+    "v": 1,
+    "position": "long",
+    "fired_offset_s": -1
+   },
+   "analyze": true,
+   "orders": [
+    {
+     "strategy": "OPT",
+     "exchange": "NFO",
+     "symbol": "NIFTY17NOV2624900CE",
+     "product": "MIS",
+     "action": "BUY",
+     "pricetype": "MARKET",
+     "quantity": "65",
+     "position_size": "65",
+     "price": "0",
+     "trigger_price": "0",
+     "disclosed_quantity": "0"
+    }
+   ]
+  },
+  {
+   "name": "option: OTM1, next expiry, a short target",
+   "form": {
+    "name": "OPT",
+    "kind": "option",
+    "underlying": "NIFTY",
+    "product": "MIS",
+    "lots": 1,
+    "strike_offset": "OTM1",
+    "expiry_rule": "next"
+   },
+   "state": {},
+   "now": "2026-11-16 10:15:02",
+   "alert": {
+    "v": 1,
+    "position": "short",
+    "fired_offset_s": -1
+   },
+   "analyze": true,
+   "orders": [
+    {
+     "strategy": "OPT",
+     "exchange": "NFO",
+     "symbol": "NIFTY24NOV2624950PE",
+     "product": "MIS",
+     "action": "BUY",
+     "pricetype": "MARKET",
+     "quantity": "65",
+     "position_size": "65",
+     "price": "0",
+     "trigger_price": "0",
+     "disclosed_quantity": "0"
+    }
+   ]
+  },
+  {
+   "name": "option: a short-only strategy reads long as an exit of its put",
+   "form": {
+    "name": "OPT",
+    "kind": "option",
+    "underlying": "NIFTY",
+    "product": "MIS",
+    "lots": 1,
+    "direction": "short"
+   },
+   "state": {
+    "last_target": -1,
+    "held_exchange": "NFO",
+    "held_symbol": "NIFTY17NOV2625000PE",
+    "held_side": "long"
+   },
+   "now": "2026-11-16 10:15:02",
+   "alert": {
+    "v": 1,
+    "position": "long",
+    "fired_offset_s": -1
+   },
+   "analyze": true,
+   "orders": [
+    {
+     "strategy": "OPT",
+     "exchange": "NFO",
+     "symbol": "NIFTY17NOV2625000PE",
+     "product": "MIS",
+     "action": "SELL",
+     "pricetype": "MARKET",
+     "quantity": "65",
+     "position_size": "0",
+     "price": "0",
+     "trigger_price": "0",
+     "disclosed_quantity": "0"
+    }
+   ]
   }
  ]
 }

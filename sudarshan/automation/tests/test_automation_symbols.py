@@ -15,6 +15,15 @@ VECTORS = json.loads((Path(__file__).parent / "symbol_vectors.json").read_text()
 MASTER = VECTORS["master"]
 IST = timezone(timedelta(hours=5, minutes=30))
 LISTED = {(ex, s) for ex, names in MASTER["symbols"].items() for s in names}
+OPTIONS = MASTER["options"]
+for _underlying, _by_expiry in OPTIONS.items():
+    for _day, _strikes in _by_expiry.items():
+        for _strike in _strikes:
+            _written = str(int(_strike)) if _strike == int(_strike) else str(_strike)
+            for _side in ("CE", "PE"):
+                _symbol = f"{_underlying}{symbols.expiry_code(_day)}{_written}{_side}"
+                if _symbol not in MASTER["options_not_listed"]:
+                    LISTED.add(("BFO" if _underlying == "SENSEX" else "NFO", _symbol))
 
 
 def ms(text: str) -> int:
@@ -28,14 +37,21 @@ def known(exchange: str, symbol: str) -> bool:
 def resolve(case, **change):
     strategy = m.Strategy(id=1, name="ORB", **{**case["strategy"], **change})
     underlying = symbols.futures_underlying(strategy)
+    expiries = MASTER["futures"].get(underlying, [])
+    by_expiry = OPTIONS.get(strategy.underlying, {})
+    if strategy.kind == m.OPTION:
+        expiries = sorted(by_expiry)
     return symbols.resolve(
         strategy,
         ms(case["now"]),
         known=known,
-        expiries=MASTER["futures"].get(underlying, []),
+        expiries=expiries,
         indices=MASTER["indices"],
         closes={day: ms(at) for day, at in case.get("closes", {}).items()},
         entering=case["entering"],
+        target=case.get("target", 1),
+        strikes_of=lambda iso: by_expiry.get(iso, []),
+        price=case.get("price"),
     )
 
 
@@ -62,7 +78,7 @@ def test_every_reason_has_a_vector():
     seen = {c["expect"].get("unmapped") for c in VECTORS["cases"]} - {None}
     assert seen == {
         "too_close", "no_expiry", "not_listed", "commodity", "unknown", "index", "unchecked",
-        "no_chart",
+        "no_chart", "no_option_expiry", "no_price", "no_strike", "nothing_held",
     }  # fmt: skip
 
 
@@ -97,6 +113,17 @@ def test_the_expiry_comes_from_the_masters_list_never_from_a_weekday():
         )  # fmt: skip
         seen.append(got.symbol)
     assert seen == ["NIFTY18NOV26FUT", "NIFTY25DEC26FUT", "NIFTY31JAN27FUT"]
+    # an option strategy's expiry too: the nearest, the next and the month's all follow the list
+    option = m.Strategy(id=1, name="OPT", kind=m.OPTION, underlying="NIFTY", expiry_rule="nearest")
+    strikes, seen = [24950.0, 25000.0, 25050.0], []
+    for rule in m.OPTION_RULES:
+        got = symbols.resolve(
+            m.Strategy(**{**option.__dict__, "expiry_rule": rule}), ms("2026-11-16 10:00:00"),
+            known=lambda ex, s: True, expiries=odd, indices=MASTER["indices"], target=-1,
+            strikes_of=lambda iso: strikes, price=25001.0,
+        )  # fmt: skip
+        seen.append(got.symbol)
+    assert seen == ["NIFTY18NOV2625000PE", "NIFTY25DEC2625000PE", "NIFTY18NOV2625000PE"]
     source = Path(symbols.__file__).read_text()
     assert "weekday" not in source.replace("a weekday", "") and "isoweekday" not in source
 

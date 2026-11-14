@@ -56,6 +56,7 @@ FORM = {
     "exchange?": "string",
     "underlying?": "string",
     "expiry_rule?": "string | null",
+    "strike_offset?": "string | null",
     "product": "Product",
     "direction?": "Direction",
     "lots?": "number | null",
@@ -181,6 +182,7 @@ _NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9 ._-]{0,39}")
 _CHART = re.compile(r"([A-Z]{2,12}):([A-Z0-9&_!.-]{1,40})")
 _FOLLOW = re.compile(r"(.+?)([12])!")
 _OPTION = re.compile(r"([A-Z0-9&_-]+?)(\d{6})([CP])(\d+(?:\.\d+)?)")
+_OFFSET = re.compile(r"ATM|(?:ITM|OTM)(?:10|[1-9])")
 _CASH = ("NSE", "BSE")
 _FO = {"NSE": "NFO", "BSE": "BFO", "NFO": "NFO", "BFO": "BFO"}
 _COMMODITY = ("MCX", "NCDEX", "NCO")
@@ -243,9 +245,7 @@ def clean(form: dict[str, Any]) -> dict[str, Any]:
             "name",
         )
     kind = form.get("kind")
-    if kind == m.OPTION:
-        raise Refused("Option strategies come in a later release.", "kind")
-    if kind not in (m.SAME, m.FUTURE):
+    if kind not in m.KINDS:
         raise Refused("Choose what the strategy trades.", "kind")
     chart = (form.get("chart") or "").strip().upper() or None
     parts = chart_parts(chart)
@@ -262,21 +262,37 @@ def clean(form: dict[str, Any]) -> dict[str, Any]:
     direction = form.get("direction") or m.BOTH
     if direction not in m.DIRECTIONS:
         raise Refused("Choose long and short, long only or short only.", "direction")
-    expiry_rule, lots, quantity = None, None, None
-    if kind == m.FUTURE:
+    expiry_rule, strike_offset, lots, quantity = None, None, None, None
+    if kind in (m.FUTURE, m.OPTION):
         exchange = str(form.get("exchange") or "NFO").upper()
         underlying = str(form.get("underlying") or "").strip().upper()
         if exchange in _COMMODITY:
             raise Refused("Commodity strategies are not supported yet.", "exchange")
         if exchange not in ("NFO", "BFO"):
-            raise Refused("A future trades on NFO or BFO.", "exchange")
+            raise Refused("Futures and options trade on NFO or BFO.", "exchange")
         if not re.fullmatch(r"[A-Z0-9&-]{1,40}", underlying):
             raise Refused(
-                "Name the underlying whose future it trades, such as NIFTY.", "underlying"
+                "Name the underlying whose future or option it trades, such as NIFTY.",
+                "underlying",
             )
-        expiry_rule = form.get("expiry_rule") or "month"
-        if expiry_rule not in ("month", "next_month"):
-            raise Refused("Choose this month's future or next month's.", "expiry_rule")
+        if kind == m.OPTION:
+            # Buying only: a long target buys a call, a short target buys a put.
+            expiry_rule = form.get("expiry_rule") or "nearest"
+            if expiry_rule not in m.OPTION_RULES:
+                raise Refused(
+                    "Choose the nearest expiry, the next one or this month's.", "expiry_rule"
+                )
+            strike_offset = str(form.get("strike_offset") or "ATM").strip().upper()
+            if not _OFFSET.fullmatch(strike_offset):
+                raise Refused(
+                    "Choose the strike: ATM, or 1 to 10 strikes in the money (ITM1 to ITM10) or "
+                    "out of the money (OTM1 to OTM10).",
+                    "strike_offset",
+                )
+        else:
+            expiry_rule = form.get("expiry_rule") or "month"
+            if expiry_rule not in m.FUTURE_RULES:
+                raise Refused("Choose this month's future or next month's.", "expiry_rule")
         derivative = True
     else:
         if parts is None:
@@ -327,7 +343,7 @@ def clean(form: dict[str, Any]) -> dict[str, Any]:
         "exchange": exchange,
         "underlying": underlying,
         "expiry_rule": expiry_rule,
-        "strike_offset": None,
+        "strike_offset": strike_offset,
         "product": product,
         "direction": direction,
         "size_mode": m.FIXED,

@@ -10,7 +10,8 @@ regime) and the stop itself (``watchlists/expiry.py``).
 a changed expiry day or a new lot size needs no code here.
 
 The chart an alert comes from and the contract traded are separate on purpose: a strategy on the
-index or on ``NIFTY1!`` may trade a future.
+index or on ``NIFTY1!`` may trade a future, or buy an option: a call for a long target, a put for
+a short one, the strike counted from the underlying's last price in the master's own strike list.
 """
 
 from __future__ import annotations
@@ -36,6 +37,8 @@ _COMMODITY = ("MCX", "NCDEX", "NCO")
 _BSE_INDICES = ("SENSEX", "BANKEX")
 _INDIA = timedelta(hours=5, minutes=30)
 CARRY = ("NRML", "CNC")
+_OFFSET = re.compile(r"ATM|(ITM|OTM)(10|[1-9])")
+Strikes = Callable[[str], Sequence[float]]
 
 
 @dataclass(frozen=True)
@@ -111,6 +114,33 @@ def held_expired(
     return stop <= now_ms
 
 
+def _pick(
+    strategy: m.Strategy,
+    exchange: str,
+    underlying: str,
+    rule: str,
+    now_ms: int,
+    expiries: Sequence[str],
+    indices: Collection[str],
+    closes: dict[str, int] | None,
+    entering: bool,
+) -> tuple[str, int] | None:
+    """The expiry a rule means now, from the listed ones, and when its contracts stop."""
+    index = underlying in indices
+    today, at = india_date(now_ms), now_ms
+    if entering and strategy.roll_on_expiry_day and today in expiries:
+        # A position that carries is never opened in a contract that ends this afternoon: from the
+        # start of expiry day the rule reads as it will after today's stop (this month's and next
+        # month's both move on, and so do the nearest and the next).
+        at = max(at, dynamic.close_ms(today, closes, index=index, exchange=exchange))
+    iso = dynamic.pick_expiries(list(expiries), at, closes, index=index, exchange=exchange).get(
+        rule
+    )
+    if iso is None:
+        return None
+    return iso, dynamic.close_ms(iso, closes, index=index, exchange=exchange)
+
+
 def _future(
     strategy: m.Strategy,
     exchange: str,
@@ -123,25 +153,83 @@ def _future(
     closes: dict[str, int] | None,
     entering: bool,
 ) -> Contract | Unmapped:
-    index = underlying in indices
-    today, at = india_date(now_ms), now_ms
-    if entering and strategy.roll_on_expiry_day and today in expiries:
-        # A position that carries is never opened in a contract that ends this afternoon: from the
-        # start of expiry day the rule reads as it will after today's stop (this month's and next
-        # month's both move on).
-        at = max(at, dynamic.close_ms(today, closes, index=index, exchange=exchange))
-    iso = dynamic.pick_expiries(list(expiries), at, closes, index=index, exchange=exchange).get(
-        rule
+    picked = _pick(
+        strategy, exchange, underlying, rule, now_ms, expiries, indices, closes, entering
     )
-    if iso is None:
+    if picked is None:
         return Unmapped("no_expiry", underlying)
-    stop = dynamic.close_ms(iso, closes, index=index, exchange=exchange)
+    iso, stop = picked
     symbol = future_symbol(underlying, iso)
     if not known(exchange, symbol):
         return Unmapped("not_listed", symbol)
     if entering and stop - now_ms < strategy.no_entry_before_stop_min * 60_000:
         return Unmapped("too_close", symbol, stop)
-    return Contract(exchange, symbol, iso, stop, iso == today, underlying)
+    return Contract(exchange, symbol, iso, stop, iso == india_date(now_ms), underlying)
+
+
+def option_side(symbol: str | None) -> str | None:
+    """``CE`` or ``PE`` for an option's symbol, ``None`` for anything else."""
+    tail = (symbol or "")[-2:]
+    return tail if tail in ("CE", "PE") and expiry_of(symbol or "") else None
+
+
+def wanted_side(target: int) -> str:
+    """What an option strategy buys for a target: a call to be long, a put to be short. It never
+    sells an option to open."""
+    return "CE" if target > 0 else "PE"
+
+
+def strike_steps(offset: str | None, side: str) -> int | None:
+    """An offset as steps along the sorted strike list: ITM is a lower strike for a call and a
+    higher one for a put, OTM the other way."""
+    found = _OFFSET.fullmatch((offset or "ATM").upper())
+    if not found:
+        return None
+    if not found.group(1):
+        return 0
+    steps = int(found.group(2))
+    lower = (found.group(1) == "ITM") == (side == "CE")
+    return -steps if lower else steps
+
+
+def _bought(
+    strategy: m.Strategy,
+    target: int,
+    now_ms: int,
+    known: Known,
+    expiries: Sequence[str],
+    strikes_of: Strikes | None,
+    price: float | None,
+    indices: Collection[str],
+    closes: dict[str, int] | None,
+    entering: bool,
+) -> Contract | Unmapped:
+    exchange, underlying = strategy.exchange, strategy.underlying
+    if target == 0:
+        return Unmapped("nothing_held", underlying)
+    rule = strategy.expiry_rule or "nearest"
+    picked = _pick(
+        strategy, exchange, underlying, rule, now_ms, expiries, indices, closes, entering
+    )
+    if picked is None:
+        return Unmapped("no_option_expiry", underlying)
+    iso, stop = picked
+    if isinstance(price, bool) or not isinstance(price, (int, float)) or not price > 0:
+        return Unmapped("no_price", underlying)
+    strikes = sorted(set(strikes_of(iso))) if strikes_of else []
+    side = wanted_side(target)
+    steps = strike_steps(strategy.strike_offset, side)
+    atm = dynamic.atm_strike(price, strikes)
+    strike = None if atm is None or steps is None else dynamic.offset_strike(strikes, atm, steps)
+    if strike is None:
+        return Unmapped("no_strike", f"{underlying} {expiry_code(iso)}")
+    written = str(int(strike)) if strike == int(strike) else str(strike)
+    symbol = f"{underlying}{expiry_code(iso)}{written}{side}"
+    if not known(exchange, symbol):
+        return Unmapped("not_listed", symbol)
+    if entering and stop - now_ms < strategy.no_entry_before_stop_min * 60_000:
+        return Unmapped("too_close", symbol, stop)
+    return Contract(exchange, symbol, iso, stop, iso == india_date(now_ms), underlying)
 
 
 def _cash(exchange: str, name: str, known: Known) -> Contract | Unmapped:
@@ -186,15 +274,25 @@ def resolve(
     indices: Collection[str] = (),
     closes: dict[str, int] | None = None,
     entering: bool = True,
+    target: int = 1,
+    strikes_of: Strikes | None = None,
+    price: float | None = None,
 ) -> Contract | Unmapped:
     """The contract the strategy trades now.
 
     ``expiries`` are the ISO expiry dates the master lists for the strategy's underlying's
-    futures; ``entering`` is False for an exit, which is never refused for being close to the
-    stop and never rolled forward.
+    futures (its options, for an option strategy); ``entering`` is False for an exit, which is
+    never refused for being close to the stop and never rolled forward. An option strategy also
+    needs the ``target`` (which side to buy), the strikes the master lists for an expiry
+    (``strikes_of``) and the underlying's last ``price``.
     """
     if strategy.exchange in _COMMODITY:
         return Unmapped("commodity")
+    if strategy.kind == m.OPTION:
+        return _bought(
+            strategy, target, now_ms, known, expiries, strikes_of, price, indices, closes,
+            entering,
+        )  # fmt: skip
     if strategy.kind == m.FUTURE:
         return _future(
             strategy, strategy.exchange, strategy.underlying, strategy.expiry_rule or "month",

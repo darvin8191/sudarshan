@@ -13,11 +13,12 @@ import type { CreateAnswer, Direction, Product, Strategy, StrategyForm } from '.
 
 interface Draft {
   name: string
-  kind: 'future' | 'same'
+  kind: 'future' | 'option' | 'same'
   chart: string
   underlying: string
   exchange: string
   expiry_rule: string
+  strike_offset: string
   product: Product
   direction: Direction
   size: string
@@ -32,6 +33,7 @@ const BLANK: Draft = {
   underlying: 'NIFTY',
   exchange: 'NFO',
   expiry_rule: 'month',
+  strike_offset: 'ATM',
   product: 'MIS',
   direction: 'both',
   size: '1',
@@ -42,11 +44,12 @@ const BLANK: Draft = {
 function draftOf(strategy: Strategy): Draft {
   return {
     name: strategy.name,
-    kind: strategy.kind === 'same' ? 'same' : 'future',
+    kind: strategy.kind,
     chart: strategy.chart ?? '',
     underlying: strategy.underlying,
     exchange: strategy.exchange,
     expiry_rule: strategy.expiry_rule ?? 'month',
+    strike_offset: strategy.strike_offset ?? 'ATM',
     product: strategy.product,
     direction: strategy.direction,
     size: String(strategy.lots ?? strategy.quantity ?? ''),
@@ -57,7 +60,7 @@ function draftOf(strategy: Strategy): Draft {
 
 /** A chart of a future (NIFTY1!) or of one option is sized in lots; a share in shares. */
 export const inLots = (draft: Pick<Draft, 'kind' | 'chart'>): boolean =>
-  draft.kind === 'future' || /[12]!$|\d{6}[CP]\d/.test(draft.chart.trim().toUpperCase())
+  draft.kind !== 'same' || /[12]!$|\d{6}[CP]\d/.test(draft.chart.trim().toUpperCase())
 
 /** A whole number as typed, or null: the server's sentence then says what the field takes. */
 const whole = (text: string): number | null => (/^\d+$/.test(text.trim()) ? Number(text) : null)
@@ -73,13 +76,37 @@ export function formOf(draft: Draft): StrategyForm {
     direction: draft.direction,
     max_age_s: whole(draft.max_age_s) as number,
     max_alerts_day: whole(draft.max_alerts_day) as number,
-    ...(draft.kind === 'future' && {
+    ...(draft.kind !== 'same' && {
       exchange: draft.exchange,
       underlying: draft.underlying.trim().toUpperCase(),
-      expiry_rule: draft.expiry_rule,
+      expiry_rule: ruleOf(draft),
     }),
+    ...(draft.kind === 'option' && { strike_offset: draft.strike_offset }),
     ...(lots ? { lots: whole(draft.size) } : { quantity: whole(draft.size) }),
   }
+}
+
+type Choices = ReadonlyArray<readonly [string, string]>
+const FUTURE_RULES: Choices = [
+  ['month', 'This month'],
+  ['next_month', 'Next month'],
+]
+const OPTION_RULES: Choices = [
+  ['nearest', 'Nearest expiry'],
+  ['next', 'Next expiry'],
+  ['month', 'This month'],
+]
+/** ATM, then 1 to 10 strikes in and out of the money, as the server reads them. */
+const STRIKES: Choices = [
+  ['ATM', 'At the money (ATM)'],
+  ...Array.from({ length: 10 }, (_, n) => [`ITM${n + 1}`, `${n + 1} in the money`] as const),
+  ...Array.from({ length: 10 }, (_, n) => [`OTM${n + 1}`, `${n + 1} out of the money`] as const),
+]
+
+/** The expiry rule the kind takes: a rule left over from the other kind reads as its first. */
+const ruleOf = (draft: Pick<Draft, 'kind' | 'expiry_rule'>): string => {
+  const rules = draft.kind === 'option' ? OPTION_RULES : FUTURE_RULES
+  return rules.some(([key]) => key === draft.expiry_rule) ? draft.expiry_rule : rules[0][0]
 }
 
 const CONTROL =
@@ -232,11 +259,18 @@ export function StrategySheet({
             value={draft.kind}
             options={[
               { id: 'future', label: 'A future' },
-              { id: 'same', label: 'What its chart shows' },
+              { id: 'option', label: 'An option' },
+              { id: 'same', label: 'Its chart' },
             ]}
-            onChange={(kind) => set('kind', kind)}
+            onChange={(kind) =>
+              setDraft((old) => ({
+                ...old,
+                kind,
+                expiry_rule: kind === 'option' ? 'nearest' : 'month',
+              }))
+            }
           />
-          {draft.kind === 'future' && (
+          {draft.kind !== 'same' && (
             <>
               <Field label="Underlying" hint="Such as NIFTY, BANKNIFTY or RELIANCE.">
                 {(id) => (
@@ -261,18 +295,30 @@ export function StrategySheet({
                 />
                 <Choice
                   label="Contract"
-                  value={draft.expiry_rule}
-                  options={[
-                    ['month', 'This month'],
-                    ['next_month', 'Next month'],
-                  ]}
+                  value={ruleOf(draft)}
+                  options={draft.kind === 'option' ? OPTION_RULES : FUTURE_RULES}
                   onChange={(value) => set('expiry_rule', value)}
                 />
               </div>
+              {draft.kind === 'option' && (
+                <>
+                  <Choice
+                    label="Strike"
+                    value={draft.strike_offset}
+                    options={STRIKES}
+                    onChange={(value) => set('strike_offset', value)}
+                  />
+                  <p className="text-[0.875rem] text-[color:var(--text-secondary)]">
+                    Options are only bought: a long alert buys a call, a short alert buys a put, and
+                    a flat alert sells what was bought. The strike is counted from the underlying's
+                    price when the alert arrives.
+                  </p>
+                </>
+              )}
             </>
           )}
           <Field
-            label={draft.kind === 'future' ? 'TradingView chart (optional)' : 'TradingView chart'}
+            label={draft.kind === 'same' ? 'TradingView chart' : 'TradingView chart (optional)'}
             hint="As TradingView shows it, exchange first: NSE:NIFTY1! or NSE:RELIANCE. An alert from another chart is not sent."
           >
             {(id) => (

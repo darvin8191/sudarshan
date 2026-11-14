@@ -130,12 +130,41 @@ describe('the Automation sheets', () => {
     expect(screen.getByRole('dialog', { name: 'New strategy' })).toBeInTheDocument()
   })
 
+  it('makes an option strategy: nearest expiry and ATM unless chosen, sized in lots', async () => {
+    api.list.mockResolvedValue(listOf([]))
+    api.create.mockResolvedValue(made())
+    renderBook('/automation', <Automation />)
+    await settle()
+    await tap('New strategy')
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'OPT' } })
+    fireEvent.click(screen.getByRole('tab', { name: 'An option' }))
+    expect(screen.getByText(/Options are only bought/)).toBeInTheDocument()
+    expect(screen.getByLabelText('Contract')).toHaveValue('nearest')
+    fireEvent.change(screen.getByLabelText('Strike'), { target: { value: 'OTM2' } })
+    expect(screen.queryByRole('option', { name: 'Delivery (CNC)' })).toBeNull()
+    await tap('Create strategy')
+    expect(api.create).toHaveBeenCalledWith({
+      name: 'OPT',
+      kind: 'option',
+      chart: null,
+      product: 'MIS',
+      direction: 'both',
+      max_age_s: 30,
+      max_alerts_day: 20,
+      exchange: 'NFO',
+      underlying: 'NIFTY',
+      expiry_rule: 'nearest',
+      strike_offset: 'OTM2',
+      lots: 1,
+    })
+  })
+
   it('sizes a share chart in shares and offers Delivery, a future chart in lots', async () => {
     api.list.mockResolvedValue(listOf([]))
     renderBook('/automation', <Automation />)
     await settle()
     await tap('New strategy')
-    fireEvent.click(screen.getByRole('tab', { name: 'What its chart shows' }))
+    fireEvent.click(screen.getByRole('tab', { name: 'Its chart' }))
     fireEvent.change(screen.getByLabelText('TradingView chart'), {
       target: { value: 'nse:reliance' },
     })

@@ -178,12 +178,9 @@ def test_create_gives_the_link_once_and_no_other_answer_ever_does(client, store)
 
 
 def test_a_form_that_cannot_be_saved_is_refused_in_its_sentence(client, store):
-    bad = owner(client, "post", f"{API}/create", {**FORM, "kind": "option"})
+    bad = owner(client, "post", f"{API}/create", {**FORM, "kind": "basket"})
     assert bad.status_code == 400
-    assert bad.get_json() == {
-        "status": "error",
-        "message": "Option strategies come in a later release.",
-    }
+    assert bad.get_json() == {"status": "error", "message": "Choose what the strategy trades."}
     make(client)
     twice = owner(client, "post", f"{API}/create", FORM)
     assert twice.status_code == 400 and "already has this name" in twice.get_json()["message"]
