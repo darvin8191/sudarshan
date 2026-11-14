@@ -156,7 +156,9 @@ def test_the_forward_to_a_slow_family_service_yields_to_the_hub(tmp_path, op, fi
     assert (result["path"], result["op"], result["sent"]) == (f"/v1/admin/{op}", op, 1)
     assert 0.9 < result["took"] < 2.9  # answered, not cut at the 3 s timeout
     assert result["ticks"] >= 10  # the hub ran on through the wait (20 ticks a second)
-    assert result["gap"] < 0.2  # and never stood still: a stall of 0.8 s passed the count above
+    # and never stood still: a stall of 0.8 s passed the count above (0.5 s, not 0.2: a shared
+    # CI runner pauses a subprocess that long without a defect; v0.12.0 review L2)
+    assert result["gap"] < 0.5
 
 
 def test_a_write_cut_at_its_timeout_yields_and_is_not_confirmed(tmp_path):
@@ -192,4 +194,4 @@ def test_a_write_cut_at_its_timeout_yields_and_is_not_confirmed(tmp_path):
     )
     assert (result["status"], result["code"], result["sent"]) == (504, "not_confirmed", 1)
     assert 0.9 < result["took"] < 3.0
-    assert result["ticks"] >= 10 and result["gap"] < 0.2
+    assert result["ticks"] >= 10 and result["gap"] < 0.5

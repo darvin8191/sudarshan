@@ -121,7 +121,14 @@ def test_the_safe_transport_closes_the_socket_of_a_cancelled_tls_handshake():
 def test_the_safe_transport_is_httpxs_own_on_the_cancel_safe_backend():
     made = safe_http.transport(retries=0)
     assert isinstance(made, httpx.AsyncHTTPTransport)
-    assert isinstance(made._pool._network_backend, safe_http.CancelSafeBackend)
+    # v0.12.0 review L9: two private attributes of httpx are reached here. Written against httpx
+    # 0.28 with httpcore 1.0.9; if this fails after a bump, find where the pool and its network
+    # backend moved and point safe_http.transport at them (until then the plain transport is used
+    # and a connect a stop cancels leaves its socket to its own timeout).
+    found = getattr(getattr(made, "_pool", None), "_network_backend", None)
+    assert isinstance(found, safe_http.CancelSafeBackend), (
+        f"httpx {httpx.__version__} keeps its pool or backend elsewhere (written for 0.28)"
+    )
 
 
 def test_every_family_channel_client_sends_through_the_safe_transport():

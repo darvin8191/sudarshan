@@ -20,10 +20,14 @@ OpenAlgo's proxy protocol that the phone's MarketDataManager reads:
 * **The session** is checked at the handshake and again on every message, as the viewer API checks
   every request; one that ended closes the socket (4401, "Signed out on this device."). The member
   row read then is the one the socket's reads and masks use. At most 40 messages in 10 s.
-* **Symbols**: at most 150 a socket. One the family view does not know (``symbol_map``) is refused
-  with "Not available in the family view". A known one is followed only when it is the member's
-  to see: an index, a row of their own books, a row of a list shared with them; until the books or
-  lists that would say so are read it waits, and then it is followed or refused.
+* **Symbols**: at most 150 a socket. A symbol is followed only when it is the member's to see: an
+  index, a row of their own books, a row of a list shared with them. Any other is refused with
+  "Not available in the family view", and the answer never tells a symbol the family view does
+  not know (``symbol_map``) from one it knows through another member's books or lists (v0.12.0
+  review M2: the map is one for the whole service, so the difference named the owner's holdings
+  to a member who was not shared them). Once the member's books and lists are read, both kinds
+  are refused at once in one message; until then both wait, and are followed or refused together
+  when the reads land.
 * **Ticks** (``market_data``) are kept per socket and symbol and sent every 100 ms, the newest
   of each; the 100 ms is the only delay added to what the feed delivers.
 * **Quotes** (``{"type": "quotes", "quotes": [Quote], "capped": [{symbol, exchange}],
@@ -63,6 +67,9 @@ TOO_MANY = f"At most {MAX_SYMBOLS} symbols can follow prices on one screen."
 CAPPED = "Not real-time · too many symbols open"
 #: A member's waiting symbols trigger their books and lists to be read at most this often.
 ENSURE_EVERY_S = 30.0
+#: What a waiting symbol the map does not hold is kept under (no instrument key is empty): it
+#: waits and is refused exactly as one the member may not see (review M2 of v0.12.0).
+UNKNOWN = ""
 Pair = tuple[str, str]
 
 
@@ -199,20 +206,27 @@ class Dialect:
 
     def _subscribe(self, seat: Seat, raw: Any) -> None:
         refused, over, taken, waits = [], [], [], False
-        visible = self.visible(int(seat.member["id"]))
+        member_id = int(seat.member["id"])
+        visible = self.visible(member_id)
+        # M2: "not in the map" and "in the map, not this member's" take the same path below.
+        known = all(source.known(member_id) for source in self.sources)
         for pair in self._pairs(raw):
-            listing = self.symbols.get(*pair) if pair else None
-            if listing is None:
-                refused.append(pair)
-            elif pair in seat.follows or pair in seat.waiting:
+            if pair is None:
+                refused.append(pair)  # not a symbol at all: nothing of the map decides this
+                continue
+            listing = self.symbols.get(*pair)
+            key = listing.instrument_key if listing is not None else UNKNOWN
+            if pair in seat.follows or pair in seat.waiting:
                 taken.append(pair)
+            elif known and key not in visible:
+                refused.append(pair)
             elif len(seat.follows) + len(seat.waiting) >= MAX_SYMBOLS:
                 over.append(pair)
-            elif listing.instrument_key in visible:
-                self._follow(seat, pair, listing.instrument_key)
+            elif key in visible:
+                self._follow(seat, pair, key)
                 taken.append(pair)
             else:
-                seat.waiting[pair] = listing.instrument_key
+                seat.waiting[pair] = key
                 waits = True
         sock = seat.sock
         if refused:
@@ -263,6 +277,10 @@ class Dialect:
         known = all(source.known(member_id) for source in self.sources)
         visible = self.visible(member_id)
         for seat in [s for s in self.seats.values() if int(s.member["id"]) == member_id]:
+            for pair in [p for p, k in seat.waiting.items() if k == UNKNOWN]:
+                listing = self.symbols.get(*pair)  # the read that landed may have brought it
+                if listing is not None:
+                    seat.waiting[pair] = listing.instrument_key
             moved = [p for p, k in seat.waiting.items() if k in visible]
             for pair in moved:
                 self._follow(seat, pair, seat.waiting.pop(pair))
