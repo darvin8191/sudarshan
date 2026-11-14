@@ -3,6 +3,7 @@
 import { Loader2, TriangleAlert } from 'lucide-react'
 import { type ReactNode, useCallback, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
+import { Switch } from '@/components/ui/switch'
 import { cn } from '@/lib/utils'
 import { type OwnerError, ownerProblem } from '../ownerApi'
 
@@ -160,3 +161,57 @@ export function Ask({
 
 /** A form control row with a visible label, at least 48 dp tall. */
 export const ROW = 'flex min-h-12 items-center justify-between gap-3'
+
+/**
+ * A switch whose whole row is the tap target. Review M6 (v0.12.0): the switch alone is 44 x 24
+ * and its name was 14 px high, a few pixels from the next row's, on switches that decide what a
+ * family member sees. The row is the switch's `<label>`, so a tap anywhere on its 48 dp flips it
+ * once; the switch keeps its own short name (the row's name, or `label`), and the line under it
+ * is its description.
+ */
+export function SwitchRow({
+  id,
+  name,
+  line,
+  label,
+  checked,
+  disabled,
+  onCheckedChange,
+}: {
+  id: string
+  name: ReactNode
+  line?: ReactNode
+  /** The switch's spoken name where the row's name alone would not say enough. */
+  label?: string
+  checked: boolean
+  disabled?: boolean
+  onCheckedChange: (next: boolean) => void
+}) {
+  return (
+    <label
+      htmlFor={id}
+      data-switch-row=""
+      className={cn(ROW, 'w-full', disabled ? 'cursor-not-allowed' : 'cursor-pointer')}
+    >
+      <span className="flex min-w-0 flex-col gap-1 py-1.5">
+        <span id={`${id}-name`} className="truncate text-sm leading-none font-medium">
+          {name}
+        </span>
+        {line ? (
+          <span id={`${id}-line`} className="text-[0.8125rem] text-[color:var(--text-tertiary)]">
+            {line}
+          </span>
+        ) : null}
+      </span>
+      <Switch
+        id={id}
+        checked={checked}
+        disabled={disabled}
+        aria-label={label}
+        aria-labelledby={label ? undefined : `${id}-name`}
+        aria-describedby={line ? `${id}-line` : undefined}
+        onCheckedChange={onCheckedChange}
+      />
+    </label>
+  )
+}

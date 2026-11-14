@@ -220,7 +220,8 @@ function targetOf(value) {
   try {
     const url = new URL(value, self.location.origin)
     if (url.origin === self.location.origin && (url.pathname === '/family' || url.pathname.startsWith(HOME))) {
-      return `${url.pathname}${url.search}`
+      // `/family` is outside the installed app's scope (review M7): its home is `/family/`.
+      return `${url.pathname === '/family' ? HOME : url.pathname}${url.search}`
     }
   } catch (_unreadable) {
     // fall through to home

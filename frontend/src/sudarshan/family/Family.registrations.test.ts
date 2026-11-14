@@ -9,7 +9,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { bottomNavItems, mobileSheetItems, navItems, profileMenuItems } from '@/config/navigation'
-import { familyBarItems, familyMenu, familyMoreItems } from './navigation'
+import { FAMILY_HOME, familyBarItems, familyMenu, familyMoreItems, familyTitle } from './navigation'
 import { meOf } from './testing/fixtures'
 
 const APP = readFileSync(join(process.cwd(), 'src', 'App.tsx'), 'utf8')
@@ -98,7 +98,7 @@ describe('the owner menu', () => {
 describe('the viewer menu (family/navigation.ts)', () => {
   it('has Dashboard, Positions, Holdings and Watchlist on the bar', () => {
     expect(familyBarItems.map((item) => [item.label, item.href])).toEqual([
-      ['Dashboard', '/family'],
+      ['Dashboard', '/family/'],
       ['Positions', '/family/positions'],
       ['Holdings', '/family/holdings'],
       ['Watchlist', '/family/watchlist'],
@@ -116,11 +116,32 @@ describe('the viewer menu (family/navigation.ts)', () => {
 
   it('points only at registered family routes, and none to an owner page', () => {
     for (const item of [...familyBarItems, ...familyMoreItems]) {
-      const sub = item.href === '/family' ? '' : item.href.replace('/family/', '')
+      const sub = item.href.replace('/family/', '')
       expect(
         sub === '' ? FAMILY_BLOCK.includes('<Route index') : FAMILY_BLOCK.includes(`path="${sub}"`)
       ).toBe(true)
     }
+  })
+
+  // Review M7 (v0.12.0): the Dashboard was at `/family`, outside the installed app's scope
+  // `/family/`: Chrome can show its address bar there, and a reload there is not behind the
+  // service worker. Fails on the old menu.
+  it('keeps every address inside the installed app scope and start address', () => {
+    const manifest = JSON.parse(
+      readFileSync(join(process.cwd(), 'public/images/sudarshan-family.webmanifest'), 'utf8')
+    ) as { scope: string; start_url: string }
+    expect(manifest.scope).toBe('/family/')
+    for (const item of [...familyBarItems, ...familyMoreItems]) {
+      expect(item.href.startsWith(manifest.scope), item.href).toBe(true)
+    }
+    expect(FAMILY_HOME).toBe(manifest.start_url)
+    expect(familyBarItems[0].href).toBe(FAMILY_HOME)
+  })
+
+  it('names the Dashboard at its address with and without the slash', () => {
+    expect(familyTitle('/family/')).toBe('Dashboard')
+    expect(familyTitle('/family')).toBe('Dashboard')
+    expect(familyTitle('/family/positions/')).toBe('Positions')
   })
 
   it('leaves Orders and Trades out for a member whose mask hides orders', () => {

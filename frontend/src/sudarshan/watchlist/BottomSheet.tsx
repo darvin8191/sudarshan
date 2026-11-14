@@ -21,6 +21,7 @@ export function BottomSheet({
   onOpenChange,
   title,
   description,
+  hiddenDescription,
   aside,
   children,
   className,
@@ -30,6 +31,8 @@ export function BottomSheet({
   onOpenChange: (open: boolean) => void
   title: ReactNode
   description?: ReactNode
+  /** Read to a screen reader when there is no visible description, in place of the default. */
+  hiddenDescription?: string
   /** Beside the title, before the close button: a figure, a badge. */
   aside?: ReactNode
   children: ReactNode
@@ -65,7 +68,9 @@ export function BottomSheet({
                   {description}
                 </Dialog.Description>
               ) : (
-                <Dialog.Description className="sr-only">Details and actions</Dialog.Description>
+                <Dialog.Description className="sr-only">
+                  {hiddenDescription ?? 'Details and actions'}
+                </Dialog.Description>
               )}
             </div>
             {aside}
