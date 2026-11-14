@@ -1,6 +1,6 @@
 """The 22:00 catch-up (JB5, M14.2; design 3.5 as amended by cross-design Y22.3).
 
-Every day at 22:00, three steps, each through the portfolio's journal purpose (one budget for
+Every day at 22:00, four steps, each through the portfolio's journal purpose (one budget for
 every ring service; the journal never reads the Upstox token):
 
 1. On a trading day, today's trades are read once more, whatever the close check marked: a cash
@@ -26,9 +26,15 @@ every ring service; the journal never reads the Upstox token):
    each segment the journal holds fills of then, and that segment's charges for the year so far. They
    are kept for the comparison of estimated with actual charges, which the next release shows.
 
+4. The open delivery trades of shares are held against Upstox's holdings (``book.recount_shares``,
+   verification N2): one whose shares the account no longer holds, because its sale was made
+   while the journal was off for longer than step 2 reaches, is ended as a trade whose closing
+   was not seen, out of every figure, instead of staying an open LONG for ever. It runs only
+   after step 1 read today's trades and step 2 ran.
+
 A first step that could not read fails the run (asked again every 15 minutes until midnight);
-the other two then run once a day whatever it did. Last, the job log lets go of rows older than
-KEEP_JOB_DAYS (design 4.2, review L3); report files are kept (a PDF is 50 to 500 KiB a month).
+steps 2 and 3 then run once a day whatever it did, and step 4 waits for a run whose first step
+read. Last, the job log lets go of rows older than KEEP_JOB_DAYS (design 4.2, review L3); report files are kept (a PDF is 50 to 500 KiB a month).
 """
 
 from __future__ import annotations
@@ -374,6 +380,20 @@ async def catch_up(service: Any, today: int, now: int, late: bool) -> str:
             done.add((today, name))
         except PortfolioUnavailable as exc:
             lines.append(f"{name}: not read ({exc})")
+    if (today, "held") not in done:
+        # Only on what today's read and the history made whole: a trade whose sale one of them
+        # brings is not one whose sale was missed.
+        if failed or (today, "history") not in done:
+            lines.append("holdings: not checked tonight")
+        else:
+            try:
+                from ..book import recount_shares
+
+                async with capture_for(service).locks["live"]:
+                    lines.append(await recount_shares(service, today, now))
+                done.add((today, "held"))
+            except PortfolioUnavailable as exc:
+                lines.append(f"holdings: not read ({exc})")
     for key in [k for k in done if k[0] < today]:
         done.discard(key)
     cutoff = to_day(to_date(today) - timedelta(days=KEEP_JOB_DAYS))

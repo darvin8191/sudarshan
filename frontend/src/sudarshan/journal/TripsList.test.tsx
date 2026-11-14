@@ -252,6 +252,42 @@ describe('TripsList', () => {
     expect(screen.queryAllByTestId('aside-trip')).toHaveLength(0)
   })
 
+  it('says a trade whose closing the journal did not see is one, with its side and entry and no figure (verification N2)', async () => {
+    serve(
+      [],
+      [closedTrip({ id: 3, net_paise: 81250, close_day: 20261112 })],
+      [
+        trip({
+          id: 9,
+          symbol: 'ACME',
+          exchange: 'NSE',
+          product: 'CNC',
+          product_class: 'carry',
+          status: 'unmatched',
+          side: 'long',
+          qty_max: 10,
+          entry_qty: 10,
+          entry_avg_u: 2_000_000,
+          exit_qty: 0,
+          exit_avg_u: null,
+          open_day: 20261109,
+          close_day: 20261120,
+          closed_ms: Date.UTC(2026, 10, 19, 18, 30),
+        }),
+      ]
+    )
+    show()
+    fireEvent.click(await screen.findByTestId('aside-fold'))
+    const card = screen.getByTestId('aside-trip')
+    expect(within(card).getByText('Closing not seen')).toBeTruthy()
+    expect(within(card).queryByText('Opened before the journal')).toBeNull()
+    expect(within(card).getByText('LONG')).toBeTruthy()
+    expect(
+      within(card).getByText('10 qty at 200.00; not all in your Upstox holdings on Fri 20 Nov 2026')
+    ).toBeTruthy()
+    expect(within(card).queryByText(/₹|Profit|Loss/)).toBeNull()
+  })
+
   it('counts the positions not in the figures in words', () => {
     expect(asideCount(1, false)).toBe('1 position')
     expect(asideCount(12, false)).toBe('12 positions')

@@ -8,6 +8,7 @@ import {
   ChevronDown,
   ChevronUp,
   Clock,
+  EyeOff,
   History,
   LoaderCircle,
   NotebookPen,
@@ -30,6 +31,7 @@ import { describe } from '@/sudarshan/watchlist/rows'
 import { journalData, problemOf } from './api'
 import { JOURNAL_KEY } from './keys'
 import {
+  closingNotSeen,
   countText,
   type DayGroup,
   dayWords,
@@ -64,9 +66,9 @@ export const ASIDE_PAGE = 50
 export const ASIDE_ALL = 500
 
 export const ASIDE_WORDS =
-  'The journal has no result for these: it did not see them opened, or they ended at expiry with no fill. They are not in your figures; Upstox’s own report has them.'
+  'The journal has no result for these: it did not see them opened or did not see them closed, or they ended at expiry with no fill. They are not in your figures; Upstox’s own report has them.'
 
-export const ASIDE_NEWEST_WORDS = `These are the newest ${ASIDE_PAGE} of each kind: opened before the journal, and ended at expiry.`
+export const ASIDE_NEWEST_WORDS = `These are the newest ${ASIDE_PAGE} of each kind: not seen opened or closed, and ended at expiry.`
 export const ASIDE_CUT_WORDS = `These are the newest ${ASIDE_ALL} of each kind. Upstox’s own report has the earlier ones.`
 
 export const EMPTY_WORDS = 'No trades yet. Fills are recorded here as they happen at Upstox.'
@@ -202,10 +204,13 @@ function OpenCard({
 }
 
 /** One position the journal pairs no result for: what it is, in words and an icon, never a
- * LONG or SHORT for one it did not see opened, and no figure. Named whole, as every card (H5). */
+ * LONG or SHORT for one it did not see opened, and no figure. Named whole, as every card (H5).
+ * A trade it saw opened and did not see closed says so, with its side and its entry. */
 function AsideCard({ trip, onOpen }: { trip: TripRow; onOpen: (id: number) => void }) {
-  const unseen = trip.status === 'unmatched'
+  const unclosed = closingNotSeen(trip)
+  const unseen = trip.status === 'unmatched' && !unclosed
   const named = describe(trip.symbol, trip.exchange)
+  const Mark = unclosed ? EyeOff : unseen ? History : CalendarX
   return (
     <li>
       <button
@@ -232,20 +237,26 @@ function AsideCard({ trip, onOpen }: { trip: TripRow; onOpen: (id: number) => vo
             {named.detail}
           </span>
           <span className="ml-auto inline-flex shrink-0 items-center gap-1 text-[0.8125rem] font-semibold text-[color:var(--text-secondary)]">
-            {unseen ? (
-              <History aria-hidden="true" className="size-3.5" />
-            ) : (
-              <CalendarX aria-hidden="true" className="size-3.5" />
-            )}
-            {unseen ? 'Opened before the journal' : 'Ended at expiry'}
+            <Mark aria-hidden="true" className="size-3.5" />
+            {unclosed
+              ? 'Closing not seen'
+              : unseen
+                ? 'Opened before the journal'
+                : 'Ended at expiry'}
           </span>
         </span>
         <span className="text-[0.8125rem] font-medium text-[color:var(--text-secondary)]">
-          {unseen
-            ? `${trip.side === 'long' ? 'Sold' : 'Bought back'} ${countText(trip.exit_qty)} qty; the price it was opened at is not known here`
-            : `${countText(openQty(trip))} qty at ${priceText(trip.entry_avg_u)}${
-                trip.close_day !== null ? `, expired ${dayWords(trip.close_day)}` : ''
-              }`}
+          {unclosed
+            ? `${countText(openQty(trip))} qty at ${priceText(trip.entry_avg_u)}${
+                trip.close_day !== null
+                  ? `; not all in your Upstox holdings on ${dayWords(trip.close_day)}`
+                  : ''
+              }`
+            : unseen
+              ? `${trip.side === 'long' ? 'Sold' : 'Bought back'} ${countText(trip.exit_qty)} qty; the price it was opened at is not known here`
+              : `${countText(openQty(trip))} qty at ${priceText(trip.entry_avg_u)}${
+                  trip.close_day !== null ? `, expired ${dayWords(trip.close_day)}` : ''
+                }`}
         </span>
       </button>
     </li>

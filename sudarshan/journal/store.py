@@ -589,8 +589,11 @@ class Tx:
     def left_out(self, mode: str, start_day: int, end_day: int) -> dict[str, int]:
         """What a period's figures leave out (review B1): ``unmatched``, the positions the
         journal did not see opened that have a fill in the period; ``expired``, the contracts
-        that ended at expiry in it (an expired trip's ``close_day`` is its expiry day)."""
+        that ended at expiry in it (an expired trip's ``close_day`` is its expiry day);
+        ``unclosed``, the trades the journal did not see closed, counted again in the period
+        (verification N2; ``pairing.unclosed``: ended holding more than its fills took off)."""
         t, legs, fills = self._t("round_trip"), self._t("fill_leg"), self._t("fill")
+        cut = t.c.closed_ms.is_not(None) & (t.c.entry_qty > t.c.exit_qty)
         joined = t.join(legs, legs.c.round_trip_id == t.c.id).join(
             fills, fills.c.id == legs.c.fill_id
         )
@@ -603,8 +606,21 @@ class Tx:
                 fills.c.principal == self.who,
                 t.c.mode == mode,
                 t.c.status == "unmatched",
+                ~cut,
                 fills.c.day >= start_day,
                 fills.c.day <= end_day,
+            )
+        ).scalar()
+        unclosed = self.conn.execute(
+            select(func.count())
+            .select_from(t)
+            .where(
+                self._mine(t),
+                t.c.mode == mode,
+                t.c.status == "unmatched",
+                cut,
+                t.c.close_day >= start_day,
+                t.c.close_day <= end_day,
             )
         ).scalar()
         expired = self.conn.execute(
@@ -618,7 +634,8 @@ class Tx:
                 t.c.close_day <= end_day,
             )
         ).scalar()
-        return {"unmatched": int(unmatched or 0), "expired": int(expired or 0)}
+        return {"unmatched": int(unmatched or 0), "expired": int(expired or 0),
+                "unclosed": int(unclosed or 0)}  # fmt: skip
 
     def trips_sold_in(self, mode: str, start_day: int, end_day: int) -> list[dict[str, Any]]:
         """The carry trades (open or closed) with an exit leg on a day from ``start_day`` to
@@ -667,6 +684,62 @@ class Tx:
             )
         )  # fmt: skip
         return True
+
+    # ---- what the account held, counted again later (verification N2) ----
+    def recounts_of(self, mode: str) -> dict[tuple[str, str, str], list[tuple[int, int]]]:
+        """Each key's recounts as (day, quantity held at the start of that day), oldest first."""
+        t = self._t("key_recount")
+        found = self.conn.execute(
+            select(t).where(self._mine(t), t.c.mode == mode).order_by(t.c.day)
+        ).mappings()
+        out: dict[tuple[str, str, str], list[tuple[int, int]]] = {}
+        for r in found:
+            key = (r["exchange"], r["symbol"], r["product_class"])
+            out.setdefault(key, []).append((int(r["day"]), int(r["qty"])))
+        return out
+
+    def recount_put(self, mode: str, key: tuple[str, str, str], day: int, qty: int, source: str,
+                    read_ms: int, now: int) -> bool:  # fmt: skip
+        """Keep what the account held of a key at the start of ``day``; a later read of the same
+        day replaces the quantity (a read that was wrong is put right). True if it changed."""
+        t = self._t("key_recount")
+        exchange, symbol, pclass = key
+        mine = (
+            self._mine(t), t.c.mode == mode, t.c.exchange == exchange, t.c.symbol == symbol,
+            t.c.product_class == pclass, t.c.day == int(day),
+        )  # fmt: skip
+        have = self.conn.execute(select(t.c.qty).where(*mine)).first()
+        if have is None:
+            self.conn.execute(
+                insert(t).values(
+                    principal=self.who, mode=mode, exchange=exchange, symbol=symbol,
+                    product_class=pclass, day=int(day), qty=int(qty), source=source,
+                    read_ms=int(read_ms), created_at=now, updated_at=now,
+                )
+            )  # fmt: skip
+            return True
+        if int(have[0]) == int(qty):
+            return False
+        self.conn.execute(
+            update(t)
+            .where(*mine)
+            .values(qty=int(qty), source=source, read_ms=int(read_ms), updated_at=now)  # fmt: skip
+        )
+        return True
+
+    def last_fill_day(self, mode: str, exchange: str, symbol: str, product_class: str,
+                      before_ms: int | None = None) -> int | None:  # fmt: skip
+        """The day of the journal's latest fill of the instrument in that product class
+        (withdrawn ones aside), before an instant when one is given; None when it holds none."""
+        t = self._t("fill")
+        query = select(func.max(t.c.day)).where(
+            self._mine(t), t.c.mode == mode, t.c.exchange == exchange, t.c.symbol == symbol,
+            t.c.source != "withdrawn", t.c.product.in_(kinds_products(product_class)),
+        )  # fmt: skip
+        if before_ms is not None:
+            query = query.where(t.c.exch_ts_ms < before_ms)
+        found = self.conn.execute(query).scalar()
+        return None if found is None else int(found)
 
     def trip_insert(self, values: Mapping[str, Any], now: int) -> int:
         """A new trip the pairing made; returns its id."""

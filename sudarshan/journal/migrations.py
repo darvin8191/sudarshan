@@ -393,8 +393,36 @@ def _v4(conn: Connection) -> None:
         )
 
 
+#: Step 5 (verification N2): what the account held of a share at the start of ``day``, read
+#: again from Upstox's holdings because an open trade's quantity was more than the account held
+#: (its sale was not seen: the journal was off for longer than its catch-up reaches). A key may be
+#: counted again on several days, so the day is part of the key; the pairing ends the trade there
+#: and goes on from ``qty``. A new table with nothing to backfill: no trade was counted before.
+V5 = (
+    """CREATE TABLE IF NOT EXISTS key_recount (
+        principal TEXT NOT NULL,
+        mode TEXT NOT NULL,
+        exchange TEXT NOT NULL,
+        symbol TEXT NOT NULL,
+        product_class TEXT NOT NULL,
+        day INTEGER NOT NULL,
+        qty INTEGER NOT NULL,
+        source TEXT NOT NULL,
+        read_ms INTEGER NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY (principal, mode, exchange, symbol, product_class, day)
+    )""",
+)
+
+
+def _v5(conn: Connection) -> None:
+    for sql in V5:
+        conn.exec_driver_sql(sql)
+
+
 Step = tuple[int, Callable[[Connection], None]]
-STEPS: tuple[Step, ...] = ((1, _v1), (2, _v2), (3, _v3), (4, _v4))
+STEPS: tuple[Step, ...] = ((1, _v1), (2, _v2), (3, _v3), (4, _v4), (5, _v5))
 LATEST = STEPS[-1][0]
 
 
