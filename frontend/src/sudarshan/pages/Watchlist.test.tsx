@@ -511,7 +511,10 @@ describe('Watchlist lists', () => {
       expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Options1'])
     )
     expect(screen.getByRole('tab', { name: /Options/ })).toHaveAttribute('aria-selected', 'true')
-    expect(where()).toHaveTextContent(/^\/watchlist$/)
+    // The dialog leaves with the list (the read after the delete), and the confirmation leaves
+    // the address after that, as a navigation the router commits as a React transition: on a
+    // busy machine it lands after the tabs, so it is waited for, not read at once.
+    await waitFor(() => expect(where()).toHaveTextContent(/^\/watchlist$/))
   })
 
   it('adds symbols from the search, marks one already in the list, and removes one', async () => {
