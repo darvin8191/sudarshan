@@ -109,6 +109,16 @@ interface Fixture {
    * time, as the cost run needs.
    */
   clock?: 'fake' | 'shifted'
+  /** The books and alerts the chart's lines are read from (C5); empty books when left out. */
+  books?: { positions: unknown[]; orders: unknown[]; alerts?: unknown[] }
+  /** Analyze mode is on: the books are the sandbox's. */
+  analyze?: boolean
+}
+
+/** A request an action of a chart line made: its path and what it carried. */
+interface Sent {
+  path: string
+  body: Record<string, unknown>
 }
 
 /** The page's date moved to `target`, with every timer left real. */
@@ -130,8 +140,23 @@ function shiftDate(target: number) {
 async function serve(
   page: Page,
   fixture: Fixture
-): Promise<{ proxy: () => WebSocketRoute; sockets: () => number }> {
+): Promise<{ proxy: () => WebSocketRoute; sockets: () => number; sent: Sent[] }> {
   const sockets: WebSocketRoute[] = []
+  const sent: Sent[] = []
+  // The pages' own exit, cancel and modify calls: answered here, never sent anywhere (C6).
+  for (const path of ['close_position', 'cancel_order', 'modify_order'])
+    await page.route(`**/${path}`, (route) => {
+      sent.push({ path, body: route.request().postDataJSON() as Record<string, unknown> })
+      return route.fulfill(json({ status: 'success', orderid: 'X9', data: { orderid: 'X9' } }))
+    })
+  await page.route('**/sudarshan/alerts/api/state', (route) =>
+    route.fulfill(
+      json({
+        status: 'success',
+        data: { enabled: true, alerts: fixture.books?.alerts ?? [], groups: [] },
+      })
+    )
+  )
   if (fixture.clock === 'shifted') await page.addInitScript(shiftDate, fixture.now)
   else await page.clock.install({ time: fixture.now })
   // The app's own push connection (order updates), long-polling: a handshake,
@@ -163,7 +188,15 @@ async function serve(
   )
   await page.route('**/auth/csrf-token', (route) => route.fulfill(json({ csrf_token: 'token' })))
   await page.route('**/auth/analyzer-mode', (route) =>
-    route.fulfill(json({ status: 'success', data: { analyze_mode: false, mode: 'live' } }))
+    route.fulfill(
+      json({
+        status: 'success',
+        data: {
+          analyze_mode: fixture.analyze === true,
+          mode: fixture.analyze ? 'analyze' : 'live',
+        },
+      })
+    )
   )
   await page.route('**/api/broker/capabilities', (route) =>
     route.fulfill(json({ status: 'success', data: { broker_type: 'stock', broker_name: 'upstox' } }))
@@ -196,6 +229,12 @@ async function serve(
     const path = new URL(route.request().url()).pathname.replace('/api/v1/', '')
     const body = (route.request().postDataJSON() ?? {}) as Record<string, string>
     switch (path) {
+      case 'positionbook':
+        return route.fulfill(json({ status: 'success', data: fixture.books?.positions ?? [] }))
+      case 'orderbook':
+        return route.fulfill(
+          json({ status: 'success', data: { orders: fixture.books?.orders ?? [], statistics: {} } })
+        )
       case 'symbol':
         return route.fulfill(
           json({
@@ -275,6 +314,7 @@ async function serve(
       return socket
     },
     sockets: () => sockets.length,
+    sent,
   }
 }
 
@@ -348,6 +388,8 @@ async function checkScreen(page: Page) {
         if (box.width === 0 && box.height === 0) return false
         if (style.visibility === 'hidden' || style.display === 'none') return false
         if (el.closest('.tsqd-parent-container')) return false
+        // The app shell's toast, which is not this screen's: its close button is the shell's to size.
+        if (el.closest('[data-sonner-toaster]')) return false
         // A control inside a 48 px label row counts by the row it sits in.
         const row = el.closest('label')?.getBoundingClientRect()
         const w = Math.max(box.width, row?.width ?? 0)
@@ -369,6 +411,7 @@ async function checkScreen(page: Page) {
   const contrast = await new AxeBuilder({ page })
     .withRules(['color-contrast', 'link-in-text-block'])
     .exclude('.tsqd-parent-container')
+    .exclude('[data-sonner-toaster]')
     .analyze()
   expect(
     contrast.violations.flatMap((v) => v.nodes.map((n) => `${v.id}: ${n.target.join(' ')}`)),
@@ -621,6 +664,301 @@ const p95 = (values: number[]) => {
   const sorted = [...values].sort((a, b) => a - b)
   return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.95))] ?? 0
 }
+
+
+/**
+ * Lines and their sheet (M4.7, C5 and C6): a long position, its stop below and a price alert
+ * above, read from fixtures. Every exit, cancel and modify the sheet sends is caught by `serve`
+ * and counted: nothing leaves the browser.
+ */
+const HELD = {
+  symbol: SYMBOL,
+  exchange: EXCHANGE,
+  product: 'MIS',
+  quantity: 10,
+  average_price: Math.round((LAST - 2) * 20) / 20,
+  ltp: LAST,
+  pnl: 20,
+  pnlpercent: 0.25,
+}
+const STOP = {
+  symbol: SYMBOL,
+  exchange: EXCHANGE,
+  action: 'SELL',
+  quantity: 10,
+  price: Math.round((LAST - 5.5) * 20) / 20,
+  trigger_price: Math.round((LAST - 5) * 20) / 20,
+  pricetype: 'SL',
+  product: 'MIS',
+  orderid: '261020000000017',
+  order_status: 'trigger pending',
+  timestamp: '2026-10-20 09:41:51',
+}
+const WATCH = {
+  id: 7,
+  version: 2,
+  status: 'active',
+  status_reason: '',
+  kind: 'price',
+  symbol: SYMBOL,
+  exchange: EXCHANGE,
+  instrument_key: 'NSE_EQ|INE062A01020',
+  tick_size: '0.05',
+  expiry: null,
+  params: { op: 'at_or_above', level: String(Math.round((LAST + 4) * 20) / 20) },
+  frequency: 'once',
+  candle_min: null,
+  cooldown_s: 0,
+  ends_at: null,
+  note: '',
+  channels: null,
+  created_at: 0,
+  updated_at: 0,
+  words: { condition: '', meta: '', checks_at: null },
+  group_id: null,
+  check: null,
+  fired_today: 0,
+  auction: null,
+}
+const BOOKS = { positions: [HELD], orders: [STOP], alerts: [WATCH] }
+
+const money = /[+−]₹[\d,]+\.\d{2}/
+const label = (page: Page, words: RegExp) =>
+  page.getByTestId('chart-lines').getByRole('button', { name: words })
+
+/**
+ * Tap the label of the line with these words and wait for its sheet. Lines nearer than a
+ * touch target share one, which opens a list first: the line is then picked from it.
+ */
+async function openLine(page: Page, words: RegExp) {
+  await label(page, words).click()
+  const sheet = page.getByRole('dialog', { name: SYMBOL })
+  await settled(page, sheet)
+  const pick = sheet.getByRole('list', { name: 'Lines near this price' })
+  if (await pick.count()) {
+    await pick.getByRole('button', { name: words }).click()
+    await expect(pick).toHaveCount(0)
+    await page.clock.runFor(600)
+    await expect(page.locator('[data-settling]')).toHaveCount(0)
+  }
+  return sheet
+}
+
+for (const [layout, viewport] of [
+  ['upright', { width: 360, height: 800 }],
+  ['on its side', { width: 800, height: 360 }],
+] as const)
+  test.describe(`lines on the phone chart ${layout}, ${viewport.width} x ${viewport.height}`, () => {
+    test.use({ viewport })
+
+    test('a position, its stop and an alert as lines with words; Exit and Add from the position', async ({ page }, info) => {
+      const { proxy, sent } = await serve(page, { now: ist(10, 0, 30), books: BOOKS })
+      await open(page)
+      await page.clock.runFor(500)
+      await tick(page, proxy(), ist(10, 0, 31), 4)
+      const lines = page.getByTestId('chart-lines')
+      // Every line says its side or what it is in words, and each kind has its own mark.
+      await expect(lines.locator('[data-line]')).toHaveCount(3)
+      await expect(lines).toContainText(/Buy 10 @ [\d,]+\.\d{2}/)
+      // The stop's trigger and limit are half a rupee apart: one label, the other counted on it.
+      await expect(lines).toContainText(/SELL 10 SL trigger [\d,]+\.\d{2}\+1/)
+      await expect(lines).toContainText(/Alert ≥ [\d,]+\.\d{2}/)
+      // The position's P&L has its sign and its arrow, and has moved off the book's with the ticks.
+      const held = lines.locator('[data-line="position:MIS"]')
+      await expect(held).toContainText(money)
+      await expect(held.locator('svg[data-direction]')).toHaveCount(1)
+      // A label stands on its line: higher price, higher on the screen.
+      const y = async (id: string) =>
+        ((await lines.locator(`[data-line="${id}"]`).boundingBox()) as DOMRect).y
+      expect(await y('alert:7')).toBeLessThan(await y('position:MIS'))
+      expect(await y('position:MIS')).toBeLessThan(await y(`order:${STOP.orderid}:trigger`))
+      await page.screenshot({ path: info.outputPath('lines.png') })
+      await checkScreen(page)
+
+      const sheet = await openLine(page, /Buy 10 @/)
+      await expect(sheet.getByRole('button', { name: /^Exit/ })).toContainText('Sell 10 at market')
+      await page.screenshot({ path: info.outputPath('position-sheet.png') })
+      await checkScreen(page)
+      await sheet.getByRole('button', { name: /^Exit/ }).click()
+      const confirm = page.getByRole('dialog', { name: /^Exit .*: sell 10 at market\?$/ })
+      await settled(page, confirm)
+      await page.screenshot({ path: info.outputPath('exit-confirm.png') })
+      await checkScreen(page)
+      expect(sent, 'nothing is sent before the confirmation').toEqual([])
+      await confirm.getByRole('button', { name: 'Exit' }).dblclick()
+      await expect(sheet.getByRole('button', { name: /^Exit/ })).toContainText('Exit sent')
+      await expect(sheet.getByRole('button', { name: /^Exit/ })).toBeDisabled()
+      expect(sent).toEqual([
+        { path: 'close_position', body: { symbol: SYMBOL, exchange: EXCHANGE, product: 'MIS' } },
+      ])
+
+      // Add: the app's own ticket, on the position's side and in its product.
+      await sheet.getByRole('button', { name: /^Add/ }).click()
+      const ticket = page.getByRole('dialog', { name: `Place Order - BUY ${SYMBOL}` })
+      await settled(page, ticket)
+      await expect(ticket.getByRole('combobox').nth(2)).toHaveText('MIS')
+      expect(sent).toHaveLength(1)
+    })
+
+    test('Modify and Cancel from an order line, each sent once', async ({ page }, info) => {
+      const { proxy, sent } = await serve(page, { now: ist(10, 0, 30), books: BOOKS })
+      await open(page)
+      await page.clock.runFor(500)
+      await tick(page, proxy(), ist(10, 0, 31), 2)
+      // The stop's trigger and limit are half a rupee apart: one target, and a list to pick from.
+      await label(page, /SELL 10 SL trigger/).click()
+      const sheet = page.getByRole('dialog', { name: SYMBOL })
+      await settled(page, sheet)
+      await page.screenshot({ path: info.outputPath('pick.png') })
+      await checkScreen(page)
+      await sheet.getByRole('button', { name: /SELL 10 SL limit/ }).click()
+      await settled(page, sheet.getByRole('button', { name: 'Modify' }))
+      await sheet.getByRole('button', { name: 'Modify' }).click()
+      await settled(page, sheet.getByRole('spinbutton', { name: 'Price', exact: true }))
+      await page.screenshot({ path: info.outputPath('modify.png') })
+      await checkScreen(page)
+      const lower = String(Math.round((STOP.price - 0.5) * 20) / 20)
+      await sheet.getByRole('spinbutton', { name: 'Price', exact: true }).fill(lower)
+      await sheet.getByRole('button', { name: 'Modify order' }).dblclick()
+      await expect(sheet).toHaveCount(0)
+      expect(sent).toEqual([
+        {
+          path: 'modify_order',
+          body: {
+            orderid: STOP.orderid,
+            symbol: SYMBOL,
+            exchange: EXCHANGE,
+            action: 'SELL',
+            product: 'MIS',
+            pricetype: 'SL',
+            quantity: 10,
+            price: Number(lower),
+            trigger_price: STOP.trigger_price,
+          },
+        },
+      ])
+
+      await openLine(page, /SELL 10 SL trigger/)
+      await sheet.getByRole('button', { name: 'Cancel order' }).click()
+      const confirm = page.getByRole('dialog', { name: 'Cancel this order?' })
+      await settled(page, confirm)
+      await expect(confirm).toContainText('The order stops working at the exchange.')
+      await page.screenshot({ path: info.outputPath('cancel-confirm.png') })
+      await checkScreen(page)
+      await confirm.getByRole('button', { name: 'Cancel order' }).dblclick()
+      await expect(sheet.getByRole('button', { name: 'Cancel sent' })).toBeDisabled()
+      expect(sent.map((one) => [one.path, one.body.orderid])).toEqual([
+        ['modify_order', STOP.orderid],
+        ['cancel_order', STOP.orderid],
+      ])
+    })
+
+    test('in Analyze mode the sheet says its orders go to the sandbox', async ({ page }, info) => {
+      const { proxy } = await serve(page, { now: ist(10, 0, 30), books: BOOKS, analyze: true })
+      await open(page)
+      await page.clock.runFor(500)
+      await tick(page, proxy(), ist(10, 0, 31), 2)
+      const sheet = await openLine(page, /Buy 10 @/)
+      await expect(sheet.getByRole('button', { name: /^Exit/ })).toContainText('Sell 10 in the sandbox')
+      await expect(sheet.getByRole('button', { name: /^Add/ })).toContainText('in the sandbox')
+      await page.screenshot({ path: info.outputPath('analyze-sheet.png') })
+      await checkScreen(page)
+      await sheet.getByRole('button', { name: /^Exit/ }).click()
+      const confirm = page.getByRole('dialog', { name: /^Exit .*: sell 10 at market\?$/ })
+      await settled(page, confirm)
+      await expect(confirm).toContainText('Analyze mode is on, so nothing goes to Upstox.')
+    })
+  })
+
+
+/** What the phone keeps of an instrument's drawings: each one's tool, as saved. */
+const savedTools = (page: Page) =>
+  page.evaluate((key) => {
+    const doc = JSON.parse(localStorage.getItem(key) ?? 'null') as {
+      drawings?: Array<{ tool: string }>
+    } | null
+    return (doc?.drawings ?? []).map((drawing) => drawing.tool)
+  }, `sudarshan-chart-draw:${EXCHANGE}:${SYMBOL}`)
+
+for (const [layout, viewport] of [
+  ['upright', { width: 360, height: 800 }],
+  ['on its side', { width: 800, height: 360 }],
+] as const)
+  test.describe(`drawing on the phone chart ${layout}, ${viewport.width} x ${viewport.height}`, () => {
+    test.use({ viewport })
+
+    test('a level by one tap, a trend line by two, Undo, and both kept for the instrument', async ({ page }, info) => {
+      const { proxy } = await serve(page, { now: ist(10, 0, 30) })
+      await open(page)
+      await page.clock.runFor(500)
+      await tick(page, proxy(), ist(10, 0, 31), 2)
+      await page.getByRole('button', { name: 'Draw' }).click()
+      const row = page.getByTestId('draw-row')
+      await expect(row.getByRole('button')).toHaveCount(7)
+      await page.screenshot({ path: info.outputPath('draw-row.png') })
+      await checkScreen(page)
+
+      const box = (await page.getByTestId('chart-surface').boundingBox()) as DOMRect
+      const at = (fx: number, fy: number) => [box.x + box.width * fx, box.y + box.height * fy] as const
+      const tap = async (fx: number, fy: number) => {
+        await page.touchscreen.tap(...at(fx, fy))
+        await page.clock.runFor(100)
+      }
+      await row.getByRole('button', { name: 'Horizontal line' }).click()
+      await expect(row.getByRole('status')).toHaveText('Horizontal line: tap the chart to place it.')
+      await tap(0.45, 0.5)
+      await expect.poll(() => savedTools(page)).toEqual(['horizontal-line'])
+      // Placed: the tool is let go, so the next touch does not draw another.
+      await expect(row.getByRole('button', { name: 'Horizontal line' })).toHaveAttribute('aria-pressed', 'false')
+
+      await row.getByRole('button', { name: 'Trend line' }).click()
+      await expect(row.getByRole('status')).toHaveText('Trend line: tap where it starts, then where it ends.')
+      await tap(0.25, 0.62)
+      expect(await savedTools(page), 'one tap is half a trend line').toEqual(['horizontal-line'])
+      await tap(0.6, 0.42)
+      await expect.poll(() => savedTools(page)).toEqual(['horizontal-line', 'trend-line'])
+      await page.screenshot({ path: info.outputPath('drawn.png') })
+      await checkScreen(page)
+
+      await page.getByRole('button', { name: 'Undo' }).click()
+      await expect.poll(() => savedTools(page)).toEqual(['horizontal-line'])
+
+      // A tap on the level selects it (C8): its ink, Lock and Delete, in a bar at the foot.
+      const levelY = await page.evaluate((key) => {
+        const doc = JSON.parse(localStorage.getItem(key) ?? '{}') as {
+          drawings: Array<{ points: Array<{ price: number }> }>
+        }
+        return doc.drawings[0].points[0].price
+      }, `sudarshan-chart-draw:${EXCHANGE}:${SYMBOL}`)
+      expect(levelY).toBeGreaterThan(0)
+      await tap(0.45, 0.5)
+      const bar = page.getByTestId('drawing-bar')
+      await expect(bar).toBeVisible()
+      await page.screenshot({ path: info.outputPath('selected.png') })
+      await checkScreen(page)
+      await bar.getByRole('button', { name: 'Peacock, dashed' }).click()
+      await expect(bar.getByRole('button', { name: 'Peacock, dashed' })).toHaveAttribute('aria-pressed', 'true')
+      await bar.getByRole('button', { name: 'Lock where it is' }).click()
+      await expect(bar).toHaveCount(0)
+      // Locked, it no longer answers a tap; Unlock is the way back.
+      await tap(0.45, 0.5)
+      await expect(bar).toHaveCount(0)
+      await page.getByRole('button', { name: 'Unlock 1 locked' }).click()
+      await tap(0.45, 0.5)
+      await expect(bar).toBeVisible()
+      await bar.getByRole('button', { name: 'Delete this horizontal line' }).click()
+      await expect.poll(() => savedTools(page)).toEqual([])
+      await page.getByRole('button', { name: 'Undo' }).click()
+      await expect.poll(() => savedTools(page)).toEqual(['horizontal-line'])
+      await page.getByRole('button', { name: 'Done' }).click()
+      await expect(row).toHaveCount(0)
+
+      // Another instrument starts clean, and the level is there when this one is opened again.
+      await page.goto(`/chart/${EXCHANGE}/${SYMBOL}`)
+      await expect(page.getByTestId('phone-chart')).toBeVisible()
+      await expect.poll(() => savedTools(page)).toEqual(['horizontal-line'])
+    })
+  })
 
 for (const [layout, viewport] of [
   ['upright', { width: 360, height: 800 }],
