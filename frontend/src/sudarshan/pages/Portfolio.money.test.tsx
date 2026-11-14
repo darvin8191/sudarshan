@@ -1,6 +1,6 @@
 /**
  * The money views of phase P7 on the Portfolio page (F0): beside the tabs only while the service
- * says their switch is on; `?view=tax` opens the Tax view's stub and leaves no tab selected; a view
+ * says their switch is on; `?view=tax` opens the Tax view and leaves no tab selected; a view
  * whose switch is off falls back to the tabs; a tab chip leaves the money view.
  */
 import { QueryClientProvider } from '@tanstack/react-query'
@@ -16,8 +16,9 @@ vi.mock('@/sudarshan/portfolio/api', async (importOriginal) => ({
 }))
 
 import { createQueryClient } from '@/app/providers'
-import { PHASE_WORDS } from '@/sudarshan/portfolio/StubViews'
+import { PortfolioError } from '@/sudarshan/portfolio/api'
 import { view } from '@/sudarshan/portfolio/tab/fixtures'
+import { TAX_OFF } from '@/sudarshan/portfolio/tax/TaxView'
 import Portfolio from './Portfolio'
 
 const UPSTOX = {
@@ -58,6 +59,8 @@ function serve(answer: object) {
         data: { holdings: { state: 'ok', read_at: 1, note: null, data: [] } },
       }
     }
+    if (op === 'tax_get')
+      throw new PortfolioError({ code: 'not_ready', message: '', entryId: null })
     throw new Error(`unexpected op ${op}`)
   })
 }
@@ -106,12 +109,12 @@ describe('the money views beside the tabs', () => {
     ])
   })
 
-  it('a chip opens its view in the address, its stub in place of the tab, and no tab selected', async () => {
+  it('a chip opens its view in the address, its screen in place of the tab, and no tab selected', async () => {
     serve(state({ tax: true }))
     show('/portfolio?tab=2&view=overview')
     await userEvent.click(await screen.findByRole('tab', { name: 'Tax' }))
     await waitFor(() => expect(where).toBe('?view=tax'))
-    expect(await screen.findByText(PHASE_WORDS.tax)).toBeTruthy()
+    expect(await screen.findByText(TAX_OFF)).toBeTruthy()
     expect(screen.getByRole('tab', { name: 'Tax' }).getAttribute('aria-selected')).toBe('true')
     for (const name of [/Upstox/, 'Gold']) {
       expect(screen.getByRole('tab', { name }).getAttribute('aria-selected')).toBe('false')
@@ -122,17 +125,17 @@ describe('the money views beside the tabs', () => {
   it('a tab chip leaves the money view', async () => {
     serve(state({ tax: true }))
     show('/portfolio?view=tax')
-    await screen.findByText(PHASE_WORDS.tax)
+    await screen.findByText(TAX_OFF)
     await userEvent.click(screen.getByRole('tab', { name: 'Gold' }))
     await waitFor(() => expect(where).toBe('?tab=2'))
-    expect(screen.queryByText(PHASE_WORDS.tax)).toBeNull()
+    expect(screen.queryByText(TAX_OFF)).toBeNull()
   })
 
   it('a view whose switch is off falls back to the tabs, even from its address', async () => {
     serve(state({ tax: false, insights: true }))
     show('/portfolio?view=tax')
     expect(await screen.findByRole('tab', { name: 'Risk' })).toBeTruthy()
-    expect(screen.queryByText(PHASE_WORDS.tax)).toBeNull()
+    expect(screen.queryByText(TAX_OFF)).toBeNull()
     expect(screen.getByRole('tab', { name: /Upstox/ }).getAttribute('aria-selected')).toBe('true')
   })
 })

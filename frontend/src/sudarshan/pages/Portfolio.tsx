@@ -34,6 +34,7 @@ import { TabStrip } from '@/sudarshan/portfolio/TabStrip'
 import { ActivityTab, PORTFOLIO_KEY } from '@/sudarshan/portfolio/tab/ActivityTab'
 import { TabOverview } from '@/sudarshan/portfolio/tab/Overview'
 import { PerformanceTab } from '@/sudarshan/portfolio/tab/PerformanceTab'
+import { TaxView } from '@/sudarshan/portfolio/tax/TaxView'
 import { WORDS } from '@/sudarshan/portfolio/types'
 import { UpstoxTab } from '@/sudarshan/portfolio/upstox/UpstoxTab'
 import {
@@ -163,7 +164,8 @@ export default function Portfolio() {
       </Notice>
     )
   } else if (money !== null) {
-    body = <PhaseStub view={money} />
+    // SUDARSHAN P7 F1: a view's own screen takes its stub's place as it lands.
+    body = money === 'tax' ? <TaxView members={members} /> : <PhaseStub view={money} />
   } else {
     body =
       current === null ? (
