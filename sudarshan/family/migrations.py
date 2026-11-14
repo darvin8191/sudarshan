@@ -13,7 +13,8 @@ write to a schema it does not know. A step is frozen once released; a later chan
 V2 (review M2): ``signin_lock``, the counts of wrong sign-ins by the keyed hash of the name typed
 (and of the phone, for a member's own phone), the same rows for names nobody has (``lockout.py``).
 The credential's ``failed_count``, ``locked_until`` and ``lock_level`` of V1 are no longer read or
-written.
+written. ``viewer_session.area_hash`` (review L3): the keyed hash of the network area a session
+signed in from, which the "new phone" notice compares; rows from before it have none.
 
 V1 holds every table of the design (4.2), with three additions: ``audit.member_id`` (the member a
 line is about, so the owner's filter by member is exact whoever acted), ``viewer_session.
@@ -196,9 +197,17 @@ def step_1(conn: Connection) -> None:
         conn.exec_driver_sql(sql)
 
 
+def add_column(conn: Connection, table: str, column: str, declared: str) -> None:
+    """Add a column only when ``PRAGMA table_info`` lacks it (SQLite has no IF NOT EXISTS here)."""
+    have = {row[1] for row in conn.exec_driver_sql(f"PRAGMA table_info({table})")}
+    if column not in have:
+        conn.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {column} {declared}")
+
+
 def step_2(conn: Connection) -> None:
     for sql in V2:
         conn.exec_driver_sql(sql)
+    add_column(conn, "viewer_session", "area_hash", "TEXT")
 
 
 Step = tuple[int, Callable[[Connection], None]]

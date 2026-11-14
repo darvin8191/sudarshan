@@ -461,6 +461,31 @@ def test_a_sign_in_from_a_new_phone_is_a_notice_and_a_known_one_is_not(rig):
     assert [(k, f) for k, _m, f in rig.notices] == [("new_device", {"device": OTHER_PHONE.label})]
 
 
+def test_a_renamed_phone_is_not_new_and_the_same_browser_from_elsewhere_is(rig):
+    """Review L3 (probe P6): the notice compared the label a rename changes, so a renamed phone was
+    "new" at its next sign-in and a stranger with the same Android and Chrome was not. It compares
+    the browser's fixed summary now, and a network area never seen for the member is new too."""
+    home = accounts.device_from(VECTORS["devices"][0][0], "a" * 64, area="area-home")
+    card = rig.run(rig.acc.member_create({"display_name": "Member A", "role": "viewer"}))
+    invite = rig.run(rig.acc.invite_create({"member_id": card["id"]}))
+    secret = rig.run(rig.acc.join_info(invite["code"]))["totp_key"]
+    joined = rig.run(rig.acc.join(invite["code"], "member_a", PASSWORD, rig.code(secret), home))
+    rig.run(rig.acc.rename(joined.session, joined.session.device_id, "Kitchen tablet"))
+    rig.notices.clear()
+    rig.login(secret=secret, phone=home)
+    assert [k for k, _m, _f in rig.notices] == []  # renamed, the same phone where it always is
+    elsewhere = accounts.device_from(VECTORS["devices"][0][0], "z" * 64, area="area-elsewhere")
+    rig.login(secret=secret, phone=elsewhere)
+    assert [(k, f) for k, _m, f in rig.notices] == [("new_device", {"device": home.label})]
+    rig.notices.clear()
+    other = accounts.device_from(VECTORS["devices"][1][0], "a" * 64, area="area-home")
+    rig.login(secret=secret, phone=other)
+    assert [k for k, _m, _f in rig.notices] == ["new_device"]  # another browser at home
+    rig.notices.clear()
+    rig.login(secret=secret, phone=elsewhere)  # seen now: no second notice
+    assert rig.notices == []
+
+
 # ---- the owner's member ops ---------------------------------------------------------------------------
 def test_members_take_their_roles_defaults_and_y24_is_refused(rig):
     viewer = rig.run(rig.acc.member_create({"display_name": " Member  A ", "role": "viewer"}))

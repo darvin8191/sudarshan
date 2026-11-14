@@ -93,16 +93,21 @@ def test_a_populated_copy_forced_back_to_the_old_version_keeps_every_row(folder,
         close(again)
 
 
-def test_a_populated_v1_file_gets_step_2_and_keeps_every_row(folder, opened):
-    """Review M2's counts table on a file the release before wrote: V1 forced back, rows in it."""
-    member = add_member(opened)
-    opened.write_now(lambda tx: audit.record(tx, at=5, actor="owner", kind="member_created",
-                                             member_id=member["id"]))  # fmt: skip
-    close(opened)
+def test_a_populated_v1_file_gets_step_2_and_keeps_every_row(folder):
+    """Step 2 on a file exactly as V1 made it, with rows in it: the counts table (review M2) and
+    the session's network area (review L3) arrive, and nothing that was there is lost."""
+    folder.mkdir(parents=True)
     path = folder / "family.db"
     con = raw(path)
     try:
-        con.execute("DROP TABLE signin_lock")
+        for sql in migrations.V1:
+            con.execute(sql)
+        con.execute("INSERT INTO member (display_name, role, privacy, created_at, updated_at) "
+                    "VALUES ('Member A', 'viewer', '{}', 1, 1)")  # fmt: skip
+        con.execute("INSERT INTO viewer_session (id_hash, member_id, device_label, ua_summary, "
+                    "created_at, last_seen_at, absolute_expires_at, idle_expires_at) "
+                    "VALUES ('ab', 1, 'Phone', 'Phone', 1, 1, 9, 9)")  # fmt: skip
+        con.execute("INSERT INTO audit (at, actor, kind) VALUES (5, 'owner', 'member_created')")
         con.execute("PRAGMA user_version = 1")
     finally:
         con.close()
@@ -110,15 +115,32 @@ def test_a_populated_v1_file_gets_step_2_and_keeps_every_row(folder, opened):
     try:
         assert again.applied == [2]
         found = again.read_now(lambda tx: (tx.count("member"), tx.count("audit"),
-                                           tx.count("signin_lock"), tx.user_version()))  # fmt: skip
-        assert found == (1, 1, 0, 2)
+                                           tx.count("signin_lock"), tx.user_version(),
+                                           tx.row("viewer_session", id_hash="ab")))  # fmt: skip
+        assert found[:4] == (1, 1, 0, 2)
+        assert found[4]["area_hash"] is None and found[4]["device_label"] == "Phone"
     finally:
         close(again)
     twice = FamilyStore(path, secrets())
     try:
         assert twice.applied == []  # idempotent: nothing runs again
+        con = raw(path)
+        try:  # the step itself is safe to run again on a file that has it
+            migrations.step_2(_Driver(con))
+        finally:
+            con.close()
     finally:
         close(twice)
+
+
+class _Driver:
+    """A plain connection standing in for SQLAlchemy's, for a step run by hand."""
+
+    def __init__(self, con):
+        self.con = con
+
+    def exec_driver_sql(self, sql):
+        return self.con.execute(sql)
 
 
 def test_a_newer_file_is_refused_in_the_owners_words_and_left_as_it_was(folder, opened):

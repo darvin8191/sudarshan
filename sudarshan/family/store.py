@@ -344,13 +344,15 @@ class Tx:
         )
         return done.rowcount > 0
 
-    def label_seen(self, member_id: int, label: str, since: int) -> bool:
-        """Whether this member used a device with this label since ``since``."""
+    def phone_seen(self, member_id: int, summary: str, area: str | None, since: int) -> bool:
+        """Whether this member used, since ``since``, a browser with this fixed summary (a rename
+        changes only the label) and signed in from this network area (review L3); an area that is
+        not known (None) is not held against the sign-in."""
         t = self.t("viewer_session")
-        query = select(func.count()).where(
-            t.c.member_id == member_id, t.c.device_label == label, t.c.last_seen_at >= since
-        )
-        return bool(self.conn.execute(query).scalar())
+        recent = and_(t.c.member_id == member_id, t.c.last_seen_at >= since)
+        seen = [t.c.ua_summary == summary] + ([t.c.area_hash == area] if area else [])
+        found = (select(func.count()).where(recent, cond) for cond in seen)
+        return all(self.conn.execute(query).scalar() for query in found)
 
     def sessions_prune(self, before: int) -> int:
         """Forget sessions that ended (revoked or expired) before ``before``."""

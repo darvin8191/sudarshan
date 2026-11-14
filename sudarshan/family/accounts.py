@@ -59,7 +59,8 @@ ARGON2 = {"time_cost": 3, "memory_cost": 64 * 1024, "parallelism": 1, "hash_len"
 HANDLE = re.compile(rf"[a-z0-9_]{{{LIMITS['handle_min']},{LIMITS['handle_max']}}}")
 TOTP_DIGITS, TOTP_STEP_S, TOTP_WINDOW = 6, 30, 1
 TOTP_ISSUER, TOTP_LABEL = "SUDARSHAN", "Family view"
-#: A sign-in from a device label the member has not used for this long is a new phone.
+#: A sign-in from a browser (its fixed summary, not the label a rename changes) or a network area
+#: the member has not used for this long is a new phone, and the owner is told (review L3).
 NEW_DEVICE_MS = 90 * sessions.DAY_MS
 IST = timezone(timedelta(hours=5, minutes=30))
 THREAD_PREFIX = "family-argon2"
@@ -389,7 +390,7 @@ class Accounts:
                 detail={"part": "suspended"},
             )
             return Outcome(FamilyError("signed_out", "suspended"))
-        new_phone = not tx.label_seen(member_id, device.label, now - NEW_DEVICE_MS)
+        new_phone = not tx.phone_seen(member_id, device.summary, device.area, now - NEW_DEVICE_MS)
         detail = {"new_device": new_phone, "known_phone": seen.phone}
         outcome = _signed_in(tx, member, device, now, detail, new_phone, self.max_devices)
         outcome.phone = _phone_cookie(tx, device, member_id, credential["password_changed_at"], now)
