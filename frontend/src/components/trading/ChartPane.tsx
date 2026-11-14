@@ -39,6 +39,7 @@ import {
 } from '@/lib/trading/chartTypes'
 import { MOD_KEY } from '@/lib/trading/drawingKeys'
 import { ChromeIcon, chromeStroke, lineStroke24 } from '@/lib/trading/glyphs'
+import { parseSymbolKey } from '@/lib/trading/startSymbol'
 
 /**
  * The snapshot glyph: a rounded body, a softened hump and an open lens ring, on
@@ -187,6 +188,11 @@ interface Props {
   apiKey: string
   wsUrl: string
   initialWorkspacePane?: WorkspacePane
+  /**
+   * SUDARSHAN: the focused pane's instrument (`EXCHANGE:SYMBOL`) as the page knows it. Read once,
+   * when this pane's chart is built: a pane with no instrument of its own kept opens on it.
+   */
+  seedSymbol?: string | null
   transitionLocked?: boolean
   onInitialized?(paneId: string, terminal: TradingTerminal): void
   onInitializationError?(paneId: string, error: unknown): void
@@ -276,6 +282,7 @@ export function ChartPane({
   apiKey,
   wsUrl,
   initialWorkspacePane,
+  seedSymbol,
   transitionLocked = false,
   onInitialized,
   onInitializationError,
@@ -353,6 +360,9 @@ export function ChartPane({
    */
   const [chartState, setChartState] = useState<ChartStateView | null>(null)
   const chartStateGate = useRef<ChartStateGate | null>(null)
+  // SUDARSHAN: kept in a ref so the focus moving on never rebuilds a chart that is already up.
+  const seedRef = useRef(seedSymbol)
+  seedRef.current = seedSymbol
   // Before the terminal boots below, so its first load has somewhere to go.
   useEffect(() => {
     const gate = createChartStateGate(setChartState)
@@ -623,6 +633,7 @@ export function ChartPane({
           legendEl: legendRef.current,
           storageKey: `oa-trading-${paneId}`,
           initialWorkspacePane,
+          seedSymbol: parseSymbolKey(seedRef.current),
           getTheme: () => {
             const s = useThemeStore.getState()
             return { mode: s.mode, appMode: s.appMode }

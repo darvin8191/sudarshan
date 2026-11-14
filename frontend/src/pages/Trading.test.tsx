@@ -116,6 +116,10 @@ vi.mock('@/components/trading/ChartPane', () => ({
         <button type="button" onClick={() => props.onBeforeSourceChange?.()}>
           Change source {props.paneId}
         </button>
+        <button type="button" onClick={() => props.onSymbolChange?.(props.paneId, 'NSE:TESTCO')}>
+          Load TESTCO {props.paneId}
+        </button>
+        <output data-testid={`seed-${props.paneId}`}>{props.seedSymbol ?? ''}</output>
       </>
     )
   },
@@ -165,6 +169,31 @@ afterEach(() => {
   vi.unstubAllGlobals()
   window.history.replaceState(null, '', '/')
   fake.ready = Promise.resolve()
+})
+
+// SUDARSHAN (SCR-P item 9): new panes of a grid open with the focused pane's instrument.
+describe('a grid’s new panes', () => {
+  it('offers every pane the focused pane’s instrument to open on', async () => {
+    localStorage.setItem('oa-trading-layout', 'grid4')
+    render(<Trading />)
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Replay p3' })).toBeVisible())
+    // Nothing is known of any pane yet: no pane is told to open on anything.
+    expect(screen.getByTestId('seed-p1')).toHaveTextContent('')
+    // The focused pane (the first, until another is picked) loads an instrument.
+    fireEvent.click(screen.getByRole('button', { name: 'Load TESTCO p0' }))
+    for (const id of ['p1', 'p2', 'p3']) {
+      expect(screen.getByTestId(`seed-${id}`)).toHaveTextContent('NSE:TESTCO')
+    }
+  })
+
+  it('does not offer an instrument loaded in a pane that is not the focused one', async () => {
+    localStorage.setItem('oa-trading-layout', 'grid4')
+    render(<Trading />)
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Replay p3' })).toBeVisible())
+    fireEvent.click(screen.getByRole('button', { name: 'Load TESTCO p2' }))
+    expect(screen.getByTestId('seed-p1')).toHaveTextContent('')
+    expect(screen.getByTestId('seed-p3')).toHaveTextContent('')
+  })
 })
 
 describe('workspace replay page ownership', () => {
