@@ -26,8 +26,11 @@ next replay of the key. An open trip whose contract's own expiry day has passed 
 (the close check marks the day's own at 16:05, ``expire_open``); the replay keeps a trip the check
 marked so, unless a later fill closes it.
 
-Charges are estimated per trip from its legs (``core/charges.py``: brokerage per order, the rest
-on each order's turnover), so net = gross - est. charges once it closes. Whether the trip opened
+Charges are estimated per trip from its orders (``core/charges.py``: brokerage per order, the
+rest on each order's turnover), so net = gross - est. charges once it closes. An order shared by
+two trips (a reversal) is priced once, whole, and each trip takes its share by quantity, in the
+pairing's order, so the day's trips add up to the day's estimate (review M1); whether the trip's
+segment is estimated at all is kept beside it (``charges_modelled``). Whether the trip opened
 on its own expiry and on an index expiry comes from the master contract, read before the
 transaction; a fact that could not be read keeps what the trip had.
 
@@ -120,32 +123,64 @@ def owned(tx: Tx, trip: Mapping[str, Any]) -> bool:
     return tx.note_of(int(trip["id"])) is not None
 
 
-def charges_of(legs: Iterable[Mapping[str, Any]], by_trade: Mapping[str, Mapping[str, Any]],
-               refs: Mapping[str, Mapping[str, Any]], mode: str,
-               plan: str) -> dict[str, Any]:  # fmt: skip
-    """The charges estimate of a trip's orders (``ChargeEstimate``): each leg's part of its fill,
-    priced per executed order by core/charges. ``legs`` carry ``trade_id`` and ``qty``."""
-    rows = []
+OrderKey = tuple[str, int]
+#: An order a trip holds part of: the order's every fill of the day, the units of it before the
+#: trip's share, and the order's quantity (review M1).
+OrderShare = tuple[list[Mapping[str, Any]], int, int]
+
+
+def _row(fill: Mapping[str, Any], qty: int, refs: Mapping[str, Mapping[str, Any]],
+         mode: str) -> dict[str, Any]:  # fmt: skip
+    ref = refs.get(fill["order_id"]) or {}
+    return {
+        "mode": mode, "order_id": fill["order_id"], "day": fill["day"], "action": fill["action"],
+        "qty": qty, "price_u": fill["price_u"], "exchange": fill["exchange"],
+        "symbol": fill["symbol"], "product": fill["product"], "surface": ref.get("surface"),
+    }  # fmt: skip
+
+
+def portions(legs: Iterable[Mapping[str, Any]],
+             by_trade: Mapping[str, Mapping[str, Any]]) -> dict[OrderKey, int]:  # fmt: skip
+    """A trip's units of each of its orders, by (order id, day)."""
+    out: dict[OrderKey, int] = {}
     for leg in legs:
         fill = by_trade[leg["trade_id"]]
-        ref = refs.get(fill["order_id"]) or {}
-        rows.append({
-            "mode": mode, "order_id": fill["order_id"], "day": fill["day"],
-            "action": fill["action"], "qty": leg["qty"], "price_u": fill["price_u"],
-            "exchange": fill["exchange"], "symbol": fill["symbol"], "product": fill["product"],
-            "surface": ref.get("surface"),
-        })  # fmt: skip
-    return charges_core.estimate(rows, plan)
+        key = (str(fill["order_id"]), int(fill["day"]))
+        out[key] = out.get(key, 0) + int(leg["qty"])
+    return out
 
 
-def _charges(trip: Mapping[str, Any], by_trade: Mapping[str, Mapping[str, Any]],
-             refs: Mapping[str, Mapping[str, Any]], mode: str, plan: str) -> int:  # fmt: skip
-    return int(charges_of(trip["legs"], by_trade, refs, mode, plan)["parts"]["total_paise"])
+def charges_of(legs: Iterable[Mapping[str, Any]], by_trade: Mapping[str, Mapping[str, Any]],
+               refs: Mapping[str, Mapping[str, Any]], mode: str, plan: str,
+               orders: Mapping[OrderKey, OrderShare] | None = None) -> dict[str, Any]:  # fmt: skip
+    """The charges estimate of a trip's orders (``ChargeEstimate``). ``legs`` carry ``trade_id``
+    and ``qty``. With ``orders`` (each order of the trip: its every fill, the units of it before
+    this trip's, its quantity) each order is priced whole and the trip takes its share by
+    quantity, so a reversal's order pays one brokerage between its two trips (review M1); without
+    them, each leg's part of its fill is priced as an order of its own."""
+    legs = list(legs)
+    if orders is None:
+        rows = [_row(by_trade[leg["trade_id"]], int(leg["qty"]), refs, mode) for leg in legs]
+        return charges_core.estimate(rows, plan)
+    shared = {}
+    for key, take in portions(legs, by_trade).items():
+        fills, before, whole = orders[key]
+        rows = [_row(f, int(f["qty"]), refs, mode) for f in fills]
+        shared[key] = (rows, before, take, whole)
+    return charges_core.estimate_shared(shared, plan)
+
+
+def order_context(tx: Tx, mode: str, order_ids: Iterable[str]) -> dict[OrderKey, list]:
+    """Every fill of each order, by (order id, day)."""
+    out: dict[OrderKey, list] = {}
+    for fill in tx.fills_of_orders(mode, order_ids):
+        out.setdefault((str(fill["order_id"]), int(fill["day"])), []).append(fill)
+    return out
 
 
 def trip_values(trip: Mapping[str, Any], by_trade: Mapping[str, Mapping[str, Any]],
-                refs: Mapping[str, Mapping[str, Any]], mode: str,
-                facts: Facts) -> dict[str, Any]:  # fmt: skip
+                refs: Mapping[str, Mapping[str, Any]], mode: str, facts: Facts,
+                orders: Mapping[OrderKey, OrderShare] | None = None) -> dict[str, Any]:  # fmt: skip
     """The columns of a stored trip from a paired one (the owner's fields excepted)."""
     values = {name: trip[name] for name in PAIRED}
     # An unmatched trip may hold no entry the journal saw: its first leg names it then.
@@ -155,8 +190,10 @@ def trip_values(trip: Mapping[str, Any], by_trade: Mapping[str, Mapping[str, Any
     values["mode"] = mode
     values["instrument_key"] = fill.get("instrument_key") or ""
     values["strategy"] = ref.get("strategy") or MANUAL
-    est = _charges(trip, by_trade, refs, mode, facts.plan)
+    estimate = charges_of(trip["legs"], by_trade, refs, mode, facts.plan, orders)
+    est = int(estimate["parts"]["total_paise"])
     values["charges_est_paise"] = est
+    values["charges_modelled"] = bool(estimate["modelled"])
     values["net_paise"] = trip["gross_paise"] - est if trip["status"] == "closed" else None
     key = values["instrument_key"]
     if key and key in facts.expiries:
@@ -209,6 +246,11 @@ def replay_tx(tx: Tx, mode: str, days: Iterable[int], now: int, facts: Facts) ->
         made = pairing.pair_fills(fills, {(mode, exchange, symbol, pclass): held})
         by_trade = {f["trade_id"]: f for f in fills}
         refs = tx.order_refs(mode, {f["order_id"] for f in fills})
+        # Each order priced whole: the units of it before the window belong to earlier trips,
+        # then each trip of the window takes the next of them, in the pairing's order.
+        whole = order_context(tx, mode, {f["order_id"] for f in fills})
+        given = {k: sum(int(f["qty"]) for f in v if int(f["exch_ts_ms"]) < anchor)
+                 for k, v in whole.items()}  # fmt: skip
         # Trips that open at one instant on one side (fills in the same millisecond) are
         # matched in the order they were made, so a replay never swaps their ids.
         known: dict[tuple[int, str], list[dict[str, Any]]] = {}
@@ -216,7 +258,14 @@ def replay_tx(tx: Tx, mode: str, days: Iterable[int], now: int, facts: Facts) ->
             known.setdefault((t["opened_ms"], t["side"]), []).append(t)
         matched: set[int] = set()
         for trip in made:
-            values = trip_values(trip, by_trade, refs, mode, facts)
+            shares: dict[OrderKey, OrderShare] = {}
+            for key, take in portions(trip["legs"], by_trade).items():
+                fills_of_order = whole.get(key) or [by_trade[leg["trade_id"]] for leg in
+                                                    trip["legs"]]  # fmt: skip
+                total = sum(int(f["qty"]) for f in fills_of_order)
+                shares[key] = (fills_of_order, given.get(key, 0), total)
+                given[key] = given.get(key, 0) + take
+            values = trip_values(trip, by_trade, refs, mode, facts, shares)
             hits = [t for t in known.get((trip["opened_ms"], trip["side"]), [])
                     if t["id"] not in matched]  # fmt: skip
             hit = hits[0] if hits else None

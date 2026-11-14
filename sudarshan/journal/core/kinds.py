@@ -205,7 +205,7 @@ RECORDS = {
     "hold_s:int|null, strategy:string, strategy_override:string|null, setup_id:int|null, "
     "own_expiry_day:bool, index_expiry_day:bool, risk_paise:int|null, mae_paise:int|null, "
     "mfe_paise:int|null, mae_ms:int|null, mfe_ms:int|null, excursion_source:ExcursionSource, "
-    "excursion_note:string|null, version:int",
+    "excursion_note:string|null, version:int, charges_modelled:bool",
     "TripNote": "round_trip_id:int, notes:string, mistakes:int[], checklist:string, "
     "mood:Mood|null, version:int",
     "Tag": "id:int, kind:TagKind, name:string, colour:TagColour, archived:bool, version:int",
@@ -220,7 +220,11 @@ RECORDS = {
     "profit_factor:string|null, profit_factor_state:RatioState, expectancy_paise:int|null, "
     "avg_win_paise:int|null, avg_loss_paise:int|null, largest_win_paise:int|null, "
     "largest_loss_paise:int|null, payoff:string|null, payoff_state:RatioState, "
-    "r_known:int, r_total:string|null, r_avg:string|null, charges_impact_pct:string|null",
+    "r_known:int, r_total:string|null, r_avg:string|null, charges_impact_pct:string|null, "
+    "charges_estimated:bool, charges_not_estimated:int",
+    # ``charges_estimated``: some trade's charges in the block are the journal's estimate (no
+    # actual figure yet), so the charges and the net say "est."; ``charges_not_estimated``: how
+    # many trades are in a segment the estimate does not cover (no charges counted for them).
     "HoldBucketRow": "bucket:HoldBucket, trips:int, wins:int, net_paise:int",
     "PeriodRow": "key:string, trips:int, wins:int, net_paise:int",
     "Calendar": "days:PeriodRow[], weeks:PeriodRow[], months:PeriodRow[]",
@@ -286,13 +290,16 @@ RECORDS = {
 #: ``trip_get``'s answer: the trip, its legs, the owner's note and its orders' references.
 # A row of the trades list: the trip and its mistake tags (the ids of its note's ``mistakes``).
 RECORDS["TripRow"] = RECORDS["Trip"] + ", mistakes:int[]"
-# The trade sheet: the trip, its fills (each as executed: a flip's fill is in both trips, its
-# ``legs`` say how much of it is this trip's), the owner's note (its ``checklist`` is JSON text,
-# ``[{"rule": ..., "yes": ...}]``, or empty), the excursion, the charges estimate of its orders,
-# the first entry order's round trip as OpenAlgo's latency record has it (``latency_ms``), and
-# each order's label.
+# A fill on the trade sheet: as executed (``qty`` is the whole fill), and ``trip_qty``, how much of
+# it is this trip's (a reversal's fill closes one trip and opens the next: the rest is the other's).
+RECORDS["TripFill"] = RECORDS["Fill"] + ", trip_qty:int"
+# The trade sheet: the trip, its fills (each as executed, with this trip's part of it), the owner's
+# note (its ``checklist`` is JSON text, ``[{"rule": ..., "yes": ...}]``, or empty), the excursion,
+# the charges estimate of its orders (each order priced whole, this trip's share by quantity), the
+# first entry order's round trip as OpenAlgo's latency record has it (``latency_ms``), and each
+# order's label.
 RECORDS["TripDetail"] = RECORDS["Trip"] + (
-    ", legs:TripLeg[], fills:Fill[], note:TripNote|null, excursion:Excursion|null, "
+    ", legs:TripLeg[], fills:TripFill[], note:TripNote|null, excursion:Excursion|null, "
     "charges:ChargeEstimate|null, latency_ms:int|null, orders:OrderRef[]"
 )
 

@@ -354,8 +354,24 @@ def _v2(conn: Connection) -> None:
         conn.exec_driver_sql(sql)
 
 
+#: Step 3 (review M1): whether a trip's charges are estimated at all. The rate card covers NSE
+#: shares and NFO options and futures; a trip of any other segment (BSE, currency, commodity) has
+#: none, which the sheet and the reports say in words instead of showing 0.00. The trips already
+#: kept are backfilled from what each says (its exchange and symbol), never from a default.
+V3_NOT_MODELLED = """UPDATE round_trip SET charges_modelled = 0 WHERE NOT (
+    UPPER(exchange) = 'NSE'
+    OR (UPPER(exchange) = 'NFO'
+        AND (UPPER(symbol) LIKE '%CE' OR UPPER(symbol) LIKE '%PE' OR UPPER(symbol) LIKE '%FUT'))
+)"""
+
+
+def _v3(conn: Connection) -> None:
+    if add_column(conn, "round_trip", "charges_modelled", "INTEGER NOT NULL DEFAULT 1"):
+        conn.exec_driver_sql(V3_NOT_MODELLED)
+
+
 Step = tuple[int, Callable[[Connection], None]]
-STEPS: tuple[Step, ...] = ((1, _v1), (2, _v2))
+STEPS: tuple[Step, ...] = ((1, _v1), (2, _v2), (3, _v3))
 LATEST = STEPS[-1][0]
 
 

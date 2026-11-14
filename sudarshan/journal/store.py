@@ -61,7 +61,7 @@ JSON_COLUMNS = frozenset(
     {"mistakes", "screenshots", "rules", "positions_overnight", "rows", "delivery", "value"}
 )
 FLAG_COLUMNS = frozenset(
-    {"archived", "system", "own_expiry_day", "index_expiry_day", "approximate"}
+    {"archived", "system", "own_expiry_day", "index_expiry_day", "approximate", "charges_modelled"}
 )
 #: Never leave the store in a row: who owns it, the client's retry key, and a report's file
 #: (its bytes leave only through ``Tx.report_file``).
@@ -437,6 +437,36 @@ class Tx:
             query = query.where(t.c.exchange == key[0], t.c.symbol == key[1])
         found = self.conn.execute(query.order_by(t.c.exch_ts_ms, t.c.trade_id)).mappings()
         return [self.out(row) for row in found]
+
+    def fills_of_orders(self, mode: str, order_ids: Iterable[str]) -> list[dict[str, Any]]:
+        """Every fill of the named orders (withdrawn ones aside), oldest first: an order is
+        priced whole, whichever trades hold its fills (review M1)."""
+        t = self._t("fill")
+        out: list[dict[str, Any]] = []
+        for batch in chunks(sorted(set(order_ids))):
+            query = select(t).where(
+                self._mine(t), t.c.mode == mode, t.c.order_id.in_(batch),
+                t.c.source != "withdrawn",
+            )  # fmt: skip
+            out += [self.out(r) for r in self.conn.execute(query).mappings()]
+        return sorted(out, key=lambda f: (f["exch_ts_ms"], f["trade_id"]))
+
+    def order_legs(self, mode: str, order_ids: Iterable[str]) -> list[dict[str, Any]]:
+        """The legs of the named orders' fills in every trade that holds one: the trade's id and
+        opening, the fill's order and day, the leg's quantity (a trade's share of an order)."""
+        t, legs, fills = self._t("round_trip"), self._t("fill_leg"), self._t("fill")
+        out: list[dict[str, Any]] = []
+        for batch in chunks(sorted(set(order_ids))):
+            query = (
+                select(t.c.id.label("trip_id"), t.c.opened_ms, fills.c.order_id, fills.c.day,
+                       legs.c.qty)
+                .select_from(legs.join(fills, fills.c.id == legs.c.fill_id)
+                             .join(t, t.c.id == legs.c.round_trip_id))
+                .where(self._mine(legs), fills.c.principal == self.who, t.c.principal == self.who,
+                       t.c.mode == mode, fills.c.order_id.in_(batch))
+            )  # fmt: skip
+            out += [dict(r) for r in self.conn.execute(query).mappings()]
+        return out
 
     def fill_before(self, mode: str, exchange: str, symbol: str, product_class: str,
                     before_ms: int) -> bool:  # fmt: skip

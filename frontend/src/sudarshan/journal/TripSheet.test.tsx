@@ -263,6 +263,58 @@ describe('what happened', () => {
     expect(screen.queryByText('Still open')).toBeNull()
   })
 
+  it('shows a reversal fill as the part of it that is this trade’s, and where the rest went', async () => {
+    const [buy, sell] = detail().fills
+    serve(
+      detail({
+        qty_max: 650,
+        fills: [
+          { ...buy, qty: 650, trip_qty: 650 },
+          { ...sell, qty: 1300, trip_qty: 650 },
+        ],
+      })
+    )
+    show()
+    const fills = await screen.findByRole('table', { name: 'Fills' })
+    const qty = within(fills)
+      .getAllByTestId('fill-qty')
+      .map((cell) => cell.textContent)
+    expect(qty).toEqual(['650', '650 of 1,300'])
+    expect(
+      screen.getByText('The rest of the 10:14:15 SELL belongs to the next trade.')
+    ).toBeTruthy()
+  })
+
+  it('says a trade on an exchange the estimate does not cover has no charges counted', async () => {
+    serve(detail({ charges_modelled: false, charges_est_paise: 0, gross_paise: 81250 }))
+    show()
+    const result = await screen.findByRole('region', { name: 'Result' })
+    expect(within(result).getByText('Charges').nextElementSibling?.textContent).toBe(
+      'Not estimated for this exchange'
+    )
+    expect(within(result).getByText('Net').nextElementSibling?.textContent).toContain(
+      'no charges counted'
+    )
+    expect(within(result).queryByText('₹0.00')).toBeNull()
+  })
+
+  it('says charges rebuilt from Upstox’s history are an estimate from it', async () => {
+    const [buy, sell] = detail().fills
+    serve(
+      detail({
+        fills: [
+          { ...buy, source: 'history' },
+          { ...sell, source: 'history' },
+        ],
+      })
+    )
+    show()
+    const result = await screen.findByRole('region', { name: 'Result' })
+    expect(within(result).getByText('Charges').nextElementSibling?.textContent).toContain(
+      'est., from Upstox’s history'
+    )
+  })
+
   it('says a Sandbox trade is one', async () => {
     serve(detail({ mode: 'sandbox' }))
     show()

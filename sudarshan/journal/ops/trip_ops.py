@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..book import charges_of, update_trip
+from ..book import charges_of, order_context, update_trip
 from ..core import kinds
 from ..core.metrics import strategy_of
 from ..errors import ApiError
@@ -72,16 +72,22 @@ async def trip_get(ctx, args):
             charges = charges_of(
                 [{"trade_id": leg["trade_id"], "qty": leg["leg_qty"]} for leg in legs],
                 fills, refs, row["mode"], tx.settings()["charges_plan"],
+                shares_of(tx, row, {leg["order_id"] for leg in legs}),
             )  # fmt: skip
         entry = next((leg for leg in legs if leg["leg_role"] == "entry"), None)
         first_ref = refs.get(entry["order_id"]) if entry else None
+        mine: dict[str, int] = {}
+        for leg in legs:
+            mine[leg["trade_id"]] = mine.get(leg["trade_id"], 0) + int(leg["leg_qty"])
         seen: set[str] = set()
         executed = []
         for leg in legs:
             if leg["trade_id"] in fills and leg["trade_id"] not in seen:
                 seen.add(leg["trade_id"])
                 fill = fills[leg["trade_id"]]
-                executed.append(fill_out(fill, refs.get(fill["order_id"])))
+                # A reversal's fill is in two trades: how much of it is this one's.
+                executed.append({**fill_out(fill, refs.get(fill["order_id"])),
+                                 "trip_qty": mine[leg["trade_id"]]})  # fmt: skip
         return {
             **trip_out(row),
             "legs": [leg_out(leg) for leg in legs],
@@ -99,6 +105,22 @@ async def trip_get(ctx, args):
             404, "not_found", "This trade is not in the journal any more. Open the list again."
         )
     return found
+
+
+def shares_of(tx, row, order_ids):
+    """Each order of a trip with its every fill, the units of it the trips opened before this one
+    hold, and its quantity: the trip's share of the order's charges (review M1)."""
+    whole = order_context(tx, row["mode"], order_ids)
+    me = (int(row["opened_ms"]), int(row["id"]))
+    before: dict[tuple[str, int], int] = {}
+    for leg in tx.order_legs(row["mode"], order_ids):
+        if (int(leg["opened_ms"]), int(leg["trip_id"])) < me:
+            key = (str(leg["order_id"]), int(leg["day"]))
+            before[key] = before.get(key, 0) + int(leg["qty"])
+    return {
+        key: (fills, before.get(key, 0), sum(int(f["qty"]) for f in fills))
+        for key, fills in whole.items()
+    }
 
 
 @op("trip_update")

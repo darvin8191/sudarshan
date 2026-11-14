@@ -233,7 +233,7 @@ function ClosedCard({
               <OutcomeWord paise={net} show={net === 0} />
               {trip.charges_actual_paise === null && (
                 <span className="text-[0.6875rem] font-semibold text-[color:var(--text-tertiary)]">
-                  est.
+                  {trip.charges_modelled === false ? 'no charges counted' : 'est.'}
                 </span>
               )}
             </span>

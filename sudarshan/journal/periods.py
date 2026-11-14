@@ -243,10 +243,7 @@ def tax_entries(span: Span, rows: list[dict[str, Any]], sold: list) -> list[dict
 def leaves_out(rows: list[dict[str, Any]], aside: Mapping[str, int]) -> tuple[str, ...]:
     """The tax pack's "What this paper leaves out" lines (review H1)."""
     lines = [FY_ESTIMATES]
-    unpriced = sum(
-        1 for t in rows
-        if charges_core.segment_of(t["exchange"], t["symbol"], t["product"]) == "not_modelled"
-    )  # fmt: skip
+    unpriced = sum(1 for t in rows if tables.unpriced(t))
     if unpriced:
         lines.append(
             f"Charges for BSE, currency and commodity trades are not estimated: "

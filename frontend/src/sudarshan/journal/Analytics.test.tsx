@@ -143,6 +143,24 @@ describe('Analytics', () => {
     expect(screen.getByTestId('charges-line').textContent).toContain('est.')
   })
 
+  it('says est. only while the service says the charges are an estimate, and names those it does not estimate', async () => {
+    serve(analytics({ metrics: metrics({ charges_estimated: false, charges_not_estimated: 2 }) }))
+    show()
+    const line = await screen.findByTestId('charges-line')
+    expect(line.textContent).not.toContain('est.')
+    expect(
+      screen.getByText(/2 trades are on an exchange whose charges are not estimated/)
+    ).toBeTruthy()
+    expect(tile('Net').textContent).not.toContain('charges est.')
+  })
+
+  it('marks the Net figure as after estimated charges while they are', async () => {
+    serve()
+    show()
+    await screen.findByTestId('charges-line')
+    expect(tile('Net').textContent).toContain('6 trades, charges est.')
+  })
+
   it('says there is no charges figure without a winning trade', async () => {
     serve(analytics({ metrics: metrics({ charges_impact_pct: null }) }))
     show()

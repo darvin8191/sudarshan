@@ -155,6 +155,15 @@ def months_table(months: Iterable[Mapping[str, Any]]) -> D.Table:
     return _period_table("Month", months, label)
 
 
+NOT_ESTIMATED = "not estimated"
+
+
+def unpriced(trip: Mapping[str, Any]) -> bool:
+    """A trade on an exchange the charges estimate does not cover, with no actual figure: its
+    charges are said to be not estimated, never shown as 0.00 (review M1)."""
+    return trip.get("charges_modelled") is False and trip.get("charges_actual_paise") is None
+
+
 def trades_table(trips: Sequence[Mapping[str, Any]]) -> D.Table:
     """Every closed trade: day, symbol, side, quantity, charges, net and result."""
     rows = []
@@ -166,7 +175,7 @@ def trades_table(trips: Sequence[Mapping[str, Any]]) -> D.Table:
                 str(t["symbol"]),
                 D.Chip("LONG" if t["side"] == "long" else "SHORT"),
                 str(t["qty_max"]),
-                D.Money(-int(t.get("charges_paise") or 0)),
+                D.Ink(NOT_ESTIMATED) if unpriced(t) else D.Money(-int(t.get("charges_paise") or 0)),
                 D.Money(net),
                 result_chip(net),
             )
@@ -375,7 +384,7 @@ def trades_csv(trips: Sequence[Mapping[str, Any]]) -> str:
                 price_text(t.get("entry_avg_u")),
                 price_text(t.get("exit_avg_u")),
                 paise_text(t.get("gross_paise")),
-                paise_text(t.get("charges_paise")),
+                NOT_ESTIMATED if unpriced(t) else paise_text(t.get("charges_paise")),
                 paise_text(t["net_paise"]),
                 csv_cell(strategy_of(t)),
                 "" if t.get("hold_s") is None else int(t["hold_s"]),

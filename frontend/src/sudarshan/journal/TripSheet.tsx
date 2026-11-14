@@ -21,7 +21,7 @@ import { cn } from '@/lib/utils'
 import { istTime } from '@/sudarshan/books/time'
 import { Signed } from '@/sudarshan/portfolio/Signed'
 import { BottomSheet } from '@/sudarshan/watchlist/BottomSheet'
-import { journalData, problemOf, WORDS } from './api'
+import { journalData, problemOf, type SheetFill, WORDS } from './api'
 import { JOURNAL_KEY } from './keys'
 import { holdWords, openQty, priceText } from './live'
 import { paiseAmount } from './money'
@@ -39,7 +39,7 @@ import {
   type SheetForm,
 } from './sheetForm'
 import { NewTag, TagChips } from './TagChips'
-import { type Fill, type FillSource, LIMITS, type Playbook, type Tag, type Trip } from './types'
+import { type FillSource, LIMITS, type Playbook, type Tag, type Trip } from './types'
 
 const SOURCE_WORDS: Record<FillSource, string> = {
   stream_read: 'Order stream',
@@ -91,7 +91,35 @@ export const UNMATCHED_WORDS =
 export const EXPIRED_WORDS =
   'This contract ended at expiry. An expiry has no fill, so the journal cannot work out its result; Upstox’s own report has it. It is not in your figures.'
 
-function FillsTable({ fills, kept }: { fills: readonly Fill[] | undefined; kept: boolean }) {
+const QTY = new Intl.NumberFormat('en-IN')
+
+/** A fill's part in this trade, when it is less than the whole fill (a reversal). */
+export function partOf(fill: SheetFill): number | null {
+  const part = fill.trip_qty
+  return part !== undefined && part > 0 && part < fill.qty ? part : null
+}
+
+/**
+ * What became of the rest of a fill this trade holds part of: a fill that closed this trade went
+ * on into the next one; a fill that opened it closed the one before.
+ */
+export function restWords(fill: SheetFill, side: Trip['side']): string {
+  const entry = (fill.action === 'BUY') === (side === 'long')
+  const at = `${istTime(fill.exch_ts_ms)} ${fill.action}`
+  return entry
+    ? `The rest of the ${at} closed the trade before this one.`
+    : `The rest of the ${at} belongs to the next trade.`
+}
+
+function FillsTable({
+  fills,
+  kept,
+  side,
+}: {
+  fills: readonly SheetFill[] | undefined
+  kept: boolean
+  side: Trip['side']
+}) {
   if (!fills || fills.length === 0) {
     return (
       <p className="text-sm text-[color:var(--text-secondary)]">
@@ -138,13 +166,27 @@ function FillsTable({ fills, kept }: { fills: readonly Fill[] | undefined; kept:
                   {fill.action}
                 </span>
               </td>
-              <td className="py-2 pr-2 text-right">{fill.qty}</td>
+              <td className="py-2 pr-2 text-right" data-testid="fill-qty">
+                {partOf(fill) === null
+                  ? QTY.format(fill.qty)
+                  : `${QTY.format(partOf(fill) ?? 0)} of ${QTY.format(fill.qty)}`}
+              </td>
               <td className="py-2 pr-2 text-right">{priceText(fill.price_u)}</td>
               <td className="py-2">{SOURCE_WORDS[fill.source]}</td>
             </tr>
           ))}
         </tbody>
       </table>
+      {fills
+        .filter((fill) => partOf(fill) !== null)
+        .map((fill) => (
+          <p
+            key={`rest-${fill.trade_id}`}
+            className="mt-1 text-xs font-medium text-[color:var(--text-tertiary)]"
+          >
+            {restWords(fill, side)}
+          </p>
+        ))}
     </div>
   )
 }
@@ -181,6 +223,20 @@ function Excursion({ trip, capture }: { trip: Trip; capture: string | null }) {
       )}
     </dl>
   )
+}
+
+/** A trade on an exchange the charges estimate does not cover: said, never shown as 0.00. */
+export const NOT_ESTIMATED = 'Not estimated for this exchange'
+
+/**
+ * The word beside the charges: Upstox's actual figure, the journal's estimate, or an estimate
+ * from Upstox's trade history (no order ids there: a side's trades of a day are one order).
+ */
+export function chargesWord(trip: { charges_actual_paise: number | null; fills?: SheetFill[] }) {
+  if (trip.charges_actual_paise !== null) return 'actual'
+  return (trip.fills ?? []).some((f) => f.source === 'history')
+    ? 'est., from Upstox’s history'
+    : 'est.'
 }
 
 /** What kind of record the sheet shows, under its title. */
@@ -574,6 +630,8 @@ export function TripSheet({
     const stillOpen = kept || unseen ? '-' : 'Still open'
     const notKnown = unseen ? 'Not known' : 'Not worked out'
     const charges = trip.charges_actual_paise ?? trip.charges_est_paise
+    const unpriced = trip.charges_modelled === false && trip.charges_actual_paise === null
+    const estimate = chargesWord(trip)
     const capture = captureOf(trip.net_paise, trip.mfe_paise, trip.excursion?.capture_pct)
     body = (
       <div className="flex flex-col gap-4">
@@ -627,13 +685,15 @@ export function TripSheet({
               )}
             </Row>
             <Row label="Charges">
-              {charges === null ? (
+              {unpriced ? (
+                NOT_ESTIMATED
+              ) : charges === null ? (
                 '-'
               ) : (
                 <>
                   {paiseAmount(charges)}{' '}
                   <span className="text-xs font-semibold text-[color:var(--text-tertiary)]">
-                    {trip.charges_actual_paise === null ? 'est.' : 'actual'}
+                    {estimate}
                   </span>
                 </>
               )}
@@ -648,7 +708,7 @@ export function TripSheet({
                   <Signed paise={trip.net_paise} />
                   {trip.charges_actual_paise === null && (
                     <span className="text-xs font-semibold text-[color:var(--text-tertiary)]">
-                      est.
+                      {unpriced ? 'no charges counted' : 'est.'}
                     </span>
                   )}
                 </span>
@@ -663,7 +723,7 @@ export function TripSheet({
           </dl>
         </Section>
         <Section title="Fills">
-          <FillsTable fills={trip.fills} kept={kept} />
+          <FillsTable fills={trip.fills} kept={kept} side={trip.side} />
         </Section>
         {!aside && (
           <Section title="How far it went">

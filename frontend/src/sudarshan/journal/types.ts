@@ -192,6 +192,7 @@ export interface Trip {
   excursion_source: ExcursionSource
   excursion_note: string | null
   version: number
+  charges_modelled: boolean
 }
 
 export interface TripNote {
@@ -263,6 +264,8 @@ export interface Metrics {
   r_total: string | null
   r_avg: string | null
   charges_impact_pct: string | null
+  charges_estimated: boolean
+  charges_not_estimated: number
 }
 
 export interface HoldBucketRow {
@@ -544,7 +547,27 @@ export interface TripRow {
   excursion_source: ExcursionSource
   excursion_note: string | null
   version: number
+  charges_modelled: boolean
   mistakes: number[]
+}
+
+export interface TripFill {
+  trade_id: string
+  order_id: string
+  mode: Mode
+  day: number
+  exchange: string
+  symbol: string
+  instrument_key: string
+  product: string
+  action: Action
+  qty: number
+  price_u: number
+  exch_ts_ms: number
+  order_ts_ms: number | null
+  source: FillSource
+  surface: Surface | null
+  trip_qty: number
 }
 
 export interface TripDetail {
@@ -584,8 +607,9 @@ export interface TripDetail {
   excursion_source: ExcursionSource
   excursion_note: string | null
   version: number
+  charges_modelled: boolean
   legs: TripLeg[]
-  fills: Fill[]
+  fills: TripFill[]
   note: TripNote | null
   excursion: Excursion | null
   charges: ChargeEstimate | null
