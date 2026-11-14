@@ -47,9 +47,7 @@ def test_the_closing_window_is_the_server_s_on_each_vector_day(case):
     assert facts_module.closing_of("NSE", day, None, auction=True) is None  # a holiday
 
 
-@pytest.mark.parametrize(
-    "case", VECTORS["expiries"], ids=[c["symbol"] for c in VECTORS["expiries"]]
-)
+@pytest.mark.parametrize("case", VECTORS["expiries"], ids=[c["symbol"] for c in VECTORS["expiries"]])
 def test_an_expiring_contract_stops_at_its_regime_s_stop(case):
     expiry = date.fromisoformat(case["expiry"])
     fo_end = ms(expiry, "15:45" if expiry >= date(2026, 12, 7) else "15:40")
@@ -106,16 +104,10 @@ def test_tuesday_8_december_the_expiring_nifty_contract_stops_at_15_30(world):
         "day": "2026-12-08", "stops_at": ms(day, "15:30"), "closing": None, "delivery": None,
     }  # fmt: skip
     before = date(2026, 12, 1)  # until 6 Dec every contract stops with the F&O close
-    assert world("NIFTY01DEC2625900CE", "NFO", ms(before, "12:00"))["stops_at"] == ms(
-        before, "15:40"
-    )
+    assert world("NIFTY01DEC2625900CE", "NFO", ms(before, "12:00"))["stops_at"] == ms(before, "15:40")
     dec29 = date(2026, 12, 29)
-    assert world("RELIANCE29DEC261400CE", "NFO", ms(dec29, "09:00"))["stops_at"] == ms(
-        dec29, "15:45"
-    )
-    assert world("NIFTYFPI29DEC2618000CE", "NFO", ms(dec29, "09:00"))["stops_at"] == ms(
-        dec29, "15:30"
-    )
+    assert world("RELIANCE29DEC261400CE", "NFO", ms(dec29, "09:00"))["stops_at"] == ms(dec29, "15:45")
+    assert world("NIFTYFPI29DEC2618000CE", "NFO", ms(dec29, "09:00"))["stops_at"] == ms(dec29, "15:30")
     # Not its expiry day, or a contract the master does not list: nothing.
     assert world("NIFTY08DEC2625900CE", "NFO", ms(date(2026, 12, 7), "12:00"))["stops_at"] is None
     assert world("NIFTY15DEC2625900CE", "NFO", ms(day, "12:00"))["stops_at"] is None
@@ -134,9 +126,7 @@ def test_thursday_10_december_a_stock_with_futures_and_an_index_close_after_15_3
     assert world("RELIANCE", "NSE", ms(christmas, "11:00"))["closing"] is None
 
 
-def test_the_route_answers_the_facts_and_refuses_a_request_without_an_instrument(
-    world, monkeypatch
-):
+def test_the_route_answers_the_facts_and_refuses_a_request_without_an_instrument(world, monkeypatch):
     from flask import Flask
 
     import blueprints.sudarshan_session as route
