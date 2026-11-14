@@ -95,6 +95,9 @@ export default function FamilyJoin() {
   const [totp, setTotp] = useState('')
   const [problem, setProblem] = useState<{ field: string | null; text: string } | null>(null)
   const [busy, setBusy] = useState(false)
+  // Review M5 (v0.12.0): the invite ended while the member was joining (it ran out, or was used
+  // or replaced meanwhile). The service's sentence, shown on the invite-ended screen.
+  const [gone, setGone] = useState<string | null>(null)
 
   // The family worker is what lets Chrome offer the install at the end of joining; the shell that
   // normally registers it is not mounted on this public page.
@@ -126,6 +129,15 @@ export default function FamilyJoin() {
             Try again
           </button>
         )}
+      </Frame>
+    )
+  }
+  if (gone !== null) {
+    // Nothing leads on from here: Continue would only go round to the same refusal.
+    return (
+      <Frame>
+        <h1 className="sd-display text-[1.5rem] font-bold">Invite</h1>
+        <Problem text={gone} />
       </Frame>
     )
   }
@@ -176,7 +188,12 @@ export default function FamilyJoin() {
       // A name or password the service refused goes back to where it is typed; the wrong code
       // stays here so the next one can be tried.
       if (failure.field === 'handle' || failure.field === 'password') setStep('sign-in')
-      if (failure.code === 'invite_gone') setStep('welcome')
+      if (failure.code === 'invite_gone') {
+        // what was typed for an invite that no longer exists is not kept
+        setPassword('')
+        setTotp('')
+        setGone(failure.message)
+      }
     } finally {
       setBusy(false)
     }

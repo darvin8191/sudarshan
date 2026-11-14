@@ -227,6 +227,29 @@ describe('Join', () => {
     expect(where.path).toBe('/family')
     expect(onlyFamily(router.urls())).toBe(true)
   })
+  // Review M5 (v0.12.0): Finish answered that the invite had ended and the page went back to the
+  // welcome step with no words; Continue led round the same loop. Fails on the old page.
+  it('says the invite has ended when it ends during joining, and offers no Continue', async () => {
+    const sentence =
+      'This invite link has expired or was already used. Ask the account owner for a new one.'
+    routeFetch(
+      { '/family/api/join/abc123': ok(INFO), '/family/api/join': fail('invite_gone', sentence) },
+      { '/family/api/join': 410 }
+    )
+    const user = userEvent.setup()
+    mountFamily('/family/join/abc123', <FamilyJoin />, '/family/join/:code')
+    await toCodeStep(user)
+    await user.type(screen.getByLabelText('Enter the 6-digit code it shows'), '123456')
+    await user.click(screen.getByRole('button', { name: 'Finish' }))
+    expect((await screen.findByRole('alert')).textContent).toBe(sentence)
+    expect(screen.queryByRole('button', { name: 'Continue' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Finish' })).toBeNull()
+    expect(screen.queryByText('You are invited to the family view of सुदर्शन · SUDARSHAN')).toBeNull()
+    // the key of an invite that ended is off the screen, and the badge is still there
+    expect(screen.queryByTestId('totp-key')).toBeNull()
+    expect(screen.getByTestId('family-badge')).toBeTruthy()
+    expect(document.body.textContent).not.toMatch(/410|invite_gone/)
+  })
 })
 
 describe('Login', () => {
