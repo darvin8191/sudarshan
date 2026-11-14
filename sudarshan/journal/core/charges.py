@@ -23,9 +23,18 @@ report replaces it (next release).
   the cut points are rounded, never the shares, so the trades' shares add up to the order's own
   figures to the paisa and the day's total (review M1).
 
+* An option that is exercised (or assigned) is its own segment, ``options_exercise``: the holder
+  pays STT on the settlement value at the exercise rate and the writer none. A fill is taken as
+  one only when it says so itself (``exercise``); how Upstox's records mark an exercise is still
+  to be seen on a real one, so no fill says so yet. Its brokerage is the plan's; exchange, SEBI
+  and stamp charges on it are not modelled (to verify).
+
 Rates were read from the Upstox charges page on 14 Nov 2026 (summarised by a fetch tool, so every
 row is also marked "to verify" against the page itself). Exchange rates moved on 1 Mar 2026 and
-STT on 1 Apr 2026.
+STT on 1 Apr 2026. The card starts on 1 Apr 2024, the first day of the oldest financial year
+Upstox's reports reach: F&O STT was lower until 30 Sep 2024 (to verify against a contract note of
+that time; the exchange's own rates before 1 Oct 2024 are not on the card, so a fill of April to
+September 2024 takes the October 2024 exchange rate).
 """
 
 from __future__ import annotations
@@ -41,10 +50,13 @@ from sudarshan.journal.core.pairing import product_class
 DEFAULT_PLAN = "plus"
 GST_RATE = Fraction(18, 100)
 PARTS = ("brokerage", "stt", "exchange", "sebi", "stamp", "gst")
-#: What a rate row without an earlier date is dated by: the first day of the page's table.
-CARD_START = 20241001
-#: The card as shipped: the day its rates were read (bump it with any row below).
-CARD_VERSION = "2026-11-14"
+#: What a rate row without an earlier date is dated by: 1 April 2024, the first day of the oldest
+#: financial year in reach of Upstox's reports.
+CARD_START = 20240401
+#: The day F&O STT rose in 2024 (the rates before it are the card's first rows).
+STT_2024 = 20241001
+#: The card as shipped: the day its rates were read, and its edition (bump it with any row below).
+CARD_VERSION = "2026-11-14.2"
 
 
 def _rate(text: str) -> Fraction:
@@ -75,10 +87,16 @@ _SEGMENTS_EQ = ("equity_delivery", "equity_intraday")
 # to verify: every row below against https://upstox.com/brokerage-charges/ (read 14 Nov 2026).
 RATE_CARD: tuple[Row, ...] = (
     # STT on the sell side of F&O: raised on 1 Apr 2026. To verify.
-    Row(CARD_START, "options", "SELL", "stt", _rate("0.001")),
+    # Until 30 Sep 2024 it was 0.0625% on options and 0.0125% on futures. To verify.
+    Row(CARD_START, "options", "SELL", "stt", _rate("0.000625")),
+    Row(STT_2024, "options", "SELL", "stt", _rate("0.001")),
     Row(20260401, "options", "SELL", "stt", _rate("0.0015")),
-    Row(CARD_START, "futures", "SELL", "stt", _rate("0.0002")),
+    Row(CARD_START, "futures", "SELL", "stt", _rate("0.000125")),
+    Row(STT_2024, "futures", "SELL", "stt", _rate("0.0002")),
     Row(20260401, "futures", "SELL", "stt", _rate("0.0005")),
+    # An exercised option: the holder's STT on the settlement value. To verify.
+    Row(CARD_START, "options_exercise", "SELL", "stt", _rate("0.00125")),
+    Row(20260401, "options_exercise", "SELL", "stt", _rate("0.0015")),
     Row(CARD_START, "equity_delivery", "BOTH", "stt", _rate("0.001")),
     Row(CARD_START, "equity_intraday", "SELL", "stt", _rate("0.00025")),
     # NSE transaction charges, both sides: raised on 1 Mar 2026. To verify.
@@ -165,6 +183,8 @@ def estimate_order(
     rows = list(fills)
     first = rows[0]
     segment = segment_of(first["exchange"], first["symbol"], first["product"])
+    if segment == "options" and first.get("exercise") is True:
+        segment = "options_exercise"
     parts = dict.fromkeys(PARTS, 0)
     if segment == "not_modelled":
         parts["total"] = 0

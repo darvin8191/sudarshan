@@ -8,7 +8,17 @@ from ..book import charges_of, shares_of, update_trip
 from ..core import kinds
 from ..core.metrics import strategy_of
 from ..errors import ApiError
-from ..views import done, excursion_out, fill_out, leg_out, note_out, ref_out, row_out, trip_out
+from ..views import (
+    actual_out,
+    done,
+    excursion_out,
+    fill_out,
+    leg_out,
+    note_out,
+    ref_out,
+    row_out,
+    trip_out,
+)
 from . import op
 from .common import OWNER, choice, need, text, whole, work
 
@@ -95,6 +105,7 @@ async def trip_get(ctx, args):
             "note": note_out(tx.note_of(trip_id)),
             "excursion": excursion_out(row),
             "charges": charges,
+            "charges_actual": actual_out(row),
             "latency_ms": (first_ref or {}).get("rtt_ms"),
             "orders": [ref_out(refs[o]) for o in sorted(refs)],
         }

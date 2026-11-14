@@ -23,8 +23,10 @@ every ring service; the journal never reads the Upstox token):
    A trade the journal already holds is never touched. A day the history has no rows for yet
    stays unmarked and is asked again the next night, while it is one of the last 3.
 3. Upstox's own P&L report: the matched pairs sold or bought on the previous 3 trading days, for
-   each segment the journal holds fills of then, and that segment's charges for the year so far. They
-   are kept for the comparison of estimated with actual charges, which the next release shows.
+   each segment the journal holds fills of then. While ``SUDARSHAN_TAX`` is off, that segment's
+   charges for the year so far are kept too, as before; while it is on, Upstox's charges are
+   read day by day and month by month instead and shared among the orders and trades
+   (``jobs/charges.py``, the step named ``charges``).
 
 4. The open delivery trades of shares are held against Upstox's holdings (``book.recount_shares``,
    verification N2): one whose shares the account no longer holds, because its sale was made
@@ -47,6 +49,7 @@ from collections.abc import Mapping
 from datetime import timedelta
 from typing import Any
 
+from ..actual import SEGMENT_OF
 from ..capture import capture_for
 from ..core import kinds
 from ..core.money import to_date, to_day, u_to_paise
@@ -62,8 +65,6 @@ OWNER = Scope.owner()
 QTY_SCALE = 1_000_000
 CATCHUP_DAYS = 3
 SEGMENTS = ("EQ", "FO", "COM", "CD")
-SEGMENT_OF = {"NSE": "EQ", "BSE": "EQ", "NFO": "FO", "BFO": "FO", "MCX": "COM", "CDS": "CD",
-              "BCD": "CD"}  # fmt: skip
 #: OpenAlgo's exchange for one of Upstox's (segment, exchange) pairs.
 EXCHANGE_OF = {("EQ", "NSE"): "NSE", ("EQ", "BSE"): "BSE", ("FO", "NSE"): "NFO",
                ("FO", "BSE"): "BFO", ("FO", "NFO"): "NFO", ("FO", "BFO"): "BFO",
@@ -347,6 +348,8 @@ async def pnl_rows(service: Any, days: list[int], now: int) -> str:
             ]
             if len(found) < int(answer.get("page_size") or PNL_PAGE_SIZE):
                 break
+        if getattr(service.settings, "tax", False):
+            continue  # the charges step reads them by day and by month
         answer = await link.pnl_report(segment, fy, "charges")
         if answer.get("state") == "ok" and isinstance(answer.get("charges"), Mapping):
             charges.append(charges_row(answer["charges"], segment, fy, now))
@@ -372,7 +375,9 @@ async def catch_up(service: Any, today: int, now: int, late: bool) -> str:
             failed = f"Today's trades could not be read at 22:00: {out.words}"
     done = service.parts.setdefault("catchup_done", set())
     days = [to_day(d) for d in plan.previous_trading_days(to_date(today), CATCHUP_DAYS)]
-    for name, step in (("history", history), ("pnl", pnl_rows)):
+    from .charges import actual_charges
+
+    for name, step in (("history", history), ("pnl", pnl_rows), ("charges", actual_charges)):
         if (today, name) in done:
             continue
         try:

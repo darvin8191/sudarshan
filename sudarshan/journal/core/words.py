@@ -22,6 +22,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from sudarshan.journal.core import money
+from sudarshan.tax.words import WORKING_PAPER
 
 HEADER = "सुदर्शन · SUDARSHAN"
 MINUS = "−"
@@ -30,7 +31,9 @@ RUPEE = "₹"
 WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 OPEN_FULL_REPORT = "Open the full report: SUDARSHAN > Reports"
-FY_NOTE = "A working paper: verify with your CA. The broker's own report is the filing source."
+#: The tax core's own sentence (``sudarshan.tax.words``), so one string labels the working
+#: paper on the phone's Tax view and on the Tax pack.
+FY_NOTE = WORKING_PAPER
 
 
 # ---- numbers ---------------------------------------------------------------------------------
@@ -362,9 +365,11 @@ def monthly(label: str, trading_days: int, metrics: Mapping[str, Any], **extra: 
     return period_report("Monthly statement", label, "month", trading_days, metrics, footer=footer, **extra)  # fmt: skip
 
 
-def fy(label: str, trading_days: int, metrics: Mapping[str, Any], **extra: Any) -> str:
-    """The tax pack (M15.5); ``label`` is e.g. ``FY 2025-26``."""
-    footer = (FY_NOTE, OPEN_FULL_REPORT)
+def fy(label: str, trading_days: int, metrics: Mapping[str, Any],
+       paper: Sequence[str] = (), **extra: Any) -> str:  # fmt: skip
+    """The tax pack (M15.5); ``label`` is e.g. ``FY 2025-26``. ``paper`` is the tax working
+    paper's own lines (``taxpack.pack_lines``), or the sentence saying why there is none."""
+    footer = (*paper, FY_NOTE, OPEN_FULL_REPORT)
     return period_report("Tax pack", label, "year", trading_days, metrics, footer=footer, **extra)
 
 

@@ -242,6 +242,7 @@ def test_the_csv_apostrophe_rule_is_exactly_y32():
 
 
 # ---- the tax pack ----------------------------------------------------------------------------
+# The working paper itself is ``test_journal_taxpack.py``'s; here, the pack with the switch off.
 def test_the_tax_pack_is_a_labelled_working_paper_with_no_section_numbers(rig, book):  # noqa: F811
     built = build(rig, "fy", period="FY2627")
     assert built["words"] == "The tax pack is in the archive."
@@ -253,27 +254,19 @@ def test_the_tax_pack_is_a_labelled_working_paper_with_no_section_numbers(rig, b
         "A working paper: verify with your CA. The broker's own report is the filing source."
         in text
     )
+    assert "Trading activity recorded by the journal" in text
     assert "Month by month" in text and "Nov 2026" in text
-    assert "By kind of trade" in text and "Futures and options (NFO, BFO)" in text
-    assert "Upstox's own charges for this financial year have not been read yet" in text
+    assert "By kind of trade" in text and "F&O and other derivatives" in text
+    # Switched off, the pack asks the portfolio for nothing and says so in a sentence.
+    assert "The tax working paper is switched off on the server" in text
+    assert "tax_pack" not in [c[0] for c in rig.portfolio.calls]
     both = text + row["text"]
     assert not re.search(
         r"(?i)\bsection\b|§|\bsec\.|\b4[34]A[DB]\b|\b11[12]A\b|\b43\(5\)|income tax act", both
     )
     assert words.FY_NOTE in row["text"]
-
-
-def test_the_brokers_own_charges_are_listed_when_they_have_been_read(rig, book):  # noqa: F811
-    book.write(OWNER, lambda tx: tx.upstox_charges_put({
-        "segment": "FO", "financial_year": 2026, "period_from": 20260401, "period_to": 20270331,
-        "total_paise": 123_456, "brokerage_paise": 40_000, "gst_paise": 9_000,
-        "stt_paise": 50_000, "stamp_paise": 2_000, "transaction_paise": 20_000,
-        "clearing_paise": 0, "ipft_paise": 100, "others_paise": 2_356, "read_at": 1}, 1))  # fmt: skip
-    build(rig, "fy", period="FY2627")
-    text = "\n".join(pdf_lines(file_of(rig, kept(rig, "fy"))))
-    assert "Charges as Upstox reports them" in text
-    assert "Futures and options" in text and "−₹1,234.56" in text
-    assert "have not been read yet" not in text
+    assert "switched off on the server" in row["text"]
+    assert row["rows"]["tax_pack"] is None and row["rows"]["tax_note"].startswith("The tax working")
 
 
 def test_a_year_with_no_trade_is_still_a_complete_labelled_paper(rig, book):  # noqa: F811
@@ -282,18 +275,48 @@ def test_a_year_with_no_trade_is_still_a_complete_labelled_paper(rig, book):  # 
     assert "verify with your CA" in text and "No trades closed in this" in text
 
 
-def test_trades_are_grouped_by_kind_and_holding_period_never_by_a_legal_term():
-    base = {"exchange": "NFO", "net_paise": 100, "gross_paise": 150, "charges_paise": 50}
-    assert tables.kind_of_trade(base) == "Futures and options (NFO, BFO)"
-    assert tables.kind_of_trade({**base, "exchange": "MCX"}) == "Currency and commodity derivatives"
-    eq = {**base, "exchange": "NSE", "product_class": "intraday"}
-    assert tables.kind_of_trade(eq) == "Equity, bought and sold the same day"
-    carry = {**base, "exchange": "NSE", "product_class": "carry", "open_day": 20261102}
-    assert tables.kind_of_trade({**carry, "close_day": 20271102}).endswith("up to 12 months")
-    assert tables.kind_of_trade({**carry, "close_day": 20271103}).endswith("over 12 months")
+def test_a_trade_is_counted_by_the_tax_cores_own_classifier_and_no_holding_period():
+    """One rule for which head a trade belongs to (``sudarshan.tax.classify``); how long shares
+    were held is the working paper's, never the journal's."""
+    base = {"exchange": "NFO", "symbol": "NIFTY25NOV2625000CE", "product_class": "carry"}
+    assert tables.kind_of_trade(base) == "F&O and other derivatives"
+    assert tables.kind_of_trade({**base, "exchange": "MCX"}) == "F&O and other derivatives"
+    eq = {"exchange": "NSE", "symbol": "ACME", "product_class": "intraday"}
+    assert tables.kind_of_trade(eq) == "Shares, bought and sold the same day"
+    carry = {"exchange": "NSE", "symbol": "ACME", "product_class": "carry", "open_day": 20261102}
+    for close in (20261103, 20271102, 20271103, 20301103):
+        assert tables.kind_of_trade({**carry, "close_day": close}) == (
+            "Shares, taken or given in delivery"
+        )
     assert tables.kind_of_trade({**carry, "close_day": 20261102}) == (
-        "Equity, bought and sold the same day"
-    )  # the delivery product, the same day: intraday all the same (review H1)
+        "Shares, bought and sold the same day"
+    )  # the delivery product, the same day: nothing was delivered (review H1)
+    assert tables.kind_of_trade({**carry, "exchange": "XYZ"}) == "Other"
+    from sudarshan.tax import classify
+
+    assert set(tables.HEAD_LABELS) == {classify.DERIVATIVE, classify.INTRADAY,
+                                       classify.DELIVERY, classify.NOT_COMPUTED}  # fmt: skip
+
+
+def test_the_journal_holds_no_capital_gains_or_turnover_rule_of_its_own():
+    """Design 11.3: the tax rules live in ``sudarshan/tax`` alone. The journal prints the pack;
+    it has no lot matching, no holding-period line, no exemption, no rate and no turnover."""
+    import pathlib
+
+    root = pathlib.Path(periods.__file__).parent
+    words_found = []
+    for path in sorted(root.rglob("*.py")):
+        if "tests" in path.parts:
+            continue
+        source = path.read_text(encoding="utf-8")
+        for needle in ("LTCG", "STCG", "grandfather", "held_over_12", "plus_months", "lots_of(",
+                       "EXEMPT", "abs_pnl", "fmv_"):  # fmt: skip
+            if needle in source and path.name != "taxpack.py":
+                words_found.append((path.name, needle))
+    assert words_found == []
+    assert not (root / "core" / "lots.py").exists()
+    printer = (root / "taxpack.py").read_text(encoding="utf-8")
+    assert "sum(" not in printer  # the printer adds nothing up: every figure is the pack's
 
 
 # ---- the archive and the ops -----------------------------------------------------------------

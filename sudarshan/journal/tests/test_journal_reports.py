@@ -20,7 +20,7 @@ from test_journal_capture import rig as rig  # noqa: F401  (a fixture)
 from test_journal_jobs import answer_positions, live_rows, position, record
 
 from sudarshan.journal import reports
-from sudarshan.journal.core import kinds
+from sudarshan.journal.core import charges, kinds
 from sudarshan.journal.errors import ApiError
 from sudarshan.journal.jobs import check, day
 from sudarshan.journal.ops import REGISTRY, settings_ops
@@ -299,7 +299,7 @@ def settings_of(rig):
 def test_settings_carry_the_alerts_the_rate_card_and_the_times(rig, alerts):
     got = settings_of(rig)
     assert got["alerts_on"] is True and got["report_language"] == "en" and got["version"] == 1
-    assert got["rate_card"] == {"version": "2026-11-14", "from_day": 20260401}
+    assert got["rate_card"] == {"version": charges.CARD_VERSION, "from_day": 20260401}
     assert got["times"] == {"brief": "08:45", "eod": "15:45", "check": "16:05",
                             "weekly": "Sunday 18:00", "monthly": "the 1st at 07:00",
                             "fy": "1 April 07:00"}  # fmt: skip

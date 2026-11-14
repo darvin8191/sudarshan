@@ -14,6 +14,7 @@ import { DividendsCard } from '../dividends/DividendsCard'
 import { type Member, REPORT_YEARS, type TaxPack } from '../types'
 import { asOf, fyLabel, fyOfDay } from './format'
 import { InputsSheet } from './InputsSheet'
+import { BuildPack, ReconcileBlock } from './JournalCards'
 import { TAX_KEY } from './keys'
 import { ChargesCard, Downloads, LeftOutCard, LossesCard, ReadsCard, readingOf } from './MoreCards'
 import { CARD, Card, OUTLINE, Sentences } from './parts'
@@ -138,9 +139,12 @@ function Paper({
       <BusinessCard business={pack.business} />
       <LossesCard pack={pack} />
       {dividends}
-      <ChargesCard pack={pack} />
+      <ChargesCard pack={pack}>
+        <ReconcileBlock fy={pack.fy} />
+      </ChargesCard>
       <LeftOutCard pack={pack} />
       <Downloads pack={pack} />
+      <BuildPack fy={pack.fy} />
       <ScheduleSheet
         open={sheet === 'tax-sales'}
         onClose={onClose}
