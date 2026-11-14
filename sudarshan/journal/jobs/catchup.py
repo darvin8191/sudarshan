@@ -10,14 +10,19 @@ every ring service; the journal never reads the Upstox token):
    journal was down that day). Upstox's history has no times, no products and no order ids, so
    such a fill is put at noon of its day (the pairing then orders a day's fills by trade number),
    takes the product the day's recorded fills of its instrument carry when they carry one, else
-   the carry class, and its order is labelled from the history alone, never asked about again. A trade the journal already holds is never touched. A day the history has no
-   rows for yet stays unmarked and is asked again the next night, while it is one of the last 3.
+   the carry class, and its order is labelled from the history alone, never asked about again.
+   The history names no order either, so the trades of one instrument, product, side and day are
+   taken as one order (``history_order_id``): one brokerage, as an order filled in parts pays,
+   never one a trade (review M1); the trade sheet says such charges are from Upstox's history.
+   A trade the journal already holds is never touched. A day the history has no rows for yet
+   stays unmarked and is asked again the next night, while it is one of the last 3.
 3. Upstox's own P&L report: the matched pairs sold or bought on the previous 3 trading days, for
    each segment the journal holds fills of then, and that segment's charges for the year so far. They
    are kept for the comparison of estimated with actual charges, which the next release shows.
 
 A first step that could not read fails the run (asked again every 15 minutes until midnight);
-the other two then run once a day whatever it did.
+the other two then run once a day whatever it did. Last, the job log lets go of rows older than
+KEEP_JOB_DAYS (design 4.2, review L3); report files are kept (a PDF is 50 to 500 KiB a month).
 """
 
 from __future__ import annotations
@@ -27,6 +32,7 @@ import hashlib
 import json
 import logging
 from collections.abc import Mapping
+from datetime import timedelta
 from typing import Any
 
 from ..capture import capture_for
@@ -56,6 +62,8 @@ PNL_PAGES = 3
 PNL_PAGE_SIZE = 5000
 HISTORY_LABEL = "Trade history"
 NOON_MIN = 12 * 60
+#: How long the job log keeps a day's rows (design 4.2).
+KEEP_JOB_DAYS = 400
 
 
 def financial_year(day: int) -> int:
@@ -138,6 +146,12 @@ def fill_from_history(row: Mapping[str, Any], listing: Any, at_ms: int) -> dict[
         "order_ts_ms": None,
         "source": "history",
     }
+
+
+def history_order_id(fill: Mapping[str, Any]) -> str:
+    """The order a history trade is taken to belong to: one per instrument, product, side and
+    day (Upstox's history names no order)."""
+    return f"h:{fill['day']}:{fill['exchange']}:{fill['symbol']}:{fill['product']}:{fill['action']}"
 
 
 def pair_row(row: Mapping[str, Any], segment: str, fy: int, now: int) -> dict[str, Any]:
@@ -232,6 +246,7 @@ async def history(service: Any, days: list[int], now: int) -> str:
         found = products.get((f["day"], f["exchange"], f["symbol"])) or set()
         if len(found) == 1:
             f["product"] = next(iter(found))
+        f["order_id"] = history_order_id(f)
     labels = {f["order_id"]: {"strategy": HISTORY_LABEL, "surface": "history"} for f in fresh}
     if fresh:
         await capture_for(service).record_history(fresh, labels)
@@ -321,6 +336,10 @@ async def catch_up(service: Any, today: int, now: int, late: bool) -> str:
             lines.append(f"{name}: not read ({exc})")
     for key in [k for k in done if k[0] < today]:
         done.discard(key)
+    cutoff = to_day(to_date(today) - timedelta(days=KEEP_JOB_DAYS))
+    let_go = await _write(service, lambda tx: tx.job_forget(cutoff))
+    if let_go:
+        lines.append(f"job log: {let_go} rows older than {KEEP_JOB_DAYS} days let go")
     if failed:
         raise JobFailed("; ".join([failed, *lines[1:]]))
     return "; ".join(lines)

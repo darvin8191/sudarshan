@@ -5,7 +5,7 @@ import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { cn } from '@/lib/utils'
 import { directionOf, formatRupees } from '@/sudarshan/dashboard/format'
-import { TREND_TEXT, TrendArrow } from '@/sudarshan/dashboard/Trend'
+import { TREND_TEXT } from '@/sudarshan/dashboard/Trend'
 import { Signed } from '@/sudarshan/portfolio/Signed'
 import { compactPaise, digitsOf, monthWords } from './analyticsWords'
 import { type Calendar, PAISE_PER_RUPEE, type PeriodRow } from './types'
@@ -49,6 +49,49 @@ export function monthCells(month: number): Array<number | null> {
   ]
 }
 
+/** The ISO week a day (YYYYMMDD) falls in, as the service keys weeks: year and week number. */
+export function isoWeekOf(day: number): { year: number; week: number } {
+  const date = new Date(
+    Date.UTC(Math.floor(day / 10000), (Math.floor(day / 100) % 100) - 1, day % 100)
+  )
+  const weekday = (date.getUTCDay() + 6) % 7 // Monday 0
+  date.setUTCDate(date.getUTCDate() - weekday + 3) // the Thursday of that week names its year
+  const year = date.getUTCFullYear()
+  const firstThursday = new Date(Date.UTC(year, 0, 4))
+  const offset = (firstThursday.getUTCDay() + 6) % 7
+  firstThursday.setUTCDate(firstThursday.getUTCDate() - offset + 3)
+  return { year, week: 1 + Math.round((date.getTime() - firstThursday.getTime()) / 604_800_000) }
+}
+
+/** A week key ("2026W45", "2026-W45") as year and week; null for one this page cannot read. */
+export function weekOfKey(key: string): { year: number; week: number } | null {
+  const m = /^(\d{4})-?W(\d{1,2})$/.exec(key.trim())
+  return m ? { year: Number(m[1]), week: Number(m[2]) } : null
+}
+
+/**
+ * The weeks to list under a month (review M8): only those holding one of its days, each named
+ * "Week 45" (the month's heading carries the year); a key this page cannot read is left out
+ * rather than shown as it is.
+ */
+export function weeksOfMonth(
+  weeks: readonly PeriodRow[],
+  month: number
+): Array<{ row: PeriodRow; week: number }> {
+  const held = new Set(
+    monthCells(month)
+      .filter((d): d is number => d !== null)
+      .map((d) => {
+        const w = isoWeekOf(d)
+        return `${w.year}:${w.week}`
+      })
+  )
+  return weeks.flatMap((row) => {
+    const w = weekOfKey(row.key)
+    return w && held.has(`${w.year}:${w.week}`) ? [{ row, week: w.week }] : []
+  })
+}
+
 const MONTH_SHORT = [
   'Jan',
   'Feb',
@@ -77,7 +120,7 @@ function Cell({ day, row }: { day: number; row: PeriodRow | undefined }) {
       data-testid="calendar-cell"
       data-day={day}
       className={cn(
-        'flex min-h-14 flex-col items-center justify-start gap-0.5 rounded-lg border border-[color:var(--divider)] px-0.5 py-1 text-center',
+        'flex min-h-14 min-w-0 flex-col items-center justify-start gap-0.5 overflow-hidden rounded-lg border border-[color:var(--divider)] px-0.5 py-1 text-center',
         TINT[dir]
       )}
     >
@@ -85,13 +128,14 @@ function Cell({ day, row }: { day: number; row: PeriodRow | undefined }) {
         {day % 100}
       </span>
       {row && (
+        // Review M4: no arrow inside a cell this small; the sign and the tint still carry the
+        // direction, and the figure is at most five characters, so it never runs into the next.
         <span
           className={cn(
-            'inline-flex items-center gap-0.5 text-[0.75rem] leading-none font-bold',
+            'text-[0.6875rem] leading-none font-bold whitespace-nowrap',
             TREND_TEXT[dir]
           )}
         >
-          <TrendArrow direction={dir} className="size-[0.4375rem]" />
           {compactPaise(net)}
         </span>
       )}
@@ -121,10 +165,7 @@ export function CalendarGrid({ calendar }: { calendar: Calendar }) {
   }
   const at = months.indexOf(month)
   const cells = monthCells(month)
-  const weeks = calendar.weeks.filter((w) => {
-    const digits = digitsOf(w.key)
-    return digits.length >= 6 && digits.slice(0, 4) === String(Math.floor(month / 100))
-  })
+  const weeks = weeksOfMonth(calendar.weeks, month)
   const inMonth = calendar.months.find((m) => digitsOf(m.key) === String(month))
   return (
     <section aria-label="Calendar" className={`${SECTION} flex flex-col gap-3`}>
@@ -179,14 +220,17 @@ export function CalendarGrid({ calendar }: { calendar: Calendar }) {
           className="flex flex-col gap-1 border-t border-[color:var(--divider)] pt-2"
           aria-label="Weeks"
         >
-          {weeks.map((w) => (
-            <li key={w.key} className="flex items-baseline justify-between text-sm">
-              <span className="font-medium text-[color:var(--text-secondary)]">Week {w.key}</span>
-              <span className="inline-flex items-baseline gap-3">
+          {weeks.map(({ row, week }) => (
+            <li
+              key={row.key}
+              className="flex flex-wrap items-baseline justify-between gap-x-3 text-sm"
+            >
+              <span className="font-medium text-[color:var(--text-secondary)]">Week {week}</span>
+              <span className="ml-auto inline-flex items-baseline gap-3">
                 <span className="text-[color:var(--text-tertiary)]">
-                  {w.trips} {w.trips === 1 ? 'trade' : 'trades'}
+                  {row.trips} {row.trips === 1 ? 'trade' : 'trades'}
                 </span>
-                <Signed paise={w.net_paise} />
+                <Signed paise={row.net_paise} />
               </span>
             </li>
           ))}

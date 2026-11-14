@@ -20,22 +20,27 @@ export function TagGlyph({ kind, className }: { kind: Tag['kind']; className?: s
   return <Icon aria-hidden="true" className={cn('size-3.5 shrink-0', className)} />
 }
 
-/** Icons only, for a crowded row: the words are read out and shown on hover. */
-export function TagIcons({ tags }: { tags: readonly Tag[] }) {
+/**
+ * A card's mistakes as one chip with their count (review L8): a row of identical warning glyphs
+ * said nothing on a phone, where nothing hovers. The names are read out and shown on a long press.
+ */
+export function MistakeCount({ tags }: { tags: readonly Tag[] }) {
   if (tags.length === 0) return null
+  const names = tags.map((tag) => tag.name).join(', ')
   return (
-    <span className="inline-flex items-center gap-1" data-testid="trip-tags">
+    <span
+      data-testid="trip-tags"
+      title={names}
+      className={cn(
+        'inline-flex h-6 items-center gap-1 rounded-full border px-2 text-xs font-semibold',
+        TAG_TONE.neutral
+      )}
+    >
+      <TagGlyph kind="mistake" />
+      {tags.length} {tags.length === 1 ? 'mistake' : 'mistakes'}
       {tags.map((tag) => (
-        <span
-          key={tag.id}
-          title={tag.name}
-          className={cn(
-            'inline-flex size-6 items-center justify-center rounded-full border',
-            TAG_TONE[tag.colour]
-          )}
-        >
-          <TagGlyph kind={tag.kind} />
-          <span className="sr-only">{tag.name}</span>
+        <span key={tag.id} className="sr-only">
+          {`, ${tag.name}`}
         </span>
       ))}
     </span>

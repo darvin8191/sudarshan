@@ -297,7 +297,8 @@ def test_status_of_a_missing_file_makes_nothing(tmp_path, capsys):
     assert migrate.main(["--status", "--path", str(target)]) == 0
     assert not target.parent.exists()
     out = capsys.readouterr().out
-    assert "version: file none, code 1" in out and "pending: [1]" in out
+    assert f"version: file none, code {migrations.LATEST}" in out
+    assert f"pending: {ALL_STEPS}" in out
 
 
 def test_status_changes_nothing_in_the_directory(path, made, capsys):
@@ -314,7 +315,7 @@ def test_status_of_an_old_file_lists_the_pending_step_and_leaves_it(path, made, 
     store.stop()
     raw(path, "PRAGMA user_version = 0")
     assert migrate.main(["--status", "--path", str(path)]) == 0
-    assert "pending: [1]" in capsys.readouterr().out
+    assert f"pending: {ALL_STEPS}" in capsys.readouterr().out
     assert raw(path, "PRAGMA user_version") == [(0,)]
 
 

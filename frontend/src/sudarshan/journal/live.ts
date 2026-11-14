@@ -50,6 +50,11 @@ export function tickOf(line: SymbolData | undefined): JournalTick | null {
   return ltpU === null ? null : { ltpU, at: price.at, live: price.live }
 }
 
+const COUNT = new Intl.NumberFormat('en-IN')
+
+/** A quantity or a count as the owner reads it: 1,300, 12,34,567 (review L1). */
+export const countText = (n: number): string => COUNT.format(n)
+
 /** A price in rupees as the owner reads it: 2 places, 4 for a currency tick that needs them. */
 export function priceText(u: number): string {
   const places = u % 100 === 0 ? 2 : 4
@@ -92,6 +97,10 @@ export interface DayGroup<T extends Trip = Trip> {
   trips: T[]
   /** The sum of the nets the day's trades have; null when none of them has one yet. */
   net_paise: number | null
+  /** The day's trades with no net yet: the sum leaves them out, and says so (review M7). */
+  missing: number
+  /** Whether a net in the sum rests on estimated charges, as a card's "est." says. */
+  estimated: boolean
 }
 
 /** Closed trips by the day they closed, newest day first and newest trade first within it. */
@@ -107,11 +116,15 @@ export function groupByDay<T extends Trip>(trips: readonly T[]): DayGroup<T>[] {
       const sorted = [...list].sort(
         (a, b) => (b.closed_ms ?? 0) - (a.closed_ms ?? 0) || b.id - a.id
       )
-      const nets = sorted.map((t) => t.net_paise).filter((n): n is number => n !== null)
+      const priced = sorted.filter((t) => t.net_paise !== null)
       return {
         day,
         trips: sorted,
-        net_paise: nets.length ? nets.reduce((sum, n) => sum + n, 0) : null,
+        net_paise: priced.length ? priced.reduce((sum, t) => sum + (t.net_paise ?? 0), 0) : null,
+        missing: sorted.length - priced.length,
+        estimated: priced.some(
+          (t) => t.charges_actual_paise === null && t.charges_modelled !== false
+        ),
       }
     })
 }

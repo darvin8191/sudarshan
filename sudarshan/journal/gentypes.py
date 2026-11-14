@@ -101,6 +101,7 @@ def render() -> str:
     out += _tuple_const("INTRADAY_PRODUCTS", k.INTRADAY_PRODUCTS)
     out += _tuple_const("CARRY_PRODUCTS", k.CARRY_PRODUCTS)
     out += _tuple_const("HOLD_BUCKETS", k.HOLD_BUCKETS)
+    out += _tuple_const("DESK_STATES", k.DESK_STATES)
     out += _tuple_const("OP_NAMES", k.OP_NAMES) + [""]
     for name, values in k.ENUMS.items():
         out += _union(name, values)
