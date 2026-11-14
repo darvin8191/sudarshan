@@ -169,14 +169,12 @@ describe('Journal', () => {
   it('keeps the page when a re-read of the journal’s state fails (review L9)', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
     try {
-      call
-        .mockResolvedValueOnce(ON)
-        .mockRejectedValue(
-          new JournalError({
-            code: 'unavailable',
-            message: 'The journal service is not answering.',
-          })
-        )
+      call.mockResolvedValueOnce(ON).mockRejectedValue(
+        new JournalError({
+          code: 'unavailable',
+          message: 'The journal service is not answering.',
+        })
+      )
       renderBook('/journal', <Journal />)
       expect(await screen.findByTestId('trips-of')).toBeTruthy()
       await act(async () => {
