@@ -1,16 +1,21 @@
 """O3 (P6; M2.11, M2.16; cross-design Y7, Y33): the deploy tool's check of the family view's nginx lines.
 
 ``sudarshan-deploy --nginx-check`` says, reading only, whether the three files the owner installs from
-``sudarshan/ops/nginx`` are in place, this release's and loaded by nginx, whether the guard sits in the
-server block for port 443, whether that server's location / goes where the invite page goes, whether the
-guard knows OpenAlgo's cookie as OpenAlgo's .env makes it, and whether the running nginx was reloaded
-after the files changed. A timer run logs the first problem once while it holds and says nothing while
-none of the files is there; the family set-up adds one line before its PASS.
+``sudarshan/ops/nginx`` are in place and this release's, whether nginx's own test passes, whether the
+include line sits in the server block for port 443 of the SUDARSHAN site file (whose path the owner
+records in /etc/sudarshan/nginx-site), whether that server's location / goes where the invite page goes,
+whether the guard knows OpenAlgo's cookie as OpenAlgo's .env makes it, whether the running nginx was
+reloaded after the four files changed, and warns when OpenAlgo trusts forwarded addresses while that
+location / passes on the two headers a caller can fake. Of nginx it reads those four files and nothing
+else: never another site's file, never a folder listing, and of ``nginx -t`` only its exit status. A
+timer run logs the first problem once while it holds and says nothing while none of the files is there;
+the family set-up adds one line before its PASS.
 
 The pieces of the tool run on their own (``_function``); the whole tool runs on the fake server of
 ``test_deploy_calendar.py``, with ``NGX_DIR`` pointed into the box (``monkeypatch`` on its
-``DEPLOY_TOOL``, as ``test_deploy_family.py`` does), a fake ``nginx`` that prints what ``nginx -T``
-would (written by the test, in nginx's own format) and a fake ``ps`` for its workers.
+``DEPLOY_TOOL``, as ``test_deploy_family.py`` does), a fake ``nginx`` whose ``-t`` answers what a test
+says, and a fake ``ps`` for its workers. With an nginx binary the whole tool also runs against a real
+``nginx -t`` (skipped without one), and with strace a run is traced to show it opens nothing else.
 """
 
 from __future__ import annotations
@@ -35,6 +40,8 @@ FILES = (
     "snippets/sudarshan-family.conf",
     "snippets/sudarshan-family-proxy.conf",
 )
+HOWTO = '(sudarshan/family/README.md, "Installing the nginx lines")'
+CLEAR = ('proxy_set_header CF-Connecting-IP "";', 'proxy_set_header True-Client-IP "";')
 pytestmark = pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash")
 
 
@@ -42,9 +49,9 @@ def tool_text() -> str:
     return DEPLOY_TOOL.read_text()
 
 
-def bash(script: str, *args: str, stdin: str | None = None) -> subprocess.CompletedProcess:
-    return subprocess.run(["bash", "-c", script, "bash", *args], input=stdin, capture_output=True,
-                          text=True, timeout=60)  # fmt: skip
+def bash(script: str, *args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(["bash", "-c", script, "bash", *args], capture_output=True, text=True,
+                          timeout=60)  # fmt: skip
 
 
 def ngx_text(path: Path) -> str:
@@ -71,25 +78,41 @@ def test_the_tool_carries_the_sums_of_this_releases_files():
 
 def test_the_owners_steps_install_what_the_tool_checks():
     """The family README's install line puts each file where NGX_FILES looks for it, and its steps
-    name the include line, the reload and the check the tool's FAIL lines send the owner to."""
+    name the include line, the record of the site file, the two lines the warning asks for, the
+    reload and the check the tool's lines send the owner to."""
     readme = (REPO / "sudarshan" / "family" / "README.md").read_text(encoding="utf-8")
+    text = tool_text()
     assert re.search(
-        r'\nNGX_HOWTO=\'sudarshan/family/README\.md, "Installing the nginx lines"\'\n', tool_text()
+        r'\nNGX_HOWTO=\'sudarshan/family/README\.md, "Installing the nginx lines"\'\n', text
+    )
+    assert (
+        '\nCAL_DIR="/etc/sudarshan"\n' in text
+        and '\nNGX_SITE_RECORD="${CAL_DIR}/nginx-site"' in text
     )
     section = readme.split("\n## Installing the nginx lines (O3)\n", 1)[1]
     (line,) = [x for x in section.splitlines() if x.lstrip().startswith("sudo bash -c 'set -e;")]
     placed = {}
-    for sources, folder in re.findall(
-        r'install -m 644 -o root -g root ((?:"\$d/[^"]+" )+)/etc/nginx/([a-z.]+)/;', line
-    ):
+    pattern = r'install -m 644 -o root -g root ((?:"\$d/[^"]+" )+)/etc/nginx/([a-z.]+)/;'
+    for sources, folder in re.findall(pattern, line):
         for name in re.findall(r'"\$d/([^"]+)"', sources):
             placed[name] = folder
     assert placed == {Path(f).name: f.split("/")[0] for f in FILES}
     assert "for f in " + " ".join(Path(f).name for f in FILES) + "; do" in line
     assert "/sudarshan/ops/nginx/$f" in line and "$(cat /var/lib/sudarshan/deployed_tag)" in line
-    for step in ("    include snippets/sudarshan-family.conf;", "sudo nginx -t && sudo systemctl reload nginx",
-                 "sudo sudarshan-deploy --nginx-check", "map $http_cookie $sud_owner"):  # fmt: skip
+    for step in (
+        "    include snippets/sudarshan-family.conf;",
+        "echo /etc/nginx/sites-enabled/<that file> | sudo tee /etc/sudarshan/nginx-site",
+        "sudo nginx -t && sudo systemctl reload nginx",
+        "sudo sudarshan-deploy --nginx-check",
+        "map $http_cookie $sud_owner",
+    ):
         assert step in section, step
+    # the two lines of the optional step, one under the other, as they go inside location /
+    assert re.search(r"\n +" + re.escape(CLEAR[0]) + r"\n +" + re.escape(CLEAR[1]) + r"\n", section)
+    in_the_warning = " ".join(
+        line.replace('"', '\\"') for line in CLEAR
+    )  # as the tool's WARN line writes them
+    assert in_the_warning in text
 
 
 def test_the_invite_pages_address_is_the_one_the_tool_compares():
@@ -104,11 +127,9 @@ def test_the_owners_cookie_name_is_set_aside_and_read_back(tmp_path):
     own = tmp_path / "zones.conf"
     own.write_text(text.replace("__Secure-session=", "__Secure-app_session="), encoding="utf-8")
     assert ngx_text(own) == ngx_text(zones)  # the one line the owner may edit
-    done = bash(_function("ngx_cookie") + 'ngx_cookie "$1"', str(own))
-    assert done.stdout == "__Secure-app_session\n"
-    assert (
-        bash(_function("ngx_cookie") + 'ngx_cookie "$1"', str(zones)).stdout == "__Secure-session\n"
-    )
+    read_back = _function("ngx_cookie") + 'ngx_cookie "$1"'
+    assert bash(read_back, str(own)).stdout == "__Secure-app_session\n"
+    assert bash(read_back, str(zones)).stdout == "__Secure-session\n"
     for change in (
         (
             "__Host-sudarshan_family=",
@@ -122,12 +143,7 @@ def test_the_owners_cookie_name_is_set_aside_and_read_back(tmp_path):
         assert ngx_text(changed) != ngx_text(zones), change
 
 
-# ---- reading nginx -T: which server block takes the include ------------------------------------------
-def dump(files: dict[str, str]) -> str:
-    """What nginx -T prints: each file as "# configuration file <path>:", its text, then a newline."""
-    return "".join(f"# configuration file {path}:\n{text}\n" for path, text in files.items())
-
-
+# ---- reading the SUDARSHAN site file ------------------------------------------------------------------
 SITE = """\
 server {
     listen 80;
@@ -148,95 +164,83 @@ server {
     }
 }
 """
+CLEARED = SITE.replace(
+    "        proxy_set_header Host $host;\n",
+    f"        proxy_set_header Host $host;\n        {CLEAR[0]}\n        {CLEAR[1]}\n",
+)
 
 
-def servers(text: str) -> list[str]:
-    done = bash(_function("ngx_servers") + "ngx_servers", stdin=text)
+def site_records(tmp_path: Path, text: str) -> list[str]:
+    site = tmp_path / "site"
+    site.write_text(text)
+    done = bash(_function("ngx_site") + 'ngx_site "$1"', str(site))
     assert done.returncode == 0, done.stderr
     return done.stdout.splitlines()
-
-
-def test_the_include_is_found_in_the_server_block_for_443():
-    text = dump({
-        "/etc/nginx/nginx.conf": "http {\n    include conf.d/*.conf;\n    include sites-enabled/*;\n}\n",
-        "/etc/nginx/sites-enabled/site": SITE,
-        "/etc/nginx/snippets/sudarshan-family.conf": "location @x { return 200; }\n"
-                                                     "include snippets/sudarshan-family.conf;\n",
-    })  # fmt: skip
-    assert servers(text) == [
-        "server 0 0 - /etc/nginx/sites-enabled/site",
-        "server 1 1 http://127.0.0.1:5000 /etc/nginx/sites-enabled/site",
-    ]
 
 
 @pytest.mark.parametrize(
     ("site", "records"),
     [
+        (SITE, ["server 0 0 - 0 0", "server 1 1 http://127.0.0.1:5000 0 0"]),
         (SITE.replace("    include snippets/sudarshan-family.conf;\n    location /socket.io/",
                       "    location /socket.io/").replace(
                           "listen [::]:80;\n", "listen [::]:80;\n    include snippets/sudarshan-family.conf;\n"),
-         ["server 0 1 - S", "server 1 0 http://127.0.0.1:5000 S"]),
+         ["server 0 1 - 0 0", "server 1 0 http://127.0.0.1:5000 0 0"]),
         ("include /etc/nginx/snippets/sudarshan-family.conf;\n" + SITE,
-         ["stray S", "server 0 0 - S", "server 1 1 http://127.0.0.1:5000 S"]),
+         ["stray", "server 0 0 - 0 0", "server 1 1 http://127.0.0.1:5000 0 0"]),
         (SITE.replace("listen 443 ssl;", "listen 8443 ssl;").replace("listen [::]:443 ssl;", ""),
-         ["server 0 0 - S", "server 0 1 http://127.0.0.1:5000 S"]),
+         ["server 0 0 - 0 0", "server 0 1 http://127.0.0.1:5000 0 0"]),
         (SITE.replace("listen 443 ssl;", "listen 192.0.2.1:443 ssl http2;"),
-         ["server 0 0 - S", "server 1 1 http://127.0.0.1:5000 S"]),
+         ["server 0 0 - 0 0", "server 1 1 http://127.0.0.1:5000 0 0"]),
         (SITE.replace("proxy_pass http://127.0.0.1:5000;\n        proxy_set_header",
                       "proxy_pass http://unix:/run/openalgo.sock;\n        proxy_set_header"),
-         ["server 0 0 - S", "server 1 1 http://unix:/run/openalgo.sock S"]),
+         ["server 0 0 - 0 0", "server 1 1 http://unix:/run/openalgo.sock 0 0"]),
+        (CLEARED, ["server 0 0 - 0 0", "server 1 1 http://127.0.0.1:5000 1 1"]),
+        (SITE.replace("        proxy_set_header Host $host;\n", f"        {CLEAR[0].lower()}\n"),
+         ["server 0 0 - 0 0", "server 1 1 http://127.0.0.1:5000 1 0"]),
+        # at server level the two lines reach location / only while it has no proxy_set_header of its own
+        (SITE.replace("    set $openalgo_loggable 1;\n", f"    {CLEAR[0]}\n    {CLEAR[1]}\n"),
+         ["server 0 0 - 0 0", "server 1 1 http://127.0.0.1:5000 0 0"]),
+        (SITE.replace("    set $openalgo_loggable 1;\n", f"    {CLEAR[0]}\n    {CLEAR[1]}\n").replace(
+            "        proxy_set_header Host $host;\n", ""),
+         ["server 0 0 - 0 0", "server 1 1 http://127.0.0.1:5000 1 1"]),
     ],
 )  # fmt: skip
-def test_where_the_include_stands_is_read_as_nginx_reads_it(site, records):
-    assert servers(dump({"S": site})) == records
-
-
-def test_another_site_on_443_without_the_line_is_left_alone():
-    other = "server {\n    listen 443 ssl;\n    server_name other.example;\n    location / { return 404; }\n}\n"
-    got = servers(
-        dump({"/etc/nginx/sites-enabled/site": SITE, "/etc/nginx/sites-enabled/other": other})
-    )
-    assert got[-1] == "server 1 0 - /etc/nginx/sites-enabled/other"
+def test_the_site_file_is_read_as_nginx_reads_it(tmp_path, site, records):
+    assert site_records(tmp_path, site) == records
 
 
 # ---- the whole tool --------------------------------------------------------------------------------
 WORKERS = "  5 nginx: master process /usr/sbin/nginx\n  5 nginx: worker process\n  5 nginx: worker process\n"
+ENV = "SESSION_COOKIE_NAME = 'session'\nHOST_SERVER = 'https://example.invalid'\n"
 
 
 class Edge:
-    """The box's nginx: the three files installed as the README says, a site like the server's, and the
-    fakes that nginx -T and ps answer through."""
+    """The box's nginx: the three files installed as the README says, the SUDARSHAN site recorded as
+    the README says, and the fakes nginx -t and ps answer through."""
 
-    def __init__(self, box: Box):
+    def __init__(self, box: Box, site: str = SITE):
         self.box, self.dir = box, box.root / "nginx"
         self.site = self.dir / "sites-enabled" / "sudarshan"
+        self.record = box.etc / "nginx-site"
         for f in FILES:
             target = self.dir / f
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy(NGINX_SRC / Path(f).name, target)
             target.chmod(0o644)
         self.site.parent.mkdir(parents=True)
-        self.site.write_text(SITE)
+        self.site.write_text(site)
+        self.record.write_text(f"{self.site}\n")
+        self.record.chmod(0o644)
         self.age(60)
         _shim(box.bin, "nginx", 'echo "$*" >> "${FAKE_WEB}/nginx_args"\n'
-              'if [[ "$1" == "-T" ]]; then cat "${FAKE_WEB}/nginx_dump"; '
-              'echo "nginx: configuration file test is successful" >&2; '
-              'exit "$(cat "${FAKE_WEB}/nginx_rc" 2>/dev/null || echo 0)"; fi\nexit 0')  # fmt: skip
+              'exit "$(cat "${FAKE_WEB}/nginx_rc" 2>/dev/null || echo 0)"')  # fmt: skip
         _shim(box.bin, "ps", 'if [[ "$*" == "-C nginx -o etimes=,args=" ]]; then '
               'cat "${FAKE_WEB}/ps_out" 2>/dev/null; exit 0; fi\nexec /bin/ps "$@"')  # fmt: skip
         (box.web / "ps_out").write_text(WORKERS)
-        (box.app / ".env").write_text("SESSION_COOKIE_NAME = 'session'\n"
-                                      "HOST_SERVER = 'https://example.invalid'\n")  # fmt: skip
-        self.loads()
+        (box.app / ".env").write_text(ENV)
 
-    def loads(self, site: str | None = None, rc: int = 0, leave_out: tuple[str, ...] = ()) -> None:
-        """What nginx -T prints next: nginx.conf, the files it reaches, the site."""
-        files = {str(self.dir / "nginx.conf"): "http {\n    include conf.d/*.conf;\n}\n"}
-        for f in FILES:
-            if f not in leave_out:
-                files[str(self.dir / f)] = (self.dir / f).read_text(encoding="utf-8")
-        files[str(self.site)] = SITE if site is None else site
-        (self.box.web / "nginx_dump").write_text(dump(files))
+    def nginx_test(self, rc: int) -> None:
         (self.box.web / "nginx_rc").write_text(str(rc))
 
     def age(self, seconds: int) -> None:
@@ -263,33 +267,45 @@ def edge(tmp_path, monkeypatch):
     return Edge(pointed_box(tmp_path, monkeypatch))
 
 
-def check(edge: Edge) -> tuple[int, list[str]]:
-    done = edge.box.run("--nginx-check")
+def check(edge: Edge, prefix: tuple[str, ...] = ()) -> tuple[int, list[str]]:
+    done = edge.box.run("--nginx-check", prefix=prefix)
     assert not done.stderr, done.stderr
     return done.returncode, done.stdout.splitlines()
+
+
+def fails(out: list[str]) -> list[str]:
+    return [line.removeprefix("nginx: FAIL ") for line in out if line.startswith("nginx: FAIL ")]
+
+
+def warns(out: list[str]) -> list[str]:
+    return [line.removeprefix("nginx: WARN ") for line in out if line.startswith("nginx: WARN ")]
+
+
+def passing(edge: Edge, tested: bool = True) -> list[str]:
+    d = edge.dir
+    loads = ": it covers every location there, and nginx loads all three files through it"
+    return [
+        f"nginx: PASS {d}/conf.d/sudarshan-family-zones.conf: in place and this release's",
+        f"nginx: PASS {d}/snippets/sudarshan-family.conf: in place and this release's",
+        f"nginx: PASS {d}/snippets/sudarshan-family-proxy.conf: in place and this release's",
+        "nginx: PASS nginx's own test passes",
+        f"nginx: PASS the guard sits in the server block for port 443 of {edge.site}"
+        + (loads if tested else ", so it covers every location there"),
+        "nginx: PASS the invite page goes to OpenAlgo at 127.0.0.1:5000, as location / of that server does",
+        "nginx: PASS the guard knows OpenAlgo's session cookie, __Secure-session, as OpenAlgo's .env makes it",
+        "nginx: PASS the running nginx has loaded them (it was reloaded after they last changed)",
+    ]
 
 
 @whole_tool
 def test_installed_loaded_and_this_releases(edge):
     rc, out = check(edge)
     assert rc == 0, out
-    d = edge.dir
     assert out == [
-        f"nginx: PASS {d}/conf.d/sudarshan-family-zones.conf: in place and this release's, loaded by nginx",
-        f"nginx: PASS {d}/snippets/sudarshan-family.conf: in place and this release's, loaded by nginx",
-        f"nginx: PASS {d}/snippets/sudarshan-family-proxy.conf: in place and this release's, loaded by nginx",
-        f"nginx: PASS the guard sits in the server block for port 443 of {edge.site}, so it covers every "
-        "location there",
-        "nginx: PASS the invite page goes to OpenAlgo at 127.0.0.1:5000, as location / of that server does",
-        "nginx: PASS the guard knows OpenAlgo's session cookie, __Secure-session, as OpenAlgo's .env makes it",
-        "nginx: PASS the running nginx has loaded them (it was reloaded after they last changed)",
+        *passing(edge),
         "nginx: PASS. The family view's nginx lines are installed, loaded and this release's.",
     ]
-    assert (edge.box.web / "nginx_args").read_text() == "-T\n"  # it only asks
-
-
-def fails(out: list[str]) -> list[str]:
-    return [line.removeprefix("nginx: FAIL ") for line in out if line.startswith("nginx: FAIL ")]
+    assert (edge.box.web / "nginx_args").read_text() == "-t\n"  # its test, never a dump
 
 
 @whole_tool
@@ -298,8 +314,9 @@ def test_nothing_installed(edge):
         (edge.dir / f).unlink()
     rc, out = check(edge)
     assert rc == 1
-    assert out == [f"nginx: FAIL none of the family view's nginx files is in {edge.dir}: install them "
-                   '(sudarshan/family/README.md, "Installing the nginx lines")']  # fmt: skip
+    assert out == [
+        f"nginx: FAIL none of the family view's nginx files is in {edge.dir}: install them {HOWTO}"
+    ]
     assert not (edge.box.web / "nginx_args").exists()  # nginx is not even asked
 
 
@@ -310,17 +327,73 @@ def test_a_file_missing_or_not_the_releases_or_open_to_others(edge):
     server.write_text(server.read_text() + "# changed by hand\n")
     (edge.dir / FILES[0]).chmod(0o664)
     edge.age(60)
-    edge.loads(leave_out=(FILES[2],))
     rc, out = check(edge)
     assert rc == 1
-    assert fails(out)[:3] == [
+    assert fails(out) == [
         f"{edge.dir}/{FILES[0]} is not a plain file of root's that only root can write: install the files again",
         f"{server} is not this release's copy (an older release's, or changed by hand): install the files "
-        'again (sudarshan/family/README.md, "Installing the nginx lines")',
-        f"{edge.dir}/{FILES[2]} is missing: install the files again "
-        '(sudarshan/family/README.md, "Installing the nginx lines")',
+        f"again {HOWTO}",
+        f"{edge.dir}/{FILES[2]} is missing: install the files again {HOWTO}",
     ]
     assert out[-1] == "nginx: FAIL. Nothing was changed; each FAIL line above says what to do."
+
+
+def record_command(edge: Edge) -> str:
+    return f"echo {edge.dir}/sites-enabled/<the SUDARSHAN site> | sudo tee {edge.record}"
+
+
+@whole_tool
+def test_the_site_file_must_be_recorded(edge):
+    edge.record.unlink()
+    rc, out = check(edge)
+    assert rc == 1
+    assert fails(out) == [
+        "the SUDARSHAN site file is not recorded, so where its include line stands cannot be checked: "
+        f"record it with {record_command(edge)}"
+    ]
+    assert (
+        len(out) == len(passing(edge)) - 2 + 2
+    )  # no line about the include, the invite page or warnings
+
+
+@whole_tool
+@pytest.mark.parametrize(
+    ("record", "mode", "what"),
+    [
+        ("{dir}/sites-available/sudarshan\n", 0o644, "record"),
+        ("sites-enabled/sudarshan\n", 0o644, "record"),
+        ("{dir}/sites-enabled/../sites-enabled/sudarshan\n", 0o644, "record"),
+        ("{dir}/conf.d/sudarshan\n", 0o644, "record"),  # in conf.d only a .conf is read by nginx
+        ("{site}\n", 0o666, "record"),  # anyone could point the check elsewhere
+        ("{dir}/sites-enabled/gone\n", 0o644, "file"),
+        ("  {site}  \n", 0o644, None),  # spaces typed around it are fine
+        ("{site}", 0o644, None),  # and no newline
+    ],
+)
+def test_what_the_record_may_name(edge, record, mode, what):
+    edge.record.write_text(record.format(dir=edge.dir, site=edge.site))
+    edge.record.chmod(mode)
+    rc, out = check(edge)
+    if what is None:
+        assert rc == 0, out
+        return
+    assert rc == 1
+    says = {
+        "record": f"{edge.record} does not name one site file in {edge.dir}/sites-enabled (or a .conf in "
+        f"{edge.dir}/conf.d), or is not root's alone: record it again with {record_command(edge)}",
+        "file": f"the site file that {edge.record} names is missing, or is not root's alone: check it, then "
+        f"record it again with {record_command(edge)}",
+    }
+    assert fails(out) == [says[what]]
+
+
+@whole_tool
+def test_a_site_file_others_can_write_is_not_trusted(edge):
+    edge.site.chmod(0o664)
+    assert fails(check(edge)[1]) == [
+        f"the site file that {edge.record} names is missing, or is not root's alone: check it, then record "
+        f"it again with {record_command(edge)}"
+    ]
 
 
 @whole_tool
@@ -328,7 +401,6 @@ def test_the_owners_own_cookie_name(edge):
     zones = edge.dir / FILES[0]
     zones.write_text(zones.read_text().replace("__Secure-session=", "__Secure-app_session="))
     edge.age(60)
-    edge.loads()
     rc, out = check(edge)
     assert rc == 1
     assert fails(out) == [
@@ -336,25 +408,25 @@ def test_the_owners_own_cookie_name(edge):
         f"__Secure-session: put __Secure-session in its place in {zones} (under map $http_cookie "
         "$sud_owner), then reload nginx"
     ]
-    (edge.box.app / ".env").write_text("SESSION_COOKIE_NAME = 'app_session'  # mine\n"
-                                       "HOST_SERVER = 'https://example.invalid'\n")  # fmt: skip
+    (edge.box.app / ".env").write_text(ENV.replace("'session'", "'app_session'  # mine"))
     rc, out = check(edge)
-    assert rc == 0 and "__Secure-app_session, as OpenAlgo's .env makes it" in out[5]
+    assert rc == 0 and "__Secure-app_session, as OpenAlgo's .env makes it" in out[6]
     (edge.box.app / ".env").write_text(
         "SESSION_COOKIE_NAME = 'app_session'\nHOST_SERVER = 'http://x'\n"
     )
-    assert (
-        "makes it app_session: put app_session" in fails(check(edge)[1])[0]
-    )  # no __Secure- on http
+    # no __Secure- prefix on plain http
+    assert "makes it app_session: put app_session" in fails(check(edge)[1])[0]
 
 
 @whole_tool
 def test_nginxs_own_test_fails(edge):
-    edge.loads(rc=1)
+    edge.nginx_test(1)
     rc, out = check(edge)
     assert rc == 1
     assert fails(out) == ["nginx's configuration does not pass its own test, so no change of it can be "
                           "loaded: run sudo nginx -t to see why"]  # fmt: skip
+    # nothing is said about loading what does not load, nor about a reload that cannot happen
+    assert out[4] == passing(edge, tested=False)[4] and len(out) == len(passing(edge))
 
 
 @whole_tool
@@ -362,12 +434,15 @@ def test_nginxs_own_test_fails(edge):
     ("site", "says"),
     [
         (SITE.replace("    include snippets/sudarshan-family.conf;\n", ""),
-         "no server block includes snippets/sudarshan-family.conf: add the include line to the server block "
-         'for port 443 (sudarshan/family/README.md, "Installing the nginx lines")'),
+         "SITE does not include snippets/sudarshan-family.conf in its server block for port 443: add the "
+         f"include line {HOWTO}"),
         (SITE.replace("    include snippets/sudarshan-family.conf;\n", "").replace(
             "listen [::]:80;\n", "listen [::]:80;\n    include snippets/sudarshan-family.conf;\n"),
-         "snippets/sudarshan-family.conf is included in a server block that does not listen on port 443 "
-         "(SITE): move the line into the server block for port 443"),
+         "snippets/sudarshan-family.conf is included in a server block of SITE that does not listen on port "
+         "443: move the line into its server block for port 443"),
+        ("include snippets/sudarshan-family.conf;\n" + SITE,
+         "snippets/sudarshan-family.conf is included outside a server block in SITE: put the line inside its "
+         "server block for port 443"),
         (SITE.replace("proxy_pass http://127.0.0.1:5000;\n        proxy_set_header",
                       "proxy_pass http://unix:/run/openalgo.sock;\n        proxy_set_header"),
          "location / of that server goes to http://unix:/run/openalgo.sock, but the invite page goes to "
@@ -375,9 +450,46 @@ def test_nginxs_own_test_fails(edge):
     ],
 )  # fmt: skip
 def test_where_the_line_stands_in_the_site(edge, site, says):
-    edge.loads(site=site)
+    edge.site.write_text(site)
+    edge.age(60)
     rc, out = check(edge)
     assert rc == 1 and fails(out) == [says.replace("SITE", str(edge.site))]
+
+
+WARNING = (
+    "OpenAlgo's .env trusts the address a request names (TRUST_PROXY_HEADERS), and location / of SITE "
+    "passes on the CF-Connecting-IP and True-Client-IP a caller writes, which OpenAlgo reads first: anyone "
+    "can give OpenAlgo's ban list and sign-in limiter any address. Add these two lines inside that "
+    f"location, then reload nginx: {CLEAR[0]} {CLEAR[1]}"
+)
+
+
+@whole_tool
+@pytest.mark.parametrize(
+    ("trust", "site", "warned"),
+    [
+        ("TRUST_PROXY_HEADERS = 'TRUE'\n", SITE, True),
+        ("TRUST_PROXY_HEADERS = 'true'  # behind nginx\n", SITE, True),
+        ("TRUST_PROXY_HEADERS=1\n", SITE, True),
+        ("TRUST_PROXY_HEADERS = 'yes'\n", SITE, True),
+        ("TRUST_PROXY_HEADERS = 'TRUE'\n", CLEARED, False),
+        ("TRUST_PROXY_HEADERS = 'TRUE'\n", CLEARED.replace(f"        {CLEAR[1]}\n", ""), True),
+        ("TRUST_PROXY_HEADERS = 'FALSE'\n", SITE, False),
+        ("", SITE, False),  # OpenAlgo's own default is FALSE
+    ],
+)
+def test_the_warning_about_addresses_a_caller_can_fake(edge, trust, site, warned):
+    (edge.box.app / ".env").write_text(ENV + trust)
+    edge.site.write_text(site)
+    edge.age(60)
+    rc, out = check(edge)
+    assert rc == 0, out  # a warning is not a failure of the family view's lines
+    if warned:
+        assert warns(out) == [WARNING.replace("SITE", str(edge.site))]
+        assert out[-1] == ("nginx: PASS. The family view's nginx lines are installed, loaded and this "
+                           "release's (one warning above).")  # fmt: skip
+    else:
+        assert warns(out) == [] and out[-1].endswith("and this release's.")
 
 
 @whole_tool
@@ -408,13 +520,34 @@ def test_it_changes_nothing_and_takes_no_lock(edge):
         time.sleep(0.2)
         started = time.monotonic()
         rc, _ = check(edge)
-        assert (
-            rc == 0 and time.monotonic() - started < 20
-        )  # an install holding the lock does not hold it up
+        # an install holding the lock does not hold the check up
+        assert rc == 0 and time.monotonic() - started < 20
     finally:
         holder.kill()
         holder.wait()
     assert server_files(edge.box) == before
+
+
+@whole_tool
+@pytest.mark.skipif(shutil.which("strace") is None, reason="needs strace")
+def test_it_reads_no_other_site_and_lists_no_folder(edge, tmp_path):
+    """The fork's rule: nothing of TRINETRA is ever read. Another site beside the SUDARSHAN one, in
+    sites-enabled and in conf.d, is never opened, looked at or listed, and no folder of nginx's is
+    listed: every file call the run makes is traced."""
+    others = (edge.dir / "sites-enabled" / "other", edge.dir / "conf.d" / "other.conf")
+    others[0].write_text("server { listen 443 ssl; server_name other.example; }\n")
+    others[1].write_text("map $host $other { default 0; }\n")
+    log = tmp_path / "trace"
+    rc, out = check(edge, prefix=("strace", "-f", "-qq", "-y", "-e", "trace=%file,getdents64",
+                                  "-o", str(log)))  # fmt: skip
+    assert rc == 0, out
+    trace = log.read_text(errors="replace")
+    assert str(edge.site) in trace and str(edge.dir / FILES[0]) in trace  # it does read its own
+    for line in trace.splitlines():
+        assert not any(str(path) in line for path in others), line
+        if "getdents" in line:
+            assert str(edge.dir) not in line, line
+    assert (edge.box.web / "nginx_args").read_text() == "-t\n"
 
 
 @whole_tool
@@ -430,6 +563,12 @@ def test_a_run_says_a_problem_once_and_nothing_while_none_is_installed(edge):
     edge.age(60)  # reloaded: nothing to say
     assert "nginx" not in edge.box.run().stdout
     assert not (edge.box.state / "family_nginx_note").exists()
+    (edge.box.app / ".env").write_text(
+        ENV + "TRUST_PROXY_HEADERS = 'TRUE'\n"
+    )  # a warning: said once too
+    said = [line for line in edge.box.run().stdout.splitlines() if "family: nginx:" in line]
+    assert len(said) == 1 and "family: nginx: WARN OpenAlgo's .env trusts the address" in said[0]
+    assert "family: nginx:" not in edge.box.run().stdout
     for f in FILES:
         (edge.dir / f).unlink()
     assert "nginx" not in edge.box.run().stdout  # the owner took them out: nothing is said
@@ -461,8 +600,94 @@ def test_the_family_set_up_says_one_line_before_its_pass(edge):
         == "family: nginx: the family view's nginx lines are installed, loaded and this release's"
     )
     assert out[-1].startswith("family: PASS: ")
+    (edge.box.app / ".env").write_text(ENV + "TRUST_PROXY_HEADERS = 'TRUE'\n")
+    out = edge.box.run("--family-provision").stdout.splitlines()
+    assert out[-2].endswith("this release's (one warning: sudarshan-deploy --nginx-check says it)")
     for f in FILES:
         (edge.dir / f).unlink()
     out = edge.box.run("--family-provision").stdout.splitlines()
-    assert out[-2] == ("family: nginx: the family view's nginx lines are not installed yet "
-                       '(sudarshan/family/README.md, "Installing the nginx lines")')  # fmt: skip
+    assert out[-2] == f"family: nginx: the family view's nginx lines are not installed yet {HOWTO}"
+
+
+# ---- a real nginx -t ------------------------------------------------------------------------------------
+def nginx_binary() -> str | None:
+    for found in (os.environ.get("SUDARSHAN_NGINX"), shutil.which("nginx"), "/usr/sbin/nginx"):
+        if found and os.path.isfile(found) and os.access(found, os.X_OK):
+            return found
+    return None
+
+
+NGINX = nginx_binary()
+# `nginx -t` opens and binds every listen socket (only "already in use" is let pass), so a real test can
+# use neither port 443 without root nor [::] on a host without IPv6: the site listens on free loopback
+# ports, and the check's port 443 rule is held by the tests above, with the fake nginx.
+OTHER = "server {\n    listen 127.0.0.1:{port};\n    server_name other.test;\n    location / { return 404; }\n}\n"
+
+
+def free_port() -> int:
+    import socket
+
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+def real_site(include: bool = True) -> str:
+    site = SITE.replace("    listen [::]:80;\n", "").replace("    listen [::]:443 ssl;\n", "")
+    site = site.replace("listen 80;", f"listen 127.0.0.1:{free_port()};")
+    site = site.replace("listen 443 ssl;", f"listen 127.0.0.1:{free_port()};")
+    return site if include else site.replace("    include snippets/sudarshan-family.conf;\n", "")
+
+
+@whole_tool
+@pytest.mark.skipif(NGINX is None, reason="no nginx binary (set SUDARSHAN_NGINX)")
+def test_a_real_nginx_test_decides_whether_the_files_load(edge):
+    """The box's nginx folder made a real nginx's configuration, as Ubuntu lays it out (conf.d and
+    sites-enabled, another site beside SUDARSHAN's), and the check's `nginx -t` run by the real nginx:
+    the include line takes in the other two files, so nginx's own test fails without either of them,
+    and passes without the line, which the check then says is missing."""
+    d = edge.dir
+    (d / "tmp").mkdir()
+    (d / "nginx.conf").write_text(
+        f"pid {d}/nginx.pid;\nerror_log stderr;\nevents {{ worker_connections 64; }}\nhttp {{\n"
+        f"    access_log off;\n    client_body_temp_path {d}/tmp/body;\n    proxy_temp_path {d}/tmp/proxy;\n"
+        f"    fastcgi_temp_path {d}/tmp/fastcgi;\n    uwsgi_temp_path {d}/tmp/uwsgi;\n"
+        f"    scgi_temp_path {d}/tmp/scgi;\n    include conf.d/*.conf;\n    include sites-enabled/*;\n}}\n"
+    )
+    (d / "sites-enabled" / "other").write_text(OTHER.replace("{port}", str(free_port())))
+    _shim(edge.box.bin, "nginx", f'exec "{NGINX}" -p "{d}" -c "{d}/nginx.conf" "$@"')
+    not_443 = (f"snippets/sudarshan-family.conf is included in a server block of {edge.site} that does not "
+               "listen on port 443: move the line into its server block for port 443")  # fmt: skip
+    edge.site.write_text(real_site())
+    edge.age(60)
+    rc, out = check(edge)
+    assert out[3] == "nginx: PASS nginx's own test passes", out
+    assert fails(out) == [not_443]  # the real test passes; only this layout's port differs
+    zones = d / FILES[0]
+    kept = zones.read_bytes()
+    zones.unlink()  # the snippet's guard and limits need the zones file
+    rc, out = check(edge)
+    assert rc == 1 and fails(out) == [
+        f"{zones} is missing: install the files again {HOWTO}",
+        "nginx's configuration does not pass its own test, so no change of it can be loaded: run sudo nginx "
+        "-t to see why",
+        not_443,
+    ]
+    zones.write_bytes(kept)
+    zones.chmod(0o644)
+    proxy = d / FILES[2]
+    kept = proxy.read_bytes()
+    proxy.unlink()  # the family service's locations include it
+    assert check(edge)[1][3].startswith(
+        "nginx: FAIL nginx's configuration does not pass its own test"
+    )
+    proxy.write_bytes(kept)
+    proxy.chmod(0o644)
+    edge.site.write_text(real_site(include=False))
+    edge.age(60)
+    rc, out = check(
+        edge
+    )  # without the line the files are inert: the test passes, the line is missing
+    assert rc == 1 and out[3] == "nginx: PASS nginx's own test passes"
+    assert fails(out) == [f"{edge.site} does not include snippets/sudarshan-family.conf in its server block "
+                          f"for port 443: add the include line {HOWTO}"]  # fmt: skip

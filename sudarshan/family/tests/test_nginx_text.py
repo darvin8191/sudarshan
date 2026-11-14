@@ -669,15 +669,17 @@ http {{
         location /socket.io/ {{ proxy_pass http://127.0.0.1:{openalgo}; }}
         location = /ws {{ proxy_pass http://127.0.0.1:{openalgo}; }}
         location /ws/ {{ proxy_pass http://127.0.0.1:{openalgo}; }}
-        location / {{ proxy_pass http://127.0.0.1:{openalgo}; }}
+        location / {{ proxy_pass http://127.0.0.1:{openalgo}; {root_lines} }}
     }}
 }}
 """
 
 
-def install(root: Path, family: int, openalgo: int, port: int, realip: bool) -> Path:
+def install(root: Path, family: int, openalgo: int, port: int, realip: bool,
+            root_lines: str = "") -> Path:  # fmt: skip
     """The three files where the server keeps them (conf.d/, snippets/), the two loopback ports
-    pointed at the fakes, in a site like the server's: its own locations for /socket.io/ and /ws."""
+    pointed at the fakes, in a site like the server's: its own locations for /socket.io/ and /ws,
+    and ``root_lines`` inside its location /."""
     for name in ("conf.d", "snippets", "tmp", "logs"):
         (root / name).mkdir()
     shutil.copy(ZONES, root / "conf.d" / ZONES.name)
@@ -689,7 +691,9 @@ def install(root: Path, family: int, openalgo: int, port: int, realip: bool) -> 
     (root / "snippets" / SERVER.name).write_text(server, encoding="utf-8")
     conf = root / "nginx.conf"
     real = "set_real_ip_from 127.0.0.0/8; real_ip_header X-Test-Client;" if realip else ""
-    conf.write_text(SITE.format(root=root, port=port, openalgo=openalgo, realip=real))
+    conf.write_text(
+        SITE.format(root=root, port=port, openalgo=openalgo, realip=real, root_lines=root_lines)
+    )
     return conf
 
 
@@ -699,10 +703,13 @@ def has_realip() -> bool:
 
 
 @pytest.fixture
-def edge(tmp_path):
+def edge(tmp_path, request):
+    """A running nginx; a test may put lines inside the site's location / (``indirect``)."""
     family, openalgo = Upstream(), Upstream({"Referrer-Policy": "strict-origin-when-cross-origin"})
     port, realip = free_port(), has_realip()
-    conf = install(tmp_path, family.port, openalgo.port, port, realip)
+    conf = install(
+        tmp_path, family.port, openalgo.port, port, realip, getattr(request, "param", "")
+    )
     process = subprocess.Popen([NGINX, "-p", str(tmp_path), "-c", str(conf)],  # type: ignore[list-item]
                                stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)  # fmt: skip
     got = Edge(tmp_path, port, family, openalgo, process, realip)
@@ -948,3 +955,29 @@ def test_the_invite_code_reaches_no_log_and_no_referer(edge):
     edge.ask("GET", "/family/positions", PHONE)  # the log itself works, and is written in order
     assert CODE not in edge.logged("access.log", "/family/positions")
     assert CODE not in edge.log("error.log")
+
+
+def readme_lines() -> str:
+    """The two lines the README's install section offers for the site's location / (step 5)."""
+    readme = (REPO / "sudarshan" / "family" / "README.md").read_text(encoding="utf-8")
+    section = readme.split("\n## Installing the nginx lines (O3)\n", 1)[1]
+    found = re.search(r'\n +(proxy_set_header CF-Connecting-IP "";)\n +(proxy_set_header True-Client-IP "";)\n',
+                      section)  # fmt: skip
+    assert found, "the README's two lines for location / are not where the install section has them"
+    return f"{found.group(1)} {found.group(2)}"
+
+
+@needs_nginx
+@pytest.mark.parametrize(
+    ("edge", "passed_on"), [("", True), (readme_lines(), False)], indirect=["edge"]
+)
+def test_the_readmes_two_lines_keep_a_callers_address_from_openalgo(edge, passed_on):
+    """OpenAlgo reads CF-Connecting-IP and True-Client-IP before the address nginx sets, when its .env
+    trusts forwarded addresses; a site's location / passes on whatever a caller writes in them unless it
+    sets them empty, as the README's optional step does (and the deploy's check warns about)."""
+    fake = {"CF-Connecting-IP": "198.51.100.7", "True-Client-IP": "198.51.100.8"}
+    status, _, _ = edge.ask("GET", "/dashboard", fake)
+    assert status == 200
+    (seen,) = edge.openalgo.seen
+    got = {name: seen.headers.get(name.lower()) for name in fake}
+    assert got == (fake if passed_on else dict.fromkeys(fake))

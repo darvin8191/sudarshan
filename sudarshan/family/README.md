@@ -93,6 +93,13 @@ What changes, once they are in:
   SUDARSHAN is for the account owner", with a button to the family view. It reaches only the
   family view (`/family/...`) and the files its pages load. OpenAlgo itself refuses such a phone
   anyway (it never holds an OpenAlgo session); nginx is the second lock.
+  - The guard is one line at the top of the server rather than a line in each location, so every
+    location the site has, or gains later, is covered.
+  - The refusal page is held by nginx itself rather than taken from the app's build, so it leaves
+    the site's own error pages alone and still answers while OpenAlgo restarts.
+  - The server's address alone and About are refused too: both open your own app, whose every
+    request the guard refuses, so a family phone gets the refusal page and its button instead of
+    a broken page.
 - Your phone and laptop, TradingView, Telegram and every other caller see no change: the guard
   acts only on a phone that carries the family cookie and not OpenAlgo's.
 - Signing in and joining are held to 5 tries a minute from one connection, and 12 a minute from
@@ -126,7 +133,25 @@ What changes, once they are in:
        include snippets/sudarshan-family.conf;
    ```
 
-4. Test, then reload. Never restart: a reload keeps every open connection, and if the test fails
+4. Record which file that is, so the deploy tool's check reads that file and no other site's:
+
+   ```sh
+   echo /etc/nginx/sites-enabled/<that file> | sudo tee /etc/sudarshan/nginx-site
+   ```
+
+   You should see the path printed back.
+5. Optional, and worth doing if OpenAlgo's `.env` sets `TRUST_PROXY_HEADERS = 'TRUE'` (the check
+   warns when it does and these lines are missing): in the same file, inside the `location / { ... }`
+   of that server block, add these two lines, because otherwise anyone can write an address of
+   their choosing in these two headers, which OpenAlgo believes before nginx's own, and so put
+   that address on OpenAlgo's ban list or step round its sign-in limiter:
+
+   ```nginx
+           proxy_set_header CF-Connecting-IP "";
+           proxy_set_header True-Client-IP "";
+   ```
+
+6. Test, then reload. Never restart: a reload keeps every open connection, and if the test fails
    nothing is reloaded and the site keeps running as before.
 
    ```sh
@@ -135,25 +160,27 @@ What changes, once they are in:
 
    You should see `syntax is ok` and `test is successful`. If not, the line nginx names is the
    one to fix (most often the include line outside the 443 server block); or undo (below).
-5. Check it:
+7. Check it:
 
    ```sh
    sudo sudarshan-deploy --nginx-check
    ```
 
    You should see `nginx: PASS` lines and, last, `nginx: PASS. The family view's nginx lines are
-   installed, loaded and this release's.` Each `nginx: FAIL` line says what to do. One you may meet:
-   OpenAlgo's session cookie is named by `SESSION_COOKIE_NAME` in OpenAlgo's `.env` (`session`
-   unless it was changed); if the check says the guard knows it under another name, put the name
-   it gives in place of `__Secure-session` in `/etc/nginx/conf.d/sudarshan-family-zones.conf`
-   (the line under `map $http_cookie $sud_owner`), then step 4 again.
-6. On a family phone (a test member on your own phone works too): the family view opens, and the
+   installed, loaded and this release's.` Each `nginx: FAIL` line says what to do, and a
+   `nginx: WARN` line says what is worth doing (step 5). One FAIL you may meet: OpenAlgo's session
+   cookie is named by `SESSION_COOKIE_NAME` in OpenAlgo's `.env` (`session` unless it was
+   changed); if the check says the guard knows it under another name, put the name it gives in
+   place of `__Secure-session` in `/etc/nginx/conf.d/sudarshan-family-zones.conf` (the line under
+   `map $http_cookie $sud_owner`), then step 6 again.
+8. On a family phone (a test member on your own phone works too): the family view opens, and the
    server's address without `/family` shows the refusal page.
 
-From then on every run of the deploy tool checks the files again, reading only, and its log says
-it once if they change, go missing or are not loaded, or when a later release brings new ones
-(then do steps 2 and 4 again; the include line stays). Nothing is said while none of the files is
-there.
+The check reads the three files, the site file you recorded and OpenAlgo's `.env`, and nothing
+else of nginx: no other site's file, and of `nginx -t` only whether it passes. From then on every
+run of the deploy tool checks them again, reading only, and its log says it once if they change,
+go missing or are not loaded, or when a later release brings new ones (then do steps 2 and 6
+again; the include line stays). Nothing is said while none of the files is there.
 
 **Trying the family view on your own phone.** While you are signed in to both, both work. Your own
 sign-in ends at 03:30 and the family one does not, so the next morning your own pages show the
@@ -162,8 +189,9 @@ in as usual. A second browser on the phone for the family view avoids this.
 
 **To undo:** take the include line out of the site first, then
 `sudo rm /etc/nginx/conf.d/sudarshan-family-zones.conf /etc/nginx/snippets/sudarshan-family.conf
-/etc/nginx/snippets/sudarshan-family-proxy.conf`, then step 4. Family phones then cannot reach the
-family view (its pages say it is not set up); nothing else changes.
+/etc/nginx/snippets/sudarshan-family-proxy.conf /etc/sudarshan/nginx-site`, then step 6. Family
+phones then cannot reach the family view (its pages say it is not set up); nothing else changes.
+The two lines of step 5 can stay: they help OpenAlgo whether or not the family view is there.
 
 **What this does not cover.**
 
@@ -183,7 +211,8 @@ family view (its pages say it is not set up); nothing else changes.
   stranger: the sign-in page and the public pages, never an order, which needs your session or API
   key. If OpenAlgo's `.env` sets `TRUST_PROXY_HEADERS = 'TRUE'`, such a process could also give any
   address as its own, and so draw OpenAlgo's ban of an address onto yours or step round its sign-in
-  limit; with `'FALSE'`, OpenAlgo's own default, it cannot.
+  limit; with `'FALSE'`, OpenAlgo's own default, it cannot. Step 5 does not help there: such a
+  process does not pass through nginx.
 
 Tests: `sudarshan/family/tests/test_nginx_text.py` (every rule on the files' text, and the same
 files run in a real nginx in front of fake services when an nginx binary is found:
