@@ -35,6 +35,11 @@ def test_the_session_facts_serve_the_stage_and_nothing_else_reads_it():
             assert "protect_flag" not in path.read_text(encoding="utf-8"), path
 
 
-def test_the_release_does_not_switch_it_on():
+def test_no_release_file_sets_it_to_on():
+    """Protect in Live is a later release (G3), after the owner's session S13. A release may set
+    ``sandbox``; none sets ``on`` yet."""
     env = (ROOT / "sudarshan" / "ops" / "deploy" / "openalgo-env.conf").read_text(encoding="utf-8")
-    assert protect_flag.ENV not in env or f"{protect_flag.ENV}=off" in env.replace(" ", "")
+    for line in env.splitlines():
+        if line.strip().startswith(protect_flag.ENV):
+            value = line.replace("=", " ").split()[1].strip("'\"").lower()
+            assert value in ("off", "sandbox"), line
