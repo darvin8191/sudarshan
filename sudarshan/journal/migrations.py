@@ -421,8 +421,72 @@ def _v5(conn: Connection) -> None:
         conn.exec_driver_sql(sql)
 
 
+#: Step 6 (M14.2, P7 J1): Upstox's own charges by day and by month, and what of them each order
+#: and each trade carries. ``charges_order`` is one executed order's share of its day's figures
+#: (``parts`` JSON: each of Upstox's parts in paise, a part Upstox left empty absent), written by
+#: the nightly spread; ``basis`` says which of Upstox's rows it came from. Empty at first: the
+#: walk-back fills it night by night.
+V6 = (
+    """CREATE TABLE IF NOT EXISTS charges_order (
+        principal TEXT NOT NULL,
+        mode TEXT NOT NULL,
+        day INTEGER NOT NULL,
+        segment TEXT NOT NULL,
+        order_id TEXT NOT NULL,
+        parts TEXT NOT NULL DEFAULT '{}',
+        total_paise INTEGER NOT NULL,
+        basis TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY (principal, mode, day, order_id)
+    )""",
+    "CREATE INDEX IF NOT EXISTS charges_order_segment ON charges_order (principal, segment, day)",
+)
+#: The basis of each ``upstox_charges`` row already kept, from what the row itself says: one day,
+#: a whole calendar month (its first day to its last), or anything else, which is the "year so
+#: far" row the catch-up kept until now.
+BASIS_DAY, BASIS_MONTH, BASIS_YTD = "day", "month", "ytd"
+
+
+def basis_of(period_from: int, period_to: int) -> str:
+    """Which kind of period a charges row covers (see ``BASIS_*``)."""
+    if period_from == period_to:
+        return BASIS_DAY
+    year, month = period_from // 10000, period_from // 100 % 100
+    same_month = period_to // 100 == period_from // 100
+    if same_month and period_from % 100 == 1 and 1 <= month <= 12:
+        long = month in (1, 3, 5, 7, 8, 10, 12)
+        leap = year % 4 == 0 and (year % 100 != 0 or year % 400 == 0)
+        last = 31 if long else (29 if leap else 28) if month == 2 else 30
+        if period_to % 100 == last:
+            return BASIS_MONTH
+    return BASIS_YTD
+
+
+def _v6(conn: Connection) -> None:
+    """Step 6: the two parts Upstox names that had no column (SEBI's fee and the depository's
+    charge on a delivery sale) stay NULL in the rows already kept, since nobody knows them until
+    the next read; ``basis`` is backfilled row by row. No trade has an actual figure yet, so its
+    two new columns stay NULL."""
+    add_column(conn, "upstox_charges", "sebi_paise", "INTEGER")
+    add_column(conn, "upstox_charges", "dp_paise", "INTEGER")
+    if add_column(conn, "upstox_charges", "basis", "TEXT"):
+        for segment, start, end in conn.exec_driver_sql(
+            "SELECT segment, period_from, period_to FROM upstox_charges"
+        ).fetchall():
+            conn.exec_driver_sql(
+                "UPDATE upstox_charges SET basis = ? "
+                "WHERE segment = ? AND period_from = ? AND period_to = ? AND basis IS NULL",
+                (basis_of(int(start), int(end)), segment, start, end),
+            )
+    add_column(conn, "round_trip", "charges_actual_basis", "TEXT")
+    add_column(conn, "round_trip", "charges_actual_parts", "TEXT")
+    for sql in V6:
+        conn.exec_driver_sql(sql)
+
+
 Step = tuple[int, Callable[[Connection], None]]
-STEPS: tuple[Step, ...] = ((1, _v1), (2, _v2), (3, _v3), (4, _v4), (5, _v5))
+STEPS: tuple[Step, ...] = ((1, _v1), (2, _v2), (3, _v3), (4, _v4), (5, _v5), (6, _v6))
 LATEST = STEPS[-1][0]
 
 

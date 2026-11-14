@@ -117,7 +117,16 @@ TAG_KINDS = ("mistake", "label")
 TAG_COLOURS = ("brand", "gold", "info", "neutral", "loss")
 REPORT_KINDS = ("brief", "eod", "weekly", "monthly", "fy")
 REPORT_STATUSES = ("ready", "sent", "text_only", "not_sent")
-CHARGE_SEGMENTS = ("options", "futures", "equity_delivery", "equity_intraday", "not_modelled")
+#: ``options_exercise``: an option exercised or assigned (its own STT rate; last, so the first
+#: four stay the traded segments every statutory row covers).
+CHARGE_SEGMENTS = (
+    "options",
+    "futures",
+    "equity_delivery",
+    "equity_intraday",
+    "not_modelled",
+    "options_exercise",
+)
 CHARGE_PLANS = ("plus", "standard")
 #: The alerts' report desk as the settings answer names it (``settings_ops.desk_state``): the
 #: state its block on the alerts' /health says, or ``unknown`` when the alerts service does not

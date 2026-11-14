@@ -58,7 +58,17 @@ OWNER = "owner"
 #: Columns that hold JSON (decoded at the boundary), and columns that are flags. ``checklist`` is
 #: JSON too but leaves the store as the text it was saved as (the contract's ``checklist:string``).
 JSON_COLUMNS = frozenset(
-    {"mistakes", "screenshots", "rules", "positions_overnight", "rows", "delivery", "value"}
+    {
+        "mistakes",
+        "screenshots",
+        "rules",
+        "positions_overnight",
+        "rows",
+        "delivery",
+        "value",
+        "parts",
+        "charges_actual_parts",
+    }
 )
 FLAG_COLUMNS = frozenset(
     {
@@ -960,6 +970,7 @@ class Tx:
         where = (self._mine(t), t.c.segment == row["segment"],
                  t.c.period_from == row["period_from"], t.c.period_to == row["period_to"])  # fmt: skip
         self.conn.execute(delete(t).where(*where))
+        row = {"basis": migrations.basis_of(row["period_from"], row["period_to"]), **row}
         self.conn.execute(
             insert(t).values(**row, principal=self.who, created_at=now, updated_at=now)
         )

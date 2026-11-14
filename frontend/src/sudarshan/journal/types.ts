@@ -123,6 +123,7 @@ export type ChargeSegment =
   | 'equity_delivery'
   | 'equity_intraday'
   | 'not_modelled'
+  | 'options_exercise'
 export type ChargePlan = 'plus' | 'standard'
 export type DeskState = 'on' | 'starting' | 'journal_off' | 'journal_down' | 'off' | 'unknown'
 export type HoldBucket = 'under_5m' | '5_30m' | '30m_2h' | 'over_2h' | '1_5d' | 'over_5d'
