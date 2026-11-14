@@ -25,7 +25,16 @@ import {
 } from '../types'
 import { devicesKey, MEMBERS_KEY } from './keys'
 import { Ask, ROW, SaidLine, useOnce } from './parts'
-import { CATEGORY_LABEL, PNL_NEEDS_QTY, ROLE_WORDS, SENT_OK, settled, whenOf } from './words'
+import {
+  CATEGORY_LABEL,
+  FUNDS_WITHOUT_AMOUNTS,
+  PNL_HIDES_MONEY,
+  PNL_NEEDS_QTY,
+  ROLE_WORDS,
+  SENT_OK,
+  settled,
+  whenOf,
+} from './words'
 
 export const REMOVE_ASK =
   'Remove this member? Their devices are signed out and their Telegram unlinked. The audit record stays.'
@@ -42,6 +51,14 @@ type Asking = { kind: 'remove' } | { kind: 'reset' } | { kind: 'device'; id: str
 
 function sameRole(a: Role): Privacy {
   return { ...PRIVACY_DEFAULTS[a] }
+}
+
+/** What a category's switch leaves the member, in the owner's words (Y24, H1). */
+function categoryLine(category: (typeof CATEGORIES)[number], privacy: Privacy): string {
+  if (category === 'pnl' && !privacy.qty) return PNL_NEEDS_QTY
+  if (category === 'pnl' && !privacy.pnl) return PNL_HIDES_MONEY
+  if (category === 'funds' && privacy.funds && !privacy.pnl) return FUNDS_WITHOUT_AMOUNTS
+  return privacy[category] ? 'Shown' : 'Hidden'
 }
 
 /** The fields of the edit form: for a new member (card undefined) or an existing one. */
@@ -141,7 +158,7 @@ function Fields({
               <div className="flex flex-col">
                 <Label htmlFor={`privacy-${category}`}>{CATEGORY_LABEL[category].name}</Label>
                 <span className="text-[0.8125rem] text-[color:var(--text-tertiary)]">
-                  {needsQty ? PNL_NEEDS_QTY : effective[category] ? 'Shown' : 'Hidden'}
+                  {categoryLine(category, effective)}
                 </span>
               </div>
               <Switch

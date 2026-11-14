@@ -341,7 +341,9 @@ two exists in this release. Each purpose has its own principal and its own list 
   with you." The answer passes the mask once more on its way out.
 * **One table of fields** (`sudarshan/family/privacy_fields.json`, `privacy.py`): `pnl`, `qty`,
   `funds`, `orders`. P&L is offered only with quantities; `value_paise` and `invested_paise`
-  belong to `qty`. `serialize.VIEWER_MASK` is built from it.
+  belong to `qty`. While P&L is hidden, the table's `cost` list goes with it whatever quantities
+  say: every rupee figure and every price a P&L is worked out from beside a quantity (review H1).
+  `serialize.VIEWER_MASK` is built from it.
 * **Orders and trades** are two more parts of the Upstox reader (`UPSTOX_PARTS`); the owner's
   `upstox_book` still reads the four of `UPSTOX_PAGE_PARTS` and the page shows neither.
 * **Budget** (`budget.py`): a principal other than `owner` takes a token only while the API's

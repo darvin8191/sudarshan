@@ -22,6 +22,7 @@ vi.mock('../ownerApi', async () => ({
 import { OwnerError } from '../ownerApi'
 import { cardOf, deviceOf, inviteOf, NOW } from './fixtures'
 import { MemberSheet, REMOVE_ASK, RESET_ASK, SIGN_OUT_ASK } from './MemberSheet'
+import { FUNDS_WITHOUT_AMOUNTS, PNL_HIDES_MONEY } from './words'
 
 function mount(
   card: ReturnType<typeof cardOf> | 'new' = cardOf(),
@@ -107,6 +108,15 @@ describe('editing a member', () => {
       version: 3,
       privacy: { pnl: false, qty: false, funds: false, orders: true },
     })
+  })
+
+  it('says that hiding P&L hides every rupee figure with it, funds amounts too (review H1)', async () => {
+    mount(cardOf({ privacy: { pnl: true, qty: true, funds: true, orders: true } }))
+    expect(screen.queryByText(PNL_HIDES_MONEY)).toBeNull()
+    await userEvent.click(screen.getByRole('switch', { name: 'P&L' }))
+    expect(screen.getByText(PNL_HIDES_MONEY)).toBeInTheDocument()
+    expect(screen.getByText(FUNDS_WITHOUT_AMOUNTS)).toBeInTheDocument()
+    expect(PNL_HIDES_MONEY).toMatch(/cost, value, the day’s change/)
   })
 
   it('shows a refusal in the service words and reads the members again after a conflict', async () => {
