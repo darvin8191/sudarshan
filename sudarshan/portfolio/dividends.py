@@ -199,4 +199,28 @@ def set_line(tx: Tx, line_id: int, args: dict[str, Any], today: int, now: int) -
     return {key: row[key] for key in LINE_KEYS}
 
 
-__all__ = ["for_pack", "owner_member", "report", "set_line", "sync"]
+def calendar(tx: Tx, today: int, from_day: int, to_day: int) -> dict[str, Any]:
+    """``calendar``: the events between two days, each with its public facts and, apart from
+    them, what is held (the day before the ex-date; for an event to come, now) and the amount a
+    dividend is expected to bring (types.ts ``CalendarReport``). ``listed_future`` is whether
+    Upstox lists any event to come at all."""
+    holdings = corpactions.Holdings(tx, today)
+    upstox = next((a for a in tx.rows("account") if a["kind"] == "upstox"), None)
+    reads = {r["isin"]: r["read_at"] for r in tx.ca_reads() if r["state"] == "ok"}
+    rows = []
+    for event in tx.ca_events(from_day=from_day, to_day=to_day):
+        held = sum(_held(holdings, upstox, event).values())
+        pays = event["kind"] == "dividend" and event["amount_u"] is not None and held
+        rows.append({
+            "event_id": event["id"], "isin": event["isin"], "name": holdings.name(event["isin"]),
+            "kind": event["kind"], "ex_day": event["ex_day"], "amount_u": event["amount_u"],
+            "ratio_num": event["ratio_num"], "ratio_den": event["ratio_den"],
+            "held_qty_u": held or None,
+            "expected_paise": rules.expected_paise(held, event["amount_u"]) if pays else None,
+            "checked_at": reads.get(event["isin"]),
+        })  # fmt: skip
+    ahead = tx.ca_events(from_day=add_days(today, 1))
+    return {"from": from_day, "to": to_day, "listed_future": bool(ahead), "calendar": rows}
+
+
+__all__ = ["calendar", "for_pack", "owner_member", "report", "set_line", "sync"]

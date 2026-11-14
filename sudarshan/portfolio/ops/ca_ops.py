@@ -106,3 +106,13 @@ async def dividend_set(ctx, message):
             OWNER, lambda tx: dividends.set_line(tx, line_id, args, day_of_instant(now), now)
         )
     )
+
+
+@op("calendar")
+async def calendar(ctx, message):
+    store, now = need(ctx), ctx.clock()
+    today = day_of_instant(now)
+    start, end = _span(message, today)
+    return await answer(
+        lambda: store.read(OWNER, lambda tx: dividends.calendar(tx, today, start, end))
+    )
