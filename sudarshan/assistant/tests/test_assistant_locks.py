@@ -141,7 +141,7 @@ def starts(tmp_path_factory) -> dict:
         done = subprocess.run(
             [sys.executable, "-m", "sudarshan.assistant.tests.locks_probe", str(out)],
             cwd=here,
-            env=probe_environment(here),
+            env={**probe_environment(here), "SUDARSHAN_RISK_DB": f"{here}/sudarshan_risk.db"},
             stdout=sink,
             stderr=subprocess.STDOUT,
             timeout=280,
@@ -172,3 +172,22 @@ def test_with_both_locks_set_it_answers_and_no_tool_writes(starts):
     assert seen["write_tools_registered"] == []
     assert len(seen["tools_registered"]) > 30, "the read tools are there"
     assert not ORDER_TOOLS & set(seen["tools_registered"])
+
+
+@pytest.mark.timeout(300)
+def test_a_token_that_worked_is_refused_once_access_is_ended(starts):
+    """M17.9 on the real transport: the same token, a second later, after ``end_all_access``."""
+    seen = starts["locked"]["cutoff"]
+    assert seen["before"] == 200 and seen["cutoff_recorded"] is True
+    assert seen["after"] == 401, "refused on its next call, not after its 15 minutes"
+    assert 'error="invalid_token"' in seen["after_challenge"]
+    assert "resource_metadata" in seen["after_challenge"], "so the client signs in again"
+    assert seen["stream_after"] == 401
+    assert seen["new_token"] == 200, "a sign-in after the cutoff works"
+
+
+@pytest.mark.timeout(300)
+def test_an_open_stream_closes_when_access_is_ended(starts):
+    seen = starts["locked"]["cutoff"]
+    assert seen["stream_opened"] is True
+    assert seen["stream_closed_in_s"] < 5, seen

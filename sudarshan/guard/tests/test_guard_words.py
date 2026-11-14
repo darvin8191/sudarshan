@@ -160,7 +160,9 @@ def kill_switch_sentences() -> list[str]:
     out += [words.ks_sandbox_orders(n, ok) for n in (0, 1, 3) for ok in (True, False)]
     out += [words.ks_sandbox_gtts(*n) for n in ((0, 0), (1, 0), (2, 1))]
     out += [words.ks_sandbox_exit_all("Closed 1 positions"), words.ks_sandbox_exit_all("")]
-    out += [words.ks_mcp_revoked(n) for n in (0, 1, 4)]
+    out += [words.ks_mcp_ended(True, n) for n in (0, 1, 4)]
+    out += [words.ks_mcp_ended(True, None), words.ks_mcp_ended(False, 2)]
+    out += [words.ks_mcp_ended(False, None)]
     out += [words.ks_resume_wait(n) for n in (1, 59)]
     out += [
         words.ks_report_lead(r)

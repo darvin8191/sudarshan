@@ -487,10 +487,27 @@ def ks_sandbox_exit_all(message: str, closed: object = None, failed: object = No
     return f"The sandbox's Exit all: {_ended(message)}"
 
 
-def ks_mcp_revoked(count: int) -> str:
+def ks_mcp_ended(cutoff: bool, revoked: int | None) -> str:
+    """What the kill switch did to AI access: ``cutoff`` says the access already granted ended
+    now, ``revoked`` how many sign-ins were revoked (None: they could not be)."""
+    if cutoff and revoked is not None:
+        return (
+            f"AI access ended at once ({_many(revoked, 'sign-in', 'sign-ins')} revoked). "
+            "To use the assistant again, connect it and give consent again."
+        )
+    if cutoff:
+        return (
+            "AI access already granted ended at once, but the sign-ins could not be revoked: an "
+            "AI app may connect again by itself. Press Revoke on the Remote MCP page."
+        )
+    if revoked is not None:
+        return (
+            f"AI sign-ins revoked ({_many(revoked, 'sign-in', 'sign-ins')}), but access already "
+            "granted could not be ended and can work for up to 15 minutes more."
+        )
     return (
-        f"Remote MCP sign-ins revoked ({_many(count, 'sign-in', 'sign-ins')}). Access already "
-        "granted can still work for up to 15 minutes."
+        "AI access could not be ended. Switch Remote MCP off on its admin page and restart "
+        "SUDARSHAN."
     )
 
 

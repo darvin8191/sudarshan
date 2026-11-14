@@ -240,6 +240,10 @@ def end_every_session(username, *, keep_server_logins: bool = False) -> bool:
         clear_browser_sessions(username)
     else:
         clear_user_sessions(username)
+    # SUDARSHAN M17.9: the AI assistant's consent was given by a session that has now ended.
+    from sudarshan.assistant import cutoff as assistant_cutoff
+
+    assistant_cutoff.end_all_access("owner_sessions_ended")
     return bool(recorded)
 
 
