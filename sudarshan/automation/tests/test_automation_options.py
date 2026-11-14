@@ -94,8 +94,10 @@ def test_long_buys_the_call_short_buys_the_put_and_nothing_is_ever_sold_to_open(
     assert send(store, desk, token, "long", NOW - 5).verdict == "sent"
     assert desk.position(CE) == 65
     got = send(store, desk, token, "short", NOW - 4)
-    assert (
-        got.verdict == "sent" and got.sentence == "OPT: order sent to buy 65 NIFTY 17 Nov 25000 PE."
+    # L6: both orders were placed, and the line says placed, never filled
+    assert got.verdict == "sent" and got.sentence == (
+        "OPT: order sent to buy 65 NIFTY 17 Nov 25000 PE. The exit of NIFTY 17 Nov 25000 CE was "
+        "placed first. Placed is not filled: check both in Orders."
     )
     assert (desk.position(CE), desk.position(PE)) == (0, 65)
     assert send(store, desk, token, "short", NOW - 3).verdict == "no_action"  # already holds it
@@ -439,3 +441,11 @@ def test_m3_day_ended_vectors(product, since, today, ended):
 
     since_ms = int(at(since) * 1000) if since else None
     assert symbols.day_ended(product, since_ms, today) is ended
+
+
+def test_l6_a_two_step_whose_exit_found_nothing_to_close_says_only_the_entry(store, desk):
+    strategy, token = make(store)
+    send(store, desk, token, "long", NOW - 5)
+    desk.positions.clear()  # the call is gone (sold by hand): the exit finds nothing to close
+    got = send(store, desk, token, "short", NOW - 4)
+    assert got.sentence == "OPT: order sent to buy 65 NIFTY 17 Nov 25000 PE."

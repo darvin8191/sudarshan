@@ -92,7 +92,10 @@ def alert(token):
         return jsonify(UNKNOWN_BODY), 404  # as for a link nobody made; nothing else is touched
     from sudarshan.automation import intake
 
-    outcome = intake.handle(token, request.get_data(cache=False), get_real_ip())
+    # At most one byte past the limit is ever read: a body sent with no declared length (chunked)
+    # passes the check above, and must not be read whole to learn that it is too large.
+    body = request.stream.read(contract.MAX_BODY + 1)
+    outcome = intake.handle(token, body, get_real_ip())
     return jsonify(outcome.body), outcome.status
 
 

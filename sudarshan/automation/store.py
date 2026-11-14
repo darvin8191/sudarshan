@@ -25,7 +25,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import func, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
@@ -42,6 +42,10 @@ logger = get_logger(__name__)
 
 PAYLOAD_KEEP = 1024
 SENTENCE_KEEP = 600
+#: How long an alert's line is kept (the design's figure), and the most lines kept for one
+#: strategy: a leaked link can add 60 lines a minute, and must not be able to fill the disk.
+KEEP_DAYS = 90
+KEEP_ROWS = 20_000
 
 
 class Conflict(Exception):
@@ -430,23 +434,65 @@ class AutomationStore:
 
     def sandbox_run(self, strategy_id: int) -> dict[str, int]:
         """How a strategy did in the sandbox, for the Go Live sheet: alerts handled, the days they
-        came on, how many sent an order and how many were refused."""
-        with self._session() as session:
-            rows = session.execute(
-                select(AlertRow.verdict, AlertRow.received_ms).where(
-                    AlertRow.strategy_id == strategy_id, AlertRow.mode == m.SANDBOX
-                )
-            ).all()
-        handled = [
-            (verdict, at) for verdict, at in rows if verdict not in ("repeat", "bad_message")
-        ]
+        came on, how many sent an order and how many were refused. Counted in the database: the
+        page reads this for every strategy on every list read."""
         india = 19_800_000  # India's time, +5:30, in ms
+        mine = (AlertRow.strategy_id == strategy_id, AlertRow.mode == m.SANDBOX)
+        handled = AlertRow.verdict.notin_(("repeat", "bad_message"))
+        with self._session() as session:
+            counts = dict(
+                session.execute(
+                    select(AlertRow.verdict, func.count())
+                    .where(*mine, handled)
+                    .group_by(AlertRow.verdict)
+                ).all()
+            )
+            day = (AlertRow.received_ms + india) // 86_400_000  # whole days in India
+            sessions = session.scalar(
+                select(func.count(func.distinct(day))).where(
+                    *mine, handled, AlertRow.received_ms.is_not(None)
+                )
+            )
         return {
-            "alerts": len(handled),
-            "sessions": len({(at + india) // 86_400_000 for _, at in handled}),
-            "sent": sum(1 for verdict, _ in handled if verdict in ("sent", "no_action")),
-            "refused": sum(1 for verdict, _ in handled if verdict not in m.MOVED),
+            "alerts": sum(counts.values()),
+            "sessions": int(sessions or 0),
+            "sent": sum(n for verdict, n in counts.items() if verdict in ("sent", "no_action")),
+            "refused": sum(n for verdict, n in counts.items() if verdict not in m.MOVED),
         }
+
+    def prune(self, now_ms: int, keep_days: int = KEEP_DAYS, keep_rows: int = KEEP_ROWS) -> int:
+        """Remove alert lines older than ``keep_days``, and for a strategy with more than
+        ``keep_rows`` lines its oldest ones. Returns how many went. Never called from an alert's
+        own request: the owner's page read asks, once a day (control.listing)."""
+        gone = 0
+        with self._session() as session:
+            cutoff = now_ms - keep_days * 86_400_000
+            gone += session.execute(delete(AlertRow).where(AlertRow.received_ms < cutoff)).rowcount
+            crowded = (
+                session.execute(
+                    select(AlertRow.strategy_id)
+                    .group_by(AlertRow.strategy_id)
+                    .having(func.count() > keep_rows)
+                )
+                .scalars()
+                .all()
+            )
+            for strategy_id in crowded:
+                oldest_kept = session.scalar(
+                    select(AlertRow.id)
+                    .where(AlertRow.strategy_id == strategy_id)
+                    .order_by(AlertRow.id.desc())
+                    .limit(1)
+                    .offset(keep_rows - 1)
+                )
+                if oldest_kept is not None:
+                    gone += session.execute(
+                        delete(AlertRow).where(
+                            AlertRow.strategy_id == strategy_id, AlertRow.id < oldest_kept
+                        )
+                    ).rowcount
+            session.commit()
+        return gone
 
 
 def _kept(columns: dict[str, Any]) -> dict[str, Any]:

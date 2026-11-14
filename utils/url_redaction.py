@@ -10,8 +10,10 @@ from typing import Any
 # as one expression makes the same rule usable for a bare Flask path, a full
 # URL, a Werkzeug request line, and arbitrary application-log text.
 _URL_CREDENTIAL = re.compile(
-    # SUDARSHAN M12.2: the Automation alert link, /sudarshan/tv/<token>, is one more.
-    r"(?P<prefix>/(?:(?:strategy|flow|chartink)/webhook|sudarshan/tv)/)[^/\s?#'\"<>]+",
+    # SUDARSHAN M12.2: the Automation alert link, /sudarshan/tv/<token>, is one more. Any run of
+    # slashes before the secret (/sudarshan/tv//<token>, which the router answers with a
+    # redirect that the traffic log keeps) is part of the prefix, so that form is masked too.
+    r"(?P<prefix>/(?:(?:strategy|flow|chartink)/webhook|sudarshan/tv)/+)[^/\s?#'\"<>]+",
     flags=re.IGNORECASE,
 )
 

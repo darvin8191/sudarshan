@@ -281,10 +281,33 @@ def view(strategy: m.Strategy, store: AutomationStore, now_ms: int, trading=None
     return out
 
 
+#: The India date the alert log was last pruned on, by this process. In memory: a restart
+#: prunes once more, which costs one small delete.
+_pruned_on: dict[int, str] = {}
+
+
+def _prune_once_a_day(store: AutomationStore, now_ms: int) -> None:
+    """The alert log keeps 90 days and at most 20,000 lines a strategy. It is pruned from the
+    owner's own page read, once a day, never from an alert's request and never by a timer inside
+    the app. A failure costs nothing: the page is read as before and tomorrow tries again."""
+    day = symbols.india_date(now_ms)
+    if _pruned_on.get(id(store)) == day:
+        return
+    _pruned_on.clear()
+    _pruned_on[id(store)] = day
+    try:
+        gone = store.prune(now_ms)
+        if gone:
+            logger.info(f"Automation: {gone} old alert lines were removed")
+    except Exception:
+        logger.exception("Automation: the alert log could not be pruned")
+
+
 def listing(*, desk: Desk | None = None, store: AutomationStore | None = None) -> dict[str, Any]:
     """Everything the page's first read needs (contract.ANSWERS["ListAnswer"])."""
     desk, store = desk or Desk(), store or shared()
     now_ms = int(desk.now() * 1000)
+    _prune_once_a_day(store, now_ms)
     stage = flag.stage()
     blocked = _live_gate(desk)
     notes = []

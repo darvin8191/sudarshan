@@ -488,3 +488,62 @@ def test_m1_a_sender_banned_by_hand_is_said_on_the_page(store, auto_ban):
     assert words.SENDER_BANNED not in control.listing(desk=PageDesk(), store=store)["notes"]
     assert auto_ban.IPBan.ban_ip(TV, "by hand", permanent=True, created_by="owner") is True
     assert words.SENDER_BANNED in control.listing(desk=PageDesk(), store=store)["notes"]
+
+
+# ---- L1: link forms the door does not expect ------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "form",
+    [
+        "/sudarshan/tv//{token}",
+        "/sudarshan/tv///{token}",
+        "/SUDARSHAN/TV//{token}",
+        "https://host.example/sudarshan/tv//{token}?a=1",
+        'POST /sudarshan/tv//{token} HTTP/1.1" 308',
+        "/strategy/webhook//{token}",
+    ],
+)
+def test_l1_the_double_slash_form_of_a_link_is_redacted_too(form):
+    from utils.url_redaction import redact_url_credentials
+
+    token = contract.TOKEN_PREFIX + "k" * 43
+    said = redact_url_credentials(form.format(token=token))
+    assert token not in said and "<redacted>" in said
+
+
+def test_l1_a_body_with_no_declared_length_is_never_read_whole(store, monkeypatch):
+    """Chunked: no Content-Length, so the header check passes. At most one byte past the limit
+    is read, and the answer is the one for a message that is too large."""
+    import io
+
+    import blueprints.sudarshan_automation as routes
+    from limiter import limiter
+
+    monkeypatch.setattr(store_mod, "_shared", store_mod.LazyInit(lambda: store, "door-test"))
+    app = Flask("door-test")
+    app.config.update(TESTING=True, RATELIMIT_ENABLED=False)
+    limiter.init_app(app)
+    app.register_blueprint(routes.sudarshan_automation_bp)
+    strategy, token = make(store)
+    handed, real = [], intake.handle
+
+    def spy(token_, body, ip, *args, **kwargs):
+        handed.append(len(body))
+        return real(token_, body, ip, *args, **kwargs)
+
+    monkeypatch.setattr(intake, "handle", spy)
+    reply = app.test_client().post(
+        f"/sudarshan/tv/{token}",
+        input_stream=io.BytesIO(b"x" * (2 * 1024 * 1024)),
+        environ_base={"REMOTE_ADDR": TV},
+        environ_overrides={"wsgi.input_terminated": True},
+        headers={"Transfer-Encoding": "chunked"},
+    )
+    assert handed == [contract.MAX_BODY + 1] and reply.status_code == 413
+    # and an ordinary alert is read whole, as before
+    body = indicator_alert("long", NOW - 1)
+    reply = app.test_client().post(
+        f"/sudarshan/tv/{token}", data=body, environ_base={"REMOTE_ADDR": TV}
+    )
+    assert handed[-1] == len(body) and reply.status_code == 200

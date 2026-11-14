@@ -337,6 +337,16 @@ def sent(name: str, target: int, quantity: int, symbol: str) -> str:
     return f"{name}: order sent to be {side(target)} {quantity} {contract_name(symbol)}."
 
 
+def two_step_sent(name: str, held: str) -> str:
+    """Both orders of a two-step were placed. Placed is not filled: the entry goes once the
+    exit's order is accepted, and an exit the exchange rejects afterwards leaves the old
+    contract open. The sentence says exactly that much."""
+    return (
+        f"The exit of {contract_name(held)} was placed first. Placed is not filled: check both "
+        "in Orders."
+    )
+
+
 def cut_to_exit(name: str, symbol: str, said: str) -> str:
     """The risk gate cut a reversal to its exit; its own sentence says what went and why."""
     passed_on = _service(said)

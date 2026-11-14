@@ -849,11 +849,26 @@ positions and fills, and the risk guard all apply as they do to an order you pla
 - **One alert, one order.** The same alert delivered twice is handled once. An alert that fired
   before a newer one was applied is not applied. A late alert (30 s by default, per strategy)
   that would open, add or reverse is not sent; a late exit still goes.
-- **The size is yours.** A fixed number of lots or shares per strategy; TradingView's quantity is
-  not used.
-- **An exit goes to the contract that was entered**, whatever the expiry rule gives today.
-- **Sandbox or Live is the strategy's own**, never the app's mode. Stopped or Active is one
-  switch per strategy; `/auto` on Telegram shows and moves it.
+- **The size is yours.** A fixed number of lots or shares per strategy, or (scaled size) the
+  chart's own position size times your multiplier, in whole lots and never above your cap. A
+  size that is not whole lots, or is above the cap, sends nothing and says why.
+- **A strategy can trade options, and then it only buys** (M12.10). A long alert buys a call, a
+  short alert buys a put, a flat alert sells what was bought. Turning the other way is two
+  orders: the held option's sale is placed first, and the other is bought only if that sale's
+  order was accepted (placed, which is not yet filled: the log says so, and the order alert
+  tells you when each fills).
+  On expiry day no new option is bought in a contract's last 15 minutes.
+- **An exit goes to the contract that was entered**, whatever the expiry rule gives today. **A
+  strategy only closes what it opened**: a flat alert while it holds nothing sends nothing, so it
+  never closes a position you opened by hand.
+- **An intraday strategy starts each day holding nothing.** Its position was squared off before
+  the close, so the first alert of a later day says so and picks today's contract.
+- **Sandbox or Live is the strategy's own**, never the app's mode or its order mode. Stopped or
+  Active is one switch per strategy; `/auto` on Telegram shows and moves it.
+- **An alert's own time is never trusted ahead of the server's clock.** New link, or Stop and
+  then Start, begins the order of alerts again.
+- **If an order went and its result could not be recorded**, you are told at once on Telegram,
+  and the next alert reads the strategy's position again before anything is sent.
 
 `SUDARSHAN_AUTOMATION` in OpenAlgo's `.env` (set by the release, above):
 
@@ -880,11 +895,46 @@ What it needs on the server:
    proxy_set_header X-Client-IP "";
    ```
 3. Semi-auto order mode off. In that mode an order waits in the Action Center and is then sent
-   wherever the app's mode points at that moment, so Automation does not use it and says so.
+   wherever the app's mode points at that moment, so Automation does not use it and says so. An
+   alert already being handled when the mode is switched is not queued either: its order goes
+   where its strategy sends it.
 
-What it does not do: option strategies, a size that follows TradingView's, limit orders, rolling
-a held position to the next contract, replaying a missed alert. A strategy and your own trades in
-the same contract and product are one position: an alert will "correct" a manual trade there.
+TradingView's own addresses are never put on the ban list by the app's automatic bans (anyone
+with a TradingView account could otherwise get them banned); a ban you set by hand still works,
+and the Automation page says when one is in the way.
+
+The alert log keeps 90 days, and at most 20,000 lines per strategy. Older lines are removed when
+you open the Automation page.
+
+What it does not do: sell options, limit orders, rolling a held position to the next contract,
+replaying a missed alert, checking market hours, or noticing an order that the exchange rejects
+after Upstox accepted it ("sent" means the order was placed, not that it filled: the order alert
+tells you the rest). While a strategy holds a position, your own trades in the same contract and
+product are part of that position: its next alert will "correct" a manual trade there.
+
+## Protect: one sell order on a holding (M5.6)
+
+On a holding's sheet, **Protect** places one GTT at Upstox: "sell these shares if the price
+falls to X" (or rises to X). It is for shares held for delivery only, one per holding, never on
+futures or options and never the two-leg kind, which on Upstox opens a position first.
+
+- The question says what is sent. The side (falls or rises) is the one you confirmed: the server
+  places that side, and refuses with a sentence when the price has already reached your price,
+  instead of choosing a direction itself.
+- Upstox places a limit order at your price when it is reached; in a fast fall it may not fill.
+  It stays for up to a year, or until you remove it. Sell on a protected holding asks about the
+  Protect first. The kill switch cancels it with every other GTT.
+
+`SUDARSHAN_GTT_PROTECT` in OpenAlgo's `.env` (set by the release, above):
+
+| value | what it does |
+|---|---|
+| `off` (in code) | Protect is on no screen |
+| `sandbox` | shown only in Analyze mode, and a Protect goes to the sandbox whatever the app's mode is when it arrives |
+| `on` | in Live too (a later release, after the Analyze-mode session) |
+
+Code: `frontend/src/sudarshan/books/protect/`, `sudarshan/books/protect_check.py`,
+`sudarshan/books/protect_flag.py`. Tests beside each.
 
 Code: `sudarshan/automation/` (rules and sentences are pure: `rules.py`, `payload.py`,
 `symbols.py`, `words.py`), `blueprints/sudarshan_automation.py`. Tests:

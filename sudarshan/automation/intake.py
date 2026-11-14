@@ -654,6 +654,7 @@ def _send(strategy, state, alert, alert_id, chosen: Plan, row, desk, store) -> O
     )
     tells = list(chosen.tells)
     now_state = state
+    first_verdict = None  # what the first of two orders answered
     for index, step in enumerate(chosen.steps if api_key else ()):
         done = step
         try:
@@ -663,6 +664,7 @@ def _send(strategy, state, alert, alert_id, chosen: Plan, row, desk, store) -> O
             logger.exception("Automation: the smart order call did not return an answer")
             success, response, status = False, {}, 500
         verdict, flat_found, cut = rules.read_answer(success, response, status)
+        first_verdict = verdict if index == 0 else first_verdict
         body = response if isinstance(response, dict) else {}
         said = body.get("risk_note") or body.get("message") or ""
         # A reversal the risk gate cut to its exit left the position flat: the state says flat.
@@ -691,6 +693,12 @@ def _send(strategy, state, alert, alert_id, chosen: Plan, row, desk, store) -> O
             )
             tells.append(("two_step", sentence))
             break
+    if len(chosen.steps) > 1 and done is chosen.steps[-1] and verdict == rules.SENT:
+        # Two orders went, and the row names only the second: say what the first did, and that
+        # an order placed is not an order filled.
+        first = chosen.steps[0]
+        if first_verdict == rules.SENT:
+            sentence = f"{sentence} {words.two_step_sent(name, first.symbol)}"
     sentence = " ".join([sentence, *chosen.notes])
     columns = {}
     if done is not None:

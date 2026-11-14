@@ -228,3 +228,60 @@ def test_the_store_opens_no_file_until_it_is_used(tmp_path):
     made.strategies()
     assert (tmp_path / "db" / "automation.db").exists()
     made.dispose()
+
+
+# ---- L2: the alert log is pruned -------------------------------------------------------------------
+
+
+def test_l2_lines_older_than_ninety_days_go_and_the_rest_stay(store):
+    strategy, _ = _make(store)
+    day, now = 86_400_000, 200 * 86_400_000
+    for n, age in enumerate((0, 1, 89, 90, 91, 400)):
+        store.note_alert(strategy.id, verdict="sent", received_ms=now - age * day - 1, claim=str(n))
+    assert store.prune(now) == 3
+    left = sorted((now - 1 - row["received_ms"]) // day for row in store.alerts(strategy.id))
+    assert left == [0, 1, 89]
+    assert store.prune(now) == 0
+
+
+def test_l2_a_strategy_keeps_only_its_newest_lines_and_another_strategy_is_untouched(store):
+    first, _ = _make(store)
+    second, _ = _make(store, name="Second", underlying="BANKNIFTY")
+    now = 200 * 86_400_000
+    for n in range(12):
+        store.note_alert(first.id, verdict="late", received_ms=now - 1000 + n, claim=f"a{n}")
+    for n in range(4):
+        store.note_alert(second.id, verdict="late", received_ms=now - 1000 + n, claim=f"b{n}")
+    assert store.prune(now, keep_rows=5) == 7
+    kept = [row["received_ms"] - (now - 1000) for row in store.alerts(first.id)]
+    assert kept == [11, 10, 9, 8, 7]  # the newest five
+    assert len(store.alerts(second.id)) == 4
+
+
+def test_l2_the_page_read_prunes_once_a_day_and_never_fails_for_it(store, monkeypatch):
+    from automation_world import NOW, FakeDesk
+
+    from sudarshan.automation import control
+
+    monkeypatch.setattr(control, "_pruned_on", {})
+    strategy, _ = _make(store)
+    desk = FakeDesk()
+    old = int(NOW * 1000) - 91 * 86_400_000
+    store.note_alert(strategy.id, verdict="sent", received_ms=old, claim="old")
+    calls = []
+    real = store.prune
+    monkeypatch.setattr(store, "prune", lambda now_ms: calls.append(now_ms) or real(now_ms))
+    control.listing(desk=desk, store=store)
+    control.listing(desk=desk, store=store)
+    assert len(calls) == 1 and store.alerts(strategy.id) == []
+    desk.clock = NOW + 86_400  # the next day in India
+    monkeypatch.setattr(store, "prune", lambda now_ms: 1 / 0)
+    assert control.listing(desk=desk, store=store)["status"] == "success"
+
+
+def test_l2_the_intake_never_prunes():
+    """The design: pruned from the owner's read, never from an alert's request."""
+    from pathlib import Path
+
+    source = (Path(__file__).parents[1] / "intake.py").read_text()
+    assert "prune" not in source
