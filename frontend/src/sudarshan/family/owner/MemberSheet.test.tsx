@@ -19,10 +19,18 @@ vi.mock('../ownerApi', async () => ({
   ...(await vi.importActual<typeof import('../ownerApi')>('../ownerApi')),
   ownerApi: api,
 }))
+const floors = vi.hoisted(() => ({ list: vi.fn(), floor: vi.fn(), set: vi.fn(), remove: vi.fn() }))
+vi.mock('./portfolioShares', async () => ({
+  ...(await vi.importActual<typeof import('./portfolioShares')>('./portfolioShares')),
+  portfolioShares: floors,
+}))
 
 import { OwnerError } from '../ownerApi'
 import { cardOf, deviceOf, inviteOf, NOW } from './fixtures'
 import {
+  FLOOR_MISSING,
+  FLOOR_WAITS,
+  MADE_NO_FLOOR,
   MemberSheet,
   REMOVE_ASK,
   RESET_ASK,
@@ -30,6 +38,17 @@ import {
   UNLOCK_LINE,
   UNLOCKED,
 } from './MemberSheet'
+import { FLOOR_CHANGED } from './privacySave'
+import { FUNDS_WITHOUT_AMOUNTS, PNL_HIDES_MONEY } from './words'
+
+/** The portfolio's floor of the default card: in step with it. */
+const floorRow = (over: Record<string, unknown> = {}) => ({
+  member: '1',
+  role: 'viewer',
+  shown: { pnl: true, qty: true, funds: false, orders: true },
+  version: 6,
+  ...over,
+})
 
 function mount(
   card: ReturnType<typeof cardOf> | 'new' = cardOf(),
@@ -67,8 +86,183 @@ function later<T>() {
 }
 
 beforeEach(() => {
-  for (const fn of Object.values(api)) fn.mockReset()
+  for (const fn of [...Object.values(api), ...Object.values(floors)]) fn.mockReset()
   api.deviceList.mockResolvedValue([])
+  floors.list.mockResolvedValue({ shares: [], privacy: [floorRow()] })
+  floors.floor.mockImplementation(async (args: { version: number | null }) =>
+    floorRow({ ...args, version: (args.version ?? 0) + 1 })
+  )
+})
+
+/** The order the two stores were written in, by name. */
+const order = () =>
+  [
+    ...api.memberUpdate.mock.invocationCallOrder.map((n) => [n, 'family'] as const),
+    ...floors.floor.mock.invocationCallOrder.map((n) => [n, 'floor'] as const),
+  ]
+    .sort((a, b) => a[0] - b[0])
+    .map(([, name]) => name)
+
+describe('the privacy floor follows the owner (cross-design Y6)', () => {
+  it('hiding writes the floor first, then the family row, and says Saved when both are confirmed', async () => {
+    api.memberUpdate.mockResolvedValue(cardOf({ version: 4 }))
+    mount()
+    await waitFor(() => expect(floors.list).toHaveBeenCalled())
+    await userEvent.click(screen.getByRole('switch', { name: 'Orders' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+    expect(await screen.findByText('Saved.')).toBeInTheDocument()
+    expect(order()).toEqual(['floor', 'family'])
+    expect(floors.floor).toHaveBeenCalledWith({
+      member: '1',
+      role: 'viewer',
+      shown: { pnl: true, qty: true, funds: false, orders: false },
+      version: 6,
+    })
+  })
+
+  it('showing writes the family row first, then the floor last', async () => {
+    api.memberUpdate.mockResolvedValue(cardOf({ version: 4 }))
+    mount()
+    await waitFor(() => expect(floors.list).toHaveBeenCalled())
+    await userEvent.click(screen.getByRole('switch', { name: 'Funds' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+    expect(await screen.findByText('Saved.')).toBeInTheDocument()
+    expect(order()).toEqual(['family', 'floor'])
+    expect(floors.floor).toHaveBeenCalledWith(
+      expect.objectContaining({ shown: { pnl: true, qty: true, funds: true, orders: true } })
+    )
+  })
+
+  it('an edit that hides one thing and shows another hides first and shows last', async () => {
+    api.memberUpdate.mockResolvedValue(cardOf({ version: 4 }))
+    mount()
+    await waitFor(() => expect(floors.list).toHaveBeenCalled())
+    await userEvent.click(screen.getByRole('switch', { name: 'Orders' }))
+    await userEvent.click(screen.getByRole('switch', { name: 'Funds' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+    expect(await screen.findByText('Saved.')).toBeInTheDocument()
+    expect(order()).toEqual(['floor', 'family', 'floor'])
+    const [hide, show] = floors.floor.mock.calls.map(([args]) => args)
+    expect(hide).toMatchObject({ shown: { funds: false, orders: false }, version: 6 })
+    expect(show).toMatchObject({ shown: { funds: true, orders: false }, version: 7 })
+  })
+
+  it('a family row refused after the floor hid names what took effect, never Saved', async () => {
+    api.memberUpdate.mockRejectedValue(
+      new OwnerError('conflict', 'This member was changed elsewhere.')
+    )
+    const { spy } = mount()
+    await waitFor(() => expect(floors.list).toHaveBeenCalled())
+    await userEvent.click(screen.getByRole('switch', { name: 'Orders' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+    expect(
+      await screen.findByText(
+        'The portfolio now hides orders from them; nothing else was saved. This member was changed elsewhere.'
+      )
+    ).toBeInTheDocument()
+    expect(screen.queryByText('Saved.')).toBeNull()
+    expect(spy).toHaveBeenCalledWith({
+      queryKey: ['sudarshan', 'family-owner', 'portfolio-shares'],
+    })
+  })
+
+  it('a floor that did not answer after the family row is not confirmed, never failed', async () => {
+    api.memberUpdate.mockResolvedValue(cardOf({ version: 4 }))
+    floors.floor.mockRejectedValue(new OwnerError('not_confirmed', 'Not confirmed.'))
+    mount()
+    await waitFor(() => expect(floors.list).toHaveBeenCalled())
+    await userEvent.click(screen.getByRole('switch', { name: 'Funds' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+    const said = await screen.findByText(
+      'Saved in the family view; whether the portfolio now shows them funds is not confirmed. Open this member again to check.'
+    )
+    expect(said.textContent).not.toMatch(/fail/i)
+  })
+
+  it('a refused hide saves nothing at all', async () => {
+    floors.floor.mockRejectedValue(new OwnerError('conflict', 'x'))
+    mount()
+    await waitFor(() => expect(floors.list).toHaveBeenCalled())
+    await userEvent.click(screen.getByRole('switch', { name: 'Orders' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+    expect(await screen.findByText(`Nothing was saved. ${FLOOR_CHANGED}`)).toBeInTheDocument()
+    expect(api.memberUpdate).not.toHaveBeenCalled()
+  })
+
+  it('a missing floor is said, and Save sends it alone, with no version', async () => {
+    floors.list.mockResolvedValue({ shares: [], privacy: [] })
+    mount()
+    expect(await screen.findByText(FLOOR_MISSING)).toBeInTheDocument()
+    const save = screen.getByRole('button', { name: 'Save changes' })
+    expect(save).toBeEnabled()
+    await userEvent.click(save)
+    expect(await screen.findByText('Saved.')).toBeInTheDocument()
+    expect(api.memberUpdate).not.toHaveBeenCalled()
+    expect(floors.floor).toHaveBeenCalledWith({
+      member: '1',
+      role: 'viewer',
+      shown: { pnl: true, qty: true, funds: false, orders: true },
+      version: null,
+    })
+  })
+
+  it('a floor that shows more than the card is said and is brought down first', async () => {
+    floors.list.mockResolvedValue({
+      shares: [],
+      privacy: [floorRow({ shown: { pnl: true, qty: true, funds: true, orders: true } })],
+    })
+    mount()
+    expect(
+      await screen.findByText(/shows them funds, which these switches hide/)
+    ).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+    expect(await screen.findByText('Saved.')).toBeInTheDocument()
+    expect(floors.floor).toHaveBeenCalledTimes(1)
+    expect(floors.floor.mock.calls[0][0]).toMatchObject({ shown: { funds: false }, version: 6 })
+  })
+
+  it('while the portfolio cannot be read, privacy waits and the name still saves', async () => {
+    floors.list.mockRejectedValue(
+      new OwnerError('off', 'The portfolio is switched off on the server.')
+    )
+    api.memberUpdate.mockResolvedValue(cardOf())
+    mount()
+    expect(
+      await screen.findByText(`The portfolio is switched off on the server. ${FLOOR_WAITS}`)
+    ).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('switch', { name: 'Orders' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+    expect(api.memberUpdate).not.toHaveBeenCalled()
+    expect(floors.floor).not.toHaveBeenCalled()
+    await userEvent.click(screen.getByRole('switch', { name: 'Orders' }))
+    const name = screen.getByLabelText('Display name')
+    await userEvent.clear(name)
+    await userEvent.type(name, 'New Name')
+    await userEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+    await waitFor(() =>
+      expect(api.memberUpdate).toHaveBeenCalledWith({ id: 1, version: 3, display_name: 'New Name' })
+    )
+  })
+
+  it('sends each write once when Save is tapped twice in the same frame', async () => {
+    let finish!: (card: unknown) => void
+    api.memberUpdate.mockReturnValue(
+      new Promise((resolve) => {
+        finish = resolve
+      })
+    )
+    mount()
+    await waitFor(() => expect(floors.list).toHaveBeenCalled())
+    await userEvent.click(screen.getByRole('switch', { name: 'Orders' }))
+    const save = screen.getByRole('button', { name: 'Save changes' })
+    act(() => {
+      save.click()
+      save.click()
+    })
+    await waitFor(() => expect(api.memberUpdate).toHaveBeenCalledTimes(1))
+    expect(floors.floor).toHaveBeenCalledTimes(1)
+    await act(async () => finish(cardOf()))
+  })
 })
 
 describe('editing a member', () => {
@@ -115,6 +309,15 @@ describe('editing a member', () => {
       version: 3,
       privacy: { pnl: false, qty: false, funds: false, orders: true },
     })
+  })
+
+  it('says that hiding P&L hides every rupee figure with it, funds amounts too (review H1)', async () => {
+    mount(cardOf({ privacy: { pnl: true, qty: true, funds: true, orders: true } }))
+    expect(screen.queryByText(PNL_HIDES_MONEY)).toBeNull()
+    await userEvent.click(screen.getByRole('switch', { name: 'P&L' }))
+    expect(screen.getByText(PNL_HIDES_MONEY)).toBeInTheDocument()
+    expect(screen.getByText(FUNDS_WITHOUT_AMOUNTS)).toBeInTheDocument()
+    expect(PNL_HIDES_MONEY).toMatch(/cost, value, the day’s change/)
   })
 
   it('shows a refusal in the service words and reads the members again after a conflict', async () => {
@@ -243,6 +446,43 @@ describe('adding a member', () => {
     })
     expect(body.request_id).toBeTruthy()
     await waitFor(() => expect(props.onCreated).toHaveBeenCalledWith(made))
+  })
+
+  it('sends the new member floor once the member exists, named by the new id', async () => {
+    const made = cardOf({
+      id: 9,
+      role: 'child',
+      privacy: { pnl: false, qty: false, funds: false, orders: false },
+    })
+    api.memberCreate.mockResolvedValue(made)
+    const { props } = mount('new')
+    await userEvent.type(screen.getByLabelText('Display name'), 'Test Two')
+    await userEvent.click(screen.getByRole('button', { name: 'Add member' }))
+    await waitFor(() => expect(props.onCreated).toHaveBeenCalledWith(made))
+    expect(floors.floor).toHaveBeenCalledWith({
+      member: '9',
+      role: 'child',
+      shown: { pnl: false, qty: false, funds: false, orders: false },
+      version: null,
+    })
+    expect(api.memberCreate.mock.invocationCallOrder[0]).toBeLessThan(
+      floors.floor.mock.invocationCallOrder[0]
+    )
+  })
+
+  it('a floor refused at create still hands the new member on, and says what is missing', async () => {
+    const made = cardOf({ id: 9 })
+    api.memberCreate.mockResolvedValue(made)
+    floors.floor.mockRejectedValue(
+      new OwnerError('unavailable', 'The portfolio service is not answering.')
+    )
+    const { props } = mount('new')
+    await userEvent.type(screen.getByLabelText('Display name'), 'Test Two')
+    await userEvent.click(screen.getByRole('button', { name: 'Add member' }))
+    await waitFor(() => expect(props.onCreated).toHaveBeenCalledWith(made))
+    expect(
+      await screen.findByText(`${MADE_NO_FLOOR} The portfolio service is not answering.`)
+    ).toBeInTheDocument()
   })
 
   it('keeps the owner own privacy choice when he then changes the role', async () => {

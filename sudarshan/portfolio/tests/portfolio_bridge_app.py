@@ -21,7 +21,7 @@ from database import user_db
 from limiter import limiter
 from sudarshan.portfolio.api import PortfolioApi
 from sudarshan.portfolio.core import kinds
-from sudarshan.vault import PORTFOLIO_API_INFO, fernet_for
+from sudarshan.vault import PORTFOLIO_API_INFO, PORTFOLIO_FAMILY_API_INFO, fernet_for
 
 OWNER = "owner"
 VIEWER = "family-viewer"
@@ -118,11 +118,17 @@ class Calls:
 
 
 class Service:
-    """The service's PortfolioApi on 127.0.0.1:<free port>, in a thread with its own loop."""
+    """The service's PortfolioApi on 127.0.0.1:<free port>, in a thread with its own loop. With
+    ``family``, it also opens the family purpose's seals, as sudarshan-portfolio does."""
 
-    def __init__(self, desk, registry, pepper: str):
+    def __init__(self, desk, registry, pepper: str, *, family: bool = False):
         self.desk = desk
-        self.api = PortfolioApi(desk, fernet_for(pepper, PORTFOLIO_API_INFO), registry=registry)
+        self.api = PortfolioApi(
+            desk,
+            fernet_for(pepper, PORTFOLIO_API_INFO),
+            registry=registry,
+            family_fernet=fernet_for(pepper, PORTFOLIO_FAMILY_API_INFO) if family else None,
+        )
         self.loop = asyncio.new_event_loop()
         self.thread = threading.Thread(target=self._run, name="portfolio-api-test", daemon=True)
         self._ready = threading.Event()

@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { PRIVACY_CATEGORIES } from '@/sudarshan/portfolio/types'
 import { CATEGORIES, type Privacy } from '../types'
 import { cardOf, NOW } from './fixtures'
 import {
@@ -27,6 +28,22 @@ describe('the privacy categories', () => {
     ) as { categories: Record<string, string[]> }
     expect(Object.keys(table.categories).sort()).toEqual([...CATEGORIES].sort())
     expect(Object.keys(CATEGORY_LABEL).sort()).toEqual([...CATEGORIES].sort())
+  })
+
+  it('are the categories the portfolio floor is sent with, in the same order (Y6)', () => {
+    expect([...CATEGORIES]).toEqual([...PRIVACY_CATEGORIES])
+  })
+
+  it('every choice the page sends is one the portfolio keeps: P&L only with quantities', () => {
+    for (let bits = 0; bits < 16; bits += 1) {
+      const sent = settled({
+        pnl: !!(bits & 1),
+        qty: !!(bits & 2),
+        funds: !!(bits & 4),
+        orders: !!(bits & 8),
+      })
+      expect(!sent.pnl || sent.qty).toBe(true)
+    }
   })
 
   it('read as one line in the order P&L, quantities, funds, orders', () => {

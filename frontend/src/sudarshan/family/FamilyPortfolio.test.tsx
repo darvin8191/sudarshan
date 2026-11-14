@@ -161,6 +161,23 @@ describe('Portfolio screen', () => {
     expect(allocation.textContent).not.toMatch(/₹/)
   })
 
+  it('marks the selected tab by weight and a check, never by colour alone (rule 6)', async () => {
+    routeFetch({
+      '/family/api/portfolio/tabs/2': ok(tabAnswer(2, { rows: [holdingRow('ALPHA')] })),
+      '/family/api/portfolio': ok(portfolio()),
+    })
+    mount('/family/portfolio?tab=2')
+    await screen.findByRole('list', { name: 'Holdings' })
+    const tabs = screen.getAllByRole('tab')
+    const chosen = tabs.filter((tab) => tab.getAttribute('aria-selected') === 'true')
+    expect(chosen).toHaveLength(1)
+    for (const tab of tabs) {
+      const selected = tab.getAttribute('aria-selected') === 'true'
+      expect(tab.querySelector('[data-mark="selected"]') !== null).toBe(selected)
+      expect(tab.className.includes('font-bold')).toBe(selected)
+    }
+  })
+
   it('has no way to change anything', async () => {
     const router = routeFetch({
       '/family/api/portfolio/tabs/1': ok(tabAnswer(1, { rows: [holdingRow('ALPHA')] })),
