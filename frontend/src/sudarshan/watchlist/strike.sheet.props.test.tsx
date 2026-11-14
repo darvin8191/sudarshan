@@ -110,7 +110,9 @@ describe('the strike sheet’s chain link', () => {
       chain: { exchange: 'NSE_INDEX', underlying: 'TEST', expiry: '2026-11-17', strike: 25_900 },
     })
     const link = screen.getByRole('link', { name: 'Open option chain' })
-    expect(link.getAttribute('href')).toMatch(/^\/options\/[A-Z_]+\/TEST\?expiry=2026-11-17&strike=25900$/)
+    expect(link.getAttribute('href')).toMatch(
+      /^\/options\/[A-Z_]+\/TEST\?expiry=2026-11-17&strike=25900$/
+    )
   })
 
   it('opens the option chain tool for an underlying alone', () => {

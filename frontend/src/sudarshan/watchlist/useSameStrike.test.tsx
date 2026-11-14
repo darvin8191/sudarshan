@@ -25,7 +25,7 @@ const ANSWER = {
 }
 
 const refuse = (code: 'off' | 'unanswered' | 'busy') => () =>
-  Promise.reject(new WatchlistsError(code, 'The server\'s sentence.'))
+  Promise.reject(new WatchlistsError(code, "The server's sentence."))
 
 beforeEach(() => {
   api.answers = []
