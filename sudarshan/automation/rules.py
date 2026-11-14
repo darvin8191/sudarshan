@@ -9,8 +9,9 @@ The rules, in order:
 
 1. repeat        the alert's claim is already there: nothing is sent.
 2. out of order  it fired before the newest alert applied: nothing, an exit included (an old exit
-                 must not close a newer entry). The mark it is judged against never runs ahead of
-                 the server's clock (``mark_of``), and one read ahead of it counts as unset.
+                 must not close a newer entry). The mark it is judged against never runs more than
+                 5 s ahead of the server's clock (``mark_of``), and one read further ahead counts
+                 as unset.
 3. stopped       a Stopped strategy sends nothing; one stopped for new entries lets only a flat
                  target through.
 4. capped        the day's alerts are used up: the strategy takes no new entries today, and only a
@@ -193,10 +194,20 @@ def read_answer(success: bool, response: object, status: int) -> tuple[str, bool
 
 def mark_of(alert: m.Alert, now_ms: int) -> int:
     """The order mark an applied alert leaves (``auto_state.last_fired_s``): the second it fired,
-    and never later than the server's own clock. An alert dated ahead (a wrong time in the alert
-    message, or anyone holding the link) is stored as now, so the alerts after it are still
-    judged against a time that has passed."""
-    return min(alert.fired_s, now_ms // 1000)
+    and never later than the server's own clock plus the slack ``decide`` allows.
+
+    An alert up to ``FUTURE_SLACK_S`` ahead keeps its own time: TradingView's clock may run a few
+    seconds ahead of this server's, and an alert that fired before it must still read as out of
+    order (clamped to now, an older exit would close the newer entry). An alert dated further
+    ahead (a wrong time in the alert message, or anyone holding the link) is stored as now, so
+    the alerts after it are judged against a time that has passed, from the next second on."""
+    return clamp_mark(alert.fired_s, now_ms)
+
+
+def clamp_mark(fired_s: int, now_ms: int) -> int:
+    """``mark_of`` for a fire time read from a row."""
+    now_s = now_ms // 1000
+    return fired_s if fired_s <= now_s + FUTURE_SLACK_S else now_s
 
 
 def state_after(
@@ -264,7 +275,7 @@ def state_settled(
     whichever way the alert pointed.
     """
     target = int(row.get("target") or 0)
-    mark = min(int(row.get("fired_s") or 0), now_ms // 1000) or state.last_fired_s
+    mark = clamp_mark(int(row.get("fired_s") or 0), now_ms) or state.last_fired_s
     named_qty = books.quantity.get(books.named, 0) if books.named else 0
     held_qty = books.quantity.get(books.held, 0) if books.held else 0
     wanted = named_qty > 0 if bought or target > 0 else named_qty < 0
