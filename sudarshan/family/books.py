@@ -486,13 +486,17 @@ class Books:
 # ---- the data plane: its keys, its pieces and its one job --------------------------------------
 @dataclass(frozen=True)
 class PlaneKeys:
-    """The data plane's seal keys in /etc/sudarshan-family (the provision step writes them)."""
+    """The data plane's seal keys in /etc/sudarshan-family (the provision step writes them): the
+    portfolio's family purpose, and OpenAlgo's internal route (F7; without it, as in a test of the
+    books alone, no list is shared and the share ops answer not_ready)."""
 
     portfolio: Fernet
+    internal: Fernet | None = None
 
     @classmethod
     def load(cls, settings: Any) -> PlaneKeys:
-        return cls(seal_key(settings.etc_dir, "portfolio-family"))
+        etc = settings.etc_dir
+        return cls(seal_key(etc, "portfolio-family"), seal_key(etc, "internal"))
 
 
 class Plane:
@@ -518,10 +522,12 @@ class Plane:
         self.parts: dict[str, Callable[[], Awaitable[None]]] = {"books": self.books.run}
         self.closers: list[Callable[[], Awaitable[None]]] = [self.nudges.close, self.books.close]
         self.reports: dict[str, Callable[[], Any]] = {"books": self.books.health}
-        #: The later lanes' pieces (viewer_ws.install: the dialect, the feed link, the symbols).
+        #: The later pieces (viewer_ws.install: the dialect, the feed link, the symbols; and
+        #: watchlists.install: the shared lists).
         self.dialect: Any = None
         self.feed: Any = None
         self.symbols: Any = None
+        self.lists: Any = None
 
     def nudged(self, kind: str, sandbox: bool, at: int) -> bool:
         return self.nudges.nudged(kind, sandbox, at)
@@ -584,5 +590,9 @@ def install(service: Any, keys: PlaneKeys) -> Plane:
     from . import viewer_ws  # F6: the sockets' dialect, the feed link and the symbol map
 
     viewer_ws.install(plane, service)
+    if keys.internal is not None:  # F7: the shared lists, and the owner's share ops
+        from . import watchlists
+
+        plane.lists = watchlists.install(plane, service, keys.internal)
     service._job_makers["data"] = lambda _service: plane.run()
     return plane

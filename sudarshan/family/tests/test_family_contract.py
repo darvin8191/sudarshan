@@ -93,7 +93,10 @@ def test_the_one_call_out_is_the_internal_watchlist_route():
     assert c.INTERNAL_PRINCIPAL == c.SERVICE == "sudarshan-family"
     assert (c.LIMITS["internal_bytes"], c.LIMITS["internal_lists"]) == (4096, 50)
     (op,) = c.INTERNAL_OPS
-    assert (op.name, c.parse_fields(op.req)) == ("watchlists", (c.Field("list_ids", "int[]"),))
+    # F7 (feat/family-c), review M3: and the member the lists are for
+    assert (op.name, c.parse_fields(op.req)) == ("watchlists", (
+        c.Field("list_ids", "int[]"), c.Field("member_id", "int"), c.Field("role", "Role"),
+    ))  # fmt: skip
     assert [f.name for f in c.record("InternalWatchlists")] == ["lists", "gone"]
     assert [f.name for f in c.record("InternalList")] == ["id", "name", "created_at", "rows"]
     assert [f.name for f in c.record("InternalRow")] == [

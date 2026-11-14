@@ -285,6 +285,21 @@ class Dialect:
             if moved or gone:
                 self._changed()
 
+    def settle(self, member: Mapping[str, Any]) -> None:
+        """A source's answer for the member changed (F7: a list shared or no longer shared):
+        recheck now, and again once every source has an answer, the books being read for the
+        member when they have none (what may be let go is decided only on every answer)."""
+        member_id = int(member["id"])
+        self.recheck(member_id)
+        if all(source.known(member_id) for source in self.sources):
+            return
+
+        async def go() -> None:
+            await asyncio.gather(*(s.ensure(member) for s in self.sources), return_exceptions=True)
+            self.recheck(member_id)
+
+        self._spawn(go())
+
     def _ensure(self, member: Mapping[str, Any]) -> None:
         member_id, now = int(member["id"]), self.mono()
         if now - self._ensured.get(member_id, -1e9) < ENSURE_EVERY_S:

@@ -806,6 +806,8 @@ PLANE_MODULES = [
     "feedlink.py",
     "viewer_ws.py",
     "symbol_map.py",
+    "watchlists.py",
+    "internal_client.py",
 ]
 
 
@@ -829,6 +831,11 @@ def test_the_plane_keys_are_the_provision_steps_files(tmp_path):
     made = settings(tmp_path)
     with pytest.raises(ConfigError):
         PlaneKeys.load(made)
-    key = Fernet.generate_key()
+    key, internal = Fernet.generate_key(), Fernet.generate_key()
     (etc / "seal-portfolio-family.key").write_bytes(key + b"\n")
-    assert PlaneKeys.load(made).portfolio.decrypt(Fernet(key).encrypt(b"x")) == b"x"
+    with pytest.raises(ConfigError):  # F7: the internal route's key is the provision step's too
+        PlaneKeys.load(made)
+    (etc / "seal-internal.key").write_bytes(internal + b"\n")
+    loaded = PlaneKeys.load(made)
+    assert loaded.portfolio.decrypt(Fernet(key).encrypt(b"x")) == b"x"
+    assert loaded.internal.decrypt(Fernet(internal).encrypt(b"y")) == b"y"
