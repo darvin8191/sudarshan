@@ -860,6 +860,8 @@ class TelegramBotService:
                 self.application.add_handler(CommandHandler("menu", self.cmd_menu))
                 # SUDARSHAN M16.7: the kill switch, in the owner's own chat (sudarshan/guard)
                 self.application.add_handler(CommandHandler("killswitch", self.cmd_killswitch))
+                # SUDARSHAN M12.1: the automation's switch, in the owner's own chat (sudarshan/automation)
+                self.application.add_handler(CommandHandler("auto", self.cmd_auto))
 
                 # Add callback query handler for inline buttons
                 self.application.add_handler(CallbackQueryHandler(self.button_callback))
@@ -1217,6 +1219,7 @@ class TelegramBotService:
 /stoppython - Stop running Python strategies (with confirmation)
 /mode - View or toggle trading mode (Live / Analyze)
 /killswitch on|exit|off STOP: stop all new orders (owner only)
+/auto: your TradingView strategies; /auto stop NAME, /auto start NAME (owner only)
 
 *Navigation:*
 /menu - Show interactive menu
@@ -2376,6 +2379,12 @@ class TelegramBotService:
         from sudarshan.guard import telegram as risk_telegram
 
         await risk_telegram.handle(self, update, context)
+
+    async def cmd_auto(self, update, context) -> None:
+        """SUDARSHAN M12.1: /auto [stop|start] <name> [phrase]; sudarshan/automation/telegram.py."""
+        from sudarshan.automation import telegram as automation_telegram
+
+        await automation_telegram.handle(self, update, context)
 
     async def cmd_stoppython(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /stoppython command — list running Python strategies and stop selected/all"""

@@ -223,3 +223,6 @@ class Desk:
 
     def tell(self, strategy_id: int, reason: str, sentence: str) -> None:
         """A line for the owner's Telegram (telegram.py merges them per minute)."""
+        from . import telegram
+
+        telegram.NOTICES.tell(strategy_id, reason, sentence)
