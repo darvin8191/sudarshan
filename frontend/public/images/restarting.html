@@ -15,7 +15,8 @@
       would answer one is the thing that is down. Two places show it, both from this one file:
         - the web server, for its own "bad gateway" and "gateway timeout" answers
           (sudarshan/ops/nginx/sudarshan-restart.conf; the owner installs it, see sudarshan/README.md);
-        - the family app's service worker (public/sw.js), for a page load answered 502, 503 or 504.
+        - the family app's service worker (public/sw.js), for a page load answered 502 or 504,
+          and 503 when that is not the web server's own "too many requests" page.
       The marks are the outlines of src/sudarshan/marks.ts; restartPage.test.ts holds them equal.
     -->
     <style>

@@ -29,8 +29,26 @@ describe('a send that threw', () => {
     for (const status of [400, 401, 403, 404, 409, 422, 429]) {
       expect(thrownOutcome(answered(status, { status: 'error', message: 'No' }))).toBe('refused')
     }
-    // Flask's own refusal of a missing security token is a page, not JSON: still a refusal.
-    expect(thrownOutcome(answered(400, '<p>The CSRF token is missing.</p>'))).toBe('refused')
+  })
+
+  it('never reads a 4xx that is not the app’s own answer as a refusal (review M2)', () => {
+    // A web server whose error page is missing answers 404 for the app's "bad gateway" while
+    // the app restarts: the exit may have gone, and a refusal would release its hold.
+    const notFound = '<html><head><title>404 Not Found</title></head><body>nginx</body></html>'
+    expect(thrownOutcome(answered(404, notFound))).toBe('unanswered')
+    // Any status, any body that is not the app's JSON with its status word.
+    const bodies = [notFound, '', undefined, null, 'Not Found', [], { detail: 'Not Found' }, 404]
+    for (const status of [400, 401, 403, 404, 405, 408, 409, 413, 422, 429, 499]) {
+      for (const body of bodies) {
+        expect(thrownOutcome(answered(status, body)), `${status} ${String(body)}`).toBe(
+          'unanswered'
+        )
+      }
+    }
+    // The app's own 404 (an order or a position it does not have) is still its refusal.
+    expect(thrownOutcome(answered(404, { status: 'error', message: 'No open position' }))).toBe(
+      'refused'
+    )
   })
 
   it('is not confirmed on any 5xx, the app’s own JSON too: it may have reached the broker', () => {

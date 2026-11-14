@@ -1078,21 +1078,32 @@ is what is down.
 Two things show it:
 
 - **The family app, with no step of yours.** Its service worker keeps the page on the phone and
-  shows it when a page load is answered 502, 503 or 504. It applies from the release that carries
+  shows it when a page load is answered 502 or 504 (and 503 when that is not the web server's
+  "too many requests" answer, which it says as that). It applies from the release that carries
   it, on phones that have opened the family view since.
 - **nginx, once you install the lines below.** They cover the owner's pages too, and a family
   phone that has not kept the page yet. Until then nginx's own error page is shown, as today.
+
+The lines carry the page inside them (`sudarshan/ops/nginx/sudarshan-restart.conf`, written from
+the page by `python -m sudarshan.ops.restart_page --write`; a test fails when the two differ).
+nginx reads no file for it, so nothing can go missing: "502 Bad Gateway" stays 502 and "504
+Gateway Time-out" stays 504, for a page load and for an order alike, each with the page as its
+body. An order sent in the second the app was down is therefore never answered "not found"; the
+phone says it could not confirm the order and keeps its hold, and TradingView sees the gateway
+error it would have seen without these lines.
 
 As for the assistant's lines above: nginx is not SUDARSHAN's alone, the deploy tool never touches
 it, and these lines go into SUDARSHAN's own site and nowhere else. On the server, from the app
 folder (`cd /opt/sudarshan/apps/openalgo`):
 
-1. Copy the page and the lines into root's folders. nginx never reads the app folder itself.
+1. Copy the lines into nginx's own folder. nginx never reads the app folder itself.
 
    ```
-   sudo install -D -m 644 -o root -g root frontend/public/images/restarting.html /usr/share/sudarshan/restarting.html
    sudo install -m 644 -o root -g root sudarshan/ops/nginx/sudarshan-restart.conf /etc/nginx/snippets/sudarshan-restart.conf
    ```
+
+   After a release that changes the page, run this line again and reload nginx (step 3); until
+   then nginx shows the earlier page, which is harmless.
 
 2. Open SUDARSHAN's own site file in nginx and add one line inside its `server { }` block, above
    its `location /` line (below the family view's and the assistant's `include` lines, if they are
@@ -1118,8 +1129,8 @@ folder (`cd /opt/sudarshan/apps/openalgo`):
 What the lines do not change: the answer keeps its status (a restart never reads as success to
 TradingView or to the app's own order calls), anything the app itself answers is passed on as it
 is, and the family view's API keeps its own "did not answer" sentence. After a release that
-changes the page (the changelog says so), run the first `install` line of step 1 again; no reload
-is needed for the page alone. To take the lines out, remove the `include` line, then
+changes the page (the changelog says so), run the `install` line of step 1 again, then step 3:
+the page is part of the lines, so nginx takes it up at the reload. To take the lines out, remove the `include` line, then
 `sudo nginx -t` and `sudo systemctl reload nginx`.
 
 Tests: `sudarshan/ops/tests/test_ops_restart_page.py`, `frontend/src/sudarshan/pwa/restartPage.test.ts`
