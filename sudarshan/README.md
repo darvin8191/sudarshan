@@ -896,6 +896,69 @@ signed out, the server could not record the time: log in and log out once more.
 Tests: `sudarshan/alerts/tests/test_sessions_valid_after.py`, `test/test_gthread_sessions_valid_after.py`
 and `frontend/src/sudarshan/signout.test.tsx`.
 
+## nginx lines for the AI assistant (M19.3)
+
+Do this only when you decide to use the AI assistant, before you turn Remote MCP on. Until then
+nothing here is needed: with Remote MCP off, the assistant's addresses answer "not found".
+
+nginx is the server's front door and is not SUDARSHAN's alone: other sites on this server may go
+through it. So the deploy tool never touches nginx, SUDARSHAN never reads nginx's files, and these
+lines are yours to install, once, into SUDARSHAN's own site and nowhere else. They let the
+addresses an AI app calls be reached only from the range Anthropic publishes for its calls to
+MCP servers (`160.79.104.0/21` on 14 Nov 2026; read Anthropic's page again before installing, and
+whenever a connection that worked stops), leave the consent page open to your own browser, and
+keep the health line for the server itself.
+
+On the server, from the app folder (`cd /opt/sudarshan/apps/openalgo`):
+
+1. Copy the two files into nginx's folders, owned by root. Never point nginx at the app folder
+   itself: the service user can write there, and nginx runs with root's rights.
+
+   ```
+   sudo install -m 644 -o root -g root sudarshan/ops/nginx/sudarshan-mcp-zone.conf /etc/nginx/conf.d/sudarshan-mcp-zone.conf
+   sudo install -m 644 -o root -g root sudarshan/ops/nginx/sudarshan-mcp.conf /etc/nginx/snippets/sudarshan-mcp.conf
+   ```
+
+2. Open SUDARSHAN's own site file in nginx (the one whose `server { }` block serves the app on
+   port 443) and add one line inside that block, above its `location /` line. Add it to no other
+   site:
+
+   ```
+   include snippets/sudarshan-mcp.conf;
+   ```
+
+3. Test, then reload. `nginx -t` reads every site's file and changes nothing; if it reports an
+   error, undo step 2 and stop. Always `reload`, never `restart`: a reload keeps every open
+   connection of every site.
+
+   ```
+   sudo nginx -t
+   sudo systemctl reload nginx
+   ```
+
+4. Check that the lines are in effect, with the app's address as you type it in the browser. It
+   asks nginx on the server itself, reads only whether each address is refused or let through,
+   opens no nginx file and changes nothing:
+
+   ```
+   sudo -u sudarshan .venv/bin/python -m sudarshan.ops.nginx_check --host <the app's address>
+   ```
+
+   Each line starts with `ok`; the last says "The assistant's nginx lines are in effect." A line
+   starting with `NO` names the address that is not as it should be.
+
+After a release, compare the two files in the app folder with your copies
+(`diff sudarshan/ops/nginx/sudarshan-mcp.conf /etc/nginx/snippets/sudarshan-mcp.conf`); the
+changelog says when they changed. To take the lines out again, remove the `include` line, then
+`sudo nginx -t` and `sudo systemctl reload nginx`.
+
+If nginx serves more than one site on this server and SUDARSHAN's is not the first, add a line to
+`/etc/sudarshan/watch.env` so the watch reads SUDARSHAN's own certificate and never another
+site's: `SUDARSHAN_WATCH_CERT_HOST` followed by `=` and the app's name. (With a number for an address instead of a
+name this cannot be chosen, and the watch reads the certificate nginx serves first.)
+
+Tests: `sudarshan/ops/tests/test_ops_nginx.py`.
+
 ## Secrets: where each one lives and what changing it breaks (M19.4)
 
 Every secret the server holds, in one place. Nothing here is a value: this table says where a

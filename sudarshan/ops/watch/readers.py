@@ -34,6 +34,9 @@ MEMINFO = Path("/proc/meminfo")
 #: The deploy tool holds this for the whole of an install (sudarshan/ops/deploy/sudarshan-deploy).
 DEPLOY_LOCK = Path("/var/lib/sudarshan/deploy.lock")
 CERT_ADDRESS = ("127.0.0.1", 443)
+#: Optional, in /etc/sudarshan/watch.env: the app's name, for a server whose nginx serves more
+#: than one site, so the certificate read is SUDARSHAN's and never another site's.
+CERT_HOST_ENV = "SUDARSHAN_WATCH_CERT_HOST"
 #: Loopback only, whatever proxy the environment names.
 _OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
@@ -112,10 +115,15 @@ def mem_available_mb(path: Path = MEMINFO) -> int | None:
     return None
 
 
-def cert_hours_left(now: float, address=CERT_ADDRESS, timeout: float = TIMEOUT_S) -> float | None:
+def cert_hours_left(
+    now: float, address=CERT_ADDRESS, timeout: float = TIMEOUT_S, name: str | None = None
+) -> float | None:
     """Hours until the certificate served at ``address`` runs out. It is read, not judged: an
-    address-only certificate is as good as a named one here."""
+    address-only certificate is as good as a named one here. ``name`` (else ``CERT_HOST_ENV``)
+    asks nginx for that site's certificate; without one it is the certificate nginx serves first."""
     from cryptography import x509
+
+    name = name or os.environ.get(CERT_HOST_ENV, "").strip() or None
 
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     context.check_hostname = False
@@ -123,7 +131,7 @@ def cert_hours_left(now: float, address=CERT_ADDRESS, timeout: float = TIMEOUT_S
     try:
         with (
             socket.create_connection(address, timeout=timeout) as plain,
-            context.wrap_socket(plain) as secure,
+            context.wrap_socket(plain, server_hostname=name) as secure,
         ):
             der = secure.getpeercert(binary_form=True)
         ends = x509.load_der_x509_certificate(der).not_valid_after_utc
