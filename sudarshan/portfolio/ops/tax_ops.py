@@ -1,7 +1,8 @@
 """The tax working paper (phase P7, lane P: M7.27; design p7 8, 9.1).
 
 ``tax_get`` is one taxpayer's financial year: the adapter (``tax_adapter``) gathers the inputs and
-the tax core (``sudarshan/tax``) works out every figure; nothing here computes tax. A loss carried
+the tax core (``sudarshan/tax``) works out every figure; nothing here computes tax. Each sale is
+given its share's name beside the ISIN (``_named``), the same name the CSV writes. A loss carried
 from an earlier year comes from that year's own paper, worked out from the oldest year Upstox
 keeps up to the year asked, and a loss the owner entered for a year wins over the computed one.
 The view starts no read of Upstox: it works on what the reader keeps and says what is not read.
@@ -235,9 +236,41 @@ def _with_dividends(store, pack: dict) -> dict:
     return pack
 
 
+#: The lists of the pack whose rows are sales of a share or a fund, each named by its ISIN.
+SALE_LISTS = ("schedule", "needs_fmv", "unknown_cost", "exempt_buybacks")
+
+
+def _share_names(tx) -> dict[str, str]:
+    """A name for each ISIN: the holding's own (under each ISIN it has had), else the scrip name
+    of Upstox's trade history."""
+    names = {
+        r["isin"]: r["scrip_name"]
+        for record in tx.report_list("trades")
+        for r in (record.get("payload") or {}).get("rows") or []
+        if r.get("isin") and r.get("scrip_name")
+    }
+    assets = {a["id"]: a["name"] for a in tx.rows("asset") if a.get("name")}
+    for alias in tx.rows("asset_alias", "id", kind="isin"):
+        if alias["asset_id"] in assets:
+            names[alias["value"]] = assets[alias["asset_id"]]
+    names.update({a["isin"]: a["name"] for a in tx.rows("asset") if a.get("isin") and a["name"]})
+    return names
+
+
+def _named(pack: dict, names: dict[str, str]) -> dict:
+    """Each sale of the pack with its share's name beside the ISIN (None where no record names
+    it; the ISIN is always kept). The core knows a share by its ISIN only."""
+    for key in SALE_LISTS:
+        for row in pack["capital_gains"][key]:
+            row["name"] = names.get(row["isin"])
+    return pack
+
+
 def _paper(store, member: int | None, fy: int, today: int, now: int, reading: bool) -> dict:
-    years = store.read(OWNER, lambda tx: _gather(tx, member, fy, today, now))
-    return _with_dividends(store, _chain(years, reading))
+    years, names = store.read(
+        OWNER, lambda tx: (_gather(tx, member, fy, today, now), _share_names(tx))
+    )
+    return _with_dividends(store, _named(_chain(years, reading), names))
 
 
 def _reading(ctx, fy: int) -> bool:
@@ -591,15 +624,9 @@ SCHEDULES = {"capital_gains": _gains, "business": _business, "losses": _losses,
 def _labels(tx, taxpayer: int) -> tuple[str, dict, dict]:
     """The taxpayer's name, a name for each ISIN (the holding's own, else Upstox's scrip name)
     and each account's name."""
-    names = {
-        r["isin"]: r["scrip_name"]
-        for record in tx.report_list("trades")
-        for r in (record.get("payload") or {}).get("rows") or []
-        if r.get("isin") and r.get("scrip_name")
-    }
-    names.update({a["isin"]: a["name"] for a in tx.rows("asset") if a.get("isin")})
     member = tx.get("member", taxpayer) or {}
-    return member.get("name") or "", names, {a["id"]: a["name"] for a in tx.rows("account")}
+    accounts = {a["id"]: a["name"] for a in tx.rows("account")}
+    return member.get("name") or "", _share_names(tx), accounts
 
 
 def _paper_file(store, member, fy: int, schedule: str, today: int, now: int) -> dict:

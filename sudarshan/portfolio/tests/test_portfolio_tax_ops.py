@@ -361,3 +361,33 @@ def test_a_dry_run_of_the_readings_and_of_a_tender_says_its_effect_and_writes_no
     shown = call(ctx, "tax_input_set", kind="trade_mark", row=tender, dry_run=True)
     assert shown["row"] is None and shown["effect"][0].startswith("In FY 2026-27 this changes ")
     assert call(ctx, "tax_inputs")["trade_marks"] == []
+
+
+# ---- each sale carries its share's name beside the ISIN (lane G) ---------------------------------
+def test_a_sale_is_named_by_the_holding_else_by_upstoxs_history_and_keeps_its_isin(ctx):
+    loss_last_year(ctx)
+    (sale,) = call(ctx, "tax_get", fy=2025)["capital_gains"]["schedule"]
+    assert (sale["isin"], sale["name"]) == (LOSS_ISIN, "LOSS LTD")  # Upstox's scrip name
+
+    def hold(tx):
+        asset = tx.insert("asset", {"kind": "listed", "name": "Loss Makers Ltd",
+                                    "isin": "INE000N01017", "asset_class": "equity"}, NOW)  # fmt: skip
+        tx.insert("asset_alias", {"asset_id": asset["id"], "kind": "isin", "value": LOSS_ISIN}, NOW)
+
+    ctx.store.write(OWNER, hold)  # the holding, which had this ISIN before a change of ISIN
+    (sale,) = call(ctx, "tax_get", fy=2025)["capital_gains"]["schedule"]
+    assert (sale["isin"], sale["name"]) == (LOSS_ISIN, "Loss Makers Ltd")
+    assert call(ctx, "tax_pack", fy=2025)["capital_gains"]["schedule"] == [sale]
+    text = call(ctx, "tax_csv", fy=2025, schedule="capital_gains")["text"]
+    assert f"{LOSS_ISIN},Loss Makers Ltd," in text  # the CSV writes the same name
+
+
+def test_every_list_of_sales_is_named_and_a_share_no_record_names_has_none():
+    from sudarshan.portfolio.ops import tax_ops
+
+    lists = {key: [{"isin": f"INE00{n}X01010"}] for n, key in enumerate(tax_ops.SALE_LISTS)}
+    pack = tax_ops._named({"capital_gains": lists}, {"INE000X01010": "First Ltd"})
+    rows = [row for key in tax_ops.SALE_LISTS for row in pack["capital_gains"][key]]
+    assert [row["name"] for row in rows] == ["First Ltd", None, None, None]
+    assert [row["isin"] for row in rows] == [f"INE00{n}X01010" for n in range(4)]
+    assert set(tax_ops.SALE_LISTS) == {"schedule", "needs_fmv", "unknown_cost", "exempt_buybacks"}

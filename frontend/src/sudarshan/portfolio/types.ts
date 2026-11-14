@@ -1823,6 +1823,9 @@ export interface TaxGain {
   taxpayer: number
   account: number
   isin: string
+  /** The share's name: the holding's own, else the scrip name of Upstox's trade history; null
+   * where no record names it. Added by the portfolio's op; the tax core's pack has no such key. */
+  name: string | null
   /** null: no purchase record; such a sale is listed apart and never costed at zero. */
   acquired_day: Day | null
   sale_day: Day
