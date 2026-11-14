@@ -201,8 +201,7 @@ The two lines of step 5 can stay: they help OpenAlgo whether or not the family v
   refusal page. Clearing the site's data in Chrome on that phone and signing in to the family view
   again brings the refusal page back.
 - nginx's error log can still name an invite's address if the family service is down at that
-  moment, and OpenAlgo's own traffic log keeps the addresses of the pages it serves, the invite
-  page included. An invite works once, for two hours.
+  moment (OpenAlgo's own logs mask the code). An invite works once, for two hours.
 - The family account's firewall (made by the one-time set-up, and proved by the family check at
   every deploy run) refuses your ports, OpenAlgo's market-data bus (5555) and its WebSocket proxy
   (8765) among them, and every local port the family view does not use. It allows OpenAlgo itself
