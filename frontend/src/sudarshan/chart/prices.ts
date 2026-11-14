@@ -3,6 +3,7 @@
  * a tick can change it without re-rendering the page around it, and the line
  * under it that says when the last tick came.
  */
+import type { MarketDepth } from 'openalgo-charts'
 import { type LiveStatus, opensAtWords } from '@/lib/trading/liveStatus'
 import type { PhoneTick } from './phoneChart'
 
@@ -10,6 +11,9 @@ import type { PhoneTick } from './phoneChart'
 export interface Prices {
   tick: PhoneTick | null
   streamed: PhoneTick | null
+  /** The five-level book (C9), and the open interest last carried, on a contract. */
+  depth: MarketDepth | null
+  oi: number | null
 }
 
 /** Runs a callback before the next paint, or soon where a page has no paints. */
@@ -26,7 +30,7 @@ const nextFrame: FrameScheduler = (run) => {
  * a burst of ticks between two paints renders the header once, at the last.
  */
 export class PriceStore {
-  private value: Prices = { tick: null, streamed: null }
+  private value: Prices = { tick: null, streamed: null, depth: null, oi: null }
   private readonly listeners = new Set<() => void>()
   private readonly schedule: FrameScheduler
   private pending = false
@@ -45,7 +49,23 @@ export class PriceStore {
   }
 
   set(tick: PhoneTick): void {
-    this.value = { tick, streamed: tick.polled ? this.value.streamed : tick }
+    this.value = {
+      ...this.value,
+      tick,
+      streamed: tick.polled ? this.value.streamed : tick,
+      // A frame that only moved the book says nothing new of open interest.
+      oi: tick.oi ?? this.value.oi,
+    }
+    this.notify()
+  }
+
+  /** The book, on each depth frame: drawn at the next frame with the price. */
+  setDepth(depth: MarketDepth): void {
+    this.value = { ...this.value, depth }
+    this.notify()
+  }
+
+  private notify(): void {
     if (this.pending) return
     this.pending = true
     this.schedule(() => {

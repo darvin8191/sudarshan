@@ -36,6 +36,8 @@ const fakes = vi.hoisted(() => ({
   /** Every study on offer, and the owner's files that failed, as the host gives them (C4). */
   catalogue: [] as Array<{ id: string; name: string; category: string; mine: boolean }>,
   problems: [] as string[],
+  /** A contract's open interest at yesterday's close (C9). */
+  prevOi: null as number | null,
 }))
 
 const UPSTOX_INTERVALS = [
@@ -117,6 +119,7 @@ vi.mock('./api', () => ({
   loadFeedConfig: async () => fakes.config,
   loadInstrument: async () => fakes.instrument,
   loadIntervals: async () => fakes.intervals,
+  loadPreviousOi: async () => fakes.prevOi,
   searchSymbols: async () => [],
 }))
 // Both close themselves the way the real dialogs do: the action's own
@@ -262,6 +265,7 @@ beforeEach(() => {
     { id: 'stochastic', name: 'Stochastic', category: 'Momentum', mine: false },
   ]
   fakes.problems = []
+  fakes.prevOi = null
   localStorage.clear()
   Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 })
   Object.defineProperty(window, 'innerHeight', { configurable: true, value: 844 })
@@ -589,6 +593,101 @@ describe('the phone chart page at 390 px', () => {
     await userEvent.clear(within(sheet).getByRole('searchbox'))
     await userEvent.type(within(sheet).getByRole('searchbox'), 'zzz')
     expect(within(sheet).getByText('No indicator by that name.')).toBeVisible()
+  })
+
+  it('shows the best bid and ask with their quantities, tick by tick, and five levels on a tap', async () => {
+    await opened()
+    const book = (bid: number) => ({
+      bids: [100, 99.95, 99.9, 99.85, 99.8].map((p, i) => ({
+        price: p + bid - 100,
+        qty: 650 * (i + 1),
+      })),
+      asks: [100.05, 100.1, 100.15, 100.2, 0].map((p) => ({
+        price: p ? p + bid - 100 : 0,
+        qty: p ? 1_300 : 0,
+      })),
+      ltp: bid,
+    })
+    emit((cb) => {
+      cb.onDepth?.(book(100))
+      cb.onStatus(status({ kind: 'live' }))
+    })
+    await waitFor(() =>
+      expect(screen.getByTestId('depth-strip')).toHaveTextContent(
+        'Bid100.00 × 650Ask100.05 × 1,300'
+      )
+    )
+    await userEvent.click(
+      screen.getByRole('button', {
+        name: /^Market depth: bid 100\.00, ask 100\.05\. Show five levels$/,
+      })
+    )
+    const sheet = await screen.findByRole('dialog', { name: 'Market depth' })
+    const rows = within(sheet).getAllByRole('row')
+    expect(rows).toHaveLength(6)
+    expect(rows[1]).toHaveTextContent('650100.00100.051,300')
+    // An empty level the proxy pads with zeros is a dash, not a price of nothing.
+    expect(rows[5]).toHaveTextContent('3,25099.80——')
+  })
+
+  it('greys the book and says why while prices are not real-time', async () => {
+    await opened()
+    emit((cb) => {
+      cb.onDepth?.({
+        bids: [{ price: 100, qty: 650 }],
+        asks: [{ price: 100.05, qty: 1_300 }],
+        ltp: 100,
+      })
+      cb.onStatus(status({ kind: 'connecting', at: Date.now(), stale: false, again: true }))
+    })
+    const strip = await screen.findByRole('button', {
+      name: /Reconnecting: the book is not current/,
+    })
+    expect(strip).toHaveClass('text-muted-foreground')
+  })
+
+  it("shows a contract's open interest and its change since yesterday, with a sign and an arrow", async () => {
+    fakes.instrument = { name: 'NIFTY 27 OCT 25900 CE', lotSize: 65, tickSize: 0.05 }
+    fakes.prevOi = 1_150_000
+    await opened('/chart/NFO/NIFTY27OCT2625900CE')
+    const line = screen.getByTestId('chart-oi')
+    expect(line).toHaveTextContent('OIwaiting for the first tick')
+    emit((cb) =>
+      cb.onTick({
+        ltp: 142.3,
+        time: null,
+        tradeTime: null,
+        at: Date.now(),
+        polled: false,
+        oi: 1_206_500,
+      })
+    )
+    await waitFor(() => expect(line).toHaveTextContent('OI12.07L+56.5Ksince yesterday'))
+    expect(line.querySelector('[data-direction="up"]')).not.toBeNull()
+  })
+
+  it("says the change is not available where yesterday's open interest is not known, and shows none for a share", async () => {
+    fakes.instrument = { name: 'NIFTY 27 OCT 25900 CE', lotSize: 65, tickSize: 0.05 }
+    await opened('/chart/NFO/NIFTY27OCT2625900CE')
+    emit((cb) =>
+      cb.onTick({
+        ltp: 142.3,
+        time: null,
+        tradeTime: null,
+        at: Date.now(),
+        polled: false,
+        oi: 1_206_500,
+      })
+    )
+    await waitFor(() =>
+      expect(screen.getByTestId('chart-oi')).toHaveTextContent('OI12.07Lchange not available')
+    )
+  })
+
+  it('has no book strip or open interest for an index', async () => {
+    await opened('/chart/NSE_INDEX/NIFTY')
+    expect(screen.queryByTestId('depth-strip')).toBeNull()
+    expect(screen.queryByTestId('chart-oi')).toBeNull()
   })
 
   it("opens the app's own order ticket from Buy and Sell, on Delivery for a share until a pick", async () => {

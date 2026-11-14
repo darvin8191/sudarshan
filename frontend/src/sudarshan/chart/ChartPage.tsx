@@ -59,8 +59,10 @@ import {
   loadFeedConfig,
   loadInstrument,
   loadIntervals,
+  loadPreviousOi,
   searchSymbols,
 } from './api'
+import { DepthSheet, DepthStrip } from './DepthStrip'
 import { IndicatorSettingsSheet } from './IndicatorSettingsSheet'
 import { IndicatorSheet } from './IndicatorSheet'
 import { LongPress } from './longPress'
@@ -163,6 +165,7 @@ type Sheet =
   | { sheet: 'style' }
   | { sheet: 'indicators' }
   | { sheet: 'study'; index: number }
+  | { sheet: 'depth' }
 
 function readSheet(state: unknown): Sheet | null {
   if (!state || typeof state !== 'object') return null
@@ -172,6 +175,7 @@ function readSheet(state: unknown): Sheet | null {
   if (value.sheet === 'timeframe') return { sheet: 'timeframe' }
   if (value.sheet === 'style') return { sheet: 'style' }
   if (value.sheet === 'indicators') return { sheet: 'indicators' }
+  if (value.sheet === 'depth') return { sheet: 'depth' }
   const index = (value as { index?: unknown }).index
   if (value.sheet === 'study' && typeof index === 'number' && Number.isInteger(index) && index >= 0)
     return { sheet: 'study', index }
@@ -224,6 +228,8 @@ function PhoneChartScreen({
   /** Every study on offer (C4), once the indicator tier is in, and the owner's files that failed. */
   const [catalogue, setCatalogue] = useState<CatalogueEntry[] | null>(null)
   const [scriptProblems, setScriptProblems] = useState<string[]>([])
+  /** A contract's open interest at yesterday's close (C9), for the header's change. */
+  const [prevOi, setPrevOi] = useState<number | null>(null)
   const [prevClose, setPrevClose] = useState<number | null>(null)
   const [status, setStatus] = useState<LiveStatus | null>(null)
   const [load, setLoad] = useState<ChartStateView | null>(null)
@@ -293,6 +299,7 @@ function PhoneChartScreen({
         onLoad: (state) => gate.set(state),
         onSessionClose: setClosesAt,
         onStudies: () => setStudyVersion((n) => n + 1),
+        onDepth: (depth) => prices.setDepth(depth),
       },
     })
     setOwner(next)
@@ -318,6 +325,18 @@ function PhoneChartScreen({
   useEffect(() => {
     if (owner && info) owner.setTick(info.tickSize)
   }, [owner, info])
+
+  // Once per contract opened: the open interest the header's change runs from.
+  useEffect(() => {
+    if (!config || !hasOpenInterest(exchange)) return
+    let alive = true
+    void loadPreviousOi(config.apiKey, symbol, exchange).then((value) => {
+      if (alive) setPrevOi(value)
+    })
+    return () => {
+      alive = false
+    }
+  }, [config, symbol, exchange])
 
   useEffect(() => {
     if (!config) return
@@ -542,7 +561,16 @@ function PhoneChartScreen({
         dp={dp}
         traded={!quoteOnly}
         closesAt={closesAt}
+        openInterest={hasOpenInterest(exchange) ? { prev: prevOi } : null}
       />
+      {!quoteOnly && (
+        <DepthStrip
+          prices={prices}
+          decimals={dp(prices.get().tick?.ltp ?? 0)}
+          quiet={bookQuiet(status)}
+          onOpen={() => openSheet({ sheet: 'depth' })}
+        />
+      )}
 
       <TimeframeRow
         chips={chips}
@@ -734,6 +762,13 @@ function PhoneChartScreen({
         onChange={(patch) => sheet?.sheet === 'study' && changeStudy(sheet.index, patch)}
         onDefaults={() => sheet?.sheet === 'study' && changeStudy(sheet.index, null)}
       />
+      <DepthSheet
+        open={sheet?.sheet === 'depth'}
+        onOpenChange={(open) => !open && closeSheet()}
+        prices={prices}
+        decimals={dp(prices.get().tick?.ltp ?? 0)}
+        quiet={bookQuiet(status)}
+      />
       <StyleSheet
         open={sheet?.sheet === 'style'}
         onOpenChange={(open) => !open && closeSheet()}
@@ -923,6 +958,7 @@ function PriceHeader({
   dp,
   traded,
   closesAt,
+  openInterest,
 }: {
   prices: PriceStore
   prevClose: number | null
@@ -932,8 +968,10 @@ function PriceHeader({
   traded: boolean
   /** The session's close, while the forming bar would run past it. */
   closesAt: number | null
+  /** On a contract: its open interest, with the change since yesterday's close (C9). */
+  openInterest: { prev: number | null } | null
 }) {
-  const { tick, streamed } = useSyncExternalStore(prices.subscribe, prices.get)
+  const { tick, streamed, oi } = useSyncExternalStore(prices.subscribe, prices.get)
   const now = useNow()
   const ltp = tick?.ltp ?? null
   const decimals = dp(ltp ?? 0)
@@ -996,8 +1034,68 @@ function PriceHeader({
           )}
         </p>
       </div>
+      {openInterest && <OpenInterestLine oi={oi} prev={openInterest.prev} quiet={quiet} />}
     </section>
   )
+}
+
+/**
+ * A contract's open interest (C9) and its change since yesterday's close,
+ * with an arrow and a sign; said in words where either is not known yet.
+ */
+function OpenInterestLine({
+  oi,
+  prev,
+  quiet,
+}: {
+  oi: number | null
+  prev: number | null
+  quiet: boolean
+}) {
+  const change = oi !== null && prev !== null ? oi - prev : null
+  const direction = change === null || change === 0 ? 'flat' : change > 0 ? 'up' : 'down'
+  const sign = change === null || change === 0 ? '' : change > 0 ? '+' : '−'
+  return (
+    <p
+      className={cn(
+        'mt-1 flex items-center gap-1.5 text-xs font-semibold',
+        quiet && 'text-muted-foreground'
+      )}
+      data-testid="chart-oi"
+    >
+      <span className="text-[color:var(--text-tertiary)]">OI</span>
+      {oi === null ? (
+        <span className="font-medium text-muted-foreground">waiting for the first tick</span>
+      ) : (
+        <>
+          <span className="tabular-nums">{compact.format(oi)}</span>
+          {change === null ? (
+            <span className="font-medium text-muted-foreground">change not available</span>
+          ) : (
+            <span
+              className={cn('inline-flex items-center gap-1 tabular-nums', TREND_TEXT[direction])}
+            >
+              <TrendArrow direction={direction} className="size-2" />
+              {sign}
+              {compact.format(Math.abs(change))}
+              <span className="font-medium text-[color:var(--text-tertiary)]">since yesterday</span>
+            </span>
+          )}
+        </>
+      )}
+    </p>
+  )
+}
+
+/** Why the book is not current, in words, or null while it is (C9). */
+function bookQuiet(status: LiveStatus | null): string | null {
+  const line = status?.line
+  if (!line) return null
+  if (line.kind === 'closed') return 'Market closed: the book as the session left it.'
+  if (line.kind === 'connecting') return 'Reconnecting: the book is not current.'
+  if (line.kind === 'polling' || (line.kind === 'delayed' && line.stale))
+    return 'Delayed: the book is not current.'
+  return null
 }
 
 /** Hair lines through the candle being read and the finger's height. */

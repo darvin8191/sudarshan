@@ -110,6 +110,8 @@ export interface PhoneTick {
   at: number
   /** A quote request standing in for the stream, not a tick from it. */
   polled: boolean
+  /** Open interest, on a contract, when the frame or quote carried it (C9). */
+  oi?: number
 }
 
 export interface PhoneChartCallbacks {
@@ -130,6 +132,8 @@ export interface PhoneChartCallbacks {
   onSessionClose?(at: number | null): void
   /** The studies on the chart changed: a set applied, a chart built anew (C3). */
   onStudies?(): void
+  /** The five-level book, on every depth frame of the charted instrument (C9). */
+  onDepth?(depth: MarketDepth): void
 }
 
 /** One legend line (C3): a study's name and settings, its values at a bar, or why it is not drawn. */
@@ -1097,7 +1101,14 @@ export class PhoneChart {
     if (ticket !== this.ticket || this.destroyed) return
     const ltp = typeof quote?.ltp === 'number' && quote.ltp > 0 ? quote.ltp : null
     if (ltp !== null && !this.streamed)
-      this.cb.onTick({ ltp, time: null, tradeTime: null, at: Date.now(), polled: true })
+      this.cb.onTick({
+        ltp,
+        time: null,
+        tradeTime: null,
+        at: Date.now(),
+        polled: true,
+        ...(typeof quote?.oi === 'number' && quote.oi > 0 ? { oi: quote.oi } : {}),
+      })
     if (quote && ltp !== null && !needsPreviousClose(quote.prev_close, ltp)) {
       this.cb.onPrevClose?.(quote.prev_close as number)
       return
@@ -1168,6 +1179,7 @@ export class PhoneChart {
   private onDepthEvent(symbol: string, exchange: string, depth: MarketDepth): void {
     const sym = this.sym
     if (!sym || symbol !== sym.symbol || !(depth.ltp > 0)) return
+    this.cb.onDepth?.(depth)
     // The day's volume and open interest come off the same frame through the
     // tap; a book update repeats the last traded quantity, so it is not summed.
     const extra = this.frames.get(symbol, exchange)
@@ -1221,6 +1233,7 @@ export class PhoneChart {
       tradeTime: tick.tradeTime ?? null,
       at,
       polled: tick.polled,
+      ...(tick.oi !== undefined && tick.oi > 0 ? { oi: tick.oi } : {}),
     })
     const update = this.builder?.onTick({
       time: tick.time ?? this.frames.clock.nowSec(),
@@ -1286,6 +1299,7 @@ export class PhoneChart {
       ltp: quote.ltp,
       time: this.frames.clock.nowSec(),
       dayVolume: isQuoteOnly(sym.exchange) ? undefined : quote.volume,
+      oi: typeof quote.oi === 'number' ? quote.oi : undefined,
       polled: true,
     })
   }

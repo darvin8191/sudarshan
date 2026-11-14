@@ -9,7 +9,7 @@
  * `installHost` in `beforeEach`, `removeHost` in `afterEach`, `mountChart` per
  * test.
  */
-import type { Bar } from 'openalgo-charts'
+import type { Bar, MarketDepth } from 'openalgo-charts'
 import { vi } from 'vitest'
 import type { ChartStateView } from '@/lib/trading/chartState'
 import { resetInstrumentSessions } from '@/lib/trading/instrumentSession'
@@ -114,6 +114,7 @@ export interface Heard {
   statuses: LiveStatus[]
   loads: ChartStateView[]
   closes: Array<number | null>
+  depths: MarketDepth[]
 }
 
 export function mountChart(options: { style?: ChartStyle } = {}): {
@@ -121,7 +122,14 @@ export function mountChart(options: { style?: ChartStyle } = {}): {
   heard: Heard
   container: HTMLDivElement
 } {
-  const heard: Heard = { ticks: [], prevClose: [], statuses: [], loads: [], closes: [] }
+  const heard: Heard = {
+    ticks: [],
+    prevClose: [],
+    statuses: [],
+    loads: [],
+    closes: [],
+    depths: [],
+  }
   const container = document.createElement('div')
   Object.defineProperty(container, 'clientWidth', { configurable: true, value: 360 })
   Object.defineProperty(container, 'clientHeight', { configurable: true, value: 520 })
@@ -138,6 +146,7 @@ export function mountChart(options: { style?: ChartStyle } = {}): {
       onStatus: (status) => heard.statuses.push(status),
       onLoad: (state) => heard.loads.push(state),
       onSessionClose: (at) => heard.closes.push(at),
+      onDepth: (depth) => heard.depths.push(depth),
     },
   })
   host.charts.push(chart)
