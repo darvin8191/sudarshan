@@ -1043,10 +1043,24 @@ After a release, compare the two files in the app folder with your copies
 changelog says when they changed. To take the lines out again, remove the `include` line, then
 `sudo nginx -t` and `sudo systemctl reload nginx`.
 
-If nginx serves more than one site on this server and SUDARSHAN's is not the first, add a line to
-`/etc/sudarshan/watch.env` so the watch reads SUDARSHAN's own certificate and never another
-site's: `SUDARSHAN_WATCH_CERT_HOST` followed by `=` and the app's name. (With a number for an address instead of a
-name this cannot be chosen, and the watch reads the certificate nginx serves first.)
+The watch's certificate check reads SUDARSHAN's own certificate and never another site's, even
+where nginx serves more than one site on this server. It asks nginx by the app's own address,
+taken from `HOST_SERVER` in OpenAlgo's `.env` (the address you open the app at), and judges the
+certificate only when it is issued for that address. If `HOST_SERVER` does not hold the app's
+address, add a line to `/etc/sudarshan/watch.env`: `SUDARSHAN_WATCH_CERT_HOST` followed by `=`
+and the app's address. To see what it uses, run the watch's check:
+
+```
+sudo -u sudarshan .venv/bin/python -m sudarshan.ops.watch --check
+```
+
+- The line `certificate site` says `set` and the address it asks by, or `unknown`: then no
+  certificate is checked until the line above is added.
+- The line `certificate` says `fine` with the hours left. `unread cause=no_name` means the
+  address is not known; `unread cause=other_site` means nginx answered that address with another
+  site's certificate (the address is wrong, or the app's site is not set up in nginx under it).
+  (With a number for an address instead of a name, nginx cannot be asked by it and gives its
+  first site's certificate: it is judged only when it is issued for that number.)
 
 Tests: `sudarshan/ops/tests/test_ops_nginx.py`.
 

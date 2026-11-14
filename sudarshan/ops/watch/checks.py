@@ -14,7 +14,7 @@ The readings (a dict; a value of None, or a key that is missing, means "could no
     master_date       the date in India of the last instrument list download ("" when never)
     disk              {"free_gb": ..., "inodes_free_pct": ...} for the app's disk
     mem_available_mb  the kernel's MemAvailable
-    cert_hours_left   hours until the certificate nginx serves runs out
+    cert_hours_left   hours until SUDARSHAN's own certificate runs out, or why none was judged
     posture           what ``posture.read`` found, read once an hour: {"mcp": {...}, "debug": bool,
                       "loose": [names], "open_ports": [ports], "reboot": bool,
                       "updates": {"all": n, "security": n} or None}
@@ -183,9 +183,17 @@ def memory_free(readings: Mapping, memory: Mapping) -> Result:
     return Result("memory", level, {"available_mb": str(int(available))}, {"low": low})
 
 
+#: Why the certificate was not judged (``readers.CERT_NO_NAME``, ``readers.CERT_OTHER_SITE``).
+CERT_CAUSES = ("no_name", "other_site")
+
+
 def certificate(readings: Mapping, memory: Mapping) -> Result:
-    """The certificate nginx serves: failing under 48 hours left (it should renew before that)."""
+    """SUDARSHAN's own certificate, as nginx serves it: failing under 48 hours left (it should
+    renew before that). A reading that names why none was judged (no name for the site is known,
+    or nginx gave another site's) is unread with that cause, never another site's hours."""
     hours = readings.get("cert_hours_left")
+    if isinstance(hours, str) and hours in CERT_CAUSES:
+        return Result("certificate", UNREAD, {"cause": hours})
     if isinstance(hours, bool) or not isinstance(hours, int | float):
         return Result("certificate", UNREAD)
     level = FAILING if hours < CERT_FAIL_HOURS else FINE
