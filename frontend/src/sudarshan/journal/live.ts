@@ -50,6 +50,11 @@ export function tickOf(line: SymbolData | undefined): JournalTick | null {
   return ltpU === null ? null : { ltpU, at: price.at, live: price.live }
 }
 
+const COUNT = new Intl.NumberFormat('en-IN')
+
+/** A quantity or a count as the owner reads it: 1,300, 12,34,567 (review L1). */
+export const countText = (n: number): string => COUNT.format(n)
+
 /** A price in rupees as the owner reads it: 2 places, 4 for a currency tick that needs them. */
 export function priceText(u: number): string {
   const places = u % 100 === 0 ? 2 : 4

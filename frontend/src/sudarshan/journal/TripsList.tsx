@@ -19,6 +19,7 @@ import { describe } from '@/sudarshan/watchlist/rows'
 import { journalData, problemOf } from './api'
 import { JOURNAL_KEY } from './keys'
 import {
+  countText,
   type DayGroup,
   dayWords,
   excursionBar,
@@ -41,7 +42,7 @@ import {
 } from './tripsPaging'
 import type { Mode, Tag, Trip } from './types'
 import { useJournalSync } from './useJournalSync'
-import { type LivePnl, useTripLive } from './useTripLive'
+import { LIVE_CAP, type LivePnl, useTripLive } from './useTripLive'
 
 export const EMPTY_WORDS = 'No trades yet. Fills are recorded here as they happen at Upstox.'
 export const NO_TOKEN_WORDS =
@@ -107,11 +108,14 @@ function Contract({ trip, children }: { trip: Trip; children: React.ReactNode })
 function OpenCard({
   trip,
   live,
+  capped,
   now,
   onOpen,
 }: {
   trip: TripRow
   live: LivePnl | undefined
+  /** Past the journal's share of the live feed: it gets no price (review L5). */
+  capped: boolean
   now: number
   onOpen: (id: number) => void
 }) {
@@ -140,19 +144,21 @@ function OpenCard({
                 // A part-closed trade's figure is what the open quantity makes now, not what the
                 // closed part made (review M7).
                 <span className="text-[0.6875rem] font-semibold text-[color:var(--text-tertiary)]">
-                  on {qty} open
+                  on {countText(qty)} open
                 </span>
               )}
             </span>
           ) : (
             <span className="text-sm font-semibold whitespace-nowrap text-[color:var(--text-tertiary)]">
-              Waiting for a price
+              {capped
+                ? `Not priced: more than ${countText(LIVE_CAP)} open trades`
+                : 'Waiting for a price'}
             </span>
           )}
         </Contract>
         <span className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[0.8125rem] font-medium text-[color:var(--text-secondary)]">
           <span>
-            {qty} qty at {priceText(trip.entry_avg_u)}
+            {countText(qty)} qty at {priceText(trip.entry_avg_u)}
           </span>
           <span className="inline-flex items-center gap-1">
             <Clock aria-hidden="true" className="size-3.5" />
@@ -162,7 +168,7 @@ function OpenCard({
         </span>
         {trip.exit_qty > 0 && (
           <span className="text-xs font-medium text-[color:var(--text-tertiary)]">
-            Part closed: {trip.exit_qty} of {trip.entry_qty} qty
+            Part closed: {countText(trip.exit_qty)} of {countText(trip.entry_qty)} qty
           </span>
         )}
       </button>
@@ -406,6 +412,7 @@ export function TripsList({ mode, onOpen }: { mode: Mode; onOpen: (id: number) =
                   key={trip.id}
                   trip={trip}
                   live={live.pnl.get(trip.id)}
+                  capped={!live.pnl.has(trip.id) && open.length > LIVE_CAP}
                   now={now}
                   onOpen={onOpen}
                 />

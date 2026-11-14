@@ -197,10 +197,10 @@ describe('what happened', () => {
     expect(await screen.findByText('The price path was not recorded.')).toBeTruthy()
   })
 
-  it('says how fast the first entry order was answered, as the service measures it', async () => {
-    serve()
+  it('says how fast the first entry order was answered, in en-IN digits (review L1)', async () => {
+    serve(detail({ latency_ms: 1412 }))
     show()
-    expect(await screen.findByText('answered in 412 ms')).toBeTruthy()
+    expect(await screen.findByText('answered in 1,412 ms')).toBeTruthy()
     expect(screen.getByText('First entry order')).toBeTruthy()
     expect(screen.queryByText(/order answered/)).toBeNull()
   })

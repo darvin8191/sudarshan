@@ -24,7 +24,7 @@ import { describe } from '@/sudarshan/watchlist/rows'
 import { journalData, problemOf, type TripDetail, WORDS } from './api'
 import { clearDraft, readDraft, writeDraft } from './drafts'
 import { JOURNAL_KEY } from './keys'
-import { holdWords, openQty, priceText } from './live'
+import { countText, holdWords, openQty, priceText } from './live'
 import { paiseAmount } from './money'
 import { Problem, SideChip, UnsavedQuestion } from './parts'
 import {
@@ -141,7 +141,7 @@ function FillsTable({ fills, kept }: { fills: readonly Fill[] | undefined; kept:
                   {fill.action}
                 </span>
               </td>
-              <td className="py-2 pr-2 text-right">{fill.qty}</td>
+              <td className="py-2 pr-2 text-right">{countText(fill.qty)}</td>
               <td className="py-2 pr-2 text-right">{priceText(fill.price_u)}</td>
               <td className="py-2">{SOURCE_WORDS[fill.source]}</td>
             </tr>
@@ -831,7 +831,7 @@ export function TripSheet({
           )}
           <Section title="Result">
             <dl className="flex flex-col gap-1.5">
-              <Row label="Quantity">{closed ? trip.qty_max : openQty(trip)}</Row>
+              <Row label="Quantity">{countText(closed ? trip.qty_max : openQty(trip))}</Row>
               <Row label="Entry average">{priceText(trip.entry_avg_u)}</Row>
               <Row label="Exit average">
                 {trip.exit_avg_u === null ? stillOpen : priceText(trip.exit_avg_u)}
@@ -869,7 +869,7 @@ export function TripSheet({
                 {trip.hold_s === null ? stillOpen : holdWords(trip.hold_s * 1000)}
               </Row>
               {trip.latency_ms !== null && trip.latency_ms !== undefined && (
-                <Row label="First entry order">answered in {trip.latency_ms} ms</Row>
+                <Row label="First entry order">answered in {countText(trip.latency_ms)} ms</Row>
               )}
             </dl>
           </Section>

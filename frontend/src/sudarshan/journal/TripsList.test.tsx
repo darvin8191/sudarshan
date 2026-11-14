@@ -159,6 +159,26 @@ describe('TripsList', () => {
     expect(within(closedGroup).queryByText(/Real-time|Reconnecting|Stale|Market closed/)).toBeNull()
   })
 
+  it('writes quantities in en-IN digits (review L1)', async () => {
+    serve([trip({ id: 1, entry_qty: 1300, exit_qty: 650 })], [])
+    show()
+    const card = await screen.findByTestId('open-trip')
+    expect(within(card).getByText('650 qty at 100.00')).toBeTruthy()
+    expect(within(card).getByText('Part closed: 650 of 1,300 qty')).toBeTruthy()
+  })
+
+  it('says a trade past the journal’s share of the feed is not priced, never waiting for ever (review L5)', async () => {
+    const many = Array.from({ length: 101 }, (_, n) =>
+      trip({ id: n + 1, opened_ms: Date.UTC(2026, 10, 13, 4, 0) - n })
+    )
+    serve(many, [])
+    show()
+    const cards = await screen.findAllByTestId('open-trip')
+    expect(cards).toHaveLength(101)
+    expect(within(cards[100]).getByText('Not priced: more than 100 open trades')).toBeTruthy()
+    expect(within(cards[0]).getByText('Waiting for a price')).toBeTruthy()
+  })
+
   it('shows a part-closed trade’s open quantity, and that its figure is on that quantity', async () => {
     serve([trip({ id: 1, entry_qty: 65, exit_qty: 25 })], [])
     show()
