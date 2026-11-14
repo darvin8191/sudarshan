@@ -645,6 +645,57 @@ Tests: `sudarshan/ops/tests/test_deploy_notices.py` (the whole tool on a fake se
 
 Tests: `sudarshan/ops/tests/test_ops_docs.py`.
 
+## Watching the server (M19.5)
+
+`sudarshan-watch` looks at the server every 2 minutes, day and night, and tells you on Telegram
+when something stops working and again when it works. It is a small program that a timer starts
+and that ends a second or two later (`sudarshan-watch.timer`, `sudarshan-watch.service`; the
+deploy tool installs both with the release). Nothing needs setting up for it.
+
+| it looks at | it tells you when | when you are told |
+|---|---|---|
+| each SUDARSHAN service: price feed, alerts, portfolio, screener, family view, journal | one has not answered for two looks in a row (about 4 minutes) | at once |
+| the Upstox login | from 08:58 on a trading day there is no login for today; later in the day, order updates have stopped arriving for 4 minutes | at once |
+| the price feed's connection to Upstox | not connected for 4 minutes while the market is open | at once |
+| the instrument list | it was not refreshed today by 09:00 on a trading day | at once |
+| the server's disk | under 15 GB free (a warning); under 5 GB free (a failure) | the warning after the market closes, the failure at once |
+| the server's memory | under 1 GB available for three looks in a row | after the market closes |
+| the security certificate | under 48 hours left and not renewed | at once |
+| OpenAlgo itself | it has not answered for two looks in a row | only through the outside heartbeat, because Telegram notices go through OpenAlgo |
+
+- **Once per cause.** A failure is told once and its recovery once, however long it lasts. A
+  service that was never set up on this server (the family view before its set-up) is not a fault.
+- **While a release is being installed** the watch stands aside: the deploy tool stops and starts
+  every service, and none of that is told.
+- **It only reads and records.** It never restarts, stops or changes a service, holds no Telegram
+  or OpenAlgo key, and sends nothing itself: it writes what changed to
+  `/var/lib/sudarshan-watch/events.jsonl`, and `sudarshan-alerts` words and sends it ("Server
+  notices on Telegram" above). It looks only at SUDARSHAN's own services and files and at
+  OpenAlgo; nothing else that runs on the server is read, asked or named, and no outside site is
+  called.
+- **What it cannot tell you.** If the alerts service or OpenAlgo is down, a notice cannot go out
+  until it is back; if the whole server is down, nothing here runs at all. The outside heartbeat
+  below is for those two cases.
+
+To see what it sees, at any time, as the service user from the app folder (it writes nothing):
+
+```
+cd /opt/sudarshan/apps/openalgo && sudo -u sudarshan .venv/bin/python -m sudarshan.ops.watch --check
+```
+
+One line per check: `fine`, `warning`, `failing`, `unread` (could not be read just now) or `off`
+(not expected now: the market is closed, or the service is not set up). The last look is also in
+`/var/lib/sudarshan-watch/report.json` (`sudo cat` it), which the System page will show in a
+later release.
+
+**After the release that brings the watch is installed, once:** run the `--check` line above and
+read it; then, outside market hours, stop the screener for 5 minutes
+(`sudo systemctl stop sudarshan-screener`, wait for the Telegram message, then
+`sudo systemctl start sudarshan-screener` and wait for the second one).
+
+Tests: `sudarshan/ops/tests/test_watch_checks.py` (the vectors), `test_watch_run.py`,
+`test_watch_reach.py`, `test_watch_unit.py` and `sudarshan/alerts/tests/test_alerts_notices_watch.py`.
+
 ## The family view's one-time set-up (P6)
 
 The family view (family members see the books, view only, with no way to place an order) runs as

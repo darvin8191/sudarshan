@@ -10,6 +10,7 @@ server is named here, and nothing outside the server is called.
 
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import socket
@@ -30,6 +31,8 @@ OPENALGO_URL = "http://127.0.0.1:5000/"
 #: Where systemd links a unit that is enabled (each SUDARSHAN service is WantedBy multi-user).
 WANTS_DIR = Path("/etc/systemd/system/multi-user.target.wants")
 MEMINFO = Path("/proc/meminfo")
+#: The deploy tool holds this for the whole of an install (sudarshan/ops/deploy/sudarshan-deploy).
+DEPLOY_LOCK = Path("/var/lib/sudarshan/deploy.lock")
 CERT_ADDRESS = ("127.0.0.1", 443)
 #: Loopback only, whatever proxy the environment names.
 _OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
@@ -70,6 +73,24 @@ def enabled(name: str, wants_dir: Path = WANTS_DIR) -> bool | None:
     if not wants_dir.is_dir():
         return None
     return os.path.lexists(wants_dir / f"sudarshan-{name}.service")
+
+
+def installing(lock: Path = DEPLOY_LOCK) -> bool:
+    """Whether the deploy tool is installing a release right now: its lock is held. A lock that is
+    not there or cannot be opened is no install (a server the tool never deployed, a test)."""
+    try:
+        fd = os.open(lock, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    except OSError:
+        return False
+    try:
+        fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
+    except BlockingIOError:
+        return True
+    except OSError:
+        return False
+    finally:
+        os.close(fd)  # closing gives the shared lock back
+    return False
 
 
 def disk(folder: Path) -> dict | None:

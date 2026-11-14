@@ -158,15 +158,19 @@ def run_once(
     *,
     clock: Callable[[], float] = time.time,
     gather: Callable[..., dict] = readers.gather,
+    installing: Callable[[], bool] = readers.installing,
 ) -> int:
     """One run. 0 when it finished (whatever the checks said), 1 when its files could not be
-    written, 0 with nothing done when another run holds the folder."""
+    written, 0 with nothing done when another run holds the folder or while the deploy tool is
+    installing a release: it stops and starts every service, and none of that is a fault."""
     settings.state_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
     lock = os.open(settings.state_dir / "lock", os.O_RDWR | os.O_CREAT, 0o600)
     try:
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError:
+            return 0
+        if installing():
             return 0
         now = clock()
         state = load_state(settings.state_file)

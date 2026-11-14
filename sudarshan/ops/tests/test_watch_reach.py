@@ -12,6 +12,7 @@ WATCH = Path(__file__).resolve().parents[1] / "watch"
 SOURCES = sorted(WATCH.glob("*.py"))
 ALLOWED_PATHS = (
     "/var/lib/sudarshan-watch",
+    "/var/lib/sudarshan/deploy.lock",  # the deploy tool's own lock: is an install running
     "/opt/sudarshan/apps/openalgo",
     "/etc/sudarshan/",
     "/etc/systemd/system/multi-user.target.wants",  # only sudarshan-<name>.service is looked for

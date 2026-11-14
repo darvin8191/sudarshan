@@ -236,7 +236,11 @@ def _runs(settings, readings_by_run):
     for readings in readings_by_run:
         at += 120
         seen = {**readings, "now": at}
-        codes.append(run.run_once(settings, clock=lambda at=at: at, gather=lambda *a, s=seen: s))
+        codes.append(
+            run.run_once(
+                settings, clock=lambda at=at: at, gather=lambda *a, s=seen: s, installing=bool
+            )
+        )
     return codes
 
 
@@ -363,3 +367,32 @@ def test_runs_and_readers_leave_no_descriptor_open(tmp_path, local, tls):
         readers.disk(tmp_path), readers.mem_available_mb(), readers.enabled("feed")
     assert _runs(settings, [FINE, down, down, FINE] * 10) == [0] * 40
     watch.assert_clean()
+
+
+def test_nothing_is_judged_while_a_release_is_being_installed(tmp_path):
+    """The deploy tool stops and starts every service: the watch stands aside until its lock is
+    free, keeps its state as it was and tells nothing."""
+    import fcntl
+
+    lock = tmp_path / "deploy.lock"
+    assert readers.installing(lock) is False, "no lock file: no install"
+    lock.write_text("")
+    assert readers.installing(lock) is False
+    settings = _settings(tmp_path)
+    down = {**FINE, "health": {**FINE["health"], "feed": None, "alerts": None}, "openalgo": False}
+    assert _runs(settings, [FINE]) == [0]
+    before = settings.state_file.read_bytes()
+    held = os.open(lock, os.O_RDWR)
+    try:
+        fcntl.flock(held, fcntl.LOCK_EX)
+        assert readers.installing(lock) is True
+        for _ in range(3):
+            code = run.run_once(
+                settings, gather=lambda *a: down, installing=lambda: readers.installing(lock)
+            )
+            assert code == 0
+    finally:
+        os.close(held)
+    assert readers.installing(lock) is False
+    assert settings.state_file.read_bytes() == before
+    assert events.read_events(settings.spool) == []
