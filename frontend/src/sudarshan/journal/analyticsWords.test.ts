@@ -25,6 +25,10 @@ describe('a ratio with no number says why', () => {
   it('never shows a zero or infinity for a ratio the core did not work out', () => {
     expect(ratioWords(null, 'no_losing_trades')).not.toMatch(/0|∞|inf/i)
   })
+
+  it('reads a state it does not know as "-", never an empty tile (review L10)', () => {
+    expect(ratioWords(null, 'from_a_newer_service' as never)).toBe('-')
+  })
 })
 
 describe('short figures', () => {
@@ -34,11 +38,22 @@ describe('short figures', () => {
     [0, '0'],
     [40, '0'],
     [123456, '+1.2k'],
-    [-9_876_500, '−98.8k'],
+    [-9_876_500, '−99k'],
+    [1_250_000, '+13k'],
+    [9_994_000, '+1L'],
+    [99_940_000, '+10L'],
     [25_000_000, '+2.5L'],
+    [-98_765_400, '−9.9L'],
+    [123_456_700, '+12L'],
     [-2_500_000_000, '−2.5Cr'],
   ])('%i paise reads %s', (paise, text) => {
     expect(compactPaise(paise)).toBe(text)
+  })
+
+  it('never takes more than five characters for a cell, short of a crore', () => {
+    for (const rupees of [999, 1000, 9949, 9950, 99_499, 99_500, 9_94_999, 9_95_000, 99_49_999]) {
+      expect(compactPaise(rupees * 100).length).toBeLessThanOrEqual(5)
+    }
   })
 
   it('shows whole rupees from a thousand up, paise below, with the sign and a true minus', () => {

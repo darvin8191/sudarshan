@@ -113,12 +113,37 @@ def csrf_headers(client) -> dict:
     return {"X-CSRFToken": token}
 
 
+#: The member an internal request is for, unless a test says otherwise (F7, review M3).
+MEMBER = {"member_id": 2, "role": "viewer"}
+
+
 def internal_seal(pepper: str | None = None, info: bytes = FAMILY_INTERNAL_INFO, **fields) -> bytes:
     """A request to the internal route as the family service seals it (the fields over the
-    defaults: op ``watchlists``, principal ``sudarshan-family``)."""
+    defaults: op ``watchlists``, principal ``sudarshan-family``, the member ``MEMBER``; a field
+    given as ``None`` is left out)."""
     fernet = fernet_for(pepper or os.environ["API_KEY_PEPPER"], info)
-    fields = {"principal": bp_module.INTERNAL_PRINCIPAL, **fields}
+    fields = {"principal": bp_module.INTERNAL_PRINCIPAL, **MEMBER, **fields}
+    fields = {k: v for k, v in fields.items() if v is not None or k == "list_ids"}
     return seal(fernet, fields.pop("op", bp_module.INTERNAL_OP), **fields)
+
+
+def note_shares(
+    lists: dict[str, int],
+    member_id: int | None = 2,
+    role: str | None = None,
+    until: int | None = None,
+) -> None:
+    """Note each list as shared with the member (or the role), as the bridge does when the owner
+    shares it (review M3): with the ``created_at`` it has now when it is the owner's."""
+
+    def note(shares: dict) -> bool:
+        for list_id in lists.values():
+            made = bp_module._list_made(str(list_id))[1]
+            shares[f"t{len(shares) + 1}"] = {"list": list_id, "made": made, "member": member_id,
+                                             "role": role, "until": until}  # fmt: skip
+        return True
+
+    bp_module._note_change(note)
 
 
 class _Server(ThreadingHTTPServer):

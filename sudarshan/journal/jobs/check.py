@@ -4,6 +4,8 @@ At the post-close session's end plus 5 minutes (16:05 on a normal day) the day's
 trades is read through the portfolio's journal purpose: a fill the live reads missed is added, a
 recorded one Upstox's list no longer holds is marked withdrawn, the day is paired again (the
 capture's hooks) and the day is marked checked, with what the check found in the owner's words.
+Every open trade whose contract can no longer trade (its expiry day passed, or an NSE or BSE
+derivative expiring today) is then marked ended at expiry (``book.expire_open``, review B1).
 The sandbox's fills are read from sandbox.db at the same time. A read that does not happen fails
 the run, which is asked again every 15 minutes until midnight; the 22:00 read follows whatever
 this one did.
@@ -42,6 +44,9 @@ async def check_day(service: Any, today: int, now: int, late: bool) -> str:
     if live.state != "ok":
         raise JobFailed(f"The day's trades could not be read for the close check: {live.words}")
     sandbox = await capture.read_sandbox("sandbox_book")
+    from ..book import expire_open
+
+    expired = await expire_open(service, now)
     note = check_note(live)
     await asyncio.get_running_loop().run_in_executor(
         None,
@@ -57,7 +62,7 @@ async def check_day(service: Any, today: int, now: int, late: bool) -> str:
 
     # the day report already kept says what the check found; it is not sent again
     await build_eod(service, today, now, announce=False, create=False)
-    return f"live: {live.line()}; sandbox: {sandbox.line()}"
+    return f"live: {live.line()}; sandbox: {sandbox.line()}; {expired} ended at expiry"
 
 
 def register_jobs() -> None:

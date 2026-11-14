@@ -163,3 +163,47 @@ def test_every_job_name_is_known_to_the_schedule(tmp_path):
     with pytest.raises(ValueError):
         plan.due("tea", date(2026, 11, 10))
     assert set(schedule_module.TRADING_JOBS) | set(schedule_module.CALENDAR_JOBS) == set(JOB_NAMES)
+
+
+# ---- a period report missed for its whole day (review L16) ------------------------------------
+def test_a_week_in_review_missed_on_sunday_is_built_at_the_next_start_for_sunday(box):
+    sunday, friday = 20261108, 20261106
+    box.store.write(
+        OWNER, lambda tx: tx.job_put("eod", friday, "ok", "x", clock_ms(friday, "15:45"))
+    )
+    runs = []
+
+    async def run(service, today, now, late):
+        runs.append((today, late))
+        return "built"
+
+    monday = clock_ms(20261109, "09:00")
+    assert asyncio.run(once_a_day(box, "weekly", monday, run)) == "late"
+    assert runs == [(sunday, True)]  # for Sunday: the week that ended then
+    row = box.store.read(OWNER, lambda tx: tx.job_get("weekly", sunday))
+    assert row["status"] == "late"
+    assert asyncio.run(once_a_day(box, "weekly", monday + 60_000, run)) is None  # once
+    assert len(runs) == 1
+
+
+def test_a_missed_period_report_waits_for_three_in_the_morning_and_three_days(box):
+    friday = 20261106
+    box.store.write(
+        OWNER, lambda tx: tx.job_put("eod", friday, "ok", "x", clock_ms(friday, "15:45"))
+    )
+
+    async def run(service, today, now, late):
+        return "built"
+
+    assert asyncio.run(once_a_day(box, "weekly", clock_ms(20261109, "01:00"), run)) is None
+    assert asyncio.run(once_a_day(box, "weekly", clock_ms(20261112, "09:00"), run)) is None
+
+
+def test_a_first_install_builds_no_report_of_the_weeks_before_it(box):
+    """Nothing in the job log in the week before the missed day: the journal was not running."""
+
+    async def run(service, today, now, late):
+        raise AssertionError("not to be built")
+
+    assert asyncio.run(once_a_day(box, "weekly", clock_ms(20261109, "09:00"), run)) is None
+    assert asyncio.run(once_a_day(box, "monthly", clock_ms(20261202, "09:00"), run)) is None

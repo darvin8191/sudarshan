@@ -40,9 +40,23 @@ socketio_subscribers = {}
 
 
 def get_username_from_session():
-    """Get username from current session"""
+    """The signed-in user, or None when the session is missing or has expired.
+
+    Every /api/websocket/* route and every /market Socket.IO handler
+    authenticates through this, and the app-wide expiry check in app.py skips
+    /api/. A username alone is not enough: a cookie from before the daily
+    rollover still carries one, and GET /api/websocket/apikey handed the live
+    API key to such a cookie. is_session_valid() applies the same rollover the
+    page routes do.
+
+    Nothing is revoked here. Open tabs poll these routes, and a stale tab left
+    overnight must not tear down the broker token another device is using;
+    the page routes clear the session and revoke on the next navigation.
+    """
     username = session.get("user")
-    return username if username else None
+    if not username or not is_session_valid():
+        return None
+    return username
 
 
 # SUDARSHAN: G5. The /api/websocket/* routes answer a valid session only: the check behind
@@ -381,7 +395,9 @@ def handle_connect(auth):
 @socketio.on("disconnect", namespace="/market")
 def handle_disconnect(reason=None):  # SUDARSHAN: G5, Flask-SocketIO 5.6 passes the reason
     """Handle client disconnection"""
-    username = get_username_from_session()
+    # Cleanup, not authorization: a socket opened before the rollover still
+    # releases what it holds, so this reads the name without the expiry check.
+    username = session.get("user")
     if username:
         leave_room(f"user_{username}")
 

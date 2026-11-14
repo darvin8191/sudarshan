@@ -18,6 +18,10 @@ from sudarshan.guard import flag, gate, killswitch, telegram, words
 from sudarshan.guard.store import KillSwitchState
 
 OWNER_TELEGRAM_ID = 7
+#: Linked under the owner's user name through a host of his own, before /link checked the key here.
+STRANGER_TELEGRAM_ID = 11
+#: The owner's own chat, linked before he regenerated his API key.
+OLD_KEY_TELEGRAM_ID = 12
 
 
 class Bot:
@@ -46,6 +50,7 @@ class Message:
 def chat(monkeypatch, risk_store):
     import database.telegram_db as telegram_db
     import database.user_db as user_db
+    import services.telegram_bot_service as bot_service
 
     fresh = gate.Gate(store=risk_store)
     fresh.set_state(KillSwitchState())
@@ -53,10 +58,30 @@ def chat(monkeypatch, risk_store):
     monkeypatch.setenv(flag.ENV, "on")
     monkeypatch.setattr(killswitch, "DRAIN_S", 0.2)
     account = Account(monkeypatch)
-    linked = {OWNER_TELEGRAM_ID: {"openalgo_username": "owner"}, 8: {"openalgo_username": "kin"}}
+    linked = {
+        OWNER_TELEGRAM_ID: {"openalgo_username": "owner"},
+        8: {"openalgo_username": "kin"},
+        STRANGER_TELEGRAM_ID: {"openalgo_username": "owner"},
+        OLD_KEY_TELEGRAM_ID: {"openalgo_username": "owner"},
+    }
     monkeypatch.setattr(
         telegram_db, "get_telegram_user", lambda telegram_id: linked.get(telegram_id)
     )
+    # The bot's own link check (_linked_owner) runs as it ships: the key each chat stored at
+    # /link, looked up among this OpenAlgo's API keys now.
+    stored = {
+        OWNER_TELEGRAM_ID: "owner-key",
+        8: "kin-key",
+        STRANGER_TELEGRAM_ID: "a-key-his-own-host-accepted",
+        OLD_KEY_TELEGRAM_ID: "owner-key-before-it-was-regenerated",
+    }
+    here = {"owner-key": "owner", "kin-key": "kin"}
+    monkeypatch.setattr(
+        bot_service,
+        "get_user_credentials",
+        lambda telegram_id: {"api_key": stored[telegram_id]} if telegram_id in stored else None,
+    )
+    monkeypatch.setattr(bot_service, "get_username_by_apikey", lambda key: here.get(key))
     monkeypatch.setattr(user_db, "find_user_by_username", lambda: SimpleNamespace(username="owner"))
     logged: list[tuple] = []
     monkeypatch.setattr(telegram_db, "log_command", lambda *args, **kwargs: logged.append(args))
@@ -100,6 +125,23 @@ def send(*args, chat_type="private", user_id=OWNER_TELEGRAM_ID, bot=None):
 def test_only_the_owner_s_own_chat_is_answered(chat, chat_type, user_id):
     text, _bot = send("on", "STOP", chat_type=chat_type, user_id=user_id)
     assert text == words.TG_ONLY_YOUR_CHAT
+    assert chat.account.calls == [] and not chat.store.state().on and chat.owners == []
+    assert chat.logged == [(user_id, "killswitch_refused", 100 + user_id)]
+
+
+@pytest.mark.parametrize("args", [("exit", "STOP"), ()], ids=["exit with the phrase", "status"])
+@pytest.mark.parametrize(
+    "user_id",
+    [STRANGER_TELEGRAM_ID, OLD_KEY_TELEGRAM_ID],
+    ids=["linked through another host", "linked before the key was regenerated"],
+)
+def test_a_link_without_this_server_s_api_key_is_refused(chat, user_id, args):
+    """PINNED DEFECT (v0.5.1). /link asked the host named in the command whether the key was good,
+    so a stranger who found the bot could be linked through a server of his own under the owner's
+    user name, and the shipped phrase is in this public repository: the link row was all
+    /killswitch checked. The chat's stored key must be this OpenAlgo's API key now."""
+    text, _bot = send(*args, user_id=user_id)
+    assert text == words.TG_LINK_AGAIN
     assert chat.account.calls == [] and not chat.store.state().on and chat.owners == []
     assert chat.logged == [(user_id, "killswitch_refused", 100 + user_id)]
 

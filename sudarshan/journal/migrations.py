@@ -326,8 +326,75 @@ def _v1(conn: Connection) -> None:
         conn.exec_driver_sql(sql)
 
 
+#: Step 2 (review B1): what the account held of an instrument before the journal's first fill of
+#: it, read once from Upstox's overnight positions (derivatives) or holdings (shares) at first
+#: sight. ``qty`` is signed (a short is negative) and describes the position at the start of
+#: ``day``, the IST day of the read. A trip's two new states (``unmatched``, ``expired``) need no
+#: change: ``round_trip.status`` is plain text with no CHECK.
+V2 = (
+    """CREATE TABLE IF NOT EXISTS key_opening (
+        principal TEXT NOT NULL,
+        mode TEXT NOT NULL,
+        exchange TEXT NOT NULL,
+        symbol TEXT NOT NULL,
+        product_class TEXT NOT NULL,
+        qty INTEGER NOT NULL,
+        day INTEGER NOT NULL,
+        source TEXT NOT NULL,
+        read_ms INTEGER NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY (principal, mode, exchange, symbol, product_class)
+    )""",
+)
+
+
+def _v2(conn: Connection) -> None:
+    for sql in V2:
+        conn.exec_driver_sql(sql)
+
+
+#: Step 3 (review M1): whether a trip's charges are estimated at all. The rate card covers NSE
+#: shares and NFO options and futures; a trip of any other segment (BSE, currency, commodity) has
+#: none, which the sheet and the reports say in words instead of showing 0.00. The trips already
+#: kept are backfilled from what each says (its exchange and symbol), never from a default.
+V3_NOT_MODELLED = """UPDATE round_trip SET charges_modelled = 0 WHERE NOT (
+    UPPER(exchange) = 'NSE'
+    OR (UPPER(exchange) = 'NFO'
+        AND (UPPER(symbol) LIKE '%CE' OR UPPER(symbol) LIKE '%PE' OR UPPER(symbol) LIKE '%FUT'))
+)"""
+
+
+def _v3(conn: Connection) -> None:
+    if add_column(conn, "round_trip", "charges_modelled", "INTEGER NOT NULL DEFAULT 1"):
+        conn.exec_driver_sql(V3_NOT_MODELLED)
+
+
+def _v4(conn: Connection) -> None:
+    """Step 4 (review M2): when a report was last announced to the report desk, and whether that
+    was a part period. A scheduled build is announced unless this very build was, or the period
+    was announced whole already; never because its row is new. Each report already kept was
+    announced when its row was made (the rule until now), as a part period when its ``rows`` say
+    so: backfilled from what each row says."""
+    made_ms = add_column(conn, "report", "announced_ms", "INTEGER")
+    made_part = add_column(conn, "report", "announced_partial", "INTEGER NOT NULL DEFAULT 0")
+    if not (made_ms or made_part):
+        return
+    for report_id, rows, created in conn.exec_driver_sql(
+        "SELECT id, rows, created_at FROM report"
+    ).fetchall():
+        try:
+            partial = bool((json.loads(rows or "{}") or {}).get("partial"))
+        except (ValueError, AttributeError):
+            partial = False
+        conn.exec_driver_sql(
+            "UPDATE report SET announced_ms = ?, announced_partial = ? WHERE id = ?",
+            (created, 1 if partial else 0, report_id),
+        )
+
+
 Step = tuple[int, Callable[[Connection], None]]
-STEPS: tuple[Step, ...] = ((1, _v1),)
+STEPS: tuple[Step, ...] = ((1, _v1), (2, _v2), (3, _v3), (4, _v4))
 LATEST = STEPS[-1][0]
 
 
