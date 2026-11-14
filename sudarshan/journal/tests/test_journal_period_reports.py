@@ -232,6 +232,10 @@ def test_the_csv_apostrophe_rule_is_exactly_y32():
         "'=1+1", "'+cmd", "'@SUM", "'-cmd", "'-", "'--1"]  # fmt: skip
     assert [cell(v) for v in ("-12.50", "-1", "ORB", "my-strategy", "12", "")] == [
         "-12.50", "-1", "ORB", "my-strategy", "12", ""]  # fmt: skip
+    # review L1, measured: these passed unchanged
+    assert [cell(v) for v in ("-1+1", "-2+3+cmd|' /C calc'!A0", "\t=1+1", "\r=1", "+1-1")] == [
+        "'-1+1", "'-2+3+cmd|' /C calc'!A0", "'\t=1+1", "'\r=1", "'+1-1"]  # fmt: skip
+    assert [cell(v) for v in ("+12", "-0.0025", " =1")] == ["+12", "-0.0025", " =1"]
     assert tables.paise_text(-123456) == "-1234.56" and tables.paise_text(5) == "0.05"
     assert tables.price_text(1_005_000) == "100.50" and tables.price_text(25) == "0.0025"
     assert tables.paise_text(None) == "" and tables.price_text(None) == ""
@@ -445,3 +449,15 @@ def test_the_period_words_are_cores_over_the_closed_trips(rig, book):  # noqa: F
     text = kept(rig, "monthly")["text"]
     assert f"Net {words.rupees(m['net_paise'], True)}" in text
     assert f"trades {m['trips']}" in text
+
+
+def test_the_pdf_libraries_log_nothing_below_a_warning():
+    """Review L2: each PDF build logged about 150 font-subsetting lines at INFO."""
+    import logging
+
+    from sudarshan.journal.config import setup_logging
+
+    setup_logging({"SUDARSHAN_JOURNAL_LOG_LEVEL": "INFO"})
+    for name in ("fontTools.subset", "fontTools.ttLib", "fpdf.output"):
+        assert logging.getLogger(name).getEffectiveLevel() >= logging.WARNING, name
+    assert logging.getLogger("sudarshan.journal").getEffectiveLevel() == logging.INFO
