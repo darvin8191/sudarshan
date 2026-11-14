@@ -358,6 +358,45 @@ def test_an_open_watchlist_screen_reads_once_a_minute_and_no_other_screen_reads(
     run(go())
 
 
+def test_an_open_screen_asks_a_failing_openalgo_at_most_every_thirty_seconds(monkeypatch):
+    monkeypatch.setattr(watchlists, "LOOK_S", 0.01)
+
+    async def go():
+        clock, tries = Clock(ist(MONDAY, 10)), []
+
+        class Store:
+            async def read(self, fn):
+                return [7]
+
+        class Client:
+            async def lists(self, ids, *, member_id, role):
+                tries.append(clock())
+                raise Refusal("unreachable")
+
+        dialect = SimpleNamespace(seats={}, settle=lambda member: None)
+        lists = Watchlists(Store(), Client(), SimpleNamespace(put=lambda found: list(found)),
+                           clock=clock)  # fmt: skip
+        lists.dialect = dialect
+        seat = SimpleNamespace(member={"id": 3, "role": "viewer"}, screen="watchlist")
+        dialect.seats["sock"] = seat
+        task = asyncio.create_task(lists.run())
+        try:
+            lists.opened(seat)
+            await until(lambda: len(tries) == 1)
+            for _ in range(5):  # 25 s, looked at every 5 s, the screen opened again each time
+                clock.at += 5_000
+                lists.opened(seat)
+                await asyncio.sleep(0.03)
+            assert len(tries) == 1
+            clock.at += 5_000  # 30 s since the failure
+            await until(lambda: len(tries) == 2)
+        finally:
+            await cancel_and_wait(task)
+            await lists.close()
+
+    run(go())
+
+
 def test_an_ended_share_leaves_the_screen_at_once_even_while_openalgo_cannot_be_read(tmp_path):
     async def go():
         async with World(tmp_path) as world:
