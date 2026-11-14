@@ -2082,6 +2082,42 @@ export interface CaListArgs {
   scope?: string
   from?: Day
   to?: Day
+  /** One instrument the owner opened: read again from Upstox, at most once a minute. */
+  isin?: string
+}
+
+/** One reading of a bonus's or a split's ratio, on the owner's own quantity when it is known. */
+export interface CaWay {
+  /** A bonus: `ratio_num` new for every `ratio_den` held. A split: every `ratio_den` become `ratio_num`. */
+  ratio_num: number
+  ratio_den: number
+  /** "Bonus 1:1: you held 100, you get 100 more, 200 in all. Is that right?" */
+  words: string
+  added_qty_u?: QtyU
+  after_qty_u?: QtyU
+  /** Part of a share is left over. */
+  fraction?: boolean
+}
+
+/** One holding's side of an event that waits for the owner's tap (design p7 6.3). */
+export interface CaExpected {
+  /** `upstox` or `tab:<id>`. */
+  scope: string
+  tab_id?: number
+  name?: string
+  /** Held the day before the ex-date; null when no record says. */
+  held_qty_u: QtyU | null
+  /** The proposed reading; null when Upstox gave no ratio (the owner types one). */
+  ratio_num: number | null
+  ratio_den: number | null
+  words: string
+  added_qty_u?: QtyU
+  after_qty_u?: QtyU
+  fraction?: boolean
+  /** "The other way round"; null when the ratio reads one way only. */
+  other: CaWay | null
+  /** A tab only: the entries for the entry form's dry run ("Add this to <tab>"). */
+  entries?: ActivityInput[]
 }
 
 export interface CaDecisionRow {
@@ -2089,8 +2125,9 @@ export interface CaDecisionRow {
   event_id: number
   scope: string
   state: CaDecision
-  ratio_num: number
-  ratio_den: number
+  /** The reading the owner applied; null on a dismissed one. */
+  ratio_num: number | null
+  ratio_den: number | null
   /** The entry a tab got from it, when the owner added one. */
   activity_id: number | null
   version: number
@@ -2117,6 +2154,8 @@ export interface CaEvent {
   /** Upstox no longer lists it; it is kept, never deleted. */
   gone_at: EpochMs | null
   decisions: CaDecisionRow[]
+  /** Only in `to_confirm`: each holding the event waits on, with the reading proposed for it. */
+  expected?: CaExpected[]
 }
 
 export interface CaRead {
