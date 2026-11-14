@@ -79,6 +79,7 @@ public_shell  /agent/config                          react.react_agent_config
 public_shell  /analyzer                              react.react_analyzer
 public_shell  /arbitrage                             react.react_arbitrage
 public_shell  /autologin                             react.react_autologin
+public_shell  /automation                            react.react_automation
 public_shell  /broker                                react.react_broker
 public_shell  /broker/<broker>/totp                  react.react_broker_totp
 public_shell  /broker/samco/auth                     react.react_broker_samco_auth
