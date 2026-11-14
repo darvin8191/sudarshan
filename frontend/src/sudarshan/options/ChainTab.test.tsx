@@ -187,4 +187,26 @@ describe('the Chain tab', () => {
     expect(rowSignature(at, 'price', extra)).toBe(rowSignature(moved, 'price', extra))
     expect(rowSignature(at, 'oi', extra)).not.toBe(rowSignature(moved, 'oi', extra))
   })
+
+  it('makes the strike a button that opens its straddle, and plain text where a side is missing', () => {
+    const onStraddle = vi.fn()
+    show(
+      modelOf((chain) => {
+        const at = chain.strikes.find((each) => each.strike === 25_950)
+        if (at) delete at.pe
+      }),
+      { onStraddle }
+    )
+    const strike = within(row(25_900)).getByRole('button', { name: /^Straddle at 25,900/ })
+    expect(strike.getBoundingClientRect).toBeDefined()
+    expect(strike.className).toContain('min-h-16')
+    fireEvent.click(strike)
+    expect(onStraddle).toHaveBeenCalledWith(25_900)
+    expect(within(row(25_950)).queryByRole('button', { name: /Straddle at/ })).toBeNull()
+  })
+
+  it('leaves the strike plain text when nothing opens a straddle', () => {
+    show()
+    expect(screen.queryByRole('button', { name: /Straddle at/ })).toBeNull()
+  })
 })

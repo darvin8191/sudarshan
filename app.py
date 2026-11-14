@@ -381,7 +381,11 @@ def create_app():
     # Remote MCP (HTTP + OAuth) — opt-in via MCP_HTTP_ENABLED. Off by default.
     # Pre-flight refusal: must NEVER coexist with FLASK_DEBUG=True (debug-mode
     # tracebacks would leak bearer tokens). See docs/prd/remote-mcp.md.
-    if os.getenv("MCP_HTTP_ENABLED", "False").lower() == "true":
+    # SUDARSHAN M17.9: never with settings that would allow orders (sudarshan/assistant/locks.py)
+    from sudarshan.assistant import locks as sudarshan_assistant_locks
+
+    sudarshan_mcp_ok = sudarshan_assistant_locks.boot_allows(os.environ, logger)
+    if sudarshan_mcp_ok and os.getenv("MCP_HTTP_ENABLED", "False").lower() == "true":
         # Match Flask's own truthy parsing (Flask accepts "1"/"t"/"true").
         # The narrow `== "true"` check we used to do let FLASK_DEBUG=1
         # slip past this guard while still putting Flask in debug mode.

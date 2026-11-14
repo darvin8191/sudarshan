@@ -1,0 +1,8 @@
+﻿date,action,symbol,exchange,isin,quantity,price,amount,charges,account,tds,ratio,note,to_account,lot_date,value
+2025-09-01,BUY,RELIANCE,NSE,INE002A01018,10,1000.00,10000.00,15.00,Zerodha,,,,,,
+2026-06-05,BUY,RELIANCE,NSE,INE002A01018,5,1100.00,5500.00,,Zerodha,,,,,,
+2026-07-01,SPLIT,RELIANCE,NSE,INE002A01018,,,,,,,2:1,,,,
+2026-09-15,SELL,RELIANCE,NSE,INE002A01018,8,600.00,4800.00,9.00,Zerodha,,,,,,
+2026-09-20,DIVIDEND,RELIANCE,NSE,INE002A01018,,,50.00,,Zerodha,5.00,,,,,
+2026-10-02,INTEREST,,,,,,590.00,,Zerodha,,,'=SUM(A1) from the bank,,,
+2026-10-02,FEE,,,,,,590.00,,Zerodha,,,,,,

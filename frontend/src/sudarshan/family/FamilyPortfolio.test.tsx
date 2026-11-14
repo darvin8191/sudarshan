@@ -121,6 +121,46 @@ describe('Portfolio screen', () => {
     expect(screen.getByRole('heading', { name: 'Shared portfolios' })).toBeTruthy()
   })
 
+  // Review M2 (v0.12.0): "Shared portfolios ▲ +₹1,500.00" in profit green read as a profit of
+  // that size. Worth is a size: no sign, no arrow, no trend colour. Fails on the old screen.
+  it('draws what a portfolio is worth plain, and keeps the sign for the gain and for today', async () => {
+    routeFetch({
+      '/family/api/portfolio/tabs/1': ok(
+        tabAnswer(1, {
+          rows: [],
+          totals: live(100_000, 10_000, 500).totals,
+          allocation: {
+            by_class: [{ label: 'Equity', holdings: 2, value_paise: 100_000, pct: '100.00' }],
+          },
+        })
+      ),
+      '/family/api/portfolio': ok(portfolio()),
+    })
+    mount()
+    const plain = (el: HTMLElement) => {
+      expect(el.textContent).not.toMatch(/[+▲▼]/)
+      expect(el.querySelector('svg')).toBeNull()
+      expect(el.querySelector('[data-direction]')).toBeNull()
+      expect(el.innerHTML).not.toMatch(/var\(--(up|down)\)|text-profit|text-loss/)
+      expect(el.querySelector('[data-plain]')).not.toBeNull()
+    }
+    const shared = await screen.findByTestId('shared-value')
+    await waitFor(() => expect(shared.textContent).toContain('1,500.00'))
+    plain(shared)
+    const lines = shared.closest('section')?.querySelector('ul') as HTMLElement
+    expect(lines.textContent).toContain('1,000.00')
+    plain(lines)
+    const value = await screen.findByTestId('tab-value')
+    await waitFor(() => expect(value.textContent).toContain('1,000.00'))
+    plain(value)
+    plain(screen.getByRole('list', { name: 'Allocation' }))
+    // a gain is a gain: signed, with its arrow
+    const gain = screen.getByTestId('tab-gain')
+    expect(gain.querySelector('[data-direction="up"]')).not.toBeNull()
+    expect(gain.textContent).toContain('+')
+    expect(screen.getByTestId('shared-today').querySelector('[data-direction="up"]')).not.toBeNull()
+  })
+
   it('shows Hidden where the mask took the figures, never 0', async () => {
     routeFetch({
       '/family/api/portfolio/tabs/1': ok(tabAnswer(1, { rows: [], totals: {} })),

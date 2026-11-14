@@ -6,23 +6,35 @@
  */
 import { useCallback, useEffect, useRef } from 'react'
 import { useLocation, useNavigate } from 'react-router'
+import type { AlertPrefill } from '@/sudarshan/alerts/AlertForm'
 import type { OrderRequest } from '@/sudarshan/watchlist/SymbolSheet'
 
 export type Sheet =
   | { sheet: 'underlying' }
   | { sheet: 'strike'; strike: number; side: 'ce' | 'pe' }
+  /** One leg's own sheet (chart, alert, depth), reached from the strike sheet. */
+  | { sheet: 'leg'; strike: number; side: 'ce' | 'pe' }
+  | { sheet: 'alert'; alert: AlertPrefill }
   | { sheet: 'ticket'; order: OrderRequest }
 
 export function readSheet(state: unknown): Sheet | null {
   if (!state || typeof state !== 'object') return null
-  const value = state as { sheet?: unknown; strike?: unknown; side?: unknown; order?: unknown }
+  const value = state as {
+    sheet?: unknown
+    strike?: unknown
+    side?: unknown
+    order?: unknown
+    alert?: unknown
+  }
   if (value.sheet === 'underlying') return { sheet: 'underlying' }
   if (
-    value.sheet === 'strike' &&
+    (value.sheet === 'strike' || value.sheet === 'leg') &&
     typeof value.strike === 'number' &&
     (value.side === 'ce' || value.side === 'pe')
   )
-    return { sheet: 'strike', strike: value.strike, side: value.side }
+    return { sheet: value.sheet, strike: value.strike, side: value.side }
+  if (value.sheet === 'alert' && value.alert && typeof value.alert === 'object')
+    return { sheet: 'alert', alert: value.alert as AlertPrefill }
   if (value.sheet === 'ticket' && value.order && typeof value.order === 'object')
     return { sheet: 'ticket', order: value.order as OrderRequest }
   return null

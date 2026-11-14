@@ -1,12 +1,11 @@
-"""Importing and exporting a tab (M7.22): import_preview, import_commit, import_discard and
-export_csv, over importer.Importer."""
+"""Importing into a tab (M7.22): import_preview, import_commit and import_discard, over
+importer.Importer. The export, ``export_csv``, is in export_ops.py (M7.40)."""
 
 from __future__ import annotations
 
 from collections.abc import Mapping
 from typing import Any
 
-from ..core.days import day_of_instant
 from ..importer import Importer
 from . import op
 from .common import OWNER, maybe_whole, need, whole, work
@@ -50,13 +49,4 @@ async def import_discard(ctx, message: Mapping[str, Any]) -> Any:
         lambda: importer.discard(
             OWNER, whole(message, "id"), maybe_whole(message, "version"), now=now
         )
-    )
-
-
-@op("export_csv")
-async def export_csv(ctx, message: Mapping[str, Any]) -> Any:
-    need(ctx)
-    importer, now = _importer(ctx), ctx.clock()
-    return await work(
-        lambda: importer.export(OWNER, whole(message, "id"), today=day_of_instant(now))
     )

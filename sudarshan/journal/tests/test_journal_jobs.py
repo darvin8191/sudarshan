@@ -246,6 +246,218 @@ def test_the_catch_up_reads_today_and_fills_the_unmarked_days_from_history(rig):
     assert [c[0] for c in rig.portfolio.calls].count("historical_trades") == 4
 
 
+# ---- shares on a day rebuilt from the history (verification N1) -------------------------------
+def share_row(trade_id, day_, side, qty, price_u):
+    return history_row(trade_id, day_, side, segment="EQ", key=STOCK["token"], symbol="ACME",
+                       scrip_name="ACME", option_type=None, strike_price_u=None, expiry=None,
+                       qty=qty, price_u=price_u)  # fmt: skip
+
+
+def rebuild(rig, rows, holdings=()):
+    """The 22:00 catch-up of Mon 9 Nov with ``rows`` as Upstox's history, nothing traded today."""
+    rig.answer_trades([])
+    rig.portfolio.answers["holdings"] = {"state": "ok", "read_at": 1, "note": None,
+                                         "data": list(holdings)}  # fmt: skip
+    rig.portfolio.answers["historical_trades"] = {
+        "state": "ok", "read_at": 1, "note": None, "total_pages": 1,
+        "total_records": len(rows), "rows": rows}  # fmt: skip
+    rig.portfolio.answers["pnl_report"] = {"state": "ok", "read_at": 1, "rows": [],
+                                           "page_size": 5000, "charges": {}}  # fmt: skip
+    rig.now = ist_ms(DAY, "22:00:00")
+    scenario(rig, lambda: catchup.catch_up(rig.svc, DAY, rig.now, False))
+    return rig.svc.store.read(OWNER, lambda tx: tx.rows("round_trip", order="opened_ms,id"))
+
+
+def test_an_intraday_share_short_on_a_history_day_is_one_closed_short(rig):
+    """Measured by the verifier: SELL 10 (trade 101) then BUY 10 (trade 102) of one share on a
+    day rebuilt from the history, nothing held, came out as a sale of shares held before the
+    journal plus an open LONG of 10 that does not exist."""
+    fri = 20261106
+    trips = rebuild(rig, [share_row("101", fri, "SELL", 10, 5_000_000),
+                          share_row("102", fri, "BUY", 10, 4_950_000)])  # fmt: skip
+    assert [(t["status"], t["side"], t["product_class"], t["entry_qty"], t["exit_qty"],
+             t["gross_paise"]) for t in trips] == [("closed", "short", "intraday", 10, 10, 5_000)]  # fmt: skip
+    fills = {f["trade_id"]: f for f in rig.fills()}
+    assert {f["product"] for f in fills.values()} == {"MIS"}
+    assert fills["101"]["order_id"] == "h:20261106:NSE:ACME:MIS:SELL"
+    note = closing_of(rig, fri)["reconcile_note"]
+    assert note.endswith("2 of them are share trades that bought and sold the same quantity "
+                         "that day, counted as bought and sold the same day (intraday).")  # fmt: skip
+    # no read of what was held: an intraday key has no opening
+    assert not [c for c in rig.portfolio.calls if c[0] == "holdings"]
+
+
+def test_a_delivery_sale_on_a_history_day_of_shares_held_before_is_still_unmatched(rig):
+    """Held 100 for months, sold 40 on a history day: the quantities differ, so it stays a
+    delivery sale, listed apart and never a short."""
+    from test_journal_unseen import holding
+
+    fri = 20261106
+    trips = rebuild(rig, [share_row("101", fri, "SELL", 40, 5_000_000)],
+                    holdings=[holding(STOCK["token"], 60)])  # fmt: skip
+    assert [(t["status"], t["side"], t["product"], t["exit_qty"], t["gross_paise"])
+            for t in trips] == [("unmatched", "long", "CNC", 40, None)]  # fmt: skip
+    assert "intraday" not in closing_of(rig, fri)["reconcile_note"]
+
+
+def test_same_day_shares_only_where_the_days_buys_and_sales_are_equal():
+    def f(day_, action, qty, exchange="NSE", symbol="ACME", product="CNC"):
+        return {"day": day_, "exchange": exchange, "symbol": symbol, "product": product,
+                "action": action, "qty": qty}  # fmt: skip
+
+    equal = [f(1, "SELL", 6), f(1, "SELL", 4), f(1, "BUY", 10)]  # in parts, sale first
+    uneven = [f(1, "SELL", 10, symbol="OTHER"), f(1, "BUY", 6, symbol="OTHER")]
+    other_day = [f(1, "BUY", 5, symbol="TWO"), f(2, "SELL", 5, symbol="TWO")]  # carried a day
+    option = [f(1, "SELL", 65, "NFO", "X", "NRML"), f(1, "BUY", 65, "NFO", "X", "NRML")]
+    lone = [f(1, "BUY", 3, symbol="LONE")]
+    assert catchup.same_day_shares(equal + uneven + other_day + option + lone) == 3
+    assert {x["product"] for x in equal} == {"MIS"}
+    assert {x["product"] for x in uneven + other_day + lone} == {"CNC"}
+    assert {x["product"] for x in option} == {"NRML"}
+
+
+# ---- a share trade whose sale was not seen is counted again (verification N2) -----------------
+BACK = 20261120  # Fri: the journal is back after more than the 3 trading days history reaches
+
+
+def held(qty):
+    from test_journal_unseen import holding
+
+    return [holding(STOCK["token"], qty)] if qty else []
+
+
+def buy_shares(rig, qty=10):
+    """Mon 9 Nov 10:05: a delivery purchase recorded live, nothing held before it."""
+    rig.portfolio.answers["holdings"] = {"state": "ok", "read_at": 1, "note": None, "data": []}
+    rig.now = ist_ms(DAY, "10:06:00")
+    record(rig, [trade_row("b1", "ob1", key=STOCK["token"], symbol="ACME", product="D",
+                           side="BUY", qty=qty, price_u=2_000_000,
+                           at=ist_ms(DAY, "10:05:00"))])  # fmt: skip
+    (trip,) = share_trips(rig)
+    assert (trip["status"], trip["side"], trip["entry_qty"]) == ("open", "long", qty)
+    return trip
+
+
+def night(rig, day_, holdings, history=(), today=()):
+    """The 22:00 catch-up of ``day_`` with these holdings; returns the job's line."""
+    rig.answer_trades(list(today))
+    rig.portfolio.answers["holdings"] = holdings
+    rig.portfolio.answers["historical_trades"] = {
+        "state": "ok", "read_at": 1, "note": None, "total_pages": 1,
+        "total_records": len(history), "rows": list(history)}  # fmt: skip
+    rig.portfolio.answers["pnl_report"] = {"state": "ok", "read_at": 1, "rows": [],
+                                           "page_size": 5000, "charges": {}}  # fmt: skip
+    rig.now = ist_ms(day_, "22:00:00")
+    return scenario(rig, lambda: catchup.catch_up(rig.svc, day_, rig.now, False))
+
+
+def ok(rows):
+    return {"state": "ok", "read_at": 1, "note": None, "data": rows}
+
+
+def share_trips(rig):
+    return rig.svc.store.read(OWNER, lambda tx: tx.rows("round_trip", order="opened_ms,id"))
+
+
+def asked_holdings(rig):
+    return sum(1 for c in rig.portfolio.calls if c[0] == "holdings")
+
+
+def test_an_open_share_trade_sold_while_the_journal_was_off_is_not_left_open(rig):
+    """Reasoned by the verifier: bought 10, the journal off for two weeks, the shares sold
+    meanwhile. The trade stayed an open LONG for ever, with a moving P&L, and a later purchase
+    was added to it."""
+    from sudarshan.journal.core.pairing import unclosed
+
+    bought = buy_shares(rig)
+    line = night(rig, BACK, ok(held(0)))
+    assert "holdings: 1 share trade checked, 1 counted again" in line
+    (trip,) = share_trips(rig)
+    assert trip["id"] == bought["id"] and unclosed(trip)
+    assert (trip["status"], trip["close_day"], trip["net_paise"]) == ("unmatched", BACK, None)
+    assert not rig.svc.store.read(OWNER, lambda tx: tx.rows("round_trip", status="open"))
+    left = rig.svc.store.read(OWNER, lambda tx: tx.left_out("live", BACK, BACK))
+    assert left == {"unmatched": 0, "expired": 0, "unclosed": 1}
+    # the same night again asks nothing more
+    calls = asked_holdings(rig)
+    night(rig, BACK, ok(held(0)))
+    assert asked_holdings(rig) == calls
+    # a purchase after it is a new trade of its own, never an add to the one that ended
+    rig.now = ist_ms(20261123, "10:06:00")
+    record(rig, [trade_row("b2", "ob2", key=STOCK["token"], symbol="ACME", product="D",
+                           side="BUY", qty=5, price_u=2_100_000,
+                           at=ist_ms(20261123, "10:05:00"))])  # fmt: skip
+    assert [(t["status"], t["entry_qty"]) for t in share_trips(rig)] == [
+        ("unmatched", 10), ("open", 5)]  # fmt: skip
+
+
+def test_a_wrong_count_is_put_right_the_next_night_and_a_part_sale_runs_off_what_is_held(rig):
+    from sudarshan.journal.core.pairing import unclosed
+
+    bought = buy_shares(rig)
+    night(rig, BACK, ok(held(0)))  # a read that was wrong: the account holds them
+    assert unclosed(share_trips(rig)[0])
+    line = night(rig, 20261123, ok(held(10)))
+    assert "1 counted again" in line
+    (trip,) = share_trips(rig)
+    assert (trip["id"], trip["status"], trip["closed_ms"]) == (bought["id"], "open", None)
+    assert "0 counted again" in night(rig, 20261124, ok(held(10)))  # agreed: nothing to do
+    # 6 of the 10 leave the account unseen; the 4 left are sold live two days later
+    night(rig, 20261125, ok(held(4)))
+    assert unclosed(share_trips(rig)[0])
+    rig.now = ist_ms(20261127, "10:06:00")
+    record(rig, [trade_row("s1", "os1", key=STOCK["token"], symbol="ACME", product="D",
+                           side="SELL", qty=4, price_u=2_200_000,
+                           at=ist_ms(20261127, "10:05:00"))])  # fmt: skip
+    assert [(t["status"], t["side"], t["entry_qty"], t["exit_qty"], t["close_day"])
+            for t in share_trips(rig)] == [
+        ("unmatched", "long", 10, 0, 20261125), ("unmatched", "long", 0, 4, 20261127)]  # fmt: skip
+
+
+def test_the_count_waits_for_a_night_the_share_was_not_traded_and_for_holdings_that_read(rig):
+    buy_shares(rig)
+    first_sight = asked_holdings(rig)
+    # the night of the purchase: what holdings say on the day of a trade is not relied on
+    buy = trade_row("b1", "ob1", key=STOCK["token"], symbol="ACME", product="D", side="BUY",
+                    qty=10, price_u=2_000_000, at=ist_ms(DAY, "10:05:00"))  # fmt: skip
+    line = night(rig, DAY, ok(held(0)), today=[buy])
+    assert "holdings: no open share trade to check" in line
+    assert asked_holdings(rig) == first_sight and share_trips(rig)[0]["status"] == "open"
+    # holdings that could not be read end nothing, and the same night's next run asks again
+    line = night(rig, BACK, {"state": "failed", "read_at": 1, "note": "down", "data": None})
+    assert "holdings: not read (the holdings could not be read)" in line
+    assert share_trips(rig)[0]["status"] == "open"
+    assert "1 counted again" in night(rig, BACK, ok(held(0)))
+
+
+def test_a_sale_the_history_brings_closes_the_trade_and_nothing_is_counted(rig):
+    """Off for two days only: the 22:00 history has the sale, so the trade closes with its
+    result and the holdings are not asked about it."""
+    buy_shares(rig)
+    first_sight = asked_holdings(rig)
+    sale = share_row("901", 20261111, "SELL", 10, 2_100_000)
+    line = night(rig, 20261112, ok(held(0)), history=[sale])
+    (trip,) = share_trips(rig)
+    assert (trip["status"], trip["gross_paise"], trip["close_day"]) == ("closed", 10_000, 20261111)
+    assert "holdings: no open share trade to check" in line
+    assert asked_holdings(rig) == first_sight
+
+
+def test_todays_trades_unread_leave_the_count_for_a_later_run(rig):
+    buy_shares(rig)
+    rig.answer_trades([], state="failed")
+    rig.portfolio.answers["holdings"] = ok(held(0))
+    rig.portfolio.answers["historical_trades"] = {"state": "ok", "read_at": 1, "note": None,
+                                                  "total_pages": 1, "total_records": 0, "rows": []}  # fmt: skip
+    rig.portfolio.answers["pnl_report"] = {"state": "ok", "read_at": 1, "rows": [],
+                                           "page_size": 5000, "charges": {}}  # fmt: skip
+    rig.now = ist_ms(BACK, "22:00:00")
+    with pytest.raises(JobFailed) as caught:
+        scenario(rig, lambda: catchup.catch_up(rig.svc, BACK, rig.now, False))
+    assert "holdings: not checked tonight" in str(caught.value)
+    assert share_trips(rig)[0]["status"] == "open"
+
+
 def closing_of(rig, day_):
     return rig.svc.store.read(OWNER, lambda tx: tx.day_close_get("live", day_))
 

@@ -68,14 +68,26 @@ const showCategoryToast = (
   message: string,
   category?: keyof AlertCategories,
   // SUDARSHAN M6.9: a toast another sender of the same result shares.
-  id?: string
+  id?: string,
+  // SUDARSHAN (v0.12.0 review L6): a second, quieter line under the sentence.
+  detail?: string
 ) => {
   const { shouldShowToast } = useAlertStore.getState()
   if (shouldShowToast(category)) {
-    if (id) toast[type](message, { id })
-    else toast[type](message)
+    if (id || detail) {
+      toast[type](message, { ...(id ? { id } : {}), ...(detail ? { description: detail } : {}) })
+    } else toast[type](message)
   }
 }
+
+/**
+ * SUDARSHAN (v0.12.0 review L6): which order a refusal is about. The sentence stays alone on the
+ * first line; the symbol goes under it, because an order sent by a TradingView alert was not
+ * tapped by anyone and the sentence does not always say which one was refused. Nothing when the
+ * sentence already names it, or when the symbol is itself the message.
+ */
+const refusedSymbol = (message: string, symbol: string | undefined): string | undefined =>
+  symbol && message !== symbol && !message.includes(symbol) ? symbol : undefined
 
 export function useSocket() {
   const navigate = useNavigate()
@@ -292,7 +304,13 @@ export function useSocket() {
         const message = data.message || data.status || data.symbol || ''
         if (!message) return
 
-        showCategoryToast(type, message, 'orders')
+        showCategoryToast(
+          type,
+          message,
+          'orders',
+          undefined,
+          type === 'error' ? refusedSymbol(message, data.symbol) : undefined
+        )
       }
     )
 
@@ -336,8 +354,9 @@ export function useSocket() {
 
       if (data.response.status === 'error') {
         // SUDARSHAN: the server's own sentence and nothing in front of it, neither "Error:" (it
-        // reads as a fault the trader caused when it is a limit the platform kept) nor the symbol;
-        // the symbol alone only when the server gave no sentence.
+        // reads as a fault the trader caused when it is a limit the platform kept) nor the symbol,
+        // which goes on the toast's second line; the symbol alone only when the server gave no
+        // sentence.
         message = data.response.message || symbol
       } else if (apiType === 'cancelorder') {
         message = orderid ? `Order Cancelled - ID: ${orderid}` : 'Order Cancelled'
@@ -376,7 +395,13 @@ export function useSocket() {
       }
 
       if (message) {
-        showCategoryToast(type, message, 'analyzer')
+        showCategoryToast(
+          type,
+          message,
+          'analyzer',
+          undefined,
+          data.response.status === 'error' ? refusedSymbol(message, symbol) : undefined
+        )
       }
     })
 

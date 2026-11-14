@@ -595,7 +595,8 @@ def test_answers_come_through_the_members_mask_end_to_end(tmp_path, monkeypatch)
                 assert "9,87,65,432" not in child_text and "P&L" not in child_text
                 assert "Qty" not in child_text and " 2" not in child_text.split("₹")[0]
                 assert "P&L +₹98,76,543.21" in viewer_text and "Long 2" in viewer_text
-                assert all(call[0] == "upstox_book" for call in portfolio.calls)
+                # M3 (v0.12.0): each member's share is asked once before their first read
+                assert {call[0] for call in portfolio.calls} == {"upstox_book", "shares_for_viewer"}
         finally:
             await portfolio.close()
 

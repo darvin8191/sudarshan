@@ -25,6 +25,7 @@ import { formatAmount, formatPrice } from '@/sudarshan/dashboard/format'
 import { LiveLine } from '@/sudarshan/dashboard/LiveLine'
 import { ago, keyOf, STALE_MS } from '@/sudarshan/dashboard/live'
 import { type FeedState, useFrameLines, useMarketDataManager } from '@/sudarshan/live/useFrameLines'
+import { foExchange, optionsPath } from '@/sudarshan/options/words'
 import type { PinControl } from '@/sudarshan/screener/feed'
 import {
   PRODUCT_MEANING,
@@ -41,8 +42,24 @@ import type { LiveRow } from './useLiveRows'
 import type { FlagName } from './v2/types'
 import { Figures, figuresOf } from './WatchlistRows'
 
-/** The option chain tool, opened on an underlying. */
-export function chainPath(chain: { exchange: string; underlying: string }): string {
+/** An underlying's option chain; a strike row names its expiry and strike as well. */
+export interface ChainTarget {
+  exchange: string
+  underlying: string
+  expiry?: string | null
+  strike?: number | null
+}
+
+/**
+ * The option chain an instrument opens. A strike row names its expiry and strike, and opens the
+ * phone's chain on them (`/options`, O9); an instrument alone opens the option chain tool.
+ */
+export function chainPath(chain: ChainTarget): string {
+  if (chain.expiry && chain.strike != null && foExchange(chain.exchange) !== 'MCX')
+    return optionsPath(chain.exchange, chain.underlying, {
+      expiry: chain.expiry,
+      strike: chain.strike,
+    })
   const query = new URLSearchParams({ exchange: chain.exchange, underlying: chain.underlying })
   return `/optionchain?${query}`
 }

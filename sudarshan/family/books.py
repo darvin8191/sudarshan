@@ -23,6 +23,16 @@ is written to family.db (M19.11, Y44). A member reads as themselves (principal `
 with their own mask, so one member's answer never serves another; the portfolio's five seconds of
 memory makes the reads of several members one Upstox call.
 
+**What it lets go** (v0.12.0 review M3). A kept answer is the member's only while the share it
+came through stands. Before one is served to a page, and once a minute for every member with a
+socket open, the portfolio is asked what the member is shared (``shares_for_viewer``: its own
+tables, never an Upstox read), at most once in ``SHARES_EVERY_MS`` for each member. When the
+Upstox tab is no longer shared with them (removed or expired), or its level or the categories the
+portfolio hides from them changed, every kept part of that member is dropped at once and their
+open sockets are told, whatever the hour: the next answer is the portfolio's of that moment
+("Not shared with you", or figures read again under the new share). While the portfolio does not
+answer, nothing is known to have changed and what is kept stays, with its own read state.
+
 **What the phone gets** (the contract's ``Book``): the portfolio's own rows with the member's mask
 applied once more on the way out (``privacy.masked``: a removed field is absent, never 0), ``side``
 (long, short or closed) on a position whose quantity reached this service, and the read state with
@@ -74,6 +84,8 @@ LOOP_S = 1.0
 #: A member's part that no open screen has shown for this long is forgotten.
 KEEP_MS = 6 * 3_600_000
 ROW_PARTS = ("positions", "holdings", "orders", "trades")
+#: Review M3 (v0.12.0): what a member is shared is asked of the portfolio again this often at most.
+SHARES_EVERY_MS = 60_000
 
 
 def clock_text(ms: int) -> str:
@@ -153,6 +165,29 @@ class Memory:
     tried_at: int = 0
 
 
+@dataclass(frozen=True)
+class Shared:
+    """What the portfolio last said of a member's share of the Upstox books, and when it was
+    asked: ``sign`` is ``sign_of`` its answer, None while it has given none."""
+
+    at: int
+    sign: tuple[str | None, tuple[str, ...]] | None = None
+
+
+def sign_of(found: Any) -> tuple[str | None, tuple[str, ...]] | None:
+    """What decides a member's books in the portfolio's ``shares_for_viewer`` answer: the level
+    of the Upstox tab's share (None: not shared with them) and the categories it hides from them.
+    None for an answer that is not that op's (nothing can be told from it)."""
+    tabs = found.get("tabs") if isinstance(found, Mapping) else None
+    if not isinstance(tabs, list):
+        return None
+    level = next((t.get("level") for t in tabs
+                  if isinstance(t, Mapping) and t.get("kind") == "upstox"), None)  # fmt: skip
+    hides = found.get("hides")
+    hidden = sorted(h for h in hides if isinstance(h, str)) if isinstance(hides, list) else []
+    return (level if isinstance(level, str) else None, tuple(hidden))
+
+
 def with_side(row: Any) -> Any:
     """A position row with ``side`` from its quantity's sign, when the quantity is there (with
     quantities hidden the portfolio's floor removed it, and the direction cannot be told)."""
@@ -208,6 +243,10 @@ class Books:
         #: The open sockets with their members (viewer_ws seats them; until then the screens').
         self.open_sockets: Callable[[], list[tuple[Any, Mapping[str, Any]]]] = self._screen_sockets
         self.reads = 0
+        #: M3: member id -> what the portfolio last said they are shared, and when it was asked.
+        self.shared: dict[int, Shared] = {}
+        self.dropped = 0
+        self._share_flights: dict[int, asyncio.Task] = {}
         self._flights: dict[tuple[int, str], asyncio.Task] = {}
         self._wake = asyncio.Event()
 
@@ -328,7 +367,12 @@ class Books:
         return await asyncio.shield(self.start(member, part))
 
     async def _read(self, member: dict[str, Any], part: str) -> Memory:
-        member_id, now = int(member["id"]), self.clock()
+        member_id = int(member["id"])
+        if member_id not in self.shared:
+            # M3: what the member is shared is on record before their first figure is kept, so
+            # the first change after it is seen as one.
+            await self.confirm(member)
+        now = self.clock()
         key, old = (member_id, part), self.memory.get((member_id, part))
         try:
             data = await self.portfolio.call("upstox_book", member_id, {"parts": [part]},
@@ -352,6 +396,73 @@ class Books:
                 log.exception("a family book read could not be passed on")
         return kept
 
+    # ---- what is still shared (review M3 of v0.12.0) -------------------------------------------
+    def _confirm_due(self, member_id: int, now: int) -> bool:
+        last = self.shared.get(member_id)
+        return last is None or not 0 <= now - last.at < SHARES_EVERY_MS
+
+    def confirm_start(self, member: Mapping[str, Any]) -> asyncio.Task | None:
+        """Ask the portfolio what the member is shared, unless it was asked within the minute:
+        the question on its way (one at a time for each member), or None when none is due."""
+        member_id = int(member["id"])
+        task = self._share_flights.get(member_id)
+        if task is not None and not task.done():
+            return task
+        if not self._confirm_due(member_id, self.clock()):
+            return None
+        task = asyncio.create_task(self._confirm(dict(member)), name="family-book-shares")
+        self._share_flights[member_id] = task
+        task.add_done_callback(
+            lambda done, m=member_id: self._share_flights.pop(m, None)
+            if self._share_flights.get(m) is done else None
+        )  # fmt: skip
+        return task
+
+    async def confirm(self, member: Mapping[str, Any]) -> None:
+        """Before a kept answer is served: what it came through still stands, or it is dropped."""
+        task = self.confirm_start(member)
+        if task is not None:
+            await asyncio.shield(task)
+
+    async def _confirm(self, member: dict[str, Any]) -> None:
+        member_id = int(member["id"])
+        last = self.shared.get(member_id)
+        try:
+            found = await self.portfolio.call("shares_for_viewer", member_id,
+                                              mask=privacy.mask_for(member))  # fmt: skip
+            sign = sign_of(found)
+        except Refusal as exc:
+            sign = (None, ()) if exc.state == "not_shared" else None
+        except Exception:
+            log.exception("what a family member is shared could not be asked")
+            sign = None
+        now = self.clock()
+        if sign is None:  # no answer: nothing is known to have changed; asked again in a minute
+            self.shared[member_id] = Shared(now, last.sign if last is not None else None)
+            return
+        self.shared[member_id] = Shared(now, sign)
+        if sign[0] is None or last is None or last.sign != sign:
+            self.forget(member_id, gone=sign[0] is None)
+
+    def forget(self, member_id: int, *, gone: bool) -> int:
+        """Drop every kept part of the member (its share was removed, expired or changed): no
+        figure of theirs stays in memory, their sockets are told and let go of the rows' symbols,
+        and the next answer is read again. How many parts were dropped."""
+        dropped = 0
+        for key in [k for k, kept in self.memory.items() if k[0] == member_id
+                    and kept.data is not None]:  # fmt: skip
+            kept = self.memory[key] = Memory("not_shared" if gone else "closed")
+            dropped += 1
+            for hook in list(self.after_read):
+                try:
+                    hook(member_id, key[1], kept)
+                except Exception:
+                    log.exception("a dropped family book could not be passed on")
+        self.dropped += dropped
+        if dropped:
+            self._wake.set()
+        return dropped
+
     def read_shown(self, part: str) -> int:
         """Read ``part`` for every member whose open screen shows it (a nudge)."""
         members = [m for (_, p), m in self.shown().items() if p == part]
@@ -363,6 +474,11 @@ class Books:
         """The re-sync: start every read an open screen is due; how many started. What no screen
         has shown for ``KEEP_MS`` is forgotten (member ids only grow as members come and go)."""
         now, started, shown = self.clock(), 0, self.shown()
+        kept = {member_id for (member_id, _), m in self.memory.items() if m.data is not None}
+        seated = {int(member["id"]): member for _, member in self.open_sockets()}
+        for member_id, member in seated.items():  # M3: a kept answer on an open socket
+            if member_id in kept and self._confirm_due(member_id, now):
+                self.confirm_start(member)
         for (member_id, part), member in shown.items():
             if self.due(member_id, part, now, "resync"):
                 self.start(member, part)
@@ -370,6 +486,10 @@ class Books:
         for key in [k for k, m in self.memory.items() if k not in shown
                     and now - m.tried_at >= KEEP_MS]:  # fmt: skip
             del self.memory[key]
+        held = {member_id for member_id, _ in self.memory} | set(seated)
+        for member_id in [m for m, last in self.shared.items()
+                          if m not in held and not 0 <= now - last.at < KEEP_MS]:  # fmt: skip
+            del self.shared[member_id]
         return started
 
     async def run(self) -> None:
@@ -382,11 +502,13 @@ class Books:
                 pass
 
     async def close(self) -> None:
-        flying, self._flights = list(self._flights.values()), {}
+        flying = [*self._flights.values(), *self._share_flights.values()]
+        self._flights, self._share_flights = {}, {}
         await cancel_and_wait(*flying)
 
     def health(self) -> dict[str, int]:
-        return {"reads": self.reads, "screens": len(self.screens), "kept": len(self.memory)}
+        return {"reads": self.reads, "screens": len(self.screens), "kept": len(self.memory),
+                "dropped": self.dropped}  # fmt: skip
 
     # ---- what the phone is sent ---------------------------------------------------------------
     def book_of(self, member: Mapping[str, Any], part: str, now: int) -> dict[str, Any]:
@@ -406,7 +528,8 @@ class Books:
 
     async def _fresh(self, member: Mapping[str, Any], part: str, now: int) -> None:
         if part in privacy.parts_shown(privacy.hidden_categories(member.get("privacy"))):
-            if self.due(int(member["id"]), part, now, "page"):
+            await self.confirm(member)  # M3: a kept answer is served only while its share stands
+            if self.due(int(member["id"]), part, self.clock(), "page"):
                 await self.read(member, part)
 
     async def route_book(self, request: Any, args: dict[str, Any], session: Any) -> Response:

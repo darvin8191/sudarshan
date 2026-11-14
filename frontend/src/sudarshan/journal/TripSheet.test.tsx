@@ -19,7 +19,14 @@ import { OPEN_GUARD } from '@/sudarshan/watchlist/openGuard'
 import { renderBook, where } from '@/test/bookPages'
 import { JournalError, WORDS } from './api'
 import { closedTrip } from './fixtures'
-import { EXPIRED_WORDS, ORPHAN_FILLS, ORPHAN_WORDS, TripSheet, UNMATCHED_WORDS } from './TripSheet'
+import {
+  EXPIRED_WORDS,
+  ORPHAN_FILLS,
+  ORPHAN_WORDS,
+  TripSheet,
+  UNMATCHED_WORDS,
+  unclosedWords,
+} from './TripSheet'
 import type { Playbook, Tag } from './types'
 
 const T0 = Date.UTC(2026, 10, 13, 4, 30, 15) // 10:00:15 IST
@@ -243,6 +250,42 @@ describe('what happened', () => {
     )
     expect(within(result).getByText('Net').nextElementSibling?.textContent).toBe('Not known')
     expect(within(result).queryByText('0.00')).toBeNull()
+    expect(screen.queryByRole('region', { name: 'How far it went' })).toBeNull()
+  })
+
+  it('says a trade the journal did not see closed is one: its side and entry kept, no result (verification N2)', async () => {
+    serve(
+      detail({
+        status: 'unmatched',
+        side: 'long',
+        entry_qty: 65,
+        exit_qty: 0,
+        exit_avg_u: null,
+        closed_ms: Date.UTC(2026, 10, 19, 18, 30),
+        close_day: 20261120,
+        gross_paise: null,
+        net_paise: null,
+        hold_s: null,
+        mae_paise: null,
+        mfe_paise: null,
+        fills: [detail().fills[0]],
+      })
+    )
+    show()
+    expect(await screen.findByText(unclosedWords(20261120))).toBeTruthy()
+    expect(unclosedWords(20261120)).toContain('When it checked your Upstox holdings on Fri 20 Nov')
+    expect(screen.getByText('Closing not seen by the journal')).toBeTruthy()
+    expect(screen.queryByText(UNMATCHED_WORDS)).toBeNull()
+    expect(screen.getByText('LONG')).toBeTruthy()
+    const result = screen.getByRole('region', { name: 'Result' })
+    expect(within(result).getByText('Entry average').nextElementSibling?.textContent).not.toBe(
+      'Not known'
+    )
+    expect(within(result).getByText('Exit average').nextElementSibling?.textContent).toBe(
+      'Not seen'
+    )
+    expect(within(result).getByText('Net').nextElementSibling?.textContent).toBe('Not known')
+    expect(within(result).getByText('Held').nextElementSibling?.textContent).toBe('-')
     expect(screen.queryByRole('region', { name: 'How far it went' })).toBeNull()
   })
 

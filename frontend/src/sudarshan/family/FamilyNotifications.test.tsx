@@ -401,6 +401,6 @@ describe('the end of joining', () => {
     await user.click(screen.getByRole('button', { name: 'Not now' }))
     expect(await screen.findByText('Link the family bot for the summary on Telegram')).toBeTruthy()
     await user.click(screen.getByRole('button', { name: 'Later' }))
-    expect(where.path).toBe('/family')
+    expect(where.path).toBe('/family/')
   })
 })

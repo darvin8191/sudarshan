@@ -51,6 +51,16 @@ vi.mock('@/sudarshan/watchlist/useSameStrike', () => ({
     retry: () => {},
   }),
 }))
+// The Straddle tab's chart is the chart lane's: here it is a stand-in that draws nothing.
+vi.mock('@/sudarshan/chart/computedChart', () => ({
+  ComputedChart: class {
+    async loadComputed() {}
+    tick() {}
+    resync() {}
+    setAppMode() {}
+    destroy() {}
+  },
+}))
 vi.mock('@/components/auth/AuthSync', () => ({ syncSession: vi.fn(async () => {}) }))
 vi.mock('@/api/client', () => ({
   webClient: {
@@ -359,7 +369,7 @@ describe('the options page', () => {
     expect(within(sheet).getByRole('button', { name: 'Sell PE' })).toBeEnabled()
     expect(within(sheet).queryByRole('link', { name: /option chain/i })).toBeNull()
     for (const name of ['Edit row', 'Remove row'])
-      expect(within(sheet).getByText(name).closest('button')).not.toBeVisible()
+      expect(within(sheet).queryByText(name)).toBeNull()
     expect(feed.live()).toHaveLength(84) // a followed strike's legs are already on the socket
     fireEvent.click(within(sheet).getByRole('button', { name: 'Close' }))
     await settle()
@@ -423,7 +433,7 @@ describe('the options page', () => {
   it('switches between the Chain and the OI tab, kept in the address beside the expiry', async () => {
     await open('/options/NFO/NIFTY?expiry=2026-11-24')
     const tabs = within(screen.getByRole('tablist')).getAllByRole('tab')
-    expect(tabs.map((tab) => tab.textContent)).toEqual(['Chain', 'OI', 'IV'])
+    expect(tabs.map((tab) => tab.textContent)).toEqual(['Chain', 'OI', 'IV', 'Straddle'])
     expect(tabs[0]).toHaveAttribute('aria-selected', 'true')
     fireEvent.click(tabs[1])
     await settle()
@@ -445,6 +455,100 @@ describe('the options page', () => {
     )
     expect(drawn[0]).toBe(26_000)
     expect(drawn.at(-1)).toBe(27_000)
+  })
+
+  it('leads the strike sheet with the side that was tapped, and draws no watchlist row’s buttons', async () => {
+    await open()
+    fireEvent.click(document.querySelector('[data-strike="25900"] [data-leg="PE"]') as HTMLElement)
+    await settle()
+    const sheet = screen.getByRole('dialog', { name: 'NIFTY 25,900' })
+    expect(
+      [...sheet.querySelectorAll('thead th')].map((th) => th.textContent).filter(Boolean)
+    ).toEqual(['PE', 'CE'])
+    expect(
+      within(sheet)
+        .getAllByRole('button', { name: /^(Buy|Sell) (CE|PE)$/ })
+        .map((button) => button.textContent)
+    ).toEqual(['Buy PE', 'Sell PE', 'Buy CE', 'Sell CE'])
+    expect(within(sheet).queryByText('Edit row')).toBeNull()
+    expect(within(sheet).queryByText('Remove row')).toBeNull()
+    expect(sheet.parentElement?.querySelector('style')).toBeNull() // no rule hides anything any more
+  })
+
+  it('opens a leg’s own sheet from the strike sheet: its chart, an alert, and the ticket', async () => {
+    await open()
+    fireEvent.click(document.querySelector('[data-strike="25900"] [data-leg="CE"]') as HTMLElement)
+    await settle()
+    vi.mocked(Date.now).mockReturnValue(NOW + 3000) // past the 500 ms guard
+    fireEvent.click(
+      within(screen.getByRole('dialog', { name: 'NIFTY 25,900' })).getByRole('button', {
+        name: 'PE: chart, alert, depth',
+      })
+    )
+    await settle()
+    const leg = screen.getByRole('dialog', { name: 'NIFTY 25900 PE' })
+    expect(within(leg).getByRole('link', { name: /Chart/ })).toHaveAttribute(
+      'href',
+      `/chart/NFO/${symbolOf(25_900, 'PE')}`
+    )
+    expect(within(leg).getByRole('button', { name: /Set alert/ })).toBeInTheDocument()
+    expect(leg).toHaveTextContent('Market depth')
+    // The sheet's own Buy and Sell are the watchlist's: they wait for the lot size it reads itself.
+    expect(within(leg).getByRole('button', { name: 'BUY' })).toBeInTheDocument()
+    // The leg is one of the 84 instruments already followed: its sheet adds none.
+    expect(new Set(feed.live().map((each) => each.split(':').slice(0, 2).join(':'))).size).toBe(84)
+    fireEvent.click(within(leg).getByRole('button', { name: 'Close' }))
+    await settle()
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('opens the Straddle tab on a tapped strike, inside the 84 instruments already followed', async () => {
+    await open()
+    fireEvent.click(screen.getByRole('button', { name: /^Straddle at 25,950/ }))
+    await settle()
+    expect(where()).toBe('/options/NFO/NIFTY?tab=straddle&strike=25950')
+    expect(screen.getByRole('tab', { name: 'Straddle' })).toHaveAttribute('aria-selected', 'true')
+    expect(document.querySelector('[data-straddle-strike]')).toHaveAttribute(
+      'data-straddle-strike',
+      '25950'
+    )
+    expect(feed.live()).toHaveLength(84) // its two legs are the window's own
+    expect(chainRead).toHaveBeenCalledTimes(1)
+    // Stepping across the whole window still follows nothing new.
+    for (let step = 0; step < 6; step += 1)
+      fireEvent.click(screen.getByRole('button', { name: 'Higher strike' }))
+    await settle()
+    expect(feed.live()).toHaveLength(84)
+  })
+
+  it('follows a far strike’s two legs only while its straddle is shown: 86, then 84 again', async () => {
+    await open('/options/NFO/NIFTY?tab=straddle&strike=24500')
+    expect(document.querySelector('[data-straddle-strike]')).toHaveAttribute(
+      'data-straddle-strike',
+      '24500'
+    )
+    expect(feed.live()).toHaveLength(86)
+    expect(feed.live()).toContain(`NFO:${symbolOf(24_500, 'CE')}:Quote`)
+    expect(feed.live()).toContain(`NFO:${symbolOf(24_500, 'PE')}:Quote`)
+    fireEvent.click(screen.getByRole('tab', { name: 'OI' }))
+    await settle()
+    expect(feed.live()).toHaveLength(84)
+  })
+
+  it('"Trade the legs" on the Straddle tab opens the strike sheet, and from it the app’s own ticket', async () => {
+    await open('/options/NFO/NIFTY?tab=straddle')
+    fireEvent.click(screen.getByRole('button', { name: '25,900 put' }))
+    await settle()
+    const sheet = screen.getByRole('dialog', { name: 'NIFTY 25,900' })
+    expect(feed.live()).toHaveLength(84)
+    vi.mocked(Date.now).mockReturnValue(NOW + 3000) // past the 500 ms guard
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Sell PE' }))
+    await settle()
+    expect(ticket.props.at(-1)).toMatchObject({
+      symbol: symbolOf(25_900, 'PE'),
+      exchange: 'NFO',
+      action: 'SELL',
+    })
   })
 
   it('lets every subscription go when the page is left', async () => {

@@ -21,11 +21,12 @@ import {
   type VolumeProfileSessionResult,
 } from 'openalgo-charts/profile'
 import type { ProfileMenuAction } from './profileLayer'
-import type {
-  ProfileKind,
-  ProfileSettings,
-  SessionVolumeProfileSettings,
-  TpoProfileSettings,
+import {
+  type ProfileKind,
+  type ProfileSettings,
+  readProfileSettings,
+  type SessionVolumeProfileSettings,
+  type TpoProfileSettings,
 } from './profileSettings'
 
 export interface ChartProfileContext {
@@ -42,6 +43,90 @@ export interface ChartProfile extends IPrimitive {
   setSettings(settings: ProfileSettings, context?: ChartProfileContext): void
   warning(): string | null
   contextMenuAt(x: number, y: number): ProfileMenuAction | null
+}
+
+/** The two theme colours a profile's look is worked out against. */
+export interface ProfileLookTheme {
+  background: string
+  axisText: string
+}
+
+/** A colour as three channels, from `#rgb`, `#rrggbb`, `rgb()` or `rgba()`; null for anything else. */
+function channels(colour: string): [number, number, number] | null {
+  if (typeof colour !== 'string') return null
+  const hex = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(colour.trim())
+  if (hex) {
+    const h = hex[1].length === 3 ? [...hex[1]].map((c) => c + c).join('') : hex[1]
+    return [0, 2, 4].map((i) => Number.parseInt(h.slice(i, i + 2), 16)) as [number, number, number]
+  }
+  const rgb = /^rgba?\(\s*([\d.]+)[\s,]+([\d.]+)[\s,]+([\d.]+)/i.exec(colour.trim())
+  return rgb ? [Number(rgb[1]), Number(rgb[2]), Number(rgb[3])] : null
+}
+
+function luminance([r, g, b]: [number, number, number]): number {
+  const linear = (value: number) => {
+    const c = value / 255
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4
+  }
+  return 0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b)
+}
+
+/** The contrast of two colours, 1 to 21; null when either cannot be read. */
+export function profileContrast(a: string, b: string): number | null {
+  const one = channels(a)
+  const two = channels(b)
+  if (!one || !two) return null
+  const [hi, lo] = [luminance(one), luminance(two)].sort((x, y) => y - x)
+  return (hi + 0.05) / (lo + 0.05)
+}
+
+/** The keys whose colour is text, which needs more contrast than a line or a fill. */
+const PROFILE_TEXT_KEYS = new Set(['valuesColor', 'volumeValuesColor'])
+const LINE_CONTRAST = 3
+const TEXT_CONTRAST = 4.5
+
+/**
+ * A profile's colours for the look it is drawn on.
+ *
+ * The profile primitives never read the theme, and the colours they ship with
+ * are tuned for a dark chart: the volume figures are a pale grey, the poor
+ * high and low a pale yellow, and both vanish on a white one. So each colour
+ * still at its shipped default is checked against the theme's background, and
+ * one that falls short (3:1 for a line or a fill, 4.5:1 for figures) is taken
+ * from the theme instead: figures become the axis text, and anything else is
+ * its own colour moved towards the axis text until it passes, which keeps its
+ * hue, so the four period colours still read as four. On a dark chart nothing
+ * changes: the defaults were made for it. A colour the trader chose is never
+ * touched: it is theirs.
+ */
+export function profileLook<T extends ProfileSettings>(settings: T, theme: ProfileLookTheme): T {
+  const shipped = readProfileSettings(settings.kind as 'tpo', {}) as unknown as Record<
+    string,
+    unknown
+  >
+  const ink = channels(theme.axisText)
+  // A dark chart is what the defaults were made for, quiet fills included: left as shipped.
+  const ground = channels(theme.background)
+  if (!ground || luminance(ground) < 0.5) return settings
+  let look: Record<string, unknown> | null = null
+  for (const [key, value] of Object.entries(settings)) {
+    if (typeof value !== 'string' || !/Color\d?$/.test(key) || shipped[key] !== value) continue
+    const need = PROFILE_TEXT_KEYS.has(key) ? TEXT_CONTRAST : LINE_CONTRAST
+    const now = profileContrast(value, theme.background)
+    if (now === null || now >= need) continue
+    let next = theme.axisText
+    const own = channels(value)
+    if (!PROFILE_TEXT_KEYS.has(key) && own && ink) {
+      for (let step = 1; step <= 10; step++) {
+        const mixed = own.map((c, i) => Math.round(c + ((ink[i] - c) * step) / 10))
+        next = `rgb(${mixed.join(',')})`
+        if ((profileContrast(next, theme.background) ?? 0) >= need) break
+      }
+    }
+    look ??= { ...settings }
+    look[key] = next
+  }
+  return (look ?? settings) as T
 }
 
 export const MAX_PROFILE_ROWS = 1024
@@ -804,10 +889,14 @@ class SessionChartProfile implements ChartProfile {
   private painted = new Map<ProfileSession, NativeSession>()
   private plotSize: { width: number; height: number } | null = null
   private settings: ProfileSettings
+  /** The settings as painted on the look last drawn on: `profileLook` of them. */
+  private look: ProfileSettings
+  private lookTheme: ProfileLookTheme | null = null
   private context: ChartProfileContext
 
   constructor(settings: ProfileSettings, context: ChartProfileContext) {
     this.settings = settings
+    this.look = settings
     this.context = context
     this.store = new ProfileSessionStore(settings, context)
   }
@@ -893,8 +982,27 @@ class SessionChartProfile implements ChartProfile {
       this.sessionTokens.clear()
     }
     this.settings = settings
+    this.look = this.lookTheme ? profileLook(settings, this.lookTheme) : settings
     this.context = context
     this.store.setSettings(settings, context)
+    this.setBars(this.bars)
+  }
+
+  /**
+   * The look this paint is on. The theme reaches a primitive only when it is
+   * drawn, so the first paint, and the first after the look changes, works the
+   * colours out again and rebuilds the period profiles that carry them.
+   */
+  private syncLook(theme: ProfileLookTheme): void {
+    const before = this.lookTheme
+    if (before && before.background === theme.background && before.axisText === theme.axisText)
+      return
+    this.lookTheme = { background: theme.background, axisText: theme.axisText }
+    const next = profileLook(this.settings, this.lookTheme)
+    if (JSON.stringify(next) === JSON.stringify(this.look)) return
+    this.look = next
+    if (this.settings.kind !== 'tpo') return
+    this.native = new Map()
     this.setBars(this.bars)
   }
 
@@ -909,8 +1017,8 @@ class SessionChartProfile implements ChartProfile {
       ])
     )
     const nextNative = new Map<ProfileSession, NativeSession>()
-    if (this.settings.kind === 'tpo') {
-      const settings = this.settings
+    if (this.look.kind === 'tpo') {
+      const settings = this.look
       for (const session of this.store.sessions) {
         if (!session.market) continue
         const cached = this.native.get(session)
@@ -960,13 +1068,14 @@ class SessionChartProfile implements ChartProfile {
   draw(ctx: CanvasRenderingContext2D, paneContext: PrimitiveRenderContext): void {
     const priceScale = this.context.priceScale?.() ?? paneContext.priceScale
     const rc = priceScale === paneContext.priceScale ? paneContext : { ...paneContext, priceScale }
+    if (rc.theme) this.syncLook(rc.theme)
     this.painted.clear()
     this.plotSize = { width: rc.plotWidth, height: rc.plotHeight }
     ctx.save()
     ctx.beginPath()
     ctx.rect(0, 0, rc.plotWidth * rc.dpr, rc.plotHeight * rc.dpr)
     ctx.clip()
-    const settings = this.settings
+    const settings = this.look
     for (const session of this.store.sessions) {
       const bounds = boundsFor(session, rc)
       if (!bounds || bounds.left > rc.plotWidth) continue

@@ -3,12 +3,13 @@
  * the book strip, the timeframes, the tools and the footer fold into one
  * 48 dp strip, and the chart takes the rest of a short screen. From the left:
  * the way back; the instrument with the feed's state under it; the price and
- * its change; the timeframe; indicators and the chart style; Buy and Sell.
+ * its change; the timeframe; indicators, the chart style and Draw; Buy and Sell.
  * The book, open interest, search, alerts and keeping the screen on wait for
  * the phone to be turned upright again.
  */
 import { ArrowLeft, ChevronDown } from 'lucide-react'
 import { useSyncExternalStore } from 'react'
+import { drawToolIcon } from '@/lib/trading/drawTools'
 import { ChromeIcon } from '@/lib/trading/glyphs'
 import type { LiveStatus } from '@/lib/trading/liveStatus'
 import { cn } from '@/lib/utils'
@@ -41,6 +42,8 @@ export function SidewaysStrip({
   onIndicators,
   onStyle,
   onOrder,
+  drawing,
+  onDraw,
 }: {
   symbol: string
   prices: PriceStore
@@ -58,6 +61,9 @@ export function SidewaysStrip({
   onIndicators(): void
   onStyle(): void
   onOrder(side: 'BUY' | 'SELL'): void
+  /** The drawing tools are over the chart (C7). */
+  drawing: boolean
+  onDraw(): void
 }) {
   const { tick } = useSyncExternalStore(prices.subscribe, prices.get)
   const now = useNow()
@@ -137,6 +143,15 @@ export function SidewaysStrip({
         className={ICON}
       >
         <ChromeIcon id={look.glyph} size={18} />
+      </button>
+      <button
+        type="button"
+        onClick={onDraw}
+        aria-label="Draw"
+        aria-pressed={drawing}
+        className={cn(ICON, drawing && 'bg-[color:var(--primary-tint)] text-primary')}
+      >
+        {drawToolIcon('trend-line', 18)}
       </button>
       {orders !== 'none' && (
         <>

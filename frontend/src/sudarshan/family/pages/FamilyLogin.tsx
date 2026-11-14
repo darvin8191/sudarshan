@@ -6,18 +6,26 @@
 // someone which part they already have right. The lock-out sentence names the time to try again.
 import { useQueryClient } from '@tanstack/react-query'
 import { type FormEvent, useEffect, useState } from 'react'
-import { Navigate } from 'react-router'
+import { Navigate, useLocation } from 'react-router'
 import { BrandLockup } from '@/sudarshan/BrandLockup'
 import { FamilyError, familyApi } from '../api'
 import { FamilyBadge } from '../FamilyBadge'
-import { Field, PRIMARY, Problem } from '../forms'
-import { forgetMember, ME_KEY } from '../session'
+import { Field, Notice, PRIMARY, Problem } from '../forms'
+import { FAMILY_HOME } from '../navigation'
+import { clearSignedIn, forgetMember, ME_KEY, markSignedIn, reasonOf } from '../session'
 
 export const FORGOT =
   'Forgot? Ask the account owner to send a new invite; it replaces your password and code app.'
 
 export default function FamilyLogin() {
   const client = useQueryClient()
+  // Review M1: why the member is here, in the service's words, when the shell sent them (the
+  // owner paused the sign-in, it expired, another device signed this one out).
+  const location = useLocation()
+  const [reason] = useState(() => reasonOf(location.state))
+  useEffect(() => {
+    if (reason !== null) clearSignedIn() // said once; a later visit shows the bare form
+  }, [reason])
   const [handle, setHandle] = useState('')
   const [password, setPassword] = useState('')
   const [totp, setTotp] = useState('')
@@ -37,6 +45,7 @@ export default function FamilyLogin() {
       .then((me) => {
         if (!live) return
         client.setQueryData(ME_KEY, me)
+        markSignedIn()
         setSignedIn(true)
       })
       .catch(() => undefined)
@@ -57,6 +66,7 @@ export default function FamilyLogin() {
       })
       forgetMember(client) // nothing read for anyone before may show for this member
       client.setQueryData(ME_KEY, me)
+      markSignedIn()
       setPassword('')
       setTotp('')
       setSignedIn(true)
@@ -70,7 +80,7 @@ export default function FamilyLogin() {
     }
   }
 
-  if (signedIn) return <Navigate to="/family" replace />
+  if (signedIn) return <Navigate to={FAMILY_HOME} replace />
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4 py-6">
@@ -82,6 +92,7 @@ export default function FamilyLogin() {
         <BrandLockup variant="stacked" align="start" />
         <FamilyBadge />
         <h1 className="sd-display text-[1.5rem] font-bold">Sign in</h1>
+        {reason && !problem && <Notice text={reason} />}
         <div className="flex w-full flex-col gap-4">
           <Field
             label="Sign-in name"

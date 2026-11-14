@@ -157,7 +157,7 @@ def test_the_owner_shares_changes_and_removes_through_the_admin_door(tmp_path):
             changed = answer["data"]
             assert (changed["id"], changed["level"], changed["expires_at"], changed["version"]) == (
                 share["id"], "restricted", until_ms, 2)  # fmt: skip
-            part = (await world.admin("share_set", kind="book", ref="positions", role="child",
+            part = (await world.admin("share_set", kind="watchlist", ref="8", role="child",
                                       level="view"))[1]["data"]  # fmt: skip
             listed = (await world.admin("share_list"))[1]["data"]
             assert [s["id"] for s in listed] == [share["id"], part["id"]]
@@ -179,7 +179,8 @@ def test_the_owner_shares_changes_and_removes_through_the_admin_door(tmp_path):
         ({"kind": "tab"}, 400, "invalid", "kind"),
         ({"ref": "007"}, 400, "invalid", "ref"),
         ({"ref": "positions"}, 400, "invalid", "ref"),
-        ({"kind": "book", "ref": "7"}, 400, "invalid", "ref"),
+        ({"kind": "book", "ref": "7"}, 400, "invalid", "kind"),
+        ({"kind": "book", "ref": "positions"}, 400, "invalid", "kind"),
         ({"level": "edit"}, 400, "invalid", "level"),
         ({"role": "viewer"}, 400, "invalid", "member_id"),  # a member and a role
         ({"member_id": None, "role": "owner"}, 400, "invalid", "role"),
@@ -202,6 +203,47 @@ def test_a_share_the_contract_does_not_allow_is_refused_and_nothing_is_written(
             assert (await world.admin("share_list"))[1]["data"] == []
 
     run(go())
+
+
+def test_h1_a_share_of_a_part_of_the_books_is_refused_in_one_sentence_and_never_listed(tmp_path):
+    """v0.12.0 review H1 (Fix A): nothing enforced a book share, so none is taken and none is
+    shown. The refusal is the one sentence the Family page shows; a row an earlier build stored
+    stays where it is, unread and unlisted. Fails on the old code, which stored and listed it."""
+    from sudarshan.family import words
+
+    async def go():
+        async with World(tmp_path) as world:
+            member, _ = await signed_in(world.service, VIEWER, world.clock())
+            for part in contract.BOOK_PARTS:
+                status, answer = await world.admin("share_set", kind="book", ref=part,
+                                                   member_id=member["id"], level="view")  # fmt: skip
+                assert (status, answer["code"], answer["field"]) == (400, "invalid", "kind")
+                assert answer["message"] == words.BOOK_SHARE_REFUSED
+            store = world.service.store
+            assert await store.read(lambda tx: tx.count("share")) == 0
+            assert await store.read(lambda tx: tx.count("audit", kind="share_set")) == 0
+            now = world.clock()
+            old = await store.write(lambda tx: tx.insert("share", {
+                "kind": "book", "ref": "holdings", "member_id": member["id"], "role": None,
+                "level": "view", "expires_at": None, "created_at": now, "updated_at": now}))  # fmt: skip
+            kept = await world.share(7, member_id=member["id"])
+            listed = (await world.admin("share_list"))[1]["data"]
+            assert [s["id"] for s in listed] == [kept["id"]] and old != kept["id"]
+            assert (
+                await store.read(lambda tx: tx.count("share", kind="book")) == 1
+            )  # left as it was
+
+    run(go())
+
+
+def test_h1_the_refusal_names_the_three_controls_that_decide_and_reads_as_a_sentence():
+    from sudarshan.family import words
+
+    text = words.BOOK_SHARE_REFUSED
+    assert text == words.WORDS["book_share"] and text.endswith(".") and text.count(".") == 1
+    for control in ("Upstox tab", "Portfolio", "Orders", "Funds"):
+        assert control in text
+    assert len(text) <= 300  # the owner bridge passes on a sentence up to this long
 
 
 # ---- the lists a member sees -------------------------------------------------------------------------

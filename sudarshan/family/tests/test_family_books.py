@@ -13,6 +13,7 @@ import itertools
 import json
 import socket
 import time
+from datetime import timedelta
 from pathlib import Path
 
 import httpx
@@ -118,6 +119,35 @@ def test_pnl_hidden_with_quantities_shown_leaves_nothing_to_work_the_pnl_out_fro
         assert sent["side"] == "long"
 
     run(go())
+
+
+def test_m4_the_owner_is_told_what_pnl_hidden_leaves_workable_and_the_table_says_the_same():
+    """v0.12.0 review M4: with P&L hidden and quantities shown, a holding still carries its
+    quantity, its live price and its previous close, so a day's change and its value are one
+    multiplication away. The table no longer claims otherwise, and carries the one sentence the
+    owner reads under the P&L switch. If a later change hides one of the three, this test fails
+    and the sentence goes. Fails on the old code: there was no such sentence."""
+    table = json.loads(privacy.FIELDS_FILE.read_text(encoding="utf-8"))
+    shown = {"pnl": False, "qty": True, "funds": False, "orders": True}
+    row = privacy.masked(holding(), privacy.mask_of(privacy.hidden_categories(shown)))
+    day_change = row["qty_u"] * (row["last_price_u"] - row["close_price_u"])
+    assert day_change != 0 and "pnl_paise" not in row and "avg_price_u" not in row
+    note = privacy.PNL_HIDDEN_NOTE
+    assert note == table["pnl_hidden_note"] and "day's change" in note and "quantit" in note
+    assert note.endswith("Hide quantities to hide those too.")
+    assert "pnl_hidden_note" in table["note"] and "does not hide a day's change" in table["note"]
+    hidden = privacy.masked(holding(), privacy.mask_of(privacy.hidden_categories(
+        {**shown, "qty": False})))  # fmt: skip
+    assert "qty_u" not in hidden  # the remedy the sentence names does hide it
+
+
+def test_m4_a_table_without_the_note_is_refused(tmp_path):
+    table = json.loads(privacy.FIELDS_FILE.read_text(encoding="utf-8"))
+    for bad in (None, "", "no full stop", "x" * 201 + "."):
+        path = tmp_path / "fields.json"
+        path.write_text(json.dumps({**table, "pnl_hidden_note": bad}), encoding="utf-8")
+        with pytest.raises(ValueError, match="pnl_hidden_note"):
+            privacy.load_note(path)
 
 
 @pytest.mark.parametrize("field", QTY_FIELDS)
@@ -245,18 +275,46 @@ class FakeClient:
         self.calls: list[tuple[str, int, dict, frozenset]] = []
         self.refuse: str | None = None
         self.reachable = True
+        #: M3: the portfolio's ``shares_for_viewer`` answer; None answers as an op with no shape.
+        self.shares: dict | None = None
+        self.shares_down = False
 
     async def call(self, op, member_id, args=None, *, mask, tabs=None):
         self.calls.append((op, member_id, dict(args or {}), mask))
+        if op == "shares_for_viewer" and self.shares_down:
+            raise Refusal("unreachable")
         if self.refuse:
             raise Refusal(self.refuse)
         if op == "upstox_book":
+            if self.shares is not None and upstox_level(self.shares) is None:
+                raise Refusal("not_shared")  # as the portfolio's need_upstox_tab refuses
             return {p: book_view(self.rows.get(p, []), self.clock()) for p in args["parts"]}
-        return {}
+        return self.shares if op == "shares_for_viewer" and self.shares is not None else {}
+
+    def ops(self):
+        return [c[0] for c in self.calls]
+
+    def asked(self):
+        return [c for c in self.calls if c[0] == "shares_for_viewer"]
 
     def reads(self, part=None):
         return [c for c in self.calls if c[0] == "upstox_book"
                 and (part is None or c[2]["parts"] == [part])]  # fmt: skip
+
+
+def shared_answer(level: str | None = "view", hides=("funds",)) -> dict:
+    """The portfolio's ``shares_for_viewer`` answer: the Upstox tab at ``level`` (None: not shared
+    with the member), one manual tab beside it, and the categories it hides."""
+    tabs = [{"tab_id": 2, "name": "Long term", "kind": "manual", "level": "view",
+             "expires_at": None}]  # fmt: skip
+    if level is not None:
+        tabs.insert(0, {"tab_id": 1, "name": "Upstox", "kind": "upstox", "level": level,
+                        "expires_at": None})  # fmt: skip
+    return {"tabs": tabs, "hides": list(hides), "member": "1"}
+
+
+def upstox_level(answer: dict) -> str | None:
+    return next((t["level"] for t in answer["tabs"] if t["kind"] == "upstox"), None)
 
 
 class Open:
@@ -280,7 +338,7 @@ def shelf(clock, rows=None, market=None):
 
 async def settle(books):
     for _ in range(200):
-        if not books._flights:
+        if not books._flights and not books._share_flights:
             return
         await asyncio.sleep(0.005)
     raise AssertionError("a book read never ended")
@@ -555,6 +613,167 @@ def test_a_failed_read_keeps_the_old_figures_only_while_they_are_still_shared():
     run(go())
 
 
+# ---- v0.12.0 review M3: a kept answer is served only while its share stands ----------------------
+def test_m3_after_the_close_a_removed_share_stops_showing_within_a_minute():
+    """The reviewer's probe turned round. Holdings are read on a Friday evening; the owner then
+    removes the Upstox tab's share. Outside the session nothing was read again until the next
+    one, so the page went on answering the kept rows (the old code: 1 h, 5 h and 30 h later, with
+    no call to the portfolio). Now the share is asked again at most once a minute, and the next
+    page answer is "Not shared with you" with no row and nothing kept."""
+
+    async def go():
+        friday = MONDAY + timedelta(days=4)
+        clock = Clock(ist(friday, 19))
+        books, client = shelf(clock, {"holdings": [holding()]})
+        client.shares = shared_answer()
+        who = member()
+        await books._fresh(who, "holdings", clock())
+        before = books.book_of(who, "holdings", clock())
+        assert before["state"] == "closed" and len(before["rows"]) == 1
+        clock.at += 20_000
+        await books._fresh(who, "holdings", clock())
+        assert len(client.asked()) == 1 and len(client.reads()) == 1  # within the minute: not asked
+
+        client.shares = shared_answer(level=None)  # the owner removes the share (or it expires)
+        out = []
+        for after_ms in (60_000, 3_600_000, 5 * 3_600_000, 30 * 3_600_000):
+            clock.at = ist(friday, 19) + 20_000 + after_ms
+            await books._fresh(who, "holdings", clock())
+            out.append(books.book_of(who, "holdings", clock()))
+        assert [(b["state"], b["rows"], b["read_at"], b["words"]) for b in out] == [
+            ("not_shared", [], None, NOT_SHARED)] * 4  # fmt: skip
+        assert books.memory[(1, "holdings")].data is None and books.keys(1) == set()
+        assert books.dropped == 1
+
+    run(go())
+
+
+@pytest.mark.parametrize("changed", [shared_answer("restricted"),
+                                     shared_answer(hides=("funds", "pnl", "qty"))])  # fmt: skip
+def test_m3_a_share_made_restricted_or_a_tightened_privacy_drops_what_is_kept(changed):
+    """The share still stands but what it shows changed (the level, or the categories the
+    portfolio hides): the kept rows were read under the old terms, so they are dropped and the
+    part is read again under the new ones, after the close too. Old code: no read, old rows."""
+
+    async def go():
+        clock = Clock(ist(MONDAY, 19))
+        books, client = shelf(clock, {"holdings": [holding()], "positions": [position()]})
+        client.shares = shared_answer()
+        who = member()
+        for part in ("holdings", "positions"):
+            await books._fresh(who, part, clock())
+        assert len(client.reads()) == 2
+        client.shares, client.rows = changed, {"holdings": [], "positions": []}
+        clock.at += 61_000
+        await books._fresh(who, "holdings", clock())
+        assert books.book_of(who, "holdings", clock())["rows"] == []
+        assert books.memory[(1, "positions")] == Memory("closed")  # dropped with it, not served
+        assert books.book_of(who, "positions", clock())["rows"] == []
+        assert len(client.reads("holdings")) == 2 and books.dropped == 2
+
+    run(go())
+
+
+def test_m3_an_open_screen_empties_and_its_socket_is_told_without_a_page_asking():
+    """A screen left open across the close: the re-sync asks what is shared once a minute, drops
+    the kept rows when the share is gone, tells the member's sockets (``book``) and lets go of
+    the rows' symbols. Old code: the screen kept its rows until the next session."""
+
+    async def go():
+        clock = Clock(ist(MONDAY, 19))
+        books, client = shelf(clock, {"positions": [position()]})
+        client.shares = shared_answer()
+        sock, who = Sock(), member()
+        books.open_sockets = lambda: [(sock, who)]
+        told = []
+        books.after_read.append(lambda member_id, part, kept: told.append((part, kept.state)))
+        books.screen(sock, who, "positions")
+        await settle(books)
+        assert books.keys(1) == {position()["instrument_key"]} and told == [("positions", "ok")]
+        assert client.ops()[:2] == ["shares_for_viewer", "upstox_book"]  # asked before the read
+        books.step()
+        await settle(books)
+        assert len(client.asked()) == 1 and books.dropped == 0
+        client.shares = shared_answer(level=None)
+        clock.at += 59_000
+        books.step()
+        await settle(books)
+        assert len(client.asked()) == 1 and books.keys(1)  # not yet a minute
+        clock.at += 1_000
+        books.step()
+        await settle(books)
+        assert told[1] == ("positions", "not_shared") and books.keys(1) == set()
+        books.step()  # the re-sync reads the part again: the portfolio's own refusal is kept
+        await settle(books)
+        view = books.book_of(who, "positions", clock())
+        assert (view["state"], view["rows"]) == ("not_shared", [])
+        client.shares = shared_answer()  # shared again: the open screen fills at its next look
+        clock.at += 60_000
+        books.step()
+        await settle(books)
+        assert len(books.book_of(who, "positions", clock())["rows"]) == 1
+
+    run(go())
+
+
+def test_m3_while_the_portfolio_does_not_answer_what_is_kept_stays_and_is_asked_again():
+    async def go():
+        clock = Clock(ist(MONDAY, 19))
+        books, client = shelf(clock, {"holdings": [holding()]})
+        client.shares = shared_answer()
+        who = member()
+        await books._fresh(who, "holdings", clock())
+        client.shares_down = True
+        clock.at += 61_000
+        await books._fresh(who, "holdings", clock())
+        assert len(books.book_of(who, "holdings", clock())["rows"]) == 1 and books.dropped == 0
+        client.shares_down, client.shares = False, shared_answer(level=None)
+        clock.at += 61_000
+        await books._fresh(who, "holdings", clock())
+        assert books.book_of(who, "holdings", clock())["state"] == "not_shared"
+        assert len(client.asked()) == 3
+
+    run(go())
+
+
+def test_m3_one_question_at_a_time_and_what_is_remembered_is_bounded():
+    """fd-audit: two pages asking together make one question; a member with nothing kept and no
+    socket is forgotten after six hours; ``close`` ends a question still on its way."""
+
+    async def go():
+        clock = Clock(ist(MONDAY, 19))
+        books, client = shelf(clock, {"holdings": [holding()]})
+        client.shares = shared_answer()
+        who = member()
+        await asyncio.gather(books.confirm(who), books.confirm(who), books.confirm(who))
+        assert len(client.asked()) == 1 and not books._share_flights
+        clock.at += books_module.KEEP_MS
+        books.step()
+        assert books.shared == {}
+        gate = asyncio.Event()
+
+        async def slow(*args, **kwargs):
+            await gate.wait()
+
+        client.call = slow
+        task = books.confirm_start(who)
+        await asyncio.sleep(0)
+        await books.close()
+        assert task.cancelled() and not books._share_flights
+
+    run(go())
+
+
+def test_m3_the_sign_reads_only_the_upstox_tabs_share_and_what_is_hidden():
+    sign_of = books_module.sign_of
+    assert sign_of(shared_answer()) == ("view", ("funds",))
+    assert sign_of(shared_answer("restricted", ("qty", "pnl"))) == ("restricted", ("pnl", "qty"))
+    assert sign_of(shared_answer(level=None)) == (None, ("funds",))
+    assert sign_of({"tabs": []}) == (None, ())
+    for not_the_op in ({}, None, {"tabs": None}, [], {"enabled": True}):
+        assert sign_of(not_the_op) is None  # nothing can be told: nothing is dropped
+
+
 def test_a_part_the_members_privacy_withholds_is_never_asked_for():
     async def go():
         clock = Clock(ist(MONDAY, 10))
@@ -660,12 +879,12 @@ def test_the_door_serves_masked_books_and_a_nudge_tells_the_open_screen(tmp_path
                 assert (book["part"], book["state"], book["words"]) == ("positions", "ok", None)
                 assert book["hidden"] == list(CATEGORIES) and book["read_at"] == clock()
                 assert "qty_u" not in book["rows"][0] and "pnl_paise" not in book["rows"][0]
-                assert fake.calls[0][1] == child["id"] and fake.calls[0][2]["parts"] == [
-                    "positions"
-                ]
+                reads = [c for c in fake.calls if c[0] == "upstox_book"]
+                assert reads[0][1] == child["id"] and reads[0][2]["parts"] == ["positions"]
+                assert fake.ops() == ["shares_for_viewer", "upstox_book"]  # M3: asked first
                 status, _, answer = await ask(port, "GET", "/family/api/books/orders",
                                               headers={"Cookie": cookie})  # fmt: skip
-                assert answer["data"]["state"] == "not_shared" and len(fake.calls) == 1
+                assert answer["data"]["state"] == "not_shared" and len(fake.calls) == 2
                 sock = await connect(f"ws://127.0.0.1:{port}/family/ws",
                                      additional_headers={"Cookie": cookie})  # fmt: skip
                 await sock.send(json.dumps({"action": "authenticate", "family": True}))
@@ -687,10 +906,11 @@ def test_the_door_serves_masked_books_and_a_nudge_tells_the_open_screen(tmp_path
                 await sock.close()
                 status, _, answer = await ask(port, "GET", "/family/api/books/positions",
                                               headers={"Cookie": cookie})  # fmt: skip
-                assert answer["data"]["read_at"] == clock() and len(fake.calls) == 2  # kept
+                assert answer["data"]["read_at"] == clock()
+                assert fake.ops().count("upstox_book") == 2  # kept
                 status, _, health = await ask(port, "GET", "/health")
                 data = health["family_state"]["data"]
-                assert data["books"] == {"reads": 2, "screens": 0, "kept": 1}  # it closed
+                assert data["books"] == {"reads": 2, "screens": 0, "kept": 1, "dropped": 0}
                 assert data["portfolio"] == "answering" and data["nudges"]["taken"] == 1
                 assert "SYNTH" not in json.dumps(health) and "Member" not in json.dumps(health)
             stored = b"".join(p.read_bytes() for p in (tmp_path / "state").glob("family.db*"))

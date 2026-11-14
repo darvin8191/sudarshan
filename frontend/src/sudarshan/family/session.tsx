@@ -53,3 +53,50 @@ export function claimForMember(client: QueryClient, memberId: number): void {
   if (filledFor.get(client) !== memberId) forgetMember(client, true)
   filledFor.set(client, memberId)
 }
+
+// ---- why the sign-in page is showing (review M1, v0.12.0) ------------------------------------
+// A session the server ended (the owner paused or removed the member, it expired, another device
+// signed this one out) answers `me` with a sentence, and the member lands on Sign in. The sentence
+// goes with them, in the router's state. A phone that was never signed in, or whose member signed
+// out here themselves, gets the same refusal with no cause to tell: this flag, kept on the phone,
+// is how the shell knows a session was open here. It holds no figure and names nobody.
+const WAS_IN = 'sd-family-was-in'
+
+/** What the sign-in page is handed when the shell sends a member there. */
+export interface LoginState {
+  reason: string
+}
+
+/** A session is open on this phone. */
+export function markSignedIn(): void {
+  try {
+    window.localStorage.setItem(WAS_IN, '1')
+  } catch {
+    // not kept: see `wasSignedIn`
+  }
+}
+
+/** The member left by their own tap, or the sign-in page has said why: nothing more to tell. */
+export function clearSignedIn(): void {
+  try {
+    window.localStorage.removeItem(WAS_IN)
+  } catch {
+    // nothing was kept
+  }
+}
+
+/** Whether a session was open here. Where the phone keeps nothing, the sentence is shown. */
+export function wasSignedIn(): boolean {
+  try {
+    return window.localStorage.getItem(WAS_IN) === '1'
+  } catch {
+    return true
+  }
+}
+
+/** The sentence the sign-in page was sent, or null (opened directly, or the state is not ours). */
+export function reasonOf(state: unknown): string | null {
+  if (!state || typeof state !== 'object') return null
+  const reason = (state as { reason?: unknown }).reason
+  return typeof reason === 'string' && reason.trim() ? reason.trim() : null
+}

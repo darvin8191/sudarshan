@@ -32,7 +32,21 @@ const fakes = vi.hoisted(() => ({
     barAt: ReturnType<typeof vi.fn>
     barX: ReturnType<typeof vi.fn>
     priceAt: ReturnType<typeof vi.fn>
+    setOverlays: ReturnType<typeof vi.fn>
+    drawings: {
+      setTool: ReturnType<typeof vi.fn>
+      cancel: ReturnType<typeof vi.fn>
+      undo: ReturnType<typeof vi.fn>
+      setNote: ReturnType<typeof vi.fn>
+      noteOf: ReturnType<typeof vi.fn>
+      placed(): void
+    }
+    moveLines(ys: Array<{ id: string; y: number }>): void
   }>,
+  /** The books the chart's lines are read from (C5). */
+  positions: [] as unknown[],
+  orders: [] as unknown[],
+  alerts: [] as unknown[],
   config: { apiKey: 'test-key', wsUrl: 'ws://test.invalid' } as unknown,
   instrument: { name: 'STATE BANK OF INDIA', lotSize: 1, tickSize: 0.05 } as unknown,
   /** What the broker offers, as the terminal groups it (Upstox's set). */
@@ -116,10 +130,61 @@ vi.mock('./phoneChart', () => ({
     }))
     barX = vi.fn(() => 120)
     priceAt = vi.fn(() => fakes.heldPrice)
+    /** The drawings host (C7), as the page drives it. */
+    drawings = (() => {
+      let state = {
+        tool: null as string | null,
+        count: 0,
+        canUndo: false,
+        failed: false,
+        selected: null as null | { id: string; tool: string; label: string; ink: number | null },
+        locked: 0,
+      }
+      const heard = new Set<() => void>()
+      const set = (next: Partial<typeof state>) => {
+        state = { ...state, ...next }
+        for (const listener of heard) listener()
+      }
+      return {
+        state: () => state,
+        subscribe: (listener: () => void) => {
+          heard.add(listener)
+          return () => heard.delete(listener)
+        },
+        setTool: vi.fn(async (tool: string | null) => set({ tool })),
+        cancel: vi.fn(() => set({ tool: null })),
+        undo: vi.fn(() => set({ canUndo: false, count: 0 })),
+        setNote: vi.fn(),
+        noteOf: vi.fn(() => ''),
+        placed: () => set({ tool: null, count: state.count + 1, canUndo: true }),
+      }
+    })()
+    /** The lines the page laid over the chart (C5), and where the host says each stands. */
+    setOverlays = vi.fn()
+    private ys: Array<{ id: string; y: number }> = []
+    private readonly heard = new Set<() => void>()
+    overlayLayout = () => this.ys
+    onOverlayLayout = (listener: () => void) => {
+      this.heard.add(listener)
+      return () => this.heard.delete(listener)
+    }
+    moveLines(ys: Array<{ id: string; y: number }>) {
+      this.ys = ys
+      for (const listener of this.heard) listener()
+    }
     constructor(opts: unknown) {
       this.opts = opts
       fakes.charts.push(this as never)
     }
+  },
+}))
+vi.mock('@/api/trading', () => ({
+  tradingApi: {
+    getPositions: vi.fn(async () => ({ status: 'success', data: fakes.positions })),
+    getOrders: vi.fn(async () => ({
+      status: 'success',
+      data: { orders: fakes.orders, statistics: {} },
+    })),
   },
 }))
 vi.mock('./api', () => ({
@@ -204,7 +269,11 @@ const alerting = vi.hoisted(() => ({
 }))
 vi.mock('@/api/marketAlerts', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/api/marketAlerts')>()),
-  marketAlertsApi: { create: alerting.create, prefs: alerting.prefs },
+  marketAlertsApi: {
+    create: alerting.create,
+    prefs: alerting.prefs,
+    state: async () => ({ enabled: true, alerts: fakes.alerts }),
+  },
 }))
 vi.mock('@/utils/toast', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/utils/toast')>()),
@@ -340,6 +409,9 @@ beforeEach(() => {
   fakes.problems = []
   fakes.prevOi = null
   fakes.heldPrice = 814.35
+  fakes.positions = []
+  fakes.orders = []
+  fakes.alerts = []
   localStorage.clear()
   Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 })
   Object.defineProperty(window, 'innerHeight', { configurable: true, value: 844 })
@@ -1313,8 +1385,258 @@ describe('the phone on its side (C10)', () => {
     held = phoneHeld('sideways')
     await opened()
     const buttons = within(screen.getByTestId('chart-strip')).getAllByRole('button')
-    expect(buttons).toHaveLength(6)
+    expect(buttons).toHaveLength(7)
     for (const button of buttons)
       expect(button.className, button.textContent ?? '').toMatch(/\b(min-)?h-12\b|\bsize-12\b/)
+  })
+})
+
+describe('the lines of the charted instrument (C5)', () => {
+  const HELD = {
+    symbol: 'SBIN',
+    exchange: 'NSE',
+    product: 'MIS',
+    quantity: 10,
+    average_price: 810,
+    ltp: 812,
+    pnl: 20,
+    pnlpercent: 0.25,
+  }
+  const STOP = {
+    symbol: 'SBIN',
+    exchange: 'NSE',
+    action: 'SELL',
+    quantity: 10,
+    price: 0,
+    trigger_price: 800,
+    pricetype: 'SL-M',
+    product: 'MIS',
+    orderid: 'A1',
+    order_status: 'trigger pending',
+    timestamp: '2026-11-16 10:41:51',
+  }
+
+  it('lays the position, its working order and its price alert over the chart, each with its words', async () => {
+    fakes.positions = [HELD, { ...HELD, symbol: 'INFY' }]
+    fakes.orders = [STOP, { ...STOP, orderid: 'A2', order_status: 'complete' }]
+    fakes.alerts = [
+      {
+        id: 7,
+        status: 'active',
+        kind: 'price',
+        symbol: 'SBIN',
+        exchange: 'NSE',
+        params: { op: 'at_or_above', level: '830' },
+      },
+    ]
+    await opened()
+    await waitFor(() =>
+      expect(
+        (chart().setOverlays.mock.lastCall?.[0] as { lines: Array<{ label: string }> }).lines.map(
+          (line) => line.label
+        )
+      ).toEqual(['Buy 10 @ 810.00', 'SELL 10 SL-M 800.00', 'Alert ≥ 830.00'])
+    )
+    act(() =>
+      chart().moveLines([
+        { id: 'position:MIS', y: 200 },
+        { id: 'order:A1:trigger', y: 300 },
+        { id: 'alert:7', y: 80 },
+      ])
+    )
+    const lines = within(screen.getByTestId('chart-lines'))
+    expect(lines.getByText('Buy 10 @ 810.00')).toBeVisible()
+    expect(lines.getByText('SELL 10 SL-M 800.00')).toBeVisible()
+    expect(lines.getByText('Alert ≥ 830.00')).toBeVisible()
+    // The position's P&L is the book's until a tick moves it, then moves with the tick.
+    const label = lines.getByText('Buy 10 @ 810.00').closest('[data-line]') as HTMLElement
+    expect(label).toHaveTextContent('+₹20.00')
+    act(() =>
+      chart().opts.callbacks.onTick({
+        ltp: 815,
+        time: null,
+        tradeTime: null,
+        at: Date.now() + 1000,
+        polled: false,
+      })
+    )
+    await waitFor(() => expect(label).toHaveTextContent('+₹50.00'))
+  })
+
+  async function withLines() {
+    fakes.positions = [HELD]
+    fakes.orders = [STOP]
+    fakes.alerts = [
+      {
+        id: 7,
+        version: 2,
+        status: 'active',
+        kind: 'price',
+        symbol: 'SBIN',
+        exchange: 'NSE',
+        tick_size: '0.05',
+        params: { op: 'at_or_above', level: '830' },
+        frequency: 'once',
+        cooldown_s: 0,
+        ends_at: null,
+        candle_min: null,
+        note: '',
+        channels: null,
+        words: { condition: 'SBIN is at or above 830', meta: '', checks_at: null },
+      },
+    ]
+    await opened('/chart/NSE/SBIN', ['/dashboard'])
+    await waitFor(() => expect(chart().setOverlays.mock.lastCall?.[0].lines).toHaveLength(3))
+    act(() =>
+      chart().moveLines([
+        { id: 'position:MIS', y: 200 },
+        { id: 'order:A1:trigger', y: 300 },
+        { id: 'alert:7', y: 80 },
+      ])
+    )
+  }
+
+  it("opens a line's sheet from its label, as an entry the phone's Back closes first (C6)", async () => {
+    await withLines()
+    await userEvent.click(
+      screen.getByRole('button', { name: /Buy 10 @ 810\.00.*Open its actions/ })
+    )
+    const sheet = screen.getByRole('dialog', { name: 'SBIN' })
+    expect(within(sheet).getByRole('button', { name: /^Exit/ })).toHaveTextContent(
+      'Sell 10 at market'
+    )
+    fireEvent.click(screen.getByText('Phone back'))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'SBIN' })).toBeNull())
+    expect(screen.getByLabelText('Location')).toHaveTextContent('/chart/NSE/SBIN')
+  })
+
+  it("opens the app's order ticket from Add, on the position's side and in its product", async () => {
+    await withLines()
+    await userEvent.click(
+      screen.getByRole('button', { name: /Buy 10 @ 810\.00.*Open its actions/ })
+    )
+    await userEvent.click(
+      within(screen.getByRole('dialog', { name: 'SBIN' })).getByRole('button', { name: /^Add/ })
+    )
+    expect(screen.getByRole('dialog', { name: 'Order ticket' })).toHaveTextContent(
+      'BUY SBIN NSE MIS 1 chart-trading MARKET no price'
+    )
+    expect(screen.queryByRole('dialog', { name: 'SBIN' })).toBeNull()
+    // The ticket took the sheet's entry: one Back is the chart again.
+    fireEvent.click(screen.getByText('Phone back'))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(screen.getByLabelText('Location')).toHaveTextContent('/chart/NSE/SBIN')
+  })
+
+  it("offers Modify and Cancel on an order's line, and the alert's own form on an alert's", async () => {
+    await withLines()
+    await userEvent.click(
+      screen.getByRole('button', { name: /SELL 10 SL-M 800\.00.*Open its actions/ })
+    )
+    const order = within(screen.getByRole('dialog', { name: 'SBIN' }))
+    expect(order.getByRole('button', { name: 'Modify' })).toBeEnabled()
+    expect(order.getByRole('button', { name: 'Cancel order' })).toBeEnabled()
+    fireEvent.click(screen.getByText('Phone back'))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    await userEvent.click(screen.getByRole('button', { name: /Alert ≥ 830\.00.*Open its actions/ }))
+    await userEvent.click(
+      within(screen.getByRole('dialog', { name: 'SBIN' })).getByRole('button', { name: 'Edit' })
+    )
+    const form = await screen.findByRole('dialog', { name: /alert/i })
+    expect(within(form).getByLabelText('Price level')).toHaveValue('830')
+  })
+
+  it('reads no book for an index, and draws no line on it', async () => {
+    const { tradingApi } = await import('@/api/trading')
+    vi.mocked(tradingApi.getPositions).mockClear()
+    fakes.positions = [{ ...HELD, symbol: 'NIFTY', exchange: 'NSE_INDEX' }]
+    await opened('/chart/NSE_INDEX/NIFTY')
+    expect(tradingApi.getPositions).not.toHaveBeenCalled()
+    expect(screen.queryByTestId('chart-lines')).toBeNull()
+  })
+})
+
+describe('drawing on the phone chart (C7)', () => {
+  it('opens the tools over the chart from Draw, holds the one tapped and says how to place it', async () => {
+    await opened()
+    expect(screen.queryByTestId('draw-row')).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Draw' }))
+    const row = within(screen.getByTestId('draw-row'))
+    expect(row.getAllByRole('button').map((button) => button.getAttribute('aria-label'))).toEqual([
+      'Horizontal line',
+      'Trend line',
+      'Ray',
+      'Rectangle',
+      'Fib retracement',
+      'Text note',
+      'Measure',
+    ])
+    expect(row.getByRole('status')).toHaveTextContent('Pick a tool, then tap the chart.')
+    await userEvent.click(row.getByRole('button', { name: 'Trend line' }))
+    expect(chart().drawings.setTool).toHaveBeenLastCalledWith('trend-line')
+    expect(row.getByRole('button', { name: 'Trend line' })).toHaveAttribute('aria-pressed', 'true')
+    expect(row.getByRole('status')).toHaveTextContent(
+      'Trend line: tap where it starts, then where it ends.'
+    )
+    await userEvent.click(row.getByRole('button', { name: 'Horizontal line' }))
+    expect(row.getByRole('status')).toHaveTextContent('Horizontal line: tap the chart to place it.')
+  })
+
+  it('keeps Cancel and Undo by the thumb: Cancel lets the tool go, Undo takes back the last drawing', async () => {
+    await opened()
+    await userEvent.click(screen.getByRole('button', { name: 'Draw' }))
+    expect(screen.getByRole('button', { name: 'Undo' })).toBeDisabled()
+    await userEvent.click(screen.getByRole('button', { name: 'Ray' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(chart().drawings.cancel).toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: 'Ray' })).toHaveAttribute('aria-pressed', 'false')
+    act(() => chart().drawings.placed())
+    await userEvent.click(screen.getByRole('button', { name: 'Undo' }))
+    expect(chart().drawings.undo).toHaveBeenCalledOnce()
+    await userEvent.click(screen.getByRole('button', { name: 'Done' }))
+    expect(screen.queryByTestId('draw-row')).toBeNull()
+  })
+
+  it('does not read a candle under a held finger while the tools are out', async () => {
+    await opened()
+    await userEvent.click(screen.getByRole('button', { name: 'Draw' }))
+    const down = new MouseEvent('pointerdown', { bubbles: true, clientX: 120, clientY: 200 })
+    Object.assign(down, { pointerId: 1, pointerType: 'touch' })
+    fireEvent(screen.getByTestId('chart-surface'), down)
+    await new Promise((resolve) => setTimeout(resolve, 700))
+    expect(screen.queryByTestId('chart-readout')).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Done' }))
+    await hold()
+    expect(screen.getByTestId('chart-readout')).toBeVisible()
+  })
+
+  it('asks for the words of a note as soon as it is placed, and removes one left empty', async () => {
+    await opened('/chart/NSE/SBIN', ['/dashboard'])
+    act(() => chart().opts.callbacks.onDrawNote?.('n1'))
+    const sheet = await screen.findByRole('dialog', { name: 'Text note' })
+    await userEvent.type(within(sheet).getByLabelText('Note'), 'Day high')
+    await userEvent.click(within(sheet).getByRole('button', { name: 'Save note' }))
+    expect(chart().drawings.setNote).toHaveBeenLastCalledWith('n1', 'Day high')
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    act(() => chart().opts.callbacks.onDrawNote?.('n2'))
+    await userEvent.click(
+      within(await screen.findByRole('dialog', { name: 'Text note' })).getByRole('button', {
+        name: 'Remove note',
+      })
+    )
+    expect(chart().drawings.setNote).toHaveBeenLastCalledWith('n2', '')
+  })
+
+  it('offers Draw on the strip when the phone is on its side', async () => {
+    const held = phoneHeld('sideways')
+    try {
+      await opened()
+      await userEvent.click(
+        within(screen.getByTestId('chart-strip')).getByRole('button', { name: 'Draw' })
+      )
+      expect(screen.getByTestId('draw-row')).toBeVisible()
+    } finally {
+      held.spy.mockRestore()
+    }
   })
 })
