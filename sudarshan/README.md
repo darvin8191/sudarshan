@@ -778,8 +778,63 @@ If a phone is lost, or a session may have been copied:
 3. Put the new key into every TradingView alert (and into Amibroker and your strategies, if you
    use them). From now on an alert that still carries the old key is refused.
 
+A logout, a password change or a reset also ends the AI assistant's access at once (see "The AI
+assistant" below): its consent was given by a session that has now ended.
+
 If the answer to a logout, a password change or a reset says that your other devices could not be
 signed out, the server could not record the time: log in and log out once more.
 
 Tests: `sudarshan/alerts/tests/test_sessions_valid_after.py`, `test/test_gthread_sessions_valid_after.py`
 and `frontend/src/sudarshan/signout.test.tsx`.
+
+## The AI assistant (M17)
+
+SUDARSHAN's assistant is your own AI app connected to OpenAlgo's remote MCP, read-only. It ships
+**switched off** and stays off until you turn Remote MCP on yourself (Admin, Remote MCP). The
+tools SUDARSHAN adds for it come in a later release; what this release does is make sure the
+assistant can never place, change or cancel an order, and that its access ends the moment you
+want it to.
+
+**It cannot be switched on with order tools (M17.9).** Every deploy writes three settings into
+OpenAlgo's `.env` (the list in "OpenAlgo settings that ship with a release"):
+
+| setting | value | what it does |
+|---|---|---|
+| `OPENALGO_MCP_READ_ONLY` | `1` | no tool that places, changes or cancels an order, switches the trading mode or sends a Telegram message exists in the MCP server at all |
+| `MCP_OAUTH_WRITE_SCOPE_ENABLED` | `False` | the right to trade is never offered to an AI app and never granted |
+| `MCP_OAUTH_REQUIRE_APPROVAL` | `True` | an AI app that registers itself waits for your approval on the Remote MCP page |
+
+When SUDARSHAN starts with Remote MCP on, it checks the first two. If either would allow orders,
+the app starts as usual **without** the assistant (its address answers "not found") and the log
+says: "The assistant is switched off: its settings would allow orders. Set
+OPENALGO_MCP_READ_ONLY=1 and MCP_OAUTH_WRITE_SCOPE_ENABLED=False." An AI setting never stops
+trading. Under these locks nothing else changed: every order from any source still meets the risk
+guards and the kill switch.
+
+**Ending its access, at once.** Each of these ends every AI connection on its next request, not
+after the 15 minutes its pass would otherwise last, and closes any connection it holds open:
+
+- the kill switch, once the risk guard covers Live orders (while it checks Analyze mode only, it
+  leaves the assistant alone, as its report says);
+- the Remote MCP page's own kill switch ("Revoke all MCP tokens");
+- a logout, a password change or a password reset.
+
+Turning the kill switch off, or logging in again, brings nothing back: connect the assistant
+again in your AI app and give consent again. To end one connection only, use Revoke beside it on
+the Remote MCP page; that one can still work for up to 15 minutes.
+
+**The Agent page** (`/agent`) is OpenAlgo's own chat, which needs a paid model key. SUDARSHAN
+leaves it as it ships: not set up, with its trading switch off. The kill switch stops it too.
+
+**From a laptop instead (M17.2).** OpenAlgo's MCP server can also run on a laptop
+(`mcp/mcpserver.py`, started by Claude Desktop or Claude Code). Use it only if the connector
+cannot be added, and then:
+
+- set `OPENALGO_MCP_READ_ONLY=1` in that client's settings for the server. Without it the laptop
+  is offered every tool, the order tools included;
+- the API key you give it is an order-capable secret now sitting on that laptop: treat a lost or
+  lent laptop as a lost phone ("Signing out every device, and a lost phone" above, steps 2 and 3);
+- reach the server through SSH only, never by opening a port:
+  `ssh -N -L 5000:127.0.0.1:5000 <you>@<server>`, with `http://127.0.0.1:5000` as the host.
+
+Tests: `sudarshan/assistant/tests/`, `sudarshan/guard/tests/test_guard_migration.py`.
