@@ -65,7 +65,7 @@ export const PNL_HIDDEN_NOTE =
  * with it; the Shares tab says it where the book switches were (v0.12.0 review H1).
  */
 export const BOOK_SHARE_RULE =
-  "Which books a member can open is set by sharing the Upstox tab in Portfolio, and by that member's Orders and Funds switches."
+  "Which books a member can open is set by sharing the Upstox tab under Portfolio tabs on the Family page, and by that member's Orders and Funds switches."
 
 export const FUNDS_WITHOUT_AMOUNTS = 'Shown without amounts while P&L is hidden'
 
