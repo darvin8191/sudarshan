@@ -922,6 +922,34 @@ for (const [layout, viewport] of [
 
       await page.getByRole('button', { name: 'Undo' }).click()
       await expect.poll(() => savedTools(page)).toEqual(['horizontal-line'])
+
+      // A tap on the level selects it (C8): its ink, Lock and Delete, in a bar at the foot.
+      const levelY = await page.evaluate((key) => {
+        const doc = JSON.parse(localStorage.getItem(key) ?? '{}') as {
+          drawings: Array<{ points: Array<{ price: number }> }>
+        }
+        return doc.drawings[0].points[0].price
+      }, `sudarshan-chart-draw:${EXCHANGE}:${SYMBOL}`)
+      expect(levelY).toBeGreaterThan(0)
+      await tap(0.45, 0.5)
+      const bar = page.getByTestId('drawing-bar')
+      await expect(bar).toBeVisible()
+      await page.screenshot({ path: info.outputPath('selected.png') })
+      await checkScreen(page)
+      await bar.getByRole('button', { name: 'Peacock, dashed' }).click()
+      await expect(bar.getByRole('button', { name: 'Peacock, dashed' })).toHaveAttribute('aria-pressed', 'true')
+      await bar.getByRole('button', { name: 'Lock where it is' }).click()
+      await expect(bar).toHaveCount(0)
+      // Locked, it no longer answers a tap; Unlock is the way back.
+      await tap(0.45, 0.5)
+      await expect(bar).toHaveCount(0)
+      await page.getByRole('button', { name: 'Unlock 1 locked' }).click()
+      await tap(0.45, 0.5)
+      await expect(bar).toBeVisible()
+      await bar.getByRole('button', { name: 'Delete this horizontal line' }).click()
+      await expect.poll(() => savedTools(page)).toEqual([])
+      await page.getByRole('button', { name: 'Undo' }).click()
+      await expect.poll(() => savedTools(page)).toEqual(['horizontal-line'])
       await page.getByRole('button', { name: 'Done' }).click()
       await expect(row).toHaveCount(0)
 

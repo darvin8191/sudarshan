@@ -132,7 +132,14 @@ vi.mock('./phoneChart', () => ({
     priceAt = vi.fn(() => fakes.heldPrice)
     /** The drawings host (C7), as the page drives it. */
     drawings = (() => {
-      let state = { tool: null as string | null, count: 0, canUndo: false, failed: false }
+      let state = {
+        tool: null as string | null,
+        count: 0,
+        canUndo: false,
+        failed: false,
+        selected: null as null | { id: string; tool: string; label: string; ink: number | null },
+        locked: 0,
+      }
       const heard = new Set<() => void>()
       const set = (next: Partial<typeof state>) => {
         state = { ...state, ...next }

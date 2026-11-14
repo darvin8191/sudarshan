@@ -76,6 +76,7 @@ import {
   searchSymbols,
 } from './api'
 import { DepthSheet, DepthStrip } from './DepthStrip'
+import { DrawingSheet } from './DrawingSheet'
 import { DRAW_ROW, DrawRow } from './DrawRow'
 import { IndicatorSettingsSheet } from './IndicatorSettingsSheet'
 import { IndicatorSheet } from './IndicatorSheet'
@@ -804,6 +805,12 @@ const ChartScreen = memo(function ChartScreen({
           />
         )}
         {owner && drawing && <DrawRow drawings={owner.drawings} onDone={toggleDraw} />}
+        {owner && (
+          <DrawingSheet
+            drawings={owner.drawings}
+            onEditNote={(id) => openSheet({ sheet: 'note', id })}
+          />
+        )}
         {inspect && (
           <Crosshair
             x={inspect.x}

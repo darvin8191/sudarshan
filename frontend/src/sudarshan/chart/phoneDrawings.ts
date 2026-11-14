@@ -37,6 +37,16 @@ export const DRAW_TOOLS = [
 
 export type DrawToolId = (typeof DRAW_TOOLS)[number]['id']
 
+/**
+ * The three inks a drawing can take (C8), each with a line style of its own, so
+ * two drawings differ by their stroke as well as their colour.
+ */
+export const DRAW_INKS = [
+  { name: 'Ink', token: '--text-primary', lineStyle: 'solid' },
+  { name: 'Peacock', token: '--brand', lineStyle: 'dashed' },
+  { name: 'Amber', token: '--warning-text', lineStyle: 'dotted' },
+] as const
+
 /** Never saved and gone with the next tool: a reading, not a drawing. */
 const TRANSIENT: ReadonlySet<string> = new Set(['measure'])
 
@@ -76,9 +86,20 @@ export interface DrawState {
   canUndo: boolean
   /** The draw tier could not be loaded: said beside the tools. */
   failed: boolean
+  /** The drawing a tap selected (C8): what it is, and which ink it has, if one of the three. */
+  selected: { id: string; tool: string; label: string; ink: number | null } | null
+  /** Drawings locked where they stand: a tap on the chart no longer selects them. */
+  locked: number
 }
 
-const IDLE: DrawState = { tool: null, count: 0, canUndo: false, failed: false }
+const IDLE: DrawState = {
+  tool: null,
+  count: 0,
+  canUndo: false,
+  failed: false,
+  selected: null,
+  locked: 0,
+}
 
 type Tier = typeof import('openalgo-charts/draw')
 
@@ -171,6 +192,55 @@ export class PhoneDrawings {
     this.changed()
   }
 
+  /** Delete the selected drawing (C8). Undo brings it back. */
+  removeSelected(): void {
+    const id = this.ctl?.selected()
+    if (id && this.ctl?.remove(id)) this.changed()
+  }
+
+  /**
+   * Lock the selected drawing where it stands: it is still drawn, and a tap on
+   * the chart no longer selects or moves it. `unlockAll` is the way back.
+   */
+  lockSelected(): void {
+    const ctl = this.ctl
+    const id = ctl?.selected()
+    if (!ctl || !id) return
+    ctl.update(id, { locked: true })
+    ctl.select(null)
+    this.changed()
+  }
+
+  unlockAll(): void {
+    const ctl = this.ctl
+    if (!ctl) return
+    const locked = ctl.drawings().filter((d) => d.locked)
+    if (!locked.length) return
+    ctl.updateMany(locked.map((d) => ({ id: d.id, patch: { locked: false } })))
+    this.changed()
+  }
+
+  /** Give the selected drawing one of the three inks, with that ink's line style. */
+  setInk(index: number): void {
+    const ctl = this.ctl
+    const id = ctl?.selected()
+    const ink = DRAW_INKS[index]
+    const drawing = id ? ctl?.get(id) : undefined
+    if (!ctl || !id || !ink || !drawing) return
+    const color = resolveCssColor(`var(${ink.token})`)
+    ctl.update(id, {
+      style: { ...drawing.style, color, lineStyle: ink.lineStyle },
+      ...(drawing.text ? { text: { ...drawing.text, color } } : {}),
+    })
+    this.changed()
+  }
+
+  /** Let the selection go. */
+  deselect(): void {
+    this.ctl?.select(null)
+    this.sync()
+  }
+
   /** The words a note carries now. */
   noteOf(id: string): string {
     return this.ctl?.get(id)?.text?.value ?? ''
@@ -220,6 +290,7 @@ export class PhoneDrawings {
     }
     const mine = () => this.ctl === ctl
     chart.on('draw:tool', () => mine() && this.sync())
+    chart.on('drawing:select', () => mine() && this.sync())
     chart.on('drawing:change', () => mine() && this.changed())
     chart.on('draw:add', (event) => {
       const drawing = (event as { drawing?: { id: string; tool: string }; history?: true }).drawing
@@ -261,21 +332,41 @@ export class PhoneDrawings {
   private sync(): void {
     const ctl = this.ctl
     const tool = (ctl?.activeTool() ?? null) as DrawToolId | null
+    const kept = ctl ? ctl.drawings().filter((d) => !TRANSIENT.has(d.tool)) : []
+    const picked = ctl?.selected() ? kept.find((d) => d.id === ctl.selected()) : undefined
     const next: DrawState = {
       tool,
-      count: ctl ? ctl.drawings().filter((d) => !TRANSIENT.has(d.tool)).length : 0,
+      count: kept.length,
       canUndo: ctl?.canUndo() ?? false,
       failed: this.failed,
+      selected: picked
+        ? {
+            id: picked.id,
+            tool: picked.tool,
+            label: DRAW_TOOLS.find((one) => one.id === picked.tool)?.label ?? 'Drawing',
+            ink: inkOf(picked.style),
+          }
+        : null,
+      locked: kept.filter((d) => d.locked).length,
     }
     const before = this.value
     if (
       before.tool === next.tool &&
       before.count === next.count &&
       before.canUndo === next.canUndo &&
-      before.failed === next.failed
+      before.failed === next.failed &&
+      before.locked === next.locked &&
+      before.selected?.id === next.selected?.id &&
+      before.selected?.ink === next.selected?.ink
     )
       return
     this.value = next
     for (const listener of [...this.listeners]) listener()
   }
+}
+
+/** Which of the three inks a style is drawn in: told by its line style, as the eye tells it. */
+function inkOf(style: { lineStyle?: string } | undefined): number | null {
+  const index = DRAW_INKS.findIndex((ink) => ink.lineStyle === (style?.lineStyle ?? 'solid'))
+  return index < 0 ? null : index
 }

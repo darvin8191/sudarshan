@@ -9,7 +9,7 @@ import type { DrawingController } from 'openalgo-charts/draw'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ist } from '@/test/tapes/scenarios'
 import type { PhoneChart } from './phoneChart'
-import { DRAW_TOOLS, hasSavedDrawings, phoneDrawingsKey } from './phoneDrawings'
+import { DRAW_INKS, DRAW_TOOLS, hasSavedDrawings, phoneDrawingsKey } from './phoneDrawings'
 import { historyOf, host, installHost, mountChart, removeHost } from './testing/host'
 
 vi.mock('@/lib/trading/sessionHours', () => ({
@@ -88,7 +88,14 @@ describe('drawings on the phone chart', () => {
     const { chart } = await opened()
     expect(tierOf(chart)).toBeNull()
     expect(controller(chart)).toBeNull()
-    expect(chart.drawings.state()).toEqual({ tool: null, count: 0, canUndo: false, failed: false })
+    expect(chart.drawings.state()).toEqual({
+      tool: null,
+      count: 0,
+      canUndo: false,
+      failed: false,
+      selected: null,
+      locked: 0,
+    })
   })
 
   it('holds a tool on the first use, and lets it go again', async () => {
@@ -228,5 +235,67 @@ describe('drawings on the phone chart', () => {
     expect(saved('SBIN')?.drawings).toHaveLength(1)
     view.chart.drawings.setNote(note.id, '   ')
     expect(controller(view.chart)?.drawings()).toEqual([])
+  })
+
+  it('says which drawing a tap selected, and lets it go', async () => {
+    const { chart } = await opened()
+    await chart.drawings.setTool(null)
+    const line = level(chart, 815)
+    controller(chart)?.select(line.id)
+    expect(chart.drawings.state().selected).toEqual({
+      id: line.id,
+      tool: 'horizontal-line',
+      label: 'Horizontal line',
+      ink: 0,
+    })
+    chart.drawings.deselect()
+    expect(chart.drawings.state().selected).toBeNull()
+  })
+
+  it('gives the selected drawing one of three inks, each with its own line style, and saves it', async () => {
+    expect(DRAW_INKS.map((ink) => ink.lineStyle)).toEqual(['solid', 'dashed', 'dotted'])
+    expect(new Set(DRAW_INKS.map((ink) => ink.token)).size).toBe(3)
+    const { chart } = await opened()
+    await chart.drawings.setTool(null)
+    const line = level(chart, 815)
+    controller(chart)?.select(line.id)
+    chart.drawings.setInk(1)
+    expect(controller(chart)?.get(line.id)?.style.lineStyle).toBe('dashed')
+    expect(chart.drawings.state().selected?.ink).toBe(1)
+    expect(
+      (saved('SBIN')?.drawings[0] as unknown as { style: { lineStyle: string } }).style.lineStyle
+    ).toBe('dashed')
+    chart.drawings.setInk(9)
+    expect(chart.drawings.state().selected?.ink).toBe(1)
+  })
+
+  it('locks the selected drawing where it stands, lets the selection go, and unlocks them all', async () => {
+    const { chart } = await opened()
+    await chart.drawings.setTool(null)
+    const line = level(chart, 815)
+    controller(chart)?.select(line.id)
+    chart.drawings.lockSelected()
+    expect(controller(chart)?.get(line.id)?.locked).toBe(true)
+    expect(chart.drawings.state()).toMatchObject({ selected: null, locked: 1, count: 1 })
+    // Kept locked for the next visit.
+    await chart.load('SBIN', 'NSE', '15m')
+    expect(chart.drawings.state().locked).toBe(1)
+    chart.drawings.unlockAll()
+    expect(chart.drawings.state().locked).toBe(0)
+    expect(controller(chart)?.drawings()[0].locked).toBeFalsy()
+  })
+
+  it('deletes the selected drawing, and Undo brings it back', async () => {
+    const { chart } = await opened()
+    await chart.drawings.setTool(null)
+    const line = level(chart, 815)
+    level(chart, 820)
+    controller(chart)?.select(line.id)
+    chart.drawings.removeSelected()
+    expect(chart.drawings.state()).toMatchObject({ count: 1, selected: null })
+    expect(saved('SBIN')?.drawings.map((d) => d.points[0].price)).toEqual([820])
+    chart.drawings.undo()
+    expect(chart.drawings.state().count).toBe(2)
+    expect(saved('SBIN')?.drawings).toHaveLength(2)
   })
 })
