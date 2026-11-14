@@ -284,6 +284,45 @@ def test_an_own_account_is_set_as_not_for_tax_from_its_version_and_back(ctx, cap
     assert same["row"]["version"] == 3  # nothing changed: nothing written
 
 
+def test_the_not_for_tax_line_is_logged_once_and_only_for_a_change_that_was_saved(
+    ctx, caplog, monkeypatch
+):
+    """The Inputs sheet asks what a change would do (a dry run, undone) before every save. The
+    line is the record of a change made: none from the dry run, none from a save whose commit
+    failed, one from the save."""
+    account = demat(ctx)
+    change = {"kind": "account_mode", "row": mode(account), "version": 1}
+
+    def said():
+        return [r.getMessage() for r in caplog.records if r.name.endswith("ops.tax_ops")]
+
+    with caplog.at_level("INFO", logger="sudarshan.portfolio.ops.tax_ops"):
+        shown = call(ctx, "tax_input_set", **change, dry_run=True)
+        assert shown["row"] is None and listed(ctx)[account["id"]] == ("ledger", 1)
+        assert said() == []
+
+        real = ctx.store.write
+
+        def fails_at_the_end(scope, fn):
+            def run(tx):
+                fn(tx)
+                raise OSError("no space left")
+
+            return real(scope, run)
+
+        monkeypatch.setattr(ctx.store, "write", fails_at_the_end)
+        assert refused(ctx, "tax_input_set", **change).status >= 500
+        monkeypatch.undo()
+        assert listed(ctx)[account["id"]] == ("ledger", 1)
+        assert said() == []
+
+        call(ctx, "tax_input_set", **change)
+        assert listed(ctx)[account["id"]] == ("none", 2)
+        assert said() == [
+            f"account {account['id']} of member 1 now counts for tax as none (was ledger)"
+        ]
+
+
 def test_the_upstox_account_a_wrong_mode_and_a_missing_version_are_refused_in_words(ctx):
     upstox = {"id": ctx.upstox_id}
     fixed = refused(ctx, "tax_input_set", kind="account_mode", row=mode(upstox), version=1)
