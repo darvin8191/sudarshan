@@ -1,12 +1,12 @@
 import { CandlestickChart, Minus, Plus, ShieldCheck } from 'lucide-react'
-import { memo, type ReactNode, useCallback, useEffect } from 'react'
+import { memo, type ReactNode, useCallback, useEffect, useState } from 'react'
 import { calculateLiveStats } from '@/hooks/useLivePrice'
 import { cn, sanitizeCSV } from '@/lib/utils'
 import { AccessNotice } from '@/sudarshan/AccessNotice'
 import { usePriceAccess, useReadWhenReady } from '@/sudarshan/access'
 import { type FeedRow, useBookFeed } from '@/sudarshan/books/feed'
 import type { TickDirection } from '@/sudarshan/books/prices'
-import { ProtectPanel } from '@/sudarshan/books/protect/ProtectPanel'
+import { ProtectPanel, SellQuestion } from '@/sudarshan/books/protect/ProtectPanel'
 import { protectedLine } from '@/sudarshan/books/protect/protect' // SUDARSHAN G1 (M5.6)
 import { useProtectBook } from '@/sudarshan/books/protect/useProtect'
 import { SymbolChartLink } from '@/sudarshan/chart/SymbolChartLink'
@@ -193,6 +193,7 @@ const HoldingBoard = memo(function HoldingBoard({
   useReadWhenReady(access.state, error !== null, refresh)
   // SUDARSHAN G1 (M5.6): the working sell GTTs on these holdings, when Protect is switched on.
   const protect = useProtectBook(apiKey, useSandbox(), bookAt)
+  const [sellAsk, setSellAsk] = useState<PricedRow<Holding> | null>(null)
   const figuresStale = (line.kind === 'delayed' || line.kind === 'connecting') && line.stale
 
   const target =
@@ -308,7 +309,10 @@ const HoldingBoard = memo(function HoldingBoard({
           now={now}
           onClose={close}
           onBuy={() => order(target, 'BUY')}
-          onSell={() => order(target, 'SELL')}
+          onSell={() =>
+            // SUDARSHAN G2 (M5.6): a protected holding asks about its Protect first.
+            protect.of(target.item).length > 0 ? setSellAsk(target) : order(target, 'SELL')
+          }
           protect={
             protect.shown ? (
               <ProtectPanel holding={target.item} last={target.ltp} book={protect} />
@@ -316,6 +320,16 @@ const HoldingBoard = memo(function HoldingBoard({
           }
         />
       )}
+      <SellQuestion
+        holding={sellAsk?.item ?? null}
+        book={protect}
+        onSell={() => {
+          const row = sellAsk
+          setSellAsk(null)
+          if (row) order(row, 'SELL')
+        }}
+        onClose={() => setSellAsk(null)}
+      />
     </div>
   )
 })
