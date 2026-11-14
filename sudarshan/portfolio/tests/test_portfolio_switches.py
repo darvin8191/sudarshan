@@ -73,7 +73,7 @@ def test_a_tax_input_has_a_dry_run_and_downloads_are_reads():
 
 
 #: The ops of the phase whose lane has landed, one line a lane; every other one is not built yet.
-LANDED_C = ("ca_list", "ca_decide")
+LANDED_C = ("ca_list", "ca_decide", "dividends", "dividend_set")
 
 
 def test_an_op_of_the_phase_not_built_yet_answers_not_ready():

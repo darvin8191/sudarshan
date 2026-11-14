@@ -12,12 +12,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from .. import corpactions
-from ..core.days import add_days, day_of_instant, is_day
+from .. import corpactions, dividends
+from ..core.days import add_days, day_of_instant, financial_year, is_day
 from ..core.kinds import CALENDAR_NEXT_DAYS, CALENDAR_PAST_DAYS
 from ..errors import ApiError
 from . import op
-from .common import OWNER, answer, need, whole
+from .common import OWNER, answer, maybe_whole, need, whole
 
 ASK = "The request was incomplete. Reload the page."
 
@@ -73,4 +73,36 @@ async def ca_decide(ctx, message):
             OWNER, lambda tx: corpactions.decide(tx, event_id, args, day_of_instant(now), now)
         ),
         lambda row: {key: row[key] for key in keep},
+    )
+
+
+@op("dividends")
+async def dividends_year(ctx, message):
+    """The lines are brought up to date first (``dividends.sync``): a closing record or an event
+    that arrived since the nightly read is counted the moment the owner looks."""
+    store, now = need(ctx), ctx.clock()
+    today = day_of_instant(now)
+    fy, member = maybe_whole(message, "fy"), maybe_whole(message, "member")
+    fy = financial_year(today) if fy is None else fy
+    if not 2000 <= fy <= financial_year(today):
+        raise ApiError(400, "bad_request", ASK)
+
+    def run(tx):
+        dividends.sync(tx, today, now)
+        who = dividends.owner_member(tx) if member is None else member
+        return dividends.report(tx, fy, who, now)
+
+    return await answer(lambda: store.write(OWNER, run))
+
+
+@op("dividend_set")
+async def dividend_set(ctx, message):
+    store, now = need(ctx), ctx.clock()
+    line_id = whole(message, "id")
+    args = {key: message.get(key) for key in ("state", "credited_paise", "tds_paise",
+                                              "credited_day", "version")}  # fmt: skip
+    return await answer(
+        lambda: store.write(
+            OWNER, lambda tx: dividends.set_line(tx, line_id, args, day_of_instant(now), now)
+        )
     )

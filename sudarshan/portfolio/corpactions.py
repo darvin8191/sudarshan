@@ -574,6 +574,7 @@ async def corporate_actions_step(service: Any, now: int) -> str | None:
         return None
     try:
         status, note = await ensure(service).run(now)
+        note = f"{note}; {await loop.run_in_executor(None, _sync_dividends, service)}"
     except Exception:
         log.exception("the nightly read of corporate actions failed")
         status, note = "failed", "Corporate actions could not be read tonight."
@@ -585,6 +586,15 @@ async def corporate_actions_step(service: Any, now: int) -> str | None:
     )
     log.info("corporate actions %s: %s", status, note)
     return status
+
+
+def _sync_dividends(service: Any) -> str:
+    """After the read: the expected dividends of what was held (dividends.py, M7.13)."""
+    from . import dividends
+
+    now = service.clock()
+    changed = service.store.write(OWNER, lambda tx: dividends.sync(tx, day_of_instant(now), now))
+    return f"{changed} dividend lines made or changed"
 
 
 def register_jobs() -> None:
