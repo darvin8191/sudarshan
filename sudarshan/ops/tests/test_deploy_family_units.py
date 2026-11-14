@@ -482,6 +482,7 @@ def test_n1_the_set_up_after_the_install_still_gets_family_env(tmp_path):
     fam_dir(box).mkdir(mode=0o750)  # the owner's set-up, after the install
     done = box.run()  # the next ten-minute run: the same release, nothing to install
     assert done.returncode == 0, done.stdout + done.stderr
+    assert "No such file" not in done.stdout + done.stderr  # the first look for its note is quiet
     env = fam_dir(box) / "family.env"
     assert env.read_text() == "SUDARSHAN_FAMILY='off'\n"
     assert (env.stat().st_mode & 0o777) == 0o640
@@ -511,6 +512,7 @@ def test_n1_a_run_never_overwrites_the_owners_switch(tmp_path):
     for _ in range(2):
         done = box.run()
         assert done.returncode == 0, done.stdout + done.stderr
+        assert "No such file" not in done.stderr  # a file with no note yet is looked at quietly
         assert env.read_text() == "# mine\nSUDARSHAN_FAMILY=on"
     (box.state / "family_env_tag").unlink()  # as a server that has never run this tool's step
     env.write_text(

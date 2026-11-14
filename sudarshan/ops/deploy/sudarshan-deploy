@@ -1326,7 +1326,7 @@ ngx_check() (   # $1 = report (every line; 0 = no FAIL, 1 = a FAIL), run (the fi
     # ${NGX_TESTED} keeps what those files looked like then and what nginx answered. --nginx-check, which the
     # owner runs himself, always asks, and keeps nothing (it changes nothing on the server).
     seen="$(ngx_seen ${site:+"${site}"})"
-    if [[ "${mode}" != "report" && -n "${seen}" ]] && { IFS= read -r k1 && IFS= read -r k2; } < "${NGX_TESTED}" 2>/dev/null \
+    if [[ "${mode}" != "report" && -n "${seen}" ]] && { IFS= read -r k1 && IFS= read -r k2; } 2>/dev/null < "${NGX_TESTED}" \
             && [[ "${k1}" == "${seen}" && ( "${k2}" == "pass" || "${k2}" == "fail" ) ]]; then
         kept="${k2}"
     fi
@@ -1477,9 +1477,9 @@ fam_env_run() {   # every run, the set-up too: the installed release's settings 
     local tmp tag bdir said=""
     [[ "${deployed}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 0
     cal_dir_ok "${FAM_DIR}" || return 0
-    managed_units | grep -Fxq -- "${FAM_UNIT}" || return 0
+    managed_units | grep -Fx -- "${FAM_UNIT}" > /dev/null || return 0   # no grep -q in a pipe (pipefail)
     if [[ -f "${FAM_DIR}/family.env" && ! -L "${FAM_DIR}/family.env" ]]; then
-        IFS= read -r said < "${FAM_ENV_TAG}" 2>/dev/null || said=""
+        IFS= read -r said 2>/dev/null < "${FAM_ENV_TAG}" || said=""   # 2> first: a missing file says nothing
         [[ "${said}" != "${deployed}" ]] || return 0
     fi
     tmp="$(mktemp -d)" || return 0

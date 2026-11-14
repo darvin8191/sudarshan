@@ -627,6 +627,7 @@ def test_l6_a_run_asks_nginx_only_when_sudarshans_own_files_changed(edge):
     for _ in range(3):
         done = edge.box.run()
         assert done.returncode == 0 and "nginx" not in done.stdout, done.stdout + done.stderr
+        assert "No such file" not in done.stderr  # the first look for a kept answer is quiet
     assert asked(edge) == 1
     edge.age(45)  # one of them changed (its time moved), and nginx was reloaded since
     assert "nginx" not in edge.box.run().stdout
