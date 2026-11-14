@@ -27,7 +27,9 @@ a user who is not the owner. What the suite holds each class to:
                    forwarded: 401, 403 or 404 to every caller; never "success".
 
 No route may raise, open a connection, look up a name, start a process or publish an event other
-than a refusal's ``...FailedEvent`` while it answers any of these callers.
+than a refusal's ``...FailedEvent`` while it answers any of these callers, and that event must be
+one raised while refusing a request for its API key, which reaches no subscriber. No route may
+write a row to the owner's order log or analyzer log for any of them.
 
 A line is ``<class> <rule> <endpoint>``, then ``# <reason>``; a ``## <reason>`` line gives the
 reason for the lines below it, up to the next blank line, that have none of their own. Every line

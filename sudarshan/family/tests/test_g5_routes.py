@@ -12,6 +12,8 @@ and what does not); this module reads its report against route_classes.py:
 - every rule the app registers is classified, and every line of the table names a rule it has;
 - each rule answers every caller as its class allows (route_classes.py says what each class
   allows), and nothing reaches the network, starts a process, raises or hands out a session;
+- no caller writes a row to the owner's order log or analyzer log, and an order event a caller
+  causes is one raised while refusing a request for its key, which the bus hands to no subscriber;
 - only protected, webhook, login-flow and internal rules take a write;
 - Socket.IO, which the url_map does not hold, refuses the anonymous caller and the viewer on every
   namespace, and an order event reaches the owner's socket and neither of theirs (Y7);
@@ -292,6 +294,24 @@ def test_nothing_reached_the_network_started_a_process_or_succeeded(report):
     bad = [entry for entry in report["ledger"] if entry["kind"] in NEVER - {"raised"}
            or (entry["kind"] == "event" and not entry["what"].endswith("FailedEvent"))]  # fmt: skip
     assert not bad, "\n".join(f"  {e['kind']} {e['what']} during {e['during']}" for e in bad)
+
+
+def test_no_caller_writes_a_row_to_the_owner_s_logs(report):
+    """Observation 4: OpenAlgo checked a request's fields before its key and logged a request its
+    fields refused, so a keyless body to /api/v1/orderstatus, /openposition, /margin or /analyzer
+    added a row to the owner's order log (15 in the walk of 14 Nov 2026)."""
+    assert report["log_rows"] == {"order_logs": 0, "analyzer_logs": 0}
+
+
+def test_an_order_event_a_caller_causes_is_refused_for_its_key(report):
+    """Observation 4: the order events a keyless body caused (cancel, modify, close, basket,
+    split, smart and GTT orders) reached the order log and, in analyze mode, the owner's screen.
+    Raised while refusing a request for its key, an event reaches no subscriber (utils/event_bus.py);
+    an event a caller who is not the owner causes that is not so marked would reach them."""
+    heard = [f"  {r['method']} {r['path']} as {r['caller']}: {e['what']}"
+             for r in report["requests"] for e in r["ledger"]
+             if e["kind"] == "event" and not e.get("key_refused")]  # fmt: skip
+    assert not heard, "order events a subscriber would hear:\n" + "\n".join(heard)
 
 
 def test_no_answer_came_from_an_ip_ban(report):
