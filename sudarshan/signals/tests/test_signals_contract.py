@@ -53,6 +53,18 @@ def test_the_ops_the_purposes_and_the_bridge_agree():
     assert set(c.RELAYED_LEVELS) == {"watch", "act"}
 
 
+def test_the_purposes_are_the_vaults():
+    """K1: each purpose the contract names is a key of the vault, word for word, and each key
+    opens only its own seals (the vault's own test holds every pair apart)."""
+    from sudarshan.vault import keys
+
+    assert c.PURPOSES["api"].encode() == keys.SIGNALS_API_INFO
+    assert c.PURPOSES["journal"].encode() == keys.SIGNALS_JOURNAL_INFO
+    assert c.PURPOSES["push"].encode() == keys.SIGNALS_PUSH_INFO
+    assert c.PURPOSES["relay"].encode() == keys.ALERTS_SIGNALS_INFO
+    assert {p.encode() for p in c.PURPOSES.values()} <= set(keys.PURPOSES)
+
+
 def test_every_module_name_and_language():
     assert set(c.MODULE_NAMES) == set(c.KNOWN_MODULES)
     assert c.module_name("regime") == "DRISHTI" and c.module_name("breadth") == "Other"

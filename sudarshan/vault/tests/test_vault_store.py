@@ -143,7 +143,7 @@ def test_every_purpose_is_its_own_and_none_opens_anothers_seal():
     import sudarshan.vault.keys as keys
 
     declared = {name: value for name, value in vars(keys).items() if name.endswith("_INFO")}
-    assert set(declared.values()) == set(PURPOSES) and len(PURPOSES) == len(set(PURPOSES)) == 18
+    assert set(declared.values()) == set(PURPOSES) and len(PURPOSES) == len(set(PURPOSES)) == 22
     assert all(info.startswith(b"sudarshan/") and info.endswith(b"/v1") for info in PURPOSES)
     derived = {derive_key(PEPPER, info) for info in PURPOSES}
     assert len(derived) == len(PURPOSES)
@@ -160,6 +160,11 @@ def test_every_purpose_is_its_own_and_none_opens_anothers_seal():
     assert SCREENER_API_INFO == b"sudarshan/screener/api/v1"
     assert SCREENER_INTERNAL_INFO == b"sudarshan/screener/internal/v1"
     assert WATCHLISTS_INTERNAL_INFO == b"sudarshan/watchlists/internal/v1"
+    # the TRINETRA view (M13.3): the strings its contract names, never renamed
+    assert keys.SIGNALS_API_INFO == b"sudarshan/signals/api/v1"
+    assert keys.SIGNALS_JOURNAL_INFO == b"sudarshan/signals/journal/v1"
+    assert keys.SIGNALS_PUSH_INFO == b"sudarshan/signals/push/v1"
+    assert keys.ALERTS_SIGNALS_INFO == b"sudarshan/alerts/signals/v1"
 
 
 def test_vault_key_is_not_openalgos_broker_token_key(monkeypatch):
