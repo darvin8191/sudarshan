@@ -742,6 +742,21 @@ deploy tool installs both with the release). Nothing needs setting up for it.
   until it is back; if the whole server is down, nothing here runs at all. The outside heartbeat
   below is for those two cases.
 
+**The Sunday summary.** On Sunday from 18:00 one message sums the week up: what needs you (or
+"Nothing needs you."), how many checks are fine, free disk space and the sizes of OpenAlgo's
+databases and logs, Historify, SUDARSHAN's own stores and the backups, the newest backup's age
+and the last restore test, system updates waiting and whether the system asks for a restart, and
+how busy the server was: the level its processor and its memory stayed under for 95% of the
+week. Those two are the whole server's figures, as the kernel gives them to every program (the
+tenancy's idle rule is about them); the size of the system's own journal is not in it, because
+that journal is not SUDARSHAN's to read.
+
+**The server diary.** The notice files keep their newest 200 lines. The watch copies every
+notice of every producer (installs, rollbacks, backups, drills, family sign-ins, reports made,
+its own) once into `/var/lib/sudarshan-watch/log/<year>.jsonl`, one small text file a year,
+keeps 8 years of them and never anything secret, and the nightly backup takes the folder. It is
+the server's part of the "Records to keep each year".
+
 To see what it sees, at any time, as the service user from the app folder (it writes nothing):
 
 ```
@@ -1161,11 +1176,11 @@ Each April, for the year just ended:
 | every order request and the broker's answer | OpenAlgo's `logs.db` | SUDARSHAN, for ever |
 | what the risk layer refused, and the kill switch's history | `sudarshan_risk.db` (Settings > Risk > History) | SUDARSHAN, for ever |
 | market alerts that fired | the alerts' history | SUDARSHAN |
-| one full archive of the server from just after 31 March | the nightly backup and its offsite copy | you: download that offsite copy before it expires (about 60 days) and keep it with the year, encrypted as it is |
+| one full archive of the server from just after 31 March | the nightly backup: the first complete archive made once 31 March's market has closed, and its offsite copy under a name starting `sudarshan-fy-` ("Nightly backups") | SUDARSHAN, for 8 years on the server and in the bucket (once both delete rules carry the prefix filter of step 3); a copy with the year's papers costs nothing |
+| installs, rollbacks, backup failures, restore drills, family sign-ins and every notice the watch told | the server diary, `/var/lib/sudarshan-watch/log/<year>.jsonl` ("Watching the server"), which the nightly backup takes | SUDARSHAN, for 8 years |
 
 A later release adds one records pack a year (the journal's statements with the order, risk and
-alert history as files) and keeps one archive per financial year by itself; until then the last
-row is done by hand.
+alert history as files).
 
 ## The AI assistant (M17)
 

@@ -21,6 +21,7 @@ ALLOWED_PATHS = (
     "/fail",  # added to the owner's own heartbeat link
     "/etc/sudarshan/watch.env",
     "/etc/sudarshan",
+    "/var/lib/sudarshan-",  # SUDARSHAN's own state folders, measured for the weekly summary
     "/var/lib/sudarshan-backup",  # the nightly backup's folder: its age, the drill's result
     "/proc/net/tcp",  # the kernel's table of listening sockets: only the ring's ports are read
     "/proc/stat",  # the kernel's processor counters, for the week's use

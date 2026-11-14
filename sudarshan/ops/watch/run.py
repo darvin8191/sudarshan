@@ -4,7 +4,10 @@
       -> events.jsonl   one line per change, for the notice desk (sudarshan/alerts/notices.py)
       -> state.json     what each check remembers and what was last told (private, 600)
       -> report.json    every check's level now, for the System page (640)
+      -> log/<year>.jsonl  the diary: every notice of every producer, kept 8 years (diary.py)
       -> the outside heartbeat (heartbeat.py), when the owner has set one up
+
+On Sunday evening one more event, the week's summary (summary.py).
 
 All three are in the unit's state folder, ``/var/lib/sudarshan-watch``. The watch only records:
 it holds no key to Telegram or OpenAlgo and sends nothing itself, as the deploy tool and the
@@ -28,7 +31,7 @@ from sudarshan.ops import events
 from sudarshan.ops.files import read_regular
 from sudarshan.ops.release import installed_release
 
-from . import checks, heartbeat, readers
+from . import checks, diary, heartbeat, readers, summary
 
 STATE_DIR = "/var/lib/sudarshan-watch"
 APP_DIR = "/opt/sudarshan/apps/openalgo"
@@ -177,6 +180,7 @@ def run_once(
     installing: Callable[[], bool] = readers.installing,
     env: Mapping[str, str] | None = None,
     send: Callable[[str], bool] = heartbeat.request,
+    measure: Callable[[Path], dict] = summary.sizes,
 ) -> int:
     """One run. 0 when it finished (whatever the checks said), 1 when its files could not be
     written, 0 with nothing done when another run holds the folder or while the deploy tool is
@@ -199,7 +203,16 @@ def run_once(
         )
         results, moved, kept = judge(readings, state)
         due = due_events(results, moved)
+        kept["usage"] = summary.sample(state.get("usage"), readings)
+        kept["summary_week"] = state.get("summary_week")
+        if summary.due(now, kept["summary_week"]):  # Sunday evening, once
+            told = summary.facts(results, kept["usage"], measure(settings.app_dir))
+            due.append({"kind": "watch_summary", "check": "summary", "tag": "week", "facts": told})
+            kept["summary_week"] = summary.week_of(now)
+            kept["usage"] = {"cpu_prev": kept["usage"]["cpu_prev"]}  # a new week starts counting
         kept_ok = record_changes(settings.spool, due, now) == len(due)
+        others = [spool for spool in diary.SPOOLS if spool != events.WATCH_SPOOL]
+        diary.keep(settings.state_dir, now, [*others, settings.spool])
         if kept_ok:  # else not kept either: the next run finds the same change and tells it
             try:
                 write_json(settings.state_file, kept, 0o600)

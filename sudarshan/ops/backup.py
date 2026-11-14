@@ -9,6 +9,7 @@ What goes in, of what exists (a source that is there and cannot be read makes a 
   db/sudarshan-*/            SUDARSHAN's own folders under db/ as they are (the sealed vault: the
                              folder 700, its files 600, kept as such inside the archive)
   /etc/sudarshan/            the machine keys and settings, the NSE day files
+  /var/lib/sudarshan-watch/log/  the server diary, one text file a year (ops/watch/diary.py)
   /var/lib/sudarshan-*/*.db  the ring's databases (alerts.db, market.db, ...); the family service's
                              store as the copy it leaves for this job
                              (sudarshan-family-export/family-copy.db), its own folder never
@@ -153,6 +154,7 @@ OWN_DIR = re.compile(r"sudarshan-[a-z0-9-]{1,60}")
 FAMILY_STATE = "sudarshan-family"
 FAMILY_EXPORT = "sudarshan-family-export"
 FAMILY_COPY = "family-copy.db"
+WATCH_STATE = "sudarshan-watch"
 SIDE_FILES = (".db-wal", ".db-shm", ".db-journal")  # a database's own, never packed apart from it
 MAX_PLAIN_FILE = 32 << 20  # a plain file bigger than this is not a key or a setting
 MAX_PLAIN_TOTAL = 64 << 20
@@ -478,6 +480,14 @@ def _add_ring(found: Found, settings: Settings) -> None:
                 )
             elif inner.name.endswith(".db"):
                 found.skipped.append(f"ring/{entry.name}/{inner.name}")
+    # The server diary (ops/watch/diary.py): one small text file a year, kept 8 years (M19.10).
+    _walk_plain(
+        found,
+        settings.ring_var / WATCH_STATE / "log",
+        f"ring/{WATCH_STATE}/log",
+        depth=0,
+        budget=[MAX_PLAIN_TOTAL],
+    )
 
 
 def _add_plain(found: Found, arc: str, path: Path, info: os.stat_result) -> None:

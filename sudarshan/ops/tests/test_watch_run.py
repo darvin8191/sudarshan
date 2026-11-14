@@ -207,7 +207,11 @@ def test_gather_gives_every_reading_and_never_raises(tmp_path, monkeypatch):
     for name in slower:
         monkeypatch.setattr(readers.posture, name, broke)
     seen = readers.gather(NOW, tmp_path, tmp_path / ".env")
-    assert set(seen) == set(FINE) | {"posture", "counts", "backup", "drill", "historify_gb"}
+    monkeypatch.setattr(readers, "cpu", broke)
+    monkeypatch.setattr(readers, "mem_total_mb", broke)
+    assert set(seen) == set(FINE) | {
+        "posture", "counts", "backup", "drill", "historify_gb", "cpu", "mem_total_mb",
+    }  # fmt: skip
     assert all(seen[key] is None for key in ("posture", "counts", "backup", "drill"))
     assert (seen["ist_minute"], seen["ist_date"]) == (600, "2026-11-16")
     assert seen["health"] == dict.fromkeys(checks.SERVICES) and seen["window_open"] is None

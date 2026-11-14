@@ -113,6 +113,7 @@ KIND_ORDER = (
     "watch_new",
     "drill_failed",
     "drill_passed",
+    "watch_summary",
 )
 
 #: Why an install was undone, in the owner's words (the cause only; ``rolled_back`` adds the rest).
@@ -599,6 +600,102 @@ def _watch_fine(event: Event, now: datetime) -> list[str]:
     }.get(check, [])
 
 
+#: A check's name in the owner's words, for the weekly summary's "needs you" line.
+_CHECK_WORDS = {
+    **{f"service_{name}": words[0] for name, words in _SERVICES.items()},
+    "openalgo": "OpenAlgo",
+    "login": "Upstox login",
+    "feed": "price feed's connection",
+    "instrument_list": "instrument list",
+    "disk": "disk space",
+    "memory": "memory",
+    "certificate": "security certificate",
+    "posture_locks": "AI assistant's safety settings",
+    "posture_debug": "OpenAlgo's debug setting",
+    "posture_modes": "private folders' permissions",
+    "posture_ports": "a service listening on the network",
+    "posture_reboot": "a restart the system asks for",
+    "posture_updates": "security updates waiting",
+    "backup": "nightly backup is late",
+    "drill": "restore test of the backups",
+    "historify": "Historify's size",
+}
+_SIZE_WORDS = (
+    ("db", "OpenAlgo's databases"),
+    ("log", "its logs"),
+    ("hist", "Historify"),
+    ("ring", "SUDARSHAN's own stores"),
+    ("bak", "the backups"),
+)
+_SIZES = re.compile(r"[a-z]{2,6}=[0-9]{1,8}(?:,[a-z]{2,6}=[0-9]{1,8}){0,9}")
+_NAMES = re.compile(r"[a-z_]{2,40}(?:,[a-z_]{2,40}){0,20}")
+
+
+def _size(megabytes: int) -> str:
+    return f"{megabytes / 1024:.1f} GB" if megabytes >= 1024 else f"{megabytes} MB"
+
+
+def _watch_summary(event: Event, now: datetime) -> list[str]:
+    """The Sunday summary: what needs the owner first, then the week in figures."""
+    number = lambda name: event.fact(name) if _MINUTES.fullmatch(event.fact(name)) else ""  # noqa: E731
+    needs = []
+    for level, word in (("failing", "not working"), ("warning", "to look at")):
+        names = event.fact(level)
+        if _NAMES.fullmatch(names):
+            needs += [
+                f"{_CHECK_WORDS.get(name, 'a server check')} ({word})" for name in names.split(",")
+            ]
+    lines = ["Weekly server summary."]
+    if needs:
+        lines.append(
+            "Needs you: " + ", ".join(dict.fromkeys(needs)) + ". The System page has each."
+        )
+    else:
+        lines.append("Nothing needs you.")
+    fine, unread = number("fine"), number("unread")
+    if fine:
+        could_not = f", {unread} could not be read" if unread not in ("", "0") else ""
+        lines.append(f"Checks fine: {fine}{could_not}.")
+    free = event.fact("disk_free_gb")
+    parts = []
+    if _SIZES.fullmatch(event.fact("sizes")):
+        measured = dict(pair.split("=") for pair in event.fact("sizes").split(","))
+        parts = [
+            f"{words} {_size(int(measured[key]))}" for key, words in _SIZE_WORDS if key in measured
+        ]
+    if _GB.fullmatch(free) or parts:
+        lead = f"Disk: {free} GB free. " if _GB.fullmatch(free) else "Disk: "
+        lines.append((lead + (", ".join(parts) + "." if parts else "")).strip())
+    age, cause, days = number("backup_age_h"), event.fact("drill_cause"), number("drill_days")
+    proof = [f"Newest backup: {age} hours old." if age else ""]
+    proof.append(
+        {
+            "passed": f"Restore test: passed {days} days ago." if days else "Restore test: passed.",
+            "failed": "Restore test: FAILED.",
+            "late": f"Restore test: last done {days} days ago."
+            if days
+            else "Restore test: overdue.",
+            "never": "Restore test: never done yet.",
+        }.get(cause, "")
+    )
+    if any(proof):
+        lines.append(" ".join(part for part in proof if part))
+    waiting, security = number("updates_all"), number("updates_security")
+    if waiting:
+        asks = " The system asks for a restart." if event.fact("reboot") == "yes" else ""
+        lines.append(
+            f"System updates waiting: {waiting}, {security or '0'} of them security. They are "
+            f"yours to apply by hand on a non-trading day.{asks}"
+        )
+    cpu, mem = number("cpu95"), number("mem95")
+    if cpu and mem:
+        lines.append(
+            f"This week the server's processor stayed under {cpu}% and its memory under {mem}% "
+            "for 95% of the time."
+        )
+    return lines
+
+
 def _drill_passed(event: Event, now: datetime) -> list[str]:
     count = event.fact("databases")
     opened = f"its {count} databases open" if _MINUTES.fullmatch(count) else "its databases open"
@@ -644,6 +741,7 @@ _FAMILY_WORDS = {
     "watch_new": _watch_new,
     "drill_passed": _drill_passed,
     "drill_failed": _drill_failed,
+    "watch_summary": _watch_summary,
 }
 
 
