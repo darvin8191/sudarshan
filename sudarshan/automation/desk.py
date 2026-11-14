@@ -21,6 +21,8 @@ logger = get_logger(__name__)
 SENDERS_ENV = "SUDARSHAN_AUTOMATION_SENDERS"
 #: TradingView's published sender addresses ("About webhooks").
 TRADINGVIEW = ("52.89.214.238", "34.212.75.30", "54.218.53.128", "52.32.178.7")
+#: Said when the day's broker login is gone (or the API key is no longer the owner's).
+NO_SESSION = "The app is not logged in to Upstox. Log in, then the next alert is handled."
 
 
 def senders() -> frozenset[str]:
@@ -258,17 +260,41 @@ class Desk:
 
     # -- the one sender -------------------------------------------------------------------------
 
+    def broker_session(self, api_key: str) -> tuple[str | None, str | None]:
+        """The owner's broker session for his API key: (token, broker), or (None, None) when the
+        key is not his or the day's login is gone. Never stored, logged or sent anywhere but to
+        the order service of this same process."""
+        from database.auth_db import get_auth_token_broker
+
+        found = get_auth_token_broker(api_key)
+        token, broker = (found[0], found[1]) if found else (None, None)
+        return (token, broker) if token and broker else (None, None)
+
     def place(self, order: dict[str, Any], api_key: str, analyze: bool) -> tuple[bool, Any, int]:
         """One smart order, in the pipe the caller decided. Every claim, hold, sizing rule and the
-        risk gate are the service's and stay there."""
+        risk gate are the service's and stay there.
+
+        The broker session is resolved here and handed over, which is the service's direct case:
+        it never asks the order mode. Called with the API key alone, the service asks the order
+        mode first, after the intake has decided, and in Semi-Auto queues the order for the
+        Action Center with no mark of its pipe; an approval later sends it wherever the app's
+        mode then points, so a Sandbox strategy's order could reach Upstox. The pipe is decided
+        once, holding the strategy's lock, and nothing after that can move the order."""
         from services.place_smart_order_service import place_smart_order
         from sudarshan.books import add_sizing
 
+        if analyze not in (True, False):
+            raise ValueError("the intake's order has no pipe")
+        token, broker = self.broker_session(api_key)
+        if token is None or broker is None:
+            return False, {"status": "error", "message": NO_SESSION}, 403
         # A7: an order of the intake's that only adds is sized from the fills, not from a
         # positions row that may not show the strategy's last fill yet. The mark is this call's
         # alone and no part of the order, so no event or log line carries it.
         with add_sizing.sized_from_fills():
-            return place_smart_order(dict(order), api_key=api_key, analyze=analyze)
+            return place_smart_order(
+                dict(order), api_key=api_key, auth_token=token, broker=broker, analyze=analyze
+            )
 
     # -- telling the owner ----------------------------------------------------------------------
 

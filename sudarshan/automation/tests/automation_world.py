@@ -150,6 +150,9 @@ class FakeDesk:
     def semi_auto(self, api_key: str) -> bool:
         return self.semi
 
+    def broker_session(self, api_key: str):
+        return ("token", "upstox")
+
     def kill_switch_on(self) -> bool:
         return self.kill_switch
 

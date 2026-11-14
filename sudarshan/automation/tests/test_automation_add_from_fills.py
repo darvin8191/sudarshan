@@ -29,12 +29,21 @@ FORM = {"name": "ORB", "kind": "future", "underlying": "NIFTY", "product": "MIS"
 # ---- the mark ------------------------------------------------------------------------------------
 
 
-def test_the_intake_s_sender_marks_its_call_and_only_its_call(monkeypatch):
+@pytest.fixture
+def session(monkeypatch):
+    """The owner's broker session, as the desk reads it for its own call."""
+    from database import auth_db
+
+    monkeypatch.setattr(auth_db, "get_auth_token_broker", lambda key: ("token", "upstox"))
+
+
+def test_the_intake_s_sender_marks_its_call_and_only_its_call(monkeypatch, session):
     import services.place_smart_order_service as service
 
     seen = []
 
-    def placed(order, api_key=None, analyze=None):
+    def placed(order, api_key=None, auth_token=None, broker=None, analyze=None):
+        assert (auth_token, broker) == ("token", "upstox")
         seen.append((add_sizing.asked(), dict(order), analyze))
         return True, {"status": "success", "orderid": "1"}, 200
 
@@ -45,10 +54,10 @@ def test_the_intake_s_sender_marks_its_call_and_only_its_call(monkeypatch):
     assert add_sizing.asked() is False
 
 
-def test_the_mark_is_let_go_when_the_call_fails(monkeypatch):
+def test_the_mark_is_let_go_when_the_call_fails(monkeypatch, session):
     import services.place_smart_order_service as service
 
-    def placed(order, api_key=None, analyze=None):
+    def placed(order, api_key=None, auth_token=None, broker=None, analyze=None):
         raise RuntimeError("no answer")
 
     monkeypatch.setattr(service, "place_smart_order", placed)
@@ -87,6 +96,8 @@ class LiveDesk(FakeDesk):
         super().__init__()
         self.guard = "on"
 
+    broker_session = Desk.broker_session  # the real read, of the session the fixture stands in
+
     def place(self, order, api_key, analyze):
         assert analyze is False
         self.placed.append({**order, "analyze": analyze})
@@ -94,9 +105,8 @@ class LiveDesk(FakeDesk):
 
 
 @pytest.fixture
-def live(monkeypatch, store):
+def live(monkeypatch, store, session):
     import services.order_router_service as router
-    import services.place_smart_order_service as service
 
     monkeypatch.setenv(flag.ENV, "on")
     intake._per_link.clear()
@@ -106,8 +116,8 @@ def live(monkeypatch, store):
     monkeypatch.setattr(exit_guard, "EXITS", exit_guard.ExitsInFlight())
     broker = upstox_world.Broker({FUT: 0}, 60.0)
     upstox_world.install(monkeypatch, broker)
-    monkeypatch.setattr(service, "get_auth_token_broker", lambda key: ("token", "upstox"))
-    monkeypatch.setattr(router, "should_route_to_pending", lambda key, kind: False)
+    # The order mode is never asked by the intake's own call (H1): an answer here would be a bug.
+    monkeypatch.setattr(router, "should_route_to_pending", _never_asked)
     desk = LiveDesk()
     strategy, token = store.create(contract.clean(FORM))
     strategy = store.set_mode(strategy.id, strategy.version, m.LIVE)
@@ -124,6 +134,10 @@ def live(monkeypatch, store):
         return intake.handle(token, send.last, TV, desk, store)
 
     return broker, desk, send
+
+
+def _never_asked(*args, **kwargs):
+    raise AssertionError("the intake's order asked the order mode")
 
 
 def _sent(broker):

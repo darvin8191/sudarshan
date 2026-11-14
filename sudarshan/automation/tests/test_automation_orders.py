@@ -406,6 +406,109 @@ def test_semi_auto_is_not_used(store, desk):
     assert got.verdict == "mode_refused" and "Action Center" in got.sentence and desk.placed == []
 
 
+class RealSender(FakeDesk):
+    """The tests' desk with the real sender (``Desk.place``): OpenAlgo's smart order service is
+    called as the intake calls it. What lies behind the service is stood in by the test."""
+
+    def place(self, order, api_key, analyze):
+        from sudarshan.automation.desk import Desk
+
+        if self.before_place:
+            self.before_place(order)
+        return Desk.place(self, order, api_key, analyze)
+
+
+@pytest.fixture
+def service(monkeypatch):
+    """The smart order service's two exits: the Action Center's queue, and the order itself
+    (the sandbox or the broker, as ``analyze`` says)."""
+    import services.order_router_service as router
+    import services.place_smart_order_service as real
+
+    seen = {"queued": [], "placed": [], "order_mode": "auto"}
+
+    def queue(api_key, data, kind):
+        seen["queued"].append((kind, dict(data)))
+        said = "Order queued for approval in Action Center"
+        return True, {"status": "success", "message": said, "mode": "semi_auto"}, 200
+
+    def with_auth(order, auth_token, broker, original, analyze=None):
+        seen["placed"].append({"symbol": order["symbol"], "analyze": analyze})
+        return True, {"status": "success", "orderid": f"SB-{len(seen['placed'])}"}, 200
+
+    monkeypatch.setattr(
+        router, "should_route_to_pending", lambda key, kind=None: seen["order_mode"] == "semi_auto"
+    )
+    monkeypatch.setattr(router, "queue_order", queue)
+    monkeypatch.setattr(real, "place_smart_order_with_auth", with_auth)
+    return seen
+
+
+def test_h1_the_order_mode_switched_between_the_plan_and_the_send_moves_nothing(store, service):
+    """The owner switches to Semi-Auto while the alert is between its claim and its order. The
+    Sandbox strategy's order still goes to the sandbox: nothing is queued for the Action Center,
+    where an approval would later send it wherever the app's mode then points."""
+    desk = RealSender()
+    strategy, token = make(store)
+    held, go = threading.Event(), threading.Event()
+    desk.before_place = lambda order: (held.set(), go.wait(5))
+    out = []
+    alert = threading.Thread(
+        target=lambda: out.append(send(store, desk, token, indicator_alert("long", NOW - 1)))
+    )
+    alert.start()
+    assert held.wait(5)  # planned and claimed, holding the lock, about to send
+    assert lines(store, strategy.id)[-1]["verdict"] == "claimed"
+    service["order_mode"] = "semi_auto"
+    go.set()
+    alert.join(10)
+    assert service["queued"] == []
+    assert service["placed"] == [{"symbol": NOV, "analyze": True}]
+    line = lines(store, strategy.id)[-1]
+    assert (out[0].verdict, line["verdict"], line["mode"]) == ("sent", "sent", "sandbox")
+    assert line["order_id"] == "SB-1" and "Action Center" not in line["sentence"]
+
+
+def test_h1_the_two_steps_second_order_does_not_ask_the_order_mode_either(store, service):
+    """The window is the whole first order for a two-step: switched during the exit, the entry
+    still goes to the sandbox."""
+    desk = RealSender()
+    strategy, token = make(store)
+    desk.clock = at("2026-11-24 15:41:00")  # the November future has stopped: December is entered
+    store.write_state(strategy.id, {
+        "last_target": 1, "held_exchange": "NFO", "held_symbol": "NIFTY25JAN27FUT",
+        "held_side": m.LONG,
+    })  # fmt: skip
+    calls = []
+    desk.before_place = lambda order: (
+        calls.append(order["symbol"]),
+        service.__setitem__("order_mode", "semi_auto"),
+    )
+    got = send(store, desk, token, indicator_alert("short", desk.clock - 1))
+    assert calls == ["NIFTY25JAN27FUT", DEC] and got.verdict == "sent"
+    assert service["queued"] == []
+    assert [p["analyze"] for p in service["placed"]] == [True, True]
+
+
+def test_h1_no_broker_session_is_a_refusal_in_words_and_nothing_is_queued(store, service):
+    desk = RealSender()
+    desk.broker_session = lambda api_key: (None, None)
+    service["order_mode"] = "semi_auto"
+    desk.semi = False
+    strategy, token = make(store)
+    got = send(store, desk, token, indicator_alert("long", NOW - 1))
+    assert got.verdict == "order_refused" and "not logged in to Upstox" in got.sentence
+    assert service["queued"] == [] and service["placed"] == []
+    assert store.state(strategy.id).held_symbol is None
+
+
+def test_h1_the_sender_refuses_an_order_with_no_pipe():
+    from sudarshan.automation.desk import Desk
+
+    with pytest.raises(ValueError):
+        Desk().place({}, "k" * 64, None)
+
+
 def test_no_api_key_is_a_refusal_in_words(store, desk):
     strategy, token = make(store)
     desk.key = None
