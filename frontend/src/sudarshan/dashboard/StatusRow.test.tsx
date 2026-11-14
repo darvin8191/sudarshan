@@ -55,8 +55,12 @@ describe('the status row', () => {
     render(<StatusRow day="2026-11-17" contract={READY} />)
 
     const market = await screen.findByRole('button', { name: /Open · closes 15:30/ })
-    expect(screen.getByRole('button', { name: 'Expiry today: NIFTY · stops 15:40' })).toBeVisible()
+    expect(screen.getByRole('link', { name: /^Expiry today: NIFTY · stops 15:40/ })).toBeVisible()
     expect(screen.queryByText(/master contract/i)).toBeNull()
+    // O9: the expiry chip opens that underlying's option chain on that expiry.
+    const chip = screen.getByRole('link', { name: /^Expiry today: NIFTY/ })
+    expect(chip).toHaveAttribute('href', '/options/NFO/NIFTY?expiry=2026-11-17')
+    expect(chip).toHaveAccessibleName(/Open the NIFTY option chain/)
 
     await user.click(market)
     const sheet = await screen.findByRole('dialog', { name: 'Market hours' })
@@ -115,11 +119,11 @@ describe('the status row', () => {
     render(<StatusRow day="2026-11-16" contract={READY} />)
     await pass(0)
     expect(screen.getByRole('button', { name: /Open · closes 15:30/ })).toBeVisible()
-    expect(screen.queryByRole('button', { name: /Expiry/ })).toBeNull()
+    expect(screen.queryByRole('link', { name: /Expiry/ })).toBeNull()
 
     await pass(61_000) // 15:30: the cash close, and tomorrow's expiry from it
     expect(screen.getByRole('button', { name: /Cash closed · F&O to 15:40/ })).toBeVisible()
-    expect(screen.getByRole('button', { name: 'Expiry tomorrow: NIFTY' })).toBeVisible()
+    expect(screen.getByRole('link', { name: /^Expiry tomorrow: NIFTY/ })).toBeVisible()
     await pass(10 * 60_000)
     expect(screen.getByRole('button', { name: /Closed · opens Tue 09:15/ })).toBeVisible()
     await pass(60 * 60_000)
@@ -149,6 +153,6 @@ describe('the status row', () => {
     rerender(<StatusRow day="2026-11-17" contract={READY} />)
     await pass(0)
     expect(reads).toHaveLength(3)
-    expect(screen.getByRole('button', { name: 'Expiry today: NIFTY · stops 15:40' })).toBeVisible()
+    expect(screen.getByRole('link', { name: /^Expiry today: NIFTY · stops 15:40/ })).toBeVisible()
   })
 })

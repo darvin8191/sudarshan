@@ -35,8 +35,14 @@ describe('the tools page', () => {
     expect(within(wide).getAllByRole('link')).toHaveLength(
       tools.filter((tool) => !tool.phone).length
     )
-    // Nothing is made for the phone until the phone's option chain lands with its page.
-    expect(screen.queryByRole('heading', { name: 'Made for the phone' })).toBeNull()
+    // O9: the phone's option screen leads, under its own heading.
+    const made = screen.getByRole('region', { name: 'Made for the phone' })
+    expect(
+      within(made)
+        .getAllByRole('link')
+        .map((link) => link.getAttribute('href'))
+    ).toEqual(['/options'])
+    expect(within(wide).queryByRole('link', { name: /Options on the phone/ })).toBeNull()
   })
 
   it('keeps the registry free of palette colours and of feed words a tile cannot back', () => {

@@ -1,0 +1,1151 @@
+{
+ "checks": [
+  {
+   "name": "a service that answers is fine and is remembered",
+   "check": "service_feed",
+   "readings": {
+    "health": {
+     "feed": {
+      "state": "connected"
+     }
+    },
+    "enabled": {
+     "feed": true
+    }
+   },
+   "memory": {},
+   "level": "fine",
+   "keep": {
+    "seen": 1
+   }
+  },
+  {
+   "name": "one run without an answer is not yet a failure",
+   "check": "service_feed",
+   "readings": {
+    "health": {
+     "feed": null
+    },
+    "enabled": {
+     "feed": true
+    }
+   },
+   "memory": {
+    "seen": 1
+   },
+   "level": "fine",
+   "keep": {
+    "seen": 1,
+    "misses": 1
+   }
+  },
+  {
+   "name": "two runs in a row without an answer fail",
+   "check": "service_feed",
+   "readings": {
+    "health": {
+     "feed": null
+    },
+    "enabled": {
+     "feed": true
+    }
+   },
+   "memory": {
+    "seen": 1,
+    "misses": 1
+   },
+   "level": "failing",
+   "facts": {
+    "service": "feed",
+    "minutes": "4"
+   },
+   "keep": {
+    "seen": 1,
+    "misses": 2
+   }
+  },
+  {
+   "name": "it stays failing while silent",
+   "check": "service_alerts",
+   "readings": {
+    "health": {
+     "alerts": null
+    },
+    "enabled": {
+     "alerts": true
+    }
+   },
+   "memory": {
+    "seen": 1,
+    "misses": 7
+   },
+   "level": "failing",
+   "facts": {
+    "service": "alerts",
+    "minutes": "16"
+   }
+  },
+  {
+   "name": "a service never seen answering is off, not a fault",
+   "check": "service_family",
+   "readings": {
+    "health": {
+     "family": null
+    },
+    "enabled": {
+     "family": true
+    }
+   },
+   "memory": {},
+   "level": "off",
+   "keep": {
+    "seen": 0
+   }
+  },
+  {
+   "name": "a service the owner disabled is off",
+   "check": "service_screener",
+   "readings": {
+    "health": {
+     "screener": null
+    },
+    "enabled": {
+     "screener": false
+    }
+   },
+   "memory": {
+    "seen": 1,
+    "misses": 5
+   },
+   "level": "off"
+  },
+  {
+   "name": "whether it is enabled could not be read: silence still counts",
+   "check": "service_journal",
+   "readings": {
+    "health": {
+     "journal": null
+    },
+    "enabled": {}
+   },
+   "memory": {
+    "seen": 1,
+    "misses": 1
+   },
+   "level": "failing"
+  },
+  {
+   "name": "the service was not asked at all: unread, and the count is kept",
+   "check": "service_portfolio",
+   "readings": {
+    "health": {},
+    "enabled": {
+     "portfolio": true
+    }
+   },
+   "memory": {
+    "seen": 1,
+    "misses": 1
+   },
+   "level": "unread",
+   "keep": {
+    "seen": 1,
+    "misses": 1
+   }
+  },
+  {
+   "name": "no health reading at all",
+   "check": "service_portfolio",
+   "readings": {},
+   "memory": {
+    "seen": 1
+   },
+   "level": "unread"
+  },
+  {
+   "name": "an answer that is not a document is no answer",
+   "check": "service_feed",
+   "readings": {
+    "health": {
+     "feed": "oops"
+    },
+    "enabled": {
+     "feed": true
+    }
+   },
+   "memory": {
+    "seen": 1,
+    "misses": 1
+   },
+   "level": "failing"
+  },
+  {
+   "name": "OpenAlgo answers",
+   "check": "openalgo",
+   "readings": {
+    "openalgo": true
+   },
+   "memory": {
+    "misses": 3
+   },
+   "level": "fine",
+   "keep": {
+    "misses": 0
+   }
+  },
+  {
+   "name": "OpenAlgo silent once",
+   "check": "openalgo",
+   "readings": {
+    "openalgo": false
+   },
+   "memory": {},
+   "level": "fine",
+   "keep": {
+    "misses": 1
+   }
+  },
+  {
+   "name": "OpenAlgo silent twice",
+   "check": "openalgo",
+   "readings": {
+    "openalgo": false
+   },
+   "memory": {
+    "misses": 1
+   },
+   "level": "failing",
+   "facts": {
+    "minutes": "4"
+   }
+  },
+  {
+   "name": "OpenAlgo not asked",
+   "check": "openalgo",
+   "readings": {},
+   "memory": {
+    "misses": 1
+   },
+   "level": "unread",
+   "keep": {
+    "misses": 1
+   }
+  },
+  {
+   "name": "before 08:58 nothing is expected",
+   "check": "login",
+   "readings": {
+    "ist_minute": 530,
+    "window_open": true,
+    "health": {
+     "alerts": {
+      "state": "waiting"
+     }
+    }
+   },
+   "memory": {},
+   "level": "off"
+  },
+  {
+   "name": "a holiday: the window is shut",
+   "check": "login",
+   "readings": {
+    "ist_minute": 600,
+    "window_open": false,
+    "health": {
+     "alerts": {
+      "state": "closed"
+     }
+    }
+   },
+   "memory": {},
+   "level": "off"
+  },
+  {
+   "name": "the alerts service says the market is closed",
+   "check": "login",
+   "readings": {
+    "ist_minute": 600,
+    "window_open": true,
+    "health": {
+     "alerts": {
+      "state": "closed"
+     }
+    }
+   },
+   "memory": {
+    "misses": 4
+   },
+   "level": "off"
+  },
+  {
+   "name": "connected at 08:58",
+   "check": "login",
+   "readings": {
+    "ist_minute": 538,
+    "window_open": true,
+    "health": {
+     "alerts": {
+      "state": "connected"
+     }
+    }
+   },
+   "memory": {
+    "misses": 1
+   },
+   "level": "fine",
+   "keep": {
+    "misses": 0
+   }
+  },
+  {
+   "name": "not connected at 08:58, first look",
+   "check": "login",
+   "readings": {
+    "ist_minute": 538,
+    "window_open": true,
+    "health": {
+     "alerts": {
+      "state": "waiting"
+     }
+    }
+   },
+   "memory": {},
+   "level": "fine",
+   "keep": {
+    "misses": 1
+   }
+  },
+  {
+   "name": "no login for today, second look at 09:00",
+   "check": "login",
+   "readings": {
+    "ist_minute": 540,
+    "window_open": true,
+    "health": {
+     "alerts": {
+      "state": "waiting"
+     }
+    }
+   },
+   "memory": {
+    "misses": 1
+   },
+   "level": "failing",
+   "facts": {
+    "when": "before_open",
+    "minutes": "4"
+   }
+  },
+  {
+   "name": "still none at 09:10",
+   "check": "login",
+   "readings": {
+    "ist_minute": 550,
+    "window_open": true,
+    "health": {
+     "alerts": {
+      "state": "backoff"
+     }
+    }
+   },
+   "memory": {
+    "misses": 6
+   },
+   "level": "failing",
+   "facts": {
+    "when": "before_open",
+    "minutes": "14"
+   }
+  },
+  {
+   "name": "the order stream down in the session",
+   "check": "login",
+   "readings": {
+    "ist_minute": 660,
+    "window_open": true,
+    "health": {
+     "alerts": {
+      "state": "backoff"
+     }
+    }
+   },
+   "memory": {
+    "misses": 1
+   },
+   "level": "failing",
+   "facts": {
+    "when": "in_session",
+    "minutes": "4"
+   }
+  },
+  {
+   "name": "the order stream reconnecting once in the session",
+   "check": "login",
+   "readings": {
+    "ist_minute": 660,
+    "window_open": true,
+    "health": {
+     "alerts": {
+      "state": "connecting"
+     }
+    }
+   },
+   "memory": {},
+   "level": "fine"
+  },
+  {
+   "name": "the alerts service did not answer",
+   "check": "login",
+   "readings": {
+    "ist_minute": 600,
+    "window_open": true,
+    "health": {
+     "alerts": null
+    }
+   },
+   "memory": {
+    "misses": 1
+   },
+   "level": "unread",
+   "keep": {
+    "misses": 1
+   }
+  },
+  {
+   "name": "the window could not be read",
+   "check": "login",
+   "readings": {
+    "ist_minute": 600,
+    "window_open": null,
+    "health": {
+     "alerts": {
+      "state": "waiting"
+     }
+    }
+   },
+   "memory": {},
+   "level": "unread"
+  },
+  {
+   "name": "the clock could not be read",
+   "check": "login",
+   "readings": {
+    "window_open": true,
+    "health": {
+     "alerts": {
+      "state": "waiting"
+     }
+    }
+   },
+   "memory": {},
+   "level": "unread"
+  },
+  {
+   "name": "the feed connected in its window",
+   "check": "feed",
+   "readings": {
+    "health": {
+     "feed": {
+      "state": "connected",
+      "market_window": {
+       "open": true
+      }
+     }
+    }
+   },
+   "memory": {
+    "misses": 1
+   },
+   "level": "fine",
+   "keep": {
+    "misses": 0
+   }
+  },
+  {
+   "name": "the feed reconnecting once",
+   "check": "feed",
+   "readings": {
+    "health": {
+     "feed": {
+      "state": "backoff",
+      "market_window": {
+       "open": true
+      }
+     }
+    }
+   },
+   "memory": {},
+   "level": "fine",
+   "keep": {
+    "misses": 1
+   }
+  },
+  {
+   "name": "the feed not connected for two runs",
+   "check": "feed",
+   "readings": {
+    "health": {
+     "feed": {
+      "state": "backoff",
+      "market_window": {
+       "open": true
+      }
+     }
+    }
+   },
+   "memory": {
+    "misses": 1
+   },
+   "level": "failing",
+   "facts": {
+    "minutes": "4"
+   }
+  },
+  {
+   "name": "the feed outside its window",
+   "check": "feed",
+   "readings": {
+    "health": {
+     "feed": {
+      "state": "closed",
+      "market_window": {
+       "open": false
+      }
+     }
+    }
+   },
+   "memory": {
+    "misses": 3
+   },
+   "level": "off"
+  },
+  {
+   "name": "the feed did not answer",
+   "check": "feed",
+   "readings": {
+    "health": {
+     "feed": null
+    }
+   },
+   "memory": {
+    "misses": 1
+   },
+   "level": "unread",
+   "keep": {
+    "misses": 1
+   }
+  },
+  {
+   "name": "the feed's answer has no state",
+   "check": "feed",
+   "readings": {
+    "health": {
+     "feed": {
+      "market_window": {
+       "open": true
+      }
+     }
+    }
+   },
+   "memory": {},
+   "level": "unread"
+  },
+  {
+   "name": "the feed's answer has no window",
+   "check": "feed",
+   "readings": {
+    "health": {
+     "feed": {
+      "state": "connected"
+     }
+    }
+   },
+   "memory": {},
+   "level": "off"
+  },
+  {
+   "name": "refreshed today",
+   "check": "instrument_list",
+   "readings": {
+    "ist_minute": 540,
+    "window_open": true,
+    "ist_date": "2026-11-16",
+    "master_date": "2026-11-16"
+   },
+   "memory": {},
+   "level": "fine"
+  },
+  {
+   "name": "not refreshed by 09:00",
+   "check": "instrument_list",
+   "readings": {
+    "ist_minute": 540,
+    "window_open": true,
+    "ist_date": "2026-11-16",
+    "master_date": "2026-11-13"
+   },
+   "memory": {},
+   "level": "failing"
+  },
+  {
+   "name": "never downloaded",
+   "check": "instrument_list",
+   "readings": {
+    "ist_minute": 570,
+    "window_open": true,
+    "ist_date": "2026-11-16",
+    "master_date": ""
+   },
+   "memory": {},
+   "level": "failing"
+  },
+  {
+   "name": "before 09:00 yesterday's list is expected",
+   "check": "instrument_list",
+   "readings": {
+    "ist_minute": 539,
+    "window_open": true,
+    "ist_date": "2026-11-16",
+    "master_date": "2026-11-13"
+   },
+   "memory": {},
+   "level": "off"
+  },
+  {
+   "name": "a holiday",
+   "check": "instrument_list",
+   "readings": {
+    "ist_minute": 600,
+    "window_open": false,
+    "ist_date": "2026-11-16",
+    "master_date": "2026-11-13"
+   },
+   "memory": {},
+   "level": "off"
+  },
+  {
+   "name": "its date could not be read",
+   "check": "instrument_list",
+   "readings": {
+    "ist_minute": 600,
+    "window_open": true,
+    "ist_date": "2026-11-16",
+    "master_date": null
+   },
+   "memory": {},
+   "level": "unread"
+  },
+  {
+   "name": "the window could not be read",
+   "check": "instrument_list",
+   "readings": {
+    "ist_minute": 600,
+    "window_open": null,
+    "ist_date": "2026-11-16",
+    "master_date": "2026-11-13"
+   },
+   "memory": {},
+   "level": "unread"
+  },
+  {
+   "name": "plenty of disk",
+   "check": "disk",
+   "readings": {
+    "disk": {
+     "free_gb": 40,
+     "inodes_free_pct": 80
+    }
+   },
+   "memory": {},
+   "level": "fine",
+   "facts": {
+    "free_gb": "40.0",
+    "cause": "space"
+   }
+  },
+  {
+   "name": "exactly 15 GB is fine",
+   "check": "disk",
+   "readings": {
+    "disk": {
+     "free_gb": 15,
+     "inodes_free_pct": 80
+    }
+   },
+   "memory": {},
+   "level": "fine"
+  },
+  {
+   "name": "under 15 GB warns",
+   "check": "disk",
+   "readings": {
+    "disk": {
+     "free_gb": 14.9,
+     "inodes_free_pct": 80
+    }
+   },
+   "memory": {},
+   "level": "warning",
+   "facts": {
+    "free_gb": "14.9",
+    "cause": "space"
+   }
+  },
+  {
+   "name": "exactly 5 GB still warns",
+   "check": "disk",
+   "readings": {
+    "disk": {
+     "free_gb": 5,
+     "inodes_free_pct": 80
+    }
+   },
+   "memory": {},
+   "level": "warning"
+  },
+  {
+   "name": "under 5 GB fails",
+   "check": "disk",
+   "readings": {
+    "disk": {
+     "free_gb": 4.99,
+     "inodes_free_pct": 80
+    }
+   },
+   "memory": {},
+   "level": "failing",
+   "facts": {
+    "free_gb": "5.0",
+    "cause": "space"
+   }
+  },
+  {
+   "name": "few file slots warns",
+   "check": "disk",
+   "readings": {
+    "disk": {
+     "free_gb": 40,
+     "inodes_free_pct": 9.9
+    }
+   },
+   "memory": {},
+   "level": "warning",
+   "facts": {
+    "free_gb": "40.0",
+    "cause": "files"
+   }
+  },
+  {
+   "name": "almost no file slots fails",
+   "check": "disk",
+   "readings": {
+    "disk": {
+     "free_gb": 14,
+     "inodes_free_pct": 2.9
+    }
+   },
+   "memory": {},
+   "level": "failing",
+   "facts": {
+    "free_gb": "14.0",
+    "cause": "files"
+   }
+  },
+  {
+   "name": "disk could not be read",
+   "check": "disk",
+   "readings": {
+    "disk": null
+   },
+   "memory": {},
+   "level": "unread"
+  },
+  {
+   "name": "a disk reading without figures",
+   "check": "disk",
+   "readings": {
+    "disk": {
+     "free_gb": "x"
+    }
+   },
+   "memory": {},
+   "level": "unread"
+  },
+  {
+   "name": "memory fine",
+   "check": "memory",
+   "readings": {
+    "mem_available_mb": 3000
+   },
+   "memory": {
+    "low": 2
+   },
+   "level": "fine",
+   "keep": {
+    "low": 0
+   }
+  },
+  {
+   "name": "memory low once",
+   "check": "memory",
+   "readings": {
+    "mem_available_mb": 900
+   },
+   "memory": {},
+   "level": "fine",
+   "keep": {
+    "low": 1
+   }
+  },
+  {
+   "name": "memory low for three runs",
+   "check": "memory",
+   "readings": {
+    "mem_available_mb": 1023
+   },
+   "memory": {
+    "low": 2
+   },
+   "level": "warning",
+   "facts": {
+    "available_mb": "1023"
+   },
+   "keep": {
+    "low": 3
+   }
+  },
+  {
+   "name": "memory could not be read",
+   "check": "memory",
+   "readings": {
+    "mem_available_mb": null
+   },
+   "memory": {
+    "low": 2
+   },
+   "level": "unread",
+   "keep": {
+    "low": 2
+   }
+  },
+  {
+   "name": "a certificate with days left",
+   "check": "certificate",
+   "readings": {
+    "cert_hours_left": 140.5
+   },
+   "memory": {},
+   "level": "fine",
+   "facts": {
+    "hours": "140"
+   }
+  },
+  {
+   "name": "exactly 48 hours is fine",
+   "check": "certificate",
+   "readings": {
+    "cert_hours_left": 48
+   },
+   "memory": {},
+   "level": "fine"
+  },
+  {
+   "name": "under 48 hours fails",
+   "check": "certificate",
+   "readings": {
+    "cert_hours_left": 31.4
+   },
+   "memory": {},
+   "level": "failing",
+   "facts": {
+    "hours": "31"
+   }
+  },
+  {
+   "name": "run out",
+   "check": "certificate",
+   "readings": {
+    "cert_hours_left": -3
+   },
+   "memory": {},
+   "level": "failing",
+   "facts": {
+    "hours": "0"
+   }
+  },
+  {
+   "name": "the certificate could not be read",
+   "check": "certificate",
+   "readings": {},
+   "memory": {},
+   "level": "unread"
+  },
+  {
+   "name": "true is not a number of hours",
+   "check": "certificate",
+   "readings": {
+    "cert_hours_left": true
+   },
+   "memory": {},
+   "level": "unread"
+  }
+ ],
+ "sequences": [
+  {
+   "name": "a failure is told once and its recovery once",
+   "check": "service_feed",
+   "memory": {
+    "seen": 1
+   },
+   "runs": [
+    [
+     {
+      "health": {
+       "feed": null
+      },
+      "enabled": {
+       "feed": true
+      }
+     },
+     null
+    ],
+    [
+     {
+      "health": {
+       "feed": null
+      },
+      "enabled": {
+       "feed": true
+      }
+     },
+     [
+      "failing",
+      "fine"
+     ]
+    ],
+    [
+     {
+      "health": {
+       "feed": null
+      },
+      "enabled": {
+       "feed": true
+      }
+     },
+     null
+    ],
+    [
+     {
+      "health": {},
+      "enabled": {
+       "feed": true
+      }
+     },
+     null
+    ],
+    [
+     {
+      "health": {
+       "feed": null
+      },
+      "enabled": {
+       "feed": true
+      }
+     },
+     null
+    ],
+    [
+     {
+      "health": {
+       "feed": {
+        "state": "connected"
+       }
+      },
+      "enabled": {
+       "feed": true
+      }
+     },
+     [
+      "fine",
+      "failing"
+     ]
+    ],
+    [
+     {
+      "health": {
+       "feed": {
+        "state": "connected"
+       }
+      },
+      "enabled": {
+       "feed": true
+      }
+     },
+     null
+    ]
+   ]
+  },
+  {
+   "name": "disk: warning, then failing, then fine",
+   "check": "disk",
+   "memory": {},
+   "runs": [
+    [
+     {
+      "disk": {
+       "free_gb": 40,
+       "inodes_free_pct": 80
+      }
+     },
+     null
+    ],
+    [
+     {
+      "disk": {
+       "free_gb": 12,
+       "inodes_free_pct": 80
+      }
+     },
+     [
+      "warning",
+      "fine"
+     ]
+    ],
+    [
+     {
+      "disk": {
+       "free_gb": 11,
+       "inodes_free_pct": 80
+      }
+     },
+     null
+    ],
+    [
+     {
+      "disk": {
+       "free_gb": 4,
+       "inodes_free_pct": 80
+      }
+     },
+     [
+      "failing",
+      "warning"
+     ]
+    ],
+    [
+     {
+      "disk": null
+     },
+     null
+    ],
+    [
+     {
+      "disk": {
+       "free_gb": 4,
+       "inodes_free_pct": 80
+      }
+     },
+     null
+    ],
+    [
+     {
+      "disk": {
+       "free_gb": 30,
+       "inodes_free_pct": 80
+      }
+     },
+     [
+      "fine",
+      "failing"
+     ]
+    ]
+   ]
+  },
+  {
+   "name": "the login is told once a morning and its return once",
+   "check": "login",
+   "memory": {},
+   "runs": [
+    [
+     {
+      "ist_minute": 536,
+      "window_open": true,
+      "health": {
+       "alerts": {
+        "state": "waiting"
+       }
+      }
+     },
+     null
+    ],
+    [
+     {
+      "ist_minute": 538,
+      "window_open": true,
+      "health": {
+       "alerts": {
+        "state": "waiting"
+       }
+      }
+     },
+     null
+    ],
+    [
+     {
+      "ist_minute": 540,
+      "window_open": true,
+      "health": {
+       "alerts": {
+        "state": "waiting"
+       }
+      }
+     },
+     [
+      "failing",
+      "fine"
+     ]
+    ],
+    [
+     {
+      "ist_minute": 550,
+      "window_open": true,
+      "health": {
+       "alerts": {
+        "state": "waiting"
+       }
+      }
+     },
+     null
+    ],
+    [
+     {
+      "ist_minute": 552,
+      "window_open": true,
+      "health": {
+       "alerts": {
+        "state": "connected"
+       }
+      }
+     },
+     [
+      "fine",
+      "failing"
+     ]
+    ],
+    [
+     {
+      "ist_minute": 970,
+      "window_open": true,
+      "health": {
+       "alerts": {
+        "state": "closed"
+       }
+      }
+     },
+     null
+    ]
+   ]
+  }
+ ]
+}

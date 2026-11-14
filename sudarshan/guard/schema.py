@@ -18,7 +18,18 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from sqlalchemy import Boolean, Column, DateTime, Float, Index, Integer, String, Text, inspect
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    Column,
+    DateTime,
+    Float,
+    Index,
+    Integer,
+    String,
+    Text,
+    inspect,
+)
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.schema import CreateColumn, CreateIndex, CreateTable
@@ -113,6 +124,9 @@ class StateRow(Base):
     ks_report = Column(Text)  # JSON: what each step did
     agent_engaged_by_us = Column(Boolean, nullable=False, server_default="0")
     updated_at = Column(DateTime)
+    #: M17.9: no AI access token issued at or before this moment (milliseconds since 1970) is
+    #: good; NULL until access is first ended (sudarshan/assistant/cutoff.py).
+    mcp_valid_after = Column(BigInteger)
 
 
 class DailyLockRow(Base):

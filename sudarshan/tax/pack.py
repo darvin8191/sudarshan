@@ -37,7 +37,7 @@ class PackInputs:
     aliases: dict = field(default_factory=dict)
     settlements: dict = field(default_factory=dict)
     charges: dict = field(default_factory=dict)
-    charges_state: str = "ready"
+    charges_state: str = "ok"
     sources: tuple = ()
     missing: tuple = ()
     upstox_pnl: dict | None = None

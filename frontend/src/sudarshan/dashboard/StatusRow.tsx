@@ -13,6 +13,7 @@ import { type ReactNode, useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router'
 import { cn } from '@/lib/utils'
 import { useOnReturn } from '@/sudarshan/books/useReturn'
+import { foExchange, optionsPath } from '@/sudarshan/options/words'
 import { HoursSheet } from './HoursSheet'
 import type { NoPrices } from './Lapsed'
 import {
@@ -217,12 +218,28 @@ export function StatusRow({
           Try again<span className="sr-only"> to read the market hours</span>
         </button>
       )}
-      {expiry && (
-        <button type="button" onClick={showHours} className={TARGET} data-expiry={expiry.kind}>
+      {/* SUDARSHAN O9: the expiry chip opens the option chain of the first expiry it names. */}
+      {expiry?.chain && foExchange(expiry.chain.exchange) ? (
+        <Link
+          to={optionsPath(expiry.chain.exchange, expiry.chain.underlying, {
+            expiry: expiry.chain.day,
+          })}
+          className={TARGET}
+          data-expiry={expiry.kind}
+        >
           <Pill tone={expiry.tone} icon={chipIcon(expiry)}>
             {expiry.words}
+            <span className="sr-only">. Open the {expiry.chain.underlying} option chain</span>
           </Pill>
-        </button>
+        </Link>
+      ) : (
+        expiry && (
+          <button type="button" onClick={showHours} className={TARGET} data-expiry={expiry.kind}>
+            <Pill tone={expiry.tone} icon={chipIcon(expiry)}>
+              {expiry.words}
+            </Pill>
+          </button>
+        )
       )}
       {facts && <HoursSheet facts={facts} now={now} open={open} onOpenChange={setOpen} />}
     </div>

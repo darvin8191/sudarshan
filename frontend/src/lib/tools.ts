@@ -16,6 +16,7 @@ import {
   FolderKanban,
   Gauge,
   History,
+  Layers3,
   LineChart,
   type LucideIcon,
   Mountain,
@@ -75,6 +76,15 @@ export const tools: Tool[] = [
       'Grade the holdings you actually own: concentration, co-movement, drawdown resilience and behaviour in past crises',
     href: '/portfolio-analyzer',
     icon: PieChart,
+  },
+  // SUDARSHAN O9: the phone's own option screen, the one tool laid out for a phone.
+  {
+    title: 'Options on the phone',
+    description:
+      'The option chain laid out for a phone: prices, OI, IV and Greeks by strike, with OI, IV and straddle views',
+    href: '/options',
+    icon: Layers3,
+    phone: true,
   },
   {
     title: 'Option Chain',

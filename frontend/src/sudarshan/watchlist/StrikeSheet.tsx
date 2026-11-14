@@ -1,4 +1,4 @@
-import { Layers, Pencil, Trash2 } from 'lucide-react'
+import { Layers, MoreHorizontal, Pencil, Trash2 } from 'lucide-react'
 import { Link } from 'react-router'
 import type { SymbolData } from '@/lib/MarketDataManager'
 import { cn } from '@/lib/utils'
@@ -44,15 +44,21 @@ export interface StrikeSheetProps {
   expiry: string | null
   legs: Legs | null
   lines: ReadonlyMap<string, SymbolData>
-  others: { state: 'loading' | 'error' | 'ready'; rows: OtherRow[]; retry: () => void }
+  /** Absent where the same strike's other expiries are not read (the options screen without the watchlists switch): no section. */
+  others?: { state: 'loading' | 'error' | 'ready'; rows: OtherRow[]; retry: () => void }
   chain: { exchange: string; underlying: string } | null
   feed: FeedState
   now: number
   marketOpen: boolean | null
   onClose: () => void
   onOrder: (order: OrderRequest) => void
-  onEdit: () => void
-  onRemove: () => void
+  /** A watchlist row's own two buttons; absent where the sheet is not a row's (a chain's strike), and then not drawn. */
+  onEdit?: () => void
+  onRemove?: () => void
+  /** The leg's own sheet (chart, alert, depth): a button a leg, drawn only when given. */
+  onLeg?: (side: 'ce' | 'pe', contract: Contract) => void
+  /** The side that leads every pair of columns and buttons: the one tapped. CE unless said. */
+  first?: 'ce' | 'pe'
 }
 
 const dash = (
@@ -65,7 +71,7 @@ const dash = (
 const num = (value: number | undefined | null, decimals: number) =>
   typeof value === 'number' && Number.isFinite(value) ? value.toFixed(decimals) : null
 
-function Row({ label, ce, pe }: { label: string; ce: React.ReactNode; pe: React.ReactNode }) {
+function Row({ label, pair }: { label: string; pair: [React.ReactNode, React.ReactNode] }) {
   return (
     <tr>
       <th
@@ -74,8 +80,8 @@ function Row({ label, ce, pe }: { label: string; ce: React.ReactNode; pe: React.
       >
         {label}
       </th>
-      <td className="px-1 py-2 text-right text-sm font-semibold">{ce ?? dash}</td>
-      <td className="px-1 py-2 text-right text-sm font-semibold">{pe ?? dash}</td>
+      <td className="px-1 py-2 text-right text-sm font-semibold">{pair[0] ?? dash}</td>
+      <td className="px-1 py-2 text-right text-sm font-semibold">{pair[1] ?? dash}</td>
     </tr>
   )
 }
@@ -86,9 +92,17 @@ function Row({ label, ce, pe }: { label: string; ce: React.ReactNode; pe: React.
  * ticket, the same strike on the next expiries (ticking while the sheet is open), and the option chain.
  * It stays on the contracts it opened with: when the row moves it says so, with Show. Open interest
  * change is not shown.
+ *
+ * Four things a host that is not a watchlist row may ask (the options screen): leave `onEdit` and
+ * `onRemove` out and the row's two buttons are not drawn; leave `others` out and there is no "other
+ * expiries" section; give `onLeg` for a button a leg to that leg's own sheet; give `first` to lead
+ * with the side that was tapped. A caller that gives none of them gets the sheet as it always was.
  */
 export function StrikeSheet(props: StrikeSheetProps) {
-  const { legs, lines, strike, expiry } = props
+  const { legs, lines, strike, expiry, others } = props
+  const sides: readonly ('ce' | 'pe')[] = props.first === 'pe' ? ['pe', 'ce'] : ['ce', 'pe']
+  /** A pair of figures, the leading side first. */
+  const pair = <T,>(ce: T, pe: T): [T, T] => (sides[0] === 'ce' ? [ce, pe] : [pe, ce])
   const ceData = legs ? lines.get(legs.ce.contract.key)?.data : undefined
   const peData = legs ? lines.get(legs.pe.contract.key)?.data : undefined
   const greeks =
@@ -159,12 +173,11 @@ export function StrikeSheet(props: StrikeSheetProps) {
               <thead>
                 <tr className="text-xs font-bold text-[color:var(--text-tertiary)]">
                   <th scope="col" className="w-20 text-left" />
-                  <th scope="col" className="text-right">
-                    CE
-                  </th>
-                  <th scope="col" className="text-right">
-                    PE
-                  </th>
+                  {sides.map((side) => (
+                    <th key={side} scope="col" className="text-right">
+                      {side.toUpperCase()}
+                    </th>
+                  ))}
                 </tr>
               </thead>
               <tbody className="divide-y divide-[color:var(--divider)]">
@@ -175,7 +188,7 @@ export function StrikeSheet(props: StrikeSheetProps) {
                   >
                     Price and change
                   </th>
-                  {(['ce', 'pe'] as const).map((side) => {
+                  {sides.map((side) => {
                     const live = legs[side].live
                     return (
                       <td key={side} data-leg={side.toUpperCase()} className="px-1 py-2">
@@ -191,14 +204,23 @@ export function StrikeSheet(props: StrikeSheetProps) {
                     )
                   })}
                 </tr>
-                <Row label="OI" ce={oi(ceData)} pe={oi(peData)} />
+                <Row label="OI" pair={pair(oi(ceData), oi(peData))} />
                 {greeks ? (
                   <>
-                    <Row label="IV" ce={iv('ce')} pe={iv('pe')} />
-                    <Row label="Delta" ce={num(g('ce')?.delta, 3)} pe={num(g('pe')?.delta, 3)} />
-                    <Row label="Theta" ce={num(g('ce')?.theta, 2)} pe={num(g('pe')?.theta, 2)} />
-                    <Row label="Gamma" ce={num(g('ce')?.gamma, 5)} pe={num(g('pe')?.gamma, 5)} />
-                    <Row label="Vega" ce={num(g('ce')?.vega, 2)} pe={num(g('pe')?.vega, 2)} />
+                    <Row label="IV" pair={pair(iv('ce'), iv('pe'))} />
+                    <Row
+                      label="Delta"
+                      pair={pair(num(g('ce')?.delta, 3), num(g('pe')?.delta, 3))}
+                    />
+                    <Row
+                      label="Theta"
+                      pair={pair(num(g('ce')?.theta, 2), num(g('pe')?.theta, 2))}
+                    />
+                    <Row
+                      label="Gamma"
+                      pair={pair(num(g('ce')?.gamma, 5), num(g('pe')?.gamma, 5))}
+                    />
+                    <Row label="Vega" pair={pair(num(g('ce')?.vega, 2), num(g('pe')?.vega, 2))} />
                   </>
                 ) : (
                   <tr>
@@ -218,7 +240,7 @@ export function StrikeSheet(props: StrikeSheetProps) {
             </p>
 
             <div className="grid grid-cols-2 gap-2">
-              {(['ce', 'pe'] as const).flatMap((side) =>
+              {sides.flatMap((side) =>
                 (['BUY', 'SELL'] as const).map((action) => {
                   const contract = legs[side].contract
                   return (
@@ -241,37 +263,53 @@ export function StrikeSheet(props: StrikeSheetProps) {
                 })
               )}
             </div>
+            {props.onLeg && (
+              <div className="grid grid-cols-2 gap-2">
+                {sides.map((side) => (
+                  <button
+                    key={side}
+                    type="button"
+                    data-leg-more={side.toUpperCase()}
+                    onClick={() => props.onLeg?.(side, legs[side].contract)}
+                    className={OUTLINED}
+                  >
+                    <MoreHorizontal aria-hidden="true" className="size-5" />
+                    {`${side.toUpperCase()}: chart, alert, depth`}
+                  </button>
+                ))}
+              </div>
+            )}
           </>
         )}
 
-        {legs && (
+        {legs && others && (
           <section aria-labelledby="ss-others" className="flex flex-col gap-1">
             <h3 id="ss-others" className="text-sm font-bold">
               Same strike, other expiries
             </h3>
-            {props.others.state === 'loading' && (
+            {others.state === 'loading' && (
               <p className="text-sm font-medium text-muted-foreground">
                 Reading the other expiries.
               </p>
             )}
-            {props.others.state === 'error' && (
+            {others.state === 'error' && (
               <p className="flex flex-wrap items-center gap-x-2 text-sm font-medium text-[color:var(--warning-text)]">
                 The other expiries could not be read.
                 <button
                   type="button"
-                  onClick={props.others.retry}
+                  onClick={others.retry}
                   className="min-h-12 font-semibold text-[color:var(--brand)] underline underline-offset-2"
                 >
                   Try again
                 </button>
               </p>
             )}
-            {props.others.state === 'ready' && props.others.rows.length === 0 && (
+            {others.state === 'ready' && others.rows.length === 0 && (
               <p className="text-sm font-medium text-muted-foreground">
                 No later expiry lists this strike.
               </p>
             )}
-            {props.others.rows.map((each) => (
+            {others.rows.map((each) => (
               <div
                 key={each.expiry}
                 data-other-expiry={each.expiry}
@@ -280,7 +318,7 @@ export function StrikeSheet(props: StrikeSheetProps) {
                 <span className="text-xs font-semibold text-[color:var(--text-secondary)]">
                   {dayLabel(each.expiry).replace(/ \d{4}$/, '')}
                 </span>
-                {(['ce', 'pe'] as const).map((side) => {
+                {sides.map((side) => {
                   const live = each[side]
                   return (
                     <span key={side} data-other-leg={side.toUpperCase()}>
@@ -307,18 +345,22 @@ export function StrikeSheet(props: StrikeSheetProps) {
               Open option chain
             </Link>
           )}
-          <button type="button" onClick={props.onEdit} className={OUTLINED}>
-            <Pencil aria-hidden="true" className="size-5" />
-            Edit row
-          </button>
-          <button
-            type="button"
-            onClick={props.onRemove}
-            className={cn(OUTLINED, 'text-[color:var(--down)]')}
-          >
-            <Trash2 aria-hidden="true" className="size-5" />
-            Remove row
-          </button>
+          {props.onEdit && (
+            <button type="button" onClick={props.onEdit} className={OUTLINED}>
+              <Pencil aria-hidden="true" className="size-5" />
+              Edit row
+            </button>
+          )}
+          {props.onRemove && (
+            <button
+              type="button"
+              onClick={props.onRemove}
+              className={cn(OUTLINED, 'text-[color:var(--down)]')}
+            >
+              <Trash2 aria-hidden="true" className="size-5" />
+              Remove row
+            </button>
+          )}
         </div>
       </div>
     </BottomSheet>

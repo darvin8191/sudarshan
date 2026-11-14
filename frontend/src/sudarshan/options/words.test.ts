@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_CHAIN, readLastChain, saveLastChain } from './prefs'
-import { daysLeft, expiryLabel, foExchange, oiWords, optionsPath, strikeWords } from './words'
+import {
+  chainLinkOf,
+  daysLeft,
+  expiryLabel,
+  foExchange,
+  oiWords,
+  optionsPath,
+  strikeWords,
+} from './words'
 
 const AT = Date.UTC(2026, 10, 16, 5, 12, 5) // 16 Nov 2026, 10:42 in India
 
@@ -93,5 +101,37 @@ describe('what the options screen remembers', () => {
     }
     expect(readLastChain(blocked)).toEqual(DEFAULT_CHAIN)
     expect(() => saveLastChain(DEFAULT_CHAIN, blocked)).not.toThrow()
+  })
+})
+
+describe('the chain another screen links to (O9)', () => {
+  it('opens an index’s own chain', () => {
+    expect(chainLinkOf('NIFTY', 'NSE_INDEX')).toBe('/options/NSE_INDEX/NIFTY')
+    expect(chainLinkOf('SENSEX', 'BSE_INDEX')).toBe('/options/BSE_INDEX/SENSEX')
+  })
+
+  it('opens an option’s underlying on its expiry and strike', () => {
+    expect(chainLinkOf('NIFTY17NOV2625900CE', 'NFO')).toBe(
+      '/options/NFO/NIFTY?expiry=2026-11-17&strike=25900'
+    )
+    expect(chainLinkOf('SENSEX19NOV2684500PE', 'BFO')).toBe(
+      '/options/BFO/SENSEX?expiry=2026-11-19&strike=84500'
+    )
+    expect(chainLinkOf('VEDL24NOV26292.5CE', 'NFO')).toBe(
+      '/options/NFO/VEDL?expiry=2026-11-24&strike=292.5'
+    )
+    expect(chainLinkOf('BAJAJ-AUTO24NOV269000PE', 'NFO')).toBe(
+      '/options/NFO/BAJAJ-AUTO?expiry=2026-11-24&strike=9000'
+    )
+  })
+
+  it('opens a future’s underlying, on the nearest expiry', () => {
+    expect(chainLinkOf('BANKNIFTY24NOV26FUT', 'NFO')).toBe('/options/NFO/BANKNIFTY')
+  })
+
+  it('offers nothing for a share, a commodity or a name it cannot read', () => {
+    expect(chainLinkOf('RELIANCE', 'NSE')).toBeNull()
+    expect(chainLinkOf('CRUDEOILM20NOV26FUT', 'MCX')).toBeNull()
+    expect(chainLinkOf('SOMETHING', 'NFO')).toBeNull()
   })
 })

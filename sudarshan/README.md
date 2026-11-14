@@ -623,6 +623,9 @@ holds no Telegram or OpenAlgo secret and cannot be made to send anything:
 - the nightly backup runs as `sudarshan` and cannot write root's file, so it records its failures
   the same way in `/var/lib/sudarshan-backup/events.jsonl` (`ops/events.py` `record()`); both
   files are read;
+- the watch (`sudarshan-watch`, "Watching the server" below) records each change of a check in
+  `/var/lib/sudarshan-watch/events.jsonl`, read the same way: a failure and the recovery from one
+  are told at once, in market hours too; a warning waits for the close;
 - recording is best effort, in its own subshell with its own error handling: a missing `jq`, a full
   disk or an unwritable folder costs the notice, never an install or a rollback; the file keeps its
   newest 200 lines; `--check` records nothing;
@@ -641,6 +644,112 @@ Tests: `sudarshan/ops/tests/test_deploy_notices.py` (the whole tool on a fake se
 `test_ops_events.py`, and `sudarshan/alerts/tests/test_alerts_notices.py`.
 
 Tests: `sudarshan/ops/tests/test_ops_docs.py`.
+
+## Watching the server (M19.5)
+
+`sudarshan-watch` looks at the server every 2 minutes, day and night, and tells you on Telegram
+when something stops working and again when it works. It is a small program that a timer starts
+and that ends a second or two later (`sudarshan-watch.timer`, `sudarshan-watch.service`; the
+deploy tool installs both with the release). Nothing needs setting up for it.
+
+| it looks at | it tells you when | when you are told |
+|---|---|---|
+| each SUDARSHAN service: price feed, alerts, portfolio, screener, family view, journal | one has not answered for two looks in a row (about 4 minutes) | at once |
+| the Upstox login | from 08:58 on a trading day there is no login for today; later in the day, order updates have stopped arriving for 4 minutes | at once |
+| the price feed's connection to Upstox | not connected for 4 minutes while the market is open | at once |
+| the instrument list | it was not refreshed today by 09:00 on a trading day | at once |
+| the server's disk | under 15 GB free (a warning); under 5 GB free (a failure) | the warning after the market closes, the failure at once |
+| the server's memory | under 1 GB available for three looks in a row | after the market closes |
+| the security certificate | under 48 hours left and not renewed | at once |
+| OpenAlgo itself | it has not answered for two looks in a row | only through the outside heartbeat, because Telegram notices go through OpenAlgo |
+
+- **Once per cause.** A failure is told once and its recovery once, however long it lasts. A
+  service that was never set up on this server (the family view before its set-up) is not a fault.
+- **While a release is being installed** the watch stands aside: the deploy tool stops and starts
+  every service, and none of that is told.
+- **It only reads and records.** It never restarts, stops or changes a service, holds no Telegram
+  or OpenAlgo key, and sends nothing itself: it writes what changed to
+  `/var/lib/sudarshan-watch/events.jsonl`, and `sudarshan-alerts` words and sends it ("Server
+  notices on Telegram" above). It looks only at SUDARSHAN's own services and files and at
+  OpenAlgo; nothing else that runs on the server is read, asked or named, and no outside site is
+  called.
+- **What it cannot tell you.** If the alerts service or OpenAlgo is down, a notice cannot go out
+  until it is back; if the whole server is down, nothing here runs at all. The outside heartbeat
+  below is for those two cases.
+
+To see what it sees, at any time, as the service user from the app folder (it writes nothing):
+
+```
+cd /opt/sudarshan/apps/openalgo && sudo -u sudarshan .venv/bin/python -m sudarshan.ops.watch --check
+```
+
+One line per check: `fine`, `warning`, `failing`, `unread` (could not be read just now) or `off`
+(not expected now: the market is closed, or the service is not set up). The last look is also in
+`/var/lib/sudarshan-watch/report.json` (`sudo cat` it), which the System page will show in a
+later release.
+
+**After the release that brings the watch is installed, once:** run the `--check` line above and
+read it; then, outside market hours, stop the screener for 5 minutes
+(`sudo systemctl stop sudarshan-screener`, wait for the Telegram message, then
+`sudo systemctl start sudarshan-screener` and wait for the second one).
+
+### The outside heartbeat: the owner's steps
+
+The watch runs on the server, and its notices go through OpenAlgo. If the whole server stops, or
+OpenAlgo does, nothing on the server can tell you. An outside heartbeat can: a service on the
+internet that expects a call from the server every 2 minutes and tells you, through its own
+channel, when the calls stop. Without it the watch does everything else, and its report says "No
+outside heartbeat is set up: nobody is told if the whole server stops."
+
+SUDARSHAN creates no account anywhere. These are your steps, once, about ten minutes:
+
+1. **Pick a heartbeat service** (they are also called "dead man's switch" or "cron monitoring"
+   services) that gives each check a secret web address to call and alerts you when the calls
+   stop. Healthchecks.io is one whose free plan is enough for one check; any service that works
+   the same way will do. Create the account yourself, with your own email address.
+2. **Create one check.** Name it something plain such as `server`; do not put your name, the
+   broker or the server's address in it. Set **Period 2 minutes** and **Grace 8 minutes**, so you
+   are told when nothing has arrived for 10 minutes.
+3. **Choose how it tells you:** email at least, and the service's own phone or Telegram
+   notification if it has one (that is the service's bot, not SUDARSHAN's).
+4. **Copy the check's address** (it starts with `https://`). Treat it as a secret: whoever has it
+   can keep the check green or raise a false alarm. Never paste it in a chat or a screenshot.
+5. **Put it on the server,** in a file only root and the service user can read:
+
+   ```
+   sudo install -m 640 -o root -g sudarshan /dev/null /etc/sudarshan/watch.env
+   sudo nano /etc/sudarshan/watch.env
+   ```
+
+   The file holds one line, with your address in place of the example:
+
+   ```
+   SUDARSHAN_WATCH_PING_URL=https://hc.example/your-check-address
+   ```
+
+6. **See it arrive.** Within 2 minutes the service's page shows the check as up. On the server,
+   the `--check` line above ends with `heartbeat set`.
+7. **Test it once,** outside market hours: `sudo systemctl stop sudarshan-watch.timer`, wait for
+   the service's message (a little over 10 minutes), then
+   `sudo systemctl start sudarshan-watch.timer` and see the check come back up.
+
+How it behaves:
+
+- While notices can go out, each look calls your address. While OpenAlgo or the alerts service has
+  not answered for two looks in a row, or the watch cannot write its own files, it calls the
+  address with `/fail` added, which Healthchecks.io and services like it read as "failing now",
+  so you are told at once and not after 10 minutes. If your service uses a different address for
+  failure, add a second line, `SUDARSHAN_WATCH_PING_FAIL_URL=https://...`.
+- While a release is being installed the plain address is still called: the server is alive.
+- Nothing is sent with the call: no figure, no name, no account. The service sees the server's
+  address and the time, nothing else. The address is never written to a log, the report or
+  Telegram, and it is in the nightly backup with the rest of `/etc/sudarshan`.
+- An address that does not start with `https://`, or that carries a user name or a `?`, is not
+  used; `--check` then says `bad_link`.
+
+Tests: `sudarshan/ops/tests/test_watch_checks.py` (the vectors), `test_watch_run.py`,
+`test_watch_reach.py`, `test_watch_unit.py`, `test_watch_heartbeat.py` and
+`sudarshan/alerts/tests/test_alerts_notices_watch.py`.
 
 ## The family view's one-time set-up (P6)
 
@@ -778,8 +887,269 @@ If a phone is lost, or a session may have been copied:
 3. Put the new key into every TradingView alert (and into Amibroker and your strategies, if you
    use them). From now on an alert that still carries the old key is refused.
 
+A logout, a password change or a reset also ends the AI assistant's access at once (see "The AI
+assistant" below): its consent was given by a session that has now ended.
+
 If the answer to a logout, a password change or a reset says that your other devices could not be
 signed out, the server could not record the time: log in and log out once more.
 
 Tests: `sudarshan/alerts/tests/test_sessions_valid_after.py`, `test/test_gthread_sessions_valid_after.py`
 and `frontend/src/sudarshan/signout.test.tsx`.
+
+## nginx lines for the AI assistant (M19.3)
+
+Do this only when you decide to use the AI assistant, before you turn Remote MCP on. Until then
+nothing here is needed: with Remote MCP off, the assistant's addresses answer "not found".
+
+nginx is the server's front door and is not SUDARSHAN's alone: other sites on this server may go
+through it. So the deploy tool never touches nginx, SUDARSHAN never reads nginx's files, and these
+lines are yours to install, once, into SUDARSHAN's own site and nowhere else. They let the
+addresses an AI app calls be reached only from the range Anthropic publishes for its calls to
+MCP servers (`160.79.104.0/21` on 14 Nov 2026; read Anthropic's page again before installing, and
+whenever a connection that worked stops), leave the consent page open to your own browser, and
+keep the health line for the server itself.
+
+On the server, from the app folder (`cd /opt/sudarshan/apps/openalgo`):
+
+1. Copy the two files into nginx's folders, owned by root. Never point nginx at the app folder
+   itself: the service user can write there, and nginx runs with root's rights.
+
+   ```
+   sudo install -m 644 -o root -g root sudarshan/ops/nginx/sudarshan-mcp-zone.conf /etc/nginx/conf.d/sudarshan-mcp-zone.conf
+   sudo install -m 644 -o root -g root sudarshan/ops/nginx/sudarshan-mcp.conf /etc/nginx/snippets/sudarshan-mcp.conf
+   ```
+
+2. Open SUDARSHAN's own site file in nginx (the one whose `server { }` block serves the app on
+   port 443) and add one line inside that block, above its `location /` line. Add it to no other
+   site:
+
+   ```
+   include snippets/sudarshan-mcp.conf;
+   ```
+
+3. Test, then reload. `nginx -t` reads every site's file and changes nothing; if it reports an
+   error, undo step 2 and stop. Always `reload`, never `restart`: a reload keeps every open
+   connection of every site.
+
+   ```
+   sudo nginx -t
+   sudo systemctl reload nginx
+   ```
+
+4. Check that the lines are in effect, with the app's address as you type it in the browser. It
+   asks nginx on the server itself, reads only whether each address is refused or let through,
+   opens no nginx file and changes nothing:
+
+   ```
+   sudo -u sudarshan .venv/bin/python -m sudarshan.ops.nginx_check --host <the app's address>
+   ```
+
+   Each line starts with `ok`; the last says "The assistant's nginx lines are in effect." A line
+   starting with `NO` names the address that is not as it should be.
+
+After a release, compare the two files in the app folder with your copies
+(`diff sudarshan/ops/nginx/sudarshan-mcp.conf /etc/nginx/snippets/sudarshan-mcp.conf`); the
+changelog says when they changed. To take the lines out again, remove the `include` line, then
+`sudo nginx -t` and `sudo systemctl reload nginx`.
+
+If nginx serves more than one site on this server and SUDARSHAN's is not the first, add a line to
+`/etc/sudarshan/watch.env` so the watch reads SUDARSHAN's own certificate and never another
+site's: `SUDARSHAN_WATCH_CERT_HOST` followed by `=` and the app's name. (With a number for an address instead of a
+name this cannot be chosen, and the watch reads the certificate nginx serves first.)
+
+Tests: `sudarshan/ops/tests/test_ops_nginx.py`.
+
+## Secrets: where each one lives and what changing it breaks (M19.4)
+
+Every secret the server holds, in one place. Nothing here is a value: this table says where a
+value lives, who can read it and what you must redo when it changes. Change a secret because
+something happened (a lost phone, a laptop given away, a session that may have been copied, a
+log or a screenshot that showed it), not by the calendar.
+
+| secret | where it lives | what changing it breaks | how to change it |
+|---|---|---|---|
+| OpenAlgo's `APP_KEY` and `API_KEY_PEPPER` | OpenAlgo's `.env` in the app folder | The pepper is the root of everything sealed: the owner vault (auto-login's TOTP key and PIN), every sealed route between the services, the stored Upstox token and the API key. A new pepper orphans all of them | **Do not change it.** It is restored with the archive it came from, never typed anew. If it ever must change, that is a planned evening with a support session |
+| OpenAlgo API key | `db/openalgo.db`, sealed | Every TradingView alert, Amibroker and your own strategies carry it; the Telegram bot was linked with it. The SUDARSHAN services read the new one by themselves | API Key in the profile menu, Regenerate; then steps 2 and 3 of "Signing out every device, and a lost phone" |
+| Your SUDARSHAN password and login code | `db/openalgo.db` (hashed; the code's key sealed) | Every device is signed out and the AI assistant is disconnected | Profile, Account, Change Password |
+| Upstox app key and secret | OpenAlgo's `.env` (`BROKER_API_KEY`, `BROKER_API_SECRET`) | The daily Upstox login, until the new values are in place | Make new ones in Upstox's My Apps, put them where the old ones are, restart OpenAlgo, then "Test now" on the Auto login page |
+| Auto-login's TOTP key and Upstox PIN | the owner vault, `db/sudarshan-vault/` (sealed with a key derived from the pepper) | Auto-login pauses until both are saved again | The Auto login page; they are never shown again once saved |
+| Upstox Analytics Token | `/etc/sudarshan/upstox_analytics_token` (root-provisioned), and the family account's own copy in `/etc/sudarshan-family/feed-token` | The price feed, the Portfolio page and the family view. **It is shared with TRINETRA: making a new one in Upstox ends the old one for TRINETRA too.** Never make a new one casually | Only together with TRINETRA's operators: new token in Upstox, then the file here and TRINETRA's own copy by its own runbook |
+| The owner's Telegram bot token | OpenAlgo's database, sealed (Telegram page) | All Telegram messages and commands until the new token is saved and the bot started | BotFather, `/revoke`; then the Telegram page in the app |
+| The family bot's token and the family service's keys | `/etc/sudarshan-family/` (the family account only) | The family view's Telegram messages or sign-ins | "The family view's one-time set-up": run the set-up again from the laptop |
+| The feed's client keys | `/etc/sudarshan/feed-clients/` (one file per service) | Nothing you see: a deleted key is made again, new, at the deploy tool's next run | Delete the file; wait for the next run |
+| The backup certificate | public half in `/etc/sudarshan/offsite.json`; **the private key only on your laptop and on one offline copy** | Offsite copies made with the old certificate still open only with the old private key: keep it until those copies have expired | "Setting up the offsite copy", steps 6 to 9 |
+| The offsite upload link | `/etc/sudarshan/offsite.json` (mode 600) | Offsite copies stop. It also expires by itself; you are told 15 days ahead | The same steps 4, 5 and 9 |
+| The assistant's signing key | `keys/` in the app folder | Every AI connection ends; each must connect and be approved again | Stop OpenAlgo, move the key file away, start OpenAlgo (it makes a new one). Normally you never need to: "Ending its access, at once" does the same job |
+| The outside heartbeat's link | `/etc/sudarshan/watch.env` (root:sudarshan, mode 640) | The heartbeat service stops hearing from the server and alerts you | Make a new check address in the heartbeat service and replace the line ("The outside heartbeat: the owner's steps") |
+| The risk layer's confirm phrase | `db/sudarshan_risk.db` | Nothing; it is asked for at the next change | Settings > Risk; if forgotten, "The risk layer's confirm phrase, if it is forgotten" |
+
+All of these except the private backup key are inside the nightly archive (`/etc/sudarshan`,
+the `.env`, the databases, the vault), which is why an archive is as secret as the server.
+
+## If the server is lost (M19.8)
+
+For the day the server cannot be brought back: deleted, broken beyond repair, or taken over. Do
+the steps in order. What you need before that day: the private backup key and its passphrase
+(laptop and one offline copy), the login to the cloud console, and this README.
+
+1. **A new server of the same shape, in the same cloud account, with the same reserved public
+   address attached.** The address is what the phones' installed apps, every TradingView alert
+   and Upstox's registered address all point at; with it kept, none of them changes. If the
+   address cannot be kept, do "Changing the server's registered address" below as well.
+2. **Install OpenAlgo and SUDARSHAN at the release the archive names** (`MANIFEST.json` inside
+   the archive says which).
+3. **Restore from the newest good offsite copy:** "Restoring from the offsite copy" above, then
+   the manual steps under "Restoring". The vault and the `.env` of the same archive go back
+   together.
+4. **Issue the security certificate again** (a few minutes; the app's address is unchanged).
+5. **Run the family set-up again** ("The family view's one-time set-up"): it makes the family
+   account, its firewall rules and its files again; the keys come from the restored files.
+6. **Start, then check:** `python -m sudarshan.ops.watch --check` (every line `fine` or `off`),
+   "Test now" on the Auto login page, one test alert from TradingView in Analyze mode, and the
+   heartbeat service showing the check up again.
+7. **What is lost:** at most the day since the last archive of SUDARSHAN's own records. The
+   journal reads the day's fills from Upstox again at its next reconcile; market alerts,
+   watchlists and settings come back as of the archive. Your orders, positions and holdings are
+   at Upstox and were never only here.
+8. **Other systems on the server are not restored by any of this.** TRINETRA is restored by its
+   own operators from its own runbook; nothing here touches it.
+
+What has not been proven: an archive has not yet been restored onto a new server from end to end.
+The restore drill of a later release proves an archive reads back; do one full restore onto a
+spare server when you can.
+
+## Changing the server's registered address (M19.9)
+
+Since 1 April 2026 an order sent through the API is accepted only from an address registered with
+the broker. Upstox lets you register a primary and a secondary address and change them **once in
+a calendar week**, and says that a change ends the access tokens in use. The server's reserved
+address is therefore something to keep (step 1 above). If it must change:
+
+1. Pick a day the market is closed. Check that the registered address was not already changed
+   this calendar week; if it was, API orders from the new address must wait for next week, and
+   the Upstox app is your way to trade until then.
+2. Ask Upstox support first whether the change also ends the Analytics Token. If it does,
+   TRINETRA is affected and its operators must be ready the same evening.
+3. Change the address in Upstox's My Apps.
+4. Every Upstox login in use has ended: press "Test now" on the Auto login page and see it
+   succeed. Then check that prices arrive (the feed uses the Analytics Token).
+5. While the app's own address is this address, everything that names it changes too: the
+   security certificate, every phone's installed app (remove and add again), every TradingView
+   alert's webhook address, and `MCP_PUBLIC_URL` if the assistant is in use. A name for the server
+   in place of the number makes this step disappear; that is worth settling before family phones
+   install the app.
+6. Note the date: the next change is possible from the next calendar week.
+
+If a second reserved address costs nothing in your cloud account, registering it at Upstox ahead
+of time as the secondary turns a forced move into no wait at all. Whether a secondary may sit
+registered and unused for months is a question for Upstox support.
+
+SUDARSHAN sends at most 5 orders a second (`UPSTOX_ORDER_MAX_PER_SECOND`), half of the 10 a
+second above which an algo must be registered with the exchange.
+
+## The Telegram bot's name and picture (M16.2)
+
+Five minutes in Telegram, in your chat with BotFather, once. Nothing on the server changes.
+
+1. Send `/mybots` and choose your SUDARSHAN bot.
+2. Edit Bot, Edit Name: `सुदर्शन · SUDARSHAN`.
+3. Edit Bot, Edit About: `Personal trading alerts. Private.` Edit Description: the same line.
+   Do not put your name, the broker or the server's address in either.
+4. Edit Bot, Edit Botpic: send the app's icon as a photo. It is `android-chrome-512x512.png` in
+   the app's `frontend/public/images/` folder; the same picture is at
+   `https://<your app's address>/images/android-chrome-512x512.png`.
+5. Edit Bot, Edit Commands: send the list below as one message, so the bot's menu shows them.
+
+```
+status - Connection and mode
+positions - Open positions
+orderbook - Today's orders
+tradebook - Today's trades
+holdings - Holdings
+funds - Funds
+pnl - Today's P&L
+quote - A quote: /quote SYMBOL EXCHANGE
+chart - A chart: /chart SYMBOL EXCHANGE
+killswitch - Stop new orders, or resume
+menu - Buttons for the above
+help - What the bot can do
+```
+
+`/closeall`, `/mode`, `/stoppython`, `/link` and `/unlink` work too and are left out of the menu
+on purpose, so they are not one tap away. The bot answers only an account that was linked with
+your API key, and `/killswitch` only in your private chat with it.
+
+## Records to keep each year (M19.10)
+
+SUDARSHAN's books are your working record. The statements Upstox issues are the record the
+regulator and the tax office recognise: keep both. How many years the tax rules require is a
+question for your CA; this list assumes 8 financial years.
+
+Each April, for the year just ended:
+
+| record | where it comes from | who keeps it |
+|---|---|---|
+| contract notes, ledger, tradebook, P&L statement and tax statement for the year | Upstox, by email and from its reports pages | you: download them and file them with the year |
+| bank statements and every transfer to and from the broker | your bank, Upstox | you |
+| the strategy behind each automated order: the TradingView alert's name and the Pine script as it was | TradingView; the order's strategy name in the journal | you: export the scripts with the year |
+| every fill, paired into trades, with charges; the monthly statements and the tax pack | the journal (`journal.db`, the Reports page) | SUDARSHAN, for ever; download the tax pack and the year's statements |
+| every order request and the broker's answer | OpenAlgo's `logs.db` | SUDARSHAN, for ever |
+| what the risk layer refused, and the kill switch's history | `sudarshan_risk.db` (Settings > Risk > History) | SUDARSHAN, for ever |
+| market alerts that fired | the alerts' history | SUDARSHAN |
+| one full archive of the server from just after 31 March | the nightly backup and its offsite copy | you: download that offsite copy before it expires (about 60 days) and keep it with the year, encrypted as it is |
+
+A later release adds one records pack a year (the journal's statements with the order, risk and
+alert history as files) and keeps one archive per financial year by itself; until then the last
+row is done by hand.
+
+## The AI assistant (M17)
+
+SUDARSHAN's assistant is your own AI app connected to OpenAlgo's remote MCP, read-only. It ships
+**switched off** and stays off until you turn Remote MCP on yourself (Admin, Remote MCP). The
+tools SUDARSHAN adds for it come in a later release; what this release does is make sure the
+assistant can never place, change or cancel an order, and that its access ends the moment you
+want it to.
+
+**It cannot be switched on with order tools (M17.9).** Every deploy writes three settings into
+OpenAlgo's `.env` (the list in "OpenAlgo settings that ship with a release"):
+
+| setting | value | what it does |
+|---|---|---|
+| `OPENALGO_MCP_READ_ONLY` | `1` | no tool that places, changes or cancels an order, switches the trading mode or sends a Telegram message exists in the MCP server at all |
+| `MCP_OAUTH_WRITE_SCOPE_ENABLED` | `False` | the right to trade is never offered to an AI app and never granted |
+| `MCP_OAUTH_REQUIRE_APPROVAL` | `True` | an AI app that registers itself waits for your approval on the Remote MCP page |
+
+When SUDARSHAN starts with Remote MCP on, it checks the first two. If either would allow orders,
+the app starts as usual **without** the assistant (its address answers "not found") and the log
+says: "The assistant is switched off: its settings would allow orders. Set
+OPENALGO_MCP_READ_ONLY=1 and MCP_OAUTH_WRITE_SCOPE_ENABLED=False." An AI setting never stops
+trading. Under these locks nothing else changed: every order from any source still meets the risk
+guards and the kill switch.
+
+**Ending its access, at once.** Each of these ends every AI connection on its next request, not
+after the 15 minutes its pass would otherwise last, and closes any connection it holds open:
+
+- the kill switch, once the risk guard covers Live orders (while it checks Analyze mode only, it
+  leaves the assistant alone, as its report says);
+- the Remote MCP page's own kill switch ("Revoke all MCP tokens");
+- a logout, a password change or a password reset.
+
+Turning the kill switch off, or logging in again, brings nothing back: connect the assistant
+again in your AI app and give consent again. To end one connection only, use Revoke beside it on
+the Remote MCP page; that one can still work for up to 15 minutes.
+
+**The Agent page** (`/agent`) is OpenAlgo's own chat, which needs a paid model key. SUDARSHAN
+leaves it as it ships: not set up, with its trading switch off. The kill switch stops it too.
+
+**From a laptop instead (M17.2).** OpenAlgo's MCP server can also run on a laptop
+(`mcp/mcpserver.py`, started by Claude Desktop or Claude Code). Use it only if the connector
+cannot be added, and then:
+
+- set `OPENALGO_MCP_READ_ONLY=1` in that client's settings for the server. Without it the laptop
+  is offered every tool, the order tools included;
+- the API key you give it is an order-capable secret now sitting on that laptop: treat a lost or
+  lent laptop as a lost phone ("Signing out every device, and a lost phone" above, steps 2 and 3);
+- reach the server through SSH only, never by opening a port:
+  `ssh -N -L 5000:127.0.0.1:5000 <you>@<server>`, with `http://127.0.0.1:5000` as the host.
+
+Tests: `sudarshan/assistant/tests/`, `sudarshan/guard/tests/test_guard_migration.py`.

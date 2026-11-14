@@ -212,8 +212,9 @@ describe('the strike sheet', () => {
     expect(s.getByText('Straddle 340.55')).toBeInTheDocument()
     expect(s.getAllByText('1,23,456', { selector: 'td' })).toHaveLength(2)
     expect(sheet().textContent).not.toMatch(/OI change/i)
+    // O9: the phone's chain, on the row's own expiry and strike.
     expect(s.getByText('Open option chain').closest('a')?.getAttribute('href')).toBe(
-      '/optionchain?exchange=NFO&underlying=NIFTY'
+      '/options/NFO/NIFTY?expiry=2026-11-24&strike=25900'
     )
   })
 

@@ -9,6 +9,13 @@ check_session_validity answers a fetch with, leaving the session as it was.
 
 Each test says how the code before G5 failed it. The owner's screens fetch only the API key and
 the stream address, and those answer the owner's session as before.
+
+The clock. The session check reads the time of day (utils.session), so every test here runs on a
+moment it names, read by the check and by the fixture alike, and each cookie's login time is built
+from the check's own last daily expiry. The fixture once read the real clock and logged the owner
+in "30 minutes ago": on a run between 00:00 and 00:30 IST that login lay before the 00:00 expiry
+this file sets, and every owner request was rightly refused. Each test runs at mid-session, at
+00:05 IST (where it failed) and at 23:58 IST.
 """
 
 from __future__ import annotations
@@ -23,9 +30,16 @@ from flask import Flask
 # after that is kept by that server only and lost at the next init_app.
 import blueprints.websocket_example as market
 import database.auth_db as auth_db
+import utils.session as session_check
 from database import user_db
 
 IST = pytz.timezone("Asia/Kolkata")
+#: The moments every test runs at (IST). The daily expiry this file sets is 00:00.
+MOMENTS = {
+    "mid-session": IST.localize(datetime(2026, 11, 16, 11, 0)),
+    "00:05, just past the expiry": IST.localize(datetime(2026, 11, 15, 0, 5)),
+    "23:58, just before the expiry": IST.localize(datetime(2026, 11, 14, 23, 58)),
+}
 OWNER = "owner"
 FAKE_API_KEY = "g5-fake-api-key-for-tests"  # pragma: allowlist secret
 #: Every /api/websocket/* rule: its method, and the body a POST sends.
@@ -70,10 +84,28 @@ class _Service:
         return {"hits": 0}
 
 
+class _Clock(datetime):
+    """What utils.session reads as ``datetime``: ``now`` is the moment the test names."""
+
+    at = MOMENTS["mid-session"]
+
+    @classmethod
+    def now(cls, tz=None):
+        return cls.at.astimezone(tz) if tz is not None else cls.at.replace(tzinfo=None)
+
+
+@pytest.fixture(params=list(MOMENTS), autouse=True)
+def clock(request, monkeypatch):
+    """The session check's clock, stopped at one of MOMENTS; ``browser`` reads the same one."""
+    monkeypatch.setattr(_Clock, "at", MOMENTS[request.param])
+    monkeypatch.setattr(session_check, "datetime", _Clock)
+    return _Clock
+
+
 @pytest.fixture
-def app(monkeypatch):
+def app(monkeypatch, clock):
     """The real blueprint on a bare app, with the services behind each view replaced by fakes
-    that say they were reached. The daily expiry is 00:00 IST, so a login yesterday is past it."""
+    that say they were reached. The daily expiry is 00:00 IST."""
     monkeypatch.delenv("DISABLE_SESSION_EXPIRY", raising=False)
     monkeypatch.setenv("SESSION_EXPIRY_TIME", "00:00")
     for name in ("get_websocket_status", "get_websocket_subscriptions", "get_market_data"):
@@ -110,10 +142,19 @@ def app(monkeypatch):
     auth_db.session_cutoff_cache.invalidate()
 
 
-def browser(app, who: str):
-    """A client whose cookie is the session ``who`` names."""
+def browser(app, who: str, login=None):
+    """A client whose cookie is the session ``who`` names.
+
+    The login time comes from the session check's own clock and its last daily expiry: half an
+    hour ago, or the expiry itself when that is later, so the owner's login is never past it;
+    "past the daily expiry" logged in a minute before it. ``login`` names another time."""
     client = app.test_client()
-    now = datetime.now(IST)
+    now = session_check.datetime.now(IST)
+    expiry = session_check.last_daily_expiry(now)
+    if login is None:
+        login = max(now - timedelta(minutes=30), expiry)
+        if who == "past the daily expiry":
+            login = expiry - timedelta(minutes=1)
     with client.session_transaction() as session:
         if who == "none":
             return client
@@ -121,10 +162,10 @@ def browser(app, who: str):
         if who == "password step only":
             return client
         session["logged_in"] = True
-        session["login_time"] = (now - timedelta(days=1) if who == "past the daily expiry"
-                                 else now - timedelta(minutes=30)).isoformat()  # fmt: skip
+        session["login_time"] = login.isoformat()
     if who == "ended on every device":
-        assert auth_db.set_sessions_valid_after(OWNER, now - timedelta(minutes=5))
+        assert login < now  # the logout of every device came after the login, and before now
+        assert auth_db.set_sessions_valid_after(OWNER, login + (now - login) / 2)
     return client
 
 
@@ -169,6 +210,21 @@ def test_the_owner_s_valid_session_is_answered_as_before(app, method, path, body
         assert data.get("status") != "error"
     else:
         assert data == {"reached": data["reached"]}
+
+
+def test_a_login_before_the_daily_expiry_is_refused_after_it_and_one_since_is_answered(app, clock):
+    """The rule the fixture once tripped over, at the moment it did (CI, Sun 15 Nov 2026, 00:05
+    IST): half an hour ago is yesterday's login, and it ended at 00:00. Not a fault of the check."""
+    now = clock.now(IST)
+    expiry = session_check.last_daily_expiry(now)
+    assert expiry == now.replace(hour=0, minute=0, second=0, microsecond=0)
+    if now - expiry < timedelta(minutes=30):
+        half_an_hour_ago = browser(app, "owner", login=now - timedelta(minutes=30))
+        answer = half_an_hour_ago.get("/api/websocket/apikey")
+        assert (answer.status_code, answer.get_json()) == (401, REFUSED)
+    for login, status in ((expiry - timedelta(seconds=1), 401), (expiry, 200), (now, 200)):
+        answer = browser(app, "owner", login=login).get("/api/websocket/apikey")
+        assert answer.status_code == status, login.isoformat()
 
 
 def test_the_market_namespace_s_disconnect_handler_runs_to_its_end(app, monkeypatch):
