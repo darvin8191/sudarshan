@@ -25,8 +25,8 @@ import type { EachAnswer } from './sent'
 /** A send that is not a refusal: the app could not confirm it, or no answer came at all. */
 export type HeldOutcome = 'unconfirmed' | 'unanswered'
 
-/** The four sends the books make, for the words their toasts use. */
-export type SendKind = 'exit' | 'exitAll' | 'cancel' | 'cancelAll'
+/** The sends the books make, for the words their toasts use; a GTT's cancel from B1. */
+export type SendKind = 'exit' | 'exitAll' | 'cancel' | 'cancelAll' | 'gttCancel'
 
 /** Whether a body is the app's own answer: a JSON object with its status word. */
 export function appAnswered(body: unknown): body is { status: string; message?: unknown } {
@@ -90,6 +90,19 @@ export function refusalReason(error: unknown): string | null {
   const message =
     typeof data === 'object' && data !== null ? (data as { message?: unknown }).message : null
   return typeof message === 'string' && message.trim() ? message.trim() : null
+}
+
+/** An error code the way Upstox writes one before its words ("UDAPI1150: "). */
+const ERROR_CODE = /\b[A-Z]{3,}\d{3,}\s*:\s*/g
+
+/**
+ * Upstox's own words without its error code, which a trader cannot act on: the
+ * page's side of the server's `_refusal_words`, for an answer that still
+ * carries one (a GTT's refusal does). Empty when nothing is left.
+ */
+export function withoutCode(text: unknown): string {
+  if (typeof text !== 'string') return ''
+  return text.replace(ERROR_CODE, '').split(/\s+/).filter(Boolean).join(' ')
 }
 
 /** An order id as the app names it, or null. */
@@ -157,6 +170,8 @@ export const NOT_CONFIRMED = {
     'This cancel is not confirmed: it may have gone through. Check the order’s status before cancelling it again.',
   cancelAll:
     'Cancel all is not confirmed: some cancels may have gone through. Check the orders’ status before cancelling again.',
+  gttCancel:
+    'This GTT cancel is not confirmed: it may have gone through. Check the GTT tab before cancelling it again.',
 } as const
 
 /**
@@ -171,6 +186,8 @@ export const NO_ANSWER = {
     'No answer came for this cancel: it may still be going through. Wait for the order’s status to change before cancelling again.',
   cancelAll:
     'No answer came for Cancel all: its cancels may still be going through. Wait for the orders’ status to change before cancelling again.',
+  gttCancel:
+    'No answer came for this GTT cancel: it may still be going through. Wait for the GTT tab to show it gone before cancelling again.',
 } as const
 
 /**
