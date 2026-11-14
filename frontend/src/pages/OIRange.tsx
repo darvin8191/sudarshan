@@ -22,11 +22,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Switch } from '@/components/ui/switch'
 import { useSupportedExchanges } from '@/hooks/useSupportedExchanges'
 import Plot from '@/lib/Plot2D'
 import { serverSentence } from '@/lib/serverSentence'
 import { useThemeStore } from '@/stores/themeStore'
+import { TimedRefresh } from '@/sudarshan/options/TimedRefresh'
 import { showToast } from '@/utils/toast'
 
 // Default number of strikes shown above and below ATM when the page first loads
@@ -559,18 +559,15 @@ export default function OIRange() {
             {isLoading ? 'Loading...' : 'Refresh'}
           </Button>
 
-          {/* Auto-refresh toggle (off by default) */}
-          <div className="flex items-center gap-2">
-            <Switch
-              id="auto-refresh"
-              checked={autoRefresh}
-              onCheckedChange={setAutoRefresh}
-              disabled={!selectedExpiry}
-            />
-            <label htmlFor="auto-refresh" className="text-sm whitespace-nowrap cursor-pointer">
-              Auto-refresh (1m)
-            </label>
-          </div>
+          {/* SUDARSHAN (M11.5, T6): the timer is off unless switched on, and says what it is */}
+          <TimedRefresh
+            id="auto-refresh"
+            everyMs={AUTO_REFRESH_MS}
+            on={autoRefresh}
+            onChange={setAutoRefresh}
+            updatedAt={lastUpdated ? lastUpdated.getTime() : null}
+            disabled={!selectedExpiry}
+          />
         </div>
       </div>
 
@@ -719,11 +716,6 @@ export default function OIRange() {
           <Badge variant="secondary" className="text-sm px-3 py-1">
             Total PE OI: {formatNumber(rangeStats.totalPe)}
           </Badge>
-          {lastUpdated && (
-            <span className="text-xs text-muted-foreground ml-auto">
-              Last updated: {lastUpdated.toLocaleTimeString()}
-            </span>
-          )}
         </div>
       )}
 
