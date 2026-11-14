@@ -870,6 +870,68 @@ for (const [layout, viewport] of [
     })
   })
 
+
+/** What the phone keeps of an instrument's drawings: each one's tool, as saved. */
+const savedTools = (page: Page) =>
+  page.evaluate((key) => {
+    const doc = JSON.parse(localStorage.getItem(key) ?? 'null') as {
+      drawings?: Array<{ tool: string }>
+    } | null
+    return (doc?.drawings ?? []).map((drawing) => drawing.tool)
+  }, `sudarshan-chart-draw:${EXCHANGE}:${SYMBOL}`)
+
+for (const [layout, viewport] of [
+  ['upright', { width: 360, height: 800 }],
+  ['on its side', { width: 800, height: 360 }],
+] as const)
+  test.describe(`drawing on the phone chart ${layout}, ${viewport.width} x ${viewport.height}`, () => {
+    test.use({ viewport })
+
+    test('a level by one tap, a trend line by two, Undo, and both kept for the instrument', async ({ page }, info) => {
+      const { proxy } = await serve(page, { now: ist(10, 0, 30) })
+      await open(page)
+      await page.clock.runFor(500)
+      await tick(page, proxy(), ist(10, 0, 31), 2)
+      await page.getByRole('button', { name: 'Draw' }).click()
+      const row = page.getByTestId('draw-row')
+      await expect(row.getByRole('button')).toHaveCount(7)
+      await page.screenshot({ path: info.outputPath('draw-row.png') })
+      await checkScreen(page)
+
+      const box = (await page.getByTestId('chart-surface').boundingBox()) as DOMRect
+      const at = (fx: number, fy: number) => [box.x + box.width * fx, box.y + box.height * fy] as const
+      const tap = async (fx: number, fy: number) => {
+        await page.touchscreen.tap(...at(fx, fy))
+        await page.clock.runFor(100)
+      }
+      await row.getByRole('button', { name: 'Horizontal line' }).click()
+      await expect(row.getByRole('status')).toHaveText('Horizontal line: tap the chart to place it.')
+      await tap(0.45, 0.5)
+      await expect.poll(() => savedTools(page)).toEqual(['horizontal-line'])
+      // Placed: the tool is let go, so the next touch does not draw another.
+      await expect(row.getByRole('button', { name: 'Horizontal line' })).toHaveAttribute('aria-pressed', 'false')
+
+      await row.getByRole('button', { name: 'Trend line' }).click()
+      await expect(row.getByRole('status')).toHaveText('Trend line: tap where it starts, then where it ends.')
+      await tap(0.25, 0.62)
+      expect(await savedTools(page), 'one tap is half a trend line').toEqual(['horizontal-line'])
+      await tap(0.6, 0.42)
+      await expect.poll(() => savedTools(page)).toEqual(['horizontal-line', 'trend-line'])
+      await page.screenshot({ path: info.outputPath('drawn.png') })
+      await checkScreen(page)
+
+      await page.getByRole('button', { name: 'Undo' }).click()
+      await expect.poll(() => savedTools(page)).toEqual(['horizontal-line'])
+      await page.getByRole('button', { name: 'Done' }).click()
+      await expect(row).toHaveCount(0)
+
+      // Another instrument starts clean, and the level is there when this one is opened again.
+      await page.goto(`/chart/${EXCHANGE}/${SYMBOL}`)
+      await expect(page.getByTestId('phone-chart')).toBeVisible()
+      await expect.poll(() => savedTools(page)).toEqual(['horizontal-line'])
+    })
+  })
+
 for (const [layout, viewport] of [
   ['upright', { width: 360, height: 800 }],
   ['on its side', { width: 800, height: 360 }],

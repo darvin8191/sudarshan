@@ -33,6 +33,14 @@ const fakes = vi.hoisted(() => ({
     barX: ReturnType<typeof vi.fn>
     priceAt: ReturnType<typeof vi.fn>
     setOverlays: ReturnType<typeof vi.fn>
+    drawings: {
+      setTool: ReturnType<typeof vi.fn>
+      cancel: ReturnType<typeof vi.fn>
+      undo: ReturnType<typeof vi.fn>
+      setNote: ReturnType<typeof vi.fn>
+      noteOf: ReturnType<typeof vi.fn>
+      placed(): void
+    }
     moveLines(ys: Array<{ id: string; y: number }>): void
   }>,
   /** The books the chart's lines are read from (C5). */
@@ -122,6 +130,28 @@ vi.mock('./phoneChart', () => ({
     }))
     barX = vi.fn(() => 120)
     priceAt = vi.fn(() => fakes.heldPrice)
+    /** The drawings host (C7), as the page drives it. */
+    drawings = (() => {
+      let state = { tool: null as string | null, count: 0, canUndo: false, failed: false }
+      const heard = new Set<() => void>()
+      const set = (next: Partial<typeof state>) => {
+        state = { ...state, ...next }
+        for (const listener of heard) listener()
+      }
+      return {
+        state: () => state,
+        subscribe: (listener: () => void) => {
+          heard.add(listener)
+          return () => heard.delete(listener)
+        },
+        setTool: vi.fn(async (tool: string | null) => set({ tool })),
+        cancel: vi.fn(() => set({ tool: null })),
+        undo: vi.fn(() => set({ canUndo: false, count: 0 })),
+        setNote: vi.fn(),
+        noteOf: vi.fn(() => ''),
+        placed: () => set({ tool: null, count: state.count + 1, canUndo: true }),
+      }
+    })()
     /** The lines the page laid over the chart (C5), and where the host says each stands. */
     setOverlays = vi.fn()
     private ys: Array<{ id: string; y: number }> = []
@@ -1348,7 +1378,7 @@ describe('the phone on its side (C10)', () => {
     held = phoneHeld('sideways')
     await opened()
     const buttons = within(screen.getByTestId('chart-strip')).getAllByRole('button')
-    expect(buttons).toHaveLength(6)
+    expect(buttons).toHaveLength(7)
     for (const button of buttons)
       expect(button.className, button.textContent ?? '').toMatch(/\b(min-)?h-12\b|\bsize-12\b/)
   })
@@ -1516,5 +1546,90 @@ describe('the lines of the charted instrument (C5)', () => {
     await opened('/chart/NSE_INDEX/NIFTY')
     expect(tradingApi.getPositions).not.toHaveBeenCalled()
     expect(screen.queryByTestId('chart-lines')).toBeNull()
+  })
+})
+
+describe('drawing on the phone chart (C7)', () => {
+  it('opens the tools over the chart from Draw, holds the one tapped and says how to place it', async () => {
+    await opened()
+    expect(screen.queryByTestId('draw-row')).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Draw' }))
+    const row = within(screen.getByTestId('draw-row'))
+    expect(row.getAllByRole('button').map((button) => button.getAttribute('aria-label'))).toEqual([
+      'Horizontal line',
+      'Trend line',
+      'Ray',
+      'Rectangle',
+      'Fib retracement',
+      'Text note',
+      'Measure',
+    ])
+    expect(row.getByRole('status')).toHaveTextContent('Pick a tool, then tap the chart.')
+    await userEvent.click(row.getByRole('button', { name: 'Trend line' }))
+    expect(chart().drawings.setTool).toHaveBeenLastCalledWith('trend-line')
+    expect(row.getByRole('button', { name: 'Trend line' })).toHaveAttribute('aria-pressed', 'true')
+    expect(row.getByRole('status')).toHaveTextContent(
+      'Trend line: tap where it starts, then where it ends.'
+    )
+    await userEvent.click(row.getByRole('button', { name: 'Horizontal line' }))
+    expect(row.getByRole('status')).toHaveTextContent('Horizontal line: tap the chart to place it.')
+  })
+
+  it('keeps Cancel and Undo by the thumb: Cancel lets the tool go, Undo takes back the last drawing', async () => {
+    await opened()
+    await userEvent.click(screen.getByRole('button', { name: 'Draw' }))
+    expect(screen.getByRole('button', { name: 'Undo' })).toBeDisabled()
+    await userEvent.click(screen.getByRole('button', { name: 'Ray' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(chart().drawings.cancel).toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: 'Ray' })).toHaveAttribute('aria-pressed', 'false')
+    act(() => chart().drawings.placed())
+    await userEvent.click(screen.getByRole('button', { name: 'Undo' }))
+    expect(chart().drawings.undo).toHaveBeenCalledOnce()
+    await userEvent.click(screen.getByRole('button', { name: 'Done' }))
+    expect(screen.queryByTestId('draw-row')).toBeNull()
+  })
+
+  it('does not read a candle under a held finger while the tools are out', async () => {
+    await opened()
+    await userEvent.click(screen.getByRole('button', { name: 'Draw' }))
+    const down = new MouseEvent('pointerdown', { bubbles: true, clientX: 120, clientY: 200 })
+    Object.assign(down, { pointerId: 1, pointerType: 'touch' })
+    fireEvent(screen.getByTestId('chart-surface'), down)
+    await new Promise((resolve) => setTimeout(resolve, 700))
+    expect(screen.queryByTestId('chart-readout')).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Done' }))
+    await hold()
+    expect(screen.getByTestId('chart-readout')).toBeVisible()
+  })
+
+  it('asks for the words of a note as soon as it is placed, and removes one left empty', async () => {
+    await opened('/chart/NSE/SBIN', ['/dashboard'])
+    act(() => chart().opts.callbacks.onDrawNote?.('n1'))
+    const sheet = await screen.findByRole('dialog', { name: 'Text note' })
+    await userEvent.type(within(sheet).getByLabelText('Note'), 'Day high')
+    await userEvent.click(within(sheet).getByRole('button', { name: 'Save note' }))
+    expect(chart().drawings.setNote).toHaveBeenLastCalledWith('n1', 'Day high')
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    act(() => chart().opts.callbacks.onDrawNote?.('n2'))
+    await userEvent.click(
+      within(await screen.findByRole('dialog', { name: 'Text note' })).getByRole('button', {
+        name: 'Remove note',
+      })
+    )
+    expect(chart().drawings.setNote).toHaveBeenLastCalledWith('n2', '')
+  })
+
+  it('offers Draw on the strip when the phone is on its side', async () => {
+    const held = phoneHeld('sideways')
+    try {
+      await opened()
+      await userEvent.click(
+        within(screen.getByTestId('chart-strip')).getByRole('button', { name: 'Draw' })
+      )
+      expect(screen.getByTestId('draw-row')).toBeVisible()
+    } finally {
+      held.spy.mockRestore()
+    }
   })
 })

@@ -66,6 +66,7 @@ import { volumePoint } from '@/lib/trading/volumeSettings'
 import type { AppMode } from '@/stores/themeStore'
 import { CHART_BRANDING } from '@/sudarshan/brand'
 import type { LineY, OverlayLine, OverlayMarker, Overlays } from './overlays'
+import { PhoneDrawings } from './phoneDrawings'
 import {
   type CatalogueEntry,
   legendValues,
@@ -138,6 +139,8 @@ export interface PhoneChartCallbacks {
   onStudies?(): void
   /** The five-level book, on every depth frame of the charted instrument (C9). */
   onDepth?(depth: MarketDepth): void
+  /** A text note was placed and waits for its words (C7). */
+  onDrawNote?(id: string): void
 }
 
 /** One legend line (C3): a study's name and settings, its values at a bar, or why it is not drawn. */
@@ -226,6 +229,10 @@ export class PhoneChart {
     lines: [],
     markers: [],
   }
+  /** The instrument's own drawings (C7), swapped between the charts this host builds. */
+  readonly drawings = new PhoneDrawings((id) => {
+    if (!this.destroyed) this.cb.onDrawNote?.(id)
+  })
   /** Each line on the current chart, by its id. */
   private readonly lineApis = new Map<string, PriceLine>()
   private markerLayer: SeriesMarkers | null = null
@@ -333,12 +340,14 @@ export class PhoneChart {
     this.bars = []
     const label = intervalLabel(this.interval)
     this.setLoad({ kind: 'loading', symbol, interval: label })
+    this.drawings.detach()
     this.chart.destroy()
     ;({ chart: this.chart, price: this.price, volume: this.volume } = this.buildChart(exchange))
     this.chart.setDataContext({ symbol, exchange, interval: this.interval })
     applySessionHours(this.chart, exchange, this.apiKey, this.stopsAt)
     this.applyStudies()
     this.applyOverlays()
+    this.drawings.attach(this.chart, symbol, exchange)
     const to = this.frames.clock.nowSec()
     const request = {
       symbol,
@@ -779,6 +788,7 @@ export class PhoneChart {
     const sym = this.sym
     if (!sym || this.destroyed) return
     const range = this.bars.length ? this.chart.getVisibleLogicalRange() : null
+    this.drawings.detach()
     this.chart.destroy()
     ;({ chart: this.chart, price: this.price, volume: this.volume } = this.buildChart(sym.exchange))
     this.chart.setDataContext({
@@ -789,6 +799,7 @@ export class PhoneChart {
     applySessionHours(this.chart, sym.exchange, this.apiKey, this.stopsAt)
     this.applyStudies()
     this.applyOverlays()
+    this.drawings.attach(this.chart, sym.symbol, sym.exchange)
     if (!this.bars.length) return
     this.draw()
     if (range) this.chart.setVisibleLogicalRange(range)
@@ -813,6 +824,7 @@ export class PhoneChart {
       /* already closed */
     }
     this.data.destroy()
+    this.drawings.detach()
     this.chart.destroy()
   }
 

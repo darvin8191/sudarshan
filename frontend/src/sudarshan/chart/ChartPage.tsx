@@ -42,9 +42,11 @@ import {
 import { Link, Navigate, useLocation, useNavigate, useParams } from 'react-router'
 import { PlaceOrderDialog } from '@/components/trading/PlaceOrderDialog'
 import { SymbolSearchDialog } from '@/components/trading/SymbolSearchDialog'
+import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { chartHref } from '@/lib/trading/chartLink'
 import { type ChartStateView, chartStateCopy, createChartStateGate } from '@/lib/trading/chartState'
+import { drawToolIcon } from '@/lib/trading/drawTools'
 import { priceDp } from '@/lib/trading/format'
 import { ChromeIcon } from '@/lib/trading/glyphs'
 import { type IntervalGroup, pickInterval as offeredInterval } from '@/lib/trading/intervals'
@@ -61,6 +63,7 @@ import { useNow } from '@/sudarshan/dashboard/hooks'
 import { LiveLine } from '@/sudarshan/dashboard/LiveLine'
 import { TREND_TEXT, TrendArrow } from '@/sudarshan/dashboard/Trend'
 import { ticketProduct } from '@/sudarshan/ticket/productPref'
+import { BottomSheet } from '@/sudarshan/watchlist/BottomSheet'
 import { useOpenGuard } from '@/sudarshan/watchlist/openGuard'
 import { showToast } from '@/utils/toast'
 import {
@@ -73,6 +76,7 @@ import {
   searchSymbols,
 } from './api'
 import { DepthSheet, DepthStrip } from './DepthStrip'
+import { DRAW_ROW, DrawRow } from './DrawRow'
 import { IndicatorSettingsSheet } from './IndicatorSettingsSheet'
 import { IndicatorSheet } from './IndicatorSheet'
 import { LineLabels } from './LineLabels'
@@ -186,6 +190,7 @@ type Sheet =
   | { sheet: 'search' }
   | { sheet: 'alert'; id?: number }
   | { sheet: 'line'; ids: string[] }
+  | { sheet: 'note'; id: string }
   | { sheet: 'timeframe' }
   | { sheet: 'style' }
   | { sheet: 'indicators' }
@@ -203,6 +208,7 @@ function readSheet(state: unknown): Sheet | null {
     ids?: unknown
   }
   if (value.sheet === 'search') return { sheet: 'search' }
+  if (value.sheet === 'note' && typeof value.id === 'string') return { sheet: 'note', id: value.id }
   if (value.sheet === 'alert')
     return typeof value.id === 'number' ? { sheet: 'alert', id: value.id } : { sheet: 'alert' }
   if (
@@ -315,6 +321,10 @@ const ChartScreen = memo(function ChartScreen({
   const addTo = sheet?.sheet === 'ticket' ? sheet.product : undefined
   const searching = sheet?.sheet === 'search'
   const sideways = usePhoneSideways()
+  /** The drawing tools are over the chart (C7); a held finger then places, not reads. */
+  const [drawing, setDrawing] = useState(false)
+  /** Asks for a placed note's words, as the page is now. */
+  const askNote = useRef<(id: string) => void>(() => {})
 
   useEffect(() => {
     saveLastInstrument(symbol, exchange)
@@ -368,6 +378,7 @@ const ChartScreen = memo(function ChartScreen({
         onSessionClose: setClosesAt,
         onStudies: () => setStudyVersion((n) => n + 1),
         onDepth: (depth) => prices.setDepth(depth),
+        onDrawNote: (id) => askNote.current(id),
       },
     })
     setOwner(next)
@@ -450,10 +461,10 @@ const ChartScreen = memo(function ChartScreen({
     owner?.setOverlays({ lines: drawn.lines })
   }, [owner, drawn.lines])
 
-  // Press and hold to read a candle.
+  // Press and hold to read a candle; not while the drawing tools are out.
   useEffect(() => {
     const el = surface.current
-    if (!el || !owner) return
+    if (!el || !owner || drawing) return
     const read = (x: number, y: number) => {
       const bar = owner.barAt(x)
       if (bar) setInspect({ bar, x: owner.barX(bar), y, price: owner.priceAt(y) })
@@ -465,7 +476,7 @@ const ChartScreen = memo(function ChartScreen({
       onClear: () => setInspect(null),
     })
     return () => press.destroy()
-  }, [owner])
+  }, [owner, drawing])
 
   const pickChip = useCallback((next: string) => {
     setTimeframe(next)
@@ -560,6 +571,7 @@ const ChartScreen = memo(function ChartScreen({
     closing.current = true
     navigate(-1)
   }, [location.state, navigate])
+  askNote.current = (id) => openSheet({ sheet: 'note', id })
   // Every move through history settles what is open.
   // biome-ignore lint/correctness/useExhaustiveDependencies: the key is the trigger
   useEffect(() => {
@@ -649,6 +661,11 @@ const ChartScreen = memo(function ChartScreen({
     setPinNotice(null)
     openSheet({ sheet: 'timeframe' })
   }
+  const toggleDraw = () => {
+    setInspect(null)
+    if (drawing) owner?.drawings.cancel()
+    setDrawing(!drawing)
+  }
   /** Buy or Sell at the price under the held finger, where orders can be placed (C10). */
   const held = inspect?.price ?? null
   const heldOrder =
@@ -679,6 +696,8 @@ const ChartScreen = memo(function ChartScreen({
           onIndicators={openIndicators}
           onStyle={() => openSheet({ sheet: 'style' })}
           onOrder={(orderSide) => openTicket(orderSide)}
+          drawing={drawing}
+          onDraw={toggleDraw}
         />
       ) : (
         <>
@@ -743,6 +762,18 @@ const ChartScreen = memo(function ChartScreen({
               {styleOf(style).label}
               <ChevronDown aria-hidden="true" className="size-3.5 shrink-0" />
             </button>
+            <button
+              type="button"
+              onClick={toggleDraw}
+              aria-pressed={drawing}
+              className={cn(
+                'inline-flex h-12 min-w-12 items-center gap-1.5 rounded-full px-3 text-sm font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                drawing ? 'bg-[color:var(--primary-tint)] text-primary' : 'hover:bg-accent'
+              )}
+            >
+              {drawToolIcon('trend-line', 18, 'shrink-0')}
+              Draw
+            </button>
           </div>
         </>
       )}
@@ -758,7 +789,7 @@ const ChartScreen = memo(function ChartScreen({
             owner={owner}
             prices={prices}
             heldTime={inspect?.bar.time ?? null}
-            below={inspect ? (heldOrder ? READOUT_WITH_ORDERS : READOUT) : 0}
+            below={drawing ? DRAW_ROW : inspect ? (heldOrder ? READOUT_WITH_ORDERS : READOUT) : 0}
           />
         )}
         {owner && (
@@ -772,6 +803,7 @@ const ChartScreen = memo(function ChartScreen({
             onOpen={(ids) => openSheet({ sheet: 'line', ids })}
           />
         )}
+        {owner && drawing && <DrawRow drawings={owner.drawings} onDone={toggleDraw} />}
         {inspect && (
           <Crosshair
             x={inspect.x}
@@ -877,6 +909,16 @@ const ChartScreen = memo(function ChartScreen({
           priceType={heldPrice === undefined ? undefined : 'LIMIT'}
           price={heldPrice}
           strategy={STRATEGY}
+        />
+      )}
+      {owner && sheet?.sheet === 'note' && (
+        <NoteSheet
+          key={sheet.id}
+          words={owner.drawings.noteOf(sheet.id)}
+          onSave={(words) => {
+            owner.drawings.setNote(sheet.id, words)
+            closeSheet()
+          }}
         />
       )}
       <LineSheet
@@ -1004,6 +1046,52 @@ const ChartScreen = memo(function ChartScreen({
     </Screen>
   )
 })
+
+/**
+ * A text note's words (C7), asked for as soon as the note is placed. Saved
+ * empty, or closed without words, the note is taken off the chart: a note with
+ * nothing in it is nothing to keep.
+ */
+function NoteSheet({ words, onSave }: { words: string; onSave(words: string): void }) {
+  const [text, setText] = useState(words)
+  return (
+    <BottomSheet
+      open
+      onOpenChange={(open) => !open && onSave(words)}
+      title="Text note"
+      description="Written on the chart where you tapped"
+    >
+      <form
+        className="flex flex-col gap-3"
+        onSubmit={(event) => {
+          event.preventDefault()
+          onSave(text)
+        }}
+      >
+        <label
+          htmlFor="chart-note"
+          className="text-xs font-semibold text-[color:var(--text-secondary)]"
+        >
+          Note
+        </label>
+        <Input
+          id="chart-note"
+          value={text}
+          maxLength={80}
+          autoFocus
+          onChange={(event) => setText(event.target.value)}
+          className="h-12 text-base"
+        />
+        <button
+          type="submit"
+          className="h-12 rounded-xl bg-primary text-base font-semibold text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          {text.trim() === '' ? 'Remove note' : 'Save note'}
+        </button>
+      </form>
+    </BottomSheet>
+  )
+}
 
 /**
  * The pinned timeframes and, last, More: every timeframe the broker offers,
