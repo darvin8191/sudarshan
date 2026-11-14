@@ -1,0 +1,340 @@
+{
+ "about": "Alert messages as TradingView sends them, and what payload.parse reads. fired 2026-11-16T04:45:02Z is 1794804302.",
+ "cases": [
+  {
+   "name": "strategy alert, long from flat",
+   "text": "{\"v\": 1, \"id\": \"Long\", \"action\": \"buy\", \"contracts\": \"1\", \"position\": \"long\", \"size\": \"1\", \"before\": \"flat\", \"before_size\": \"0\", \"signed_size\": \"1\", \"price\": \"24510.5\", \"ticker\": \"NSE:NIFTY1!\", \"interval\": \"1\", \"bar\": \"2026-11-16T04:44:00Z\", \"fired\": \"2026-11-16T04:45:02Z\"}",
+   "expect": {
+    "fired_s": 1794804302,
+    "bar_s": 1794804240,
+    "exchange": "NSE",
+    "ticker": "NIFTY1!",
+    "delayed": false,
+    "interval": "1",
+    "position": "long",
+    "size": 1.0,
+    "before": "flat",
+    "before_size": 0.0,
+    "order_id": "Long",
+    "action": "buy",
+    "contracts": 1.0,
+    "target": 1,
+    "before_target": 0,
+    "claim": "1794804302|Long|long:1"
+   }
+  },
+  {
+   "name": "strategy alert, short from flat",
+   "text": "{\"v\": 1, \"id\": \"Short\", \"action\": \"sell\", \"contracts\": \"1\", \"position\": \"short\", \"size\": \"1\", \"before\": \"flat\", \"before_size\": \"0\", \"signed_size\": \"-1\", \"price\": \"24510.5\", \"ticker\": \"NSE:NIFTY1!\", \"interval\": \"1\", \"bar\": \"2026-11-16T04:44:00Z\", \"fired\": \"2026-11-16T04:45:02Z\"}",
+   "expect": {
+    "fired_s": 1794804302,
+    "bar_s": 1794804240,
+    "exchange": "NSE",
+    "ticker": "NIFTY1!",
+    "delayed": false,
+    "interval": "1",
+    "position": "short",
+    "size": 1.0,
+    "before": "flat",
+    "order_id": "Short",
+    "action": "sell",
+    "target": -1,
+    "claim": "1794804302|Short|short:1"
+   }
+  },
+  {
+   "name": "strategy alert, flat from long",
+   "text": "{\"v\": 1, \"id\": \"Exit\", \"action\": \"sell\", \"contracts\": \"1\", \"position\": \"flat\", \"size\": \"0\", \"before\": \"long\", \"before_size\": \"1\", \"signed_size\": \"0\", \"price\": \"24510.5\", \"ticker\": \"NSE:NIFTY1!\", \"interval\": \"1\", \"bar\": \"2026-11-16T04:44:00Z\", \"fired\": \"2026-11-16T04:45:02Z\"}",
+   "expect": {
+    "fired_s": 1794804302,
+    "bar_s": 1794804240,
+    "exchange": "NSE",
+    "ticker": "NIFTY1!",
+    "delayed": false,
+    "interval": "1",
+    "position": "flat",
+    "size": 0.0,
+    "before": "long",
+    "before_size": 1.0,
+    "target": 0,
+    "before_target": 1,
+    "claim": "1794804302|Exit|flat:0"
+   }
+  },
+  {
+   "name": "strategy alert, reversal: contracts is twice the size",
+   "text": "{\"v\": 1, \"id\": \"Short\", \"action\": \"sell\", \"contracts\": \"2\", \"position\": \"short\", \"size\": \"1\", \"before\": \"long\", \"before_size\": \"1\", \"signed_size\": \"-1\", \"price\": \"24510.5\", \"ticker\": \"NSE:NIFTY1!\", \"interval\": \"1\", \"bar\": \"2026-11-16T04:44:00Z\", \"fired\": \"2026-11-16T04:45:02Z\"}",
+   "expect": {
+    "fired_s": 1794804302,
+    "bar_s": 1794804240,
+    "exchange": "NSE",
+    "ticker": "NIFTY1!",
+    "delayed": false,
+    "interval": "1",
+    "position": "short",
+    "size": 1.0,
+    "contracts": 2.0,
+    "before": "long",
+    "target": -1,
+    "before_target": 1
+   }
+  },
+  {
+   "name": "strategy alert sent as text/plain bytes are the same JSON text",
+   "text": "{\"v\": 1, \"id\": \"Long\", \"action\": \"buy\", \"contracts\": \"1\", \"position\": \"long\", \"size\": \"1\", \"before\": \"flat\", \"before_size\": \"0\", \"signed_size\": \"1\", \"price\": \"24510.5\", \"ticker\": \"NSE:NIFTY1!\", \"interval\": \"1\", \"bar\": \"2026-11-16T04:44:00Z\", \"fired\": \"2026-11-16T04:45:02Z\"}",
+   "as_bytes": true,
+   "expect": {
+    "position": "long",
+    "fired_s": 1794804302
+   }
+  },
+  {
+   "name": "fractional size from a share strategy",
+   "text": "{\"v\": 1, \"id\": \"L\", \"action\": \"buy\", \"contracts\": \"12.5\", \"position\": \"long\", \"size\": \"12.5\", \"before\": \"flat\", \"before_size\": \"0\", \"signed_size\": \"12.5\", \"price\": \"24510.5\", \"ticker\": \"NSE:RELIANCE\", \"interval\": \"1\", \"bar\": \"2026-11-16T04:44:00Z\", \"fired\": \"2026-11-16T04:45:02Z\"}",
+   "expect": {
+    "position": "long",
+    "size": 12.5,
+    "ticker": "RELIANCE",
+    "claim": "1794804302|L|long:12.5"
+   }
+  },
+  {
+   "name": "indicator alert() with numbers in milliseconds",
+   "text": "{\"v\":1,\"position\":\"long\",\"ticker\":\"NSE:NIFTY\",\"interval\":\"5\",\"bar\":1794804240000,\"fired\":1794804302431}",
+   "expect": {
+    "position": "long",
+    "fired_s": 1794804302,
+    "bar_s": 1794804240,
+    "size": null,
+    "before": null,
+    "order_id": null,
+    "before_target": null,
+    "exchange": "NSE",
+    "ticker": "NIFTY",
+    "claim": "1794804302|-|long:"
+   }
+  },
+  {
+   "name": "alertcondition with a fixed flat target",
+   "text": "{\"v\": 1, \"position\": \"flat\", \"ticker\": \"NSE:BANKNIFTY\", \"interval\": \"15\", \"bar\": \"2026-11-16T04:44:00Z\", \"fired\": \"2026-11-16T04:45:02Z\"}",
+   "expect": {
+    "position": "flat",
+    "target": 0,
+    "fired_s": 1794804302,
+    "ticker": "BANKNIFTY",
+    "claim": "1794804302|-|flat:"
+   }
+  },
+  {
+   "name": "position word in capitals, v as text",
+   "text": "{\"v\":\"1\",\"position\":\"SHORT\",\"fired\":\"2026-11-16T04:45:02Z\"}",
+   "expect": {
+    "position": "short",
+    "ticker": null,
+    "exchange": null
+   }
+  },
+  {
+   "name": "delayed-data chart, _DL",
+   "text": "{\"v\":1,\"position\":\"long\",\"ticker\":\"NSE_DL:NIFTY\",\"fired\":\"2026-11-16T04:45:02Z\"}",
+   "expect": {
+    "exchange": "NSE",
+    "ticker": "NIFTY",
+    "delayed": true
+   }
+  },
+  {
+   "name": "delayed-data chart, _DLY",
+   "text": "{\"v\":1,\"position\":\"long\",\"ticker\":\"BSE_DLY:SENSEX\",\"fired\":\"2026-11-16T04:45:02Z\"}",
+   "expect": {
+    "exchange": "BSE",
+    "ticker": "SENSEX",
+    "delayed": true
+   }
+  },
+  {
+   "name": "comment is allowed and ignored",
+   "text": "{\"v\":1,\"position\":\"long\",\"comment\":\"my note\",\"fired\":\"2026-11-16T04:45:02Z\"}",
+   "expect": {
+    "position": "long"
+   }
+  },
+  {
+   "name": "fired with fractional seconds",
+   "text": "{\"v\":1,\"position\":\"long\",\"fired\":\"2026-11-16T04:45:02.500Z\"}",
+   "expect": {
+    "fired_s": 1794804302
+   }
+  },
+  {
+   "name": "not JSON",
+   "text": "buy NIFTY now",
+   "error": "not_json"
+  },
+  {
+   "name": "empty body",
+   "text": "",
+   "error": "not_json"
+  },
+  {
+   "name": "a JSON list",
+   "text": "[1]",
+   "error": "not_object"
+  },
+  {
+   "name": "bytes that are not UTF-8",
+   "hex": "ff00fe",
+   "error": "not_json"
+  },
+  {
+   "name": "v missing",
+   "text": "{\"position\":\"long\",\"fired\":\"2026-11-16T04:45:02Z\"}",
+   "error": "version"
+  },
+  {
+   "name": "v 2",
+   "text": "{\"v\":2,\"position\":\"long\",\"fired\":\"2026-11-16T04:45:02Z\"}",
+   "error": "version"
+  },
+  {
+   "name": "an API key in the message is an unknown key",
+   "text": "{\"v\":1,\"apikey\":\"abc\",\"position\":\"long\",\"fired\":\"2026-11-16T04:45:02Z\"}",
+   "error": "unknown_key",
+   "what": "apikey"
+  },
+  {
+   "name": "unknown key",
+   "text": "{\"v\":1,\"position\":\"long\",\"qty\":5,\"fired\":\"2026-11-16T04:45:02Z\"}",
+   "error": "unknown_key",
+   "what": "qty"
+  },
+  {
+   "name": "strategy placeholder left unfilled in an indicator alert",
+   "text": "{\"v\":1,\"id\":\"{{strategy.order.id}}\",\"position\":\"long\",\"fired\":\"2026-11-16T04:45:02Z\"}",
+   "error": "placeholder",
+   "what": "{{strategy.order.id}}"
+  },
+  {
+   "name": "unfilled placeholder outside a string breaks JSON but is still named",
+   "text": "{\"v\":1,\"position\":\"long\",\"bar\":{{time}},\"fired\":\"2026-11-16T04:45:02Z\"}",
+   "error": "placeholder",
+   "what": "{{time}}"
+  },
+  {
+   "name": "position missing",
+   "text": "{\"v\":1,\"fired\":\"2026-11-16T04:45:02Z\"}",
+   "error": "position"
+  },
+  {
+   "name": "position not a side",
+   "text": "{\"v\":1,\"position\":\"buy\",\"fired\":\"2026-11-16T04:45:02Z\"}",
+   "error": "position"
+  },
+  {
+   "name": "before not a side",
+   "text": "{\"v\":1,\"position\":\"long\",\"before\":\"none\",\"fired\":\"2026-11-16T04:45:02Z\"}",
+   "error": "before"
+  },
+  {
+   "name": "fired missing",
+   "text": "{\"v\":1,\"position\":\"long\"}",
+   "error": "fired"
+  },
+  {
+   "name": "fired unreadable",
+   "text": "{\"v\":1,\"position\":\"long\",\"fired\":\"yesterday\"}",
+   "error": "fired"
+  },
+  {
+   "name": "fired in seconds, not milliseconds, is out of range",
+   "text": "{\"v\":1,\"position\":\"long\",\"fired\":946684800000}",
+   "error": "fired"
+  },
+  {
+   "name": "fired without the Z",
+   "text": "{\"v\":1,\"position\":\"long\",\"fired\":\"2026-11-16T04:45:02\"}",
+   "error": "fired"
+  },
+  {
+   "name": "bar unreadable",
+   "text": "{\"v\":1,\"position\":\"long\",\"bar\":\"x\",\"fired\":\"2026-11-16T04:45:02Z\"}",
+   "error": "bar"
+  },
+  {
+   "name": "size not a number",
+   "text": "{\"v\":1,\"position\":\"long\",\"size\":\"one\",\"fired\":\"2026-11-16T04:45:02Z\"}",
+   "error": "number",
+   "what": "size"
+  },
+  {
+   "name": "size NaN",
+   "text": "{\"v\":1,\"position\":\"long\",\"size\":\"nan\",\"fired\":\"2026-11-16T04:45:02Z\"}",
+   "error": "number"
+  },
+  {
+   "name": "negative absolute size",
+   "text": "{\"v\":1,\"position\":\"short\",\"size\":\"-1\",\"fired\":\"2026-11-16T04:45:02Z\"}",
+   "error": "number"
+  },
+  {
+   "name": "long with size 0",
+   "text": "{\"v\":1,\"position\":\"long\",\"size\":\"0\",\"fired\":\"2026-11-16T04:45:02Z\"}",
+   "error": "mismatch",
+   "what": "size"
+  },
+  {
+   "name": "flat with a size",
+   "text": "{\"v\":1,\"position\":\"flat\",\"size\":\"1\",\"fired\":\"2026-11-16T04:45:02Z\"}",
+   "error": "mismatch",
+   "what": "size"
+  },
+  {
+   "name": "signed size disagrees with the word: long but negative",
+   "text": "{\"v\": 1, \"id\": \"L\", \"action\": \"buy\", \"contracts\": \"1\", \"position\": \"long\", \"size\": \"1\", \"before\": \"flat\", \"before_size\": \"0\", \"signed_size\": \"-1\", \"price\": \"24510.5\", \"ticker\": \"NSE:NIFTY1!\", \"interval\": \"1\", \"bar\": \"2026-11-16T04:44:00Z\", \"fired\": \"2026-11-16T04:45:02Z\"}",
+   "error": "mismatch",
+   "what": "signed_size"
+  },
+  {
+   "name": "signed size disagrees with the absolute size",
+   "text": "{\"v\": 1, \"id\": \"L\", \"action\": \"buy\", \"contracts\": \"1\", \"position\": \"long\", \"size\": \"1\", \"before\": \"flat\", \"before_size\": \"0\", \"signed_size\": \"2\", \"price\": \"24510.5\", \"ticker\": \"NSE:NIFTY1!\", \"interval\": \"1\", \"bar\": \"2026-11-16T04:44:00Z\", \"fired\": \"2026-11-16T04:45:02Z\"}",
+   "error": "mismatch",
+   "what": "signed_size"
+  },
+  {
+   "name": "flat but signed size not zero",
+   "text": "{\"v\": 1, \"id\": \"X\", \"action\": \"sell\", \"contracts\": \"1\", \"position\": \"flat\", \"size\": \"0\", \"before\": \"long\", \"before_size\": \"1\", \"signed_size\": \"1\", \"price\": \"24510.5\", \"ticker\": \"NSE:NIFTY1!\", \"interval\": \"1\", \"bar\": \"2026-11-16T04:44:00Z\", \"fired\": \"2026-11-16T04:45:02Z\"}",
+   "error": "mismatch",
+   "what": "signed_size"
+  },
+  {
+   "name": "a value longer than 64 characters",
+   "text": "{\"v\":1,\"id\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\",\"position\":\"long\",\"fired\":\"2026-11-16T04:45:02Z\"}",
+   "error": "too_long",
+   "what": "id"
+  },
+  {
+   "name": "an ignored value longer than 64 characters",
+   "text": "{\"v\":1,\"comment\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\",\"position\":\"long\",\"fired\":\"2026-11-16T04:45:02Z\"}",
+   "error": "too_long",
+   "what": "comment"
+  },
+  {
+   "name": "a nested value",
+   "text": "{\"v\":1,\"id\":{\"a\":1},\"position\":\"long\",\"fired\":\"2026-11-16T04:45:02Z\"}",
+   "error": "unknown_key",
+   "what": "id"
+  },
+  {
+   "name": "ticker without its exchange",
+   "text": "{\"v\":1,\"position\":\"long\",\"ticker\":\"NIFTY\",\"fired\":\"2026-11-16T04:45:02Z\"}",
+   "error": "unknown_key",
+   "what": "ticker"
+  },
+  {
+   "name": "action that is not buy or sell",
+   "text": "{\"v\":1,\"action\":\"hold\",\"position\":\"long\",\"fired\":\"2026-11-16T04:45:02Z\"}",
+   "error": "unknown_key",
+   "what": "action"
+  }
+ ]
+}

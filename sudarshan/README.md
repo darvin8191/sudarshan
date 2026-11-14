@@ -726,6 +726,122 @@ network namespace of its own), `test_deploy_family.py` (the deploy tool's side, 
 without the set-up gets nothing but the tokens), `test_backup_family.py`, and
 `sudarshan/family/tests/`.
 
+## Automation: TradingView alerts (M12.1)
+
+A TradingView alert of one of your strategies reaches `POST /sudarshan/tv/<token>`, and SUDARSHAN
+decides whether it becomes one order. It adds no way of its own to send an order: an alert that
+passes becomes one smart order through OpenAlgo's own service, so the exit holds, the sizing from
+positions and fills, and the risk guard all apply as they do to an order you place yourself.
+
+- **The alert carries no secret.** Each strategy has its own link; the link's token is the
+  credential and is kept on the server only as a hash. The API key no longer goes into TradingView.
+- **Every alert says where the strategy should be after it** (long, short or flat). A repeated
+  alert finds the position already there; a missed one is put right by the next.
+- **One alert, one order.** The same alert delivered twice is handled once. An alert that fired
+  before a newer one was applied is not applied. A late alert (30 s by default, per strategy)
+  that would open, add or reverse is not sent; a late exit still goes.
+- **The size is yours.** A fixed number of lots or shares per strategy; TradingView's quantity is
+  not used.
+- **An exit goes to the contract that was entered**, whatever the expiry rule gives today.
+- **Sandbox or Live is the strategy's own**, never the app's mode. Stopped or Active is one
+  switch per strategy; `/auto` on Telegram shows and moves it.
+
+`SUDARSHAN_AUTOMATION` in OpenAlgo's `.env` (set by the release, above):
+
+| value | what it does |
+|---|---|
+| `off` (in code) | the alert links answer as links nobody made; nothing is opened or sent |
+| `sandbox` | every strategy sends to the sandbox, whatever the app's mode; Live cannot be chosen |
+| `on` | a strategy may be set to Live, with your confirm phrase, while `SUDARSHAN_RISK_GUARD` is `on` too |
+
+What it needs on the server:
+
+1. The nginx lines of the next section, so only TradingView's addresses reach the links.
+2. `TRUST_PROXY_HEADERS` on in OpenAlgo's `.env`. Behind nginx the app otherwise sees every
+   caller as this server itself, and refuses every alert as coming from an address that is not
+   TradingView's. The Automation page says so when that has happened. Turn it on only with the
+   nginx lines installed: they are what makes the header trustworthy for these links. The
+   setting applies to the whole site, so when you turn it on also put these three lines into the
+   site's own `location /` block (and `/socket.io/`), or a visitor could name any address as his
+   own to the login limit and the ban list:
+
+   ```
+   proxy_set_header CF-Connecting-IP "";
+   proxy_set_header True-Client-IP "";
+   proxy_set_header X-Client-IP "";
+   ```
+3. Semi-auto order mode off. In that mode an order waits in the Action Center and is then sent
+   wherever the app's mode points at that moment, so Automation does not use it and says so.
+
+What it does not do: option strategies, a size that follows TradingView's, limit orders, rolling
+a held position to the next contract, replaying a missed alert. A strategy and your own trades in
+the same contract and product are one position: an alert will "correct" a manual trade there.
+
+Code: `sudarshan/automation/` (rules and sentences are pure: `rules.py`, `payload.py`,
+`symbols.py`, `words.py`), `blueprints/sudarshan_automation.py`. Tests:
+`sudarshan/automation/tests/`.
+
+## The fence around the alert links (M12.2)
+
+OpenAlgo has three addresses that take an alert without a login: the strategy module's
+(`/strategy/webhook/`), Flow's (`/flow/webhook/`) and Chartink's (`/chartink/webhook/`). Until the
+lines below are installed, all three can be reached from any address on the internet. SUDARSHAN's
+own alert links (`/sudarshan/tv/`, the Automation page) are fenced by the same lines.
+
+Two files in `ops/nginx/` do it. nginx then:
+
+- lets only TradingView's four sender addresses reach the alert links, and answers everyone else
+  "not found" before the app sees the request. This is a filter, not proof of who sent an alert:
+  every TradingView customer's alerts come from the same four addresses, so the token in a link is
+  still the secret. Keep a link as private as a password;
+- tells the app the sender's address itself and clears the headers a sender could use to name
+  another address;
+- keeps the links, and so their tokens, out of its logs;
+- finishes an alert even when TradingView has stopped waiting (it hangs up after 3 seconds);
+- holds one address to 2 alerts a second (10 at once), and refuses an alert larger than 8 KiB;
+- refuses Chartink's webhook for everyone, because Chartink is not used on this server.
+
+The deploy tool never edits nginx. Install the lines once, as root, from the app folder the deploy
+tool installs into:
+
+```
+cd /opt/sudarshan/apps/openalgo/sudarshan/ops/nginx
+sudo install -m 644 sudarshan-webhooks-zones.conf /etc/nginx/conf.d/sudarshan-webhooks-zones.conf
+sudo install -m 644 sudarshan-webhooks.conf /etc/nginx/snippets/sudarshan-webhooks.conf
+```
+
+Then open the site's file (the one in `/etc/nginx/sites-available/` with `listen 443 ssl`) and add
+one line inside that `server { ... }` block, before its first `location`:
+
+```
+    include snippets/sudarshan-webhooks.conf;
+```
+
+Check and load it. `nginx -t` must say "test is successful"; if it does not, take the line out
+again and nothing has changed:
+
+```
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+After that:
+
+- From a phone browser, open `https://<your address>/strategy/webhook/x`. It must say "404 Not
+  Found" in nginx's plain page.
+- A TradingView alert must still arrive. Its sender address in the app's record must be one of
+  TradingView's four, never 127.0.0.1.
+- If a file in `ops/nginx/` changes in a later release, its release notes say so; copy the two
+  files again and reload.
+
+After each install the deploy tool looks for these lines in `/etc/nginx`. While they are missing it
+writes a warning in its log and you get one notice on Telegram per release. It is only a reminder:
+it never stops or undoes an install.
+
+To use Chartink after all, replace the last block of `snippets/sudarshan-webhooks.conf` as the
+comment above it says, with Chartink's own sender addresses.
+
+Tests: `sudarshan/ops/tests/test_nginx_webhooks.py`.
+
 ## The risk layer's confirm phrase, if it is forgotten (M5.13)
 
 The kill switch cannot be turned off, and no limit can be loosened, without the confirm phrase,

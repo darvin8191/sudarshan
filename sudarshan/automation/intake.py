@@ -1,0 +1,615 @@
+"""One alert, step by step (M12.1, M12.2). ORDER PATH. Callable without a request context.
+
+``handle`` is what the public route calls. Its order is the contract:
+
+1. the flag: ``off`` answers exactly as a link nobody made, before anything else is looked at;
+2. the token's shape, then the sender's address, each answered the same way, with no lookup;
+3. the token, by its hash;
+4. the size of the body, the limit per link;
+5. the message (payload.py): a bad one is written to the log and answered as not readable;
+6. a first look at the rules, only to learn whether a sibling alert is worth a short wait;
+7. **the claim**: holding the strategy's lock, the strategy and its state are read again, the
+   rules are asked again, and the alert's row is written. The unique index on (strategy, claim)
+   is the check and the marker in one statement, and the row is written before anything is sent;
+8. the contract, the size and where the order goes (symbols.py, rules.pipe);
+9. the order, still holding the lock, and its answer on the row.
+
+The caller is never read from, or depended on, after its body is in: TradingView hangs up after
+three seconds and an order can take longer. What the public caller is told is deliberately
+almost nothing: the holder of a link learns no name, no position and no verdict from it.
+"""
+
+from __future__ import annotations
+
+import ipaddress
+import time
+from dataclasses import dataclass, field, replace
+from typing import Any
+
+from utils import real_threading, runtime
+from utils.keyed_locks import KeyedLocks, LockBusy
+from utils.logging import get_logger
+from utils.thread_safe_cache import LockedTTLCache
+
+from . import contract, flag, payload, rules, symbols, words
+from . import model as m
+from .desk import Desk, senders
+
+logger = get_logger(__name__)
+
+#: One lock per strategy: an alert's claim, its order and the owner's switch all take it.
+LOCKS = KeyedLocks(name="automation")
+#: Longest an alert waits for its strategy's lock under gthread (the smart order's own figure).
+LOCK_WAIT_S = 30.0
+
+#: What builds the desk for a call that brings none. A test stands a fake in its place.
+DESK = Desk
+
+UNKNOWN = (404, {"status": "error", "message": "Not found"})
+TOO_LARGE = (413, {"status": "error", "message": "The alert message is too large."})
+TOO_MANY = (429, {"status": "error", "message": "Too many alerts. Try again in a minute."})
+NOT_READ = (400, {"status": "error", "message": "The alert message could not be read."})
+HANDLED = (200, {"status": "success", "message": "handled"})
+ALREADY = (200, {"status": "success", "message": "already handled"})
+
+#: Alerts per link in the last minute. Bounded: a key is a strategy's id, never a token.
+_per_link = LockedTTLCache(maxsize=256, ttl=60.0)
+#: What was refused before any strategy was known, counted for one log line a minute.
+_refused = LockedTTLCache(maxsize=8, ttl=60.0)
+_count_lock = real_threading.Lock()
+#: When an alert last arrived from this server's own address (the proxy is not passing the
+#: sender's address on). The Automation page says so.
+_local_sender_ms = 0
+
+
+@dataclass(frozen=True)
+class Step:
+    """One smart order of a plan."""
+
+    exchange: str
+    symbol: str
+    target: int  # +1, 0, -1
+    quantity: int
+    order: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class Plan:
+    """What the rules made of one alert, holding the lock."""
+
+    verdict: str | None  # None: send ``steps``
+    sentence: str = ""
+    target: int = 0
+    steps: tuple[Step, ...] = ()
+    analyze: bool | None = None
+    notes: tuple[str, ...] = ()  # said beside the order's own sentence
+    tell: str | None = None  # the reason key for the owner's Telegram, when it should hear
+    tells: tuple[tuple[str, str], ...] = ()  # (reason, sentence) the owner hears beside an order
+    state_values: dict[str, Any] = field(default_factory=dict)
+    strategy_values: dict[str, Any] = field(default_factory=dict)
+    counts: bool = True
+
+
+def local_sender_seen_ms() -> int:
+    return _local_sender_ms
+
+
+def _count_refused(why: str, ip: str) -> None:
+    """Bounded: one counter per reason, one log line a minute. Never the token."""
+    global _local_sender_ms
+    if why == "sender":
+        try:
+            if ipaddress.ip_address(ip).is_loopback:
+                _local_sender_ms = int(time.time() * 1000)
+        except ValueError:
+            pass
+    with _count_lock:
+        first = why not in _refused
+        if first:
+            _refused[why] = True
+    if first:
+        said = {
+            "shape": "an alert link that is not one of SUDARSHAN's",
+            "sender": "an alert from an address that is not on the sender list",
+            "token": "an alert link nobody made, or one that was replaced",
+        }[why]
+        logger.warning(f"Automation: refused {said} (more in the next minute are not logged)")
+
+
+def _link_over_limit(strategy_id: int, now: float) -> bool:
+    """More than the limit for one link in this clock minute. The count restarts with the minute,
+    so a strategy that alerts steadily is never shut out for good."""
+    minute = int(now // 60)
+    with _count_lock:  # in-memory bookkeeping only
+        at, seen = _per_link.get(strategy_id) or (minute, 0)
+        seen = seen + 1 if at == minute else 1
+        _per_link[strategy_id] = (minute, seen)
+    return seen > contract.TOKEN_PER_MINUTE
+
+
+def order_data(strategy: m.Strategy, exchange: str, symbol: str, target: int, quantity: int,
+               held_side: str | None = None) -> dict[str, Any]:  # fmt: skip
+    """The smart order for one target. The quantity is the strategy's own, never the alert's: a
+    smart order to a size other than 0 works out what to send from the account, and for an exit
+    the quantity only marks the order as an exit that must never open a position."""
+    if target == 0:
+        action = "BUY" if held_side == m.SHORT else "SELL"
+    else:
+        action = "BUY" if target > 0 else "SELL"
+    return {
+        "strategy": strategy.name,
+        "exchange": exchange,
+        "symbol": symbol,
+        "product": strategy.product,
+        "action": action,
+        "pricetype": "MARKET",
+        "quantity": str(quantity),
+        "position_size": str(target * quantity),
+        "price": "0",
+        "trigger_price": "0",
+        "disclosed_quantity": "0",
+    }
+
+
+def _refuse(verdict: str, sentence: str, target: int, tell: str | None = None, **more) -> Plan:
+    return Plan(verdict, sentence, target, tell=tell or verdict, **more)
+
+
+def plan(
+    strategy: m.Strategy,
+    state: m.State,
+    alert: m.Alert,
+    desk: Desk,
+    *,
+    stage: str,
+    claimed: bool = False,
+    waited: bool = True,
+) -> Plan:
+    """What to do with one alert, on rows read holding the strategy's lock. No writes."""
+    name, now = strategy.name, desk.now()
+    now_ms, day = int(now * 1000), symbols.india_date(int(now * 1000))
+    if claimed:
+        return Plan("repeat", words.repeat(alert.fired_s), counts=False)
+    if not symbols.chart_matches(strategy.chart, alert):
+        if alert.ticker is None:
+            return _refuse("not_mapped", words.not_mapped(name, "no_chart"), 0)
+        sent = f"{alert.exchange}:{alert.ticker}"
+        return _refuse("not_mapped", words.wrong_chart(name, sent, strategy.chart or ""), 0)
+    indices = desk.indices()
+    state_values: dict[str, Any] = {}
+    notes: list[str] = []
+    if state.held_symbol and symbols.held_expired(
+        state.held_symbol, state.held_exchange, now_ms, indices,
+        _closes(desk, state.held_symbol, state.held_exchange),
+    ):  # fmt: skip
+        # The held contract stopped trading for good: the strategy holds nothing, and the chain
+        # rule is silent for this one alert.
+        notes.append(words.expired(name, state.held_symbol))
+        state_values = {
+            "held_exchange": None,
+            "held_symbol": None,
+            "held_side": None,
+            "held_since_ms": None,
+            "last_target": 0,
+        }
+        state = replace(state, **state_values)
+        alert = replace(alert, before=None)
+    decision = rules.decide(strategy, state, alert, now, day, waited=waited)
+    target = decision.target
+    if decision.wait:
+        return Plan(None, target=target, notes=("wait",), counts=False)
+    cap_values: dict[str, Any] = {}
+    if decision.capped_now:
+        cap_values = {"state": m.EXITS_ONLY, "stopped_why": "too many alerts today"}
+        state_values["told_stopped_day"] = day
+    common = {"state_values": state_values, "strategy_values": cap_values}
+    if decision.verdict == "out_of_order":
+        return _refuse("out_of_order", words.out_of_order(name, alert.fired_s), target, **common)
+    if decision.verdict == "stopped":
+        said = words.stopped(name, strategy.state == m.EXITS_ONLY, target)
+        tell = "stopped" if decision.tell_stopped else ""
+        if decision.tell_stopped:
+            state_values["told_stopped_day"] = day
+        return Plan("stopped", said, target, tell=tell or None, **common)
+    if decision.verdict == "capped":
+        said = words.capped(name, strategy.max_alerts_day)
+        return Plan(
+            "capped", said, target, tell="capped" if decision.capped_now else None, **common
+        )
+    if decision.verdict == "late":
+        said = words.late(name, target, decision.late_s or 0, state.last_target)
+        return _refuse("late", said, target, **common)
+    tells: list[tuple[str, str]] = [("expired", note) for note in notes]
+    if decision.capped_now:
+        notes.append(words.capped(name, strategy.max_alerts_day))
+        tells.append(("capped", notes[-1]))
+    if decision.late_s is not None:
+        notes.append(words.late_note(decision.late_s))
+    if decision.gap:
+        notes.append(words.gap(name, target))
+        tells.append(("gap", notes[-1]))
+    # where the order goes
+    api_key = desk.api_key()
+    analyze, why = rules.pipe(
+        stage, desk.guard_stage(), strategy.mode, desk.app_in_analyze(), target
+    )
+    if analyze is None:
+        return _refuse(
+            "mode_refused", words.mode_refused(name, why or "", target), target, **common
+        )
+    if alert.delayed and analyze is False:
+        return _refuse("mode_refused", words.delayed_chart(name), target, **common)
+    if not api_key:
+        return _refuse("order_refused", words.order_refused(name, _NO_KEY), target, **common)
+    if desk.semi_auto(api_key):
+        said = words.mode_refused(name, rules.SEMI_AUTO, target)
+        return _refuse("mode_refused", said, target, **common)
+    # the contract and the size
+    steps = _steps(strategy, state, target, desk, now_ms, indices)
+    if isinstance(steps, Plan):
+        return replace(steps, **common)
+    return Plan(
+        None,
+        target=target,
+        steps=steps,
+        analyze=analyze,
+        notes=tuple(notes),
+        tells=tuple(tells),
+        **common,
+    )
+
+
+_NO_KEY = "No API key is set up in the app. Make one under API Key, then try again."
+
+
+def _closes(desk: Desk, symbol: str | None, exchange: str | None) -> dict[str, int]:
+    found = symbols.expiry_of(symbol or "")
+    return desk.closes([found[1]], exchange or "NFO") if found else {}
+
+
+def _resolve(strategy: m.Strategy, desk: Desk, now_ms: int, indices, entering: bool):
+    underlying = symbols.futures_underlying(strategy)
+    expiries = desk.future_expiries(underlying) if underlying else []
+    exchange = strategy.exchange or "NFO"
+    return symbols.resolve(
+        strategy,
+        now_ms,
+        known=desk.known,
+        expiries=expiries,
+        indices=indices,
+        closes=desk.closes(list(expiries), exchange) if expiries else {},
+        entering=entering,
+    )
+
+
+def _steps(strategy: m.Strategy, state: m.State, target: int, desk: Desk, now_ms: int, indices):
+    """The order, or the two orders, for a target; or the refusal as a ``Plan``."""
+    name = strategy.name
+    held = (state.held_exchange, state.held_symbol) if state.held_symbol else None
+    if target == 0 and held:
+        # An exit goes to the contract that was entered, whatever the rule resolves today.
+        quantity = _size(strategy, desk, *held, exit_=True)
+        return (_step(strategy, *held, 0, quantity, state.held_side),)
+    if not desk.master_loaded():
+        return _refuse("not_mapped", words.not_mapped(name, "master"), target)
+    found = _resolve(strategy, desk, now_ms, indices, entering=target != 0)
+    if isinstance(found, symbols.Unmapped):
+        if found.reason == "too_close":
+            said = words.too_close(name, found.what, (found.stop_ms or 0) // 1000)
+            return _refuse("not_mapped", said, target)
+        return _refuse("not_mapped", words.not_mapped(name, found.reason, found.what), target)
+    if target == 0:
+        quantity = _size(strategy, desk, found.exchange, found.symbol, exit_=True)
+        return (_step(strategy, found.exchange, found.symbol, 0, quantity, None),)
+    same_side = state.held_side == (m.LONG if target > 0 else m.SHORT)
+    if held and held != (found.exchange, found.symbol) and same_side:
+        # A strategy never rolls a held position by itself: the same target with an older
+        # contract held is asked of the held contract, and reads as already there.
+        found = replace(found, exchange=held[0], symbol=held[1])
+    quantity = _size(strategy, desk, found.exchange, found.symbol)
+    if isinstance(quantity, Plan):
+        return replace(quantity, target=target)
+    entry = _step(strategy, found.exchange, found.symbol, target, quantity, None)
+    if held and held != (found.exchange, found.symbol):
+        # The other side, in another contract (a future after a roll): the held contract's exit
+        # first, and the entry only if that exit answered clearly.
+        out = _size(strategy, desk, *held, exit_=True)
+        return (_step(strategy, *held, 0, out, state.held_side), entry)
+    return (entry,)
+
+
+def _size(strategy: m.Strategy, desk: Desk, exchange: str, symbol: str, exit_: bool = False):
+    lot = desk.lot_size(exchange, symbol) if strategy.lots else 1
+    found = symbols.expiry_of(symbol)
+    freeze = desk.freeze_qty(found[0], exchange) if found and not exit_ else 0
+    got = symbols.quantity(strategy, lot, freeze)
+    if isinstance(got, symbols.NotSized):
+        if exit_:
+            return 1  # an exit is sized from the account; this only marks the order as an exit
+        said = words.not_sized(strategy.name, got.reason, symbol, got.figure)
+        return _refuse("not_sized", said, 0)
+    return got
+
+
+def _step(strategy, exchange, symbol, target, quantity, held_side) -> Step:
+    order = order_data(strategy, exchange, symbol, target, quantity, held_side)
+    return Step(exchange, symbol, target, quantity, order)
+
+
+@dataclass(frozen=True)
+class Outcome:
+    status: int
+    body: dict[str, Any]
+    verdict: str | None = None
+    sentence: str = ""
+    alert_id: int | None = None
+
+
+def _out(pair, **more) -> Outcome:
+    return Outcome(pair[0], dict(pair[1]), **more)
+
+
+def check(strategy_id: int, body: str | bytes, desk: Desk | None = None, store=None) -> dict:
+    """What one alert's text would do now, for the page's Check sheet. Nothing is written and
+    nothing is sent."""
+    desk = desk or DESK()
+    if store is None:
+        from .store import shared
+
+        store = shared()
+    both = store.both(strategy_id)
+    if both is None:
+        return {"verdict": "bad_message", "sentence": words.NOT_FOUND, "order": None}
+    strategy, state = both
+    try:
+        alert = payload.parse(body)
+    except payload.BadMessage as bad:
+        said = words.bad_message(strategy.name, bad.reason, bad.what)
+        return {"verdict": "bad_message", "sentence": said, "order": None}
+    stage = flag.stage() if flag.stage() != flag.OFF else flag.SANDBOX
+    made = plan(strategy, state, alert, desk, stage=stage)
+    if made.verdict is not None:
+        return {"verdict": made.verdict, "sentence": made.sentence, "order": None}
+    last = made.steps[-1]
+    said = " ".join([_would(strategy, made), *made.notes])
+    return {"verdict": "sent", "sentence": said, "order": dict(last.order)}
+
+
+def _would(strategy: m.Strategy, made: Plan) -> str:
+    last = made.steps[-1]
+    where = "the Sandbox" if made.analyze else "Upstox"
+    if last.target == 0:
+        return f"Would send an exit for {words.contract_name(last.symbol)} to {where}."
+    return (
+        f"Would send an order to {where} to be {words.side(last.target)} {last.quantity} "
+        f"{words.contract_name(last.symbol)}."
+    )
+
+
+def handle(token: str, body: bytes, ip: str, desk: Desk | None = None, store=None) -> Outcome:
+    """One alert. Never raises: anything unexpected is logged and answered as handled, because
+    the sender cannot act on an answer and must not be told more than "received"."""
+    stage = flag.stage()
+    if stage == flag.OFF:
+        return _out(UNKNOWN)
+    try:
+        return _handle(token, body, ip, desk or DESK(), store, stage)
+    except Exception:
+        logger.exception("Automation: an alert could not be handled")
+        return _out(HANDLED)
+
+
+def _handle(token: str, body: bytes, ip: str, desk: Desk, store, stage: str) -> Outcome:
+    if not isinstance(token, str) or not contract.TOKEN.fullmatch(token):
+        _count_refused("shape", ip)
+        return _out(UNKNOWN)
+    if ip not in senders():
+        _count_refused("sender", ip)
+        return _out(UNKNOWN)
+    if store is None:
+        from .store import shared
+
+        store = shared()
+    strategy = store.by_token(token)
+    if strategy is None:
+        _count_refused("token", ip)
+        return _out(UNKNOWN)
+    if len(body) > contract.MAX_BODY:
+        return _out(TOO_LARGE)
+    if _link_over_limit(strategy.id, desk.now()):
+        return _out(TOO_MANY)
+    received_ms = int(desk.now() * 1000)
+    row = {"received_ms": received_ms, "ip": ip[:45], "payload": payload.redact(body)}
+    try:
+        alert = payload.parse(body)
+    except payload.BadMessage as bad:
+        said = words.bad_message(strategy.name, bad.reason, bad.what)
+        alert_id = store.note_alert(strategy.id, verdict="bad_message", sentence=said, **row)
+        _after(desk, strategy, "bad_message", said, "bad_message")
+        return _out(NOT_READ, verdict="bad_message", sentence=said, alert_id=alert_id)
+    row.update(
+        fired_s=alert.fired_s,
+        bar_s=alert.bar_s,
+        claim=alert.claim,
+        tv_delay_ms=received_ms - alert.fired_s * 1000,
+    )
+    _wait_for_a_sibling(strategy.id, alert, desk, store, stage)
+    wait = LOCK_WAIT_S if runtime.gthread_active() else None
+    try:
+        with LOCKS.hold(strategy.id, timeout=wait):
+            return _claim_and_send(strategy.id, token, alert, row, desk, store, stage)
+    except LockBusy:
+        said = words.busy(strategy.name)
+        alert_id = store.note_alert(strategy.id, verdict="order_refused", sentence=said, **{
+            **row, "claim": None,
+        })  # fmt: skip
+        _after(desk, strategy, "order_refused", said, "busy")
+        return _out(HANDLED, verdict="order_refused", sentence=said, alert_id=alert_id)
+
+
+def _wait_for_a_sibling(strategy_id: int, alert: m.Alert, desk: Desk, store, stage: str) -> None:
+    """Two alerts fired in the same second can arrive swapped. The one whose "before" does not
+    fit waits, without the lock, up to 1.5 s for the other to be applied."""
+    if alert.before is None:
+        return
+    waited = 0.0
+    while waited < rules.CHAIN_WAIT_S:
+        both = store.both(strategy_id)
+        if both is None:
+            return
+        strategy, state = both
+        now = desk.now()
+        day = symbols.india_date(int(now * 1000))
+        if not rules.decide(strategy, state, alert, now, day, waited=False).wait:
+            return
+        desk.sleep(rules.CHAIN_STEP_S)
+        waited += rules.CHAIN_STEP_S
+
+
+def _claim_and_send(strategy_id, token, alert, row, desk, store, stage) -> Outcome:
+    made: list[Plan] = []
+
+    def decide(strategy: m.Strategy, state: m.State) -> dict[str, Any] | None:
+        chosen = plan(strategy, state, alert, desk, stage=stage)
+        made.append(chosen)
+        first = chosen.steps[0] if chosen.steps else None
+        return {
+            **row,
+            "verdict": chosen.verdict or "claimed",
+            "sentence": chosen.sentence,
+            "target": chosen.target,
+            "mode": m.SANDBOX
+            if chosen.analyze
+            else (m.LIVE if chosen.analyze is False else strategy.mode),
+            "exchange": first.exchange if first else None,
+            "symbol": first.symbol if first else None,
+            "action": first.order["action"] if first else None,
+            "quantity": first.quantity if first else None,
+            "counts": chosen.counts,
+            "state_values": chosen.state_values,
+            "strategy_values": chosen.strategy_values,
+        }
+
+    day = symbols.india_date(int(desk.now() * 1000))
+    # The link is checked again in the same read as the strategy: one replaced while this alert
+    # waited for the lock is nobody's now.
+    claimed = store.claim_alert(strategy_id, decide, day, token=token)
+    if claimed is None or not made:
+        _count_refused("token", row.get("ip", ""))
+        return _out(UNKNOWN)
+    strategy, state, alert_id, _columns = claimed
+    chosen = made[0]
+    if alert_id is None:  # the claim was there already: a second delivery of the same alert
+        said = words.repeat(alert.fired_s)
+        store.note_alert(strategy_id, verdict="repeat", sentence=said, **{**row, "claim": None})
+        return _out(ALREADY, verdict="repeat", sentence=said)
+    if chosen.verdict is not None:
+        _after(desk, strategy, chosen.verdict, chosen.sentence, chosen.tell)
+        return _out(HANDLED, verdict=chosen.verdict, sentence=chosen.sentence, alert_id=alert_id)
+    return _send(strategy, state, alert, alert_id, chosen, row, desk, store)
+
+
+def _send(strategy, state, alert, alert_id, chosen: Plan, row, desk, store) -> Outcome:
+    """The order, holding the strategy's lock, with the alert's row already written.
+
+    One smart order to the target; or two when the held contract and the one to enter differ: the
+    held contract's exit to 0 first, and the entry only if that exit answered clearly (an order
+    went, or there was nothing to close). On anything else the entry is not sent: a refusal costs
+    nothing, and both sides are never opened from one alert. Nothing is ever retried.
+
+    Whatever happens here, the claim stays: an alert whose order failed is not handled again.
+    """
+    name = strategy.name
+    api_key = desk.api_key()
+    state_values: dict[str, Any] = {}
+    verdict, sentence, order_id, done = (
+        "order_refused",
+        words.order_refused(name, _NO_KEY),
+        None,
+        None,
+    )
+    tells = list(chosen.tells)
+    now_state = state
+    for index, step in enumerate(chosen.steps if api_key else ()):
+        done = step
+        try:
+            success, response, status = desk.place(step.order, api_key, chosen.analyze)
+        except Exception:
+            # It may have reached the broker: never a refusal, never the failure's own words.
+            logger.exception("Automation: the smart order call did not return an answer")
+            success, response, status = False, {}, 500
+        verdict, flat_found, cut = rules.read_answer(success, response, status)
+        body = response if isinstance(response, dict) else {}
+        said = body.get("risk_note") or body.get("message") or ""
+        # A reversal the risk gate cut to its exit left the position flat: the state says flat.
+        reached = 0 if cut else step.target
+        moved = rules.state_after(
+            verdict, flat_found, reached, alert, step.exchange, step.symbol,
+            int(desk.now() * 1000), now_state,
+        )  # fmt: skip
+        state_values.update(moved)
+        now_state = replace(now_state, **moved)
+        if verdict == rules.SENT:
+            order_id = str(body.get("orderid"))
+            sentence = words.sent(name, step.target, step.quantity, step.symbol)
+            if cut:
+                sentence = words.cut_to_exit(name, step.symbol, said)
+        elif verdict == rules.NO_ACTION:
+            sentence = words.no_action(name, step.target, step.quantity, step.symbol, flat_found)
+        elif verdict == rules.ORDER_REFUSED:
+            sentence = words.order_refused(name, said)
+        else:
+            sentence = words.not_confirmed(name, said)
+        if index < len(chosen.steps) - 1 and verdict not in (rules.SENT, rules.NO_ACTION):
+            wanted = chosen.steps[-1].symbol
+            sentence = words.exit_first_refused(
+                name, step.symbol, wanted, verdict == rules.ORDER_REFUSED
+            )
+            tells.append(("two_step", sentence))
+            break
+    sentence = " ".join([sentence, *chosen.notes])
+    columns = {}
+    if done is not None:
+        columns = {
+            "exchange": done.exchange,
+            "symbol": done.symbol,
+            "action": done.order["action"],
+            "quantity": done.quantity,
+        }
+    store.finish_alert(
+        alert_id,
+        verdict=verdict,
+        sentence=sentence,
+        order_id=order_id,
+        answer_ms=int(desk.now() * 1000) - row["received_ms"],
+        state_values=state_values,
+        **columns,
+    )
+    _after(desk, strategy, verdict, sentence, None)
+    for reason, said in tells:
+        _tell(desk, strategy, reason, said)
+    return _out(HANDLED, verdict=verdict, sentence=sentence, alert_id=alert_id)
+
+
+def _after(desk: Desk, strategy: m.Strategy, verdict: str, sentence: str, tell: str | None) -> None:
+    """The live event for the owner's screens and, when it should hear, his Telegram. Neither
+    carries a token or an API key, and neither can fail the alert."""
+    desk.emit(
+        {
+            "kind": "alert",
+            "strategy_id": strategy.id,
+            "name": strategy.name,
+            "verdict": verdict,
+            "sentence": sentence,
+            "at_ms": int(desk.now() * 1000),
+        }
+    )
+    if tell:
+        _tell(desk, strategy, tell, sentence)
+
+
+def _tell(desk: Desk, strategy: m.Strategy, reason: str, sentence: str) -> None:
+    try:
+        desk.tell(strategy.id, reason, sentence)
+    except Exception:
+        logger.exception("Automation: a notice could not be queued")

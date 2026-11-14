@@ -100,6 +100,8 @@ MIGRATIONS = [
     ("migrate_session_cutoffs.py", "SUDARSHAN Session Cutoffs (logout of every device)"),
     # SUDARSHAN M8.4: the watchlist store, db/sudarshan_watchlists.db. Listed, not required (L14).
     ("migrate_sudarshan_watchlists.py", "SUDARSHAN Watchlists v2 (sections, follow rows, flags)"),
+    # SUDARSHAN M12.1: the automation's own file, db/sudarshan_automation.db
+    ("migrate_sudarshan_automation.py", "SUDARSHAN Automation (TradingView alerts)"),
 ]
 
 # Legacy migrations historically used non-zero exits for best-effort warnings,
@@ -112,6 +114,7 @@ REQUIRED_MIGRATIONS = frozenset(
         "migrate_strategy_module.py",
         "migrate_strategy_universe_tab.py",
         "migrate_sudarshan_risk.py",  # SUDARSHAN M5.13
+        "migrate_sudarshan_automation.py",  # SUDARSHAN M12.1
     }
 )
 

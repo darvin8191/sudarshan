@@ -105,6 +105,7 @@ from blueprints.strategy_chart import strategy_chart_bp  # Import the strategy c
 from blueprints.strategy_module import strategy_module_bp  # Multi-leg options strategies with RMS
 from blueprints.strategy_portfolio import strategy_portfolio_bp  # Strategy Builder portfolio
 from blueprints.sudarshan_alerts import sudarshan_alerts_bp  # SUDARSHAN M10 market alerts
+from blueprints.sudarshan_automation import sudarshan_automation_bp  # SUDARSHAN M12.1 automation
 from blueprints.sudarshan_autologin import sudarshan_autologin_bp  # SUDARSHAN M2.20 auto-login
 from blueprints.sudarshan_family import sudarshan_family_bp  # SUDARSHAN M20.6 family view bridge
 from blueprints.sudarshan_journal import sudarshan_journal_bp  # SUDARSHAN M14.1 journal bridge
@@ -373,6 +374,7 @@ def create_app():
     app.register_blueprint(sudarshan_watchlists_bp)  # SUDARSHAN M8.4: sudarshan/watchlists/README.md
     app.register_blueprint(sudarshan_journal_bp)  # SUDARSHAN M14.1: the journal (sudarshan-journal)
     app.register_blueprint(sudarshan_family_bp)  # SUDARSHAN M20.6: the family view's two doors
+    app.register_blueprint(sudarshan_automation_bp)  # SUDARSHAN M12.1: sudarshan/automation (alerts)
 
     # Remote MCP (HTTP + OAuth) — opt-in via MCP_HTTP_ENABLED. Off by default.
     # Pre-flight refusal: must NEVER coexist with FLASK_DEBUG=True (debug-mode

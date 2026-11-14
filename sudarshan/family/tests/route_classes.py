@@ -307,6 +307,7 @@ webhook       /oauth/token                    mcp_oauth_bp.token_endpoint       
 webhook       /postback/<broker>              postback_bp.broker_postback                   # broker order postbacks: matched to the live broker session
 webhook       /strategy/webhook/<token>       strategy_module_bp.webhook                    # strategy alerts (TradingView): the token in the path
 webhook       /sudarshan/risk/api/killswitch  sudarshan_risk_bp.api_turn_on                 # kill switch for outside platforms: the API key in the body (M5.13)
+webhook       /sudarshan/tv/<token>           sudarshan_automation_bp.alert                 # Automation alerts (TradingView): the token in the path; off by default, when it answers as a link nobody made (M12.1)
 
 # --- internal: ring services' sealed hand-offs, called on 127.0.0.1 ---
 internal      /sudarshan/alerts/internal/push          sudarshan_alerts.internal_push                  # sudarshan-alerts pushes events: sealed, 404 through nginx
@@ -716,6 +717,16 @@ protected     /sudarshan/alerts/api/prefs                                       
 protected     /sudarshan/alerts/api/prefs                                               sudarshan_alerts.set_prefs
 protected     /sudarshan/alerts/api/state                                               sudarshan_alerts.state
 protected     /sudarshan/alerts/api/test                                                sudarshan_alerts.send_test
+protected     /sudarshan/automation/api/alerts                                          sudarshan_automation_bp.api_alerts
+protected     /sudarshan/automation/api/check                                           sudarshan_automation_bp.api_check
+protected     /sudarshan/automation/api/create                                          sudarshan_automation_bp.api_create
+protected     /sudarshan/automation/api/list                                            sudarshan_automation_bp.api_list
+protected     /sudarshan/automation/api/mode                                            sudarshan_automation_bp.api_mode
+protected     /sudarshan/automation/api/one                                             sudarshan_automation_bp.api_one
+protected     /sudarshan/automation/api/others                                          sudarshan_automation_bp.api_others
+protected     /sudarshan/automation/api/state                                           sudarshan_automation_bp.api_state
+protected     /sudarshan/automation/api/token                                           sudarshan_automation_bp.api_token
+protected     /sudarshan/automation/api/update                                          sudarshan_automation_bp.api_update
 protected     /sudarshan/autologin/enabled                                              sudarshan_autologin.set_enabled
 protected     /sudarshan/autologin/pin                                                  sudarshan_autologin.clear_pin
 protected     /sudarshan/autologin/pin                                                  sudarshan_autologin.set_pin

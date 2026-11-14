@@ -1,0 +1,1092 @@
+{
+ "master": {
+  "about": "Rows in the master's own form (symbol, exchange, lot size, expiry), written by hand for these tests from the published expiry days: NIFTY and BANKNIFTY monthly on the last Tuesday (24 Nov and 29 Dec 2026), January's moved from Tue 26 Jan 2027 (Republic Day) to Mon 25 Jan, SENSEX on the last Thursday. Not cut from a server's export.",
+  "symbols": {
+   "NSE": [
+    "RELIANCE",
+    "M&M",
+    "BAJAJ-AUTO",
+    "SBIN"
+   ],
+   "BSE": [
+    "RELIANCE"
+   ],
+   "NSE_INDEX": [
+    "NIFTY",
+    "BANKNIFTY",
+    "FINNIFTY",
+    "MIDCPNIFTY"
+   ],
+   "BSE_INDEX": [
+    "SENSEX"
+   ],
+   "NFO": [
+    "NIFTY24NOV26FUT",
+    "NIFTY29DEC26FUT",
+    "NIFTY25JAN27FUT",
+    "BANKNIFTY24NOV26FUT",
+    "BANKNIFTY29DEC26FUT",
+    "RELIANCE24NOV26FUT",
+    "RELIANCE29DEC26FUT",
+    "NIFTY24NOV2625000CE",
+    "NIFTY24NOV2625000PE",
+    "NIFTY24NOV2624950.5CE"
+   ],
+   "BFO": [
+    "SENSEX26NOV26FUT",
+    "SENSEX31DEC26FUT"
+   ]
+  },
+  "futures": {
+   "NIFTY": [
+    "2026-11-24",
+    "2026-12-29",
+    "2027-01-25"
+   ],
+   "BANKNIFTY": [
+    "2026-11-24",
+    "2026-12-29"
+   ],
+   "RELIANCE": [
+    "2026-11-24",
+    "2026-12-29"
+   ],
+   "SENSEX": [
+    "2026-11-26",
+    "2026-12-31"
+   ],
+   "FINNIFTY": [
+    "2026-11-24"
+   ]
+  },
+  "lots": {
+   "NIFTY": 65,
+   "BANKNIFTY": 30,
+   "SENSEX": 20,
+   "RELIANCE": 500
+  },
+  "indices": [
+   "NIFTY",
+   "BANKNIFTY",
+   "FINNIFTY",
+   "MIDCPNIFTY",
+   "SENSEX",
+   "BANKEX"
+  ]
+ },
+ "cases": [
+  {
+   "name": "NIFTY future this month, an ordinary day",
+   "strategy": {
+    "kind": "future",
+    "underlying": "NIFTY",
+    "exchange": "NFO",
+    "expiry_rule": "month",
+    "product": "MIS"
+   },
+   "now": "2026-11-16 10:00:00",
+   "entering": true,
+   "expect": {
+    "exchange": "NFO",
+    "symbol": "NIFTY24NOV26FUT",
+    "expiry": "2026-11-24",
+    "expires_today": false,
+    "underlying": "NIFTY"
+   }
+  },
+  {
+   "name": "NIFTY future next month",
+   "strategy": {
+    "kind": "future",
+    "underlying": "NIFTY",
+    "exchange": "NFO",
+    "expiry_rule": "next_month",
+    "product": "MIS"
+   },
+   "now": "2026-11-16 10:00:00",
+   "entering": true,
+   "expect": {
+    "exchange": "NFO",
+    "symbol": "NIFTY29DEC26FUT"
+   }
+  },
+  {
+   "name": "expiry day morning, intraday: the expiring contract, marked",
+   "strategy": {
+    "kind": "future",
+    "underlying": "NIFTY",
+    "exchange": "NFO",
+    "expiry_rule": "month",
+    "product": "MIS"
+   },
+   "now": "2026-11-24 10:00:00",
+   "entering": true,
+   "expect": {
+    "exchange": "NFO",
+    "symbol": "NIFTY24NOV26FUT",
+    "expires_today": true,
+    "stop": "2026-11-24 15:40:00"
+   }
+  },
+  {
+   "name": "old regime: entry 15 min 1 s before the 15:40 stop is allowed",
+   "strategy": {
+    "kind": "future",
+    "underlying": "NIFTY",
+    "exchange": "NFO",
+    "expiry_rule": "month",
+    "product": "MIS"
+   },
+   "now": "2026-11-24 15:24:59",
+   "entering": true,
+   "expect": {
+    "exchange": "NFO",
+    "symbol": "NIFTY24NOV26FUT"
+   }
+  },
+  {
+   "name": "old regime: entry exactly 15 min before the stop is allowed",
+   "strategy": {
+    "kind": "future",
+    "underlying": "NIFTY",
+    "exchange": "NFO",
+    "expiry_rule": "month",
+    "product": "MIS"
+   },
+   "now": "2026-11-24 15:25:00",
+   "entering": true,
+   "expect": {
+    "exchange": "NFO",
+    "symbol": "NIFTY24NOV26FUT"
+   }
+  },
+  {
+   "name": "old regime: entry inside the last 15 minutes is too close",
+   "strategy": {
+    "kind": "future",
+    "underlying": "NIFTY",
+    "exchange": "NFO",
+    "expiry_rule": "month",
+    "product": "MIS"
+   },
+   "now": "2026-11-24 15:25:01",
+   "entering": true,
+   "expect": {
+    "unmapped": "too_close",
+    "what": "NIFTY24NOV26FUT",
+    "stop": "2026-11-24 15:40:00"
+   }
+  },
+  {
+   "name": "an exit is never too close",
+   "strategy": {
+    "kind": "future",
+    "underlying": "NIFTY",
+    "exchange": "NFO",
+    "expiry_rule": "month",
+    "product": "MIS"
+   },
+   "now": "2026-11-24 15:39:59",
+   "entering": false,
+   "expect": {
+    "exchange": "NFO",
+    "symbol": "NIFTY24NOV26FUT"
+   }
+  },
+  {
+   "name": "old regime: the instant before the stop, an entry with no window",
+   "strategy": {
+    "kind": "future",
+    "underlying": "NIFTY",
+    "exchange": "NFO",
+    "expiry_rule": "month",
+    "product": "MIS",
+    "no_entry_before_stop_min": 0
+   },
+   "now": "2026-11-24 15:39:59",
+   "entering": true,
+   "expect": {
+    "exchange": "NFO",
+    "symbol": "NIFTY24NOV26FUT"
+   }
+  },
+  {
+   "name": "old regime: at the stop the rule gives the next expiry",
+   "strategy": {
+    "kind": "future",
+    "underlying": "NIFTY",
+    "exchange": "NFO",
+    "expiry_rule": "month",
+    "product": "MIS",
+    "no_entry_before_stop_min": 0
+   },
+   "now": "2026-11-24 15:40:00",
+   "entering": true,
+   "expect": {
+    "exchange": "NFO",
+    "symbol": "NIFTY29DEC26FUT",
+    "expires_today": false
+   }
+  },
+  {
+   "name": "old regime: at the stop next month moves on too, to the holiday-shifted January",
+   "strategy": {
+    "kind": "future",
+    "underlying": "NIFTY",
+    "exchange": "NFO",
+    "expiry_rule": "next_month",
+    "product": "MIS"
+   },
+   "now": "2026-11-24 15:40:00",
+   "entering": true,
+   "expect": {
+    "exchange": "NFO",
+    "symbol": "NIFTY25JAN27FUT",
+    "expiry": "2027-01-25"
+   }
+  },
+  {
+   "name": "new regime (from 7 Dec): an index contract's last instant, 15:29:59",
+   "strategy": {
+    "kind": "future",
+    "underlying": "NIFTY",
+    "exchange": "NFO",
+    "expiry_rule": "month",
+    "product": "MIS"
+   },
+   "now": "2026-12-29 15:29:59",
+   "entering": false,
+   "expect": {
+    "exchange": "NFO",
+    "symbol": "NIFTY29DEC26FUT"
+   }
+  },
+  {
+   "name": "new regime: at 15:30 the index contract has stopped while F&O still trades",
+   "strategy": {
+    "kind": "future",
+    "underlying": "NIFTY",
+    "exchange": "NFO",
+    "expiry_rule": "month",
+    "product": "MIS"
+   },
+   "now": "2026-12-29 15:30:00",
+   "entering": true,
+   "expect": {
+    "exchange": "NFO",
+    "symbol": "NIFTY25JAN27FUT"
+   }
+  },
+  {
+   "name": "new regime: too close is measured from 15:30",
+   "strategy": {
+    "kind": "future",
+    "underlying": "NIFTY",
+    "exchange": "NFO",
+    "expiry_rule": "month",
+    "product": "MIS"
+   },
+   "now": "2026-12-29 15:15:01",
+   "entering": true,
+   "expect": {
+    "unmapped": "too_close",
+    "what": "NIFTY29DEC26FUT",
+    "stop": "2026-12-29 15:30:00"
+   }
+  },
+  {
+   "name": "new regime: 15 min 1 s before 15:30 is allowed",
+   "strategy": {
+    "kind": "future",
+    "underlying": "NIFTY",
+    "exchange": "NFO",
+    "expiry_rule": "month",
+    "product": "MIS"
+   },
+   "now": "2026-12-29 15:14:59",
+   "entering": true,
+   "expect": {
+    "exchange": "NFO",
+    "symbol": "NIFTY29DEC26FUT"
+   }
+  },
+  {
+   "name": "new regime: a stock's future still trades at 15:30 on its expiry day",
+   "strategy": {
+    "kind": "future",
+    "underlying": "RELIANCE",
+    "exchange": "NFO",
+    "expiry_rule": "month",
+    "product": "MIS"
+   },
+   "now": "2026-12-29 15:30:00",
+   "entering": false,
+   "expect": {
+    "exchange": "NFO",
+    "symbol": "RELIANCE29DEC26FUT",
+    "underlying": "RELIANCE"
+   }
+  },
+  {
+   "name": "new regime: a stock's future stops at 15:45, and the list has nothing after it",
+   "strategy": {
+    "kind": "future",
+    "underlying": "RELIANCE",
+    "exchange": "NFO",
+    "expiry_rule": "month",
+    "product": "MIS"
+   },
+   "now": "2026-12-29 15:45:00",
+   "entering": false,
+   "expect": {
+    "unmapped": "no_expiry",
+    "what": "RELIANCE"
+   }
+  },
+  {
+   "name": "old regime: a stock's future stops at 15:40 with the index's",
+   "strategy": {
+    "kind": "future",
+    "underlying": "RELIANCE",
+    "exchange": "NFO",
+    "expiry_rule": "month",
+    "product": "MIS"
+   },
+   "now": "2026-11-24 15:40:00",
+   "entering": false,
+   "expect": {
+    "exchange": "NFO",
+    "symbol": "RELIANCE29DEC26FUT"
+   }
+  },
+  {
+   "name": "carry product, the day before expiry: the expiring contract",
+   "strategy": {
+    "kind": "future",
+    "underlying": "NIFTY",
+    "exchange": "NFO",
+    "expiry_rule": "month",
+    "product": "NRML",
+    "roll_on_expiry_day": true
+   },
+   "now": "2026-11-23 10:00:00",
+   "entering": true,
+   "expect": {
+    "exchange": "NFO",
+    "symbol": "NIFTY24NOV26FUT"
+   }
+  },
+  {
+   "name": "carry product on expiry day: an entry goes to the next expiry from the morning",
+   "strategy": {
+    "kind": "future",
+    "underlying": "NIFTY",
+    "exchange": "NFO",
+    "expiry_rule": "month",
+    "product": "NRML",
+    "roll_on_expiry_day": true
+   },
+   "now": "2026-11-24 09:20:00",
+   "entering": true,
+   "expect": {
+    "exchange": "NFO",
+    "symbol": "NIFTY29DEC26FUT",
+    "expires_today": false
+   }
+  },
+  {
+   "name": "carry product on expiry day: the rule for an exit is still the expiring contract",
+   "strategy": {
+    "kind": "future",
+    "underlying": "NIFTY",
+    "exchange": "NFO",
+    "expiry_rule": "month",
+    "product": "NRML",
+    "roll_on_expiry_day": true
+   },
+   "now": "2026-11-24 09:20:00",
+   "entering": false,
+   "expect": {
+    "exchange": "NFO",
+    "symbol": "NIFTY24NOV26FUT"
+   }
+  },
+  {
+   "name": "carry product, next month, on expiry day",
+   "strategy": {
+    "kind": "future",
+    "underlying": "NIFTY",
+    "exchange": "NFO",
+    "expiry_rule": "next_month",
+    "product": "NRML",
+    "roll_on_expiry_day": true
+   },
+   "now": "2026-11-24 09:20:00",
+   "entering": true,
+   "expect": {
+    "exchange": "NFO",
+    "symbol": "NIFTY25JAN27FUT"
+   }
+  },
+  {
+   "name": "carry product on the last listed expiry: nothing to roll to",
+   "strategy": {
+    "kind": "future",
+    "underlying": "BANKNIFTY",
+    "exchange": "NFO",
+    "expiry_rule": "month",
+    "product": "NRML",
+    "roll_on_expiry_day": true
+   },
+   "now": "2026-12-29 09:20:00",
+   "entering": true,
+   "expect": {
+    "unmapped": "no_expiry",
+    "what": "BANKNIFTY"
+   }
+  },
+  {
+   "name": "the master lists the expiry but not the contract yet",
+   "strategy": {
+    "kind": "future",
+    "underlying": "FINNIFTY",
+    "exchange": "NFO",
+    "expiry_rule": "month",
+    "product": "MIS"
+   },
+   "now": "2026-11-16 10:00:00",
+   "entering": true,
+   "expect": {
+    "unmapped": "not_listed",
+    "what": "FINNIFTY24NOV26FUT"
+   }
+  },
+  {
+   "name": "an underlying with no futures listed",
+   "strategy": {
+    "kind": "future",
+    "underlying": "SBIN",
+    "exchange": "NFO",
+    "expiry_rule": "month",
+    "product": "MIS"
+   },
+   "now": "2026-11-16 10:00:00",
+   "entering": true,
+   "expect": {
+    "unmapped": "no_expiry",
+    "what": "SBIN"
+   }
+  },
+  {
+   "name": "SENSEX future on BFO",
+   "strategy": {
+    "kind": "future",
+    "underlying": "SENSEX",
+    "exchange": "BFO",
+    "expiry_rule": "month",
+    "product": "MIS"
+   },
+   "now": "2026-11-16 10:00:00",
+   "entering": true,
+   "expect": {
+    "exchange": "BFO",
+    "symbol": "SENSEX26NOV26FUT",
+    "expiry": "2026-11-26"
+   }
+  },
+  {
+   "name": "SENSEX future at its stop",
+   "strategy": {
+    "kind": "future",
+    "underlying": "SENSEX",
+    "exchange": "BFO",
+    "expiry_rule": "month",
+    "product": "MIS"
+   },
+   "now": "2026-11-26 15:40:00",
+   "entering": false,
+   "expect": {
+    "exchange": "BFO",
+    "symbol": "SENSEX31DEC26FUT"
+   }
+  },
+  {
+   "name": "a commodity future",
+   "strategy": {
+    "kind": "future",
+    "underlying": "CRUDEOIL",
+    "exchange": "MCX",
+    "expiry_rule": "month",
+    "product": "MIS"
+   },
+   "now": "2026-11-16 10:00:00",
+   "entering": true,
+   "expect": {
+    "unmapped": "commodity"
+   }
+  },
+  {
+   "name": "a share on NSE",
+   "strategy": {
+    "kind": "same",
+    "chart": "NSE:RELIANCE",
+    "exchange": "NSE",
+    "expiry_rule": null,
+    "product": "MIS"
+   },
+   "now": "2026-11-16 10:00:00",
+   "entering": true,
+   "expect": {
+    "exchange": "NSE",
+    "symbol": "RELIANCE",
+    "expiry": null,
+    "expires_today": false
+   }
+  },
+  {
+   "name": "a share on BSE",
+   "strategy": {
+    "kind": "same",
+    "chart": "BSE:RELIANCE",
+    "exchange": "BSE",
+    "expiry_rule": null,
+    "product": "MIS"
+   },
+   "now": "2026-11-16 10:00:00",
+   "entering": true,
+   "expect": {
+    "exchange": "BSE",
+    "symbol": "RELIANCE"
+   }
+  },
+  {
+   "name": "M_M is M&M",
+   "strategy": {
+    "kind": "same",
+    "chart": "NSE:M_M",
+    "exchange": "NSE",
+    "expiry_rule": null,
+    "product": "MIS"
+   },
+   "now": "2026-11-16 10:00:00",
+   "entering": true,
+   "expect": {
+    "exchange": "NSE",
+    "symbol": "M&M"
+   }
+  },
+  {
+   "name": "BAJAJ_AUTO is BAJAJ-AUTO",
+   "strategy": {
+    "kind": "same",
+    "chart": "NSE:BAJAJ_AUTO",
+    "exchange": "NSE",
+    "expiry_rule": null,
+    "product": "MIS"
+   },
+   "now": "2026-11-16 10:00:00",
+   "entering": true,
+   "expect": {
+    "exchange": "NSE",
+    "symbol": "BAJAJ-AUTO"
+   }
+  },
+  {
+   "name": "a share the master does not list",
+   "strategy": {
+    "kind": "same",
+    "chart": "NSE:NOSUCH",
+    "exchange": "NSE",
+    "expiry_rule": null,
+    "product": "MIS"
+   },
+   "now": "2026-11-16 10:00:00",
+   "entering": true,
+   "expect": {
+    "unmapped": "unknown",
+    "what": "NSE:NOSUCH"
+   }
+  },
+  {
+   "name": "an index is not tradable itself",
+   "strategy": {
+    "kind": "same",
+    "chart": "NSE:NIFTY",
+    "exchange": "NSE",
+    "expiry_rule": null,
+    "product": "MIS"
+   },
+   "now": "2026-11-16 10:00:00",
+   "entering": true,
+   "expect": {
+    "unmapped": "index",
+    "what": "NIFTY"
+   }
+  },
+  {
+   "name": "an index by TradingView's own name",
+   "strategy": {
+    "kind": "same",
+    "chart": "NSE:CNXFINANCE",
+    "exchange": "NSE",
+    "expiry_rule": null,
+    "product": "MIS"
+   },
+   "now": "2026-11-16 10:00:00",
+   "entering": true,
+   "expect": {
+    "unmapped": "index",
+    "what": "FINNIFTY"
+   }
+  },
+  {
+   "name": "NIFTY1! is this month's future",
+   "strategy": {
+    "kind": "same",
+    "chart": "NSE:NIFTY1!",
+    "exchange": "NSE",
+    "expiry_rule": null,
+    "product": "MIS"
+   },
+   "now": "2026-11-16 10:00:00",
+   "entering": true,
+   "expect": {
+    "exchange": "NFO",
+    "symbol": "NIFTY24NOV26FUT"
+   }
+  },
+  {
+   "name": "NIFTY2! is next month's future",
+   "strategy": {
+    "kind": "same",
+    "chart": "NSE:NIFTY2!",
+    "exchange": "NSE",
+    "expiry_rule": null,
+    "product": "MIS"
+   },
+   "now": "2026-11-16 10:00:00",
+   "entering": true,
+   "expect": {
+    "exchange": "NFO",
+    "symbol": "NIFTY29DEC26FUT"
+   }
+  },
+  {
+   "name": "NIFTY1! rolls at the stop like the named future",
+   "strategy": {
+    "kind": "same",
+    "chart": "NSE:NIFTY1!",
+    "exchange": "NSE",
+    "expiry_rule": null,
+    "product": "MIS"
+   },
+   "now": "2026-12-29 15:30:00",
+   "entering": false,
+   "expect": {
+    "exchange": "NFO",
+    "symbol": "NIFTY25JAN27FUT"
+   }
+  },
+  {
+   "name": "BANKNIFTY1!",
+   "strategy": {
+    "kind": "same",
+    "chart": "NSE:BANKNIFTY1!",
+    "exchange": "NSE",
+    "expiry_rule": null,
+    "product": "MIS"
+   },
+   "now": "2026-11-16 10:00:00",
+   "entering": true,
+   "expect": {
+    "exchange": "NFO",
+    "symbol": "BANKNIFTY24NOV26FUT",
+    "underlying": "BANKNIFTY"
+   }
+  },
+  {
+   "name": "a stock's future by its chart name is not checked yet",
+   "strategy": {
+    "kind": "same",
+    "chart": "NSE:RELIANCE1!",
+    "exchange": "NSE",
+    "expiry_rule": null,
+    "product": "MIS"
+   },
+   "now": "2026-11-16 10:00:00",
+   "entering": true,
+   "expect": {
+    "unmapped": "unchecked",
+    "what": "NSE:RELIANCE1!"
+   }
+  },
+  {
+   "name": "a BSE future by its chart name is not checked yet",
+   "strategy": {
+    "kind": "same",
+    "chart": "BSE:SENSEX1!",
+    "exchange": "BSE",
+    "expiry_rule": null,
+    "product": "MIS"
+   },
+   "now": "2026-11-16 10:00:00",
+   "entering": true,
+   "expect": {
+    "unmapped": "unchecked",
+    "what": "BSE:SENSEX1!"
+   }
+  },
+  {
+   "name": "an index future whose chart name differs from its root is not checked yet",
+   "strategy": {
+    "kind": "same",
+    "chart": "NSE:CNXFINANCE1!",
+    "exchange": "NSE",
+    "expiry_rule": null,
+    "product": "MIS"
+   },
+   "now": "2026-11-16 10:00:00",
+   "entering": true,
+   "expect": {
+    "unmapped": "unchecked",
+    "what": "NSE:CNXFINANCE1!"
+   }
+  },
+  {
+   "name": "an option by its chart name, call",
+   "strategy": {
+    "kind": "same",
+    "chart": "NSE:NIFTY261124C25000",
+    "exchange": "NSE",
+    "expiry_rule": null,
+    "product": "MIS"
+   },
+   "now": "2026-11-16 10:00:00",
+   "entering": true,
+   "expect": {
+    "exchange": "NFO",
+    "symbol": "NIFTY24NOV2625000CE",
+    "expiry": "2026-11-24",
+    "underlying": "NIFTY"
+   }
+  },
+  {
+   "name": "an option by its chart name, put",
+   "strategy": {
+    "kind": "same",
+    "chart": "NSE:NIFTY261124P25000",
+    "exchange": "NSE",
+    "expiry_rule": null,
+    "product": "MIS"
+   },
+   "now": "2026-11-16 10:00:00",
+   "entering": true,
+   "expect": {
+    "exchange": "NFO",
+    "symbol": "NIFTY24NOV2625000PE"
+   }
+  },
+  {
+   "name": "an option with a fractional strike",
+   "strategy": {
+    "kind": "same",
+    "chart": "NSE:NIFTY261124C24950.5",
+    "exchange": "NSE",
+    "expiry_rule": null,
+    "product": "MIS"
+   },
+   "now": "2026-11-16 10:00:00",
+   "entering": true,
+   "expect": {
+    "exchange": "NFO",
+    "symbol": "NIFTY24NOV2624950.5CE"
+   }
+  },
+  {
+   "name": "an option the master does not list",
+   "strategy": {
+    "kind": "same",
+    "chart": "NSE:NIFTY261124C99000",
+    "exchange": "NSE",
+    "expiry_rule": null,
+    "product": "MIS"
+   },
+   "now": "2026-11-16 10:00:00",
+   "entering": true,
+   "expect": {
+    "unmapped": "not_listed",
+    "what": "NIFTY24NOV2699000CE"
+   }
+  },
+  {
+   "name": "an option too close to its stop",
+   "strategy": {
+    "kind": "same",
+    "chart": "NSE:NIFTY261124C25000",
+    "exchange": "NSE",
+    "expiry_rule": null,
+    "product": "MIS"
+   },
+   "now": "2026-11-24 15:30:00",
+   "entering": true,
+   "expect": {
+    "unmapped": "too_close",
+    "what": "NIFTY24NOV2625000CE",
+    "stop": "2026-11-24 15:40:00"
+   }
+  },
+  {
+   "name": "a BSE option by its chart name is not checked yet",
+   "strategy": {
+    "kind": "same",
+    "chart": "BSE:SENSEX261126C80000",
+    "exchange": "BSE",
+    "expiry_rule": null,
+    "product": "MIS"
+   },
+   "now": "2026-11-16 10:00:00",
+   "entering": true,
+   "expect": {
+    "unmapped": "unchecked",
+    "what": "BSE:SENSEX261126C80000"
+   }
+  },
+  {
+   "name": "a commodity chart",
+   "strategy": {
+    "kind": "same",
+    "chart": "MCX:CRUDEOIL1!",
+    "exchange": "MCX",
+    "expiry_rule": null,
+    "product": "MIS"
+   },
+   "now": "2026-11-16 10:00:00",
+   "entering": true,
+   "expect": {
+    "unmapped": "commodity"
+   }
+  },
+  {
+   "name": "a strategy that trades its chart and names none",
+   "strategy": {
+    "kind": "same",
+    "chart": null,
+    "exchange": "NSE",
+    "expiry_rule": null,
+    "product": "MIS"
+   },
+   "now": "2026-11-16 10:00:00",
+   "entering": true,
+   "expect": {
+    "unmapped": "no_chart"
+   }
+  },
+  {
+   "name": "a special session's own close ends the contract early",
+   "strategy": {
+    "kind": "future",
+    "underlying": "NIFTY",
+    "exchange": "NFO",
+    "expiry_rule": "month",
+    "product": "MIS",
+    "no_entry_before_stop_min": 0
+   },
+   "now": "2026-11-24 14:00:00",
+   "entering": true,
+   "closes": {
+    "2026-11-24": "2026-11-24 14:00:00"
+   },
+   "expect": {
+    "exchange": "NFO",
+    "symbol": "NIFTY29DEC26FUT"
+   }
+  },
+  {
+   "name": "a special session: the instant before its close",
+   "strategy": {
+    "kind": "future",
+    "underlying": "NIFTY",
+    "exchange": "NFO",
+    "expiry_rule": "month",
+    "product": "MIS",
+    "no_entry_before_stop_min": 0
+   },
+   "now": "2026-11-24 13:59:59",
+   "entering": true,
+   "closes": {
+    "2026-11-24": "2026-11-24 14:00:00"
+   },
+   "expect": {
+    "exchange": "NFO",
+    "symbol": "NIFTY24NOV26FUT",
+    "stop": "2026-11-24 14:00:00"
+   }
+  }
+ ],
+ "sizes": [
+  {
+   "name": "1 lot of NIFTY is the master's lot size",
+   "strategy": {
+    "lots": 1
+   },
+   "lot": 65,
+   "freeze": 1800,
+   "expect": 65
+  },
+  {
+   "name": "2 lots of BANKNIFTY",
+   "strategy": {
+    "lots": 2
+   },
+   "lot": 30,
+   "freeze": 600,
+   "expect": 60
+  },
+  {
+   "name": "a new lot size needs no code",
+   "strategy": {
+    "lots": 1
+   },
+   "lot": 75,
+   "freeze": 1800,
+   "expect": 75
+  },
+  {
+   "name": "exactly the freeze quantity goes",
+   "strategy": {
+    "lots": 27
+   },
+   "lot": 65,
+   "freeze": 1755,
+   "expect": 1755
+  },
+  {
+   "name": "above the freeze quantity nothing is sent",
+   "strategy": {
+    "lots": 28
+   },
+   "lot": 65,
+   "freeze": 1800,
+   "expect": {
+    "not_sized": "freeze",
+    "figure": 1800
+   }
+  },
+  {
+   "name": "no freeze row means no freeze limit",
+   "strategy": {
+    "lots": 28
+   },
+   "lot": 65,
+   "freeze": 0,
+   "expect": 1820
+  },
+  {
+   "name": "the lot size could not be read",
+   "strategy": {
+    "lots": 1
+   },
+   "lot": null,
+   "freeze": 1800,
+   "expect": {
+    "not_sized": "lot"
+   }
+  },
+  {
+   "name": "a lot size of 0 is not a size",
+   "strategy": {
+    "lots": 1
+   },
+   "lot": 0,
+   "freeze": 0,
+   "expect": {
+    "not_sized": "lot"
+   }
+  },
+  {
+   "name": "shares are the strategy's own number",
+   "strategy": {
+    "lots": null,
+    "quantity": 10
+   },
+   "lot": 1,
+   "freeze": 0,
+   "expect": 10
+  },
+  {
+   "name": "shares never take the lot size",
+   "strategy": {
+    "lots": null,
+    "quantity": 10
+   },
+   "lot": 500,
+   "freeze": 0,
+   "expect": 10
+  }
+ ],
+ "held": [
+  {
+   "name": "a share never expires",
+   "symbol": "RELIANCE",
+   "exchange": "NSE",
+   "now": "2030-01-01 10:00:00",
+   "expect": false
+  },
+  {
+   "name": "nothing held",
+   "symbol": null,
+   "exchange": null,
+   "now": "2026-11-24 16:00:00",
+   "expect": false
+  },
+  {
+   "name": "old regime: held index future, the instant before its stop",
+   "symbol": "NIFTY24NOV26FUT",
+   "exchange": "NFO",
+   "now": "2026-11-24 15:39:59",
+   "expect": false
+  },
+  {
+   "name": "old regime: at its stop",
+   "symbol": "NIFTY24NOV26FUT",
+   "exchange": "NFO",
+   "now": "2026-11-24 15:40:00",
+   "expect": true
+  },
+  {
+   "name": "new regime: held index option at 15:30",
+   "symbol": "NIFTY29DEC2625000CE",
+   "exchange": "NFO",
+   "now": "2026-12-29 15:30:00",
+   "expect": true
+  },
+  {
+   "name": "new regime: held index option at 15:29:59",
+   "symbol": "NIFTY29DEC2625000CE",
+   "exchange": "NFO",
+   "now": "2026-12-29 15:29:59",
+   "expect": false
+  },
+  {
+   "name": "new regime: a stock future at 15:30 still trades",
+   "symbol": "RELIANCE29DEC26FUT",
+   "exchange": "NFO",
+   "now": "2026-12-29 15:30:00",
+   "expect": false
+  },
+  {
+   "name": "new regime: a stock future at 15:45",
+   "symbol": "RELIANCE29DEC26FUT",
+   "exchange": "NFO",
+   "now": "2026-12-29 15:45:00",
+   "expect": true
+  },
+  {
+   "name": "the next morning",
+   "symbol": "NIFTY24NOV26FUT",
+   "exchange": "NFO",
+   "now": "2026-11-25 09:15:00",
+   "expect": true
+  }
+ ]
+}
