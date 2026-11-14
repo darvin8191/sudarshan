@@ -9,6 +9,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const SOURCE = readFileSync(join(process.cwd(), 'public', 'sw.js'), 'utf8')
 const ORIGIN = 'https://sudarshan.example'
+/** The restart page as the build ships it (M1.17). */
+const RESTART_PAGE = readFileSync(
+  join(process.cwd(), 'public', 'images', 'restarting.html'),
+  'utf8'
+)
 
 type Handler = (event: Record<string, unknown>) => void
 
@@ -159,7 +164,8 @@ async function activate(world: World) {
 const basic = (body: string) =>
   Object.defineProperty(new Response(body, { status: 200 }), 'type', { value: 'basic' })
 
-async function install(world: World) {
+/** Install the worker. `kept` then sets what the cache holds of a file: its text, or null for nothing. */
+async function install(world: World, kept: Record<string, string | null> = {}) {
   let pending: Promise<unknown> = Promise.resolve()
   world.handlers.get('install')?.({
     waitUntil: (p: Promise<unknown>) => {
@@ -167,6 +173,11 @@ async function install(world: World) {
     },
   })
   await pending
+  const bucket = world.store.get('sudarshan-shell-v1')
+  for (const [path, text] of Object.entries(kept)) {
+    if (text === null) bucket?.delete(`${ORIGIN}${path}`)
+    else bucket?.set(`${ORIGIN}${path}`, new Response(text, { status: 200 }))
+  }
 }
 
 let world: World
@@ -212,14 +223,60 @@ describe('navigations: network first', () => {
     expect(world.fetch).toHaveBeenCalledWith(expect.objectContaining({ url: expect.any(String) }))
   })
 
-  it.each([
-    401, 403, 404, 500, 502, 503,
-  ])('never shows the offline page for a %i', async (status) => {
+  it.each([401, 403, 404, 500])('never shows the offline page for a %i', async (status) => {
     await install(world)
     world.fetch.mockResolvedValueOnce(new Response('the server says', { status }))
     const answer = await dispatch(world, '/family/holdings', { mode: 'navigate' })
     expect(answer?.status).toBe(status)
     expect(await answer?.text()).toBe('the server says')
+  })
+
+  // Review L3 (v0.12.0), M1.17: this list was pinned with the others above ("never shows the
+  // offline page for a 502, 503"). Changed on purpose: these three are the web server answering
+  // while the app restarts, and its bare page tells a family member nothing.
+  it.each([
+    502, 503, 504,
+  ])('shows the restart page for a navigation answered %i, under the same status', async (status) => {
+    await install(world, { '/images/restarting.html': RESTART_PAGE })
+    world.fetch.mockResolvedValueOnce(new Response('<h1>Bad Gateway</h1>nginx', { status }))
+    const answer = await dispatch(world, '/family/holdings', { mode: 'navigate' })
+    expect(answer?.status).toBe(status)
+    const shown = (await answer?.text()) ?? ''
+    expect(shown).toBe(RESTART_PAGE)
+    expect(shown).toContain('SUDARSHAN is restarting. It is back within a minute.')
+    expect(shown).not.toContain('Bad Gateway')
+    expect(answer?.headers.get('content-type')).toContain('text/html')
+    expect(answer?.headers.get('cache-control')).toBe('no-store')
+    // Still not the offline page, and nothing was kept of the failed answer.
+    expect(shown).not.toContain('You are offline')
+  })
+
+  it('shows the restart page again on the next try, and the app once the server answers', async () => {
+    await install(world, { '/images/restarting.html': RESTART_PAGE })
+    world.fetch.mockResolvedValueOnce(new Response('bad gateway', { status: 502 }))
+    expect((await dispatch(world, '/family/', { mode: 'navigate' }))?.status).toBe(502)
+    world.fetch.mockResolvedValueOnce(new Response('gateway timeout', { status: 504 }))
+    expect((await dispatch(world, '/family/', { mode: 'navigate' }))?.status).toBe(504)
+    const back = await dispatch(world, '/family/', { mode: 'navigate' })
+    expect(back?.status).toBe(200)
+    expect(await back?.text()).toBe('fresh')
+  })
+
+  it('passes the server’s own answer through when this phone has not kept the restart page', async () => {
+    await install(world, { '/images/restarting.html': null })
+    world.fetch.mockResolvedValueOnce(new Response('the server says', { status: 503 }))
+    const answer = await dispatch(world, '/family/holdings', { mode: 'navigate' })
+    expect(answer?.status).toBe(503)
+    expect(await answer?.text()).toBe('the server says')
+  })
+
+  it('leaves a 503 that is not a page load alone: the app shows its own words for those', async () => {
+    await install(world, { '/images/restarting.html': RESTART_PAGE })
+    expect(await dispatch(world, '/family/api/me')).toBeNull()
+    world.fetch.mockResolvedValueOnce(new Response('busy', { status: 503 }))
+    const asset = await dispatch(world, '/assets/app-1.js')
+    expect(asset?.status).toBe(503)
+    expect(await asset?.text()).toBe('busy')
   })
 })
 
@@ -504,6 +561,7 @@ describe('the file itself', () => {
     for (const found of SOURCE.matchAll(/'(\/(?:images\/[^']+|offline\.html))'/g)) {
       named.add(found[1])
     }
+    expect([...named]).toContain('/images/restarting.html')
     expect([...named]).toContain('/offline.html')
     expect([...named]).toContain('/images/family-offline.js')
     for (const path of named) {
