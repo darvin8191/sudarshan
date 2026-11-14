@@ -126,6 +126,11 @@ export interface ChainModel {
   skew: number | null
   /** When the snapshot was read, epoch ms. */
   asOf: number
+  /**
+   * No followed leg's open interest has come from a tick: it is all the snapshot's, re-read every
+   * minute, and the screen says its time instead of implying it moves with ticks (design fact 1).
+   */
+  oiFromSnapshot: boolean
   /** The snapshot's time when some strike shows it instead of ticks; null when every strike ticks. */
   wingsAsOf: number | null
 }
@@ -361,6 +366,9 @@ export function chainModel({
     expectedMove:
       premium === null ? null : { premium, pct: spot !== null ? (premium / spot) * 100 : null },
     skew: putIv !== null && callIv !== null ? putIv - callIv : null,
+    oiFromSnapshot:
+      priced.length > 0 &&
+      !priced.some((row) => row.ce?.oiFrom === 'tick' || row.pe?.oiFrom === 'tick'),
     asOf,
     wingsAsOf: rows.some((row) => !row.live) ? asOf : null,
   }

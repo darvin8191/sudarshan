@@ -65,7 +65,11 @@ function Second({ leg, view, grey }: { leg: LegView; view: ChainView; grey: bool
     const direction = directionOf(leg.change)
     return (
       <span
-        className={cn(SMALL, 'inline-flex items-center gap-1', grey ? GREY : TREND_TEXT[direction])}
+        className={cn(
+          SMALL,
+          'inline-flex flex-wrap items-center justify-[inherit] gap-x-1',
+          grey ? GREY : TREND_TEXT[direction]
+        )}
       >
         <TrendArrow direction={direction} className="size-2" />
         {formatChange(leg.change)} · {formatPercent(leg.changePct, 1)}

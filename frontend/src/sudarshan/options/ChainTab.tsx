@@ -105,6 +105,11 @@ export function ChainTab({
         <span className="text-center">STRIKE</span>
         <span className="text-right">PUT</span>
       </p>
+      {view === 'oi' && model.oiFromSnapshot && (
+        <p data-oi-as-of="true" className="text-xs font-semibold text-[color:var(--stale)]">
+          Open interest as of {clockTime(model.asOf)} · prices move with ticks
+        </p>
+      )}
       <ul ref={list} data-chain-rows={stage} className="flex flex-col">
         {rows.map((row) => {
           const extra = {

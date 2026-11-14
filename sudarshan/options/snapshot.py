@@ -40,6 +40,8 @@ _shape_lock = real_threading.Lock()
 #: The unreadable answer shapes already logged (their key names), each once; at most 16 kept.
 _shapes_logged: set[str] = set()
 SHAPES_KEPT = 16
+#: Whether the mapping's note has been logged in this process (one line, counts only).
+_mapping_noted: list[bool] = []
 
 
 def now_ms() -> int:
@@ -75,6 +77,23 @@ def _unreadable(answer: Any, why: str) -> None:
             "Options: Upstox answered a chain in a shape this version cannot read (%s); "
             "key names: answer %s, first row %s, its call %s",
             why, shape["answer"], shape["row"], shape["call"],
+        )  # fmt: skip
+
+
+def _note_mapping(got: mapping.Mapped) -> None:
+    """Say once, in counts only, that Upstox's instrument keys were not the master's tokens (legs
+    matched by strike and side instead) or that the master lacked some legs: the answer to design
+    fact 2, for whoever reads the log after the first live read."""
+    if not (got.by_strike or got.left_out):
+        return
+    with _shape_lock:  # a flag's bookkeeping only
+        first = not _mapping_noted
+        _mapping_noted[:] = [True]
+    if first:
+        logger.warning(
+            "Options: of a chain's legs, %s were matched by strike and side (their instrument "
+            "key was not the master's token) and %s were left out (today's master lacks them)",
+            got.by_strike, got.left_out,
         )  # fmt: skip
 
 
@@ -135,6 +154,7 @@ def _read(token: str, target: mapping.Target, by_token) -> dict:
     if out.kind != "ok":
         return _record("unavailable", words.FAILED)
     got = mapping.map_chain(out.answer, target, by_token)
+    _note_mapping(got)
     return _record("ok", None, {
         "as_of": now_ms(),
         "exchange": target.exchange,

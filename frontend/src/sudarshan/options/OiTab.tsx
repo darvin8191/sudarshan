@@ -241,6 +241,15 @@ export function OiTab({ model, dim }: { model: ChainModel; dim: boolean }) {
           PCR {model.pcr === null ? dash : model.pcr.toFixed(2)}
           {wings}
         </p>
+        {model.oiFromSnapshot && (
+          <p
+            data-oi-as-of="true"
+            className="inline-flex items-center gap-1 text-[color:var(--stale)]"
+          >
+            <Clock aria-hidden="true" className="size-3.5" />
+            Open interest as of {clockTime(model.asOf)} · prices move with ticks
+          </p>
+        )}
         <p>
           {model.maxPain === null
             ? 'Max pain not worked out: no open interest yet.'

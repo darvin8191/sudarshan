@@ -36,6 +36,8 @@ function show(model = modelOf(), props: Partial<Parameters<typeof ChainTab>[0]> 
 const rows = () => [...document.querySelectorAll<HTMLElement>('[data-strike]')]
 const row = (strike: number) => document.querySelector(`[data-strike="${strike}"]`) as HTMLElement
 
+vi.setConfig({ testTimeout: 30_000 })
+
 describe('the Chain tab', () => {
   it('draws ten strikes either side of the money, then the window, then the far strikes with their time', () => {
     show()

@@ -156,6 +156,20 @@ describe('the chain model', () => {
     expect(BUILD_UP_WORDS.short_covering).toBe('Short covering')
   })
 
+  it('says when no followed leg has had its open interest from a tick', () => {
+    expect(run(plain).oiFromSnapshot).toBe(true)
+    const ticking = run({
+      ...plain,
+      ticks: { 'NFO:TEST120CE': { at: plain.now, data: { oi: 310 } } },
+    })
+    expect(ticking.oiFromSnapshot).toBe(false)
+    const priceOnly = run({
+      ...plain,
+      ticks: { 'NFO:TEST120CE': { at: plain.now, data: { ltp: 6.5 } } },
+    })
+    expect(priceOnly.oiFromSnapshot).toBe(true)
+  })
+
   it('has no max pain without any open interest', () => {
     expect(maxPain([{ strike: 100, ceOi: null, peOi: 0 }], 100)).toBeNull()
   })

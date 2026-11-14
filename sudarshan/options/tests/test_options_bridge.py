@@ -279,6 +279,18 @@ def test_an_answer_that_cannot_be_read_is_logged_once_by_its_key_names(client, u
     assert "4242" not in caplog.text and TOKEN not in caplog.text
 
 
+def test_legs_matched_by_strike_are_noted_once_in_counts_only(client, upstox, caplog):
+    snapshot._mapping_noted.clear()
+    upstox.fake.replies += [ok(), ok()]
+    with caplog.at_level(logging.WARNING):
+        client.get(PATH + NIFTY)
+        upstox.clock.t += snapshot.CACHE_S + 1
+        client.get(PATH + NIFTY)
+    notes = [r.getMessage() for r in caplog.records if "matched by strike" in r.getMessage()]
+    assert len(notes) == 1 and "2 were matched" in notes[0] and "2 were left out" in notes[0]
+    assert "NIFTY17NOV26" not in caplog.text and TOKEN not in caplog.text
+
+
 def test_a_failure_inside_the_read_is_a_sentence_never_the_error_s_text(
     client, upstox, monkeypatch
 ):

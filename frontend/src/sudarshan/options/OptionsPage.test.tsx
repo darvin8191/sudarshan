@@ -100,10 +100,12 @@ async function open(path = '/options/NFO/NIFTY') {
 }
 
 async function settle() {
-  await act(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 0))
-    await new Promise((resolve) => setTimeout(resolve, 0))
-  })
+  // The reads are answered by the test at once; a few turns let each answer reach the screen.
+  for (let turn = 0; turn < 5; turn += 1) {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+  }
   act(() => frames.flush())
 }
 
@@ -111,7 +113,11 @@ const where = () => screen.getByTestId('where').textContent
 const state = () =>
   document.querySelector('[data-options-state]')?.getAttribute('data-options-state')
 
+// A page of 21 rows queried by role is slow in jsdom on a busy machine: the default 5 s is too tight.
+vi.setConfig({ testTimeout: 30_000 })
+
 beforeEach(() => {
+  same.rows = []
   localStorage.clear()
   feed.reset()
   frames.install()

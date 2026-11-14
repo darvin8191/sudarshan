@@ -33,6 +33,15 @@ describe('the OI tab', () => {
     expect(facts.textContent).toMatch(/Call wall \d\d,\d{3} \(.+\) · Put wall \d\d,\d{3} \(.+\)/)
   })
 
+  it('says the time of the open interest while no tick has carried any', () => {
+    const { rerender } = render(<OiTab model={modelOf()} dim={false} />)
+    expect(document.querySelector('[data-oi-as-of]')).toHaveTextContent(
+      'Open interest as of 10:42:05 · prices move with ticks'
+    )
+    rerender(<OiTab model={{ ...modelOf(), oiFromSnapshot: false }} dim={false} />)
+    expect(document.querySelector('[data-oi-as-of]')).toBeNull()
+  })
+
   it('words max pain against the spot either way, and without a spot', () => {
     expect(painWords(25_900, 25_912.35)).toBe('Max pain 25,900 · spot is 12 above')
     expect(painWords(26_000, 25_912.35)).toBe('Max pain 26,000 · spot is 88 below')
