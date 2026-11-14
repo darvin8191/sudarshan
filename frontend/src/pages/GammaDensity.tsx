@@ -189,7 +189,7 @@ export default function GammaDensity() {
         : 'rgba(0,0,0,0.08)',
       density: '#f59e0b', // amber — Γ×OI line
       densityFill: 'rgba(245,158,11,0.12)',
-      convexity: '#22c55e', // green — convexity bell
+      convexity: '#067A45', // SUDARSHAN T3b: the D look's up, for the convexity bell
       convexityFill: 'rgba(34,197,94,0.14)',
       spot: isDark ? '#60a5fa' : '#2563eb',
       band: isDark ? 'rgba(96,165,250,0.10)' : 'rgba(37,99,235,0.07)',
@@ -473,25 +473,26 @@ export default function GammaDensity() {
             value={`±${formatNum(data?.sigma_move)}`}
             sub={`${formatNum(data?.dte_days, 1)}d to expiry`}
           />
+          {/* SUDARSHAN T3b (M1.18): low and high in the down and up tokens; the labels name them. */}
           <StatCard
             label="1σ Low"
             value={formatNum(data?.one_sigma_low, 0)}
-            valueClass="text-red-500"
+            valueClass="text-[color:var(--down)]"
           />
           <StatCard
             label="1σ High"
             value={formatNum(data?.one_sigma_high, 0)}
-            valueClass="text-green-500"
+            valueClass="text-[color:var(--up)]"
           />
           <StatCard
             label="2σ Lower Tail"
             value={formatNum(data?.two_sigma_low, 0)}
-            valueClass="text-red-500"
+            valueClass="text-[color:var(--down)]"
           />
           <StatCard
             label="2σ Upper Tail"
             value={formatNum(data?.two_sigma_high, 0)}
-            valueClass="text-green-500"
+            valueClass="text-[color:var(--up)]"
           />
           <StatCard label="DTE" value={formatNum(data?.dte_days, 1)} sub="days" />
         </div>

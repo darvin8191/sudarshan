@@ -364,6 +364,10 @@ class PriceBook(Prices):
         before = sessions.previous_trading_day(day, self.calendar.is_trading_day)
         return sessions.day_key(before) if before else today
 
+    def holidays(self) -> tuple[int, ...]:
+        """The exchange's holidays as the calendar file lists them, as days (M7.31)."""
+        return tuple(sorted(sessions.day_key(day) for day in self.calendar.holidays()))
+
     def auction(self, asset: Mapping[str, Any], today: int):
         return self._auction.get(asset["id"], NO_AUCTION)
 

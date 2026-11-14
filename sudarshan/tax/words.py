@@ -117,7 +117,6 @@ NOT_COMPUTED = (
     "Rules against wash sales and bonus or dividend stripping.",
     "The extra tax on a promoter in a buyback.",
     "Debt funds, unlisted shares, property, gold, crypto and foreign assets.",
-    "Dividends other than a buyback's receipt (they come with corporate actions).",
 )
 CESS_LABEL = "cess at 4%, before surcharge"
 EXEMPT_ORDERS = {

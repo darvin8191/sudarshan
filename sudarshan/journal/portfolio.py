@@ -11,6 +11,8 @@ for exactly these reads, each answered with ``read_at``:
     historical_trades(segment, from, to, page)
     pnl_report(segment, fy, part, page)     Upstox's matched pairs and charges
     positions, funds                        the day report's figure and the brief's lines
+    positions, holdings                     what was held before the journal's first fill of an
+                                            instrument, read once at first sight (review B1)
     benchmark_closes(index, from, to)       NIFTY 50's closes for the week and beta
 
 A seal is ``{"op", "nonce", "principal": "sudarshan-journal", "args": {...}}``, one Fernet token,
@@ -141,6 +143,9 @@ class PortfolioLink:
 
     async def positions(self) -> dict[str, Any]:
         return await self.call("positions")
+
+    async def holdings(self) -> dict[str, Any]:
+        return await self.call("holdings")
 
     async def funds(self) -> dict[str, Any]:
         return await self.call("funds")

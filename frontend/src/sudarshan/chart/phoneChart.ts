@@ -20,11 +20,17 @@ import {
   createChart,
   DataLoadingController,
   type DataLoadingSnapshot,
+  getIndicator,
+  hasIndicator,
+  INDICATOR_SOURCES,
+  type IndicatorApi,
   InvalidationLevel,
+  indicatorDefaults,
   type LtpEvent,
   type MarketDepth,
   OpenAlgoDataFeed,
   OpenAlgoWsFeed,
+  registeredIndicators,
   type SeriesApi,
   withBarCache,
 } from 'openalgo-charts'
@@ -56,6 +62,20 @@ import { applySessionHours, sessionCalendarFor } from '@/lib/trading/sessionHour
 import { volumePoint } from '@/lib/trading/volumeSettings'
 import type { AppMode } from '@/stores/themeStore'
 import { CHART_BRANDING } from '@/sudarshan/brand'
+import {
+  type CatalogueEntry,
+  legendValues,
+  type Placement,
+  type StudyEntry,
+  type StudyFacts,
+  type StudyForm,
+  skipReason,
+  studyFields,
+  VOLUME_MA,
+  volumeMaAt,
+  volumeMaLength,
+} from './phoneStudies'
+import { type ChartStyle, DEFAULT_STYLE, intervalLabel, styleOf } from './prefs'
 
 /** How often the quote fallback asks while the stream is down: the same as /trading's. */
 export const QUOTE_FALLBACK_MS = 4000
@@ -90,6 +110,8 @@ export interface PhoneTick {
   at: number
   /** A quote request standing in for the stream, not a tick from it. */
   polled: boolean
+  /** Open interest, on a contract, when the frame or quote carried it (C9). */
+  oi?: number
 }
 
 export interface PhoneChartCallbacks {
@@ -108,6 +130,23 @@ export interface PhoneChartCallbacks {
    * overshoots; null otherwise.
    */
   onSessionClose?(at: number | null): void
+  /** The studies on the chart changed: a set applied, a chart built anew (C3). */
+  onStudies?(): void
+  /** The five-level book, on every depth frame of the charted instrument (C9). */
+  onDepth?(depth: MarketDepth): void
+}
+
+/** One legend line (C3): a study's name and settings, its values at a bar, or why it is not drawn. */
+export interface LegendRow {
+  key: string
+  title: string
+  params: string
+  values: string[]
+  /** The pane it belongs to, and that pane's top in the chart's pixels. */
+  pane: number
+  top: number
+  /** Why it is not drawn here, or why it could not compute. */
+  note?: string
 }
 
 export interface PhoneChartOptions {
@@ -115,6 +154,8 @@ export interface PhoneChartOptions {
   apiKey: string
   wsUrl: string
   appMode: AppMode
+  /** Candles unless the phone chose another style (C2). */
+  style?: ChartStyle
   callbacks: PhoneChartCallbacks
 }
 
@@ -123,6 +164,20 @@ export class PhoneChart {
   private readonly cb: PhoneChartCallbacks
   private readonly container: HTMLElement
   private appMode: AppMode
+  private style: ChartStyle
+  /** The transform tier is loaded: Heikin Ashi can be drawn. */
+  private transformReady = false
+  /** The indicator set (C3), applied to every chart this host builds. */
+  private studies: StudyEntry[] = []
+  /** Each entry's study on the current chart, or null where it is skipped or drawn by the host. */
+  private studyApis: Array<IndicatorApi | null> = []
+  private indicatorsReady = false
+  /** The engine's own ids, from its indicator tier's list (C4). */
+  private builtIns: Set<string> | null = null
+  /** The volume pane's moving average, when the set holds one and the instrument trades. */
+  private volumeMa: SeriesApi | null = null
+  /** The instrument's tick, for the price axis and a study's `ctx.tickSize`. */
+  private tick = 0
   private chart: Chart
   private price: SeriesApi
   private volume: SeriesApi | null = null
@@ -139,6 +194,8 @@ export class PhoneChart {
   private ticket = 0
   private subscribed: { mode: 'LTP' | 'Depth'; symbol: string; exchange: string } | null = null
   private fallback: ReturnType<typeof setInterval> | null = null
+  /** The stream is down, so quotes stand in for it while the page is shown. */
+  private streamDown = false
   private loadingOlder = false
   private wsOpened = false
   private hiddenAt: number | null = null
@@ -160,12 +217,19 @@ export class PhoneChart {
   private dayWatch: (() => void) | null = null
   private destroyed = false
   private readonly offs: Array<() => void> = []
+  /** History as the candle clock repairs it: never read while the page is hidden. */
+  private readonly whenShown = {
+    bars: () => this.data.bars(),
+    refresh: () =>
+      document.visibilityState === 'hidden' ? Promise.resolve() : this.data.refresh(),
+  }
 
   constructor(opts: PhoneChartOptions) {
     this.apiKey = opts.apiKey
     this.cb = opts.callbacks
     this.container = opts.container
     this.appMode = opts.appMode
+    this.style = opts.style ?? DEFAULT_STYLE
     ;({ chart: this.chart, price: this.price, volume: this.volume } = this.buildChart(''))
 
     const rest = new OpenAlgoDataFeed({ baseUrl: '', apiKey: this.apiKey })
@@ -195,7 +259,8 @@ export class PhoneChart {
     this.clock = new LiveBarClock({
       builder: () => (this.destroyed ? null : this.builder),
       onBar: (update) => this.applyLiveBar(update),
-      history: () => this.data,
+      // Hidden, nothing is read: the wake reads the whole gap instead (C13).
+      history: () => this.whenShown,
       now: () => this.frames.clock.seconds(),
     })
     this.resync = new HistoryResync({
@@ -237,6 +302,9 @@ export class PhoneChart {
   async load(symbol: string, exchange: string, chip: string): Promise<void> {
     if (this.destroyed) return
     const ticket = ++this.ticket
+    // A saved Heikin Ashi needs its tier before the first build (C2).
+    if (styleOf(this.style).transform) await this.loadTransformTier()
+    if (ticket !== this.ticket || this.destroyed) return
     const same = this.sym?.symbol === symbol && this.sym.exchange === exchange
     this.stopLive()
     if (!same) {
@@ -247,11 +315,13 @@ export class PhoneChart {
     this.sym = { symbol, exchange }
     this.interval = apiInterval(chip)
     this.bars = []
-    this.setLoad({ kind: 'loading', symbol, interval: chip })
+    const label = intervalLabel(this.interval)
+    this.setLoad({ kind: 'loading', symbol, interval: label })
     this.chart.destroy()
     ;({ chart: this.chart, price: this.price, volume: this.volume } = this.buildChart(exchange))
     this.chart.setDataContext({ symbol, exchange, interval: this.interval })
     applySessionHours(this.chart, exchange, this.apiKey, this.stopsAt)
+    this.applyStudies()
     const to = this.frames.clock.nowSec()
     const request = {
       symbol,
@@ -269,8 +339,8 @@ export class PhoneChart {
     }
     if (ticket !== this.ticket || this.destroyed) return
     failure ??= bars.length ? null : this.data.getState().error
-    if (failure) this.setLoad(chartLoadFailed(symbol, chip, cleanError(failure)))
-    else if (!bars.length) this.setLoad(chartNoData(symbol, chip))
+    if (failure) this.setLoad(chartLoadFailed(symbol, label, cleanError(failure)))
+    else if (!bars.length) this.setLoad(chartNoData(symbol, label))
     else {
       this.setLoad(CHART_READY)
       // History's last close stands in until the first tick, never over one.
@@ -297,8 +367,316 @@ export class PhoneChart {
   setAppMode(mode: AppMode): void {
     if (mode === this.appMode || this.destroyed) return
     this.appMode = mode
+    this.rebuild()
+  }
+
+  /**
+   * Draw in another style (C2), keeping the candles and the view. Heikin Ashi
+   * loads the engine's transform tier the first time it is chosen.
+   */
+  async setStyle(style: ChartStyle): Promise<void> {
+    if (style === this.style || this.destroyed) return
+    this.style = style
+    if (styleOf(style).transform) await this.loadTransformTier()
+    if (this.destroyed || this.style !== style) return
+    this.rebuild()
+  }
+
+  private async loadTransformTier(): Promise<void> {
+    if (this.transformReady) return
+    try {
+      await import('openalgo-charts/transform')
+      this.transformReady = true
+    } catch {
+      /* drawn as candles until the next choice or load asks again */
+    }
+  }
+
+  /**
+   * The indicator set (C3), for this chart and every one built after it. The
+   * engine's indicator tier is imported the first time a set needs it.
+   */
+  async setStudies(set: readonly StudyEntry[]): Promise<void> {
+    if (this.destroyed) return
+    const next = set.map((entry) => ({ id: entry.id, settings: { ...entry.settings } }))
+    // The same studies with other settings (C4): changed where they stand, nothing re-added.
+    const same =
+      this.studyApis.length === next.length &&
+      next.every((entry, i) => entry.id === this.studies[i]?.id)
+    this.studies = next
+    if (same) {
+      next.forEach((entry, i) => {
+        const api = this.studyApis[i]
+        if (api) api.setSettings(this.settingsOf(entry), { force: true })
+      })
+      if (this.bars.length) this.draw()
+      this.cb.onStudies?.()
+      return
+    }
+    if (next.some((entry) => entry.id !== VOLUME_MA)) await this.loadIndicatorTier()
+    // A saved set naming the owner's own studies loads just the files they come from (C4).
+    const missing = next.map((e) => e.id).filter((id) => id !== VOLUME_MA && !hasIndicator(id))
+    if (this.indicatorsReady && missing.length) await this.restoreMine(missing)
+    if (this.destroyed) return
+    this.applyStudies()
+    if (this.bars.length) this.draw()
+  }
+
+  /** A study's settings over its defaults, so a key cleared from the set returns to its default. */
+  private settingsOf(entry: StudyEntry): Record<string, unknown> {
+    return hasIndicator(entry.id)
+      ? { ...indicatorDefaults(getIndicator(entry.id)), ...entry.settings }
+      : entry.settings
+  }
+
+  /**
+   * The owner's own studies a saved set names: the JavaScript files that
+   * register them, then the OpenScript studies when one is a script, as the
+   * terminal restores a layout. Failures are said when the sheet opens.
+   */
+  private async restoreMine(ids: string[]): Promise<void> {
+    try {
+      const { ensureCustomIndicators } = await import('@/lib/trading/customIndicators')
+      await ensureCustomIndicators(ids)
+      const { fileForScriptId } = await import('@/lib/trading/openscriptFiles')
+      if (ids.some((id) => fileForScriptId(id) !== null)) {
+        const { loadOpenScriptStudies } = await import('@/lib/trading/openscriptStudies')
+        await loadOpenScriptStudies()
+      }
+    } catch {
+      /* skipped with a line until the next load */
+    }
+  }
+
+  /**
+   * Every study the owner can add (C4): the engine's built-ins and his own,
+   * the JavaScript indicators and then the OpenScript studies on the server,
+   * loaded in that order after the built-in tier, exactly as the terminal
+   * loads them, so one of his reusing a built-in id overrides it the same way.
+   * The loaders' own sentences come back for a file that would not load.
+   */
+  async loadMyScripts(): Promise<string[]> {
+    if (!(await this.loadIndicatorTier())) return []
+    const problems: string[] = []
+    try {
+      const { loadCustomIndicators } = await import('@/lib/trading/customIndicators')
+      const custom = await loadCustomIndicators()
+      for (const e of custom.errors) problems.push(`${e.file}: ${e.message}`)
+      const { loadOpenScriptStudies } = await import('@/lib/trading/openscriptStudies')
+      const scripts = await loadOpenScriptStudies()
+      for (const e of scripts.errors) problems.push(`${e.file}: ${e.message}`)
+    } catch {
+      problems.push('Your scripts could not be read. Check the connection, then open this again.')
+    }
+    return problems
+  }
+
+  /** The catalogue the sheet searches: built-ins, and the owner's own marked so, by name. */
+  catalogue(): CatalogueEntry[] {
+    if (!this.indicatorsReady) return []
+    const builtIns = this.builtIns ?? new Set<string>()
+    return registeredIndicators()
+      .map((d) => ({
+        id: d.id,
+        name: d.name,
+        category: d.category ?? 'Other',
+        mine: !builtIns.has(d.id),
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name))
+  }
+
+  /** The settings form of the set's study at `index` (C4), from the engine's own descriptor. */
+  studyForm(index: number): StudyForm | null {
+    const entry = this.studies[index]
+    if (!entry) return null
+    if (entry.id === VOLUME_MA)
+      return {
+        name: 'Volume moving average',
+        fields: [{ key: 'length', type: 'number', label: 'Length', min: 2, max: 500, step: 1 }],
+        values: { length: volumeMaLength(entry.settings) },
+      }
+    if (!this.indicatorsReady || !hasIndicator(entry.id)) return null
+    const descriptor = getIndicator(entry.id)
+    return {
+      name: descriptor.name,
+      fields: studyFields(descriptor.inputs ?? [], INDICATOR_SOURCES),
+      values: this.settingsOf(entry),
+    }
+  }
+
+  /** What the registry says of a study: its name and where it draws; null for an id it does not hold. */
+  studyFacts(id: string): StudyFacts | null {
+    if (id === VOLUME_MA) return { name: 'Volume moving average', placement: 'host' }
+    if (!this.indicatorsReady || !hasIndicator(id)) return null
+    const descriptor = getIndicator(id)
+    return {
+      name: descriptor.name,
+      placement: (descriptor.placement === 'pane' ? 'pane' : 'onchart') as Placement,
+      category: descriptor.category,
+    }
+  }
+
+  /** The tier the studies come from, imported once, when a set or the sheet first needs it. */
+  async loadIndicatorTier(): Promise<boolean> {
+    if (this.indicatorsReady) return true
+    try {
+      const tier = await import('openalgo-charts/indicators')
+      // The tier's own list, so a script another page loaded first is never taken for a built-in.
+      this.builtIns = new Set(tier.BUILTIN_INDICATORS.map((d) => d.id))
+      this.indicatorsReady = true
+    } catch {
+      /* the next set or sheet asks again */
+    }
+    return this.indicatorsReady
+  }
+
+  /** The instrument's tick: the price axis is written in it, and a study reads it. */
+  setTick(tick: number): void {
+    if (!(tick > 0) || this.destroyed) return
+    this.tick = tick
+    this.chart.setPriceScaleOptions({ minMove: tick })
+  }
+
+  /**
+   * One legend line per study (C3), with its values at the bar of `time`, or
+   * at the last bar. A study the engine could not compute says so in place of
+   * values.
+   */
+  legendRows(time: number | null = null): LegendRow[] {
+    const held = time === null ? -1 : this.bars.findIndex((bar) => bar.time === time)
+    const at = held >= 0 ? held : this.bars.length - 1
+    const decimals = (pane: number) => (pane === 0 ? Math.max(2, decimalsOf(this.tick)) : 2)
+    return this.studies.map((entry, i) => {
+      const api = this.studyApis[i]
+      const key = `${i}:${entry.id}`
+      if (entry.id === VOLUME_MA) {
+        const top = this.chart.plotRect(1)?.top ?? 0
+        if (!this.volumeMa)
+          return {
+            key,
+            title: 'Vol MA',
+            params: '',
+            values: [],
+            pane: 1,
+            top,
+            note: this.skip(entry) ?? undefined,
+          }
+        const length = volumeMaLength(entry.settings)
+        const value = volumeMaAt(
+          this.bars.map((b) => b.volume),
+          at,
+          length
+        )
+        const values = [value === null ? '—' : compactVolume.format(value)]
+        return { key, title: 'Vol MA', params: String(length), values, pane: 1, top }
+      }
+      if (!api)
+        return {
+          key,
+          title: this.studyFacts(entry.id)?.name ?? entry.id,
+          params: '',
+          values: [],
+          pane: 0,
+          top: 0,
+          note: this.skip(entry) ?? undefined,
+        }
+      const legend = api.legend()?.options()
+      const pane = api.paneIndex
+      const status = api.dataStatus()
+      const row: LegendRow = {
+        key,
+        title: legend?.title ?? api.name,
+        params: legend?.params ?? '',
+        values: [],
+        pane,
+        top: this.chart.plotRect(pane)?.top ?? 0,
+      }
+      if (status?.state === 'error') return { ...row, note: 'Could not compute on this chart.' }
+      const plots = getIndicator(entry.id).plots.map((plot) => plot.key)
+      return { ...row, values: legendValuesOf(api, plots, at, decimals(pane)) }
+    })
+  }
+
+  private skip(entry: StudyEntry): string | null {
     const sym = this.sym
-    if (!sym) return
+    if (!sym) return null
+    return skipReason(entry.id, this.studyFacts(entry.id), {
+      exchange: sym.exchange,
+      traded: !isQuoteOnly(sym.exchange),
+    })
+  }
+
+  /**
+   * Put the set on the chart as it is now: what it had goes, each entry is
+   * added in order, and one that cannot run on this instrument is skipped. The
+   * engine's own legend rows and their small buttons stay hidden: the page
+   * draws the legend, and the sheet holds the settings and Remove.
+   */
+  private applyStudies(): void {
+    for (const api of this.studyApis) {
+      try {
+        if (api) this.chart.removeIndicator(api.id, { force: true })
+      } catch {
+        /* went with the chart it was on */
+      }
+    }
+    this.studyApis = []
+    this.volumeMa?.remove()
+    this.volumeMa = null
+    for (const entry of this.studies) {
+      if (entry.id === VOLUME_MA) {
+        if (this.volume && !this.volumeMa) this.volumeMa = this.addVolumeMa()
+        this.studyApis.push(null)
+        continue
+      }
+      if (!this.indicatorsReady || this.skip(entry)) {
+        this.studyApis.push(null)
+        continue
+      }
+      try {
+        const api = this.chart.addIndicator(entry.id, entry.settings, {
+          policy: { removable: false, configurable: false, movable: false },
+        })
+        api.legend()?.setOptions({ visible: false })
+        this.studyApis.push(api)
+      } catch {
+        this.studyApis.push(null)
+      }
+    }
+    this.weighPanes()
+    if (!this.destroyed) this.cb.onStudies?.()
+  }
+
+  /**
+   * Heights on a phone: the candles keep most of it, and a study's pane gets
+   * enough to read its line; the volume pane gives a little up when two study
+   * panes share the screen.
+   */
+  private weighPanes(): void {
+    const panes = this.chart.panes().length
+    const studyPanes = panes - (this.volume ? 2 : 1)
+    this.chart.setPaneWeight(0, 4)
+    if (this.volume) this.chart.setPaneWeight(1, studyPanes > 1 ? 0.8 : 1)
+    for (let p = this.volume ? 2 : 1; p < panes; p++) this.chart.setPaneWeight(p, 1.4)
+  }
+
+  private addVolumeMa(): SeriesApi {
+    return this.chart.addSeries('line', {
+      paneIndex: 1,
+      priceFormat: { type: 'volume' },
+      style: {
+        color: this.chart.theme().axisText,
+        lineWidth: 1.5,
+        priceLineVisible: false,
+        lastValueVisible: false,
+      },
+    })
+  }
+
+  /** The chart built anew for a mode or a style, as /trading does, keeping the bars and the view. */
+  private rebuild(): void {
+    const sym = this.sym
+    if (!sym || this.destroyed) return
     const range = this.bars.length ? this.chart.getVisibleLogicalRange() : null
     this.chart.destroy()
     ;({ chart: this.chart, price: this.price, volume: this.volume } = this.buildChart(sym.exchange))
@@ -308,6 +686,7 @@ export class PhoneChart {
       interval: this.interval,
     })
     applySessionHours(this.chart, sym.exchange, this.apiKey, this.stopsAt)
+    this.applyStudies()
     if (!this.bars.length) return
     this.draw()
     if (range) this.chart.setVisibleLogicalRange(range)
@@ -335,12 +714,36 @@ export class PhoneChart {
     this.chart.destroy()
   }
 
-  /** The chart the page's long-press reads from: bar under an x, price under a y. */
+  /**
+   * The candle the page's long-press reads under an x: the one drawn, so on
+   * Heikin Ashi its own open, high, low and close (one element a bar).
+   */
   barAt(x: number): Bar | null {
-    if (!this.bars.length) return null
+    const drawn = this.drawnBars()
+    if (!drawn.length) return null
     const index = Math.round(this.chart.timeScale.xToIndex(x))
-    if (index < 0 || index >= this.bars.length) return null
-    return this.bars[index]
+    if (index < 0 || index >= drawn.length) return null
+    const bar = drawn[index]
+    // The volume traded under it, which a transform does not carry.
+    return bar.volume === undefined ? { ...bar, volume: this.bars[index]?.volume } : bar
+  }
+
+  /**
+   * The price at a held finger's height on the candles' pane, at the
+   * instrument's tick (C10); null over the volume pane, a study's pane or the
+   * time axis, where no price of the instrument is drawn.
+   */
+  priceAt(y: number): number | null {
+    const rect = this.chart.plotRect(0)
+    if (!rect || y < rect.top || y > rect.top + rect.height) return null
+    const price = this.chart.coordinateToPrice(y, 0)
+    if (price === null || !Number.isFinite(price) || price <= 0) return null
+    return this.chart.snapPrice(0, price)
+  }
+
+  /** What is drawn: the bars, or the elements a transform formed from them. */
+  private drawnBars(): readonly Bar[] {
+    return this.chart.seriesTransform(this.price) ? this.chart.primaryBars() : this.bars
   }
 
   /** The x, in the chart's own pixels, of the bar a long-press is on. */
@@ -354,10 +757,20 @@ export class PhoneChart {
     this.data.setVisible(visible)
     if (!visible) {
       this.hiddenAt ??= Date.now()
+      // The countdown only repaints, and nothing is painted or read while hidden.
+      this.stopCountdownTimer()
+      this.stopFallback()
       return
     }
     const hiddenAt = this.hiddenAt
     this.hiddenAt = null
+    // Android stops the clock timers run on while the phone sleeps, so a timer
+    // set before the sleep still has the rest of its wait to run after it: the
+    // candle clock is aimed again from now, or a candle nobody trades would
+    // open up to a bar late (C13).
+    if (!this.destroyed && this.builder?.hasSession()) this.clock.start()
+    this.syncCountdown()
+    if (this.streamDown && !this.destroyed) this.startFallback()
     if (hiddenAt !== null && Date.now() - hiddenAt > WAKE_RECONNECT_MS)
       void this.checkStream(hiddenAt)
   }
@@ -470,8 +883,15 @@ export class PhoneChart {
       shortcuts: false,
       ...chartMotionOptions(),
       branding: CHART_BRANDING,
+      // The page draws the studies' legend (C3): the engine's own rows are
+      // hidden, and its "Indicators" toggle, whose 16 px target sits where
+      // they would start, is placed above the pane, where it is not drawn.
+      legendOffset: { top: -10_000, left: 8 },
     })
-    const price = chart.addSeries('candlestick')
+    // Heikin Ashi waits for its tier; meanwhile, and should the tier not load, candles.
+    const style = styleOf(this.style)
+    const transform = style.transform && this.transformReady ? { type: style.transform } : null
+    const price = chart.addSeries(style.series, transform ? { transform } : undefined)
     let volume: SeriesApi | null = null
     if (exchange && !isQuoteOnly(exchange)) {
       volume = chart.addSeries('histogram', {
@@ -483,6 +903,10 @@ export class PhoneChart {
       chart.setPaneWeight(1, 1)
     }
     chart.setHistoryLoader(() => void this.loadOlder())
+    if (this.tick > 0) chart.setPriceScaleOptions({ minMove: this.tick })
+    // The studies of the chart before went with it.
+    this.studyApis = []
+    this.volumeMa = null
     return { chart, price, volume }
   }
 
@@ -504,6 +928,21 @@ export class PhoneChart {
         )
       )
     }
+    if (this.volumeMa) {
+      const length = this.volumeMaSetting()
+      const volumes = this.bars.map((bar) => bar.volume)
+      this.volumeMa.setData(
+        this.bars.map((bar, i) => {
+          const value = volumeMaAt(volumes, i, length)
+          return value === null ? { time: bar.time } : { time: bar.time, value }
+        })
+      )
+    }
+  }
+
+  private volumeMaSetting(): number {
+    const entry = this.studies.find((e) => e.id === VOLUME_MA)
+    return volumeMaLength(entry?.settings ?? {})
   }
 
   /** Draw one bar again where it already stands, the tail or just before it. */
@@ -515,6 +954,14 @@ export class PhoneChart {
     this.volume?.update(
       volumePoint(bar, this.bars[i - 1]?.close, bar.volume ?? 0, this.volumeStyle(), true)
     )
+    if (this.volumeMa) {
+      const value = volumeMaAt(
+        this.bars.map((b) => b.volume),
+        i,
+        this.volumeMaSetting()
+      )
+      this.volumeMa.update(value === null ? { time: bar.time } : { time: bar.time, value })
+    }
   }
 
   private applySnapshot(snapshot: DataLoadingSnapshot): void {
@@ -667,7 +1114,14 @@ export class PhoneChart {
     if (ticket !== this.ticket || this.destroyed) return
     const ltp = typeof quote?.ltp === 'number' && quote.ltp > 0 ? quote.ltp : null
     if (ltp !== null && !this.streamed)
-      this.cb.onTick({ ltp, time: null, tradeTime: null, at: Date.now(), polled: true })
+      this.cb.onTick({
+        ltp,
+        time: null,
+        tradeTime: null,
+        at: Date.now(),
+        polled: true,
+        ...(typeof quote?.oi === 'number' && quote.oi > 0 ? { oi: quote.oi } : {}),
+      })
     if (quote && ltp !== null && !needsPreviousClose(quote.prev_close, ltp)) {
       this.cb.onPrevClose?.(quote.prev_close as number)
       return
@@ -704,6 +1158,7 @@ export class PhoneChart {
     if (state === 'open') {
       // The stream is back: the quotes standing in for it stop now, not at
       // its first tick, which on a quiet instrument may be a while coming.
+      this.streamDown = false
       this.stopFallback()
       this.status.setTransport('live')
       // The server's time, for the clock that opens candles.
@@ -737,6 +1192,7 @@ export class PhoneChart {
   private onDepthEvent(symbol: string, exchange: string, depth: MarketDepth): void {
     const sym = this.sym
     if (!sym || symbol !== sym.symbol || !(depth.ltp > 0)) return
+    this.cb.onDepth?.(depth)
     // The day's volume and open interest come off the same frame through the
     // tap; a book update repeats the last traded quantity, so it is not summed.
     const extra = this.frames.get(symbol, exchange)
@@ -790,6 +1246,7 @@ export class PhoneChart {
       tradeTime: tick.tradeTime ?? null,
       at,
       polled: tick.polled,
+      ...(tick.oi !== undefined && tick.oi > 0 ? { oi: tick.oi } : {}),
     })
     const update = this.builder?.onTick({
       time: tick.time ?? this.frames.clock.nowSec(),
@@ -831,7 +1288,9 @@ export class PhoneChart {
   }
 
   private startFallback(): void {
-    if (this.fallback) return
+    this.streamDown = true
+    // Nobody reads a hidden page: the wake tests the stream and reads the gap (C13).
+    if (this.fallback || document.visibilityState === 'hidden') return
     this.fallback = setInterval(() => void this.pollQuote(), QUOTE_FALLBACK_MS)
   }
 
@@ -853,6 +1312,7 @@ export class PhoneChart {
       ltp: quote.ltp,
       time: this.frames.clock.nowSec(),
       dayVolume: isQuoteOnly(sym.exchange) ? undefined : quote.volume,
+      oi: typeof quote.oi === 'number' ? quote.oi : undefined,
       polled: true,
     })
   }
@@ -869,4 +1329,26 @@ function cleanError(error: unknown): string {
     .replace(/^(?:openalgo\s+)?history request failed\b(?:\s*\(\d+\))?:?\s*/i, '')
     .replace(/^\/api\/v1\/[\w/]+\s+failed\s+\(\d+\)(:\s*)?/i, '')
     .trim()
+}
+
+const compactVolume = new Intl.NumberFormat('en-IN', {
+  notation: 'compact',
+  maximumFractionDigits: 2,
+})
+
+/** Decimals a tick is written with: 0.05 has two. */
+function decimalsOf(tick: number): number {
+  if (!(tick > 0)) return 0
+  const text = String(tick)
+  return text.includes('.') ? text.split('.')[1].length : 0
+}
+
+/** A study's values at a bar, from its own columns, at a pane's decimals. */
+function legendValuesOf(
+  api: IndicatorApi,
+  plots: readonly string[],
+  index: number,
+  decimals: number
+) {
+  return legendValues(api.values(), plots, index, decimals)
 }

@@ -34,23 +34,35 @@ OpenAlgo never reads, so every route below answers it as it answers a stranger.
 2. **The internal route**, ``POST /sudarshan/family/internal/watchlists`` (M8.15): the family
    service reads the lists the owner shares. The contract gives no shape for it, so it is this:
    the body is one Fernet token under ``FAMILY_INTERNAL_INFO`` (60 s, once), ``{"op":
-   "watchlists", "nonce", "principal": "sudarshan-family", "list_ids": [1 to 50 distinct ids]}``,
-   at most 4 KiB. No session and no CSRF (the service has no browser to forge; the seal is its
-   proof). A request carrying any header nginx sets is 404 before anything else; then the length
-   (411), the size (413), the seal, op, nonce and principal (403; a full nonce book 503 ``busy``).
+   "watchlists", "nonce", "principal": "sudarshan-family", "list_ids": [1 to 50 distinct ids],
+   "member_id", "role"}``, at most 4 KiB. No session and no CSRF (the service has no browser to
+   forge; the seal is its proof). A request carrying any header nginx sets is 404 before anything
+   else; then the length (411), the size (413), the seal, op, nonce and principal (403; a full
+   nonce book 503 ``busy``), the fields (400), and 120 a minute (429).
    The answer is ``{"status": "success", "data": {"lists": [{"id", "name", "created_at", "rows":
    [{"symbol", "exchange", "instrument_key", "name", "tick_size", "lot_size"}]}], "gone": [id]}}``:
-   the owner's lists asked for, in that order, rows in the list's order, each resolved through
-   OpenAlgo's master (``get_symbol_info``; null where the master lacks it), and the ids that name
-   no list of his. OpenAlgo's own list rows only: never a flag, a note, a section or a follow row
-   of Watchlists v2, nor anything else of the owner's. ``created_at`` tells a list from a later
-   one OpenAlgo gave the same id.
+   the lists asked for that OpenAlgo's own note (3.) says the owner shared with that member or
+   their role, in that order, rows in the list's order, each resolved through OpenAlgo's master
+   (``get_symbol_info``; null where the master lacks it), and every other id as gone. OpenAlgo's
+   own list rows only: never a flag, a note, a section or a follow row of Watchlists v2, nor
+   anything else of the owner's. ``created_at`` tells a list from a later one OpenAlgo gave the
+   same id: the note keeps the one the list had when it was shared, and a list that differs is
+   gone.
+
+3. **The note of shared lists** (review M3, feat/family-c): which member sees which list is decided
+   in the family service, the internet-facing process, so OpenAlgo keeps its own note of every
+   watchlist share the owner makes through 1. and serves no list it does not name. It is one entry
+   of the owner vault (mode 600; sudarshan-family cannot read it), written as the owner's ops pass:
+   a ``share_set`` of one of his lists that the service confirmed is noted with the list's
+   ``created_at``; a ``share_remove`` is forgotten before it is sent, and noted again only when the
+   service answered that it still has the share; a removed member's shares are forgotten.
 """
 
 import json
 import math
 import os
 import re
+import threading
 import time
 from datetime import datetime
 
@@ -74,7 +86,14 @@ from sudarshan.autologin.handoff import (
     seal,
 )
 from sudarshan.family import contract
-from sudarshan.vault import FAMILY_ADMIN_INFO, FAMILY_INTERNAL_INFO, fernet_for, pepper_from
+from sudarshan.vault import (
+    FAMILY_ADMIN_INFO,
+    FAMILY_INTERNAL_INFO,
+    SecretUnreadable,
+    Vault,
+    fernet_for,
+    pepper_from,
+)
 from utils import real_threading
 from utils.httpx_client import get_httpx_client
 from utils.lazy import LazyInit
@@ -101,14 +120,10 @@ MAX_INT = 2**53 - 1
 INTERNAL_OP, INTERNAL_PRINCIPAL = "watchlists", contract.SERVICE
 INTERNAL_MAX_BYTES = 4 * 1024
 MAX_LIST_IDS = 50
-#: Set by nginx on every proxied location: the family service calls 127.0.0.1:5000 directly.
-PROXY_HEADERS = (
-    "X-Forwarded-For",
-    "X-Real-IP",
-    "Forwarded",
-    "X-Forwarded-Proto",
-    "X-Forwarded-Host",
-)
+INTERNAL_LIMIT = "120 per minute"
+#: Set by nginx on every proxied location: the family service calls 127.0.0.1:5000 directly. L7
+#: (feat/family-c): the contract's list, so the family service's sealed doors refuse the same five.
+PROXY_HEADERS = contract.FORWARDED_HEADERS
 #: Where the listener check looks (a test points it at tables of its own).
 TCP_TABLES = loopback.TCP_TABLES
 #: The contract's codes, and the bridge's own two.
@@ -405,7 +420,8 @@ def _register(op: contract.SealedOp) -> None:
             fields = _fields(op)
         except _Bad as bad:
             return _error("invalid", field=bad.field)
-        return _send(op, fields)
+        noted = _NOTED.get(op.name)  # SUDARSHAN M3 (feat/family-c): the note of shared lists
+        return noted(op, fields) if noted is not None else _send(op, fields)
 
     served.__name__ = f"family_{op.name}"  # one name per op for the limiter
     cls = "read" if op.name in READS else "write"
@@ -445,7 +461,7 @@ def _failed(error):
 
 INTERNAL_WORDS = {
     "not_found": "Not found.",
-    "invalid": "The request did not name between 1 and 50 list ids.",
+    "invalid": "The request did not name between 1 and 50 list ids and the member they are for.",
     "too_large": "The request is too large.",
     "forbidden": "The request was not sealed by this server's family service.",
     "busy": "Too many requests in the last two minutes.",
@@ -473,32 +489,46 @@ def _row(symbol: str, exchange: str) -> dict:
             "lot_size": getattr(info, "lotsize", None)}  # fmt: skip
 
 
-def shared_lists(ids: list[int]) -> dict:
-    """The owner's lists ``ids`` as the route answers them (see the module's note)."""
+def _made_text(value) -> str | None:
+    """A list's ``created_at`` as the route answers it and the note keeps it."""
+    made = value.isoformat(sep=" ") if isinstance(value, datetime) else value
+    return made or None
+
+
+def shared_lists(ids: list[int], member_id: int, role: str) -> dict:
+    """The owner's lists ``ids`` that the note shares with the member or their role, as the route
+    answers them (see the module's note)."""
     from database import watchlist_db as oa
 
-    owner = find_user_by_username()
-    if owner is None:
-        raise LookupError("this instance has no owner account")
-    try:
-        found = {
-            w.id: (w.name, w.created_at, [(i.symbol, i.exchange) for i in w.items])
-            for w in oa.db_session.query(oa.Watchlist)
-            .filter(oa.Watchlist.user_id == owner.username, oa.Watchlist.id.in_(ids))
-            .all()
-        }
-    finally:
-        oa.db_session.remove()  # a read: the connection goes back at once
+    noted = _noted_for(member_id, role)
+    asked = [i for i in ids if i in noted]
+    found = {}
+    if asked:
+        owner = find_user_by_username()
+        if owner is None:
+            raise LookupError("this instance has no owner account")
+        try:
+            found = {
+                w.id: (w.name, w.created_at, [(i.symbol, i.exchange) for i in w.items])
+                for w in oa.db_session.query(oa.Watchlist)
+                .filter(oa.Watchlist.user_id == owner.username, oa.Watchlist.id.in_(asked))
+                .all()
+            }
+        finally:
+            oa.db_session.remove()  # a read: the connection goes back at once
     lists = []
-    for lid in (i for i in ids if i in found):
+    for lid in (i for i in asked if i in found):
         name, made, items = found[lid]
-        made = made.isoformat(sep=" ") if isinstance(made, datetime) else made
-        lists.append({"id": lid, "name": name, "created_at": made or None,
+        if _made_text(made) not in noted[lid]:
+            continue  # a later list OpenAlgo gave the same id: it was never shared
+        lists.append({"id": lid, "name": name, "created_at": _made_text(made),
                       "rows": [_row(symbol, exchange) for symbol, exchange in items]})  # fmt: skip
-    return {"lists": lists, "gone": [i for i in ids if i not in found]}
+    shown = {lst["id"] for lst in lists}
+    return {"lists": lists, "gone": [i for i in ids if i not in shown]}
 
 
 @sudarshan_family_bp.route("/internal/watchlists", methods=["POST"])
+@limiter.limit(INTERNAL_LIMIT)  # SUDARSHAN M3 (feat/family-c): each row is resolved on the worker
 def internal_watchlists():
     if any(header in request.headers for header in PROXY_HEADERS):
         return _refused(404, "not_found")
@@ -522,13 +552,194 @@ def internal_watchlists():
         _warn_once("principal", "Family: refused an internal request from another principal")
         return _refused(403, "forbidden")
     ids = _list_ids(message.get("list_ids"))
-    if ids is None:
+    member_id, role = message.get("member_id"), message.get("role")  # M3 (feat/family-c)
+    member_ok = type(member_id) is int and 0 < member_id <= 2**31 - 1 and role in contract.ROLES
+    if ids is None or not member_ok:
         return _refused(400, "invalid")
     try:
-        return _answer({"status": "success", "data": shared_lists(ids)})
+        return _answer({"status": "success", "data": shared_lists(ids, member_id, role)})
     except Exception:
         logger.exception("Family: the shared lists could not be read")
         return _refused(500, "failed")
+
+
+# -- the note of shared lists (review M3; SUDARSHAN feat/family-c) --------------------------------
+
+NOTE_NAME = "family_list_shares"
+NOTE_WORDS = {
+    "not_mine": "That list is not among your watchlists any more. Open the Family page again.",
+    "unread": "Your watchlists could not be read just now, so nothing was shared. Try again in a "
+    "minute.",
+    "unnoted": "The list was shared, but OpenAlgo could not keep its note of it, so the family "
+    "cannot see it yet. Remove that share, then share the list again.",
+    "unforgotten": "The share could not be removed just now. Nothing was changed; try again in a "
+    "minute.",
+}
+_vault_lazy = LazyInit(lambda: Vault(pepper=pepper_from(os.environ)), "sudarshan-family-vault")
+#: One change of the note at a time. Plain on purpose: it is held across the vault's file I/O, so
+#: under eventlet it is the hub's lock, as every request here runs on the hub (no real thread takes
+#: it); under gthread it is a real one, and the read, change and write are one step.
+_note_lock = threading.Lock()
+
+
+def _note() -> dict:
+    """The note's shares by share id; empty when there is none or it cannot be opened (then no list
+    is served until the owner shares again)."""
+    try:
+        raw = _vault_lazy.get().get_secret(NOTE_NAME)
+        found = json.loads(raw) if raw else {}
+    except (SecretUnreadable, ValueError):
+        _warn_once("note", "Family: the note of shared lists cannot be opened (saved under other "
+                   "keys, or damaged); the owner shares the lists again to show them")  # fmt: skip
+        return {}
+    shares = found.get("shares") if isinstance(found, dict) and found.get("v") == 1 else None
+    return {k: v for k, v in shares.items() if isinstance(v, dict)} if isinstance(shares, dict) \
+        else {}  # fmt: skip
+
+
+def _note_change(change) -> None:
+    """``change(shares)`` under the lock, written when it says it changed something; raises when
+    the vault cannot be read or written (the caller decides what that means)."""
+    with _note_lock:
+        shares = _note()
+        if not change(shares):
+            return
+        if shares:
+            text = json.dumps({"v": 1, "shares": shares}, separators=(",", ":"))
+            _vault_lazy.get().set_secret(NOTE_NAME, text)
+        else:
+            _vault_lazy.get().clear_secret(NOTE_NAME)
+
+
+def _noted_for(member_id: int, role: str) -> dict:
+    """List id -> the ``created_at`` texts it was shared at with the member, their role or every
+    member (a share with neither a member nor a role), unexpired."""
+    now = int(time.time() * 1000)
+    found: dict = {}
+    for entry in _note().values():
+        if entry.get("member") is not None:
+            mine = entry.get("member") == member_id
+        else:
+            mine = entry.get("role") is None or entry.get("role") == role
+        until = entry.get("until")
+        live = until is None or (type(until) is int and until > now)
+        if mine and live and type(entry.get("list")) is int:
+            found.setdefault(entry["list"], set()).add(entry.get("made"))
+    return found
+
+
+def _list_made(ref: str) -> tuple[bool, str | None]:
+    """Whether list ``ref`` is the owner's, and its ``created_at`` as the note keeps it."""
+    from database import watchlist_db as oa
+
+    owner = find_user_by_username()
+    if owner is None:
+        return False, None
+    try:
+        found = (
+            oa.db_session.query(oa.Watchlist.created_at)
+            .filter(oa.Watchlist.user_id == owner.username, oa.Watchlist.id == int(ref))
+            .first()
+        )
+    finally:
+        oa.db_session.remove()
+    return (True, _made_text(found[0])) if found is not None else (False, None)
+
+
+def _data_of(response):
+    """The data of a success envelope, else None (the Off record is a success too)."""
+    body = response.get_json(silent=True)
+    return body.get("data") if isinstance(body, dict) and body.get("status") == "success" else None
+
+
+def _done(response) -> bool:
+    data = _data_of(response)
+    return isinstance(data, dict) and data.get("ok") is True
+
+
+def _share_set(op, fields):
+    """A list shared: checked to be the owner's, sent, and noted once the service confirms it."""
+    ref = fields.get("ref")
+    if fields.get("kind") != "watchlist" or not (isinstance(ref, str) and ref.isascii()
+                                                 and ref.isdigit() and len(ref) <= 10):  # fmt: skip
+        return _send(op, fields)  # a part of the books, or a ref the service refuses in its words
+    try:
+        mine, made = _list_made(ref)
+    except Exception:
+        logger.exception("Family: a list to share could not be read")
+        return _error("failed", NOTE_WORDS["unread"])
+    if not mine:
+        return _error("not_found", NOTE_WORDS["not_mine"])
+    response = _send(op, fields)
+    share = _data_of(response)
+    if not (isinstance(share, dict) and type(share.get("id")) is int
+            and share.get("kind") == "watchlist" and share.get("ref") == ref):  # fmt: skip
+        return response  # refused, switched off or not confirmed: nothing to note
+    entry = {"list": int(ref), "made": made, "member": fields.get("member_id"),
+             "role": fields.get("role"), "until": fields.get("expires_at")}  # fmt: skip
+
+    def note(shares: dict) -> bool:
+        shares[str(share["id"])] = entry
+        return True
+
+    try:
+        _note_change(note)
+    except Exception:
+        logger.exception("Family: a shared list could not be noted")
+        return _error("failed", NOTE_WORDS["unnoted"])
+    return response
+
+
+def _share_remove(op, fields):
+    """A share removed: forgotten first (a failure leaves it shown nowhere), then sent; noted again
+    only when the service answered that it still has the share."""
+    key, kept = str(fields.get("id")), []
+
+    def forget(shares: dict) -> bool:
+        kept.append(shares.pop(key, None))
+        return kept[0] is not None
+
+    try:
+        _note_change(forget)
+    except Exception:
+        logger.exception("Family: a shared list could not be forgotten")
+        return _error("failed", NOTE_WORDS["unforgotten"])
+    response = _send(op, fields)
+    body = response.get_json(silent=True) or {}
+    gone = _done(response) or body.get("code") in ("not_found", "not_confirmed")
+    if kept[0] is not None and not gone:
+
+        def again(shares: dict) -> bool:
+            return shares.setdefault(key, kept[0]) is kept[0]
+
+        try:
+            _note_change(again)
+        except Exception:
+            logger.exception("Family: a share still in place could not be noted again")
+    return response
+
+
+def _member_remove(op, fields):
+    """A member removed: their own shares are forgotten once the service confirms it."""
+    response = _send(op, fields)
+    if _done(response):
+        member = fields.get("id")
+
+        def forget(shares: dict) -> bool:
+            theirs = [k for k, entry in shares.items() if entry.get("member") == member]
+            for k in theirs:
+                del shares[k]
+            return bool(theirs)
+
+        try:
+            _note_change(forget)
+        except Exception:
+            logger.exception("Family: a removed member's shared lists could not be forgotten")
+    return response
+
+
+#: The owner's ops that change what is shared, each with its step in the note.
+_NOTED = {"share_set": _share_set, "share_remove": _share_remove, "member_remove": _member_remove}
 
 
 @sudarshan_family_bp.record_once

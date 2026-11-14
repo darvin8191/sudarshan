@@ -20,6 +20,17 @@ const CARD = 'rounded-[1.125rem] border bg-card px-4 py-3 shadow-[var(--shadow-c
 const BUTTON =
   'inline-flex min-h-12 items-center justify-center gap-2 rounded-[0.875rem] border border-input bg-card px-4 text-[0.9375rem] font-semibold outline-none hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-60'
 
+const GROUPED = new Intl.NumberFormat('en-IN', { maximumFractionDigits: 2 })
+
+/** The capital as the field starts from it, in en-IN digits (review L2): 5,00,000 or 1,250.50. */
+export function capitalText(paise: number | null): string {
+  if (paise === null) return ''
+  const text = riskText(paise)
+  return text.includes('.')
+    ? new Intl.NumberFormat('en-IN', { minimumFractionDigits: 2 }).format(paise / 100)
+    : GROUPED.format(paise / 100)
+}
+
 export const CAPITAL_WORDS =
   'Capital is the one figure used for percentage returns, beta and the drawdown percentage. It is not linked to the daily loss limit on the Risk page.'
 
@@ -37,11 +48,15 @@ export function Settings() {
   const queryClient = useQueryClient()
   const settings = query.data
   const [capital, setCapital] = useState('')
-  const seen = useRef<number | null>(null)
+  const seen = useRef<{ version: number; text: string } | null>(null)
   useEffect(() => {
-    if (!settings || seen.current === settings.version) return
-    seen.current = settings.version
-    setCapital(riskText(settings.capital_base_paise))
+    if (!settings || seen.current?.version === settings.version) return
+    const text = capitalText(settings.capital_base_paise)
+    const last = seen.current
+    // Review L2: a capital being typed is not reset when a switch saved meanwhile moves the
+    // version; only a field still showing what was read last takes the new figure.
+    setCapital((now) => (last === null || now === last.text ? text : now))
+    seen.current = { version: settings.version, text }
   }, [settings])
 
   const save = useMutation({

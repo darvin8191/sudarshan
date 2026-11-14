@@ -432,6 +432,9 @@ PURE_STDLIB = frozenset(
 )
 #: What imports/ may use besides: text in memory (csv, io) and a hash (hashlib); no file, no clock.
 IMPORTS_STDLIB = PURE_STDLIB | {"csv", "hashlib", "io"}
+#: Pure modules the core may import besides itself: the statistics shared with the journal
+#: (standard library only; its own test holds it to that).
+PURE_OURS = ("sudarshan.portfolio.core", "sudarshan.common.stats")
 BANNED_CALLS = frozenset({"open", "print", "input", "exec", "eval", "compile", "__import__"})
 BANNED_ATTRIBUTES = frozenset(
     {
@@ -448,6 +451,13 @@ BANNED_ATTRIBUTES = frozenset(
 )
 
 
+def _ours(module: str, names) -> bool:
+    """``from sudarshan.common import stats`` and ``from sudarshan.common.stats import x``."""
+    return module.startswith(PURE_OURS) or all(
+        f"{module}.{alias.name}".startswith(PURE_OURS) for alias in names
+    )
+
+
 def impurities(source: str, allowed: frozenset = PURE_STDLIB) -> list[str]:
     """Why this source is not pure: an import outside the allowed few, a clock, a file, a print."""
     found = []
@@ -455,15 +465,13 @@ def impurities(source: str, allowed: frozenset = PURE_STDLIB) -> list[str]:
         if isinstance(node, ast.Import):
             for alias in node.names:
                 top = alias.name.partition(".")[0]
-                if top not in allowed and not alias.name.startswith("sudarshan.portfolio.core"):
+                if top not in allowed and not alias.name.startswith(PURE_OURS):
                     found.append(f"imports {alias.name}")
         elif isinstance(node, ast.ImportFrom):
             module = node.module or ""
             if node.level:  # a relative import stays inside the package
                 continue
-            if module.partition(".")[0] not in allowed and not module.startswith(
-                "sudarshan.portfolio.core"
-            ):
+            if module.partition(".")[0] not in allowed and not _ours(module, node.names):
                 found.append(f"imports from {module}")
         elif isinstance(node, ast.Call):
             func = node.func
@@ -503,6 +511,9 @@ def test_the_import_modules_are_all_held_to_it():
         "from threading import Lock",
         "import sqlite3",
         "from sudarshan.alerts.market import grain",
+        "from sudarshan.common import pacer",
+        "from sudarshan.common import stats, schedule",
+        "import sudarshan.common.schedule",
         "from datetime import datetime\nx = datetime.now()",
         "from datetime import date\nx = date.today()",
         "print('x')",
@@ -519,6 +530,10 @@ def test_the_purity_check_lets_the_pure_imports_through():
     assert impurities("from decimal import Decimal\nfrom fractions import Fraction\n") == []
     assert impurities("from sudarshan.portfolio.core.kinds import QTY_SCALE") == []
     assert impurities("from .kinds import QTY_SCALE") == []
+    assert impurities("from sudarshan.common import stats") == []
+    assert (
+        impurities("from sudarshan.common.stats import beta\nimport sudarshan.common.stats") == []
+    )
 
 
 @pytest.mark.parametrize(

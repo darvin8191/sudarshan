@@ -1,0 +1,276 @@
+{
+ "note": "synthetic; built by make_goals.py, which states the arithmetic of every case",
+ "monthly": [
+  {
+   "id": "GL1",
+   "note": "the design's: 10,00,000 in 60 months, 2,00,000 now, 12%: i 0.0094887929, g 1.7623416832, need 6,47,531.66, monthly 8,059.76, shown 8,060",
+   "target_paise": 100000000,
+   "value_now_paise": 20000000,
+   "months": 60,
+   "rate_bp": 1200,
+   "required_monthly_paise": 806000
+  },
+  {
+   "id": "GL2",
+   "note": "no return assumed: 1,20,000 in 12 months from nothing is 10,000 a month exactly (a whole rupee is not rounded further up)",
+   "target_paise": 12000000,
+   "value_now_paise": 0,
+   "months": 12,
+   "rate_bp": 0,
+   "required_monthly_paise": 1000000
+  },
+  {
+   "id": "GL3",
+   "note": "no return, 1,00,000 in 7 months: 14,285.71, rounded up to 14,286",
+   "target_paise": 10000000,
+   "value_now_paise": 0,
+   "months": 7,
+   "rate_bp": 0,
+   "required_monthly_paise": 1428600
+  },
+  {
+   "id": "GL4",
+   "note": "one month left, 50,000 now, 12%: need 49,525.56, all of it at once: 49,526",
+   "target_paise": 10000000,
+   "value_now_paise": 5000000,
+   "months": 1,
+   "rate_bp": 1200,
+   "required_monthly_paise": 4952600
+  },
+  {
+   "id": "GL5",
+   "note": "months of 0 (due this month, or overdue) count as 1: GL4's answer",
+   "target_paise": 10000000,
+   "value_now_paise": 5000000,
+   "months": 0,
+   "rate_bp": 1200,
+   "required_monthly_paise": 4952600
+  },
+  {
+   "id": "GL5b",
+   "note": "months below 0 count as 1 too",
+   "target_paise": 10000000,
+   "value_now_paise": 5000000,
+   "months": -7,
+   "rate_bp": 1200,
+   "required_monthly_paise": 4952600
+  },
+  {
+   "id": "GL6",
+   "note": "the default 10%: 1,00,00,000 in 120 months, 10,00,000 now: need 74,06,257.54, monthly 37,056.51, shown 37,057",
+   "target_paise": 1000000000,
+   "value_now_paise": 100000000,
+   "months": 120,
+   "rate_bp": 1000,
+   "required_monthly_paise": 3705700
+  },
+  {
+   "id": "GL7",
+   "note": "on track: 6,00,000 at 12% for 60 months is 10,57,405.01: nothing to add, never a negative amount",
+   "target_paise": 100000000,
+   "value_now_paise": 60000000,
+   "months": 60,
+   "rate_bp": 1200,
+   "required_monthly_paise": 0
+  },
+  {
+   "id": "GL8",
+   "note": "just on track: 5,67,427 x 1.7623416832 is past 10,00,000",
+   "target_paise": 100000000,
+   "value_now_paise": 56742700,
+   "months": 60,
+   "rate_bp": 1200,
+   "required_monthly_paise": 0
+  },
+  {
+   "id": "GL8b",
+   "note": "a rupee less misses by 1.51 rupees in all: 1 rupee a month, never 0",
+   "target_paise": 100000000,
+   "value_now_paise": 56742600,
+   "months": 60,
+   "rate_bp": 1200,
+   "required_monthly_paise": 100
+  },
+  {
+   "id": "GL9",
+   "note": "already there, no return: target met exactly, nothing to add",
+   "target_paise": 10000000,
+   "value_now_paise": 10000000,
+   "months": 12,
+   "rate_bp": 0,
+   "required_monthly_paise": 0
+  },
+  {
+   "id": "GL10",
+   "note": "nothing saved, one month, no return: the whole target",
+   "target_paise": 10000000,
+   "value_now_paise": 0,
+   "months": 1,
+   "rate_bp": 0,
+   "required_monthly_paise": 10000000
+  },
+  {
+   "id": "GL11",
+   "note": "a rupee short with no return over 12 months: 0.0833 a month, rounded up to 1",
+   "target_paise": 10000000,
+   "value_now_paise": 9999900,
+   "months": 12,
+   "rate_bp": 0,
+   "required_monthly_paise": 100
+  }
+ ],
+ "months": [
+  {
+   "id": "MO1",
+   "note": "14 Nov 2026 to 31 Mar 2031: 60 - 8 = 52 (the design's card)",
+   "as_of_day": 20261114,
+   "target_day": 20310331,
+   "months": 52
+  },
+  {
+   "id": "MO2",
+   "note": "the same day of the month is a whole month",
+   "as_of_day": 20261114,
+   "target_day": 20261214,
+   "months": 1
+  },
+  {
+   "id": "MO3",
+   "note": "a day short of it is not",
+   "as_of_day": 20261114,
+   "target_day": 20261213,
+   "months": 0
+  },
+  {
+   "id": "MO4",
+   "note": "across the year end: 14 Nov to 13 Jan is 1, to 14 Jan is 2",
+   "as_of_day": 20261114,
+   "target_day": 20270113,
+   "months": 1
+  },
+  {
+   "id": "MO5",
+   "note": "14 Nov to 14 Jan: 2",
+   "as_of_day": 20261114,
+   "target_day": 20270114,
+   "months": 2
+  },
+  {
+   "id": "MO6",
+   "note": "the target day itself: 0",
+   "as_of_day": 20261114,
+   "target_day": 20261114,
+   "months": 0
+  },
+  {
+   "id": "MO7",
+   "note": "overdue: 0, never below",
+   "as_of_day": 20261114,
+   "target_day": 20250101,
+   "months": 0
+  },
+  {
+   "id": "MO8",
+   "note": "31 Jan to 28 Feb: the 28th is before the 31st, so 0; to 31 Mar: 2",
+   "as_of_day": 20270131,
+   "target_day": 20270228,
+   "months": 0
+  },
+  {
+   "id": "MO9",
+   "note": "31 Jan to 31 Mar: 2",
+   "as_of_day": 20270131,
+   "target_day": 20270331,
+   "months": 2
+  },
+  {
+   "id": "MO10",
+   "note": "ten years to the day: 120",
+   "as_of_day": 20261114,
+   "target_day": 20361114,
+   "months": 120
+  }
+ ],
+ "cards": [
+  {
+   "id": "GC1",
+   "note": "GL1 as a card: 20% there, 60 months left, 8,060 a month",
+   "target_paise": 100000000,
+   "value_now_paise": 20000000,
+   "as_of_day": 20261114,
+   "target_day": 20311114,
+   "rate_bp": 1200,
+   "expect": {
+    "value_now_paise": 20000000,
+    "progress_pct": "20.0000",
+    "required_monthly_paise": 806000,
+    "months_left": 60,
+    "on_track": false
+   }
+  },
+  {
+   "id": "GC2",
+   "note": "past the target: 125%, not capped; on track",
+   "target_paise": 100000000,
+   "value_now_paise": 125000000,
+   "as_of_day": 20261114,
+   "target_day": 20311114,
+   "rate_bp": 1000,
+   "expect": {
+    "value_now_paise": 125000000,
+    "progress_pct": "125.0000",
+    "required_monthly_paise": 0,
+    "months_left": 60,
+    "on_track": true
+   }
+  },
+  {
+   "id": "GC3",
+   "note": "overdue and short: 0 months left, and all of what is missing asked for at once (GL4: 49,526)",
+   "target_paise": 10000000,
+   "value_now_paise": 5000000,
+   "as_of_day": 20261114,
+   "target_day": 20261101,
+   "rate_bp": 1200,
+   "expect": {
+    "value_now_paise": 5000000,
+    "progress_pct": "50.0000",
+    "required_monthly_paise": 4952600,
+    "months_left": 0,
+    "on_track": false
+   }
+  },
+  {
+   "id": "GC4",
+   "note": "nothing saved yet: 0%",
+   "target_paise": 12000000,
+   "value_now_paise": 0,
+   "as_of_day": 20261114,
+   "target_day": 20271114,
+   "rate_bp": 0,
+   "expect": {
+    "value_now_paise": 0,
+    "progress_pct": "0.0000",
+    "required_monthly_paise": 1000000,
+    "months_left": 12,
+    "on_track": false
+   }
+  },
+  {
+   "id": "GC5",
+   "note": "GL7 as a card: 60% there and on track, because what is there grows past the target by the day (on track is not the same as already there)",
+   "target_paise": 100000000,
+   "value_now_paise": 60000000,
+   "as_of_day": 20261114,
+   "target_day": 20311114,
+   "rate_bp": 1200,
+   "expect": {
+    "value_now_paise": 60000000,
+    "progress_pct": "60.0000",
+    "required_monthly_paise": 0,
+    "months_left": 60,
+    "on_track": true
+   }
+  }
+ ]
+}

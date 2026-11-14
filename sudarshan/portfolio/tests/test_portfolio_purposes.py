@@ -177,8 +177,8 @@ async def test_the_family_purpose_opens_only_read_ops_and_a_write_is_403_and_log
 @scenario
 async def test_the_journal_purpose_opens_only_its_reads_and_a_write_is_403_and_logged(rig, caplog):
     assert set(kinds.JOURNAL_OPS) == {
-        "trades_day", "order_history", "historical_trades", "pnl_report", "positions", "funds",
-        "benchmark_closes",
+        "trades_day", "order_history", "historical_trades", "pnl_report", "positions", "holdings",
+        "funds", "benchmark_closes", "tax_pack",
     }  # fmt: skip
     with caplog.at_level(logging.WARNING, logger="sudarshan.portfolio"):
         for name in (n for n in kinds.SERVICE_OP_NAMES if n not in kinds.JOURNAL_OPS):
@@ -746,6 +746,18 @@ async def test_positions_and_funds_are_the_readers_parts_with_read_at(rig):
     funds = (await rig.journal("funds"))[1]["data"]
     assert positions["read_at"] == NOW and positions["data"][0]["qty_u"] == -65_000_000
     assert funds["read_at"] == NOW and funds["data"]["available_paise"] == 12_500_050
+
+
+@scenario
+async def test_the_holdings_are_the_readers_part_with_read_at(rig, fake):
+    """The journal reads the holdings once per share at first sight (its review B1): the same
+    part, with read_at, as the owner's page reads, and one Upstox call for the two."""
+    status, answer = await rig.journal("holdings")
+    holdings = answer["data"]
+    assert status == 200 and holdings["state"] == "ok" and holdings["read_at"] == NOW
+    assert holdings["data"] and all("qty_u" in r and "t1_qty_u" in r for r in holdings["data"])
+    await rig.owner("upstox_book", parts=["holdings"])
+    assert fake.count("holdings") == 1
 
 
 @scenario

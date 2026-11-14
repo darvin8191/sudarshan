@@ -23,8 +23,8 @@ def t(day, side, qty, rupees, isin=XYZ, account=1, **more):
     return row
 
 
-def opening(day, qty, cost, isin=XYZ, source="owner"):
-    return {"taxpayer": 1, "account": 1, "instrument": isin, "acquired_day": day,
+def opening(day, qty, cost, isin=XYZ, source="owner", account=1):
+    return {"taxpayer": 1, "account": account, "instrument": isin, "acquired_day": day,
             "qty_u": qty * U, "cost_paise": cost, "source": source}  # fmt: skip
 
 
@@ -182,6 +182,25 @@ CASES = [
     case("X1-other-heads-passed-over", "a future and an untagged fund are not lots: nothing out",
          [t(20260803, "BUY", 65, 24000, isin=["NFO", "NIFTY", 20260827, 0, "FUT"], segment="FO"),
           t(20260803, "BUY", 10, 60, isin=FUND, segment="MF")]),
+    case("S1-bonus-of-one-account", "account 1 (Upstox) and account 2 (a tab) each bought 10 at "
+         "100 (1,000.00); Upstox's bonus 1:1 of 10 Sep 2025, accepted for account 1 only, adds 10 "
+         "at nil there; the tab's own bonus entry is its opening lot of 10 at nil on that day, "
+         "and the Upstox bonus adds nothing to it (unscoped it would add 20 more, the 10 bought "
+         "and the 10 already given)",
+         [t(20250602, "BUY", 10, 100), t(20250602, "BUY", 10, 100, account=2)], [],
+         [lot(20250602, 10, 100_000, account=1), lot(20250910, 10, 0, account=1, source="bonus"),
+          lot(20250602, 10, 100_000, account=2), lot(20250910, 10, 0, account=2, source="bonus")],
+         opening=[opening(20250910, 10, 0, source="bonus", account=2)],
+         actions=[act("BONUS", 20250910, 1, 1, account=1)]),
+    case("S2-split-of-one-account", "the same two purchases; the tab's split 1 into 5 of 5 Jan "
+         "2026, for account 2 only, makes its lot 50 at 1,000.00; account 1's 10 are untouched, "
+         "so its sale of 10 at 120 (1,200.00) on 12 Aug 2026 takes the whole lot at 1,000.00 "
+         "(unscoped, its lot would be 50 and the 10 sold would cost a fifth of it, 200.00)",
+         [t(20250602, "BUY", 10, 100), t(20250602, "BUY", 10, 100, account=2),
+          t(20260812, "SELL", 10, 120)],
+         [sold(20260812, 10, 120_000, 20250602, 100_000, account=1)],
+         [lot(20250602, 50, 100_000, account=2)],
+         actions=[act("SPLIT", 20260105, 5, 1, account=2)]),
 ]  # fmt: skip
 
 FILES = {"lots.json": CASES}

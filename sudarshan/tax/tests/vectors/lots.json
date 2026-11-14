@@ -1341,5 +1341,169 @@
    "notes": 0,
    "fractions": []
   }
+ },
+ {
+  "id": "S1-bonus-of-one-account",
+  "note": "account 1 (Upstox) and account 2 (a tab) each bought 10 at 100 (1,000.00); Upstox's bonus 1:1 of 10 Sep 2025, accepted for account 1 only, adds 10 at nil there; the tab's own bonus entry is its opening lot of 10 at nil on that day, and the Upstox bonus adds nothing to it (unscoped it would add 20 more, the 10 bought and the 10 already given)",
+  "in": {
+   "trades": [
+    {
+     "taxpayer": 1,
+     "account": 1,
+     "day": 20250602,
+     "seq": 40,
+     "side": "BUY",
+     "segment": "EQ",
+     "instrument": "INE000A01010",
+     "qty_u": 10000000,
+     "price_u": 1000000,
+     "amount_paise": 100000
+    },
+    {
+     "taxpayer": 1,
+     "account": 2,
+     "day": 20250602,
+     "seq": 41,
+     "side": "BUY",
+     "segment": "EQ",
+     "instrument": "INE000A01010",
+     "qty_u": 10000000,
+     "price_u": 1000000,
+     "amount_paise": 100000
+    }
+   ],
+   "opening": [
+    {
+     "taxpayer": 1,
+     "account": 2,
+     "instrument": "INE000A01010",
+     "acquired_day": 20250910,
+     "qty_u": 10000000,
+     "cost_paise": 0,
+     "source": "bonus"
+    }
+   ],
+   "actions": [
+    {
+     "kind": "BONUS",
+     "instrument": "INE000A01010",
+     "ex_day": 20250910,
+     "num": 1,
+     "den": 1,
+     "account": 1
+    }
+   ]
+  },
+  "out": {
+   "disposals": [],
+   "open_lots": [
+    {
+     "acquired_day": 20250602,
+     "qty_u": 10000000,
+     "cost_paise": 100000,
+     "account": 1
+    },
+    {
+     "acquired_day": 20250910,
+     "qty_u": 10000000,
+     "cost_paise": 0,
+     "account": 1,
+     "source": "bonus"
+    },
+    {
+     "acquired_day": 20250602,
+     "qty_u": 10000000,
+     "cost_paise": 100000,
+     "account": 2
+    },
+    {
+     "acquired_day": 20250910,
+     "qty_u": 10000000,
+     "cost_paise": 0,
+     "account": 2,
+     "source": "bonus"
+    }
+   ],
+   "intraday": [],
+   "notes": 0,
+   "fractions": []
+  }
+ },
+ {
+  "id": "S2-split-of-one-account",
+  "note": "the same two purchases; the tab's split 1 into 5 of 5 Jan 2026, for account 2 only, makes its lot 50 at 1,000.00; account 1's 10 are untouched, so its sale of 10 at 120 (1,200.00) on 12 Aug 2026 takes the whole lot at 1,000.00 (unscoped, its lot would be 50 and the 10 sold would cost a fifth of it, 200.00)",
+  "in": {
+   "trades": [
+    {
+     "taxpayer": 1,
+     "account": 1,
+     "day": 20250602,
+     "seq": 42,
+     "side": "BUY",
+     "segment": "EQ",
+     "instrument": "INE000A01010",
+     "qty_u": 10000000,
+     "price_u": 1000000,
+     "amount_paise": 100000
+    },
+    {
+     "taxpayer": 1,
+     "account": 2,
+     "day": 20250602,
+     "seq": 43,
+     "side": "BUY",
+     "segment": "EQ",
+     "instrument": "INE000A01010",
+     "qty_u": 10000000,
+     "price_u": 1000000,
+     "amount_paise": 100000
+    },
+    {
+     "taxpayer": 1,
+     "account": 1,
+     "day": 20260812,
+     "seq": 44,
+     "side": "SELL",
+     "segment": "EQ",
+     "instrument": "INE000A01010",
+     "qty_u": 10000000,
+     "price_u": 1200000,
+     "amount_paise": 120000
+    }
+   ],
+   "actions": [
+    {
+     "kind": "SPLIT",
+     "instrument": "INE000A01010",
+     "ex_day": 20260105,
+     "num": 5,
+     "den": 1,
+     "account": 2
+    }
+   ]
+  },
+  "out": {
+   "disposals": [
+    {
+     "sale_day": 20260812,
+     "qty_u": 10000000,
+     "sale_paise": 120000,
+     "acquired_day": 20250602,
+     "cost_paise": 100000,
+     "account": 1
+    }
+   ],
+   "open_lots": [
+    {
+     "acquired_day": 20250602,
+     "qty_u": 50000000,
+     "cost_paise": 100000,
+     "account": 2
+    }
+   ],
+   "intraday": [],
+   "notes": 0,
+   "fractions": []
+  }
  }
 ]

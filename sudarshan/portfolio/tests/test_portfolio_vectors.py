@@ -65,6 +65,9 @@ def test_a_generator_imports_nothing_from_the_code_it_checks(name):
         "hashlib",
         "pathlib",
         "portfolio_vector_tools",
+        # P7 lane R: weekdays of a calendar (never the clock) and whole-number square roots.
+        "datetime",
+        "math",
     }
     assert imported <= allowed, imported
 

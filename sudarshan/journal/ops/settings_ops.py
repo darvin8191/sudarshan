@@ -9,6 +9,11 @@ exists). The answer adds what the Reports page shows beside them:
   off on its side (``off``: order alerts off, or ``SUDARSHAN_JOURNAL=off`` in alerts.env). The
   desk's view of this journal does not count against it: a journal answering this request is on,
   and the desk asks it again within a minute.
+* ``desk_state``: the desk's own state for the page to word (review M5 of v0.11.0): ``on``,
+  ``starting``, ``journal_off``, ``journal_down`` or ``off`` as the block says it, else
+  ``unknown`` (the alerts service does not answer as itself, has no block, or names a state this
+  release does not know), so the page never says "switched off" for an alerts service that is
+  only not answering. Every answer carries it: the contract's ``DeskState``.
 * ``rate_card``: the charges card in use, its version and the day its newest rate applies from.
 * ``times``: when each report is built, as the page prints them: the day ones for today, or for
   the next trading day when today has no session.
@@ -38,6 +43,9 @@ CAPITAL_MAX_PAISE = 10**13
 #: The report desk's states (``report_desk.state`` on the alerts' /health) in which it delivers
 #: the reports, or will as soon as it next asks this journal; ``off`` is the one that does not.
 DESK_DELIVERS = frozenset({"on", "starting", "journal_off", "journal_down"})
+#: Every state the desk names (the contract's ``DeskState`` but ``unknown``); anything else, or no
+#: block at all, is ``unknown`` to the page.
+DESK_STATES = frozenset(kinds.DESK_STATES) - {"unknown"}
 WEEKDAY_NAMES = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
 MONTH_NAMES = ("January", "February", "March", "April", "May", "June", "July", "August",
                "September", "October", "November", "December")  # fmt: skip
@@ -110,11 +118,17 @@ def rate_card(today: int, plan: str) -> dict[str, Any]:
     return {"version": charges.CARD_VERSION, "from_day": max(dates, default=charges.CARD_START)}
 
 
-async def alerts_on(service: Any) -> bool:
-    """Whether anything delivers the reports (Y38): the alerts' report desk, as its block says."""
+async def desk_state(service: Any) -> str:
+    """The alerts' report desk's state as its block says it, or ``unknown`` (see the module)."""
     probe = service.part("alerts", lambda svc: AlertsProbe(svc.settings.alerts_url))
     block = await probe.desk()
-    return block is not None and block.get("state") in DESK_DELIVERS
+    state = block.get("state") if block is not None else None
+    return state if isinstance(state, str) and state in DESK_STATES else "unknown"
+
+
+async def alerts_on(service: Any) -> bool:
+    """Whether anything delivers the reports (Y38): the alerts' report desk, as its block says."""
+    return await desk_state(service) in DESK_DELIVERS
 
 
 @op("settings_get")
@@ -123,9 +137,11 @@ async def settings_get(ctx, args):
     now = ctx.clock()
     found = await work(lambda: store.read(OWNER, lambda tx: tx.settings()))
     today = ist_day(now)
+    desk = await desk_state(ctx)
     return {
         **{name: found.get(name) for name in FIELDS},
-        "alerts_on": await alerts_on(ctx),
+        "alerts_on": desk in DESK_DELIVERS,
+        "desk_state": desk,
         "rate_card": rate_card(today, found.get("charges_plan") or charges.DEFAULT_PLAN),
         "times": report_times(ctx, today),
     }

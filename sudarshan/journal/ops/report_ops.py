@@ -18,10 +18,11 @@ import base64
 from typing import Any
 
 from ..core import kinds
-from ..core.money import ist_day
+from ..core.money import ist_day, to_date
 from ..errors import ApiError
 from ..periods import PERIOD_KINDS, BadPeriod, build_period, csv_file, resolve_span
 from ..reports import build_brief, build_eod, markdown_safe
+from ..schedule import schedule_for
 from ..views import done, fields_of
 from . import op
 from .common import OWNER, caller, choice, need, text, whole, work
@@ -131,12 +132,16 @@ async def report_build(ctx, args):
         if day > today or (kind == "brief" and day != today):
             raise ApiError(422, "refused", "That report can be built for today or an earlier day "
                            "only; the morning brief for today only.", "period")  # fmt: skip
+        # Built before its own job's time today, it is a part: the job's build still goes (M2).
+        plan = schedule_for(ctx)
+        due = (plan.eod_at if kind == "eod" else plan.brief_at)(to_date(day))
+        partial = day == today and due is not None and now < due
         if kind == "eod":
-            report_id = await build_eod(ctx, day, now)
+            report_id = await build_eod(ctx, day, now, partial=partial)
             if report_id is None:
                 raise ApiError(422, "refused", NO_CLOSE, "period")
         else:
-            report_id = await build_brief(ctx, day, now)
+            report_id = await build_brief(ctx, day, now, partial=partial)
     version = await work(lambda: store.read(OWNER, lambda tx: tx.get("report", report_id)))
     return done(report_id, version["version"] if version else None, BUILT[kind])
 

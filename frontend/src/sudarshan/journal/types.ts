@@ -57,6 +57,14 @@ export const HOLD_BUCKET_LABELS = {
 export const INTRADAY_PRODUCTS = ['MIS', 'I'] as const
 export const CARRY_PRODUCTS = ['NRML', 'CNC', 'D'] as const
 export const HOLD_BUCKETS = ['under_5m', '5_30m', '30m_2h', 'over_2h', '1_5d', 'over_5d'] as const
+export const DESK_STATES = [
+  'on',
+  'starting',
+  'journal_off',
+  'journal_down',
+  'off',
+  'unknown',
+] as const
 export const OP_NAMES = [
   'state',
   'trips',
@@ -84,7 +92,7 @@ export const OP_NAMES = [
 export type Mode = 'live' | 'sandbox'
 export type Action = 'BUY' | 'SELL'
 export type Side = 'long' | 'short'
-export type TripStatus = 'open' | 'closed' | 'orphan'
+export type TripStatus = 'open' | 'closed' | 'orphan' | 'unmatched' | 'expired'
 export type LegRole = 'entry' | 'exit'
 export type ProductClass = 'intraday' | 'carry'
 export type FillSource =
@@ -116,6 +124,7 @@ export type ChargeSegment =
   | 'equity_intraday'
   | 'not_modelled'
 export type ChargePlan = 'plus' | 'standard'
+export type DeskState = 'on' | 'starting' | 'journal_off' | 'journal_down' | 'off' | 'unknown'
 export type HoldBucket = 'under_5m' | '5_30m' | '30m_2h' | 'over_2h' | '1_5d' | 'over_5d'
 export type RatioState =
   | 'ok'
@@ -192,6 +201,7 @@ export interface Trip {
   excursion_source: ExcursionSource
   excursion_note: string | null
   version: number
+  charges_modelled: boolean
 }
 
 export interface TripNote {
@@ -263,6 +273,8 @@ export interface Metrics {
   r_total: string | null
   r_avg: string | null
   charges_impact_pct: string | null
+  charges_estimated: boolean
+  charges_not_estimated: number
 }
 
 export interface HoldBucketRow {
@@ -425,6 +437,7 @@ export interface Settings {
   charges_plan: ChargePlan
   version: number
   alerts_on: boolean
+  desk_state: DeskState
   rate_card: RateCard
   times: ReportTimes
 }
@@ -544,7 +557,27 @@ export interface TripRow {
   excursion_source: ExcursionSource
   excursion_note: string | null
   version: number
+  charges_modelled: boolean
   mistakes: number[]
+}
+
+export interface TripFill {
+  trade_id: string
+  order_id: string
+  mode: Mode
+  day: number
+  exchange: string
+  symbol: string
+  instrument_key: string
+  product: string
+  action: Action
+  qty: number
+  price_u: number
+  exch_ts_ms: number
+  order_ts_ms: number | null
+  source: FillSource
+  surface: Surface | null
+  trip_qty: number
 }
 
 export interface TripDetail {
@@ -584,8 +617,9 @@ export interface TripDetail {
   excursion_source: ExcursionSource
   excursion_note: string | null
   version: number
+  charges_modelled: boolean
   legs: TripLeg[]
-  fills: Fill[]
+  fills: TripFill[]
   note: TripNote | null
   excursion: Excursion | null
   charges: ChargeEstimate | null

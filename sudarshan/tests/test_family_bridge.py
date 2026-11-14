@@ -29,6 +29,7 @@ from family_bridge_app import (
     internal_seal,
     login_session,
     make_app,
+    note_shares,
     reset_lists,
     reset_users,
 )
@@ -42,8 +43,10 @@ from sudarshan.vault import (
     FAMILY_INTERNAL_INFO,
     FAMILY_NUDGE_INFO,
     JOURNAL_API_INFO,
+    Vault,
     fernet_for,
 )
+from utils.lazy import LazyInit
 from utils.thread_safe_cache import LockedTTLCache
 
 REPO = Path(__file__).resolve().parents[2]
@@ -118,6 +121,17 @@ def family(monkeypatch):
     with FakeFamily() as running:
         monkeypatch.setenv("SUDARSHAN_FAMILY_API_URL", running.url)
         yield running
+
+
+@pytest.fixture(autouse=True)
+def _note_of_shares(monkeypatch, tmp_path):
+    """M3 (feat/family-c): the note of shared lists in a vault of each test's own, and the sample
+    share naming one of the owner's own lists (the bridge checks that before it sends a share)."""
+    vault = LazyInit(lambda: Vault(tmp_path / "vault.db", pepper=os.environ["API_KEY_PEPPER"]),
+                     "test-family-vault")  # fmt: skip
+    monkeypatch.setattr(bp_module, "_vault_lazy", vault)
+    monkeypatch.setitem(SAMPLE, "share_set",
+                        {**SAMPLE["share_set"], "ref": str(reset_lists()["swing"])})  # fmt: skip
 
 
 @pytest.fixture
@@ -664,6 +678,7 @@ def lists(monkeypatch):
                         lambda symbol, exchange: (lambda v: v and _Info(**v))(
                             FAKE_MASTER.get((symbol, exchange))))  # fmt: skip
     monkeypatch.setattr(bp_module, "_nonces", NonceBook(64))
+    note_shares(ids)  # M3 (feat/family-c): each shared with member 2, as the owner's page does
     return ids
 
 
@@ -789,7 +804,7 @@ def test_a_full_nonce_book_is_busy_not_forgetful(bridge, lists, monkeypatch):
 
 
 def test_a_list_read_that_fails_is_told_without_its_cause(bridge, lists, monkeypatch):
-    def broken(ids):
+    def broken(ids, member_id, role):
         raise RuntimeError("database is locked")
 
     monkeypatch.setattr(bp_module, "shared_lists", broken)
@@ -845,3 +860,255 @@ def test_the_family_services_admin_door_opens_what_the_bridge_sends(bridge, fami
         response = asyncio.run(doors.admin(request))
         assert response.payload == {"status": "success", "data": {"ran": op_name}}
     assert seen == {op.name: SAMPLE[op.name] for op in OPS}
+
+
+# -- the note of shared lists (review M3) and one list of forwarded headers (review L7) -----------
+# SUDARSHAN feat/family-c (F7): the internal route serves only what OpenAlgo's own note shares
+# with the member asked about; the owner's share ops write the note as they pass.
+
+OP = {op.name: op for op in OPS}
+
+
+def share_answer(share_id: int, fields: dict, version: int = 1):
+    """The family service's ``Share`` for a share_set it took."""
+    return (200, {"status": "success", "data": {
+        "id": share_id, "kind": fields["kind"], "ref": fields["ref"],
+        "member_id": fields.get("member_id"), "role": fields.get("role"),
+        "level": fields["level"], "expires_at": fields.get("expires_at"),
+        "created_at": 1731500000000, "version": version}})  # fmt: skip
+
+
+def shown(client, ids, **member) -> dict:
+    response = post_internal(client, internal_seal(list_ids=ids, **member))
+    assert response.status_code == 200, response.get_json()
+    return response.get_json()["data"]
+
+
+def test_m3_an_owners_list_that_is_not_shared_is_gone_with_no_content(bridge, lists):
+    """The review's test: a correctly sealed request for a list of the owner's that no share
+    names gets it back in gone, and nothing of the list."""
+    bp_module._note_change(lambda shares: bool(shares.clear()) or True)
+    response = post_internal(bridge, internal_seal(list_ids=[lists["swing"], lists["empty"]]))
+    assert response.status_code == 200
+    assert response.get_json()["data"] == {"lists": [], "gone": [lists["swing"], lists["empty"]]}
+    assert b"Swing" not in response.data and b"INFY" not in response.data
+
+
+def test_m3_a_list_shared_with_someone_else_is_gone(bridge, lists):
+    bp_module._note_change(lambda shares: bool(shares.clear()) or True)
+    note_shares({"swing": lists["swing"]}, member_id=3)
+    note_shares({"empty": lists["empty"]}, member_id=None, role="child")
+    asked = [lists["swing"], lists["empty"]]
+    assert shown(bridge, asked)["gone"] == asked  # member 2, a viewer
+    assert [x["id"] for x in shown(bridge, asked, member_id=3)["lists"]] == [lists["swing"]]
+    child = shown(bridge, asked, member_id=5, role="child")
+    assert ([x["id"] for x in child["lists"]], child["gone"]) == (
+        [lists["empty"]],
+        [lists["swing"]],
+    )
+
+
+def test_m3_a_list_shared_with_every_member_is_each_members(bridge, lists):
+    """The owner's Family page shares with every member as no member and no role."""
+    bp_module._note_change(lambda shares: bool(shares.clear()) or True)
+    note_shares({"swing": lists["swing"]}, member_id=None, role=None)
+    for member in ({"member_id": 2, "role": "viewer"}, {"member_id": 9, "role": "child"}):
+        found = shown(bridge, [lists["swing"], lists["empty"]], **member)
+        assert ([x["id"] for x in found["lists"]], found["gone"]) == (
+            [lists["swing"]], [lists["empty"]])  # fmt: skip
+
+
+def test_m3_a_later_list_given_the_same_id_is_gone(bridge, lists):
+    """OpenAlgo gives a deleted list's id to the next list made (its ids are not AUTOINCREMENT):
+    the note keeps the created_at the shared list had, and a list with another one was never
+    shared."""
+    from datetime import timedelta
+
+    from database import watchlist_db as oa
+
+    newest = oa.create_watchlist(OWNER, "Newest", items=[])["id"]
+    note_shares({"newest": newest})
+    assert oa.delete_watchlist(OWNER, newest)
+    again = oa.create_watchlist(OWNER, "Made later", items=[{"symbol": "INFY", "exchange": "NSE"}])
+    assert again["id"] == newest  # the same id, for another list
+    later = oa.db_session.get(oa.Watchlist, newest)
+    later.created_at = later.created_at + timedelta(seconds=5)  # made in a later second
+    oa.db_session.commit()
+    oa.db_session.remove()
+    data = shown(bridge, [newest, lists["empty"]])
+    assert ([x["id"] for x in data["lists"]], data["gone"]) == ([lists["empty"]], [newest])
+    assert b"Made later" not in post_internal(bridge, internal_seal(list_ids=[newest])).data
+
+
+def test_m3_an_expired_share_is_gone(bridge, lists):
+    bp_module._note_change(lambda shares: bool(shares.clear()) or True)
+    now = int(time.time() * 1000)
+    note_shares({"swing": lists["swing"]}, until=now - 1)
+    note_shares({"empty": lists["empty"]}, until=now + 60_000)
+    data = shown(bridge, [lists["swing"], lists["empty"]])
+    assert ([x["id"] for x in data["lists"]], data["gone"]) == ([lists["empty"]], [lists["swing"]])
+
+
+@pytest.mark.parametrize(
+    "member",
+    [{"member_id": None}, {"role": None}, {"member_id": 0}, {"member_id": True},
+     {"member_id": "2"}, {"member_id": 2**31}, {"role": "owner"}, {"role": ["viewer"]}],
+)  # fmt: skip
+def test_m3_a_request_must_say_which_member_it_is_for(bridge, lists, member):
+    response = post_internal(bridge, internal_seal(list_ids=[lists["swing"]], **member))
+    assert response.status_code == 400 and response.get_json()["code"] == "invalid"
+    assert b"Swing" not in response.data
+
+
+def test_m3_a_confirmed_share_is_noted_and_then_served(bridge, family, lists):
+    bp_module._note_change(lambda shares: bool(shares.clear()) or True)
+    fields = {"kind": "watchlist", "ref": str(lists["swing"]), "member_id": 4, "level": "view",
+              "expires_at": None}  # fmt: skip
+    family.answers["share_set"] = share_answer(31, fields)
+    response = send(bridge, OP["share_set"], fields, headers=as_owner(bridge))
+    assert response.status_code == 200 and response.get_json()["data"]["id"] == 31
+    made = bp_module._list_made(str(lists["swing"]))[1]
+    assert made is not None and bp_module._note() == {"31": {
+        "list": lists["swing"], "made": made, "member": 4, "role": None, "until": None}}  # fmt: skip
+    assert [x["id"] for x in shown(bridge, [lists["swing"]], member_id=4)["lists"]] == [
+        lists["swing"]]  # fmt: skip
+
+
+def test_m3_a_list_not_the_owners_is_never_sent(bridge, family, lists):
+    before = bp_module._note()
+    for ref in (str(lists["other"]), "999999"):
+        fields = {"kind": "watchlist", "ref": ref, "role": "viewer", "level": "view"}
+        response = send(bridge, OP["share_set"], fields, headers=as_owner(bridge))
+        assert response.status_code == 404
+        assert error_of(response) == {"code": "not_found",
+                                      "message": bp_module.NOTE_WORDS["not_mine"]}  # fmt: skip
+    assert family.calls == [] and bp_module._note() == before
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        (409, {"status": "error", "code": "conflict",
+               "message": "This was changed on another screen. Reload and try again."}),
+        (200, {"status": "success", "data": {"enabled": False,
+                                             "message": "The family view is switched off."}}),
+        (200, {"status": "success", "data": {"op": "share_set"}}),
+        "late",
+    ],
+)  # fmt: skip
+def test_m3_a_share_the_service_did_not_confirm_is_not_noted(bridge, family, lists, monkeypatch,
+                                                            answer):  # fmt: skip
+    if answer == "late":
+        monkeypatch.setattr(bp_module, "TIMEOUTS_S", {"read": 0.3, "write": 0.3})
+        family.delay = 0.8
+        answer = share_answer(32, {"kind": "watchlist", "ref": str(lists["swing"]),
+                                   "role": "viewer", "level": "view"})  # fmt: skip
+    family.answers["share_set"] = answer
+    fields = {"kind": "watchlist", "ref": str(lists["swing"]), "role": "viewer", "level": "view"}
+    before = bp_module._note()
+    response = send(bridge, OP["share_set"], fields, headers=as_owner(bridge))
+    assert len(family.calls) == 1
+    assert bp_module._note() == before
+    if family.delay:
+        assert error_of(response)["code"] == "not_confirmed"
+        time.sleep(0.6)  # the stand-in finishes its slow answer
+
+
+def test_m3_a_share_of_a_part_of_the_books_is_sent_as_it_is(bridge, family, lists):
+    fields = {"kind": "book", "ref": "positions", "role": "viewer", "level": "view"}
+    family.answers["share_set"] = share_answer(33, fields)
+    before = bp_module._note()
+    assert send(bridge, OP["share_set"], fields, headers=as_owner(bridge)).status_code == 200
+    assert family.calls == [("share_set", fields)] and bp_module._note() == before
+
+
+def test_m3_a_removed_share_is_forgotten_first_and_kept_only_while_the_service_has_it(
+    bridge, family, lists
+):
+    headers = as_owner(bridge)
+    entry = {"list": lists["swing"], "made": None, "member": 2, "role": None, "until": None}
+    for answer, kept in [
+        ((409, {"status": "error", "code": "conflict", "message": "Changed. Reload."}), True),
+        ((503, {"status": "error", "code": "busy", "message": "Busy. Wait a minute."}), True),
+        ((200, {"status": "success", "data": {"enabled": False, "message": "Off."}}), True),
+        ((404, {"status": "error", "code": "not_found", "message": "No longer there."}), False),
+        ((200, {"status": "success", "data": {"ok": True, "words": None}}), False),
+    ]:
+        bp_module._note_change(lambda shares: bool(shares.update({"9": dict(entry)})) or True)
+        seen = []
+        family.answers["share_remove"] = lambda message, a=answer, s=seen: (
+            s.append(dict(bp_module._note())) or a)  # fmt: skip
+        send(bridge, OP["share_remove"], {"id": 9, "version": 1}, headers=headers)
+        assert "9" not in seen[0]  # forgotten before the service was asked
+        assert ("9" in bp_module._note()) is kept, answer
+
+
+def test_m3_a_note_that_cannot_be_written_is_said_and_nothing_is_sent(bridge, family, lists,
+                                                                       monkeypatch):  # fmt: skip
+    headers = as_owner(bridge)
+
+    def broken(*args, **kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(bp_module, "_note_change", broken)
+    response = send(bridge, OP["share_remove"], {"id": 9, "version": 1}, headers=headers)
+    assert (response.status_code, error_of(response)) == (
+        500, {"code": "failed", "message": bp_module.NOTE_WORDS["unforgotten"]})  # fmt: skip
+    assert family.calls == []
+    fields = {"kind": "watchlist", "ref": str(lists["swing"]), "role": "viewer", "level": "view"}
+    family.answers["share_set"] = share_answer(34, fields)
+    response = send(bridge, OP["share_set"], fields, headers=headers)
+    assert (response.status_code, error_of(response)) == (
+        500, {"code": "failed", "message": bp_module.NOTE_WORDS["unnoted"]})  # fmt: skip
+    assert [op for op, _ in family.calls] == ["share_set"]
+
+
+def test_m3_a_removed_members_shares_are_forgotten(bridge, family, lists):
+    bp_module._note_change(lambda shares: bool(shares.clear()) or True)
+    note_shares({"swing": lists["swing"]}, member_id=2)
+    note_shares({"empty": lists["empty"]}, member_id=None, role="viewer")
+    note_shares({"other": lists["other"]}, member_id=3)
+    note_shares({"swing": lists["swing"]}, member_id=None)  # every member's
+    family.answers["member_remove"] = (409, {"status": "error", "code": "conflict",
+                                             "message": "Changed. Reload."})  # fmt: skip
+    headers = as_owner(bridge)
+    send(bridge, OP["member_remove"], {"id": 2, "version": 4}, headers=headers)
+    assert len(bp_module._note()) == 4  # refused: nothing forgotten
+    family.answers["member_remove"] = (200, {"status": "success",
+                                             "data": {"ok": True, "words": None}})  # fmt: skip
+    send(bridge, OP["member_remove"], {"id": 2, "version": 4}, headers=headers)
+    assert {(e["member"], e["role"]) for e in bp_module._note().values()} == {
+        (3, None), (None, "viewer"), (None, None)}  # fmt: skip
+
+
+def test_m3_the_internal_route_answers_120_a_minute(monkeypatch, tmp_path, lists):
+    monkeypatch.setattr(bp_module, "_nonces", NonceBook(512))
+    client = make_app(rate_limits=True).test_client()
+    for _ in range(120):
+        assert post_internal(client, internal_seal(list_ids=[lists["swing"]])).status_code == 200
+    refused = post_internal(client, internal_seal(list_ids=[lists["swing"]]))
+    assert refused.status_code == 429 and b"Swing" not in refused.data
+
+
+def test_l7_the_internal_route_and_the_family_doors_refuse_one_list_of_headers():
+    assert bp_module.PROXY_HEADERS is contract.FORWARDED_HEADERS
+    assert set(contract.FORWARDED_HEADERS) == {"X-Forwarded-For", "X-Real-IP", "Forwarded",
+                                               "X-Forwarded-Proto", "X-Forwarded-Host"}  # fmt: skip
+
+
+def test_m3_the_share_ops_and_their_note_leave_no_descriptor_open(bridge, family, lists):
+    """fd-audit (F7): the note lives in the vault (its engine built once, a session per read or
+    write) and the list check reads OpenAlgo's table with the session removed after."""
+    headers = as_owner(bridge)
+    fields = {"kind": "watchlist", "ref": str(lists["swing"]), "role": "child", "level": "view"}
+    family.answers["share_set"] = share_answer(40, fields)
+    family.answers["share_remove"] = (200, {"status": "success",
+                                            "data": {"ok": True, "words": None}})  # fmt: skip
+    send(bridge, OP["share_set"], fields, headers=headers)  # warm up: the vault's engine
+    watch = FdWatch()
+    for _ in range(30):
+        assert send(bridge, OP["share_set"], fields, headers=headers).status_code == 200
+        assert send(bridge, OP["share_remove"], {"id": 40, "version": 1},
+                    headers=headers).status_code == 200  # fmt: skip
+        assert post_internal(bridge, internal_seal(list_ids=[lists["swing"]])).status_code == 200
+    watch.assert_clean()

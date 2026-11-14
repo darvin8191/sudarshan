@@ -147,7 +147,8 @@ def _balanced(text: str, start: int) -> str:
 def interfaces(text: str) -> dict[str, str]:
     """Interface name to the text of its own members (not those it extends)."""
     found = {}
-    for match in re.finditer(r"^export interface (\w+)(?: extends [\w, ]+?)?\s*\{", text, re.M):
+    pattern = r"^export interface (\w+)(?:<[^>{]*>)?(?: extends [\w, ]+?)?\s*\{"
+    for match in re.finditer(pattern, text, re.M):
         found[match.group(1)] = _balanced(text, match.end() - 1)
     return found
 
@@ -185,3 +186,62 @@ def includes(text: str, name: str, target: str) -> bool:
     if name == target:
         return True
     return any(includes(text, base, target) for base in parents(text).get(name, []))
+
+
+def _uncommented(text: str) -> str:
+    return re.sub(r"/\*.*?\*/|//[^\n]*", "", text, flags=re.S)
+
+
+def aliases(text: str) -> dict[str, str]:
+    """``export type NAME = <expression>`` as name to expression, the expression read to where
+    its brackets close and the line ends."""
+    found = {}
+    for match in re.finditer(r"^export type (\w+)(?:<[^>]*>)? =", text, re.M):
+        depth, i = 0, match.end()
+        while i < len(text):
+            if text[i] in "{([<":
+                depth += 1
+            elif text[i] in "})]>":
+                depth -= 1
+            elif text[i] == "\n" and depth <= 0 and not text.startswith("\n  |", i):
+                break
+            i += 1
+        found[match.group(1)] = text[match.end() : i]
+    return found
+
+
+def member_types(body: str) -> list[tuple[str, str]]:
+    """An interface's (or an inline object type's) own members as (name, type expression)."""
+    body, out, depth, part = _uncommented(body), [], 0, []
+    for c in body + "\n":
+        if c in "{([<":
+            depth += 1
+        elif c in "})]>":
+            depth -= 1
+        if depth == 0 and c in "\n;,":
+            match = re.fullmatch(r"\s*(?:readonly\s+)?(\w+)\??:\s*(.+?)\s*", "".join(part), re.S)
+            if match:
+                out.append((match.group(1), match.group(2)))
+            part = []
+        else:
+            part.append(c)
+    return out
+
+
+def type_refs(expr: str, exported: set[str]) -> tuple[set[str], list[str]]:
+    """The exported type names a type expression names, and the bodies of its inline objects."""
+    expr, names, inline, i = _uncommented(expr), set(), [], 0
+    while i < len(expr):
+        if expr[i] == "{":
+            body = _balanced(expr, i)
+            inline.append(body)
+            i += len(body) + 2
+            continue
+        match = re.match(r"[A-Za-z_]\w*", expr[i:])
+        if match:
+            if match.group() in exported:
+                names.add(match.group())
+            i += len(match.group())
+            continue
+        i += 1
+    return names, inline
