@@ -5,6 +5,155 @@ publish. The owner publishes each release on GitHub. The server's deploy timer t
 outside 08:30-16:00 IST on trading days (09:00-15:45 until v0.3.1), keeps backups, and rolls
 back if the app does not come up healthy.
 
+## v0.11.0 (14 Nov 2026)
+
+The trade journal and its reports: a Journal page with every trade paired from your fills, its
+analytics and your playbooks, and a Reports page with the Morning brief, Day report, Week in review,
+Monthly statement and Tax pack, each also sent to your Telegram. **This release switches the journal
+on** (`SUDARSHAN_JOURNAL` is set to `on`). It ships on because it only reads: it cannot place, change
+or cancel an order, and nothing you trade with changes. It includes everything in v0.10.0. **Publish
+it only after v0.10.0 has installed and run one trading day.**
+
+### What changes for you from the day you install it
+- **A new service, `sudarshan-journal`, starts with the install and is on.** It reads your fills
+  through the portfolio service, prices from the price feed and OpenAlgo's own records, and reaches
+  nothing off the server. It keeps its own file, `journal.db`, in `/var/lib/sudarshan-journal/`;
+  from the next install on, the deploy backs it up and puts it back on a rollback.
+- **Two new menu entries, Journal and Reports.** The menu now reads Watchlist, Screener, Portfolio,
+  Journal, Reports, then Holdings.
+- **A fill becomes a trade in the Journal a few seconds after its Telegram alert.** A check after
+  the close (16:05) adds any fill that was missed. Every night at 22:00 the journal reads the day
+  once more, and rebuilds from Upstox's trade history any of the last 3 trading days it did not
+  check itself. On the first night that is the 3 trading days before the install: their trades
+  appear under the strategy "Trade history", without times.
+- **New Telegram messages:** a Morning brief 30 minutes before the open (08:45), a Day report 5
+  minutes after the F&O close (15:45; 15:50 from 7 Dec), a Week in review on Sunday at 18:00 with
+  its chart as a picture, a Monthly statement on the 1st at 07:00 with a PDF, and a Tax pack on 1
+  April and whenever you ask for one. They take turns with order and market alerts: a report never
+  goes while one of those waits. If the install runs after a report's time on a trading day, that
+  day's report can arrive late, the same evening.
+- **Positions the journal did not see from start to end are listed apart, never guessed.** Shares
+  or F&O positions you held before it started read "Opened before the journal"; a contract you let
+  expire reads "Ended at expiry"; a share trade you no longer hold reads "Closing not seen". They
+  sit under "Not in the figures" on the Trades list (one line with its count; tap to open), carry no
+  P&L, and are left out of every figure. Each report says how many it left out. Upstox's own report
+  has them. A sale of shares you hold is never shown as a short.
+- **Charges and net figures are estimates,** marked "est.": Rs 30 an order plus the statutory
+  charges. An order shared by two trades (a reversal) pays its brokerage once, split between them.
+- **A chart, an order ticket or the scalping page left open overnight picks up the new day by
+  itself** when the date changes in India, or when the phone wakes after midnight: an expiring
+  contract's chart stops at its own time instead of drawing flat candles, and the scalping page
+  reads the day's expiry list again.
+- **Screener:** while a screen's 15:30 check waits for closing prices (from 7 Dec), its "next
+  check" shows when it will really run. A screen no longer waits for the closing price of an auction
+  stock the screener cannot follow (past its 320-instrument limit).
+
+### What the journal and the reports do
+- **Trades:** open trades first, their P&L moving with every tick ("Real-time" only while ticks
+  arrive), then closed trades by whole days. The Sandbox switch shows Analyze-mode trades, never
+  mixed with real ones.
+- **A trade's sheet:** its fills, averages, gross, charges, net, how long it was held, its worst
+  and best point, and how fast its first entry order was answered. A reversal's fill reads "65 of
+  130" and says where the rest went. Below that, your own part: strategy, playbook and its
+  checklist, risk in rupees, mistake tags, mood and notes. The sheet asks before it closes with
+  changes you have not saved, and keeps them in that browser tab for up to a week.
+- **Analytics:** net, win rate, profit factor, expectancy, average R, max drawdown, the equity
+  curve, a calendar, best hours, hold times, results by strategy and by tag, expiry days against
+  other days, and what charges took.
+- **Playbooks:** your setups, each with its checks and how it has done.
+- **Reports, Archive:** every report, whether it reached Telegram (and why not, if it did not),
+  Open to read it, Download for its file, Download CSV on a Monthly statement, "Build the FY pack
+  now" and "Build this month's statement now". A statement you build early is sent again, whole,
+  on its day. A Week in review, Monthly statement or Tax pack missed because the journal was down
+  is built at its next start, within 3 days.
+- **Reports, Settings:** a switch for each report, the times as the server says them, and your
+  trading capital.
+- **The Tax pack is a working paper for your CA,** not a filing. Shares bought and sold the same
+  day are listed as that; the 12-month line goes by calendar dates; a position sold in parts is
+  booked sale by sale, each in its own year; and it has a block, "What this paper leaves out".
+
+### What you must do
+- **Nothing when you publish.** The deploy installs the service and adds `SUDARSHAN_JOURNAL='on'`
+  to the app's settings. No other setting changes.
+- **Under Reports, Settings, type your trading capital and save.** Until then the percentage
+  figures ask you to set it.
+- **To switch the journal off:** set `SUDARSHAN_JOURNAL` to `off` in the app's settings file and
+  restart `sudarshan-journal`. It then stays off through later releases, and no report is sent.
+  Deleting the line instead brings `on` back at the next install.
+- **On the first trading day after it installs.** Do not place a real order for these checks; look
+  at them when you next trade. The two that need an order are done in Analyze mode.
+  - The Journal page opens. After your first real fill, the trade appears within a few seconds with
+    Upstox's time and price, and the line beside "Open" says "Real-time".
+  - In Analyze mode, one small round trip: it appears as one trade under the Sandbox switch, and
+    not among your real trades.
+  - In Analyze mode, one reversal (for example SELL 130 against a long of 65): the first trade's
+    sheet reads "65 of 130" on the shared fill.
+  - When you next sell part of a share you already hold: it reads "Opened before the journal",
+    never SHORT under Open. Note the holding's quantity in the Upstox app just before and just after
+    the sale, and tell the next work session (Upstox's holdings on the day of a sale are not yet
+    checked).
+  - Type a note on a trade and tap outside the sheet: it asks before closing.
+  - Analytics, "By strategy": the Net column shows each rupee figure whole.
+  - At 15:45 the Day report arrives; its realised figure matches the Upstox app (delivery sales are
+    not in it). Its row under Reports says Sent, and Open shows its text.
+  - After 16:05, an option that expired that day reads "Ended at expiry".
+- **On the first night, after 22:00, and the next morning:**
+  - each trade of the 3 trading days before the install appears once under "Trade history", never
+    twice;
+  - a share you shorted and covered on one of those days is one closed SHORT, not an open LONG;
+  - no share you still hold has moved to "Closing not seen". If one has, and the shares are pledged
+    or held under MTF, tell the next work session;
+  - "Not in the figures" is one line with a count, and a tap opens it.
+- **Later:** on Sunday at 18:00 the Week in review arrives with its picture; on 1 Dec, Download and
+  Download CSV on the Monthly statement each give a file that opens.
+
+### What is refused now that used to be accepted
+- Nothing that was accepted before. Of the new parts: a report file goes to Telegram only as a PDF,
+  CSV or PNG of at most 10 MB, and a download that cannot be the file shows a sentence and saves
+  nothing.
+
+### Still to check, or not modelled
+- **Results of positions opened before the journal, and of contracts that ended at expiry, are not
+  worked out.** They stay out of the figures; settlement values come in a later release.
+- **A rebuilt day that mixes an intraday short and a delivery purchase of the same share, in unequal
+  quantities,** is taken as delivery whole and can show a long larger than you hold. Check that
+  share against the Upstox app; the nightly count ends it if you hold fewer.
+- **"Closing not seen" covers shares only and runs at 22:00.** After the journal has been off for
+  more than 3 trading days, a share trade whose sale it missed reads as open until the first 22:00
+  after it is back; a share you trade every day is never counted; a reverse split or a transfer out
+  ends the trade the same way. An F&O trade whose closing was missed ends at its expiry, and one
+  closed in part meanwhile can pair a later order wrongly. How Upstox's holdings count pledged or
+  MTF shares is not verified.
+- **Upstox's trade history may name a trade differently from its trades of the day.** If it does, a
+  day partly recorded live is doubled by the nightly rebuild; that is the first-night check above.
+- **If the portfolio service does not answer when an F&O position is first seen,** a sale against
+  an overnight long can read as a short until the journal asks again.
+- **Charges:** every rate is still to be verified against Upstox's page. Upstox's lower brokerage
+  on small share orders and the DP charge on delivery sales are not modelled; BSE, currency and
+  commodity trades say "not estimated". The comparison with Upstox's own charges is the next release.
+- **Tax pack:** it matches purchases to sales inside one journal trade, so shares sold out and
+  bought back the same day are listed as a delivery sale and a new holding, where a broker's
+  statement nets the day first; totals agree over time, the heading and year of a part can differ.
+  Dividends and the list of trades are not in it (the Monthly statements list the trades).
+- **For your CA:** shares bought on 29 February and sold on 1 March of the next year are listed as
+  held over 12 months. Whether that one day counts is for the CA (the next such date is in 2028).
+- **If the journal is stopped in the instant between marking a report as announced and writing its
+  line for Telegram,** that report's message is not sent; the report is still on the Reports page. In
+  three other narrow moments a report can arrive twice.
+- **The Day report's realised figure leaves delivery sales out,** as the daily loss limit does.
+- **Notes are saved only by Save.** Unsaved changes are kept in that browser tab only; an app the
+  phone closed and started afresh has lost them. Back from a sheet opened by a link leaves the page
+  without asking (the changes come back when the trade is opened again).
+- **An open trade's sheet shows no moving P&L** (its card does), and past 100 open trades the rest
+  read "Not priced".
+- **Reports are in English;** a name typed in Gujarati prints as question marks in a PDF. A report
+  you build yourself goes to Telegram at once, also in market hours. Report files are kept with no
+  limit. With an empty holidays file, a holiday still gets a Morning brief and a Day report.
+- **A list of more than a few hundred closed trades is slow to scroll back through.** The
+  best-hours table in Analytics scrolls sideways when trades fall outside 9:00 to 15:00.
+- **The new pages have no test under the opt-in worker** (the default worker's tests cover them),
+  and the family's view of the journal is not in this release.
+
 ## v0.10.0 (14 Nov 2026)
 
 Groundwork for the family view and the trade journal, which come in the next releases. Nothing you
