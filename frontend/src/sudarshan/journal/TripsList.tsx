@@ -131,11 +131,18 @@ function OpenCard({
         <Contract trip={trip}>
           {live?.pnl_paise !== null && live?.pnl_paise !== undefined ? (
             <span
-              className="inline-flex items-baseline text-base font-bold whitespace-nowrap"
+              className="inline-flex items-baseline gap-1.5 text-base font-bold whitespace-nowrap"
               data-testid="live-pnl"
             >
               <Signed paise={live.pnl_paise} stale={live.stale} />
               <OutcomeWord paise={live.pnl_paise} />
+              {trip.exit_qty > 0 && (
+                // A part-closed trade's figure is what the open quantity makes now, not what the
+                // closed part made (review M7).
+                <span className="text-[0.6875rem] font-semibold text-[color:var(--text-tertiary)]">
+                  on {qty} open
+                </span>
+              )}
             </span>
           ) : (
             <span className="text-sm font-semibold whitespace-nowrap text-[color:var(--text-tertiary)]">
@@ -223,7 +230,9 @@ function ClosedCard({
 
 /**
  * A day's line over its trades: the count and the day's net. A day not read whole (more trades on
- * it than the list could read) says "so far" and shows no total, never a sum of part of it.
+ * it than the list could read) says "so far" and shows no total, never a sum of part of it. The
+ * total carries "est." while a net in it rests on estimated charges, and names the trades whose net
+ * is not worked out yet, which it leaves out (review M7).
  */
 function DayHeader({ group, partial }: { group: DayGroup<TripRow>; partial: boolean }) {
   const count = group.trips.length
@@ -235,7 +244,23 @@ function DayHeader({ group, partial }: { group: DayGroup<TripRow>; partial: bool
           {count} {count === 1 ? 'trade' : 'trades'}
           {partial && ' so far'}
         </span>
-        {!partial && group.net_paise !== null && <Signed paise={group.net_paise} />}
+        {!partial && group.net_paise !== null && (
+          <span className="inline-flex items-baseline gap-1.5" data-testid="day-net">
+            <Signed paise={group.net_paise} />
+            {group.estimated && (
+              <span className="text-[0.6875rem] font-semibold text-[color:var(--text-tertiary)]">
+                est.
+              </span>
+            )}
+          </span>
+        )}
+        {group.missing > 0 && (
+          <span className="font-medium text-[color:var(--text-tertiary)]">
+            {group.missing === group.trips.length
+              ? 'net not worked out yet'
+              : `${group.missing} not worked out yet`}
+          </span>
+        )}
       </span>
     </div>
   )

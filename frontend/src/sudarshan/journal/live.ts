@@ -92,6 +92,10 @@ export interface DayGroup<T extends Trip = Trip> {
   trips: T[]
   /** The sum of the nets the day's trades have; null when none of them has one yet. */
   net_paise: number | null
+  /** The day's trades with no net yet: the sum leaves them out, and says so (review M7). */
+  missing: number
+  /** Whether a net in the sum rests on estimated charges, as a card's "est." says. */
+  estimated: boolean
 }
 
 /** Closed trips by the day they closed, newest day first and newest trade first within it. */
@@ -107,11 +111,13 @@ export function groupByDay<T extends Trip>(trips: readonly T[]): DayGroup<T>[] {
       const sorted = [...list].sort(
         (a, b) => (b.closed_ms ?? 0) - (a.closed_ms ?? 0) || b.id - a.id
       )
-      const nets = sorted.map((t) => t.net_paise).filter((n): n is number => n !== null)
+      const priced = sorted.filter((t) => t.net_paise !== null)
       return {
         day,
         trips: sorted,
-        net_paise: nets.length ? nets.reduce((sum, n) => sum + n, 0) : null,
+        net_paise: priced.length ? priced.reduce((sum, t) => sum + (t.net_paise ?? 0), 0) : null,
+        missing: sorted.length - priced.length,
+        estimated: priced.some((t) => t.charges_actual_paise === null),
       }
     })
 }

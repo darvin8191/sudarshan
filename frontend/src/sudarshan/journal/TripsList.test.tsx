@@ -159,12 +159,47 @@ describe('TripsList', () => {
     expect(within(closedGroup).queryByText(/Real-time|Reconnecting|Stale|Market closed/)).toBeNull()
   })
 
-  it('shows a part-closed trade’s open quantity', async () => {
+  it('shows a part-closed trade’s open quantity, and that its figure is on that quantity', async () => {
     serve([trip({ id: 1, entry_qty: 65, exit_qty: 25 })], [])
     show()
     const card = await screen.findByTestId('open-trip')
     expect(within(card).getByText('40 qty at 100.00')).toBeTruthy()
     expect(within(card).getByText('Part closed: 25 of 65 qty')).toBeTruthy()
+    act(() => feed.push('SBIN', 'NSE', { ltp: 101 }))
+    flush()
+    // review M7: what the closed part made is not in this figure
+    expect(within(card).getByTestId('live-pnl').textContent).toContain('on 40 open')
+  })
+
+  it('says a day’s total rests on estimates and leaves out a trade with no net yet (review M7)', async () => {
+    serve(
+      [],
+      [
+        closedTrip({ id: 1, net_paise: 1000, close_day: 20261113, closed_ms: 300 }),
+        {
+          ...closedTrip({ id: 2, net_paise: 0, close_day: 20261113, closed_ms: 200 }),
+          net_paise: null,
+        },
+        closedTrip({
+          id: 3,
+          net_paise: 500,
+          close_day: 20261112,
+          closed_ms: 100,
+          charges_actual_paise: 4049,
+        }),
+      ]
+    )
+    show()
+    const days = await screen.findAllByTestId('closed-day')
+    const today = days[0].firstElementChild?.textContent ?? ''
+    expect(today).toContain('2 trades')
+    expect(today).toContain('+₹10.00')
+    expect(today).toContain('est.')
+    expect(today).toContain('1 not worked out yet')
+    const before = days[1].firstElementChild?.textContent ?? ''
+    expect(before).toContain('+₹5.00')
+    expect(before).not.toContain('est.')
+    expect(before).not.toContain('not worked out')
   })
 
   it('groups closed trades by day, newest first, each with net, sign, hold, strategy and tags', async () => {
