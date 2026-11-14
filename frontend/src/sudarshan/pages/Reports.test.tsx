@@ -375,7 +375,7 @@ describe('Settings', () => {
     expect(
       screen.getByRole('switch', { name: 'Week in review' }).getAttribute('aria-checked')
     ).toBe('false')
-    expect((screen.getByLabelText(/Trading capital/) as HTMLInputElement).value).toBe('500000')
+    expect((screen.getByLabelText(/Trading capital/) as HTMLInputElement).value).toBe('5,00,000')
     expect(screen.getByText('English only for now.')).toBeTruthy()
     expect(screen.getByText(/Card 2026-04, in force from/)).toBeTruthy()
     expect(screen.getByTestId('where').textContent).toContain('view=settings')
@@ -422,6 +422,31 @@ describe('Settings', () => {
     )
     expect(lines[2].textContent).toBe('Sunday 18:00, every week')
     expect(screen.queryByText(/Close check/)).toBeNull()
+  })
+
+  it('keeps a capital being typed when a switch is saved meanwhile (review L2)', async () => {
+    const user = userEvent.setup()
+    let version = 3
+    api.call.mockResolvedValue({ enabled: true, data: { enabled: true } })
+    api.data.mockImplementation(async (op: string) => {
+      if (op === 'reports_list') return []
+      if (op === 'settings_get') return { ...SETTINGS, version }
+      if (op === 'settings_set') {
+        version += 1
+        return { done: true }
+      }
+      throw new Error(`unexpected op ${op}`)
+    })
+    renderBook('/reports', <Reports />)
+    await user.click(await screen.findByRole('tab', { name: 'Settings' }))
+    const input = (await screen.findByLabelText(/Trading capital/)) as HTMLInputElement
+    await user.clear(input)
+    await user.type(input, '7,50,000')
+    await user.click(screen.getByRole('switch', { name: 'Week in review' }))
+    await waitFor(() => expect(calls('settings_get').length).toBeGreaterThan(1))
+    await waitFor(() => expect(version).toBe(4))
+    expect(input.value).toBe('7,50,000')
+    expect(screen.getByRole('button', { name: 'Save capital' })).toBeTruthy()
   })
 
   it('saves a switch with the version it read', async () => {
