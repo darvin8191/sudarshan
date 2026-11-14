@@ -74,6 +74,8 @@ KINDS = frozenset(
         "watch_warning",
         "watch_fine",
         "watch_new",
+        "drill_passed",
+        "drill_failed",
     }
 )
 FORMAT = "1"
