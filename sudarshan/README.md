@@ -1039,6 +1039,22 @@ name this cannot be chosen, and the watch reads the certificate nginx serves fir
 
 Tests: `sudarshan/ops/tests/test_ops_nginx.py`.
 
+## The security audit (M19)
+
+Three things look at the security of the install, each where it can see:
+
+- **Before every release and after every rebase on upstream**, a Claude session runs the
+  repository's `security-audit` skill on the release branch and reads its report, failures
+  first. The report stays on that machine.
+- **Once a month on GitHub** (`.github/workflows/sudarshan-security.yml`, the 3rd at 03:10 IST,
+  and by hand from the Actions page) the same script runs on the default branch. This
+  repository is public, so the run shows only whether the audit passed and the counts per sheet
+  (`python -m sudarshan.ops.audit_counts`): the script's own output and its report are never
+  published, and a failed run opens nothing. A red run means: ask a session to reproduce it
+  privately with the skill.
+- **On the server, every hour**, the watch's posture checks ("Watching the server") look at what
+  GitHub cannot see: the real settings, the assistant's locks, the private folders, the ports.
+
 ## Secrets: where each one lives and what changing it breaks (M19.4)
 
 Every secret the server holds, in one place. Nothing here is a value: this table says where a

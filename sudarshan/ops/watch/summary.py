@@ -24,7 +24,7 @@ from . import checks
 
 SUNDAY, FROM_MIN = 6, 18 * 60  # Sunday, 18:00 in India
 BUCKETS = 20
-MAX_ENTRIES = 200_000  # a walk gives up past this many files and says so
+MAX_ENTRIES = 50_000  # one summary's walks give up past this many files, together
 #: SUDARSHAN's own folders under the system's state folder all start with this.
 RING_PREFIX = "/var/lib/sudarshan-"
 BACKUP_FOLDER = "sudarshan-backup"
@@ -116,9 +116,10 @@ def folder_mb(path: Path, budget: list[int] | None = None) -> int | None:
 def sizes(app_dir: Path, ring_prefix: str = RING_PREFIX) -> dict[str, int]:
     """The sizes of the retention table (README), in MB; a folder that could not be measured is
     left out. Only the app's ``db`` and ``log`` folders and SUDARSHAN's own state folders."""
+    budget = [MAX_ENTRIES]  # shared: a run has a minute, and the disk is the market's too
     found: dict[str, int | None] = {
-        "db": folder_mb(app_dir / "db"),
-        "log": folder_mb(app_dir / "log"),
+        "db": folder_mb(app_dir / "db", budget),
+        "log": folder_mb(app_dir / "log", budget),
     }
     try:
         historify = os.stat(app_dir / "db" / "historify.duckdb").st_size >> 20
@@ -136,7 +137,7 @@ def sizes(app_dir: Path, ring_prefix: str = RING_PREFIX) -> dict[str, int]:
     for name in names:
         if os.path.islink(os.path.join(base, name)):
             continue  # a link is not SUDARSHAN's folder, wherever it points
-        size = folder_mb(Path(base) / name)
+        size = folder_mb(Path(base) / name, budget)
         if name == BACKUP_FOLDER:
             backups = size
         elif size is not None and ring is not None:
