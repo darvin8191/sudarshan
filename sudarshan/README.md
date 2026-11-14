@@ -967,13 +967,19 @@ positions and fills, and the risk guard all apply as they do to an order you pla
   strategy only closes what it opened**: a flat alert while it holds nothing sends nothing, so it
   never closes a position you opened by hand.
 - **An intraday strategy starts each day holding nothing.** Its position was squared off before
-  the close, so the first alert of a later day says so and picks today's contract.
+  the close, so the first alert of a later day says so and picks today's contract. Until that
+  alert the Automation page and `/auto` say the position was closed at the session's end; they
+  never show it as held.
 - **Sandbox or Live is the strategy's own**, never the app's mode or its order mode. Stopped or
   Active is one switch per strategy; `/auto` on Telegram shows and moves it.
-- **An alert's own time is never trusted ahead of the server's clock.** New link, or Stop and
-  then Start, begins the order of alerts again.
+- **An alert's own time is never trusted more than 5 s ahead of the server's clock.** New link,
+  or Stop and then Start, begins the order of alerts again.
 - **If an order went and its result could not be recorded**, you are told at once on Telegram,
-  and the next alert reads the strategy's position again before anything is sent.
+  and the next alert reads the strategy's position again before anything is sent. While
+  Positions cannot be read, or the result still cannot be recorded, the strategy sends no new
+  entry and says so; an exit alert still goes. You are told again after each further day. Only
+  after Positions has stayed unreadable for 16 hours, counted from the first read that failed,
+  is the alert closed as not confirmed: then check Positions yourself.
 
 `SUDARSHAN_AUTOMATION` in OpenAlgo's `.env` (set by the release, above):
 
