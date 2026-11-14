@@ -37,7 +37,18 @@ export interface UsePageVisibilityReturn {
   lastVisibilityChange: number
 }
 
-export function usePageVisibility(): UsePageVisibilityReturn {
+/**
+ * SUDARSHAN (SCR-F): `clock: false` leaves out the once-a-second count of
+ * `timeSinceVisible` and `timeSinceHidden`, so a reader of `isVisible` alone
+ * renders again only when the page is hidden or shown. The two counts are then
+ * as of the last change.
+ */
+export interface UsePageVisibilityOptions {
+  clock?: boolean
+}
+
+export function usePageVisibility(options: UsePageVisibilityOptions = {}): UsePageVisibilityReturn {
+  const clock = options.clock ?? true // SUDARSHAN (SCR-F)
   // Initialize based on current document state (SSR-safe)
   const [isVisible, setIsVisible] = useState<boolean>(() =>
     typeof document !== 'undefined' ? document.visibilityState === 'visible' : true
@@ -139,7 +150,8 @@ export function usePageVisibility(): UsePageVisibilityReturn {
     window.addEventListener('blur', handleBlur)
 
     // Update timers periodically when visible (for timeSinceVisible accuracy)
-    const timerInterval = setInterval(updateTimers, 1000)
+    // SUDARSHAN (SCR-F): only for a reader that asked for the counts.
+    const timerInterval = clock ? setInterval(updateTimers, 1000) : null
 
     return () => {
       active = false
@@ -148,9 +160,9 @@ export function usePageVisibility(): UsePageVisibilityReturn {
       document.removeEventListener('visibilitychange', handleVisibilityChange)
       window.removeEventListener('focus', handleFocus)
       window.removeEventListener('blur', handleBlur)
-      clearInterval(timerInterval)
+      if (timerInterval !== null) clearInterval(timerInterval)
     }
-  }, [updateTimers])
+  }, [updateTimers, clock])
 
   // Reset wasHidden after a short delay (so consumers can react to it)
   useEffect(() => {
@@ -184,6 +196,7 @@ export function usePageVisibility(): UsePageVisibilityReturn {
  * ```
  */
 export function useIsPageVisible(): boolean {
-  const { isVisible } = usePageVisibility()
+  // SUDARSHAN (SCR-F): no clock, so this changes only when the page is hidden or shown.
+  const { isVisible } = usePageVisibility({ clock: false })
   return isVisible
 }
