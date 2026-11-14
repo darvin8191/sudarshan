@@ -305,6 +305,19 @@ def test_the_findings_and_exemptions_name_rules_the_table_has(walk):
     )
 
 
+def test_every_admin_op_of_the_family_contract_is_a_protected_bridge_route(report):
+    """Review L1: an admin op added to the family contract (signin_unlock) is a route of the owner
+    bridge classified protected, so the walk above holds it to 401 or 403 for every stand-in."""
+    from sudarshan.family.contract import ADMIN_OP_NAMES
+
+    prefix = "/sudarshan/family/api/"
+    bridge = {r["rule"][len(prefix) :]: r for r in report["rules"] if r["rule"].startswith(prefix)}
+    assert set(bridge) == set(ADMIN_OP_NAMES) and "signin_unlock" in bridge
+    loose = [op for op, r in bridge.items()
+             if classes.ROUTES.get((r["rule"], r["endpoint"])) != classes.PROTECTED]  # fmt: skip
+    assert not loose, f"owner bridge routes not classified protected: {loose}"
+
+
 def test_only_protected_webhook_login_and_internal_rules_take_a_write(report):
     wrong = []
     for r in report["rules"]:

@@ -15,7 +15,19 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { isLegExecutable, type StrategyLeg } from '@/lib/strategyMath'
 import { cn } from '@/lib/utils'
+import {
+  answerBody,
+  notConfirmed,
+  refusalReason,
+  thrownOutcome,
+} from '@/sudarshan/books/sendOutcome'
 import { showToast } from '@/utils/toast'
+
+/** SUDARSHAN: a basket refused with no sentence of the server's own. */
+export const BASKET_NOT_SENT = 'This basket was not sent. Try again.'
+/** SUDARSHAN: a basket that may have gone (no answer, or one the server could not confirm). */
+export const BASKET_NOT_CONFIRMED =
+  'This basket is not confirmed: some of its orders may have gone through. Check Orders before sending it again.'
 
 /**
  * Basket execution dialog for the Strategy Builder.
@@ -238,8 +250,15 @@ export function ExecuteBasketDialog({
         showToast.error(`Basket partial: ${successCount} ok, ${failCount} failed`)
       }
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Network error'
-      showToast.error(`Basket order error: ${msg}`)
+      // SUDARSHAN: a refusal (the risk guard holds a basket whole) is the server's own sentence
+      // with nothing in front of it; it read "Basket order error: Request failed with status code
+      // 403". One that may have gone says so, never in the transport's words.
+      if (thrownOutcome(err) === 'refused') {
+        showToast.error(refusalReason(err) ?? BASKET_NOT_SENT)
+      } else {
+        const said = notConfirmed(answerBody(err)) ? refusalReason(err) : null
+        showToast.warning(said ?? BASKET_NOT_CONFIRMED)
+      }
     } finally {
       setSubmitting(false)
     }

@@ -37,24 +37,12 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
+import { MASKED, NOT_A_PASSWORD } from '@/sudarshan/masked'
 import { showToast } from '@/utils/toast'
 
 export const STATUS_KEY = ['sudarshan-autologin-status'] as const
 const TOTP_SHAPE = /^[A-Z2-7]{16,64}$/
 const PIN_SHAPE = /^[0-9]{6}$/
-/** Dots instead of characters, without type="password" (which invites a password manager). */
-const MASKED = '[-webkit-text-security:disc]'
-/** Attributes that keep password managers (and the keyboard's suggestions) away. */
-const NOT_A_PASSWORD = {
-  autoComplete: 'off',
-  autoCorrect: 'off',
-  autoCapitalize: 'off',
-  spellCheck: false,
-  'data-1p-ignore': true,
-  'data-lpignore': 'true',
-  'data-bwignore': true,
-  'data-form-type': 'other',
-} as const
 // Brand tokens (sudarshan/theme.css), never a fixed palette: they follow colour-blind mode.
 const UP = 'text-[color:var(--up)]'
 const DOWN = 'text-[color:var(--down)]'

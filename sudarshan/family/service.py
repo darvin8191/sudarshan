@@ -7,6 +7,8 @@ one listener on 127.0.0.1:5585 and the jobs.
   up so that the owner's page learns the switch from it.
 * **A store a newer release wrote**, or one that will not open, keeps the view off the same way with
   its own sentence (a restart loop would only repeat it, and a newer file must not be written to).
+  That sentence is the owner's, on his Family page and in /health; a family phone is told "The
+  family view is not available right now. Ask the account owner." (review L4).
 * **Port taken** (cross-design P23): an ERROR in plain words, the jobs keep running, and the port is
   tried again every minute; never another port (X2). Exit status 2 is for a setting or key it
   cannot use, which a restart would not mend.
@@ -26,7 +28,7 @@ from typing import Any
 from sudarshan.tasks import cancel_and_wait
 
 from . import accounts as accounts_module
-from . import audit, backup, health, sessions, ws
+from . import audit, backup, health, lockout, sessions, ws
 from . import store as store_module
 from .accounts import Accounts, Hasher
 from .admin_api import SealedDoors
@@ -122,8 +124,8 @@ class FamilyService(Router):
             return call
 
         names = ("member_create", "member_update", "member_status", "member_remove",
-                 "invite_create", "invite_revoke", "signin_reset", "device_list",
-                 "device_revoke")  # fmt: skip
+                 "invite_create", "invite_revoke", "signin_reset", "signin_unlock",
+                 "device_list", "device_revoke")  # fmt: skip
         built = {name: via(name) for name in names}
         built["member_list"] = self._member_list
         built["state"] = self._admin_state
@@ -193,13 +195,20 @@ class FamilyService(Router):
             return await self.doors.nudge(request)
         if door == "viewer":
             if not self.enabled:
-                raise self.off_error or FamilyError("off")
+                raise self.viewer_off()
             return await self.viewer.http(request)
         raise FamilyError("not_found")  # /family/ws without an upgrade
 
+    def viewer_off(self) -> FamilyError:
+        """What a family phone is told while the view is off: the switch in its own words, and
+        for a store that cannot be used one sentence a member can act on, never the owner's."""
+        if self.off_error is None or self.off_error.code == "off":
+            return self.off_error or FamilyError("off")
+        return FamilyError("off", "viewer_unavailable")
+
     async def upgrade(self, request: Request, reader, writer) -> Response | None:
         if not self.enabled:
-            return Response.refused(self.off_error or FamilyError("off"))
+            return Response.refused(self.viewer_off())
         if self.registry.full():
             return Response.refused(FamilyError("busy"))
         try:
@@ -313,16 +322,23 @@ class FamilyService(Router):
 
 
 async def _prune(service: FamilyService) -> None:
-    """Forget sessions that ended more than 90 days ago, now and every six hours."""
+    """Forget sessions that ended more than 90 days ago and counts of wrong sign-ins a day old,
+    now and every six hours."""
     while True:
         if service.store is not None:
             try:
-                gone = await service.store.write(lambda tx: sessions.prune(tx, service.clock()))
+                gone = await service.store.write(lambda tx: _forget(tx, service.clock()))
                 if gone:
                     log.info("forgot %d sessions that ended more than 90 days ago", gone)
             except StoreError as exc:
                 log.error("old sessions could not be forgotten this time (%s)", exc.cause)
         await asyncio.sleep(PRUNE_EVERY_S)
+
+
+def _forget(tx: store_module.Tx, now: int) -> int:
+    """The prune job's one transaction: old counts of wrong sign-ins, then old sessions (counted)."""
+    lockout.prune(tx, now)
+    return sessions.prune(tx, now)
 
 
 async def _sweep(service: FamilyService) -> None:

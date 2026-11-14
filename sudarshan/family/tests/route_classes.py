@@ -737,6 +737,7 @@ protected     /sudarshan/family/api/share_list                                  
 protected     /sudarshan/family/api/share_remove                                        sudarshan_family.share_remove
 protected     /sudarshan/family/api/share_set                                           sudarshan_family.share_set
 protected     /sudarshan/family/api/signin_reset                                        sudarshan_family.signin_reset
+protected     /sudarshan/family/api/signin_unlock                                       sudarshan_family.signin_unlock
 protected     /sudarshan/family/api/state                                               sudarshan_family.state
 protected     /sudarshan/journal/api/analytics                                          sudarshan_journal.analytics
 protected     /sudarshan/journal/api/playbooks                                          sudarshan_journal.playbook_create
