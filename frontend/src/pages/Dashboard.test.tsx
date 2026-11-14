@@ -186,6 +186,20 @@ describe('Dashboard', () => {
     expect(screen.getByRole('region', { name: 'Indices' })).toBeInTheDocument()
   })
 
+  it('puts the Screener, Shortcuts and System in place of Quick Access, the contract under System (D7)', async () => {
+    server(OK)
+    const user = userEvent.setup()
+    render(<Dashboard />)
+    await screen.findByTestId('pnl-total')
+    expect(screen.queryByRole('heading', { name: 'Quick Access' })).toBeNull()
+    expect(screen.getByRole('link', { name: 'Chart' })).toHaveAttribute('href', '/chart')
+    await user.click(screen.getByRole('button', { name: 'System' }))
+    expect(
+      await screen.findByRole('link', { name: /Master contract\s*Ready · 1,18,432 symbols/ })
+    ).toHaveAttribute('href', '/master-contract')
+    expect(screen.queryByRole('link', { name: /Documentation/ })).toBeNull()
+  })
+
   it('shows the master contract in the status row while it downloads (M3.2)', async () => {
     contractStatus = 'downloading'
     server(OK)
@@ -335,7 +349,7 @@ describe('Dashboard', () => {
     expect(screen.getByRole('heading', { level: 1, name: 'Dashboard' })).toBeVisible()
     expect(screen.queryByTestId('pnl-total')).toBeNull()
     expect(screen.queryByRole('region', { name: 'Indices' })).toBeNull()
-    expect(screen.getByRole('heading', { name: 'Quick Access' })).toBeVisible()
+    expect(screen.getByRole('heading', { name: 'Shortcuts' })).toBeVisible()
   })
 
   it('says what failed and offers to try again when the funds cannot be loaded', async () => {

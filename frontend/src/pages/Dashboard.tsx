@@ -1,13 +1,4 @@
-import {
-  AlertTriangle,
-  BarChart3,
-  BookOpen,
-  ChevronRight,
-  ExternalLink,
-  FileText,
-  Search,
-  Zap,
-} from 'lucide-react'
+import { AlertTriangle } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router'
 import { tradingApi } from '@/api/trading'
@@ -31,7 +22,9 @@ import { type DashboardFunds, PnlCard } from '@/sudarshan/dashboard/PnlCard'
 import { PortfolioCard } from '@/sudarshan/dashboard/PortfolioCard'
 import { usePortfolioCard } from '@/sudarshan/dashboard/portfolioCard'
 import { ScreenerCard } from '@/sudarshan/dashboard/ScreenerCard'
+import { Shortcuts } from '@/sudarshan/dashboard/Shortcuts' // SUDARSHAN D7
 import { StatusRow } from '@/sudarshan/dashboard/StatusRow' // SUDARSHAN D2
+import { SystemList } from '@/sudarshan/dashboard/SystemList' // SUDARSHAN D7
 
 interface MasterContractStatus {
   status: 'pending' | 'downloading' | 'success' | 'error'
@@ -62,40 +55,6 @@ async function readPositions(apiKey: string | null): Promise<PositionsSnapshot |
     return null
   }
 }
-
-const QUICK_ACCESS = [
-  {
-    href: '/search',
-    label: 'Symbols',
-    description: 'Universal symbology across brokers',
-    icon: Search,
-  },
-  {
-    href: '/pnl-tracker',
-    label: 'P&L Tracker',
-    description: 'Live intraday MTM tracker',
-    icon: BarChart3,
-  },
-  {
-    href: '/logs',
-    label: 'Live Logs',
-    description: 'Real-time trading activity logs',
-    icon: FileText,
-  },
-  {
-    href: '/logs/latency',
-    label: 'Latency Monitor',
-    description: 'Monitor order & API latency',
-    icon: Zap,
-  },
-  {
-    href: 'https://docs.openalgo.in',
-    label: 'Documentation',
-    description: 'Tutorials, API docs & features',
-    icon: BookOpen,
-    external: true,
-  },
-] as const
 
 export default function Dashboard() {
   const [marginData, setMarginData] = useState<DashboardFunds | null>(null)
@@ -324,63 +283,16 @@ export default function Dashboard() {
           <HoldingsCard apiKey={apiKey} marketOpen={marketOpen} />
           {/* SUDARSHAN M3.8 (D5): the market alerts fired today, live from the alerts push. */}
           <AlertsCard />
-          {/* SUDARSHAN M9 UI8: the screener's day, live from its run pushes. */}
-          <ScreenerCard marketOpen={marketOpen} />
         </div>
 
-        <section
-          aria-labelledby="sd-quick-access"
-          className="min-w-0 rounded-[1.125rem] border bg-card px-4 pt-1 pb-1 shadow-[var(--shadow-card)]"
-        >
-          <h2 id="sd-quick-access" className="flex h-11 items-center text-[0.9375rem] font-bold">
-            Quick Access
-          </h2>
-          <ul>
-            {QUICK_ACCESS.map((item) => {
-              const Icon = item.icon
-              const inner = (
-                <>
-                  <span className="flex size-9 shrink-0 items-center justify-center rounded-[0.6875rem] bg-[color:var(--brand-tint)] text-[color:var(--brand)]">
-                    <Icon aria-hidden="true" className="size-[1.125rem]" />
-                  </span>
-                  <span className="flex min-w-0 flex-1 flex-col gap-px">
-                    <span className="text-[0.90625rem] font-semibold">{item.label}</span>
-                    <span className="text-[0.78125rem] leading-snug font-medium text-[color:var(--text-tertiary)]">
-                      {item.description}
-                    </span>
-                  </span>
-                  {'external' in item ? (
-                    <ExternalLink
-                      aria-hidden="true"
-                      className="size-4 shrink-0 text-[color:var(--text-tertiary)]"
-                    />
-                  ) : (
-                    <ChevronRight
-                      aria-hidden="true"
-                      className="size-[1.125rem] shrink-0 text-[color:var(--text-tertiary)]"
-                    />
-                  )}
-                </>
-              )
-              const row =
-                'flex min-h-14 items-center gap-3 rounded-lg py-2 outline-none hover:bg-accent/60 focus-visible:ring-2 focus-visible:ring-ring'
-              return (
-                <li key={item.href} className="border-t border-[color:var(--divider)]">
-                  {'external' in item ? (
-                    <a href={item.href} target="_blank" rel="noopener noreferrer" className={row}>
-                      {inner}
-                      <span className="sr-only">(opens in a new tab)</span>
-                    </a>
-                  ) : (
-                    <Link to={item.href} className={row}>
-                      {inner}
-                    </Link>
-                  )}
-                </li>
-              )
-            })}
-          </ul>
-        </section>
+        {/* SUDARSHAN D7: the right-hand column on a wide screen (design 3.1): the screener's
+            day, the shortcuts and the System pages, in place of upstream's Quick Access. */}
+        <div className="flex min-w-0 flex-col gap-2.5 md:gap-4">
+          {/* SUDARSHAN M9 UI8: the screener's day, live from its run pushes. */}
+          <ScreenerCard marketOpen={marketOpen} />
+          <Shortcuts />
+          <SystemList contract={masterContract} />
+        </div>
       </div>
     </div>
   )
