@@ -57,6 +57,16 @@ def cutoff_on_the_real_transport(app) -> dict:
         )
     client = app.test_client()
     seen["before"] = _ask(client, token)
+    from blueprints import mcp_oauth
+    from utils import oauth_codes
+
+    def consent():
+        return oauth_codes.issue(
+            client_id="probe", redirect_uri="https://example.invalid/cb", scope="read:market",
+            user_id=1, code_challenge="c", code_challenge_method="S256", state=None,
+        ).code  # fmt: skip
+
+    early = consent()
     stream = client.get(
         "/mcp",
         headers={"Authorization": f"Bearer {token}"},
@@ -88,6 +98,9 @@ def cutoff_on_the_real_transport(app) -> dict:
             user_id=1, client_id="probe", scope="read:market read:account"
         )
     seen["new_token"] = _ask(client, later)
+    # the token route's own read of a consent code (the name the route calls)
+    seen["code_from_before"] = mcp_oauth.consume_code(early) is not None
+    seen["code_from_after"] = mcp_oauth.consume_code(consent()) is not None
     return seen
 
 

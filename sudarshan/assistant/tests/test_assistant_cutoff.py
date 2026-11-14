@@ -93,6 +93,44 @@ def test_checked_refuses_as_an_expired_token_is_refused(risk_store):
         cutoff.checked(upstream_refuses, Refused)("x")
 
 
+def _code():
+    from utils import oauth_codes
+
+    return oauth_codes.issue(
+        client_id="probe", redirect_uri="https://example.invalid/cb", scope="read:market",
+        user_id=1, code_challenge="c", code_challenge_method="S256", state=None,
+    )  # fmt: skip
+
+
+def test_a_consent_code_from_before_the_cutoff_cannot_be_exchanged_after_it(risk_store):
+    """A consent given, then access ended (the kill switch, a logout), then the exchange: refused,
+    and the code is spent. A consent given after the ending is exchanged as before."""
+    from utils import oauth_codes
+
+    consume = cutoff.checked_code(oauth_codes.consume)
+    untouched = _code()
+    assert consume(untouched.code) is untouched, "nothing was ever ended: upstream's answer"
+    early = _code()
+    cutoff.set_now(lambda: early.issued_at + 0.002)
+    time.sleep(0.02)
+    assert consume(early.code) is None
+    assert oauth_codes.consume(early.code) is None, "and it is spent, not left to be tried again"
+    late = _code()  # issued after that moment
+    assert consume(late.code) is late
+    assert consume(late.code) is None and consume("") is None, "one use, as upstream"
+
+
+def test_a_code_is_refused_when_the_cutoff_cannot_be_read(risk_store, monkeypatch):
+    from utils import oauth_codes
+
+    def read():
+        raise OperationalError("SELECT", {}, Exception("disk I/O error"))
+
+    code = _code()
+    monkeypatch.setattr(risk_store, "mcp_valid_after", read)
+    assert cutoff.checked_code(oauth_codes.consume)(code.code) is None
+
+
 def test_ending_access_records_the_cutoff_and_revokes_the_sign_ins(risk_store, monkeypatch):
     from database import oauth_db
 
