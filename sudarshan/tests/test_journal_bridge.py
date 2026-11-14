@@ -313,6 +313,17 @@ def test_a_transport_refusal_is_never_shown_as_a_code(bridge, journal):
     }
 
 
+@pytest.mark.parametrize("words", ["malformed HTTP request", "method not allowed", "", None])
+def test_a_transport_refusal_without_a_sentence_says_the_bridges_own(bridge, journal, words):
+    """Review L6: the service's listener answers some refusals with a transport's words; those
+    never reach the owner."""
+    journal.answers["state"] = (400, {"status": "error", "code": "bad_http", "message": words})
+    as_owner(bridge)
+    response = bridge.get(PREFIX + "/state", headers=JSON)
+    assert response.status_code == 503
+    assert error_of(response) == {"code": "unavailable", "message": WORDS["failed"]}
+
+
 @pytest.mark.parametrize("how", ["missing", "unknown"])
 def test_an_op_the_service_lacks_is_not_ready(bridge, journal, how):
     getattr(journal, how).add("analytics")
@@ -539,13 +550,16 @@ def test_a_csv_asked_for_must_come_back_as_a_csv(bridge, journal):
     "answer",
     [
         stored(sha="0" * 64),  # the bytes are not the ones recorded
+        (200, {"status": "success", "data": {  # no record to check them against (review L6)
+            "id": 3, "file_name": "SUDARSHAN_Monthly-statement_202610.pdf",
+            "file_mime": "application/pdf", "file_b64": base64.b64encode(PDF).decode()}}),
         stored(name="statement one.pdf"),  # a name that is not plain ASCII
         stored(name="report.html", mime="text/html"),
         stored(mime="image/png"),  # a type that is not the name's
         (200, {"status": "success", "data": {"file_name": "a.pdf", "file_mime": "application/pdf",
                                              "file_b64": "%%%not base64%%%"}}),
     ],
-    ids=["sha256", "name", "html", "mime", "base64"],
+    ids=["sha256", "no-sha256", "name", "html", "mime", "base64"],
 )  # fmt: skip
 def test_a_file_that_is_not_what_was_stored_is_never_sent(bridge, journal, answer):
     journal.answers["report_file"] = answer
