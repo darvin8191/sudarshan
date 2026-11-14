@@ -343,13 +343,14 @@ RECORDS["TripFill"] = RECORDS["Fill"] + ", trip_qty:int"
 # The trade sheet: the trip, its fills (each as executed, with this trip's part of it), the owner's
 # note (its ``checklist`` is JSON text, ``[{"rule": ..., "yes": ...}]``, or empty), the excursion,
 # the charges estimate of its orders (each order priced whole, this trip's share by quantity),
-# Upstox's actual charges once every order of it has them (``charges_actual``), the
+# Upstox's actual charges once every order of it has them (``charges_actual``), why it still
+# carries the estimate where the owner could not tell (``charges_note``), the
 # first entry order's round trip as OpenAlgo's latency record has it (``latency_ms``), and each
 # order's label.
 RECORDS["TripDetail"] = RECORDS["Trip"] + (
     ", legs:TripLeg[], fills:TripFill[], note:TripNote|null, excursion:Excursion|null, "
     "charges:ChargeEstimate|null, latency_ms:int|null, orders:OrderRef[], "
-    "charges_actual:ChargeActual|null"
+    "charges_actual:ChargeActual|null, charges_note?:string|null"
 )
 
 

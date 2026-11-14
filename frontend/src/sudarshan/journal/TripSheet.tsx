@@ -985,6 +985,14 @@ export function TripSheet({
               {trip.charges_actual && (
                 <ChargesParts actual={trip.charges_actual} estimate={trip.charges_est_paise} />
               )}
+              {trip.charges_note && (
+                <p
+                  data-testid="trip-charges-note"
+                  className="text-xs text-[color:var(--text-secondary)]"
+                >
+                  {trip.charges_note}
+                </p>
+              )}
               <Row label="Net">
                 {aside ? (
                   notKnown

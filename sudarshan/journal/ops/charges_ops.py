@@ -7,6 +7,11 @@ live orders of in it: the estimate is the sum of those orders' estimates (the sa
 row the catch-up keeps (``jobs/charges.py``), and ``core/reconcile.py`` compares them. A month
 whose row is not there yet says why: it has not ended, or Upstox has not been asked or has not
 answered. Nothing is read of Upstox here.
+
+Upstox's month is the whole account's; the estimate is of the orders the journal holds. So a
+month the journal does not cover whole (``actual.covers``: its first month, or one with a trading
+day it never checked) is not compared at all: no actual, no difference, no "Check", and a
+sentence saying why. Advice built on such a gap would send the owner to the wrong place.
 """
 
 from __future__ import annotations
@@ -20,6 +25,7 @@ from ..core import kinds, reconcile
 from ..core.money import ist_day
 from ..errors import ApiError
 from ..jobs.charges import financial_year, month_due
+from ..schedule import schedule_for
 from . import op
 from .common import OWNER, need, whole, work
 from .settings_ops import rate_card
@@ -72,7 +78,7 @@ def month_estimates(fills: list[dict[str, Any]], refs: dict[str, dict[str, Any]]
     return out
 
 
-def reconcile_year(tx: Any, fy: int, today: int) -> dict[str, Any]:
+def reconcile_year(tx: Any, fy: int, today: int, sched: Any) -> dict[str, Any]:
     plan = tx.settings().get("charges_plan") or charges_core.DEFAULT_PLAN
     plan = plan if plan in kinds.CHARGE_PLANS else charges_core.DEFAULT_PLAN
     months = []
@@ -82,13 +88,19 @@ def reconcile_year(tx: Any, fy: int, today: int) -> dict[str, Any]:
         estimates = month_estimates(fills, refs, plan)
         due = month_due(first, today)
         waiting = reconcile.NOT_READ if due else reconcile.NOT_ENDED
+        kept = {s: tx.upstox_charges_get(s, first, last) for s in SEGMENTS if s in estimates}
+        covered = True
+        if any(actual.ready(row) for row in kept.values()):
+            covered = actual.covers(tx, actual.trading_days_of(sched, first, last))
+            if not covered:
+                waiting = reconcile.NOT_WHOLE
         segments = []
         for segment in SEGMENTS:
             if segment not in estimates:
                 continue
             found = estimates[segment]
-            row = tx.upstox_charges_get(segment, first, last)
-            ok = actual.ready(row)
+            row = kept[segment]
+            ok = covered and actual.ready(row)
             parts = actual.parts_of(row) if ok else None
             total = None
             if ok:
@@ -121,4 +133,5 @@ async def charges_reconcile(ctx, args):
     today = ist_day(ctx.clock())
     this = financial_year(today)
     fy = whole(args, "fy", low=2000, high=this, default=this)
-    return await work(lambda: store.read(OWNER, lambda tx: reconcile_year(tx, fy, today)))
+    sched = schedule_for(ctx)
+    return await work(lambda: store.read(OWNER, lambda tx: reconcile_year(tx, fy, today, sched)))

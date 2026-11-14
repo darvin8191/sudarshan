@@ -11,7 +11,8 @@ is on, and asks at most ``MAX_CALLS`` questions a night:
 2. **Each month that has ended**, from its 3rd day of the next month on: one read a segment for
    the first to the last of the month, the ``month`` row. It is what the comparison of estimate
    and actual rests on, and it answers for the days of the month Upstox never answered one by
-   one (``actual.spread_month``). A month not answered after ``GIVE_UP`` nights is asked again
+   one (``actual.spread_month``), but only in a month the journal covers whole
+   (``actual.covers``): Upstox's month is the whole account's. A month not answered after ``GIVE_UP`` nights is asked again
    only on the 3rd of each month.
 3. **The walk back**: every older day since the journal's first fill that was never answered,
    newest first, ``WALKBACK_DAYS`` days a night, until all are. Nothing is kept about where the
@@ -35,6 +36,7 @@ from ..core import kinds
 from ..core.money import ist_day, to_date, to_day
 from ..migrations import BASIS_DAY, BASIS_MONTH
 from ..portfolio import PortfolioUnavailable, link_for
+from ..schedule import schedule_for
 from ..store import Scope
 
 log = logging.getLogger("sudarshan.journal")
@@ -145,6 +147,11 @@ async def actual_charges(service: Any, days: list[int], now: int) -> str:
         asked = int((kept.get((segment, start, end)) or {}).get("asked") or 0) + 1
         found.append(charges_row(answer["charges"], segment, start, end, asked, now))
 
+    months = sorted({(r["segment"], *actual.month_of(r["period_from"])) for r in found})
+    sched = schedule_for(service) if months else None
+    month_days = {(first, last): actual.trading_days_of(sched, first, last)
+                  for _, first, last in months}  # fmt: skip
+
     def write(tx):
         orders: set[str] = set()
         for row in found:
@@ -153,9 +160,10 @@ async def actual_charges(service: Any, days: list[int], now: int) -> str:
             if row["period_from"] == row["period_to"]:
                 orders.update(actual.spread_day(tx, row["period_from"], row["segment"], plan, now))
         # A month just answered, or a day just given up, may let a month answer for its days.
-        for segment, first in sorted({(r["segment"], actual.month_of(r["period_from"])[0])
-                                      for r in found}):  # fmt: skip
-            orders.update(actual.spread_month(tx, first, segment, plan, now))
+        # Only in a month the journal covers whole; else its trades keep the estimate.
+        for segment, first, last in months:
+            whole = actual.covers(tx, month_days[(first, last)])
+            orders.update(actual.spread_month(tx, first, segment, plan, now, whole))
         return actual.apply_trips(tx, actual.trips_of_orders(tx, orders), now) if orders else 0
 
     trips = await _thread(lambda: service.store.write(OWNER, write))
