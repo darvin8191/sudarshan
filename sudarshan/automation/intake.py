@@ -257,7 +257,7 @@ def plan(
             # since is said first.
             state_values.update(last_target=0, last_fired_s=rules.mark_of(alert, now_ms))
             said = " ".join([*notes, steps.sentence])
-            return replace(steps, sentence=said, tell="expired" if notes else None, **common)
+            return replace(steps, sentence=said, tell=tells[0][0] if tells else None, **common)
         return replace(steps, **common)
     for step in steps:
         if step.expires_today and step.target != 0:
@@ -321,10 +321,13 @@ def _steps(strategy, state, target: int, desk: Desk, now_ms: int, indices, size=
         quantity = _size(strategy, desk, *held, exit_=True)
         return (_step(strategy, *held, 0, quantity, state.held_side),)
     option = strategy.kind == m.OPTION
-    if target == 0 and option:
-        # An option strategy that holds nothing has no contract to ask: which strike its rule
-        # means now says nothing about what it once bought. Nothing is sent.
-        return Plan(rules.NO_ACTION, words.holds_nothing(name), 0)
+    if target == 0:
+        # A strategy only ever closes what it opened. With nothing held there is nothing of its
+        # own to close: an exit sent for the contract its rule means today would close a position
+        # the owner opened by hand in that contract and product (and for an option strategy the
+        # rule's strike today says nothing about what it once bought). Nothing is sent, in the
+        # Sandbox as in Live, so a rehearsal shows what Live will do.
+        return Plan(rules.NO_ACTION, words.holds_nothing(name, option), 0)
     if not desk.master_loaded():
         return _refuse("not_mapped", words.not_mapped(name, "master"), target)
     if option and held and symbols.option_side(held[1]) == symbols.wanted_side(target):
@@ -334,15 +337,12 @@ def _steps(strategy, state, target: int, desk: Desk, now_ms: int, indices, size=
         if isinstance(quantity, Plan):
             return replace(quantity, target=target)
         return (_step(strategy, *held, target, quantity, None),)
-    found = _resolve(strategy, desk, now_ms, indices, entering=target != 0, target=target)
+    found = _resolve(strategy, desk, now_ms, indices, entering=True, target=target)
     if isinstance(found, symbols.Unmapped):
         if found.reason == "too_close":
             said = words.too_close(name, found.what, (found.stop_ms or 0) // 1000)
             return _refuse("not_mapped", said, target)
         return _refuse("not_mapped", words.not_mapped(name, found.reason, found.what), target)
-    if target == 0:
-        quantity = _size(strategy, desk, found.exchange, found.symbol, exit_=True)
-        return (_step(strategy, found.exchange, found.symbol, 0, quantity, None),)
     same_side = state.held_side == (m.LONG if target > 0 else m.SHORT)
     if not option and held and held != (found.exchange, found.symbol) and same_side:
         # A strategy never rolls a held position by itself: the same target with an older

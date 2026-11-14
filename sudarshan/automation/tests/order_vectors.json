@@ -268,39 +268,6 @@
    ]
   },
   {
-   "name": "flat with nothing held: the rule's contract, which answers no open position",
-   "form": {
-    "name": "ORB",
-    "kind": "future",
-    "underlying": "NIFTY",
-    "product": "MIS",
-    "lots": 1
-   },
-   "state": {},
-   "now": "2026-11-16 10:15:02",
-   "alert": {
-    "v": 1,
-    "position": "flat",
-    "fired_offset_s": -1
-   },
-   "analyze": true,
-   "orders": [
-    {
-     "strategy": "ORB",
-     "exchange": "NFO",
-     "symbol": "NIFTY24NOV26FUT",
-     "product": "MIS",
-     "action": "SELL",
-     "pricetype": "MARKET",
-     "quantity": "65",
-     "position_size": "0",
-     "price": "0",
-     "trigger_price": "0",
-     "disclosed_quantity": "0"
-    }
-   ]
-  },
-  {
    "name": "flat after the roll goes to the contract that was entered, not to the rule's",
    "form": {
     "name": "ORB",

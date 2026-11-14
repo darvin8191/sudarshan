@@ -239,7 +239,7 @@ SAMPLES = {
     "quantity": 65, "flat_found": False, "said": "Another exit is on its way.", "held": "NIFTY24NOV26FUT",
     "wanted": "NIFTY29DEC26FUT", "confirmed": False, "state": "active", "surface": "the app",
     "mode": "live", "other": "Second", "side_": "long", "epoch_s": 1794804302, "seconds": 130,
-    "product": "MIS", "strategy": m.Strategy(id=1, name="ORB", underlying="NIFTY"),
+    "product": "MIS", "strategy": m.Strategy(id=1, name="ORB", underlying="NIFTY"), "option": False,
 }  # fmt: skip
 REASONS = {
     "bad_message": [*payload.REASONS],

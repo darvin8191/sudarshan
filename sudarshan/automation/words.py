@@ -307,8 +307,11 @@ def expires_today(symbol: str) -> str:
     return f"{contract_name(symbol)} expires today."
 
 
-def holds_nothing(name: str) -> str:
-    return f"{name} holds no option. Nothing to send."
+def holds_nothing(name: str, option: bool = False) -> str:
+    """A flat alert for a strategy that holds nothing: a strategy only closes what it opened."""
+    if option:
+        return f"{name} holds no option. Nothing to send."
+    return f"{name} holds no position of its own. Nothing to send."
 
 
 def expired(name: str, symbol: str) -> str:

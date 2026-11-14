@@ -114,8 +114,8 @@ def test_long_then_the_same_alert_again_then_flat_and_flat(store, desk):
     assert send(store, desk, token, flat).verdict == "sent" and desk.position(NOV) == 0  # 3
     again = send(store, desk, token, strategy_alert("flat", NOW + 1, before="flat", order_id="X"))
     assert again.verdict == "no_action"  # flat again, a new fire time: nothing to close
-    assert again.sentence == "ORB: no open position in NIFTY 24 Nov FUT. Nothing to send."
-    assert [o["position_size"] for o in desk.placed] == ["65", "0", "0"]
+    assert again.sentence == "ORB holds no position of its own. Nothing to send."
+    assert [o["position_size"] for o in desk.placed] == ["65", "0"]  # M4: nothing held, no order
     assert all(o["analyze"] is True for o in desk.placed)
     said = [r["sentence"] for r in lines(store, strategy.id)]
     assert said[0] == "ORB: order sent to be long 65 NIFTY 24 Nov FUT."
@@ -163,9 +163,11 @@ def test_a_gap_is_applied_after_the_wait_and_said(store, desk):
     got = send(store, desk, token, strategy_alert("flat", NOW - 1, before="long", order_id="X"))
     assert desk.slept == pytest.approx(rules.CHAIN_WAIT_S, abs=0.11)
     assert got.verdict == "no_action"
-    assert got.sentence.endswith(
-        "ORB: an earlier alert did not arrive. This one was applied: now flat."
+    assert got.sentence == (
+        "ORB: an earlier alert did not arrive. This one was applied: now flat. "
+        "ORB holds no position of its own. Nothing to send."
     )
+    assert desk.placed == []
     assert [t[1] for t in desk.told] == ["gap"]
 
 
@@ -427,6 +429,64 @@ def test_a_live_strategy_at_stage_on(store, desk, monkeypatch):
     closed = send(store, desk, token, indicator_alert("flat", NOW - 3))
     assert closed.verdict == "sent" and desk.placed[-1]["analyze"] is False
     assert desk.position(NOV, analyze=False) == 0 and desk.position(NOV, analyze=True) == 0
+
+
+M4_KINDS = [
+    ({}, NOV),
+    (
+        {"kind": "same", "underlying": "", "chart": "NSE:RELIANCE", "quantity": 10, "lots": None},
+        "RELIANCE",
+    ),
+    ({"kind": "option", "expiry_rule": "nearest", "strike_offset": "ATM"}, "NIFTY17NOV2625000CE"),
+]
+
+
+@pytest.mark.parametrize(("change", "symbol"), M4_KINDS, ids=["future", "same", "option"])
+@pytest.mark.parametrize("app_in_analyze", [False, True], ids=["app Live", "app in Analyze"])
+def test_m4_a_live_flat_alert_with_nothing_held_sends_nothing(
+    store, desk, monkeypatch, change, symbol, app_in_analyze
+):
+    """Mutation 9, extended. A strategy only ever closes what it opened: the owner's own position
+    in the contract its rule means today is not the strategy's to close."""
+    monkeypatch.setenv(flag.ENV, "on")
+    desk.guard, desk.analyze_app = "on", app_in_analyze
+    strategy, token = make(store, mode=m.LIVE, **change)
+    exchange = "NSE" if symbol == "RELIANCE" else "NFO"
+    by_hand = (False, exchange, symbol, strategy.product)
+    desk.positions[by_hand] = 130  # opened by hand at Upstox, same contract and product
+    ticker = {"ticker": "NSE:RELIANCE"} if symbol == "RELIANCE" else {}
+    got = send(store, desk, token, indicator_alert("flat", NOW - 1, **ticker))
+    assert got.verdict == "no_action" and desk.placed == []
+    assert "Nothing to send." in got.sentence and "holds no" in got.sentence
+    assert desk.positions[by_hand] == 130
+    state = store.state(strategy.id)
+    assert (state.last_target, state.held_symbol, state.last_fired_s) == (0, None, int(NOW) - 1)
+
+
+def test_m4_a_live_strategy_that_holds_sends_its_exit_to_upstox(store, desk, monkeypatch):
+    monkeypatch.setenv(flag.ENV, "on")
+    desk.guard = "on"
+    strategy, token = make(store, mode=m.LIVE)
+    assert send(store, desk, token, indicator_alert("long", NOW - 2)).verdict == "sent"
+    desk.analyze_app = True  # the exit goes where the entry went, whatever the app's mode
+    assert send(store, desk, token, indicator_alert("flat", NOW - 1)).verdict == "sent"
+    assert [(o["position_size"], o["analyze"]) for o in desk.placed] == [
+        ("65", False),
+        ("0", False),
+    ]
+    assert desk.position(NOV, analyze=False) == 0
+    # and flat again: nothing of its own is left, so nothing is sent
+    assert send(store, desk, token, indicator_alert("flat", NOW)).verdict == "no_action"
+    assert len(desk.placed) == 2
+
+
+def test_m4_in_the_sandbox_too_a_flat_alert_with_nothing_held_sends_nothing(store, desk):
+    strategy, token = make(store)
+    desk.positions[(True, "NFO", NOV, "MIS")] = 65  # the owner's own sandbox position
+    got = send(store, desk, token, indicator_alert("flat", NOW - 1))
+    assert got.verdict == "no_action" and desk.placed == []
+    assert got.sentence == "ORB holds no position of its own. Nothing to send."
+    assert desk.position(NOV) == 65
 
 
 def test_live_waits_for_the_risk_guard(store, desk, monkeypatch):
