@@ -19,6 +19,13 @@ vi.mock('../api', async (importOriginal) => ({
   getDividends: (args: object) => api.call('dividends', args),
 }))
 
+// The journal's two parts of the view have their own tests (JournalCards.test.tsx); here the
+// journal is switched off, so nothing of this file goes to the network for them.
+vi.mock('@/sudarshan/journal/api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/sudarshan/journal/api')>()),
+  journalCall: async () => ({ enabled: false, data: null, message: 'off' }),
+}))
+
 import { createQueryClient } from '@/app/providers'
 import { PortfolioError } from '../api'
 import { DIVIDENDS_OFF } from '../dividends/DividendsCard'

@@ -2,6 +2,7 @@
 // service's sentences, Upstox's own charges per segment, what the paper leaves out, the reads of
 // Upstox it rests on, and the CSV of each schedule.
 import { Download, RefreshCw } from 'lucide-react'
+import type { ReactNode } from 'react'
 import { getTaxCsv, portfolioCall, saveDownload } from '../api'
 import { useSend } from '../sheets/useSend'
 import { dayText } from '../tab/format'
@@ -32,7 +33,7 @@ export function LossesCard({ pack }: { pack: TaxPack }) {
   )
 }
 
-export function ChargesCard({ pack }: { pack: TaxPack }) {
+export function ChargesCard({ pack, children }: { pack: TaxPack; children?: ReactNode }) {
   const rows = Object.entries(pack.charges.by_segment) as [
     ReportSegment,
     { total_paise: number | null; stt_paise: number | null },
@@ -58,6 +59,7 @@ export function ChargesCard({ pack }: { pack: TaxPack }) {
         Upstox's own figures for the year
         {pack.charges.state === 'ok' ? '.' : '; a segment you traded in is not read yet.'}
       </p>
+      {children}
     </Card>
   )
 }

@@ -24,6 +24,7 @@ import { Signed } from '@/sudarshan/portfolio/Signed'
 import { BottomSheet } from '@/sudarshan/watchlist/BottomSheet'
 import { describe } from '@/sudarshan/watchlist/rows'
 import { journalData, problemOf, type SheetFill, type TripDetail, WORDS } from './api'
+import { ChargesParts } from './ChargesParts'
 import { clearDraft, readDraft, writeDraft } from './drafts'
 import { JOURNAL_KEY } from './keys'
 import { closingNotSeen, countText, dayWords, holdWords, openQty, priceText } from './live'
@@ -247,8 +248,19 @@ export const NOT_ESTIMATED = 'Not estimated for this exchange'
  * The word beside the charges: Upstox's actual figure, the journal's estimate, or an estimate
  * from Upstox's trade history (no order ids there: a side's trades of a day are one order).
  */
-export function chargesWord(trip: { charges_actual_paise: number | null; fills?: SheetFill[] }) {
-  if (trip.charges_actual_paise !== null) return 'actual'
+export function chargesWord(trip: {
+  charges_actual_paise: number | null
+  charges_actual_basis?: 'day' | 'month' | null
+  fills?: SheetFill[]
+}) {
+  if (trip.charges_actual_paise !== null) {
+    // The month's figures answer for a day Upstox never gave by itself.
+    return trip.charges_actual_basis === 'month'
+      ? 'actual, from Upstox’s figures for the month'
+      : trip.charges_actual_basis === 'day'
+        ? 'actual, from Upstox’s figures for the day'
+        : 'actual'
+  }
   return (trip.fills ?? []).some((f) => f.source === 'history')
     ? 'est., from Upstox’s history'
     : 'est.'
@@ -970,6 +982,9 @@ export function TripSheet({
                   </>
                 )}
               </Row>
+              {trip.charges_actual && (
+                <ChargesParts actual={trip.charges_actual} estimate={trip.charges_est_paise} />
+              )}
               <Row label="Net">
                 {aside ? (
                   notKnown

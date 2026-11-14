@@ -7,6 +7,7 @@ import axios from 'axios'
 import { webClient } from '@/api/client'
 import {
   API_PREFIX,
+  type ChargeActual,
   type ChargeEstimate,
   type Cls,
   type Done,
@@ -32,6 +33,8 @@ export interface TripDetail extends Trip {
   note?: TripNote | null
   excursion?: Excursion | null
   charges?: ChargeEstimate | null
+  /** Upstox's own charges as this trade carries them; an older service sends none. */
+  charges_actual?: ChargeActual | null
   /**
    * "First entry order: answered in 412 ms": the round trip of the trade's first entry order, when
    * the platform recorded one (the service's `latency_ms`); never a later order's.
