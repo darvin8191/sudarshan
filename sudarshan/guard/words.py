@@ -584,6 +584,12 @@ def upstox_segment(code: str) -> str:
 
 
 TG_ONLY_YOUR_CHAT = "This command works only in your own chat with the bot."
+#: The owner's chat whose stored API key is not this OpenAlgo's now (the bot's own check for /mode
+#: and /stoppython): a key regenerated since he linked, or a link made through another host.
+TG_LINK_AGAIN = (
+    "This chat is not linked with your current OpenAlgo API key. Link it again with "
+    "/link <api_key> <host_url>, then send /killswitch again."
+)
 TG_OFF = "The kill switch is off."
 TG_USAGE = (
     "Send /killswitch on followed by your phrase to stop new orders and cancel open orders and "
@@ -1034,6 +1040,7 @@ FIXED = (
     EXIT_ALL_NOT_UNDERSTOOD,
     AUDIT_UNREADABLE,
     TG_ONLY_YOUR_CHAT,
+    TG_LINK_AGAIN,
     TG_OFF,
     TG_USAGE,
     TG_RESUME_HOW,
