@@ -575,7 +575,9 @@ def test_a_report_without_a_file_and_a_download_refused_by_the_service(bridge, j
     assert error_of(off) == {"code": "unavailable", "message": WORDS["off"]}
 
 
-def test_a_download_while_switched_off_is_refused_in_words_never_a_200(bridge, journal, monkeypatch):
+def test_a_download_while_switched_off_is_refused_in_words_never_a_200(
+    bridge, journal, monkeypatch
+):
     """Review H4 (v0.11.0): a browser saves a 200 under the name it asked for, so a switched-off
     answer of 200 came to the phone as a "PDF" holding JSON. Every way of saying off is a 503 with
     the sentence, and no file name goes with it."""

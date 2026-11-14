@@ -241,14 +241,42 @@ describe('Archive', () => {
     expect(screen.getByRole('button', { name: /Download CSV/ }).textContent).toBe('Download CSV')
   })
 
-  it('says the alerts service is off when the server says so', async () => {
-    serve([row({ status: 'not_sent' })], { ...SETTINGS, alerts_on: false })
+  it('says the alerts service is off when the desk says so', async () => {
+    serve([row({ status: 'not_sent' })], { ...SETTINGS, alerts_on: false, desk_state: 'off' })
     renderBook('/reports', <Reports />)
     await waitFor(() =>
       expect(screen.getByTestId('delivery').textContent).toBe(
         'Not sent: the alerts service is switched off on the server'
       )
     )
+    expect(screen.getByTestId('desk').textContent).toContain(
+      'none can be sent while the alerts service is switched off on the server'
+    )
+  })
+
+  it.each([
+    ['starting', /The alerts service is starting/],
+    ['journal_off', /last found the journal switched off/],
+    ['journal_down', /could not reach the journal just now/],
+    ['unknown', /Whether reports can be sent just now is not known/],
+    ['a_state_from_later', /Whether reports can be sent just now is not known/],
+  ])('words the desk’s state %s on its own, never as switched off (review M5)', async (state, words) => {
+    serve([row({ status: 'ready' })], {
+      ...SETTINGS,
+      alerts_on: state !== 'unknown' && state !== 'a_state_from_later',
+      desk_state: state,
+    })
+    renderBook('/reports', <Reports />)
+    await waitFor(() => expect(screen.getByTestId('desk').textContent).toMatch(words))
+    expect(screen.getByTestId('desk').textContent).not.toContain('switched off on the server')
+    expect(screen.getByTestId('delivery').textContent).toMatch(/^Ready to send/)
+  })
+
+  it('says nothing over the archive while the desk sends', async () => {
+    serve([row({ status: 'ready' })], { ...SETTINGS, desk_state: 'on' })
+    renderBook('/reports', <Reports />)
+    await waitFor(() => expect(screen.getByTestId('delivery').textContent).toBe('Ready to send'))
+    expect(screen.queryByTestId('desk')).toBeNull()
   })
 
   it('says what an empty archive means, with the day report’s time as the server says it', async () => {

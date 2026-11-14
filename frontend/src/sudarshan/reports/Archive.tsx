@@ -3,7 +3,9 @@ import {
   CalendarDays,
   CalendarRange,
   CheckCheck,
+  CircleHelp,
   CircleSlash,
+  Clock,
   Download,
   FileSpreadsheet,
   FileText,
@@ -20,7 +22,10 @@ import type { ReportKind } from '../journal/types'
 import { REPORTS_KEY, useArchive, useReportSettings } from './queries'
 import {
   builtWords,
+  DESK_WORDS,
+  type DeskState,
   deliveryOf,
+  deskOf,
   downloadName,
   emptyWords,
   hasCsv,
@@ -43,21 +48,33 @@ const DELIVERY_ICON = {
     <FileText aria-hidden="true" className="size-4 shrink-0 text-[color:var(--text-secondary)]" />
   ),
   not: <CircleSlash aria-hidden="true" className="size-4 shrink-0 text-[color:var(--down)]" />,
+  unknown: (
+    <CircleHelp aria-hidden="true" className="size-4 shrink-0 text-[color:var(--text-secondary)]" />
+  ),
 } as const
+
+/** The glyph beside the desk's sentence: off says so, waiting waits, not known asks. */
+const DESK_ICON: Record<Exclude<DeskState, 'on'>, ReactNode> = {
+  starting: <Clock aria-hidden="true" className="mt-0.5 size-4 shrink-0" />,
+  journal_off: <Clock aria-hidden="true" className="mt-0.5 size-4 shrink-0" />,
+  journal_down: <Clock aria-hidden="true" className="mt-0.5 size-4 shrink-0" />,
+  off: <CircleSlash aria-hidden="true" className="mt-0.5 size-4 shrink-0" />,
+  unknown: <CircleHelp aria-hidden="true" className="mt-0.5 size-4 shrink-0" />,
+}
 
 const BUTTON =
   'inline-flex min-h-12 items-center justify-center gap-2 rounded-[0.875rem] border border-input bg-card px-4 text-[0.9375rem] font-semibold outline-none hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-60'
 
 function Row({
   report,
-  alertsOn,
+  desk,
   onOpen,
 }: {
   report: ReportRow
-  alertsOn: boolean | undefined
+  desk: DeskState | undefined
   onOpen: (id: number) => void
 }) {
-  const delivery = deliveryOf(report, alertsOn)
+  const delivery = deliveryOf(report, desk)
   const named = `${kindTitle(report.kind)} ${periodWords(report.period_key)}`
   // Review H4: the file is fetched and checked before it is saved, so a refusal is a sentence
   // under the row and never a file that will not open. One download at a time per row.
@@ -186,7 +203,8 @@ export function Archive({ onOpen }: { onOpen: (id: number) => void }) {
   const archive = useArchive()
   const settings = useReportSettings()
   const { build, asked } = useBuild()
-  const alertsOn = settings.data?.alerts_on
+  const desk = deskOf(settings.data)
+  const deskWords = desk ? DESK_WORDS[desk] : null
   const rows = archive.data
 
   return (
@@ -226,11 +244,13 @@ export function Archive({ onOpen }: { onOpen: (id: number) => void }) {
           it is ready.
         </output>
       )}
-      {alertsOn === false && (
-        <p className="flex items-start gap-1.5 text-sm text-[color:var(--text-secondary)]">
-          <CircleSlash aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
-          Reports are built and kept here, but none can be sent while the alerts service is switched
-          off on the server.
+      {desk && desk !== 'on' && deskWords && (
+        <p
+          className="flex items-start gap-1.5 text-sm text-[color:var(--text-secondary)]"
+          data-testid="desk"
+        >
+          {DESK_ICON[desk]}
+          {deskWords}
         </p>
       )}
       {archive.isPending ? (
@@ -255,7 +275,7 @@ export function Archive({ onOpen }: { onOpen: (id: number) => void }) {
           {[...(rows ?? [])]
             .sort((a, b) => b.built_ms - a.built_ms)
             .map((report) => (
-              <Row key={report.id} report={report} alertsOn={alertsOn} onOpen={onOpen} />
+              <Row key={report.id} report={report} desk={desk} onOpen={onOpen} />
             ))}
         </ul>
       )}
