@@ -72,6 +72,7 @@ export function useDayFacts(day: string) {
 function useEdgeClock(edge: number | null): number {
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
+    setNow(Date.now()) // new facts (a new day): judged against the clock now, not the last edge
     const wake = () => {
       if (document.visibilityState === 'visible') setNow(Date.now())
     }
