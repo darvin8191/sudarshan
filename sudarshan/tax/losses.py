@@ -129,8 +129,9 @@ def business_setoff(non_speculative_net: int, speculative_net: int, carries, fy:
     }  # fmt: skip
 
 
-def sentences(result: dict, fy: int) -> list[str]:
-    """What a set-off did, in words: each step, what is carried and to when, what lapsed."""
+def sentences(result: dict, fy: int, order: str = words.SET_OFF_ORDER) -> list[str]:
+    """What a set-off did, in words: each step, what is carried and to when, what lapsed, and
+    (when an earlier year's loss was used) the ``order`` followed, to verify."""
     out = [
         words.set_off_step(step, rupees(step["paise"]), fy_label(step["loss_fy"]))
         for step in result["steps"]
@@ -151,5 +152,5 @@ def sentences(result: dict, fy: int) -> list[str]:
         for row in result["own_figures"]
     ]
     if any(step["step"] == "brought_forward" for step in result["steps"]):
-        out.append(words.SET_OFF_ORDER)
+        out.append(order)
     return out
