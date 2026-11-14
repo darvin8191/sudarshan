@@ -26,13 +26,18 @@ def test_the_stage_is_off_unless_it_is_one_of_the_three_words(monkeypatch, raw, 
     assert protect_flag.stage() == stage
 
 
-def test_the_session_facts_serve_the_stage_and_nothing_else_reads_it():
+def test_the_session_facts_serve_the_stage_and_no_order_code_reads_it_directly():
     auth = (ROOT / "blueprints" / "auth.py").read_text(encoding="utf-8")
     assert auth.count('"gtt_protect": protect_flag.stage()') == 1
-    # No order code reads the switch: the GTT service and the gate are the existing ones.
+    # No order code reads the switch itself. The one rule that does is
+    # sudarshan/books/protect_check.sandbox_only, which can only move a Protect to the sandbox
+    # (test_books_protect_check.py): the GTT services ask it, and nothing else does.
     for folder in ("services", "broker/upstox", "restx_api", "sandbox", "sudarshan/guard"):
         for path in (ROOT / folder).rglob("*.py"):
-            assert "protect_flag" not in path.read_text(encoding="utf-8"), path
+            text = path.read_text(encoding="utf-8")
+            assert "protect_flag" not in text, path
+            if "protect_check.sandbox_only" in text:
+                assert path.name in ("place_gtt_order_service.py", "modify_gtt_order_service.py")
 
 
 def test_no_release_file_sets_it_to_on():

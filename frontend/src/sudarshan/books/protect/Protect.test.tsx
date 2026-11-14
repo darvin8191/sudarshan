@@ -288,6 +288,48 @@ describe('Protect on a holding (M5.6)', () => {
     expect(screen.getByRole('button', { name: 'Change' })).toBeInTheDocument()
   })
 
+  it('sends the side the question showed, whatever the price does under it (M5)', async () => {
+    const tap = user()
+    await renderPhone(RELIANCE)
+    await openSheet(tap, /RELIANCE/)
+    await fillAndAsk(tap, '1420')
+    const question = 'Sell 40 RELIANCE if the price falls to 1,420.00?'
+    expect(screen.getByText(question)).toBeInTheDocument()
+    // the price drops through the stop while the question is open
+    act(() => feed.push('RELIANCE', 'NSE', { ltp: 1390, cp: 1461 }))
+    await settle()
+    expect(screen.getByText(question)).toBeInTheDocument() // the words under the finger stay
+    await tap.click(screen.getByRole('button', { name: 'Set Protect' }))
+    await settle()
+    await settle()
+    expect(api.post).toHaveBeenCalledTimes(1)
+    // "falls to 1,420" is what goes: never the other side, read off the price as it is now
+    expect(api.post.mock.calls[0][1]).toMatchObject({ triggerprice_sl: 1420, triggerprice_tg: 0 })
+  })
+
+  it('says the server\u2019s own sentence when the price has already reached the trigger (M5)', async () => {
+    const tap = user()
+    await renderPhone(RELIANCE)
+    await openSheet(tap, /RELIANCE/)
+    await fillAndAsk(tap, '1420')
+    const said =
+      'The last price is 1,418.00, already at or below 1,420.00, so this would sell at once. Protect was not placed. Choose a price below the last price, or sell from the card.'
+    api.post.mockRejectedValue(
+      new AxiosError('refused', 'ERR_BAD_REQUEST', undefined, undefined, {
+        status: 409,
+        data: { status: 'error', message: said },
+        statusText: '',
+        headers: {},
+        config: {} as never,
+      })
+    )
+    await tap.click(screen.getByRole('button', { name: 'Set Protect' }))
+    await settle()
+    await settle()
+    expect(toast.said).toEqual([`refused: Protect was not set. ${said}`])
+    expect(screen.getByRole('button', { name: 'Protect' })).toBeEnabled() // not held: refused
+  })
+
   it('barrier 9: taps inside the first half second do nothing, and a double tap sends once', async () => {
     const tap = user()
     await renderPhone(RELIANCE)

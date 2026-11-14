@@ -5,6 +5,7 @@ from typing import Any, Dict, Optional, Tuple
 from database.auth_db import get_auth_token_broker
 from database.settings_db import get_analyze_mode
 from events import AnalyzerErrorEvent, GTTModifiedEvent, GTTModifyFailedEvent
+from sudarshan.books import protect_check  # SUDARSHAN M5.6: Protect's side and book
 from utils.broker_backpressure import BrokerBusyError
 from utils.event_bus import bus
 from utils.logging import get_logger
@@ -49,8 +50,33 @@ def modify_gtt_order_with_auth(
     api_key = original_data.get("apikey", "")
     trigger_id = order_data.get("trigger_id", "")
 
-    if get_analyze_mode():
+    # SUDARSHAN M5.6: a Protect at stage sandbox is changed in the sandbox whatever the app's
+    # mode, and one whose price the market has already reached is refused.
+    protect_sandbox = protect_check.sandbox_only(order_data)
+    if get_analyze_mode() or protect_sandbox:
         from services.sandbox_service import sandbox_modify_gtt_order
+
+        if protect_sandbox and not api_key:
+            api_key = protect_check.owner_api_key() or ""
+        refused = None
+        if protect_check.is_protect(order_data):
+            from services.place_gtt_order_service import _fetch_last_price_for_sandbox
+
+            refused = protect_check.refusal(
+                order_data,
+                _fetch_last_price_for_sandbox(
+                    order_data.get("symbol", ""), order_data.get("exchange", ""), api_key
+                ),
+            )
+        if refused:
+            response = {"status": "error", "message": refused, "mode": "analyze"}
+            bus.publish(GTTModifyFailedEvent(
+                mode="analyze", api_type=API_TYPE,
+                symbol=order_data.get("symbol", ""), trigger_id=trigger_id,
+                error_message=refused,
+                request_data=order_request_data, response_data=response, api_key=api_key,
+            ))
+            return False, response, protect_check.REFUSED_STATUS
 
         success, response, status_code = sandbox_modify_gtt_order(
             trigger_id, order_data, api_key

@@ -9,6 +9,7 @@ from broker.upstox.mapping.transform_data import map_product_type, reverse_map_p
 from broker.upstox.streaming.upstox_mapping import UpstoxExchangeMapper
 from database.token_db import get_oa_symbol, get_token
 from database.token_db_enhanced import get_symbol_info
+from sudarshan.books import protect_check  # SUDARSHAN M5.6: Protect's side
 from utils.logging import get_logger
 from utils.mpp_slab import get_instrument_type_from_symbol, get_mpp_percentage
 
@@ -177,6 +178,12 @@ def _single_trigger_direction(data, trigger_price):
     validates), else fall back to the OpenAlgo field semantics
     (``triggerprice_sl`` = below LTP, ``triggerprice_tg`` = above LTP).
     """
+    # SUDARSHAN M5.6 (v0.14.0 review, M5): a Protect is placed on the side its request states,
+    # the one the owner confirmed, never on the side the price happens to be on by now.
+    stated = protect_check.direction(data)
+    if stated:
+        return stated
+
     last_price = float(data.get("last_price") or 0)
     if last_price > 0:
         if trigger_price < last_price:

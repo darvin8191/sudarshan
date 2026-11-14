@@ -41,6 +41,7 @@ from broker.upstox.mapping.gtt_data import (
     transform_place_gtt,
 )
 from database.token_db import get_token
+from sudarshan.books import protect_check  # SUDARSHAN M5.6: Protect's side
 from sudarshan.guard import gate as risk_gate  # SUDARSHAN M5.13: the risk gate
 from utils.broker_backpressure import BrokerBusyError
 from utils.httpx_client import get_httpx_client
@@ -155,6 +156,16 @@ def _prepare(data, auth):
     if not token:
         return f"Instrument token not found for {data.get('symbol')}", 404
     data["instrument_token"] = token
+
+    if protect_check.is_protect(data):
+        # SUDARSHAN M5.6 (v0.14.0 review, M5): a Protect is judged on a last price read now,
+        # never one the request carried, and is refused when the price has already reached its
+        # trigger: the server does not choose a direction for it.
+        data["last_price"] = _fetch_last_price(data["symbol"], data["exchange"], auth) or 0
+        refused = protect_check.refusal(data, data["last_price"])
+        if refused:
+            return refused, protect_check.REFUSED_STATUS
+        return None, None
 
     if not data.get("last_price"):
         ltp = _fetch_last_price(data["symbol"], data["exchange"], auth)

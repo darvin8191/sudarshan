@@ -4,11 +4,14 @@ Protect is one SINGLE sell GTT on a cash holding, sent by the page through OpenA
 service, so the order passes the risk gate like any other. This is only the page's switch:
 
 - ``off`` (the default): no Protect on any screen, and the Holdings page does not read the GTT book.
-- ``sandbox``: Protect shows only while the app is in Analyze mode, where it goes to the sandbox.
+- ``sandbox``: Protect shows only while the app is in Analyze mode, and a Protect request goes to
+  the sandbox whatever the app's mode is when it arrives (``protect_check.sandbox_only``).
 - ``on``: in Live too.
 
-It is read on every call. Any other value reads as ``off``, with one warning in the log. No server
-order code reads it: it is served to the page with the session facts (blueprints/auth.py).
+It is read on every call. Any other value reads as ``off``, with one warning in the log. It is
+served to the page with the session facts (blueprints/auth.py). No order code reads it directly:
+the one rule that does is ``protect_check.sandbox_only``, which can only move a Protect to the
+sandbox.
 """
 
 from __future__ import annotations

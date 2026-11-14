@@ -5,6 +5,7 @@ from typing import Any
 from database.auth_db import get_auth_token_broker
 from database.settings_db import get_analyze_mode
 from events import AnalyzerErrorEvent, GTTFailedEvent, GTTPlacedEvent
+from sudarshan.books import protect_check  # SUDARSHAN M5.6: Protect's side and book
 from utils.broker_backpressure import BrokerBusyError
 from utils.event_bus import bus
 from utils.logging import get_logger
@@ -90,12 +91,24 @@ def place_gtt_order_with_auth(
 
     # Analyze (sandbox) mode: the sandbox GTT engine owns the whole lifecycle,
     # so nothing below this point (broker module, broker call) applies.
-    if get_analyze_mode():
+    # SUDARSHAN M5.6: a Protect at stage sandbox goes to the sandbox whatever the app's mode.
+    if get_analyze_mode() or protect_check.sandbox_only(order_data):
         from services.sandbox_service import sandbox_place_gtt_order
 
         last_price = _fetch_last_price_for_sandbox(
             order_data.get("symbol", ""), order_data.get("exchange", ""), api_key
         )
+        # SUDARSHAN M5.6: a Protect whose price the market has already reached is refused.
+        refused = protect_check.refusal(order_data, last_price)
+        if refused:
+            response = {"status": "error", "message": refused, "mode": "analyze"}
+            bus.publish(GTTFailedEvent(
+                mode="analyze", api_type=API_TYPE,
+                symbol=order_data.get("symbol", ""), exchange=order_data.get("exchange", ""),
+                trigger_type=order_data.get("trigger_type", ""), error_message=refused,
+                request_data=order_request_data, response_data=response, api_key=api_key,
+            ))
+            return False, response, protect_check.REFUSED_STATUS
         success, response, status_code = sandbox_place_gtt_order(
             order_data, api_key, last_price
         )
@@ -221,7 +234,9 @@ def place_gtt_order(
         order_data["apikey"] = api_key
 
     # Semi-auto / Action Center routing (place-side is queueable per Phase 0.3).
-    if api_key and not (auth_token and broker):
+    # SUDARSHAN M5.6: a Protect at stage sandbox is never queued: an approval would send it
+    # wherever the app's mode then points.
+    if api_key and not (auth_token and broker) and not protect_check.sandbox_only(order_data):
         from services.order_router_service import queue_order, should_route_to_pending
 
         if should_route_to_pending(api_key, API_TYPE):

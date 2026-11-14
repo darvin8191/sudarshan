@@ -172,7 +172,14 @@ function ProtectSheet({
   const held = Number(holding.quantity) || 0
   const [trigger, setTrigger] = useState(editing ? String(editing.trigger) : '')
   const [quantity, setQuantity] = useState(String(editing ? editing.quantity : held))
-  const [asking, setAsking] = useState(false)
+  // What the question says is what is sent: the price, the shares and the side are taken once,
+  // when the question opens. The last price keeps moving under it, and a side read again at the
+  // tap could differ from the one the owner has just read.
+  const [asked, setAsked] = useState<null | {
+    shares: number
+    at: number
+    side: 'falls' | 'rises'
+  }>(null)
   const once = useRef(false)
   useEffect(() => {
     once.current = false
@@ -185,11 +192,9 @@ function ProtectSheet({
   const ready = blocked === null && check.ok && quantityProblem === null
 
   const send = () => {
-    if (once.current || !check.ok || quantityProblem !== null || blocked !== null) return
+    if (once.current || asked === null || blocked !== null) return
     once.current = true
-    const shares = number(quantity) as number
-    const at = number(trigger) as number
-    const side = check.side
+    const { shares, at, side } = asked
     onClose()
     const id = editing ? editing.triggerId : placingId(holding)
     void sendHeld('gtt', sandbox, [{ id }], async () => {
@@ -213,7 +218,13 @@ function ProtectSheet({
         className="flex flex-col gap-3"
         onSubmit={(event) => {
           event.preventDefault()
-          if (ready) setAsking(true)
+          if (ready && check.ok) {
+            setAsked({
+              shares: number(quantity) as number,
+              at: number(trigger) as number,
+              side: check.side,
+            })
+          }
         }}
       >
         <div className="grid grid-cols-2 gap-3">
@@ -262,17 +273,13 @@ function ProtectSheet({
         </button>
       </form>
       <Confirm
-        open={asking}
+        open={asked !== null}
         title={editing ? 'Change Protect?' : 'Set Protect?'}
-        description={
-          check.ok
-            ? asks(holding.symbol, number(quantity) ?? 0, number(trigger) ?? 0, check.side)
-            : ''
-        }
+        description={asked ? asks(holding.symbol, asked.shares, asked.at, asked.side) : ''}
         confirmLabel={editing ? 'Change' : 'Set Protect'}
         confirmClassName="bg-primary text-primary-foreground hover:bg-primary/90"
         onConfirm={send}
-        onClose={() => setAsking(false)}
+        onClose={() => setAsked(null)}
       />
     </BottomSheet>
   )
