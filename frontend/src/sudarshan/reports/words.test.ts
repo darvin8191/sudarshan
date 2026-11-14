@@ -1,6 +1,16 @@
 import { describe, expect, it } from 'vitest'
 import type { Report } from '../journal/types'
-import { ALERTS_OFF, deliveryOf, downloadName, periodWords } from './words'
+import {
+  ALERTS_OFF,
+  checkWords,
+  deliveryOf,
+  downloadName,
+  emptyWords,
+  hasCsv,
+  periodWords,
+  SWITCHES,
+  timeOf,
+} from './words'
 
 const report = (over: Partial<Report> = {}): Report => ({
   id: 1,
@@ -47,6 +57,16 @@ describe('names and periods', () => {
     expect(
       downloadName(report({ kind: 'monthly', period_key: '202610', file_name: 'a.csv' }))
     ).toBe('SUDARSHAN_Monthly_statement_202610.csv')
+    const statement = report({ kind: 'monthly', period_key: '202610' })
+    expect(downloadName(statement, 'csv')).toBe('SUDARSHAN_Monthly_statement_202610.csv')
+    expect(downloadName(statement)).toBe('SUDARSHAN_Monthly_statement_202610.pdf')
+  })
+
+  it('offers a CSV for the monthly statement only', () => {
+    expect(hasCsv(report({ kind: 'monthly' }))).toBe(true)
+    for (const kind of ['eod', 'brief', 'weekly', 'fy'] as const) {
+      expect(hasCsv(report({ kind }))).toBe(false)
+    }
   })
 
   it('words each key', () => {
@@ -55,5 +75,29 @@ describe('names and periods', () => {
     expect(periodWords('202610')).toBe('October 2026')
     expect(periodWords('FY2627')).toBe('FY 2026-27')
     expect(periodWords('odd')).toBe('odd')
+  })
+})
+
+describe('the times, as the server says them', () => {
+  const times = { brief: '08:45', eod: '15:50', check: '16:05', weekly: 'Sunday 18:00' }
+
+  it('takes each time from the server and none from anywhere else', () => {
+    expect(timeOf(times, 'eod')).toBe('15:50')
+    expect(timeOf(times, 'monthly')).toBeNull()
+    expect(timeOf({ eod: '  ' }, 'eod')).toBeNull()
+    expect(timeOf(undefined, 'eod')).toBeNull()
+    expect(timeOf(null, 'brief')).toBeNull()
+    expect(SWITCHES.map((row) => row.at)).toEqual(['eod', 'brief', 'weekly', 'monthly', 'fy'])
+    expect(JSON.stringify(SWITCHES)).not.toMatch(/\d\d:\d\d/)
+  })
+
+  it('says the close check and the empty archive with the server’s times, or that it has not said', () => {
+    expect(checkWords(times)).toBe(
+      "Close check at 16:05: the day's fills are read again and the journal corrected."
+    )
+    expect(checkWords({})).toBeNull()
+    expect(emptyWords(times)).toContain('The Day report is built at 15:50 on each trading day.')
+    expect(emptyWords(undefined)).toContain('the server has not said the time yet.')
+    expect(emptyWords(undefined)).not.toMatch(/\d\d:\d\d/)
   })
 })

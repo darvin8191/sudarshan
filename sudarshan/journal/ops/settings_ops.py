@@ -5,8 +5,10 @@ report, the charges plan and the report language (English only in this release; 
 exists). The answer adds what the Reports page shows beside them:
 
 * ``alerts_on``: false while nothing delivers the reports (Y38): the alerts service does not
-  answer its /health on this server, or a report kept in the last day is still waiting for its
-  outcome half an hour after it was made (the alerts' report desk is switched off).
+  answer its /health on this server, or the ``report_desk`` block there says the desk is switched
+  off on its side (``off``: order alerts off, or ``SUDARSHAN_JOURNAL=off`` in alerts.env). The
+  desk's view of this journal does not count against it: a journal answering this request is on,
+  and the desk asks it again within a minute.
 * ``rate_card``: the charges card in use, its version and the day its newest rate applies from.
 * ``times``: when each report is built, as the page prints them: the day ones for today, or for
   the next trading day when today has no session.
@@ -33,9 +35,9 @@ FIELDS = ("capital_base_paise", "eod_on", "brief_on", "weekly_on", "monthly_on",
 SWITCHES = ("eod_on", "brief_on", "weekly_on", "monthly_on", "fy_on")
 LANGUAGES = ("en",)
 CAPITAL_MAX_PAISE = 10**13
-#: A report not told about this long after it was made means no desk is delivering.
-DESK_GRACE_MS = 30 * 60_000
-DESK_WINDOW_MS = 24 * 3_600_000
+#: The report desk's states (``report_desk.state`` on the alerts' /health) in which it delivers
+#: the reports, or will as soon as it next asks this journal; ``off`` is the one that does not.
+DESK_DELIVERS = frozenset({"on", "starting", "journal_off", "journal_down"})
 WEEKDAY_NAMES = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
 MONTH_NAMES = ("January", "February", "March", "April", "May", "June", "July", "August",
                "September", "October", "November", "December")  # fmt: skip
@@ -44,24 +46,27 @@ HEALTH_TIMEOUT = httpx.Timeout(1.0, connect=0.5)
 
 
 class AlertsProbe:
-    """Asks the alerts service's /health whether it runs (a part: one client, closed with the
-    service). Its health holds nothing secret."""
+    """Asks the alerts service's /health about its report desk (a part: one client, closed with
+    the service). Its health holds nothing secret."""
 
     def __init__(self, url: str):
         self.url = url.rstrip("/") + "/health"
         self.client = httpx.AsyncClient(timeout=HEALTH_TIMEOUT, trust_env=False)
 
-    async def up(self) -> bool:
+    async def desk(self) -> dict[str, Any] | None:
+        """The ``report_desk`` block, or None when the alerts service does not answer as itself
+        or carries no such block (a release before the block cannot be read as delivering)."""
         try:
             answer = await self.client.get(self.url, follow_redirects=False)
             doc = answer.json()
         except (httpx.HTTPError, ValueError):
-            return False
-        return (
-            answer.status_code == 200
-            and isinstance(doc, dict)
-            and (doc.get("service") == "sudarshan-alerts")
-        )
+            return None
+        if answer.status_code != 200 or not isinstance(doc, dict):
+            return None
+        block = doc.get("report_desk")
+        if doc.get("service") != "sudarshan-alerts" or not isinstance(block, dict):
+            return None
+        return block
 
     async def aclose(self) -> None:
         await self.client.aclose()
@@ -105,18 +110,11 @@ def rate_card(today: int, plan: str) -> dict[str, Any]:
     return {"version": charges.CARD_VERSION, "from_day": max(dates, default=charges.CARD_START)}
 
 
-async def alerts_on(service: Any, now: int) -> bool:
+async def alerts_on(service: Any) -> bool:
+    """Whether anything delivers the reports (Y38): the alerts' report desk, as its block says."""
     probe = service.part("alerts", lambda svc: AlertsProbe(svc.settings.alerts_url))
-    if not await probe.up():
-        return False
-
-    def waiting(tx) -> bool:
-        return any(
-            r["told_ms"] is None and now - DESK_WINDOW_MS <= r["built_ms"] <= now - DESK_GRACE_MS
-            for r in tx.rows("report", order="built_ms,id")
-        )
-
-    return not await work(lambda: service.store.read(OWNER, waiting))
+    block = await probe.desk()
+    return block is not None and block.get("state") in DESK_DELIVERS
 
 
 @op("settings_get")
@@ -127,7 +125,7 @@ async def settings_get(ctx, args):
     today = ist_day(now)
     return {
         **{name: found.get(name) for name in FIELDS},
-        "alerts_on": await alerts_on(ctx, now),
+        "alerts_on": await alerts_on(ctx),
         "rate_card": rate_card(today, found.get("charges_plan") or charges.DEFAULT_PLAN),
         "times": report_times(ctx, today),
     }

@@ -280,7 +280,39 @@ describe('TripsList', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Show earlier trades' }))
     await screen.findByText('Tue 10 Nov 2026')
     expect(screen.getAllByTestId('closed-trip')).toHaveLength(101)
-    expect(api.data.mock.calls.find(([, a]) => a?.before !== undefined)?.[1].before).toBe(5000 - 99)
+    // up to and including the last one's close: the service's page ends strictly before it
+    expect(api.data.mock.calls.find(([, a]) => a?.before !== undefined)?.[1].before).toBe(
+      5000 - 99 + 1
+    )
+    expect(screen.queryByRole('button', { name: 'Show earlier trades' })).toBeNull()
+  })
+
+  it('loses no trade that closed in the same second as the last one shown', async () => {
+    // The service as it pages: closed trades newest first by close time, then id, and a later
+    // page holds those that closed strictly before `before`.
+    const all = [
+      ...Array.from({ length: 99 }, (_, n) =>
+        closedTrip({ id: 1000 - n, net_paise: 100, close_day: 20261112, closed_ms: 5000 - n })
+      ),
+      closedTrip({ id: 801, net_paise: 100, close_day: 20261111, closed_ms: 4000 }),
+      closedTrip({ id: 800, net_paise: -50, close_day: 20261111, closed_ms: 4000 }),
+      closedTrip({ id: 7, net_paise: -100, close_day: 20261110, closed_ms: 10 }),
+    ]
+    api.data.mockImplementation(
+      async (op: string, args: { status?: string; before?: number; limit?: number }) => {
+        if (op === 'tags_list') return TAGS
+        if (args.status === 'open') return []
+        const before = args.before
+        const rows = before === undefined ? all : all.filter((t) => (t.closed_ms ?? 0) < before)
+        return rows.slice(0, args.limit ?? 100)
+      }
+    )
+    show()
+    await screen.findAllByTestId('closed-trip')
+    expect(screen.getAllByTestId('closed-trip')).toHaveLength(100) // 801 is the last of the page
+    fireEvent.click(screen.getByRole('button', { name: 'Show earlier trades' }))
+    await screen.findByText('Tue 10 Nov 2026')
+    expect(screen.getAllByTestId('closed-trip')).toHaveLength(102) // 800 too, and once each
     expect(screen.queryByRole('button', { name: 'Show earlier trades' })).toBeNull()
   })
 })

@@ -29,9 +29,10 @@ describe('the Screener page registrations', () => {
     expect(flask.indexOf(view)).toBeGreaterThan(flask.indexOf('def react_watchlist():'))
   })
 
-  it('is in the menu right after Portfolio, as Screener', () => {
+  it('is in the menu right after Watchlist and before Portfolio, as Screener (Y36)', () => {
     const index = profileMenuItems.findIndex((item) => item.href === '/screener')
     expect(profileMenuItems[index]).toMatchObject({ label: 'Screener' })
-    expect(profileMenuItems[index - 1]?.href).toBe('/portfolio')
+    expect(profileMenuItems[index - 1]?.href).toBe('/watchlist')
+    expect(profileMenuItems[index + 1]?.href).toBe('/portfolio')
   })
 })

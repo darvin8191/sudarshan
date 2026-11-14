@@ -104,7 +104,8 @@ describe('journalCall', () => {
     await expect(journalData('state')).rejects.toThrow(WORDS.off)
   })
 
-  it('names the bridge’s file route for a download', () => {
+  it('names the bridge’s file route for a download, and its CSV form', () => {
     expect(reportFileUrl(12)).toBe(`${PREFIX}/reports/12/file`)
+    expect(reportFileUrl(12, 'csv')).toBe(`${PREFIX}/reports/12/file?format=csv`)
   })
 })

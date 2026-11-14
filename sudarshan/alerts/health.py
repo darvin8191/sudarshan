@@ -10,6 +10,11 @@ to Telegram. Nothing secret is on it: no key, no user name, no message text.
 The market alerts' local API (market/api.py) is the one listener on 5582: its /health returns this
 document with the market fields added (``market_alerts``, ``market_state``, ``alerts_active``,
 ``instruments``). The names here are fixed; the market fields must not reuse them.
+
+``report_desk`` (M15.7) is the report desk's own block (``ReportDesk.health``): on or off and why,
+the reports waiting and when the last one went to Telegram. Without a desk it says why there is
+none (order alerts switched off, ``SUDARSHAN_JOURNAL=off`` in alerts.env, no key to seal with), or
+``starting`` before the service has built it. The journal reads it for the Reports page.
 """
 
 from __future__ import annotations
@@ -17,6 +22,7 @@ from __future__ import annotations
 from sudarshan.ops.release import installed_release
 
 from . import __version__
+from .reports_desk import OFF, STARTING
 
 
 def health_document(service) -> dict:
@@ -40,4 +46,20 @@ def health_document(service) -> dict:
         "owner_problem": service._owner_problem,
         "stats": dict(service.stats),
         "telegram": dict(outbox.stats) if outbox is not None else None,
+        "report_desk": report_desk_block(service),
+    }
+
+
+def report_desk_block(service) -> dict:
+    """The report desk's block: its own when it runs, else why there is none (a copy)."""
+    desk = getattr(service, "reports", None)
+    if desk is not None:
+        return desk.health()
+    why = getattr(service, "reports_off", None)
+    return {
+        "state": OFF if why else STARTING,
+        "on": False,
+        "reason": why,
+        "waiting": None,
+        "last_delivery_ms": None,
     }

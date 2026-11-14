@@ -18,7 +18,7 @@ import { OPEN_GUARD } from '@/sudarshan/watchlist/openGuard'
 import { renderBook, where } from '@/test/bookPages'
 import { JournalError, WORDS } from './api'
 import { closedTrip } from './fixtures'
-import { TripSheet } from './TripSheet'
+import { ORPHAN_FILLS, ORPHAN_WORDS, TripSheet } from './TripSheet'
 import type { Playbook, Tag } from './types'
 
 const T0 = Date.UTC(2026, 10, 13, 4, 30, 15) // 10:00:15 IST
@@ -188,10 +188,23 @@ describe('what happened', () => {
     expect(await screen.findByText('The price path was not recorded.')).toBeTruthy()
   })
 
-  it('says how fast the order was answered', async () => {
+  it('says how fast the first entry order was answered, as the service measures it', async () => {
     serve()
     show()
-    expect(await screen.findByText('order answered in 412 ms')).toBeTruthy()
+    expect(await screen.findByText('answered in 412 ms')).toBeTruthy()
+    expect(screen.getByText('First entry order')).toBeTruthy()
+    expect(screen.queryByText(/order answered/)).toBeNull()
+  })
+
+  it('says an earlier record kept for the notes is one, with no fills and nothing still open', async () => {
+    serve(detail({ status: 'orphan', fills: [], exit_avg_u: null, hold_s: null }))
+    show()
+    expect(await screen.findByText(ORPHAN_WORDS)).toBeTruthy()
+    expect(screen.getByText('Earlier record, kept for your notes')).toBeTruthy()
+    expect(screen.getByText(ORPHAN_FILLS)).toBeTruthy()
+    expect(screen.queryByText('Still open')).toBeNull()
+    expect(screen.queryByText(/not available yet/)).toBeNull()
+    expect(screen.queryByText('Closed trade')).toBeNull()
   })
 
   it('says a Sandbox trade is one', async () => {

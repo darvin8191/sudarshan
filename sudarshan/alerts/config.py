@@ -71,6 +71,12 @@ def _soft_switch(env: Mapping[str, str], name: str) -> bool:
     return (env.get(name) or "").strip().lower() in _ON
 
 
+def _unless_off(env: Mapping[str, str], name: str) -> bool:
+    """A switch that is on unless it clearly says off: another switch decides the rest, and this
+    one can only take this service's part away. A mistyped one is on, never an error."""
+    return (env.get(name) or "").strip().lower() not in _OFF
+
+
 def switched_off(env: Mapping[str, str] | None = None) -> bool:
     """The kill switch, read before anything else: off means no other setting matters."""
     return not _switch(os.environ if env is None else env, "SUDARSHAN_ORDER_ALERTS", True)
@@ -107,10 +113,14 @@ class Settings:
     notice_spools: tuple[Path, ...] = DEFAULT_SPOOLS
     #: Where the deploy tool records the installed release (shown on the health page).
     deployed_tag_file: Path = DEPLOYED_TAG_FILE
-    #: Nudges ("orders changed", nudge.py) to the family service and to the journal, each off until
-    #: its switch (``SUDARSHAN_FAMILY=on``, ``SUDARSHAN_JOURNAL=on``) is set in alerts.env.
+    #: Nudges ("orders changed", nudge.py) to the family service, off until ``SUDARSHAN_FAMILY=on``
+    #: is set in alerts.env.
     nudge_family: bool = False
-    nudge_journal: bool = False
+    #: This service's part for the journal (M15.7, Y17): its nudges and the report desk. The
+    #: journal's own switch decides (``SUDARSHAN_JOURNAL`` in OpenAlgo's .env, which a release
+    #: sets; the desk reads it from the journal's /health), so this is on unless alerts.env says
+    #: ``SUDARSHAN_JOURNAL=off``, which takes both away whatever the journal says.
+    journal: bool = True
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> Settings:
@@ -150,7 +160,7 @@ class Settings:
             notice_spools=_paths(get("SUDARSHAN_NOTICE_SPOOLS")) or DEFAULT_SPOOLS,
             deployed_tag_file=Path(get("SUDARSHAN_DEPLOYED_TAG_FILE") or DEPLOYED_TAG_FILE),
             nudge_family=_soft_switch(env, "SUDARSHAN_FAMILY"),
-            nudge_journal=_soft_switch(env, "SUDARSHAN_JOURNAL"),
+            journal=_unless_off(env, "SUDARSHAN_JOURNAL"),
         )
 
 
