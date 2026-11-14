@@ -129,6 +129,18 @@ def test_a_year_upstox_does_not_keep_and_a_member_not_there_are_refused_in_words
     assert (gone.code, gone.message) == ("not_found", NOT_THERE)
 
 
+def test_the_years_dividends_are_in_the_paper_and_no_longer_listed_as_not_computed(ctx):
+    line = {"member_id": 1, "account_id": ctx.upstox_id, "isin": ISIN, "fy": 2026,
+            "ex_day": 20260815, "qty_u": 10 * U, "expected_paise": 10_000, "state": "confirmed",
+            "credited_paise": 9_000, "tds_paise": 1_000, "credited_day": 20260820}  # fmt: skip
+    ctx.store.write(OWNER, lambda tx: tx.insert("dividend_line", line, NOW))
+    pack = call(ctx, "tax_get")
+    (payer,) = pack["dividends"]["by_payer"]
+    assert (payer["isin"], payer["confirmed_paise"], payer["total_paise"]) == (ISIN, 10_000, 10_000)
+    assert pack["dividends"]["total_paise"] == 10_000 and pack["dividends"]["buyback_paise"] == 0
+    assert not [words for words in pack["not_computed"] if words.startswith("Dividends")]
+
+
 # ---- tax_inputs and saving one ------------------------------------------------------------------
 def test_the_inputs_name_each_account_with_its_mode_and_the_default_readings(ctx):
     found = call(ctx, "tax_inputs")

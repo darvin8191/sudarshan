@@ -12,11 +12,18 @@ rule (heads, lots, gains, business income, set-off) is the core's; a rule change
 * **Upstox's history** is read from complete years only (state ``ok``), the run of them that ends
   at the pack's year; a year not complete is said in ``missing``. A purchase from before that run
   comes from Upstox's P&L pairs (``upstox_pair``) unless the owner entered his own for that share.
+  Upstox's bonuses and splits come from the corporate actions the owner accepted (one he has not
+  decided is passed unaccepted, so the core changes nothing and says so).
 * **The ledgers**: a buy or rights issue is a purchase, a sale a sale, a transfer in from outside a
   purchase from before the records at its own date and cost, a bonus a lot at nil cost on its day
-  and a split one action per share and day. A transfer between accounts or to outside is not
-  followed yet and is said in ``missing``. Charges count without STT only where the entry's
+  and a split one action per share, day and account. A transfer between accounts or to outside is
+  not followed yet and is said in ``missing``. Charges count without STT only where the entry's
   breakdown names the STT; otherwise they are left out (the larger gain, never the smaller).
+* **An action changes its own account's lots only** (owner decision 10): Upstox's for the Upstox
+  account, a tab's split for the tab's accounts, so a tab's bonus entry and Upstox's bonus never
+  both reach one account. A lot whose quantity is in later units (a transfer in after a split, an
+  Upstox pair sold after one) is put back into the units of its purchase day for its account's
+  own splits, so the core does not apply one twice.
 """
 
 from __future__ import annotations
@@ -25,10 +32,11 @@ from collections.abc import Mapping
 from dataclasses import replace
 from typing import Any
 
-from sudarshan.tax.model import Action, Carry, OpeningLot, Settings, Trade
+from sudarshan.tax.model import Action, Carry, OpeningLot, Settings, Trade, build
 from sudarshan.tax.pack import PackInputs
 from sudarshan.tax.units import day_text, fy_first, fy_label, fy_last, fy_of, value_paise
 
+from . import corpactions
 from .migrations import tax_mode_of
 
 REPORT_SEGMENTS = ("EQ", "FO", "COM", "CD", "MF")
@@ -118,10 +126,21 @@ def _net_charges(entry: Mapping[str, Any]) -> int | None:
     return charges - stt if isinstance(stt, int) else None
 
 
+def _holders(entries, accounts) -> dict[tuple, set]:
+    """The accounts that count each tab's entries of each asset are on, by (tab, asset): where a
+    tab's split for all its accounts lands."""
+    found: dict[tuple, set] = {}
+    for entry in entries:
+        for account in (entry.get("account_id"), entry.get("to_account_id")):
+            if accounts.get(account) is not None:
+                found.setdefault((entry["tab_id"], entry.get("asset_id")), set()).add(account)
+    return found
+
+
 def ledger_inputs(entries, accounts, assets, aliases, taxpayer: int, seq0: int):
     """Trades, purchases from before the records, actions and words from the custom tabs."""
     trades, opening, actions, missing, arrived = [], [], {}, [], {}
-    unbroken = 0
+    unbroken, holders = 0, _holders(entries, accounts)
     order = sorted(entries, key=lambda e: (e["trade_date"], e["tab_id"], e["seq"], e["id"]))
     for n, entry in enumerate(order, start=seq0):
         asset = assets.get(entry.get("asset_id"))
@@ -129,10 +148,14 @@ def ledger_inputs(entries, accounts, assets, aliases, taxpayer: int, seq0: int):
             continue
         key = instrument_of(asset, aliases.get(asset["id"], []))
         kind, day, account = entry["kind"], entry["trade_date"], entry.get("account_id")
-        if kind == "SPLIT":
-            actions[(key, day, entry["ratio_num"], entry["ratio_den"])] = Action(
-                "SPLIT", key, day, entry["ratio_num"], entry["ratio_den"]
+        if kind == "SPLIT":  # one account, or every account of the tab holding the asset
+            num, den = entry["ratio_num"], entry["ratio_den"]
+            on = (
+                holders.get((entry["tab_id"], asset["id"]), set()) if account is None else {account}
             )
+            for target in sorted(a for a in on if accounts.get(a) is not None):
+                action = Action("SPLIT", key, day, num, den, account=target)
+                actions[(key, day, num, den, target)] = action
             continue
         target = entry.get("to_account_id") if kind == "TRANSFER" else account
         if accounts.get(target) is None and accounts.get(account) is None:
@@ -188,10 +211,11 @@ def ledger_inputs(entries, accounts, assets, aliases, taxpayer: int, seq0: int):
 
 
 def _in_first_units(opening, arrived: Mapping[int, int], actions) -> list[OpeningLot]:
-    """A lot brought in from outside is entered in the units of the day it arrived (``arrived``,
-    by its place in ``opening``), and the core reads an opening lot in the units of the day it
-    was bought: a split between the two days is undone on it, so the core does not apply it
-    twice. A split after its arrival stays, and one that does not divide it leaves it as it is."""
+    """A lot brought in from outside is entered in the units of the day it arrived, and an
+    Upstox pair in those of the day it was sold (``arrived``, by its place in ``opening``); the
+    core reads an opening lot in the units of the day it was bought. So an accepted split of the
+    lot's own account between the two days is undone on it, and the core does not apply it twice.
+    A split after that day stays, and one that does not divide it leaves it as it is."""
     out = []
     for n, lot in enumerate(opening):
         qty, day = lot.qty_u, arrived.get(n)
@@ -199,6 +223,9 @@ def _in_first_units(opening, arrived: Mapping[int, int], actions) -> list[Openin
             between = day is not None and lot.acquired_day < action.ex_day <= day
             if (
                 between
+                and action.kind == "SPLIT"
+                and action.accepted
+                and action.account in (None, lot.account)
                 and action.instrument == lot.instrument
                 and qty * action.den % action.num == 0
             ):
@@ -214,10 +241,18 @@ def _amount(entry: Mapping[str, Any]) -> int:
     return value_paise(entry["qty_u"], entry["price_u"])
 
 
-def pair_lots(pairs, before: int, taxpayer: int, account: int, owned: set[str]):
+def pair_lots(pairs, before: int, taxpayer: int, account: int, owned: set[str], actions=()):
     """Purchases from before ``before`` that Upstox's P&L pairs name for shares sold since, for
-    each share the owner entered none of his own for."""
-    return [
+    each share the owner entered none of his own for, in the units of their purchase day."""
+    kept = [
+        row
+        for row in pairs
+        if row.get("isin")
+        and row["isin"] not in owned
+        and row.get("buy_date")
+        and row["buy_date"] < before
+    ]
+    lots = [
         OpeningLot(
             taxpayer,
             account,
@@ -227,12 +262,10 @@ def pair_lots(pairs, before: int, taxpayer: int, account: int, owned: set[str]):
             row["buy_amount_paise"],
             "upstox_pair",
         )
-        for row in pairs
-        if row.get("isin")
-        and row["isin"] not in owned
-        and row.get("buy_date")
-        and row["buy_date"] < before
+        for row in kept
     ]
+    sold = {n: row["sell_date"] for n, row in enumerate(kept) if row.get("sell_date")}
+    return _in_first_units(lots, sold, actions)
 
 
 def settlements_of(pairs, trades) -> tuple[dict, list]:
@@ -306,8 +339,12 @@ def inputs(tx, taxpayer: int, fy: int, as_of_day: int, as_of_ms: int) -> PackInp
     trades, opening, missing, sources = [], [], [], []
     own = tx.tax_inputs(taxpayer)
     run = _complete_run(records, fy) if upstox and upstox["tax_mode"] == "reports" else []
-    pairs = []
+    pairs, upstox_actions = [], []
     if upstox and upstox["tax_mode"] == "reports":
+        upstox_actions = [
+            replace(build(Action, row), account=upstox["id"])
+            for row in corpactions.accepted_actions(tx)
+        ]
         unread = []
         for segment in REPORT_SEGMENTS:
             record = records.get(("trades", fy, segment))
@@ -367,7 +404,8 @@ def inputs(tx, taxpayer: int, fy: int, as_of_day: int, as_of_ms: int) -> PackInp
     ]
     if upstox and run:
         owned = {r["isin"] for r in own["tax_opening_lot"] if r["account_id"] == upstox["id"]}
-        opening += pair_lots(pairs, fy_first(run[0]), taxpayer, upstox["id"], owned)
+        before = fy_first(run[0])
+        opening += pair_lots(pairs, before, taxpayer, upstox["id"], owned, upstox_actions)
     entries = [e for e in tx.rows("activity") if e["trade_date"] <= fy_last(fy)]
     more, bonus, actions, words = ledger_inputs(
         entries, ledger, assets, aliases, taxpayer, len(trades)
@@ -392,7 +430,7 @@ def inputs(tx, taxpayer: int, fy: int, as_of_day: int, as_of_ms: int) -> PackInp
         as_of_ms=as_of_ms,
         trades=tuple(trades + closing),
         opening=tuple(opening),
-        actions=tuple(actions),
+        actions=tuple(upstox_actions + actions),
         fmv={r["isin"]: r["fmv_u"] for r in tx.rows("tax_fmv")},
         carries=tuple(
             Carry(taxpayer, r["loss_fy"], r["bucket"], r["paise"], r["source"])

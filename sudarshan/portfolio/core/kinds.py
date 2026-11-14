@@ -557,7 +557,7 @@ OPS = (
         "GET",
         "/corporate-actions",
         "read",
-        query=(("scope", "str"), ("from", "day"), ("to", "day")),
+        query=(("scope", "str"), ("from", "day"), ("to", "day"), ("isin", "str")),
     ),
     OpSpec("ca_decide", "POST", "/corporate-actions/<id>", "write"),
     OpSpec("dividends", "GET", "/dividends", "read", query=(("fy", "int"), ("member", "int"))),

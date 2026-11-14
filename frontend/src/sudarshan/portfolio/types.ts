@@ -563,6 +563,7 @@ export const OPS: readonly OpSpec[] = [
       ['scope', 'str'],
       ['from', 'day'],
       ['to', 'day'],
+      ['isin', 'str'],
     ],
   },
   { name: 'ca_decide', method: 'POST', route: '/corporate-actions/<id>', cls: 'write' },
@@ -1957,16 +1958,22 @@ export interface BusinessIncome {
   assumed_zero_count: number
 }
 
+/** One company's dividends of the year to the taxpayer's accounts that count (M7.29). */
 export interface TaxPayer {
   isin: string
   name: string | null
+  /** What every line of the year was expected to pay. */
   expected_paise: Paise
+  /** What the confirmed lines paid: the credit and the tax deducted from it. */
   confirmed_paise: Paise
+  /** What the year counts from this payer: a confirmed line as paid, one not received as
+   * nothing, any other at its expected amount. */
+  total_paise: Paise
   tds_likely: boolean
 }
 
 export interface TaxDividends {
-  /** From release 2 (M7.29); empty before. */
+  /** Every payer of the year; a buyback's receipt taxed as a dividend is beside them. */
   by_payer: TaxPayer[]
   buyback_paise: Paise
   total_paise: Paise

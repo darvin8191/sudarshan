@@ -29,7 +29,7 @@ from sudarshan.tax.model import Carry
 from sudarshan.tax.pack import build_pack
 from sudarshan.tax.units import day_text, fy_label, rupees
 
-from .. import reports, tax_adapter
+from .. import dividends, reports, tax_adapter
 from ..core.days import day_of_instant, financial_year, is_day
 from ..core.kinds import (
     CARRY_BUCKETS,
@@ -206,8 +206,19 @@ def _chain(years: list, reading: bool = False) -> dict:
     return pack
 
 
+def _with_dividends(store, pack: dict) -> dict:
+    """The year's dividends of the taxpayer's accounts that count (``dividends.for_pack``),
+    with the buyback's receipt the core worked out beside them."""
+    buyback = pack["dividends"]["buyback_paise"]
+    pack["dividends"] = store.read(
+        OWNER, lambda tx: dividends.for_pack(tx, pack["fy"], pack["taxpayer"], buyback)
+    )
+    return pack
+
+
 def _paper(store, member: int | None, fy: int, today: int, now: int, reading: bool) -> dict:
-    return _chain(store.read(OWNER, lambda tx: _gather(tx, member, fy, today, now)), reading)
+    years = store.read(OWNER, lambda tx: _gather(tx, member, fy, today, now))
+    return _with_dividends(store, _chain(years, reading))
 
 
 def _reading(ctx, fy: int) -> bool:
@@ -514,13 +525,21 @@ def _losses(pack: dict, names: dict, accounts: dict) -> list[list[Any]]:
 
 
 def _dividends(pack: dict, names: dict, accounts: dict) -> list[list[Any]]:
-    dividends = pack["dividends"]
-    rows = [["Payer ISIN", "Name", "Expected", "Confirmed", "TDS likely"]]
+    block = pack["dividends"]
+    rows = [["Payer ISIN", "Name", "Expected", "Confirmed", "Counted for the year", "TDS likely"]]
     rows += [[p["isin"], p.get("name") or names.get(p["isin"], ""),
               _money(p.get("expected_paise")), _money(p.get("confirmed_paise")),
-              "Yes" if p.get("tds_likely") else "No"] for p in dividends["by_payer"]]  # fmt: skip
-    return rows + [[], ["Buyback receipts taxed as a dividend", _money(dividends["buyback_paise"])],
-                   ["Total", _money(dividends["total_paise"])]]  # fmt: skip
+              _money(p.get("total_paise")), "Yes" if p.get("tds_likely") else "No"]
+             for p in block["by_payer"]]  # fmt: skip
+    rows += [[], ["Buyback receipts taxed as a dividend", _money(block["buyback_paise"])],
+             ["Total", _money(block["total_paise"])]]  # fmt: skip
+    if block.get("tds_expected_paise"):
+        rows.append(
+            ["Tax the companies likely deducted, about", _money(block["tds_expected_paise"])]
+        )
+    if block.get("unconfirmed_count"):
+        rows.append(["Lines not confirmed yet, counted as expected", block["unconfirmed_count"]])
+    return rows
 
 
 SCHEDULES = {"capital_gains": _gains, "business": _business, "losses": _losses,
@@ -547,7 +566,7 @@ def _paper_file(store, member, fy: int, schedule: str, today: int, now: int) -> 
         return years, _labels(tx, years[-1].taxpayer)
 
     years, (who, names, accounts) = store.read(OWNER, run)
-    pack = _chain(years)
+    pack = _with_dividends(store, _chain(years))
     title = f"{HEADER} · Tax working paper · {pack['fy_label']} · {who}"
     if pack["running"]:
         title += f" · year to date, as of {day_text(pack['as_of_day'])}"

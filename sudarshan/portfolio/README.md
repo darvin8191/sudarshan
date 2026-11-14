@@ -203,7 +203,7 @@ two types, and a test holds this table, that map and `kinds.py` to each other.
 | `tax_input_delete` | DELETE | `/tax/inputs/<id>` | write | | `TaxInputDeleteArgs` | `Deleted` | P7 `tax` |
 | `tax_csv` | GET | `/tax/export.csv` | read | `fy:int, member:int, schedule:str` | `TaxCsvArgs` | `ExportFile` | P7 `tax`, download |
 | `report_csv` | GET | `/reports/export.csv` | read | `kind:str, fy:int, segment:str` | `ReportCsvArgs` | `ExportFile` | P7 `tax`, download: Upstox's rows as read |
-| `ca_list` | GET | `/corporate-actions` | read | `scope:str, from:day, to:day` | `CaListArgs` | `CaList` | P7 `insights` |
+| `ca_list` | GET | `/corporate-actions` | read | `scope:str, from:day, to:day, isin:str` | `CaListArgs` | `CaList` | P7 `insights` |
 | `ca_decide` | POST | `/corporate-actions/<id>` | write | | `CaDecideArgs` | `CaDecisionRow` | P7 `insights`: nothing changes a lot without it |
 | `dividends` | GET | `/dividends` | read | `fy:int, member:int` | `DividendsArgs` | `DividendsReport` | P7 `insights` |
 | `dividend_set` | POST | `/dividends/<id>` | write | | `DividendSetArgs` | `DividendLine` | P7 `insights` |
@@ -418,6 +418,15 @@ and a loss the owner entered for a year wins over the computed one (shown beside
 counts by its `tax_mode`; a ledger entry on the Upstox account is left out, so nothing counts
 twice. The view starts no read of Upstox: what is not read in full is a line of
 `inputs.missing`, and a read in flight for the year puts `tax_reading` first.
+
+A bonus or a split changes the lots of its own account only (owner decision 10; the core's
+`Action.account`): the corporate actions the owner accepted for Upstox (`corpactions`) reach the
+Upstox account, one not decided yet is passed unaccepted (the core changes nothing and says so),
+and a tab's SPLIT entry reaches that tab's accounts (all of the tab's accounts holding the share
+when the entry names none). An Upstox pair lot sold after an accepted split, like a transfer in
+after a tab's split, is put back into the units of its purchase day, so no split is applied twice.
+The paper's `dividends` block is the year's dividend lines of the accounts that count
+(`dividends.for_pack`), with the core's buyback receipt beside them and in the total.
 
 `tax_input_set` keeps one input of a closed kind (`TAX_INPUT_KINDS`): a 31 Jan 2018 price (one
 per share), a purchase from before the records (it wins over Upstox's pair for that share), a loss
