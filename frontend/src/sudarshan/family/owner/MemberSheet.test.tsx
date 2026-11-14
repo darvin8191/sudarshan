@@ -333,7 +333,11 @@ describe('editing a member', () => {
     const pnl = screen.getByRole('switch', { name: 'P&L' })
     expect(pnl).toBeDisabled()
     expect(pnl).toHaveAttribute('aria-checked', 'false')
-    expect(screen.getByText('Live P&L is worked out from quantities')).toBeInTheDocument()
+    // Review L7 (v0.12.0): "Live" is the trading-mode chip's word; this line said "Live P&L".
+    expect(
+      screen.getByText('P&L that moves with prices is worked out from quantities')
+    ).toBeInTheDocument()
+    expect(document.body.textContent).not.toMatch(/\bLive\b/)
     await userEvent.click(screen.getByRole('button', { name: 'Save changes' }))
     expect(api.memberUpdate).toHaveBeenCalledWith({
       id: 1,

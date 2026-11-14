@@ -261,7 +261,14 @@ export function FamilyLayout() {
             </div>
           </nav>
 
-          <BottomSheet open={more} onOpenChange={setMore} title="More">
+          {/* Review L8 (v0.12.0): the sheet's default line is "Details and actions", and this
+              view has no action. */}
+          <BottomSheet
+            open={more}
+            onOpenChange={setMore}
+            title="More"
+            hiddenDescription="More screens of the family view"
+          >
             <ul className="flex flex-col gap-1">
               {rest.map((item) => (
                 <li key={item.href}>

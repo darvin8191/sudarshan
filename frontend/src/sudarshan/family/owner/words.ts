@@ -46,7 +46,8 @@ export function privacyLine(privacy: Privacy): string {
 }
 
 /** Cross-design Y24: P&L is worked out from quantities, so P&L is offered only with them. */
-export const PNL_NEEDS_QTY = 'Live P&L is worked out from quantities'
+// Review L7 (v0.12.0): it said "Live P&L"; "Live" is the trading-mode chip's word and no other's.
+export const PNL_NEEDS_QTY = 'P&L that moves with prices is worked out from quantities'
 
 /**
  * Review H1: beside a quantity, any rupee figure gives the P&L away, so hiding P&L hides them all

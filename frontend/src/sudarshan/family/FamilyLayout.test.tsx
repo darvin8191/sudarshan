@@ -289,6 +289,9 @@ describe('the viewer bottom bar', () => {
         .getAllByRole('link')
         .map((link) => link.textContent)
     ).toEqual(['Orders', 'Trades', 'Portfolio', 'Settings'])
+    // Review L8 (v0.12.0): the sheet said "Details and actions" on a view that has no action.
+    expect(sheet.textContent).not.toMatch(/actions/i)
+    expect(sheet).toHaveAccessibleDescription('More screens of the family view')
   })
 
   it('leaves Orders and Trades out, not greyed, when the mask hides orders', async () => {
