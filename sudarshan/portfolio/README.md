@@ -427,6 +427,17 @@ at, 0 before the first save). Every field is checked and refused in a sentence n
 row is made once per `request_id`; an existing one changes from its version. With `dry_run` it
 writes nothing and answers `effect`, the year's headline figures that would change, as sentences.
 
+`tax_csv` writes one schedule of that paper (`TAX_SCHEDULES`: every sale with its cost, expenses,
+gain, term, rate and status, then the year's totals; business income by bucket and kind, with
+charges, net, the turnover method, flags and what differs from Upstox; each set-off, carry and
+lapse; dividends) under a first line naming सुदर्शन · SUDARSHAN, the year and the taxpayer, and
+the working-paper sentence. `report_csv` writes Upstox's trades or P&L pairs of one year and
+segment as the reader kept them (with the year's charges under the pairs), `_partial` in the name
+when the read was not complete; a report not read yet is refused with a sentence. In both,
+numbers are plain with their signs, text a spreadsheet would run as a formula gets an apostrophe
+(`csvutil.guard`), and the file names are ASCII (`SUDARSHAN_Tax_FY2026-27_member1_losses.csv`,
+`SUDARSHAN_Upstox_pnl_FY2026-27_FO.csv`).
+
 A family member sees nothing of this phase: none of its ops is a family op (a test holds
 `FAMILY_OPS` to that), and the mask table (version 3) hides its fields defensively anyway, its
 rupee figures in `cost` too. A closed-world test walks every key of every answer a viewer can be

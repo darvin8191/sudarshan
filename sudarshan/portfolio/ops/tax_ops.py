@@ -10,10 +10,16 @@ The view starts no read of Upstox: it works on what the reader keeps and says wh
 31 Jan 2018 prices, purchases from before the records, losses brought forward, days of delivery,
 buyback tenders and the readings of the open rules. A dry run of a save says what it would change
 in the year's figures and writes nothing. Every op waits for ``SUDARSHAN_TAX`` (``ops.switched``).
+
+``tax_csv`` writes one schedule of the paper for the CA, under the working-paper sentence;
+``report_csv`` writes Upstox's report rows as the reader kept them. A number is written plain and
+any text that a spreadsheet would read as a formula gets an apostrophe (``csvutil.guard``).
 """
 
 from __future__ import annotations
 
+import csv
+import io
 import re
 from collections.abc import Callable
 from dataclasses import replace
@@ -21,7 +27,7 @@ from typing import Any
 
 from sudarshan.tax.model import Carry
 from sudarshan.tax.pack import build_pack
-from sudarshan.tax.units import fy_label, rupees
+from sudarshan.tax.units import day_text, fy_label, rupees
 
 from .. import reports, tax_adapter
 from ..core.days import day_of_instant, financial_year, is_day
@@ -29,12 +35,16 @@ from ..core.kinds import (
     CARRY_BUCKETS,
     EXEMPT_ORDERS,
     LT_BOUNDARIES,
+    REPORT_KINDS,
+    REPORT_SEGMENTS,
     REPORT_YEARS,
     TAX_INPUT_KINDS,
+    TAX_SCHEDULES,
     TURNOVER_METHODS,
     WORDS,
 )
 from ..errors import ApiError
+from ..imports.csvutil import guard
 from ..store import Invalid, NotFound, Refused, VersionConflict
 from . import op
 from .common import OWNER, answer, maybe_whole, need, whole
@@ -367,3 +377,239 @@ async def tax_input_delete(ctx, message):
         raise _bad("kind")
     row_id, version = whole(message, "id"), whole(message, "version")
     return await answer(lambda: store.write(OWNER, lambda tx: _remove(tx, kind, row_id, version)))
+
+
+# ---- the downloads -----------------------------------------------------------------------------
+HEADER = "सुदर्शन · SUDARSHAN"
+NOT_READ = (
+    "Upstox's report for this year and segment is not read yet. Read it on the Upstox tab, then "
+    "download it."
+)
+PLAIN = re.compile(r"-?[0-9]+(?:\.[0-9]+)?")
+TERMS = {"short": "Short-term", "long": "Long-term"}
+STATUS = {"ok": "Counted", "needs_fmv": "Needs the 31 Jan 2018 price",
+          "unknown_cost": "No purchase record", "exempt_buyback": "Buyback, exempt"}  # fmt: skip
+BUYBACK = {"exempt": "Exempt", "capital_gain": "Capital gain",
+           "dividend_and_loss": "Taxed as a dividend; the cost a capital loss"}  # fmt: skip
+BUCKETS = {"stcl": "Short-term capital loss", "ltcl": "Long-term capital loss",
+           "business": "Business loss", "speculative": "Speculative loss"}  # fmt: skip
+AGAINST = {"short": "Short-term gain", "long": "Long-term gain", "business": "F&O income",
+           "speculative": "Intraday income"}  # fmt: skip
+BLOCKS = (("non_speculative", "F&O and other derivatives"),
+          ("speculative", "Intraday shares (speculative)"))  # fmt: skip
+CHARGES = (("total", "Total"), ("brokerage", "Brokerage"), ("gst", "GST"), ("stt", "STT"),
+           ("stamp_duty", "Stamp duty"), ("transaction", "Exchange transaction"),
+           ("clearing", "Clearing"), ("ipft", "IPFT"), ("others", "Others"),
+           ("sebi_turnover", "SEBI turnover fee"),
+           ("demat_transaction", "Demat transaction"))  # fmt: skip
+
+
+def _cell(value: Any) -> str:
+    text = "" if value is None else str(value)
+    return text if PLAIN.fullmatch(text) else guard(text)
+
+
+def _csv(rows: list[list[Any]]) -> str:
+    out = io.StringIO(newline="")
+    writer = csv.writer(out, lineterminator="\r\n")
+    writer.writerows([_cell(value) for value in row] for row in rows)
+    return out.getvalue()
+
+
+def _num(value: int | None, decimals: int, least: int = 0) -> str:
+    """A whole number of 10^-decimals as plain text, its sign kept: -105025, 2 is "-1050.25"."""
+    if value is None:
+        return ""
+    whole, part = divmod(abs(value), 10**decimals)
+    digits = f"{part:0{decimals}d}".rstrip("0").ljust(least, "0")
+    return ("-" if value < 0 else "") + (f"{whole}.{digits}" if digits else str(whole))
+
+
+def _money(paise: int | None) -> str:
+    return _num(paise, 2, 2)
+
+
+def _iso(day: int | None) -> str:
+    return "" if day is None else f"{day // 10000:04d}-{day // 100 % 100:02d}-{day % 100:02d}"
+
+
+def _gains(pack: dict, names: dict, accounts: dict) -> list[list[Any]]:
+    capital = pack["capital_gains"]
+    rows = [["Sale day", "ISIN", "Name", "Account", "Bought", "Quantity", "Received", "Sale value",
+             "Cost", "Expenses", "Gain", "Term", "Rate %", "Status", "31 Jan 2018 price used",
+             "Expenses shared from the year's charges", "Buyback"]]  # fmt: skip
+    every = (*capital["schedule"], *capital["needs_fmv"], *capital["unknown_cost"],
+             *capital["exempt_buybacks"])  # fmt: skip
+    for g in sorted(every, key=lambda g: (g["sale_day"], g["isin"], g["acquired_day"] or 0)):
+        rows.append([
+            _iso(g["sale_day"]), g["isin"], names.get(g["isin"], ""),
+            accounts.get(g["account"], ""), _iso(g["acquired_day"]), _num(g["qty_u"], 6),
+            _money(g["receipt_paise"]), _money(g["sale_paise"]), _money(g["cost_paise"]),
+            _money(g["expenses_paise"]), _money(g["gain_paise"]), TERMS.get(g["term"], ""),
+            _num(g["rate_bp"], 2), STATUS[g["status"]], "Yes" if g["fmv_used"] else "No",
+            "Yes" if g["allocated"] else "No", BUYBACK.get(g["buyback"], ""),
+        ])  # fmt: skip
+    tax = capital["indicative_tax"]
+    return rows + [[]] + [[label, _money(paise)] for label, paise in (
+        ("Short-term gains", capital["st_gain_paise"]),
+        ("Short-term losses", capital["st_loss_paise"]),
+        ("Long-term gains", capital["lt_gain_paise"]),
+        ("Long-term losses", capital["lt_loss_paise"]),
+        ("Exemption used", capital["exemption"]["used_paise"]),
+        ("Taxable short-term gain", capital["taxable"]["st_paise"]),
+        ("Taxable long-term gain", capital["taxable"]["lt_paise"]),
+        ("Tax at the special rates", tax["tax_paise"]),
+        (f"Cess ({tax['cess_label']})", tax["cess_paise"]),
+    )]  # fmt: skip
+
+
+def _business(pack: dict, names: dict, accounts: dict) -> list[list[Any]]:
+    business = pack["business"]
+    rows = [["Bucket", "Line", "Count", "Amount", "Turnover"]]
+    for key, label in BLOCKS:
+        block = business[key]
+        for kind, row in sorted(block["by_kind"].items()):
+            rows.append([label, kind.capitalize(), row["count"], _money(row["gross_paise"]),
+                         _money(row["turnover_paise"])])  # fmt: skip
+        rows += [[label, "Gross", "", _money(block["gross_paise"]),
+                  _money(block["turnover_paise"])],
+                 [label, "Charges", "", _money(block["charges_paise"]), ""],
+                 [label, "Net", "", _money(block["net_paise"]), ""]]  # fmt: skip
+    rows += [[], ["Turnover method", business["turnover_method_label"]],
+             ["Turnover", _money(business["turnover_paise"])]]  # fmt: skip
+    rows += [["Check with your CA", flag] for flag in business["flags"]]
+    if business["assumed_zero_count"]:
+        rows.append(["Options taken as expired worthless", business["assumed_zero_count"]])
+    for position in business["unknown_settlement"]:
+        contract = position[2]
+        rows.append(["No settlement price, left out", f"{contract[1]} {_iso(contract[2])}",
+                     position[3], _num(position[5], 6)])  # fmt: skip
+    if business["differs"]:
+        rows += [[], ["Scrip", "Worked out here", "Upstox's report"]]
+        rows += [[d["scrip"], _money(d["own_paise"]), _money(d["upstox_paise"])]
+                 for d in business["differs"]]  # fmt: skip
+    return rows
+
+
+def _losses(pack: dict, names: dict, accounts: dict) -> list[list[Any]]:
+    rows = [["Head", "Line", "Kind of loss", "Year of loss", "Against", "Usable to", "Amount",
+             "Source"]]  # fmt: skip
+    words = []
+    for head, block in (("Capital gains", pack["capital_gains"]), ("Business", pack["business"])):
+        for step in block["set_off"]:
+            against = AGAINST[step["against"]]
+            if step.get("rate_bp"):
+                against += f" at {_num(step['rate_bp'], 2)}%"
+            line = "Set off this year" if step["step"] == "same_year" else "Brought forward"
+            rows.append([head, line, BUCKETS[step["bucket"]], fy_label(step["loss_fy"]), against,
+                         "", _money(step["paise"]), ""])  # fmt: skip
+        for key, line in (("carried", "Carried forward"), ("lapsed", "Lapsed"),
+                          ("own_figures", "Worked out here, beside your own figure")):  # fmt: skip
+            for r in block[key]:
+                source = "You entered it" if r["source"] == "owner" else "Worked out here"
+                rows.append([head, line, BUCKETS[r["bucket"]], fy_label(r["loss_fy"]), "",
+                             fy_label(r["last_fy"]), _money(r["paise"]), source])  # fmt: skip
+        words += block["set_off_words"]
+    return rows + ([[], *[[w] for w in words]] if words else [])
+
+
+def _dividends(pack: dict, names: dict, accounts: dict) -> list[list[Any]]:
+    dividends = pack["dividends"]
+    rows = [["Payer ISIN", "Name", "Expected", "Confirmed", "TDS likely"]]
+    rows += [[p["isin"], p.get("name") or names.get(p["isin"], ""),
+              _money(p.get("expected_paise")), _money(p.get("confirmed_paise")),
+              "Yes" if p.get("tds_likely") else "No"] for p in dividends["by_payer"]]  # fmt: skip
+    return rows + [[], ["Buyback receipts taxed as a dividend", _money(dividends["buyback_paise"])],
+                   ["Total", _money(dividends["total_paise"])]]  # fmt: skip
+
+
+SCHEDULES = {"capital_gains": _gains, "business": _business, "losses": _losses,
+             "dividends": _dividends}  # fmt: skip
+
+
+def _labels(tx, taxpayer: int) -> tuple[str, dict, dict]:
+    """The taxpayer's name, a name for each ISIN (the holding's own, else Upstox's scrip name)
+    and each account's name."""
+    names = {
+        r["isin"]: r["scrip_name"]
+        for record in tx.report_list("trades")
+        for r in (record.get("payload") or {}).get("rows") or []
+        if r.get("isin") and r.get("scrip_name")
+    }
+    names.update({a["isin"]: a["name"] for a in tx.rows("asset") if a.get("isin")})
+    member = tx.get("member", taxpayer) or {}
+    return member.get("name") or "", names, {a["id"]: a["name"] for a in tx.rows("account")}
+
+
+def _paper_file(store, member, fy: int, schedule: str, today: int, now: int) -> dict:
+    def run(tx):
+        years = _gather(tx, member, fy, today, now)
+        return years, _labels(tx, years[-1].taxpayer)
+
+    years, (who, names, accounts) = store.read(OWNER, run)
+    pack = _chain(years)
+    title = f"{HEADER} · Tax working paper · {pack['fy_label']} · {who}"
+    if pack["running"]:
+        title += f" · year to date, as of {day_text(pack['as_of_day'])}"
+    rows = [[title], [pack["note"]], [], *SCHEDULES[schedule](pack, names, accounts)]
+    label = pack["fy_label"].replace(" ", "")
+    name = f"SUDARSHAN_Tax_{label}_member{pack['taxpayer']}_{schedule}.csv"
+    return {"filename": name, "text": "\ufeff" + _csv(rows)}
+
+
+def _report_file(store, kind: str, fy: int, segment: str) -> dict:
+    record = store.read(OWNER, lambda tx: tx.report_get(kind, fy, segment))
+    if record is None or not record.get("payload"):
+        raise NotFound(NOT_READ)
+    payload = record["payload"]
+    if kind == "trades":
+        rows = [["Trade date", "Trade id", "Exchange", "Segment", "Side", "Scrip", "Symbol", "ISIN",
+                 "Option type", "Strike", "Expiry", "Quantity", "Price", "Amount"]]  # fmt: skip
+        rows += [[_iso(r["trade_date"]), r["trade_id"], r["exchange"], r["segment"],
+                  r["transaction_type"], r["scrip_name"], r.get("symbol"), r.get("isin"),
+                  r.get("option_type"), _num(r.get("strike_price_u"), 4, 2), _iso(r.get("expiry")),
+                  _num(r["qty_u"], 6), _num(r["price_u"], 4, 2), _money(r["amount_paise"])]
+                 for r in payload.get("rows") or []]  # fmt: skip
+    else:
+        rows = [["Scrip", "ISIN", "Type", "Quantity", "Buy date", "Buy average", "Buy amount",
+                 "Sell date", "Sell average", "Sell amount", "Profit or loss"]]  # fmt: skip
+        rows += [[r["scrip_name"], r.get("isin"), r["trade_type"], _num(r["qty_u"], 6),
+                  _iso(r.get("buy_date")), _num(r["buy_average_u"], 4, 2),
+                  _money(r["buy_amount_paise"]), _iso(r.get("sell_date")),
+                  _num(r["sell_average_u"], 4, 2), _money(r["sell_amount_paise"]),
+                  _money(r["pnl_paise"])] for r in payload.get("rows") or []]  # fmt: skip
+        charges = payload.get("charges")
+        if charges:
+            rows += [[], ["Charges for the year", ""]]
+            rows += [[label, _money(charges.get(f"{key}_paise")) or "not given"]
+                     for key, label in CHARGES]  # fmt: skip
+    partial = "" if record.get("state") == "ok" else "_partial"
+    label = reports.fy_label(fy).replace(" ", "")
+    return {"filename": f"SUDARSHAN_Upstox_{kind}_{label}_{segment}{partial}.csv",
+            "text": _csv(rows)}  # fmt: skip
+
+
+@op("tax_csv")
+async def tax_csv(ctx, message):
+    store, today = need(ctx), _today(ctx)
+    fy, member, now = _year(message, today), maybe_whole(message, "member"), ctx.clock()
+    schedule = message.get("schedule")
+    if schedule not in TAX_SCHEDULES:
+        raise ApiError(400, "bad_request", "Choose a schedule to download.", "schedule")
+    return await answer(lambda: _paper_file(store, member, fy, schedule, today, now))
+
+
+@op("report_csv")
+async def report_csv(ctx, message):
+    store, today = need(ctx), _today(ctx)
+    kind, fy = message.get("kind"), message.get("fy")
+    segment = str(message.get("segment") or "").upper()
+    if kind not in REPORT_KINDS:
+        raise _bad("kind")
+    if fy.__class__ is not int or not reports.year_ok(fy, today):
+        raise ApiError(400, "bad_request", WORDS["tax_years"], "fy")
+    if segment not in REPORT_SEGMENTS:
+        raise ApiError(400, "bad_request", reports.WORDS["segment"], "segment")
+    if kind == "pnl" and segment not in reports.PNL_SEGMENTS:
+        raise ApiError(400, "bad_request", reports.WORDS["no_pnl_mf"], "segment")
+    return await answer(lambda: _report_file(store, kind, fy, segment))
