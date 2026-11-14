@@ -132,7 +132,8 @@ def test_the_files_reach_nothing_but_openalgo_on_this_machine():
 def test_nginx_itself_accepts_the_two_files(tmp_path):
     """``nginx -t`` on a configuration of the test's own that includes both files as the README
     says: the zone line at http level, the snippet inside one server block. Nothing is started
-    and no other configuration is read."""
+    and no other configuration is read. The site listens on a socket file in the test's folder:
+    ``nginx -t`` opens what it listens on, and a port would need rights the test may not have."""
     conf = tmp_path / "nginx.conf"
     conf.write_text(
         f"pid {tmp_path}/nginx.pid;\nerror_log stderr;\nevents {{}}\n"
@@ -140,7 +141,7 @@ def test_nginx_itself_accepts_the_two_files(tmp_path):
         f"  proxy_temp_path {tmp_path}/proxy;\n  fastcgi_temp_path {tmp_path}/fastcgi;\n"
         f"  uwsgi_temp_path {tmp_path}/uwsgi;\n  scgi_temp_path {tmp_path}/scgi;\n"
         f"  include {NGINX}/sudarshan-mcp-zone.conf;\n"
-        "  server {\n    listen 127.0.0.1:1;\n"
+        f"  server {{\n    listen unix:{tmp_path}/site.sock;\n"
         f"    include {NGINX}/sudarshan-mcp.conf;\n"
         "    location / { proxy_pass http://127.0.0.1:5000; }\n  }\n}\n"
     )
