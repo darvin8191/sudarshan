@@ -116,6 +116,8 @@ public_shell  /oiprofile                             react.react_oiprofile
 public_shell  /oirange                               react.react_oirange
 public_shell  /oitracker                             react.react_oitracker
 public_shell  /optionchain                           react.react_optionchain
+public_shell  /options                              react.react_options
+public_shell  /options/<exchange>/<underlying>      react.react_options_chain
 public_shell  /orderbook                             react.react_orderbook
 public_shell  /platforms                             react.react_platforms
 public_shell  /playground                            react.react_playground

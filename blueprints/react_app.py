@@ -839,6 +839,17 @@ def react_phone_chart_symbol(exchange, symbol):
     return serve_react_app()
 
 
+# SUDARSHAN M11.1: the option chain on the phone (its API is /sudarshan/options/api/*).
+@react_bp.route("/options", strict_slashes=False)
+def react_options():
+    return serve_react_app()
+
+
+@react_bp.route("/options/<exchange>/<underlying>", strict_slashes=False)
+def react_options_chain(exchange, underlying):
+    return serve_react_app()
+
+
 # SUDARSHAN M8.2: the phone-first watchlist (its API is /watchlist/api/*, blueprints/watchlist.py)
 @react_bp.route("/watchlist", strict_slashes=False)
 def react_watchlist():
