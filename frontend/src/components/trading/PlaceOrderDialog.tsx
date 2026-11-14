@@ -3,7 +3,7 @@
 // Uses WebSocket for real-time data with REST API fallback (like Holdings/Positions)
 
 import { X } from 'lucide-react'
-import { useCallback, useEffect, useId, useState } from 'react'
+import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import { tradingApi } from '@/api/trading'
 import { Button } from '@/components/ui/button'
 import {
@@ -122,19 +122,28 @@ export function lotsFor(quantity: number | undefined, lotSize: number): number {
   return Math.max(1, Math.round(quantity / lotSize))
 }
 
+// SUDARSHAN (v0.13.0 verify N2): the decimals a tick needs, never fewer than two. A currency
+// contract's tick is 0.0025; cut to two decimals its price is off the tick again.
+export function tickDecimals(tickSize: number): number {
+  if (!(tickSize > 0)) return 2
+  const fraction = tickSize.toFixed(8).replace(/0+$/, '').split('.')[1] ?? ''
+  return Math.max(2, fraction.length)
+}
+
 // Tick size validation helpers
-function roundToTick(price: number, tickSize: number): number {
+export function roundToTick(price: number, tickSize: number): number {
   if (tickSize <= 0) return price
   // Use toFixed to avoid floating point precision issues (e.g., 140.95000000000002)
-  return Number((Math.round(price / tickSize) * tickSize).toFixed(2))
+  return Number((Math.round(price / tickSize) * tickSize).toFixed(tickDecimals(tickSize)))
 }
 
 function adjustPrice(price: number, tickSize: number, direction: 'up' | 'down'): number {
   const rounded = roundToTick(price, tickSize)
+  const decimals = tickDecimals(tickSize)
   if (direction === 'up') {
-    return Number((rounded + tickSize).toFixed(2))
+    return Number((rounded + tickSize).toFixed(decimals))
   }
-  return Math.max(0, Number((rounded - tickSize).toFixed(2)))
+  return Math.max(0, Number((rounded - tickSize).toFixed(decimals)))
 }
 
 // Check if exchange is F&O/Commodity/Currency (uses NRML/MIS)
@@ -164,6 +173,10 @@ const UNITS = new Intl.NumberFormat('en-IN')
  * The order as one line, shown beside the Place button (v0.13.0 review H1): on a phone the body
  * scrolls, so the price can be off screen when the button is pressed. The line never is.
  * "SELL 1 SBIN · LIMIT 803.00 · CNC"; a stop adds its trigger; lots are said with the units.
+ *
+ * v0.13.0 verify N2: the prices are the ones the order carries, on the tick and with the tick's
+ * decimals (803.127 typed reads 803.15, as it is sent), and the exchange is named when it is not
+ * the instrument's usual one: BSE for a share, or any pick other than the one the ticket opened on.
  */
 export function orderLine(order: {
   action: 'BUY' | 'SELL'
@@ -174,19 +187,30 @@ export function orderLine(order: {
   price: number
   trigger: number
   product: string
+  tickSize?: number
+  exchange?: string
+  /** The exchange the ticket opened on. */
+  usualExchange?: string
 }): { side: string; rest: string } {
   const type = PRICE_TYPES.find((entry) => entry.value === order.priceType)?.label ?? ''
   const lots =
     order.lots === undefined ? '' : ` (${order.lots} ${order.lots === 1 ? 'lot' : 'lots'})`
-  const price =
-    order.priceType === 'LIMIT' || order.priceType === 'SL' ? ` ${order.price.toFixed(2)}` : ''
+  const tick = order.tickSize ?? 0.05
+  const said = (value: number) => roundToTick(value, tick).toFixed(tickDecimals(tick))
+  const price = order.priceType === 'LIMIT' || order.priceType === 'SL' ? ` ${said(order.price)}` : ''
   const trigger =
-    order.priceType === 'SL' || order.priceType === 'SL-M'
-      ? `, trigger ${order.trigger.toFixed(2)}`
-      : ''
+    order.priceType === 'SL' || order.priceType === 'SL-M' ? `, trigger ${said(order.trigger)}` : ''
+  const elsewhere =
+    order.exchange !== undefined &&
+    order.exchange !== '' &&
+    (order.exchange === 'BSE' ||
+      (order.usualExchange !== undefined &&
+        order.usualExchange !== '' &&
+        order.exchange !== order.usualExchange))
+  const venue = elsewhere ? ` on ${order.exchange}` : ''
   return {
     side: order.action,
-    rest: `${UNITS.format(order.quantity)}${lots} ${order.symbol} · ${type.toUpperCase()}${price}${trigger} · ${order.product}`,
+    rest: `${UNITS.format(order.quantity)}${lots} ${order.symbol}${venue} · ${type.toUpperCase()}${price}${trigger} · ${order.product}`,
   }
 }
 
@@ -226,6 +250,9 @@ export function PlaceOrderDialog({
   const [formPrice, setFormPrice] = useState(0)
   const [formTriggerPrice, setFormTriggerPrice] = useState(0)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  // SUDARSHAN (v0.13.0 verify N1): the guard against a second Place. State is read as the last
+  // render left it, so presses in one task all saw "not submitting" and each sent an order.
+  const sending = useRef(false)
   const [isDepthExpanded, setIsDepthExpanded] = useState(false)
   const [quantityMode, setQuantityMode] = useState<'lots' | 'shares'>('lots')
   const [lotMultiplier, setLotMultiplier] = useState(1)
@@ -366,6 +393,9 @@ export function PlaceOrderDialog({
       return
     }
 
+    // SUDARSHAN (v0.13.0 verify N1): claimed before anything awaits; one order however it is pressed.
+    if (sending.current) return
+    sending.current = true
     setIsSubmitting(true)
     try {
       // Price types are now directly mapped to API values
@@ -379,8 +409,10 @@ export function PlaceOrderDialog({
         quantity: formQuantity,
         pricetype: apiPriceType,
         product: formProduct,
-        ...(needsPrice && { price: formPrice }),
-        ...(needsTrigger && { trigger_price: formTriggerPrice }),
+        // SUDARSHAN (v0.13.0 verify N2): on the tick, as the box's blur leaves it and as the line
+        // beside Place says it. A press that never blurred the box sent the price as typed.
+        ...(needsPrice && { price: roundToTick(formPrice, tickSize) }),
+        ...(needsTrigger && { trigger_price: roundToTick(formTriggerPrice, tickSize) }),
       }
 
       // A caller's own route (the chart's trade feed, which checks the mode
@@ -420,6 +452,7 @@ export function PlaceOrderDialog({
       showToast.error(errorMsg, 'orders')
       onError?.(errorMsg)
     } finally {
+      sending.current = false
       setIsSubmitting(false)
     }
   }
@@ -460,6 +493,9 @@ export function PlaceOrderDialog({
     price: formPrice,
     trigger: formTriggerPrice,
     product: formProduct,
+    tickSize,
+    exchange: exchange_,
+    usualExchange: exchange,
   })
 
   return (
