@@ -319,7 +319,14 @@ def test_the_shipped_list_on_a_fresh_install(tmp_path):
     assert after["SUDARSHAN_PORTFOLIO"] == "on"  # M7: the portfolio is switched on by the release
     assert after["SUDARSHAN_WATCHLISTS_V2"] == "off"  # M8.4: Watchlists v2 ships off
     assert after["SUDARSHAN_JOURNAL"] == "on"  # M14, M15: the journal is switched on by the release
+    assert after["OPENALGO_MCP_READ_ONLY"] == "1"  # M17.9: the assistant's three settings
+    assert after["MCP_OAUTH_WRITE_SCOPE_ENABLED"] == "False"
+    assert after["MCP_OAUTH_REQUIRE_APPROVAL"] == "True"
+    assert after["MCP_HTTP_ENABLED"] == "False"  # and remote MCP itself stays off
     managed = {
+        "OPENALGO_MCP_READ_ONLY",
+        "MCP_OAUTH_WRITE_SCOPE_ENABLED",
+        "MCP_OAUTH_REQUIRE_APPROVAL",
         "SUDARSHAN_PORTFOLIO",
         "SUDARSHAN_WATCHLISTS_V2",
         "SUDARSHAN_JOURNAL",

@@ -2461,6 +2461,10 @@ def api_mcp_kill_switch():
         from database.oauth_db import revoke_all_tokens
 
         revoked = revoke_all_tokens("admin_kill_switch")
+        # SUDARSHAN M17.9: and the access already handed out ends now, not in 15 minutes.
+        from sudarshan.assistant import cutoff as sudarshan_cutoff
+
+        sudarshan_cutoff.end_all_access("admin_kill_switch", revoke=False)
         logger.warning(f"[MCP kill-switch] revoked {revoked} refresh tokens via admin UI")
         return jsonify({"status": "success", "tokens_revoked": revoked})
     except Exception as e:

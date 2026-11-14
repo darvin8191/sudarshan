@@ -781,10 +781,12 @@ def _mcp_enabled() -> bool:
 def _revoke_mcp() -> tuple[bool, str, dict]:
     if not _mcp_enabled():
         return True, words.KS_MCP_OFF, {}
-    from database.oauth_db import revoke_all_tokens
+    # M17.9: the tokens already handed out end now too, not after their 15 minutes.
+    from sudarshan.assistant import cutoff
 
-    count = revoke_all_tokens("sudarshan_kill_switch")
-    return True, words.ks_mcp_revoked(count), {"revoked": count}
+    done = cutoff.end_all_access("sudarshan_kill_switch")
+    ok = done["cutoff"] and done["revoked"] is not None
+    return ok, words.ks_mcp_ended(done["cutoff"], done["revoked"]), done
 
 
 def _engage_agent() -> tuple[bool, str, dict]:

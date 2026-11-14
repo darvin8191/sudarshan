@@ -22,7 +22,7 @@ from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
@@ -325,6 +325,33 @@ class RiskStore:
             session.commit()
         self._cache.invalidate("state")  # after the commit, never before
         return self.state()
+
+    # -- the assistant's cutoff (M17.9) --------------------------------------------------------
+
+    def mcp_valid_after(self) -> int | None:
+        """The moment (milliseconds since 1970) at or before which no AI access token is good, or
+        None. Read from the file each time: sudarshan/assistant/cutoff.py keeps its own cache."""
+        with self._session() as session:
+            return session.execute(
+                select(StateRow.mcp_valid_after).where(StateRow.id == 1)
+            ).scalar_one_or_none()
+
+    def set_mcp_valid_after(self, moment_ms: int) -> int:
+        """Move the cutoff to ``moment_ms``, never back; returns the moment now stored."""
+        moment_ms = int(moment_ms)
+        later = func.max(func.coalesce(StateRow.mcp_valid_after, 0), moment_ms)
+        with self._session() as session:
+            done = session.execute(
+                update(StateRow).where(StateRow.id == 1).values(mcp_valid_after=later)
+            )
+            if done.rowcount == 0:
+                session.add(StateRow(id=1, mcp_valid_after=moment_ms))
+            session.commit()
+            return int(
+                session.execute(
+                    select(StateRow.mcp_valid_after).where(StateRow.id == 1)
+                ).scalar_one()
+            )
 
     # -- daily locks --------------------------------------------------------------------------
 
