@@ -221,6 +221,7 @@ WORD_KEYS = (
     "password_changed",
     "signed_out_everywhere",
     "store_failed",
+    "viewer_unavailable",
 )
 
 PRIMITIVES = ("string", "int", "number", "bool", "json")

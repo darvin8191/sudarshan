@@ -356,7 +356,14 @@ def test_switched_off_every_viewer_request_is_told_and_nothing_is_opened(tmp_pat
     run(scenario())
 
 
+VIEWER_OFF = "The family view is not available right now. Ask the account owner."
+UPGRADE = {"Upgrade": "websocket", "Connection": "Upgrade",
+           "Sec-WebSocket-Key": "dGhlIHNhbXBsZSBub25jZQ==", "Sec-WebSocket-Version": "13"}  # fmt: skip
+
+
 def test_a_store_a_newer_release_wrote_keeps_the_view_off_in_the_owners_words(tmp_path):
+    """The owner reads why on his page and in /health; a family phone reads one sentence it can act
+    on, never "install that release again" (review L4)."""
     made = FamilyStore(tmp_path / "state" / "family.db")
     made.close()
     close(None)
@@ -367,8 +374,9 @@ def test_a_store_a_newer_release_wrote_keeps_the_view_off_in_the_owners_words(tm
         async with running(service):
             port = service.listener.port
             status, _, answer = await ask(port, "GET", "/family/api/me")
-            assert (status, answer["code"]) == (503, "store_newer")
-            assert "newer release" in answer["message"]
+            assert (status, answer["code"], answer["message"]) == (503, "off", VIEWER_OFF)
+            status, _, answer = await ask(port, "GET", "/family/ws", headers=UPGRADE)
+            assert (status, answer["message"]) == (503, VIEWER_OFF)
             off = await ask(
                 port,
                 "POST",
@@ -380,6 +388,27 @@ def test_a_store_a_newer_release_wrote_keeps_the_view_off_in_the_owners_words(tm
             )
             health = (await ask(port, "GET", "/health"))[2]["family_state"]
             assert "newer release" in health["reason"] and health["store"] == "closed"
+
+    run(scenario())
+
+
+def test_a_store_that_will_not_open_tells_a_phone_to_ask_the_owner(tmp_path):
+    """Review L4: "check that the server has free disk space" is the owner's sentence."""
+    (tmp_path / "state").write_text("a file where the store's folder should be")
+
+    async def scenario():
+        service = service_for(tmp_path)
+        async with running(service):
+            port = service.listener.port
+            for path in ("/family/api/me", "/family/api/login"):
+                method = "GET" if path.endswith("me") else "POST"
+                status, _, answer = await ask(port, method, path, body=b"{}" * (method == "POST"))
+                assert (status, answer["code"], answer["message"]) == (503, "off", VIEWER_OFF)
+            status, _, answer = await ask(port, "GET", "/family/ws", headers=UPGRADE)
+            assert (status, answer["message"]) == (503, VIEWER_OFF)
+            off = (await ask(port, "POST", "/v1/admin/state",
+                             body=sealed(service.keys.admin, "state")))[2]["data"]  # fmt: skip
+            assert off["enabled"] is False and "free disk space" in off["message"]
 
     run(scenario())
 

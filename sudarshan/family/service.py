@@ -7,6 +7,8 @@ one listener on 127.0.0.1:5585 and the jobs.
   up so that the owner's page learns the switch from it.
 * **A store a newer release wrote**, or one that will not open, keeps the view off the same way with
   its own sentence (a restart loop would only repeat it, and a newer file must not be written to).
+  That sentence is the owner's, on his Family page and in /health; a family phone is told "The
+  family view is not available right now. Ask the account owner." (review L4).
 * **Port taken** (cross-design P23): an ERROR in plain words, the jobs keep running, and the port is
   tried again every minute; never another port (X2). Exit status 2 is for a setting or key it
   cannot use, which a restart would not mend.
@@ -193,13 +195,20 @@ class FamilyService(Router):
             return await self.doors.nudge(request)
         if door == "viewer":
             if not self.enabled:
-                raise self.off_error or FamilyError("off")
+                raise self.viewer_off()
             return await self.viewer.http(request)
         raise FamilyError("not_found")  # /family/ws without an upgrade
 
+    def viewer_off(self) -> FamilyError:
+        """What a family phone is told while the view is off: the switch in its own words, and
+        for a store that cannot be used one sentence a member can act on, never the owner's."""
+        if self.off_error is None or self.off_error.code == "off":
+            return self.off_error or FamilyError("off")
+        return FamilyError("off", "viewer_unavailable")
+
     async def upgrade(self, request: Request, reader, writer) -> Response | None:
         if not self.enabled:
-            return Response.refused(self.off_error or FamilyError("off"))
+            return Response.refused(self.viewer_off())
         if self.registry.full():
             return Response.refused(FamilyError("busy"))
         try:
