@@ -29,7 +29,8 @@ def test_known_path_in_react_app():
 def test_entry_in_the_profile_menu():
     source = (REPO / "frontend" / "src" / "config" / "navigation.ts").read_text(encoding="utf-8")
     menu = source.split("export const profileMenuItems: NavItem[] = [", 1)[1].split("\n]\n", 1)[0]
-    assert "{ href: '/autologin', label: 'Auto login', icon: KeyRound }" in menu
+    # Under System in the menu sheet (M1.11: every entry names its group).
+    assert "{ href: '/autologin', label: 'Auto login', icon: KeyRound, group: 'System' }" in menu
 
 
 def test_blueprint_registered_once_in_app_py():

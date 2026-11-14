@@ -1,5 +1,5 @@
 import { Download, Loader2, Pencil, RefreshCw, X } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react'
 import { tradingApi } from '@/api/trading'
 import {
   AlertDialog,
@@ -36,8 +36,24 @@ import {
 import { cn, makeFormatCurrency, sanitizeCSV } from '@/lib/utils'
 import { useAuthStore } from '@/stores/authStore'
 import { onModeChange } from '@/stores/themeStore'
+// SUDARSHAN B1 (M5.6): what became of a cancel, so the phone's GTT cards hold theirs.
+import {
+  answerBody,
+  answeredHeld,
+  heldText,
+  refusalReason,
+  thrownOutcome,
+  withoutCode,
+} from '@/sudarshan/books/sendOutcome'
+import type { SendOutcome } from '@/sudarshan/books/sent'
+import { useOpenGuard } from '@/sudarshan/watchlist/openGuard'
 import type { GttOrder } from '@/types/trading'
 import { showToast } from '@/utils/toast'
+
+// SUDARSHAN B1 (M5.6, M6.1): the phone's GTT cards, loaded only where they are shown.
+const GttCards = lazy(() =>
+  import('@/sudarshan/books/cards/GttCards').then((module) => ({ default: module.GttCards }))
+)
 
 interface ModifyForm {
   trigger_type: 'SINGLE' | 'OCO'
@@ -91,9 +107,15 @@ interface GttTabProps {
    * on the page will act. The order book page passes nothing.
    */
   refuse?: () => boolean
+  /**
+   * SUDARSHAN B1: a card per GTT, with a sheet each, in place of the action row
+   * and the table (the order book page on a phone). Modify and Cancel are this
+   * tab's own, and the modify dialog is the same.
+   */
+  cards?: boolean
 }
 
-export default function GttTab({ refuse }: GttTabProps = {}) {
+export default function GttTab({ refuse, cards = false }: GttTabProps = {}) {
   const { apiKey, user } = useAuthStore()
   const formatCurrency = useMemo(() => makeFormatCurrency(user?.broker), [user?.broker])
 
@@ -155,8 +177,11 @@ export default function GttTab({ refuse }: GttTabProps = {}) {
     return () => unsubscribe()
   }, [fetchGtts])
 
-  const handleCancel = async (triggerId: string) => {
-    if (refuse?.()) return
+  // SUDARSHAN B1 (M5.6): returns what became of the cancel, so the phone holds its
+  // Cancel (src/sudarshan/books/sent.ts). One that may have reached the broker is
+  // "not confirmed", never "failed"; Upstox's refusal shows without its error code.
+  const handleCancel = async (triggerId: string): Promise<SendOutcome> => {
+    if (refuse?.()) return 'refused'
     setCancellingId(triggerId)
     try {
       const response = await tradingApi.cancelGttOrder(triggerId)
@@ -164,15 +189,27 @@ export default function GttTab({ refuse }: GttTabProps = {}) {
         showToast.success(`GTT cancelled: ${triggerId}`, 'orders')
         // Give the broker a moment to reflect the change.
         setTimeout(() => fetchGtts(true), 800)
-      } else {
-        showToast.error(response.message || 'Failed to cancel GTT', 'orders')
+        return 'sent'
       }
+      const held = answeredHeld(response)
+      if (held) {
+        showToast.warning(heldText('gttCancel', held, response), 'orders')
+        setTimeout(() => fetchGtts(true), 800)
+        return held
+      }
+      showToast.error(withoutCode(response.message) || 'Failed to cancel GTT', 'orders')
     } catch (e) {
-      const axiosError = e as { response?: { data?: { message?: string } } }
-      showToast.error(axiosError.response?.data?.message || 'Failed to cancel GTT', 'orders')
+      const outcome = thrownOutcome(e)
+      if (outcome !== 'refused') {
+        showToast.warning(heldText('gttCancel', outcome, answerBody(e)), 'orders')
+        setTimeout(() => fetchGtts(true), 800)
+        return outcome
+      }
+      showToast.error(withoutCode(refusalReason(e)) || 'Failed to cancel GTT', 'orders')
     } finally {
       setCancellingId(null)
     }
+    return 'refused'
   }
 
   const openModify = (gtt: GttOrder) => {
@@ -328,23 +365,49 @@ export default function GttTab({ refuse }: GttTabProps = {}) {
     return s === 'active' || s === 'disabled'
   }
 
+  // SUDARSHAN B1: the modify dialog takes no tap for half a second after it opens (M6.9).
+  const modifyGuard = useOpenGuard(modifyOpen)
+
   return (
     <div className="space-y-4">
       {/* Action row */}
-      <div className="flex items-center justify-end gap-2 flex-wrap">
-        <Button variant="outline" size="sm" onClick={() => fetchGtts(true)} disabled={isRefreshing}>
-          <RefreshCw className={cn('h-4 w-4 mr-2', isRefreshing && 'animate-spin')} />
-          Refresh
-        </Button>
-        <Button variant="outline" size="sm" onClick={exportToCSV} disabled={gtts.length === 0}>
-          <Download className="h-4 w-4 mr-2" />
-          Export
-        </Button>
-      </div>
+      {!cards && (
+        <div className="flex items-center justify-end gap-2 flex-wrap">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => fetchGtts(true)}
+            disabled={isRefreshing}
+          >
+            <RefreshCw className={cn('h-4 w-4 mr-2', isRefreshing && 'animate-spin')} />
+            Refresh
+          </Button>
+          <Button variant="outline" size="sm" onClick={exportToCSV} disabled={gtts.length === 0}>
+            <Download className="h-4 w-4 mr-2" />
+            Export
+          </Button>
+        </div>
+      )}
 
-      <Card>
-        <CardContent className="p-0">
-          {isLoading ? (
+      {/* SUDARSHAN B1: on a phone the GTT cards stand in for the table, and the card around
+          it draws no box (`contents`), so they sit on the page as every phone book's do. */}
+      <Card className={cn(cards && 'contents')}>
+        <CardContent className={cn('p-0', cards && 'contents')}>
+          {cards ? (
+            <Suspense fallback={null}>
+              <GttCards
+                gtts={gtts}
+                loading={isLoading}
+                refreshing={isRefreshing}
+                error={error}
+                onRefresh={fetchGtts}
+                onModify={openModify}
+                onCancel={handleCancel}
+                modifyOpen={modifyOpen}
+                onModifyOpenChange={setModifyOpen}
+              />
+            </Suspense>
+          ) : isLoading ? (
             <div className="flex items-center justify-center py-12">
               <Loader2 className="h-8 w-8 animate-spin" />
             </div>
@@ -499,7 +562,11 @@ export default function GttTab({ refuse }: GttTabProps = {}) {
 
       {/* Modify GTT Dialog */}
       <Dialog open={modifyOpen} onOpenChange={setModifyOpen}>
-        <DialogContent className="sm:max-w-[600px]">
+        <DialogContent
+          {...modifyGuard.handlers}
+          data-settling={modifyGuard.settling || undefined}
+          className="sm:max-w-[600px]"
+        >
           <DialogHeader>
             <DialogTitle className="flex items-center gap-3">
               <span>Modify GTT</span>
@@ -515,14 +582,15 @@ export default function GttTab({ refuse }: GttTabProps = {}) {
           {modifyingGtt && (
             <>
               {/* Symbol + trigger ID */}
-              <div className="rounded-lg border p-4 flex items-center justify-between">
-                <div>
-                  <div className="text-lg font-semibold">{modifyingGtt.symbol}</div>
+              {/* SUDARSHAN B1: long names wrap, so at 360px the dialog keeps Save in view. */}
+              <div className="rounded-lg border p-4 flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-lg font-semibold break-all">{modifyingGtt.symbol}</div>
                   <div className="text-sm text-muted-foreground">{modifyingGtt.exchange}</div>
                 </div>
-                <div className="text-right">
+                <div className="min-w-0 text-right">
                   <div className="text-xs text-muted-foreground">Trigger ID</div>
-                  <div className="font-mono text-sm">{modifyingGtt.trigger_id}</div>
+                  <div className="font-mono text-sm break-all">{modifyingGtt.trigger_id}</div>
                 </div>
               </div>
 

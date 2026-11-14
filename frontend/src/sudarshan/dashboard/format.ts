@@ -62,3 +62,20 @@ export function formatPrice(value: number, decimals = 2): string {
 export function formatPercent(value: number, decimals = 2): string {
   return `${sign(value, decimals, true)}${formatAmount(value, decimals)}%`
 }
+
+const CONTRACT =
+  /^(.+?)(\d{2})(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\d{2}(?:(\d+(?:\.\d+)?)(CE|PE)|FUT)$/
+
+/**
+ * A derivative as a broker's app names it (SUDARSHAN D4): NIFTY17NOV2625900CE is "NIFTY 25,900 CE"
+ * expiring "17 Nov", NIFTY24NOV26FUT "NIFTY FUT". Anything else keeps its symbol and no expiry.
+ */
+export function contractWords(symbol: string): { name: string; expiry: string | null } {
+  const found = CONTRACT.exec(symbol.toUpperCase())
+  if (!found) return { name: symbol, expiry: null }
+  const [, base, day, month, strike, right] = found
+  const expiry = `${Number(day)} ${month[0]}${month.slice(1).toLowerCase()}`
+  if (strike === undefined) return { name: `${base} FUT`, expiry }
+  const decimals = strike.includes('.') ? strike.split('.')[1].length : 0
+  return { name: `${base} ${formatAmount(Number(strike), decimals)} ${right}`, expiry }
+}

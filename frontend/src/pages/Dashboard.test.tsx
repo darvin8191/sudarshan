@@ -75,6 +75,7 @@ const portfolioCalls = () => portfolio.calls
 import { useAuthStore } from '@/stores/authStore'
 import { RESYNC_MS } from '@/sudarshan/dashboard/live'
 import { setPortfolioCard } from '@/sudarshan/dashboard/portfolioCard'
+import { serverFacts } from '@/test/dayFacts'
 import { feed } from '@/test/marketDataHarness'
 import { render, screen, userEvent, waitFor } from '@/test/test-utils'
 import Dashboard from './Dashboard'
@@ -105,6 +106,8 @@ type Answer = { status: number; body: unknown }
 
 /** How long the funds call takes to answer, in fake-clock milliseconds. */
 let latency = 0
+/** What the master contract's state answers: ready unless a test says otherwise. */
+let contractStatus = 'success'
 
 /** Every request in the order it was made: the funds, the book and the contract state. */
 function server(...answers: Answer[]) {
@@ -128,7 +131,14 @@ function server(...answers: Answer[]) {
         return {
           ok: true,
           status: 200,
-          json: async () => ({ status: 'success', total_symbols: 118432 }),
+          json: async () => ({ status: contractStatus, total_symbols: 118432 }),
+        }
+      }
+      if (url === '/sudarshan/session/today') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ status: 'success', data: serverFacts('2026-11-17') }),
         }
       }
       return { ok: false, status: 404, json: async () => ({}) }
@@ -150,6 +160,7 @@ async function pass(ms: number) {
 beforeEach(() => {
   marketOpen = false
   latency = 0
+  contractStatus = 'success'
   feed.reset()
   getPositions.mockReset()
   useAuthStore.setState({ apiKey: 'key' })
@@ -169,11 +180,33 @@ describe('Dashboard', () => {
     expect(await screen.findByTestId('pnl-total')).toHaveTextContent('+₹2,450.75')
     expect(screen.getByRole('heading', { level: 1, name: 'Dashboard' })).toBeInTheDocument()
     expect(screen.getByText('₹48,320.50')).toBeInTheDocument()
-    expect(await screen.findByRole('link', { name: /Master contract ready/ })).toHaveAttribute(
-      'href',
-      '/master-contract'
-    )
+    // SUDARSHAN D2: the status row; a ready master contract needs no chip there.
+    expect(await screen.findByTestId('status-row')).toHaveAttribute('data-ready', 'true')
+    expect(screen.queryByRole('link', { name: /master contract/i })).toBeNull()
     expect(screen.getByRole('region', { name: 'Indices' })).toBeInTheDocument()
+  })
+
+  it('puts the Screener, Shortcuts and System in place of Quick Access, the contract under System (D7)', async () => {
+    server(OK)
+    const user = userEvent.setup()
+    render(<Dashboard />)
+    await screen.findByTestId('pnl-total')
+    expect(screen.queryByRole('heading', { name: 'Quick Access' })).toBeNull()
+    expect(screen.getByRole('link', { name: 'Chart' })).toHaveAttribute('href', '/chart')
+    await user.click(screen.getByRole('button', { name: 'System' }))
+    expect(
+      await screen.findByRole('link', { name: /Master contract\s*Ready · 1,18,432 symbols/ })
+    ).toHaveAttribute('href', '/master-contract')
+    expect(screen.queryByRole('link', { name: /Documentation/ })).toBeNull()
+  })
+
+  it('shows the master contract in the status row while it downloads (M3.2)', async () => {
+    contractStatus = 'downloading'
+    server(OK)
+    render(<Dashboard />)
+    expect(
+      await screen.findByRole('link', { name: 'Downloading master contract' })
+    ).toHaveAttribute('href', '/master-contract')
   })
 
   it('shows the Portfolio card only when its switch is on, beside the Holdings card (M3.11)', async () => {
@@ -196,7 +229,9 @@ describe('Dashboard', () => {
     const calls = server(OK)
     render(<Dashboard />)
 
-    expect(await screen.findByText('1 open position')).toBeInTheDocument()
+    expect(
+      await screen.findByRole('link', { name: /NIFTY 25,900 CE,\s*28 Oct · \+65 · NRML,\s*Buy/ })
+    ).toBeVisible()
     const book = calls.indexOf('positionbook')
     expect(book).toBeGreaterThanOrEqual(0)
     expect(book).toBeLessThan(calls.indexOf('/auth/dashboard-data'))
@@ -295,17 +330,26 @@ describe('Dashboard', () => {
     await pass(RESYNC_MS)
     expect(screen.getByTestId('pnl-total')).toHaveTextContent('+₹2,450.75')
     expect(screen.queryByRole('alert')).toBeNull()
-    expect(screen.getByRole('status')).toHaveTextContent('Could not refresh just now.')
+    expect(screen.getByRole('status')).toHaveTextContent('Could not read the broker · last read')
   })
 
-  it('sends an expired broker session to the reconnect screen, not to login', async () => {
+  it('answers an expired broker session with Reconnect in place of the prices, not with login (D3)', async () => {
     server({ status: 401, body: { status: 'error', code: 'BROKER_SESSION_EXPIRED' } })
     render(<Dashboard />)
 
-    expect(await screen.findByRole('link', { name: 'Reconnect Broker' })).toHaveAttribute(
+    expect(await screen.findByRole('link', { name: 'Reconnect' })).toHaveAttribute(
       'href',
       '/broker'
     )
+    expect(screen.getByRole('link', { name: 'Upstox login needed' })).toHaveAttribute(
+      'href',
+      '/broker'
+    )
+    // No dead end: the page and its title stay; only the prices and the P&L give way.
+    expect(screen.getByRole('heading', { level: 1, name: 'Dashboard' })).toBeVisible()
+    expect(screen.queryByTestId('pnl-total')).toBeNull()
+    expect(screen.queryByRole('region', { name: 'Indices' })).toBeNull()
+    expect(screen.getByRole('heading', { name: 'Shortcuts' })).toBeVisible()
   })
 
   it('says what failed and offers to try again when the funds cannot be loaded', async () => {
@@ -336,19 +380,40 @@ describe('Dashboard access to prices', () => {
     expect(screen.queryByText(/API key/)).toBeNull()
   })
 
-  it('Upstox not logged in today: the reconnect page, before any funds read', async () => {
-    server(OK)
+  it('Upstox not logged in today: Reconnect in place of the prices, the rest of the page kept', async () => {
+    const calls = server(OK)
     useAuthStore.setState({ apiKey: 'key', sessionChecked: true, brokerSessionExpired: true })
     render(<Dashboard />)
-    expect(await screen.findByRole('link', { name: /Reconnect/ })).toBeInTheDocument()
+    expect(await screen.findByRole('link', { name: 'Reconnect' })).toHaveAttribute(
+      'href',
+      '/broker'
+    )
     expect(screen.queryByText(/API key/)).toBeNull()
+    expect(screen.queryByTestId('pnl-total')).toBeNull()
+    expect(screen.getByTestId('status-row')).toBeVisible()
+    expect(calls).not.toContain('positionbook') // no key to read the book with
   })
 
-  it('no API key: the existing message and link', async () => {
+  it('logged in again elsewhere: the prices and the P&L come back by themselves', async () => {
+    server(OK)
+    useAuthStore.setState({ apiKey: null, sessionChecked: true, brokerSessionExpired: true })
+    render(<Dashboard />)
+    expect(await screen.findByRole('link', { name: 'Reconnect' })).toBeVisible()
+
+    act(() => useAuthStore.setState({ apiKey: 'key', brokerSessionExpired: false }))
+    expect(await screen.findByTestId('pnl-total')).toHaveTextContent('+₹2,450.75')
+    expect(screen.queryByRole('link', { name: 'Reconnect' })).toBeNull()
+  })
+
+  it('no API key: a card to make one in place of the prices', async () => {
     server(OK)
     useAuthStore.setState({ apiKey: null, sessionChecked: true, brokerSessionExpired: false })
     render(<Dashboard />)
-    expect(await screen.findByText('Prices and search need an API key.')).toBeInTheDocument()
+    expect(await screen.findByRole('link', { name: 'Create an API key' })).toHaveAttribute(
+      'href',
+      '/apikey'
+    )
+    expect(screen.getByRole('link', { name: 'No API key' })).toHaveAttribute('href', '/apikey')
   })
 
   it('ready: no notice', async () => {
