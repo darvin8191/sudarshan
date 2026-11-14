@@ -1085,12 +1085,20 @@ sudo -u sudarshan .venv/bin/python -m sudarshan.ops.watch --check
 ```
 
 - The line `certificate site` says `set` and the address it asks by, or `unknown`: then no
-  certificate is checked until the line above is added.
+  certificate is checked until the line above is added. The System page then reads "Not being
+  checked" beside Security certificate, with the reason.
 - The line `certificate` says `fine` with the hours left. `unread cause=no_name` means the
   address is not known; `unread cause=other_site` means nginx answered that address with another
   site's certificate (the address is wrong, or the app's site is not set up in nginx under it).
+  After two days of either it reads `warning` with the same cause.
   (With a number for an address instead of a name, nginx cannot be asked by it and gives its
   first site's certificate: it is judged only when it is issued for that number.)
+
+A certificate that is not checked cannot warn you before it runs out. So when the check has
+judged no certificate for two days in a row, for either of those two reasons, you are told once
+on Telegram, with the line to add to `/etc/sudarshan/watch.env`; and once more, "is being
+checked again", when it is set right. A look that merely failed (nginx not answering for a
+moment) does not count towards the two days and does not end them.
 
 Tests: `sudarshan/ops/tests/test_ops_nginx.py`.
 

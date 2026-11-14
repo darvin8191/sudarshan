@@ -62,6 +62,9 @@ DISK_WARN_GB, DISK_FAIL_GB = 15.0, 5.0
 INODES_WARN_PCT, INODES_FAIL_PCT = 10.0, 3.0
 MEM_LOW_MB, MEM_LOW_RUNS = 1024, 3
 CERT_FAIL_HOURS = 48.0
+#: How long the certificate may go unjudged for a cause the owner can set right (no name for the
+#: site, or another site's certificate given) before he is told: two days in a row.
+CERT_UNJUDGED_TELL_S = 2 * 24 * 60 * 60
 BACKUP_LATE_HOURS = 30.0  # the backup job's own "overdue" line (backup.OVERDUE_S)
 DRILL_LATE_DAYS = 100  # one drill a month by its timer; a quarter without one is told
 HISTORIFY_WARN_GB = 3.0
@@ -191,12 +194,28 @@ CERT_CAUSES = ("no_name", "other_site")
 def certificate(readings: Mapping, memory: Mapping) -> Result:
     """SUDARSHAN's own certificate, as nginx serves it: failing under 48 hours left (it should
     renew before that). A reading that names why none was judged (no name for the site is known,
-    or nginx gave another site's) is unread with that cause, never another site's hours."""
+    or nginx gave another site's) is unread with that cause, never another site's hours.
+
+    Unread tells nobody, so a certificate that is never judged would run out unannounced. When it
+    has gone unjudged for one of those causes for ``CERT_UNJUDGED_TELL_S`` in a row, the check is
+    a warning with the cause: told once, like any change of level, and once more when a
+    certificate is judged again. A reading that merely failed (nginx not answering) neither
+    starts nor ends the count; a judged certificate ends it."""
     hours = readings.get("cert_hours_left")
+    since = memory.get("unjudged_since")
+    since = since if isinstance(since, int) and not isinstance(since, bool) else None
     if isinstance(hours, str) and hours in CERT_CAUSES:
-        return Result("certificate", UNREAD, {"cause": hours})
+        now = readings.get("now")
+        now = int(now) if isinstance(now, int | float) and not isinstance(now, bool) else None
+        if since is None or (now is not None and now < since):
+            since = now
+        keep = {} if since is None else {"unjudged_since": since}
+        told = since is not None and now is not None and now - since >= CERT_UNJUDGED_TELL_S
+        return Result("certificate", WARNING if told else UNREAD, {"cause": hours}, keep)
     if isinstance(hours, bool) or not isinstance(hours, int | float):
-        return Result("certificate", UNREAD)
+        return Result(
+            "certificate", UNREAD, keep={} if since is None else {"unjudged_since": since}
+        )
     level = FAILING if hours < CERT_FAIL_HOURS else FINE
     return Result("certificate", level, {"hours": str(max(0, int(hours)))})
 
