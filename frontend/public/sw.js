@@ -12,8 +12,17 @@
  *   navigations   network first. The offline page is shown only when the network itself fails,
  *                 never for a 4xx or 5xx answer: the server's own words are the right ones.
  *   /assets/*     cache first (content-hashed, so a hit is never stale).
- *   /images/*     cache first, except .webmanifest files, which are network first.
+ *   /images/*     stale-while-revalidate: the kept copy at once, a fresh one fetched behind it,
+ *                 so a changed icon or offline script reaches the phone; .webmanifest files are
+ *                 network first.
  *   anything else passes through.
+ *
+ * The cache does not grow with every release (review L5). On activate, and whenever a navigation
+ * brings a shell that names an asset the cache lacks (a new release: this file itself rarely
+ * changes, so activate alone would rarely run), every /assets/ entry the current shell does not
+ * name is deleted and the precached files are fetched again. A page that names no asset is not a
+ * shell, and nothing is deleted on its word. A chunk the shell loads later is fetched again when
+ * it is next needed (the browser's own cache usually still holds it).
  */
 const CACHE = 'sudarshan-shell-v1'
 const OFFLINE = '/offline.html'
@@ -25,6 +34,8 @@ const PRECACHE = [
 ]
 const NEVER = ['/family/api', '/api', '/auth', '/sudarshan', '/socket.io', '/ws']
 const HOME = '/family/'
+/** How long activate waits for the shell it trims by (fetches wait while it activates). */
+const SHELL_WAIT_MS = 3000
 const SUBSCRIBE = '/family/api/push/subscriptions'
 const CSRF_COOKIE = '__Host-sudarshan_family_csrf'
 
@@ -44,13 +55,80 @@ function neverCached(path) {
   return under(path, NEVER)
 }
 
-async function networkFirstOffline(request) {
+/** The /assets/ files a shell names: its script, its preloads and its styles. */
+function assetsOf(html) {
+  const named = new Set()
+  for (const found of html.matchAll(/(?:src|href)="(\/assets\/[^"?#]+)"/g)) named.add(found[1])
+  return named
+}
+
+/** Delete every /assets/ entry the shell does not name; how many went. */
+async function trimAssets(named) {
+  if (named.size === 0) return 0
+  const cache = await caches.open(CACHE)
+  let gone = 0
+  for (const request of await cache.keys()) {
+    const path = pathOf(request)
+    if (path !== null && under(path, ['/assets']) && !named.has(path)) {
+      await cache.delete(request)
+      gone += 1
+    }
+  }
+  return gone
+}
+
+/** Fetch the offline page, the icons and the offline script again; a failure keeps the old copy. */
+async function refreshPrecache() {
+  const cache = await caches.open(CACHE)
+  await Promise.all(
+    [OFFLINE, ...PRECACHE].map(async (path) => {
+      try {
+        const fresh = await fetch(path, { cache: 'no-cache' })
+        if (fresh.ok) await cache.put(path, fresh)
+      } catch (_failure) {
+        // kept as it was; tried again at the next release
+      }
+    })
+  )
+}
+
+/** A shell that names an asset the cache lacks is a new release: trim, and refresh the rest. */
+async function settleRelease(shell) {
+  const named = assetsOf(await shell.text())
+  if (named.size === 0) return
+  const cache = await caches.open(CACHE)
+  const kept = new Set((await cache.keys()).map(pathOf))
+  if ([...named].every((path) => kept.has(path))) return // this release, opened again
+  await trimAssets(named)
+  await refreshPrecache()
+}
+
+async function networkFirstOffline(event) {
   try {
-    return await fetch(request)
+    const fresh = await fetch(event.request)
+    const type = fresh.headers.get('content-type') || ''
+    if (fresh.ok && type.includes('text/html')) {
+      event.waitUntil(settleRelease(fresh.clone()).catch(() => undefined))
+    }
+    return fresh
   } catch (_failure) {
     const cache = await caches.open(CACHE)
     const page = await cache.match(OFFLINE)
     return page || Response.error()
+  }
+}
+
+/** The current shell, for activate: a short wait, and null rather than an error. */
+async function currentShell() {
+  const stop = new AbortController()
+  const timer = setTimeout(() => stop.abort(), SHELL_WAIT_MS)
+  try {
+    const shell = await fetch(HOME, { cache: 'no-cache', signal: stop.signal })
+    return shell.ok ? await shell.text() : null
+  } catch (_failure) {
+    return null
+  } finally {
+    clearTimeout(timer)
   }
 }
 
@@ -76,6 +154,21 @@ async function cacheFirst(request) {
   return fresh
 }
 
+/** The kept copy at once, and a fresh one fetched behind it for the next time. */
+async function staleWhileRevalidate(event) {
+  const { request } = event
+  const cache = await caches.open(CACHE)
+  const kept = await cache.match(request)
+  const refresh = (async () => {
+    const fresh = await fetch(request)
+    if (fresh.ok && fresh.type === 'basic') await cache.put(request, fresh.clone())
+    return fresh
+  })()
+  if (!kept) return refresh
+  event.waitUntil(refresh.catch(() => undefined))
+  return kept
+}
+
 self.addEventListener('install', (event) => {
   event.waitUntil(
     (async () => {
@@ -93,6 +186,8 @@ self.addEventListener('activate', (event) => {
     (async () => {
       const names = await caches.keys()
       await Promise.all(names.filter((name) => name !== CACHE).map((name) => caches.delete(name)))
+      const shell = await currentShell()
+      if (shell !== null) await trimAssets(assetsOf(shell))
       await self.clients.claim()
     })()
   )
@@ -104,15 +199,19 @@ self.addEventListener('fetch', (event) => {
   const path = pathOf(request)
   if (path === null || neverCached(path)) return
   if (request.mode === 'navigate') {
-    event.respondWith(networkFirstOffline(request))
+    event.respondWith(networkFirstOffline(event))
     return
   }
   if (path.endsWith('.webmanifest')) {
     event.respondWith(networkFirst(request))
     return
   }
-  if (under(path, ['/assets', '/images'])) {
+  if (under(path, ['/assets'])) {
     event.respondWith(cacheFirst(request))
+    return
+  }
+  if (under(path, ['/images'])) {
+    event.respondWith(staleWhileRevalidate(event))
   }
 })
 
