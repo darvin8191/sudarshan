@@ -34,9 +34,6 @@ STATE_DIR = "/var/lib/sudarshan-watch"
 APP_DIR = "/opt/sudarshan/apps/openalgo"
 FORMAT = 1
 MAX_STATE = 1 << 18
-#: Checks whose change is never an event: OpenAlgo carries the notices, so its own silence is told
-#: by the outside heartbeat alone.
-NO_EVENT = frozenset({"openalgo"})
 KIND = {checks.FAILING: "watch_failing", checks.WARNING: "watch_warning", checks.FINE: "watch_fine"}
 
 
@@ -110,6 +107,7 @@ def judge(readings: Mapping, state: Mapping) -> tuple[list[checks.Result], list[
         "memory": {result.name: dict(result.keep) for result in results},
         "since": since,
         "master_date": master if master else state.get("master_date"),
+        "posture": readings.get("posture") or state.get("posture"),
     }
     return results, moved, kept
 
@@ -135,22 +133,38 @@ def report_of(results: list[checks.Result], state: Mapping, now: float, release,
     }
 
 
-def record_changes(spool: Path, moved: list[dict], now: float) -> int:
-    """One event per change, all of one run together; returns how many are in the file."""
+def due_events(results: list[checks.Result], moved: list[dict]) -> list[dict]:
+    """What a run has to record: each change of level that is the watch's to tell
+    (``checks.told_by``), and each check's news (a new AI connection, a Telegram link)."""
+    due = [
+        {"kind": KIND[change["level"]], "check": change["check"], "tag": change["level"],
+         "facts": {"was": change["was"], **change["facts"]}}
+        for change in moved
+        if checks.told_by(change)
+    ]  # fmt: skip
+    due += [
+        {"kind": "watch_new", "check": result.name, "tag": "new",
+         "facts": {**result.facts, **result.news}}
+        for result in results
+        if result.news
+    ]  # fmt: skip
+    return due
+
+
+def record_changes(spool: Path, due: list[dict], now: float) -> int:
+    """One event per entry of ``due_events``, all of one run together; returns how many are in
+    the file."""
     run, written = f"watch-{int(now)}", 0
-    for change in moved:
-        if change["check"] in NO_EVENT:
-            continue
+    for entry in due:
         written += events.record(
             spool,
-            kind=KIND[change["level"]],
-            event_id=f"watch-{change['check']}-{change['level']}-{int(now) // 60}",
+            kind=entry["kind"],
+            event_id=f"watch-{entry['check']}-{entry['tag']}-{int(now) // 60}",
             at=now,
             run=run,
             src="watch",
-            check=change["check"],
-            was=change["was"],
-            **change["facts"],
+            check=entry["check"],
+            **entry["facts"],
         )
     return written
 
@@ -180,10 +194,12 @@ def run_once(
             return 0
         now = clock()
         state = load_state(settings.state_file)
-        readings = gather(now, settings.app_dir, settings.env_file, state.get("master_date"))
+        readings = gather(
+            now, settings.app_dir, settings.env_file, state.get("master_date"), state.get("posture")
+        )
         results, moved, kept = judge(readings, state)
-        due = sum(change["check"] not in NO_EVENT for change in moved)
-        kept_ok = record_changes(settings.spool, moved, now) == due
+        due = due_events(results, moved)
+        kept_ok = record_changes(settings.spool, due, now) == len(due)
         if kept_ok:  # else not kept either: the next run finds the same change and tells it
             try:
                 write_json(settings.state_file, kept, 0o600)

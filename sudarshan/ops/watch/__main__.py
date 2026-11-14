@@ -23,7 +23,9 @@ def main(argv: list[str] | None = None) -> int:
     if not args.check:
         return run.run_once(settings)
     state = run.load_state(settings.state_file)
-    readings = readers.gather(time.time(), settings.app_dir, settings.env_file)
+    readings = readers.gather(
+        time.time(), settings.app_dir, settings.env_file, None, state.get("posture")
+    )
     for result in checks.run_checks(readings, state.get("memory") or {}):
         facts = " ".join(f"{name}={value}" for name, value in sorted(result.facts.items()))
         sys.stdout.write(f"{result.name:<20} {result.level:<8} {facts}\n")

@@ -677,6 +677,12 @@ deploy tool installs both with the release). Nothing needs setting up for it.
 | the server's memory | under 1 GB available for three looks in a row | after the market closes |
 | the security certificate | under 48 hours left and not renewed | at once |
 | OpenAlgo itself | it has not answered for two looks in a row | only through the outside heartbeat, because Telegram notices go through OpenAlgo |
+| AI connections (OpenAlgo's own tables, read-only) | one more approved AI client, or one more live AI sign-in, than at the last look | at once: "press Disconnect the assistant on the System page" if it was not you |
+| Telegram accounts linked to your bot | one was linked or unlinked | at once (a linked account can run the bot's commands) |
+| the server's posture, once an hour: the assistant's safety settings, OpenAlgo's debug setting, the settings folder, the vault and the `.env` closed to other accounts, every SUDARSHAN port listening inside the server only | any of them is not as it should be | after the market closes, once per cause |
+| the restore test of the backups ("The restore drill" below) | the last one is over 100 days old | after the market closes (the drill tells its own pass or failure) |
+| Historify's downloaded history | it has reached 3 GB | after the market closes |
+| shown only, on the System page and in the Sunday summary: the nightly backup's age and its offsite copy, operating-system updates waiting, a restart the system asks for | never a notice of their own: the backup job tells its own late night, and updates are applied by you, by hand, on a non-trading day | - |
 
 - **Once per cause.** A failure is told once and its recovery once, however long it lasts. A
   service that was never set up on this server (the family view before its set-up) is not a fault.

@@ -22,6 +22,7 @@ from pathlib import Path
 
 from sudarshan.ops.files import read_regular
 
+from . import posture
 from .checks import SERVICES
 
 IST = timezone(timedelta(hours=5, minutes=30), "IST")  # India keeps no daylight saving
@@ -182,11 +183,18 @@ def _or_none(read, *args):
         return None
 
 
-def gather(now: float, app_dir: Path, env_file: Path, known_master_date: str | None = None) -> dict:
+def gather(
+    now: float,
+    app_dir: Path,
+    env_file: Path,
+    known_master_date: str | None = None,
+    known_posture: Mapping | None = None,
+) -> dict:
     """One run's readings, in the shape ``checks.py`` documents. Never raises.
 
     ``known_master_date`` is the instrument list's date an earlier run today already read: when it
-    is today's, OpenAlgo's database is not opened again.
+    is today's, OpenAlgo's database is not opened again for it. ``known_posture`` is the last
+    posture reading: it is read afresh once an hour.
     """
     moment = datetime.fromtimestamp(now, UTC).astimezone(IST)
     today = moment.date().isoformat()
@@ -212,4 +220,9 @@ def gather(now: float, app_dir: Path, env_file: Path, known_master_date: str | N
         "disk": _or_none(disk, app_dir),
         "mem_available_mb": _or_none(mem_available_mb),
         "cert_hours_left": _or_none(cert_hours_left, now),
+        "posture": _or_none(posture.read, now, app_dir, env_file, known_posture),
+        "counts": _or_none(posture.counts, app_dir, env_file),
+        "backup": _or_none(posture.backup, now),
+        "drill": _or_none(posture.drill),
+        "historify_gb": _or_none(posture.historify_gb, app_dir),
     }

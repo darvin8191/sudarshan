@@ -73,6 +73,7 @@ KINDS = frozenset(
         "watch_failing",
         "watch_warning",
         "watch_fine",
+        "watch_new",
     }
 )
 FORMAT = "1"

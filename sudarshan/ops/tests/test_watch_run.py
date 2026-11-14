@@ -203,8 +203,12 @@ def test_gather_gives_every_reading_and_never_raises(tmp_path, monkeypatch):
     for name in ("health", "openalgo", "enabled", "disk", "mem_available_mb",
                  "cert_hours_left", "master_date"):  # fmt: skip
         monkeypatch.setattr(readers, name, broke)
+    slower = ("read", "counts", "backup", "drill", "historify_gb")
+    for name in slower:
+        monkeypatch.setattr(readers.posture, name, broke)
     seen = readers.gather(NOW, tmp_path, tmp_path / ".env")
-    assert set(seen) == set(FINE)
+    assert set(seen) == set(FINE) | {"posture", "counts", "backup", "drill", "historify_gb"}
+    assert all(seen[key] is None for key in ("posture", "counts", "backup", "drill"))
     assert (seen["ist_minute"], seen["ist_date"]) == (600, "2026-11-16")
     assert seen["health"] == dict.fromkeys(checks.SERVICES) and seen["window_open"] is None
     assert seen["openalgo"] is None and seen["disk"] is None and seen["master_date"] is None
@@ -289,8 +293,10 @@ def test_the_reports_shape_is_pinned_for_the_system_page(tmp_path):
     assert [c["name"] for c in report["checks"]] == [
         *(f"service_{name}" for name in checks.SERVICES),
         "openalgo", "login", "feed", "instrument_list", "disk", "memory", "certificate",
+        "posture_locks", "posture_debug", "posture_modes", "posture_ports", "posture_reboot",
+        "posture_updates", "assistant", "telegram_links", "backup", "drill", "historify",
     ]  # fmt: skip
-    disk = report["checks"][-3]
+    disk = report["checks"][-14]
     assert disk == {
         "name": "disk",
         "level": "warning",
@@ -346,7 +352,7 @@ def test_the_check_option_prints_and_writes_nothing(tmp_path, monkeypatch, capsy
     monkeypatch.setattr(readers, "gather", lambda *a, **k: dict(FINE))
     assert main(["--check"]) == 0
     printed = capsys.readouterr().out.splitlines()
-    assert len(printed) == len(checks.SERVICES) + 8 and printed[0].split()[:2] == [
+    assert len(printed) == len(checks.SERVICES) + 19 and printed[0].split()[:2] == [
         "service_feed",
         "fine",
     ]
