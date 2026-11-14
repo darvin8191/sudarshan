@@ -264,7 +264,8 @@ export default function IVChart() {
         if (!container) continue
 
         const w = container.offsetWidth > 0 ? container.offsetWidth : fallbackW
-        const color = type === 'ce' ? '#22c55e' : '#ef4444'
+        // SUDARSHAN T3a (M1.18): the D look's up and down (#067A45, #C3282E), as the legend's tokens.
+        const color = type === 'ce' ? '#067A45' : '#C3282E'
         const cfg = METRIC_CONFIG[metric]
         const title = type === 'ce' ? cfg.ceTitle : cfg.peTitle
 
@@ -578,18 +579,18 @@ export default function IVChart() {
                 <span className="font-medium">{chartData.underlying_ltp?.toFixed(2)}</span>
               </div>
               <div className="flex items-center gap-1.5">
-                <span className="inline-block h-2.5 w-2.5 rounded-full bg-green-500" />
+                <span className="inline-block h-2.5 w-2.5 rounded-full bg-[color:var(--up)]" />
                 <span className="text-muted-foreground">CE: </span>
                 <span className="font-medium">{chartData.ce_symbol}</span>
-                <span className="text-green-600 dark:text-green-400 font-medium ml-1">
+                <span className="text-[color:var(--up)] font-medium ml-1">
                   {getLatestValue('CE', 'iv')}
                 </span>
               </div>
               <div className="flex items-center gap-1.5">
-                <span className="inline-block h-2.5 w-2.5 rounded-full bg-red-500" />
+                <span className="inline-block h-2.5 w-2.5 rounded-full bg-[color:var(--down)]" />
                 <span className="text-muted-foreground">PE: </span>
                 <span className="font-medium">{chartData.pe_symbol}</span>
-                <span className="text-red-600 dark:text-red-400 font-medium ml-1">
+                <span className="text-[color:var(--down)] font-medium ml-1">
                   {getLatestValue('PE', 'iv')}
                 </span>
               </div>
@@ -618,7 +619,7 @@ export default function IVChart() {
                   {/* CE chart */}
                   <div>
                     <div className="flex items-center justify-between mb-2">
-                      <span className="text-sm font-medium text-green-600 dark:text-green-400">
+                      <span className="text-sm font-medium text-[color:var(--up)]">
                         {chartData?.ce_symbol || 'CE'} {METRIC_CONFIG[metric].label}
                       </span>
                       <span className="text-sm tabular-nums text-muted-foreground">
@@ -634,7 +635,7 @@ export default function IVChart() {
                   {/* PE chart */}
                   <div>
                     <div className="flex items-center justify-between mb-2">
-                      <span className="text-sm font-medium text-red-600 dark:text-red-400">
+                      <span className="text-sm font-medium text-[color:var(--down)]">
                         {chartData?.pe_symbol || 'PE'} {METRIC_CONFIG[metric].label}
                       </span>
                       <span className="text-sm tabular-nums text-muted-foreground">

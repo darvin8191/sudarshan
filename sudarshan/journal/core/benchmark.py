@@ -5,7 +5,9 @@
 * The index's week is its Friday close over the previous Friday close, minus one.
 * Beta: daily ``r_p = day net / capital`` against ``r_m = close / previous close - 1`` over the
   last 60 trading days (a day with no trades is 0), shown only from 20 days. Population
-  covariance and variance, exact fractions; correlation takes one square root, in Decimal.
+  covariance and variance, exact fractions; correlation takes one square root, in Decimal. The
+  arithmetic is ``sudarshan.common.stats`` (shared with the portfolio); this module turns the
+  journal's days into returns and the answers into the journal's strings.
   ``beta = cov(r_p, r_m) / var(r_m)``; correlation is ``cov / (sd_p x sd_m)``. Where a standard
   deviation is 0 the correlation says "no variation"; where the index did not move there is no
   beta either.
@@ -14,10 +16,12 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from decimal import ROUND_HALF_UP, Decimal, localcontext
+from decimal import ROUND_HALF_UP, Decimal
 from fractions import Fraction
 from typing import Any
 
+from sudarshan.common import stats
+from sudarshan.common.stats import sqrt_ratio as _sqrt_ratio  # noqa: F401  (its old name here)
 from sudarshan.journal.core import kinds, money
 
 NO_CAPITAL_NOTE = "set your trading capital under Reports to see this"
@@ -54,12 +58,6 @@ def beta_note(have: int, need: int, ready_day: int | None = None) -> str:
     return text
 
 
-def _sqrt_ratio(frac: Fraction) -> Decimal:
-    with localcontext() as ctx:
-        ctx.prec = 60
-        return (Decimal(frac.numerator) / Decimal(frac.denominator)).sqrt()
-
-
 def correlation_beta(
     days: Sequence[dict[str, int]],
     capital_base_paise: int | None,
@@ -89,21 +87,14 @@ def correlation_beta(
         out["state"] = out["correlation_state"] = "short"
         out["note"] = beta_note(len(used), min_days, ready_day)
         return out
-    n = len(used)
     r_p = [Fraction(int(d["net_paise"]), capital_base_paise) for d in used]
     r_m = [Fraction(int(d["close_u"]), int(d["prev_close_u"])) - 1 for d in used]
-    mean_p, mean_m = sum(r_p, Fraction(0)) / n, sum(r_m, Fraction(0)) / n
-    cov = sum(((p - mean_p) * (m - mean_m) for p, m in zip(r_p, r_m, strict=True)), Fraction(0)) / n
-    var_p = sum(((p - mean_p) ** 2 for p in r_p), Fraction(0)) / n
-    var_m = sum(((m - mean_m) ** 2 for m in r_m), Fraction(0)) / n
-    if var_m == 0:
-        out["state"] = out["correlation_state"] = "no_variation"
-        return out
-    out["beta"] = money.fraction_str(cov / var_m, kinds.RATIO_PLACES["beta"])
-    if var_p == 0:
-        out["correlation_state"] = "no_variation"
-        return out
-    corr = _sqrt_ratio(cov * cov / (var_p * var_m))
-    corr = -corr if cov < 0 else corr
-    out["correlation"] = str(corr.quantize(Decimal(1).scaleb(-4), rounding=ROUND_HALF_UP))
+    found = stats.correlation_beta(r_p, r_m, min_days, window)
+    out["state"], out["correlation_state"] = found["state"], found["correlation_state"]
+    if found["beta"] is not None:
+        out["beta"] = money.fraction_str(found["beta"], kinds.RATIO_PLACES["beta"])
+    if found["correlation"] is not None:
+        out["correlation"] = str(
+            found["correlation"].quantize(Decimal(1).scaleb(-4), rounding=ROUND_HALF_UP)
+        )
     return out

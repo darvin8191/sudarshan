@@ -48,7 +48,7 @@ describe('PriceStore', () => {
     const store = new PriceStore(frame.schedule)
     const heard = vi.fn()
     const off = store.subscribe(heard)
-    expect(store.get()).toEqual({ tick: null, streamed: null })
+    expect(store.get()).toEqual({ tick: null, streamed: null, depth: null, oi: null })
 
     const first = tick(100, false, ist(10, 0, 1))
     store.set(first)
@@ -57,7 +57,7 @@ describe('PriceStore', () => {
     const quote = tick(100.5, true)
     store.set(quote)
     frame.paint()
-    expect(store.get()).toEqual({ tick: quote, streamed: first })
+    expect(store.get()).toMatchObject({ tick: quote, streamed: first })
     expect(heard).toHaveBeenCalledTimes(2)
 
     off()
@@ -136,5 +136,37 @@ describe('tickLine', () => {
     expect(
       tickLine(null, status({ kind: 'connecting', at: null, stale: false, again: false }))
     ).toBe('Waiting for the first tick')
+  })
+})
+
+describe('the book and open interest in the price store (C9)', () => {
+  const book = (bid: number) => ({
+    bids: [{ price: bid, qty: 650 }],
+    asks: [{ price: bid + 0.05, qty: 1_300 }],
+    ltp: bid,
+  })
+
+  it('draws a burst of book frames and ticks once, at the next frame, with the newest of each', () => {
+    const queued: Array<() => void> = []
+    const store = new PriceStore((run) => queued.push(run))
+    const heard = vi.fn()
+    store.subscribe(heard)
+    store.setDepth(book(100))
+    store.set(tick(100.05, false))
+    store.setDepth(book(100.1))
+    expect(queued).toHaveLength(1)
+    for (const run of queued.splice(0)) run()
+    expect(heard).toHaveBeenCalledTimes(1)
+    expect(store.get().depth?.bids[0].price).toBe(100.1)
+    expect(store.get().tick?.ltp).toBe(100.05)
+  })
+
+  it('keeps the last open interest through a frame that only moved the book', () => {
+    const store = new PriceStore(() => {})
+    store.set({ ...tick(140, false), oi: 1_200_000 })
+    store.set(tick(140.05, false))
+    expect(store.get().oi).toBe(1_200_000)
+    store.set({ ...tick(140.1, false), oi: 1_200_650 })
+    expect(store.get().oi).toBe(1_200_650)
   })
 })

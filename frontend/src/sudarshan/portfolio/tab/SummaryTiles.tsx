@@ -137,7 +137,7 @@ export function LooseLoans({
       </dd>
       <dd className={NOTE}>Move to a tab puts the loan on {tabName}.</dd>
       {problem && (
-        <dd role="alert" className="text-sm font-medium text-[color:var(--loss)]">
+        <dd role="alert" className="text-sm font-medium text-[color:var(--down)]">
           {problem}
         </dd>
       )}
