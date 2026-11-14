@@ -5,7 +5,8 @@ A family member is given the answers of ``FAMILY_OPS``, passed through the one m
 every key of every answer a viewer can be given, and of every answer of phase P7 (none of whose ops
 is a family op, and whose fields the table hides anyway), must be one of:
 
-* hidden by a category of the table: its value, and everything under it, goes;
+* hidden by a category of the table, or by its ``cost`` list (which follows P&L): its value,
+  and everything under it, goes;
 * in the table's ``never_hidden``: the live price's anchors and the public facts beside them;
 * in ``STRUCTURAL`` below: a key that carries no figure of the owner's (a name, an id, a day, a
   state, a container whose members are judged one by one).
@@ -41,7 +42,10 @@ from sudarshan.portfolio.core import kinds
 REPO = Path(__file__).resolve().parents[3]
 TYPES_TS = REPO / "frontend" / "src" / "sudarshan" / "portfolio" / "types.ts"
 TABLE = json.loads(privacy.FIELDS_FILE.read_text(encoding="utf-8"))
-MASK = frozenset(entry for entries in TABLE["categories"].values() for entry in entries)
+#: Everything some choice of the owner's hides: the categories, and ``cost``, which follows P&L.
+MASK = frozenset(
+    entry for entries in (*TABLE["categories"].values(), TABLE["cost"]) for entry in entries
+)
 NEVER = frozenset(TABLE["never_hidden"])
 
 #: Keys that carry no figure of the owner's, reviewed one by one. A figure (money, a quantity, a
@@ -79,13 +83,14 @@ STRUCTURAL = frozenset(
     }
 )  # fmt: skip
 
-#: What the phase added to the table (design p7 section 10, and the defensive few beside it).
-V2_PNL = (
+#: What the phase added to the table (design p7 section 10, and the defensive few beside it), in
+#: version 3: the rupee figures among them follow P&L in ``cost`` as well (review H1's rule).
+V3_PNL = (
     "beta", "correlation", "stat_days", "stat_note", "risk", "sharpe", "sortino", "calmar",
     "volatility", "drawdown", "tax", "capital_gains", "business", "carried", "goals", "progress",
     "required_monthly",
 )  # fmt: skip
-V2_QTY = ("dividends", "expected", "calendar", "turnover", "charges", "fmv_u", "text", "base64")
+V3_QTY = ("dividends", "expected", "calendar", "turnover", "charges", "fmv_u", "text", "base64")
 
 
 def judged(key: str) -> bool:
@@ -229,22 +234,23 @@ async def test_the_phase_hides_nothing_a_family_screen_shows_today(rig):
         status, body = await rig.family("7", op, **args)
         assert status == 200, (op, body)
         keys(body["data"])
-    added = frozenset((*V2_PNL, *V2_QTY))
+    added = frozenset((*V3_PNL, *V3_QTY))
     assert {key for key in seen if serialize.hidden(key, added)} == set()
 
 
 # ---- the table and the list ----------------------------------------------------------------------
-def test_the_table_is_version_2_and_hides_the_phase_fields():
-    assert TABLE["version"] == 2
-    assert set(V2_PNL) <= set(TABLE["categories"]["pnl"])
-    assert set(V2_QTY) <= set(TABLE["categories"]["qty"])
+def test_the_table_hides_the_phase_fields_from_version_3():
+    assert TABLE["version"] >= 3
+    assert set(V3_PNL) <= set(TABLE["categories"]["pnl"])
+    assert set(V3_QTY) <= set(TABLE["categories"]["qty"])
+    assert set(V3_QTY) <= set(TABLE["cost"])  # every one of them is a rupee figure or holds one
     assert "amount_u" in NEVER
 
 
 def test_no_op_of_the_phase_is_a_family_op():
     """Mutation target 20: a tax, risk, goal or calendar op added to FAMILY_OPS fails here."""
     assert not set(kinds.SWITCH_OF) & set(kinds.FAMILY_OPS)
-    assert not set(kinds.SWITCH_OF) & set(kinds.OWNER_EXTRA_OPS)
+    assert not set(kinds.SWITCH_OF) & set(kinds.SHARING_OPS)
 
 
 def test_a_structural_key_is_no_figure_and_names_a_declared_field():

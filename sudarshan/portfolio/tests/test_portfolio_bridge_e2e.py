@@ -20,14 +20,16 @@ from portfolio_fakes import FakeResolver
 from test_portfolio_service import settings_for
 
 import blueprints.sudarshan_portfolio as bp_module
+from sudarshan.autologin.handoff import seal
 from sudarshan.portfolio import store as store_module
 from sudarshan.portfolio.service import Service
 from sudarshan.portfolio.store import DB_FILENAME, PortfolioStore
 from sudarshan.portfolio.views import Prices
-from sudarshan.vault import PORTFOLIO_API_INFO, fernet_for
+from sudarshan.vault import PORTFOLIO_API_INFO, PORTFOLIO_FAMILY_API_INFO, fernet_for
 from utils.thread_safe_cache import LockedTTLCache
 
 PREFIX = "/sudarshan/portfolio/api"
+FAMILY = fernet_for(os.environ["API_KEY_PEPPER"], PORTFOLIO_FAMILY_API_INFO)
 
 
 class RealService:
@@ -76,6 +78,65 @@ def wired(tmp_path, monkeypatch):
         login_session(client)
         yield client
     http.close()
+
+
+@pytest.fixture
+def wired_family(tmp_path, monkeypatch):
+    """The real service opening the family purpose too, the bridge in front of it."""
+    reset_users()
+    http = httpx.Client(trust_env=False)
+    monkeypatch.setattr(bp_module, "get_httpx_client", lambda: http)
+    monkeypatch.setattr(bp_module, "_loopback_warned", LockedTTLCache(maxsize=8, ttl=600))
+    with RealService(tmp_path) as service:
+        service.svc.api.purposes.append(("family", FAMILY))
+        monkeypatch.setenv("SUDARSHAN_PORTFOLIO_API_URL", service.url)
+        client = make_app().test_client()
+        login_session(client)
+        yield client, service
+    http.close()
+
+
+def as_member(service, member: str, op: str) -> dict:
+    """One read under the family purpose, as the family service sends it."""
+    answer = httpx.post(
+        f"{service.url}/v1/{op}",
+        content=seal(FAMILY, op, principal=f"viewer:{member}", args={}),
+        timeout=20,
+        trust_env=False,
+    )
+    assert answer.status_code == 200, answer.text
+    return answer.json()["data"]
+
+
+def test_the_owner_shares_a_tab_and_sets_a_floor_that_the_family_purpose_applies(wired_family):
+    client, service = wired_family
+    h = csrf_headers(client)
+    tab = ok(client.post(PREFIX + "/tabs", headers=h, json={
+        "request_id": "t-s", "name": "Gold", "kind": "gold"}))  # fmt: skip
+    made = ok(client.put(PREFIX + "/family/shares", headers=h, json={
+        "tab_id": tab["id"], "viewer": "12", "level": "view", "expires_at": None,
+        "version": None}))  # fmt: skip
+    assert made == {"tab_id": tab["id"], "viewer": "12", "level": "view", "expires_at": None,
+                    "version": 1}  # fmt: skip
+    unset = as_member(service, "12", "shares_for_viewer")
+    assert unset["hides"] == ["pnl", "qty", "funds", "orders"]  # no floor yet: nothing shown
+    floor = ok(client.put(PREFIX + "/family/privacy", headers=h, json={
+        "member": "12", "role": "viewer", "version": None,
+        "shown": {"pnl": False, "qty": True, "funds": False, "orders": True}}))  # fmt: skip
+    assert floor["version"] == 1 and floor["role"] == "viewer"
+    listed = ok(client.get(PREFIX + "/family/shares"))
+    assert listed == {"shares": [made], "privacy": [floor]}
+    seen = as_member(service, "12", "shares_for_viewer")
+    assert seen["hides"] == ["pnl", "funds"]
+    assert [(t["tab_id"], t["level"]) for t in seen["tabs"]] == [(tab["id"], "view")]
+    stale = client.delete(PREFIX + "/family/shares", headers=h, json={
+        "tab_id": tab["id"], "viewer": "12", "version": 7})  # fmt: skip
+    assert stale.status_code == 409
+    assert stale.get_json()["error"]["code"] == "version_conflict"
+    ok(client.delete(PREFIX + "/family/shares", headers=h, json={
+        "tab_id": tab["id"], "viewer": "12", "version": 1}))  # fmt: skip
+    assert as_member(service, "12", "shares_for_viewer")["tabs"] == []
+    assert ok(client.get(PREFIX + "/family/shares", query_string={"viewer": "12"}))["shares"] == []
 
 
 def test_control_an_op_without_arguments_works(wired):

@@ -437,7 +437,39 @@ async def test_the_stored_floor_hides_pnl_even_when_the_caller_sends_an_empty_ma
     }
     assert not pnl_names & keys(quiet)
     assert pnl_names <= keys(loud)
-    assert "value_paise" in keys(quiet) and "qty_u" in keys(quiet)  # quantities are shown to 7
+    assert "qty_u" in keys(quiet)  # quantities are shown to 7, and with P&L hidden no value (H1)
+    assert "value_paise" not in keys(quiet) and "value_paise" in keys(loud)
+
+
+@scenario
+async def test_pnl_hidden_with_quantities_shown_shows_no_cost_value_or_days_change(rig):
+    """Review H1: beside a quantity, what a holding cost, what it is worth now and the day's change
+    in rupees give the P&L away by one subtraction. A member with quantities shown and P&L hidden
+    gets the quantities and none of those, in every answer the family purpose gives, whatever the
+    family service asks for."""
+    shown = {"pnl": False, "qty": True, "funds": False, "orders": True}
+    await rig.grant("7", [rig.tab["id"], rig.upstox_tab], shown=shown)
+    book = ["holdings", "positions", "orders", "trades"]
+    answers = {
+        "tab_get": await rig.family("7", "tab_get", id=rig.tab["id"], mask=[]),
+        "summary": await rig.family("7", "summary", mask=[]),
+        "performance": await rig.family("7", "performance", id=rig.tab["id"]),
+        "upstox_book": await rig.family("7", "upstox_book", parts=book, mask=[]),
+        "upstox_history": await rig.family("7", "upstox_history"),
+    }
+    prices = {"avg_price_u", "buy_price_u", "sell_price_u", "price_u", "trigger_price_u"}
+    for op, (status, body) in answers.items():
+        assert status == 200, (op, body)
+        found = keys(body["data"])
+        money = sorted(k for k in found if k.endswith("_paise"))
+        assert not money, (op, money)  # no invested, no value, no day's change, no amount
+        assert not prices & found, (op, prices & found)  # no price a P&L is worked out from
+        assert not {"pnl", "paise", "pct", "xirr", "words", "note"} & found, op
+    held = keys(answers["tab_get"][1]["data"]) | keys(answers["upstox_book"][1]["data"])
+    assert {"qty_u", "last_price_u", "symbol"} <= held  # what is still shown: not vacuous
+    await rig.grant("8", [rig.tab["id"]])  # everything shown: the same answer has the figures
+    full = keys((await rig.family("8", "tab_get", id=rig.tab["id"]))[1]["data"])
+    assert {"value_paise", "cost_paise", "in_today_paise", "overall_gain_paise"} <= full
 
 
 @scenario
@@ -813,14 +845,35 @@ async def test_the_journal_never_sees_the_family_masks_and_the_family_never_the_
 
 # ---- the one table of fields (Y24) ---------------------------------------------------------------
 def test_the_viewer_mask_is_what_the_one_table_hides_for_pnl_and_quantities():
-    table = privacy.load()
+    table, cost = privacy.load(), privacy.load_cost()
     assert set(table) == set(kinds.PRIVACY_CATEGORIES)
-    assert serialize.VIEWER_MASK == table["pnl"] | table["qty"]
+    assert serialize.VIEWER_MASK == table["pnl"] | table["qty"] | cost
     assert privacy.floor(None) == privacy.mask_of(kinds.PRIVACY_CATEGORIES)
     assert privacy.floor(ALL) == frozenset()
-    assert privacy.floor({**ALL, "qty": False}) == table["pnl"] | table["qty"]  # P&L needs qty
-    assert privacy.floor({**ALL, "pnl": False}) == table["pnl"]
+    assert privacy.floor({**ALL, "qty": False}) == table["pnl"] | table["qty"] | cost
+    assert privacy.floor({**ALL, "pnl": False}) == table["pnl"] | cost  # H1: and what it costs
     assert privacy.floor({**ALL, "funds": False}) == table["funds"]
+    assert privacy.floor({**ALL, "orders": False}) == table["orders"]
+
+
+def test_hiding_pnl_hides_cost_value_and_the_days_change_and_never_a_live_price():
+    """Review H1: the cost list is what a P&L is worked out from beside a quantity."""
+    cost = privacy.load_cost()
+    for name in ("invested_paise", "cost_paise", "value_paise", "amount_paise", "in_today_paise",
+                 "avg_price_u", "buy_price_u", "sell_price_u", "price_u", "buy_average_u"):  # fmt: skip
+        assert serialize.hidden(name, cost), name
+    for name in (*privacy.json_never_hidden(), "qty_u", "day_buy_qty_u", "symbol", "kind"):
+        assert not serialize.hidden(name, cost), name
+    # cost is not a category: the owner sets four, and cost follows P&L
+    assert set(privacy.load()) == set(kinds.PRIVACY_CATEGORIES)
+
+
+def test_a_table_without_its_cost_list_is_refused(tmp_path):
+    path = tmp_path / "f.json"
+    for cost in ("", '"cost": [],', '"cost": ["*"],', '"cost": "price_u",'):
+        path.write_text("{" + cost + '"categories": {}}')
+        with pytest.raises(ValueError):
+            privacy.load_cost(path)
 
 
 def test_value_and_invested_belong_to_quantities_and_the_live_price_is_never_hidden():

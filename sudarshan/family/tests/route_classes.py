@@ -759,6 +759,10 @@ protected     /sudarshan/portfolio/api/corporate-actions                        
 protected     /sudarshan/portfolio/api/corporate-actions/<int:id>                       sudarshan_portfolio.ca_decide
 protected     /sudarshan/portfolio/api/dividends                                        sudarshan_portfolio.dividends
 protected     /sudarshan/portfolio/api/dividends/<int:id>                               sudarshan_portfolio.dividend_set
+protected     /sudarshan/portfolio/api/family/privacy                                   sudarshan_portfolio.member_privacy_set
+protected     /sudarshan/portfolio/api/family/shares                                    sudarshan_portfolio.share_remove
+protected     /sudarshan/portfolio/api/family/shares                                    sudarshan_portfolio.share_set
+protected     /sudarshan/portfolio/api/family/shares                                    sudarshan_portfolio.shares_list
 protected     /sudarshan/portfolio/api/goals                                            sudarshan_portfolio.goal_create
 protected     /sudarshan/portfolio/api/goals                                            sudarshan_portfolio.goals_list
 protected     /sudarshan/portfolio/api/goals/<int:id>                                   sudarshan_portfolio.goal_update

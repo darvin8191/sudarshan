@@ -1,0 +1,92 @@
+"""Generator of classify.json (T1): which head a trade, a day and a round trip belong to.
+
+Imports nothing from sudarshan. Every expected value is typed from the rule as the design states
+it, with the reason in the case's note. Run: python3 make_classify.py
+"""
+
+import json
+from pathlib import Path
+
+U = 10**6
+FUT = ["NFO", "NIFTY", 20261126, 0, "FUT"]
+CALL = ["NFO", "NIFTY", 20261126, 245000000, "CE"]
+
+
+def trade(segment, instrument="INE000A01010", **more):
+    row = {"taxpayer": 1, "account": 1, "day": 20260803, "seq": 1, "side": "BUY", "qty_u": U}
+    row.update(segment=segment, instrument=instrument, price_u=1000000, amount_paise=10000)
+    row.update(more)
+    return row
+
+
+def head(case, note, row, out):
+    return {"id": case, "note": note, "in": row, "out": out}
+
+
+HEAD_OF = [
+    head("H-EQ", "a share trade alone is delivery; the day decides intraday", trade("EQ"),
+         "delivery_equity"),
+    head("H-FO-FUT", "a future is business, not speculative", trade("FO", FUT), "derivative"),
+    head("H-FO-OPT", "an option is business, not speculative", trade("FO", CALL), "derivative"),
+    head("H-COM", "a commodity derivative", trade("COM", ["MCX", "GOLDM", 20261205, 0, "FUT"]),
+         "derivative"),
+    head("H-CD", "a currency derivative", trade("CD", ["CDS", "USDINR", 20261127, 0, "FUT"]),
+         "derivative"),
+    head("H-MF-EQ", "a fund unit tagged equity", trade("MF", "INF000A01011", asset_class="equity"),
+         "equity_mf"),
+    head("H-MF-NONE", "a fund unit with no tag is not assumed equity", trade("MF", "INF000A01011"),
+         "not_computed"),
+    head("H-MF-DEBT", "a debt fund is outside this engine",
+         trade("MF", "INF000A01011", asset_class="debt"), "not_computed"),
+    head("H-MANUAL", "a hand-kept asset is never computed, whatever its segment",
+         trade("EQ", asset_class="manual"), "not_computed"),
+    head("H-LIAB", "a liability is never computed", trade("EQ", asset_class="liability"),
+         "not_computed"),
+]  # fmt: skip
+
+
+def day(case, note, bought, sold, all_delivery, out):
+    row = {"bought_u": bought * U, "sold_u": sold * U, "all_delivery": all_delivery}
+    return {"id": case, "note": note, "in": row, "out": out * U}
+
+
+INTRADAY = [
+    day("D-I1", "I1: bought 50, sold 80: min(50, 80) = 50 intraday", 50, 80, False, 50),
+    day("D-MORE-BUY", "bought 120, sold 70: min = 70 intraday, 50 delivered", 120, 70, False, 70),
+    day("D-EQUAL", "a same-day round trip, CNC or not: min(100, 100) = 100", 100, 100, False, 100),
+    day("D-BUY-ONLY", "nothing sold: min(40, 0) = 0", 40, 0, False, 0),
+    day("D-SELL-ONLY", "nothing bought: min(0, 40) = 0", 0, 40, False, 0),
+    day("D-I2", "I2: the owner marked the day as all delivery: 0", 50, 80, True, 0),
+]
+
+
+def trip(case, note, exchange, product, same_day, out):
+    row = {"exchange": exchange, "symbol": "XYZ", "product": product, "same_day": same_day}
+    return {"id": case, "note": note, "in": row, "out": out}
+
+
+PRODUCT = [
+    trip("P-MIS", "MIS on a cash exchange is intraday", "NSE", "MIS", True, "intraday_equity"),
+    trip("P-CNC", "CNC held overnight is delivery", "NSE", "CNC", False, "delivery_equity"),
+    trip("P-CNC-SAME-DAY", "a CNC round trip inside one day delivered nothing: intraday", "BSE",
+         "CNC", True, "intraday_equity"),
+    trip("P-NFO-NRML", "an F&O trip is a derivative whatever the product", "NFO", "NRML", False,
+         "derivative"),
+    trip("P-NFO-MIS", "an intraday F&O trip is still not speculative", "NFO", "MIS", True,
+         "derivative"),
+    trip("P-BFO", "BSE derivatives", "BFO", "NRML", False, "derivative"),
+    trip("P-MCX", "commodity derivatives", "MCX", "NRML", False, "derivative"),
+    trip("P-CDS", "currency derivatives", "CDS", "MIS", True, "derivative"),
+    trip("P-INDEX", "an index is not traded: not computed", "NSE_INDEX", "CNC", False,
+         "not_computed"),
+    trip("P-NSE-NRML", "NRML is not a cash-market product: not computed", "NSE", "NRML", False,
+         "not_computed"),
+]  # fmt: skip
+
+FILES = {
+    "classify.json": {"head_of": HEAD_OF, "intraday_qty": INTRADAY, "head_of_product": PRODUCT}
+}
+
+if __name__ == "__main__":
+    for name, data in FILES.items():
+        (Path(__file__).parent / name).write_text(json.dumps(data, indent=1) + "\n")

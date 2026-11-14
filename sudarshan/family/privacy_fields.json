@@ -1,6 +1,6 @@
 {
-  "version": 2,
-  "note": "The one table of what each privacy category hides (cross-design Y24). An entry is a field name, or a pattern that starts with * for every field that ends so. A category's fields are removed from an answer at any depth. P&L is offered only together with quantities: while qty is hidden, pnl is hidden too, and everything qty hides is hidden with it. Never hidden: symbol, exchange, direction, product, the live price and its change, the market status, and today (the trading date; the P&L of the day is the paise, base_paise and pct inside a Today figure). Version 2 (phase P7): the fields of tax, risk, goals, dividends, the calendar, the benchmark statistics and exported files are hidden too, though no op of that phase is a family op (a family member sees none of them), so a field cannot reach a viewer by being forgotten; a closed-world test fails on any answer key no category, never_hidden or its reviewed structural list names.",
+  "version": 3,
+  "note": "The one table of what each privacy category hides (cross-design Y24). An entry is a field name, or a pattern that starts with * for every field that ends so. A category's fields are removed from an answer at any depth. P&L is offered only together with quantities: while qty is hidden, pnl is hidden too, and everything qty hides is hidden with it. While pnl is hidden, everything in cost is hidden too, whatever qty says: what a holding cost, what it is worth now, the day's change in rupees, a trade's price and every other rupee figure give the P&L away beside its quantity (review H1). Never hidden: symbol, exchange, direction, product, the live price and its change, the market status, and today (the trading date; the P&L of the day is the paise, base_paise and pct inside a Today figure). Version 3 (phase P7): the fields of tax, risk, goals, dividends, the calendar, the benchmark statistics and exported files are hidden too, and their rupee figures follow P&L in cost, though no op of that phase is a family op (a family member sees none of them); a closed-world test fails on any answer key that no category, cost, never_hidden or its reviewed structural list accounts for.",
   "categories": {
     "pnl": [
       "pnl",
@@ -88,6 +88,27 @@
       "trades"
     ]
   },
+  "cost": [
+    "*_paise",
+    "avg_price_u",
+    "buy_price_u",
+    "sell_price_u",
+    "*_average_u",
+    "price_u",
+    "trigger_price_u",
+    "prices_u",
+    "charges_detail",
+    "words",
+    "note",
+    "charges",
+    "fmv_u",
+    "turnover",
+    "dividends",
+    "expected",
+    "calendar",
+    "text",
+    "base64"
+  ],
   "never_hidden": [
     "last_price_u",
     "close_price_u",

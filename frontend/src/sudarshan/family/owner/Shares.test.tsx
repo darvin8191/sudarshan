@@ -1,7 +1,11 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { act, render, screen, waitFor, within } from '@testing-library/react'
+import { act, configure, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+// The first render of this file pays for loading three sections and their queries; on a shared
+// two-core box under load that has taken past the default second, so the waits get four.
+configure({ asyncUtilTimeout: 4000 })
 
 const api = vi.hoisted(() => ({ shareList: vi.fn(), shareSet: vi.fn(), shareRemove: vi.fn() }))
 vi.mock('../ownerApi', async () => ({
@@ -11,11 +15,19 @@ vi.mock('../ownerApi', async () => ({
 const lists = vi.hoisted(() => ({ list: vi.fn() }))
 vi.mock('@/api/watchlist', () => ({ watchlistApi: lists }))
 const portfolio = vi.hoisted(() => ({ call: vi.fn() }))
-vi.mock('@/sudarshan/portfolio/api', () => ({ portfolioCall: portfolio.call }))
+vi.mock('@/sudarshan/portfolio/api', async () => ({
+  ...(await vi.importActual<typeof import('@/sudarshan/portfolio/api')>(
+    '@/sudarshan/portfolio/api'
+  )),
+  portfolioCall: portfolio.call,
+}))
 
+import { PortfolioError } from '@/sudarshan/portfolio/api'
+import type { TabShare } from '@/sudarshan/portfolio/types'
 import { OwnerError } from '../ownerApi'
-import { cardOf, shareOf } from './fixtures'
-import { Shares, TABS_NOTE } from './Shares'
+import { cardOf, NOW, shareOf } from './fixtures'
+import { END_AFTER_NOW, ENDED_BLOCKS, TABS_NOTE, UPSTOX_NOTE } from './PortfolioTabShares'
+import { Shares } from './Shares'
 
 const members = [
   cardOf(),
@@ -41,7 +53,7 @@ function mount() {
   const spy = vi.spyOn(client, 'invalidateQueries')
   render(
     <QueryClientProvider client={client}>
-      <Shares members={members} />
+      <Shares members={members} now={NOW} />
     </QueryClientProvider>
   )
   return { spy }
@@ -51,8 +63,51 @@ beforeEach(() => {
   for (const fn of [...Object.values(api), lists.list, portfolio.call]) fn.mockReset()
   api.shareList.mockResolvedValue([])
   lists.list.mockResolvedValue(watchlists)
-  portfolio.call.mockResolvedValue({ enabled: true, data: { tabs: [] } })
+  portfolio.call.mockImplementation(portfolioAnswers({ tabs: [], shares: [] }))
 })
+
+const TABS = [
+  { id: 1, name: 'Upstox', archived: false, system: true },
+  { id: 2, name: 'Old tab', archived: true, system: false },
+  { id: 3, name: 'Gold', archived: false, system: false },
+]
+const floor = (member: string, role: string) => ({
+  member,
+  role,
+  shown: { pnl: true, qty: true, funds: false, orders: true },
+  version: 1,
+})
+
+/** The portfolio bridge, by op: the tabs, the shares and floors, and each write's answer. */
+function portfolioAnswers({
+  tabs = TABS,
+  shares = [] as TabShare[],
+  privacy = [floor('1', 'viewer'), floor('2', 'child')],
+}: {
+  tabs?: unknown[]
+  shares?: TabShare[]
+  privacy?: unknown[]
+}) {
+  return async (name: string, args: Record<string, unknown>) => {
+    if (name === 'state') return { enabled: true, data: { tabs } }
+    if (name === 'shares_list') return { enabled: true, data: { shares, privacy } }
+    if (name === 'share_set') {
+      return { enabled: true, data: { ...args, version: ((args.version as number) ?? 0) + 1 } }
+    }
+    return { enabled: true, data: { removed: true } }
+  }
+}
+
+const tabShare = (over: Partial<TabShare>): TabShare => ({
+  tab_id: 3,
+  viewer: '1',
+  level: 'view',
+  expires_at: null,
+  version: 1,
+  ...over,
+})
+const writes = (op: string) =>
+  portfolio.call.mock.calls.filter(([name]) => name === op).map(([, args]) => args)
 
 describe('sharing watchlists', () => {
   it('lists the owner lists, none shared yet, for every member first', async () => {
@@ -216,26 +271,215 @@ describe('sharing books', () => {
 })
 
 describe('portfolio tabs', () => {
-  it('are read only: the tabs by name and the sentence that they cannot be shared from here', async () => {
-    portfolio.call.mockResolvedValue({
-      enabled: true,
-      data: {
-        tabs: [
-          { id: 1, name: 'Upstox', archived: false },
-          { id: 2, name: 'Old tab', archived: true },
-          { id: 3, name: 'Gold', archived: false },
+  const section = async () =>
+    (await screen.findByRole('heading', { name: 'Portfolio tabs' })).closest(
+      'section'
+    ) as HTMLElement
+
+  it('lists the tabs that are not archived, what each is shared with, and the Upstox tab note', async () => {
+    portfolio.call.mockImplementation(portfolioAnswers({}))
+    mount()
+    const tabs = await section()
+    expect(await within(tabs).findByText('Gold')).toBeInTheDocument()
+    expect(within(tabs).queryByText('Old tab')).toBeNull()
+    expect(within(tabs).getByText(TABS_NOTE)).toBeInTheDocument()
+    expect(within(tabs).getByText(UPSTOX_NOTE)).toBeInTheDocument()
+    expect(within(tabs).getAllByText('Not shared')).toHaveLength(2)
+    expect(portfolio.call).toHaveBeenCalledWith('state', undefined, expect.anything())
+    expect(portfolio.call).toHaveBeenCalledWith('shares_list', {}, expect.anything())
+  })
+
+  it('shares a tab with every member: a share for each role, new, with no version', async () => {
+    portfolio.call.mockImplementation(portfolioAnswers({}))
+    mount()
+    const tabs = await section()
+    await userEvent.click(await within(tabs).findByRole('button', { name: 'Share Gold' }))
+    const form = within(tabs).getByRole('form', { name: 'Share Gold' })
+    expect(within(form).getByLabelText('Share with')).toHaveValue('all')
+    await userEvent.click(within(form).getByRole('button', { name: 'Share' }))
+    expect(await screen.findByText('Gold is shared with every member: View.')).toBeInTheDocument()
+    expect(writes('share_set')).toEqual([
+      { tab_id: 3, viewer: 'role:viewer', level: 'view', expires_at: null, version: null },
+      { tab_id: 3, viewer: 'role:child', level: 'view', expires_at: null, version: null },
+    ])
+  })
+
+  it('shares a tab with one member, Restricted, until a date in India time', async () => {
+    portfolio.call.mockImplementation(portfolioAnswers({}))
+    mount()
+    const tabs = await section()
+    await userEvent.click(await within(tabs).findByRole('button', { name: 'Share Gold' }))
+    const form = within(tabs).getByRole('form', { name: 'Share Gold' })
+    await userEvent.selectOptions(within(form).getByLabelText('Share with'), '2')
+    await userEvent.click(within(form).getByRole('radio', { name: /Restricted/ }))
+    await userEvent.click(within(form).getByRole('radio', { name: /On a date and time/ }))
+    const end = within(form).getByLabelText('Share ends at')
+    await userEvent.clear(end)
+    await userEvent.type(end, '2026-11-20T18:00')
+    await userEvent.click(within(form).getByRole('button', { name: 'Share' }))
+    await waitFor(() =>
+      expect(writes('share_set')).toEqual([
+        {
+          tab_id: 3,
+          viewer: '2',
+          level: 'restricted',
+          expires_at: Date.UTC(2026, 10, 20, 12, 30),
+          version: null,
+        },
+      ])
+    )
+  })
+
+  it('refuses an end that has passed, in words, and sends nothing', async () => {
+    portfolio.call.mockImplementation(portfolioAnswers({}))
+    mount()
+    const tabs = await section()
+    await userEvent.click(await within(tabs).findByRole('button', { name: 'Share Gold' }))
+    const form = within(tabs).getByRole('form', { name: 'Share Gold' })
+    await userEvent.click(within(form).getByRole('radio', { name: /On a date and time/ }))
+    const end = within(form).getByLabelText('Share ends at')
+    await userEvent.clear(end)
+    await userEvent.type(end, '2020-01-01T10:00')
+    await userEvent.click(within(form).getByRole('button', { name: 'Share' }))
+    expect(await screen.findByText(END_AFTER_NOW)).toBeInTheDocument()
+    expect(writes('share_set')).toEqual([])
+  })
+
+  it('changes a share with the version the portfolio holds', async () => {
+    portfolio.call.mockImplementation(
+      portfolioAnswers({ shares: [tabShare({ viewer: '1', version: 4 })] })
+    )
+    mount()
+    const tabs = await section()
+    await userEvent.click(
+      await within(tabs).findByRole('button', { name: 'Change how Gold is shared with Test One' })
+    )
+    const form = within(tabs).getByRole('form', { name: 'Share Gold' })
+    expect(within(form).queryByLabelText('Share with')).toBeNull()
+    await userEvent.click(within(form).getByRole('radio', { name: /Restricted/ }))
+    await userEvent.click(within(form).getByRole('button', { name: 'Save' }))
+    await waitFor(() =>
+      expect(writes('share_set')).toEqual([
+        { tab_id: 3, viewer: '1', level: 'restricted', expires_at: null, version: 4 },
+      ])
+    )
+  })
+
+  it('stops a share with every member, each role at its own version', async () => {
+    portfolio.call.mockImplementation(
+      portfolioAnswers({
+        shares: [
+          tabShare({ viewer: 'role:viewer', version: 2 }),
+          tabShare({ viewer: 'role:child', version: 5 }),
         ],
-      },
+      })
+    )
+    mount()
+    const tabs = await section()
+    await userEvent.click(
+      await within(tabs).findByRole('button', { name: 'Stop sharing Gold with Every member' })
+    )
+    expect(
+      await screen.findByText('Gold is no longer shared with every member.')
+    ).toBeInTheDocument()
+    expect(writes('share_remove')).toEqual([
+      { tab_id: 3, viewer: 'role:viewer', version: 2 },
+      { tab_id: 3, viewer: 'role:child', version: 5 },
+    ])
+  })
+
+  it('says which part of every member took effect when the second share is refused', async () => {
+    const answers = portfolioAnswers({})
+    portfolio.call.mockImplementation(async (name: string, args: Record<string, unknown>) => {
+      if (name === 'share_set' && args.viewer === 'role:child') {
+        throw new PortfolioError({
+          code: 'unavailable',
+          message: 'The portfolio service is not answering.',
+          entryId: null,
+        })
+      }
+      return answers(name, args)
+    })
+    const { spy } = mount()
+    const tabs = await section()
+    await userEvent.click(await within(tabs).findByRole('button', { name: 'Share Gold' }))
+    await userEvent.click(within(tabs).getByRole('button', { name: 'Share' }))
+    expect(
+      await screen.findByText(
+        'Gold is now shared with members with the Viewer role only. The portfolio service is not answering.'
+      )
+    ).toBeInTheDocument()
+    expect(spy).toHaveBeenCalledWith({
+      queryKey: ['sudarshan', 'family-owner', 'portfolio-shares'],
+    })
+  })
+
+  it('a share that was not answered is not confirmed, never failed', async () => {
+    const answers = portfolioAnswers({})
+    portfolio.call.mockImplementation(async (name: string, args: Record<string, unknown>) => {
+      if (name === 'share_set') {
+        throw new PortfolioError({ code: 'not_confirmed', message: 'x', entryId: null })
+      }
+      return answers(name, args)
     })
     mount()
-    expect(await screen.findByText(TABS_NOTE)).toBeInTheDocument()
-    expect(await screen.findByText('Gold')).toBeInTheDocument()
-    expect(screen.queryByText('Old tab')).toBeNull()
-    const section = screen
-      .getByRole('heading', { name: 'Portfolio tabs' })
-      .closest('section') as HTMLElement
-    expect(within(section).queryByRole('switch')).toBeNull()
-    expect(within(section).queryByRole('combobox')).toBeNull()
-    expect(portfolio.call).toHaveBeenCalledWith('state', undefined, expect.anything())
+    const tabs = await section()
+    await userEvent.click(await within(tabs).findByRole('button', { name: 'Share Gold' }))
+    await userEvent.click(within(tabs).getByRole('button', { name: 'Share' }))
+    const said = await screen.findByText(/^Not confirmed/)
+    expect(said.textContent).not.toMatch(/fail/i)
+    expect(writes('share_set')).toHaveLength(1) // the second role is not sent after it
+  })
+
+  it('sends a stop once when it is tapped twice in the same frame', async () => {
+    let finish!: (value: unknown) => void
+    const answers = portfolioAnswers({ shares: [tabShare({ viewer: '1' })] })
+    portfolio.call.mockImplementation((name: string, args: Record<string, unknown>) =>
+      name === 'share_remove'
+        ? new Promise((resolve) => {
+            finish = resolve
+          })
+        : answers(name, args)
+    )
+    mount()
+    const tabs = await section()
+    const stop = await within(tabs).findByRole('button', {
+      name: 'Stop sharing Gold with Test One',
+    })
+    act(() => {
+      stop.click()
+      stop.click()
+    })
+    expect(writes('share_remove')).toHaveLength(1)
+    await act(async () => finish({ enabled: true, data: { removed: true } }))
+  })
+
+  it('says an ended share of a member keeps the share with every member from them', async () => {
+    portfolio.call.mockImplementation(
+      portfolioAnswers({
+        shares: [
+          tabShare({ viewer: 'role:viewer' }),
+          tabShare({ viewer: 'role:child' }),
+          tabShare({ viewer: '1', expires_at: NOW - 60_000 }),
+        ],
+      })
+    )
+    mount()
+    const tabs = await section()
+    expect(await within(tabs).findByText(ENDED_BLOCKS)).toBeInTheDocument()
+    expect(within(tabs).getByText(/^Ended /)).toBeInTheDocument()
+  })
+
+  it('names a member whose privacy has not reached the portfolio, so every member misses them', async () => {
+    portfolio.call.mockImplementation(
+      portfolioAnswers({
+        shares: [tabShare({ viewer: 'role:viewer' }), tabShare({ viewer: 'role:child' })],
+        privacy: [floor('1', 'viewer')],
+      })
+    )
+    mount()
+    expect(
+      await screen.findByText(/Tabs shared with every member do not reach Test Two yet/)
+    ).toBeInTheDocument()
   })
 })

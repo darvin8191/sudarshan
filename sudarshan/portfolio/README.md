@@ -193,6 +193,10 @@ two types, and a test holds this table, that map and `kinds.py` to each other.
 | `report_years` | GET | `/reports/years` | upstox | | `NoArgs` | `ReportYears` | |
 | `report_trades` | GET | `/reports/trades` | upstox | `fy:int, segment:str, force:bool` | `ReportArgs` | `TradesReport` | reads Upstox, cached per year |
 | `report_pnl` | GET | `/reports/pnl` | upstox | `fy:int, segment:str, force:bool` | `ReportArgs` | `PnlReport` | reads Upstox, cached per year |
+| `shares_list` | GET | `/family/shares` | read | `tab_id:int, viewer:str` | `SharesListArgs` | `SharesList` | the Family page: the tab shares and every member's privacy floor |
+| `share_set` | PUT | `/family/shares` | write | | `ShareSetArgs` | `TabShare` | a new share has no version; a change names its version |
+| `share_remove` | DELETE | `/family/shares` | write | | `ShareRemoveArgs` | `ShareRemoved` | |
+| `member_privacy_set` | PUT | `/family/privacy` | write | | `MemberPrivacySetArgs` | `MemberPrivacy` | a member's privacy floor (cross-design Y6) |
 | `tax_get` | GET | `/tax` | read | `fy:int, member:int` | `TaxGetArgs` | `TaxPack` | P7 `tax`: the working paper of one year and taxpayer |
 | `tax_inputs` | GET | `/tax/inputs` | read | `member:int` | `TaxInputsArgs` | `TaxInputs` | P7 `tax`: the owner's figures and what the paper lacks |
 | `tax_input_set` | POST | `/tax/inputs` | write | | `TaxInputSetArgs` | `TaxInputSaved` | P7 `tax`: `kind` from a closed list; `dry_run` tells the effect first |
@@ -342,7 +346,7 @@ two exists in this release. Each purpose has its own principal and its own list 
 
 | purpose | principal | ops |
 |---|---|---|
-| owner (`PORTFOLIO_API_INFO`) | `owner` | the contract's ops, plus `share_set`, `share_remove`, `shares_list`, `member_privacy_set` |
+| owner (`PORTFOLIO_API_INFO`) | `owner` | the contract's ops, the four sharing ops among them (`shares_list`, `share_set`, `share_remove`, `member_privacy_set`) |
 | family (`PORTFOLIO_FAMILY_API_INFO`) | `viewer:<member id>` | reads: `state`, `summary`, `tab_get`, `performance`, `upstox_book`, `upstox_history`, `shares_for_viewer` |
 | journal (`PORTFOLIO_JOURNAL_API_INFO`) | `sudarshan-journal` | reads: `trades_day`, `order_history`, `historical_trades`, `pnl_report`, `positions`, `funds`, `benchmark_closes` |
 
@@ -355,7 +359,9 @@ two exists in this release. Each purpose has its own principal and its own list 
   with you." The answer passes the mask once more on its way out.
 * **One table of fields** (`sudarshan/family/privacy_fields.json`, `privacy.py`): `pnl`, `qty`,
   `funds`, `orders`. P&L is offered only with quantities; `value_paise` and `invested_paise`
-  belong to `qty`. `serialize.VIEWER_MASK` is built from it.
+  belong to `qty`. While P&L is hidden, the table's `cost` list goes with it whatever quantities
+  say: every rupee figure and every price a P&L is worked out from beside a quantity (review H1).
+  `serialize.VIEWER_MASK` is built from it.
 * **Orders and trades** are two more parts of the Upstox reader (`UPSTOX_PARTS`); the owner's
   `upstox_book` still reads the four of `UPSTOX_PAGE_PARTS` and the page shows neither.
 * **Budget** (`budget.py`): a principal other than `owner` takes a token only while the API's
@@ -365,6 +371,14 @@ two exists in this release. Each purpose has its own principal and its own list 
   got from retrieve-all, get-trades-for-day and order history. Read it with
   `journalctl -u sudarshan-portfolio | grep "Analytics Token probe"`.
 * **Schema step 4** adds `tab_share` and `member_privacy`.
+* **Set from the owner's Family page** (v0.12.0). The four sharing ops are routes of the owner's
+  bridge (`/sudarshan/portfolio/api/family/shares` and `/family/privacy`), sealed under the owner's
+  purpose like every other route and never under the family's. The page writes a member's floor in
+  the same action as the family service's own record of their privacy: what the edit hides is
+  written to the floor first, what it shows is written to the floor last, after the family service
+  confirmed its own write, so a half-done edit can only leave the member seeing less. "Every member"
+  is a share for each role (`role:viewer`, `role:child`); a role share reaches a member once their
+  floor names their role.
 * **Schema step 5** (phase P7, one step for the whole phase) adds `owner_setting`, the tax inputs
   (`tax_opening_lot`, `tax_fmv`, `tax_carry`, `tax_day_override`, `tax_trade_mark`), Upstox's
   corporate actions (`ca_event`, `ca_read`: public facts, no principal) with the owner's
@@ -395,11 +409,11 @@ it. The owner's `state` answer carries `switches`, so the page offers a view onl
 switch is on.
 
 A family member sees nothing of this phase: none of its ops is a family op (a test holds
-`FAMILY_OPS` to that), and the mask table (version 2) hides its fields defensively anyway. A
-closed-world test walks every key of every answer a viewer can be given and of every answer of the
-phase, in `types.ts` and in the service's real answers, and fails on a key that no category
-hides, that is not in `never_hidden` and that is not in its reviewed list of structural keys: a
-new field cannot reach a viewer by being forgotten.
+`FAMILY_OPS` to that), and the mask table (version 3) hides its fields defensively anyway, its
+rupee figures in `cost` too. A closed-world test walks every key of every answer a viewer can be
+given and of every answer of the phase, in `types.ts` and in the service's real answers, and fails
+on a key that no category or `cost` hides, that is not in `never_hidden` and that is not in its
+reviewed list of structural keys: a new field cannot reach a viewer by being forgotten.
 
 ### Import and export
 

@@ -250,6 +250,12 @@ export const ERROR_CODES = [
 export type ErrorCode = (typeof ERROR_CODES)[number]
 export const QUERY_TYPES = ['int', 'day', 'str', 'ints', 'strs', 'bool'] as const
 export type QueryType = (typeof QUERY_TYPES)[number]
+/** A tab share's level: `view` shows what the member's privacy allows, `restricted` no figures. */
+export const SHARE_LEVELS = ['view', 'restricted'] as const
+export type ShareLevel = (typeof SHARE_LEVELS)[number]
+/** The four categories of a family member's privacy (sudarshan/family/privacy_fields.json). */
+export const PRIVACY_CATEGORIES = ['pnl', 'qty', 'funds', 'orders'] as const
+export type PrivacyCategory = (typeof PRIVACY_CATEGORIES)[number]
 // The money features of phase P7: tax, insights, goals (the buckets, methods and readings are the
 // tax core's, sudarshan/tax).
 export const TAX_INPUT_KINDS = [
@@ -491,6 +497,19 @@ export const OPS: readonly OpSpec[] = [
       ['force', 'bool'],
     ],
   },
+  {
+    name: 'shares_list',
+    method: 'GET',
+    route: '/family/shares',
+    cls: 'read',
+    query: [
+      ['tab_id', 'int'],
+      ['viewer', 'str'],
+    ],
+  },
+  { name: 'share_set', method: 'PUT', route: '/family/shares', cls: 'write' },
+  { name: 'share_remove', method: 'DELETE', route: '/family/shares', cls: 'write' },
+  { name: 'member_privacy_set', method: 'PUT', route: '/family/privacy', cls: 'write' },
   // Phase P7: each answers "not ready" until its part lands and while its switch is off.
   {
     name: 'tax_get',
@@ -1702,6 +1721,67 @@ export interface ViewList {
   views: SavedView[]
 }
 
+// ---- what the owner shares with the family (M7.37; cross-design Y6) ----
+
+/**
+ * A tab shared with one family member (`viewer` is the member's id, "12") or with every member of
+ * a role ("role:child"). An ended share stays until the owner removes it, and while a member's own
+ * share stays, ended or not, it is the one that counts for them, not their role's.
+ */
+export interface TabShare {
+  tab_id: number
+  viewer: string
+  level: ShareLevel
+  expires_at: EpochMs | null
+  version: number
+}
+
+/** A member's privacy floor: what the portfolio hides from them whatever the family view asks. */
+export interface MemberPrivacy {
+  member: string
+  role: string | null
+  shown: Record<PrivacyCategory, boolean>
+  version: number
+}
+
+export interface SharesListArgs {
+  tab_id?: number
+  viewer?: string
+}
+
+export interface SharesList {
+  shares: TabShare[]
+  /** Every member who has a floor; a member with none is shown no figures. */
+  privacy: MemberPrivacy[]
+}
+
+/** A new share is sent with `version: null`; a change names the version it was decided on. */
+export interface ShareSetArgs {
+  tab_id: number
+  viewer: string
+  level: ShareLevel
+  expires_at: EpochMs | null
+  version: number | null
+}
+
+export interface ShareRemoveArgs {
+  tab_id: number
+  viewer: string
+  version: number
+}
+
+export interface ShareRemoved {
+  removed: boolean
+}
+
+/** A first floor is sent with `version: null`. P&L shown needs quantities shown (Y24). */
+export interface MemberPrivacySetArgs {
+  member: string
+  role: string | null
+  shown: Record<PrivacyCategory, boolean>
+  version: number | null
+}
+
 // ---- phase P7: the tax working paper (M7.6, M7.7, M7.27, M7.28, M15.5) ----
 // Every figure is computed by the tax core (sudarshan/tax) in the service; the phone formats them
 // and computes none. Not market data: each answer carries when it was worked out. The pack's
@@ -2307,6 +2387,10 @@ export interface PortfolioOps {
   report_years: { args: NoArgs; data: ReportYears }
   report_trades: { args: ReportArgs; data: TradesReport }
   report_pnl: { args: ReportArgs; data: PnlReport }
+  shares_list: { args: SharesListArgs; data: SharesList }
+  share_set: { args: ShareSetArgs; data: TabShare }
+  share_remove: { args: ShareRemoveArgs; data: ShareRemoved }
+  member_privacy_set: { args: MemberPrivacySetArgs; data: MemberPrivacy }
   tax_get: { args: TaxGetArgs; data: TaxPack }
   tax_inputs: { args: TaxInputsArgs; data: TaxInputs }
   tax_input_set: { args: TaxInputSetArgs; data: TaxInputSaved }
