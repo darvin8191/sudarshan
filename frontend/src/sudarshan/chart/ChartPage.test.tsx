@@ -1037,6 +1037,29 @@ describe('the phone chart page at 390 px', () => {
     expect(screen.getByRole('status', { name: 'Location' })).toHaveTextContent('/dashboard')
   })
 
+  it('says why when the phone will not keep the screen on, and the switch goes off (C12)', async () => {
+    let allow = false
+    const request = vi.fn(async () => {
+      if (!allow) throw new Error('battery saver is on')
+      return { release: vi.fn(async () => {}), addEventListener() {} }
+    })
+    Object.defineProperty(navigator, 'wakeLock', { configurable: true, value: { request } })
+    await opened()
+    const toggle = screen.getByRole('switch', { name: 'Keep screen on' })
+    await userEvent.click(toggle)
+    await waitFor(() => expect(toggle).not.toBeChecked())
+    const words =
+      'The phone would not keep the screen on. If battery saver is on, turn it off, then switch this on again.'
+    expect(screen.getByText(words)).toBeVisible()
+    expect(toggle).toHaveAccessibleDescription(words)
+    // Switched on again once the phone allows it: the lock is held and the sentence goes.
+    allow = true
+    await userEvent.click(toggle)
+    await waitFor(() => expect(toggle).toBeChecked())
+    expect(screen.queryByText(/would not keep the screen on/)).toBeNull()
+    expect(request).toHaveBeenCalledTimes(2)
+  })
+
   it('keeps the screen on across a switch of instrument', async () => {
     const release = vi.fn(async () => {})
     const request = vi.fn(async () => ({ release, addEventListener() {} }))

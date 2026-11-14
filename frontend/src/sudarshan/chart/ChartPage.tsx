@@ -716,7 +716,11 @@ function PhoneChartScreen({
               <label className="flex min-h-12 items-center gap-2 text-sm font-medium">
                 <SunMedium aria-hidden="true" className="size-4 text-muted-foreground" />
                 Keep screen on
-                <Switch checked={wake.on} onCheckedChange={wake.setOn} />
+                <Switch
+                  checked={wake.on}
+                  onCheckedChange={wake.setOn}
+                  aria-describedby={wake.refused ? 'chart-wake-refused' : undefined}
+                />
               </label>
             ) : (
               <span />
@@ -728,6 +732,15 @@ function PhoneChartScreen({
               Open in full terminal
             </Link>
           </div>
+          {wake.refused && (
+            <output
+              id="chart-wake-refused"
+              className="block pb-2 text-xs font-medium text-[color:var(--warning-text)]"
+            >
+              The phone would not keep the screen on. If battery saver is on, turn it off, then
+              switch this on again.
+            </output>
+          )}
           <div className="grid grid-cols-2 gap-2">
             <button
               type="button"
