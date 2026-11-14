@@ -21,7 +21,8 @@ every ring service; the journal never reads the Upstox token):
    are kept for the comparison of estimated with actual charges, which the next release shows.
 
 A first step that could not read fails the run (asked again every 15 minutes until midnight);
-the other two then run once a day whatever it did.
+the other two then run once a day whatever it did. Last, the job log lets go of rows older than
+KEEP_JOB_DAYS (design 4.2, review L3); report files are kept (a PDF is 50 to 500 KiB a month).
 """
 
 from __future__ import annotations
@@ -31,6 +32,7 @@ import hashlib
 import json
 import logging
 from collections.abc import Mapping
+from datetime import timedelta
 from typing import Any
 
 from ..capture import capture_for
@@ -60,6 +62,8 @@ PNL_PAGES = 3
 PNL_PAGE_SIZE = 5000
 HISTORY_LABEL = "Trade history"
 NOON_MIN = 12 * 60
+#: How long the job log keeps a day's rows (design 4.2).
+KEEP_JOB_DAYS = 400
 
 
 def financial_year(day: int) -> int:
@@ -332,6 +336,10 @@ async def catch_up(service: Any, today: int, now: int, late: bool) -> str:
             lines.append(f"{name}: not read ({exc})")
     for key in [k for k in done if k[0] < today]:
         done.discard(key)
+    cutoff = to_day(to_date(today) - timedelta(days=KEEP_JOB_DAYS))
+    let_go = await _write(service, lambda tx: tx.job_forget(cutoff))
+    if let_go:
+        lines.append(f"job log: {let_go} rows older than {KEEP_JOB_DAYS} days let go")
     if failed:
         raise JobFailed("; ".join([failed, *lines[1:]]))
     return "; ".join(lines)
