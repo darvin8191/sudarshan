@@ -91,7 +91,7 @@ IN = {
     "charges": {"EQ": {"total_paise": 30_000, "stt_paise": 18_000},
                 "FO": {"total_paise": 45_000, "stt_paise": 21_000}},
     "upstox_pnl": {"NIFTY": 130_000},
-    "sources": [{"kind": "trades", "fy": 2026, "segment": "EQ", "state": "ready",
+    "sources": [{"kind": "trades", "fy": 2026, "segment": "EQ", "state": "ok",
                  "read_at": 1794670000000}],
 }  # fmt: skip
 
@@ -196,7 +196,7 @@ OUT = {
     "business": BUSINESS,
     "dividends": {"by_payer": [], "buyback_paise": 0, "total_paise": 0,
                   "tds_expected_paise": None, "unconfirmed_count": 0},
-    "charges": {"by_segment": IN["charges"], "state": "ready"},
+    "charges": {"by_segment": IN["charges"], "state": "ok"},
     "not_computed": [
         "Tax at slab rates, surcharge, rebate and the choice of regime.",
         "The unused basic exemption against these gains.",

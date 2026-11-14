@@ -21,7 +21,7 @@ vi.mock('../api', async (importOriginal) => {
 })
 
 import { PortfolioError } from '../api'
-import type { TaxPack, TaxSource } from '../types'
+import { REPORT_STATES, type TaxPack, type TaxSource } from '../types'
 import { ChargesCard, Downloads, LeftOutCard, LossesCard, ReadsCard, readingOf } from './MoreCards'
 
 function pack(change: (pack: TaxPack) => void = () => {}): TaxPack {
@@ -64,6 +64,8 @@ describe('the cards', () => {
     expect(screen.getByText('Shares')).toBeTruthy()
     expect(screen.getByText('₹300.00')).toBeTruthy()
     expect(screen.getByText('of which STT ₹210.00')).toBeTruthy()
+    // The fixture's year is read in full (state `ok`, as the reader sends it): nothing is waiting.
+    expect(screen.queryByText(/not read yet/)).toBeNull()
     unmount()
     render(
       <ChargesCard
@@ -99,6 +101,15 @@ describe('the reads the year rests on', () => {
       { ...source(null, 'ok'), kind: 'ledger' },
     ])
     expect(state).toEqual({ total: 4, done: 1, reading: ['FO'], unread: ['COM', 'CD'] })
+  })
+
+  it('the fixture speaks the reader’s own states, so its year reads as done', () => {
+    const p = pack()
+    const states = [...p.inputs.sources.map((s) => s.state), p.charges.state]
+    for (const state of states) expect(REPORT_STATES).toContain(state)
+    expect(readingOf(p.inputs.sources)).toEqual({ total: 1, done: 1, reading: [], unread: [] })
+    const { container } = render(<ReadsCard pack={p} onRead={() => {}} />)
+    expect(container.innerHTML).toBe('')
   })
 
   it('shows nothing once every part is read', () => {

@@ -402,3 +402,22 @@ def test_a_tabs_split_reaches_its_own_accounts_and_never_the_upstox_one():
     assert [(a.ex_day, a.num, a.account) for a in actions] == [
         (20250601, 2, ACCOUNT), (20250601, 2, 8), (20250701, 3, ACCOUNT),
     ]  # fmt: skip
+
+
+# ---- the pack fixture speaks the reader's states (lane G) ----------------------------------------
+def test_the_pack_fixture_and_the_cores_default_use_only_the_states_the_reader_sends():
+    """``pack.json`` is the contract for the phone and the journal's renderer: a state in it that
+    the reader never sends (it once said "ready") would be drawn as a year not read."""
+    from sudarshan.portfolio.core import kinds
+    from sudarshan.tax import pack as tax_pack
+
+    path = Path(tax_pack.__file__).parent / "tests" / "vectors" / "pack.json"
+    (case,) = json.loads(path.read_text(encoding="utf-8"))
+    states = [source["state"] for source in case["in"]["sources"]]
+    states += [source["state"] for source in case["out"]["inputs"]["sources"]]
+    assert states and set(states) <= set(kinds.REPORT_STATES)
+    charges = {case["out"]["charges"]["state"], tax_pack.PackInputs(2026, 1, 0, 0).charges_state}
+    assert charges == {"ok"}  # the adapter sends "ok" or "partial", nothing else
+    assert tax_adapter._source("trades", 2026, "EQ", None)["state"] == "unavailable"
+    for state in kinds.REPORT_STATES:
+        assert tax_adapter._source("trades", 2026, "EQ", {"state": state})["state"] == state
