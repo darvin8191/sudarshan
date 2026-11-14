@@ -101,6 +101,22 @@ describe('Analytics', () => {
     expect(tile('Max drawdown').querySelector('[data-direction="down"]')).toBeTruthy()
   })
 
+  it('keeps every figure clear of its neighbour on a phone (review M4)', async () => {
+    serve(analytics({ metrics: metrics({ net_paise: 12_345_678 }) }))
+    show()
+    await screen.findAllByTestId('tile')
+    // the averages take one column on a phone, two from a wider screen
+    expect(screen.getByTestId('averages').className).toContain('grid-cols-1 ')
+    expect(screen.getByTestId('averages').className).toContain('sm:grid-cols-2')
+    // the period row wraps to two rows of three, so Custom is never off the edge
+    expect(screen.getByRole('tablist', { name: 'Period' }).className).toContain('grid-cols-3')
+    // a big net keeps its sign on its line, a step smaller
+    const net = tile('Net').children[1] as HTMLElement
+    expect(net.className).toContain('whitespace-nowrap')
+    expect(net.className).toContain('text-[1.375rem]')
+    expect(net.textContent).toContain('+₹1,23,457')
+  })
+
   it('says why a ratio has no number, and what to do for R', async () => {
     serve(
       analytics({
@@ -141,6 +157,95 @@ describe('Analytics', () => {
       'Charges took 3.92% of the gross profit'
     )
     expect(screen.getByTestId('charges-line').textContent).toContain('est.')
+  })
+
+  it('keeps every net whole on a phone: two columns, the net on one line, nothing scrolled sideways (review B1)', async () => {
+    serve(
+      analytics({
+        by_strategy: [
+          {
+            name: 'ORB breakout long name',
+            metrics: metrics({ trips: 30, net_paise: 12_345_678, win_rate: '62.50' }),
+          },
+          { name: '', metrics: metrics({ trips: 12, net_paise: -123_456_700 }) },
+        ],
+        by_tag: [{ name: '', metrics: metrics({ trips: 5, net_paise: -500_000 }) }],
+      })
+    )
+    show()
+    const strategies = await screen.findByRole('region', { name: 'By strategy' })
+    for (const region of [strategies, screen.getByRole('region', { name: 'By tag' })]) {
+      const table = within(region).getByRole('table')
+      expect(table.className).not.toContain('min-w-')
+      expect(region.querySelector('.overflow-x-auto')).toBeNull()
+      const heads = within(table)
+        .getAllByRole('columnheader')
+        .map((h) => h.textContent)
+      expect(heads.at(-1)).toBe('Net')
+      for (const cell of within(table).getAllByTestId('net')) {
+        expect(cell.className).toContain('whitespace-nowrap')
+      }
+    }
+    const [orb, unnamed] = within(within(strategies).getByRole('table'))
+      .getAllByRole('row')
+      .slice(1)
+    expect(orb.textContent).toContain('ORB breakout long name')
+    expect(orb.textContent).toContain('30 trades · Win rate 62.50%')
+    expect(within(orb).getByTestId('net').textContent).toBe('+₹1,23,456.78')
+    expect(unnamed.textContent).toContain('No strategy')
+    expect(within(unnamed).getByTestId('net').textContent).toBe('−₹12,34,567.00')
+    // A tag row with no name is not a strategy (review L4).
+    const tags = screen.getByRole('region', { name: 'By tag' })
+    expect(tags.textContent).toContain('No tag')
+    expect(tags.textContent).not.toContain('No strategy')
+    // The expiry tables take the same two columns.
+    const expiry = screen.getByRole('region', { name: 'Expiry days' })
+    expect(expiry.querySelector('.overflow-x-auto')).toBeNull()
+    expect(within(expiry).getAllByTestId('net').length).toBe(4)
+  })
+
+  it('leaves out a part missing from the answer, never the whole page (review M6)', async () => {
+    serve({
+      ...analytics(),
+      equity: undefined,
+      expiry: undefined,
+      calendar: undefined,
+    } as unknown as Answer)
+    show()
+    await screen.findAllByTestId('tile')
+    expect(screen.getByRole('region', { name: 'Filters' })).toBeTruthy()
+    expect(tile('Max drawdown').textContent).toContain('-')
+    expect(screen.queryByTestId('equity')).toBeNull()
+    expect(screen.queryByRole('region', { name: 'Expiry days' })).toBeNull()
+    expect(screen.getByRole('region', { name: 'Heat map' })).toBeTruthy()
+    expect(screen.getByRole('region', { name: 'By strategy' })).toBeTruthy()
+  })
+
+  it('says an answer without its figures cannot be read, in words', async () => {
+    serve({ ...analytics(), metrics: undefined } as unknown as Answer)
+    show()
+    expect(
+      await screen.findByText('OpenAlgo’s answer could not be read. Try again in a minute.')
+    ).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Try again/ })).toBeTruthy()
+  })
+
+  it('says est. only while the service says the charges are an estimate, and names those it does not estimate', async () => {
+    serve(analytics({ metrics: metrics({ charges_estimated: false, charges_not_estimated: 2 }) }))
+    show()
+    const line = await screen.findByTestId('charges-line')
+    expect(line.textContent).not.toContain('est.')
+    expect(
+      screen.getByText(/2 trades are on an exchange whose charges are not estimated/)
+    ).toBeTruthy()
+    expect(tile('Net').textContent).not.toContain('charges est.')
+  })
+
+  it('marks the Net figure as after estimated charges while they are', async () => {
+    serve()
+    show()
+    await screen.findByTestId('charges-line')
+    expect(tile('Net').textContent).toContain('6 trades, charges est.')
   })
 
   it('says there is no charges figure without a winning trade', async () => {

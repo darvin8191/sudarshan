@@ -23,6 +23,14 @@ close on that day or the last one before it. The index portfolio's value is its 
 now, and the XIRR of the same money with that value is the benchmark's. Units are kept exactly (as
 fractions) and a negative count is kept too, and flagged. The index's time-weighted return is its
 close at the end of the tab's over its close at the start. Both indices are price indices.
+
+**Beta, correlation, excess return (M7.31).** A tab's *day return* runs from one trading day's
+closing value to the next trading day's (a weekday that is no holiday the caller named), money
+that moved counted as the time-weighted return counts it. A return that would span a trading day
+with no complete value is left out, and so is the tab's first day (it has no close before it).
+Each is paired with the index's ``close / previous close - 1`` over the very same two days; the
+last 60 pairs give beta and correlation (sudarshan.common.stats), shown from 20. The excess
+return is the tab's time-weighted return less the index's over the same span, as shown.
 """
 
 from __future__ import annotations
@@ -33,12 +41,22 @@ from dataclasses import asdict, dataclass
 from fractions import Fraction
 from typing import NamedTuple
 
+from sudarshan.common import stats
+
 from . import performance, words
-from .days import add_days, business_days_between
-from .kinds import BENCHMARK_LABELS, BENCHMARKS, HOLDING_KINDS, NAV_OLD_BUSINESS_DAYS
+from .days import add_days, business_days_between, is_weekday
+from .kinds import (
+    BENCHMARK_LABELS,
+    BENCHMARKS,
+    HOLDING_KINDS,
+    NAV_OLD_BUSINESS_DAYS,
+    PCT_DECIMALS,
+    STAT_DAYS,
+    STAT_MIN_DAYS,
+)
 from .model import Ledger
-from .money import pct, round_div, value_paise
-from .performance import Flow, Point, Twr
+from .money import format_pct, pct, round_div, value_paise
+from .performance import Flow, Period, Point, Twr
 
 # ---------------------------------------------------------------- closing prices
 
@@ -279,7 +297,142 @@ def benchmark(
     return Benchmark(name, label, value, xirr_pct, twr_pct, early or short, notes)
 
 
+# ---------------------------------------------------------------- beta, correlation, excess
+
+
+class DayReturn(NamedTuple):
+    """A tab's growth from the close of one trading day (``start``) to the close of the next."""
+
+    start: int
+    day: int
+    grown: int
+    base: int
+
+    @property
+    def rate(self) -> Fraction:
+        return Fraction(self.grown, self.base) - 1
+
+
+def day_returns(periods: Iterable[Period], holidays: Iterable[int] = ()) -> list[DayReturn]:
+    """One return for each trading day that follows a trading day with a complete value.
+
+    ``periods`` are ``performance.periods`` of the tab, oldest first. A value on a day the
+    exchange was shut (a fund's NAV on a Saturday) joins the next trading day's return. A return
+    that spans a trading day without a complete value is left out, as is a day the series only
+    begins on: neither is the move of one day.
+    """
+    shut = frozenset(holidays)
+    found: list[DayReturn] = []
+    start = last = None
+    grown = base = 1
+    for period in periods:
+        if start is None or period.start != last:
+            start, grown, base = period.start, 1, 1
+        grown, base, last = grown * period.grown, base * period.base, period.day
+        if is_weekday(period.day) and period.day not in shut:
+            if business_days_between(start, period.day, shut) == 1:
+                found.append(DayReturn(start, period.day, grown, base))
+            start = None
+    return found
+
+
+@dataclass(frozen=True, slots=True)
+class IndexStats:
+    """What a ``BenchmarkFigure`` (types.ts) says beside the same-money figures."""
+
+    beta: str | None = None
+    correlation: str | None = None
+    excess_pct: str | None = None
+    stat_days: int = 0
+    stat_note: str | None = None
+
+    def as_dict(self) -> dict:
+        return asdict(self)
+
+
+def _session_after(day: int, count: int, shut: frozenset[int]) -> int:
+    """The ``count``-th trading day after ``day``, by the weekdays and the holidays named."""
+    while count > 0:
+        day = add_days(day, 1)
+        count -= is_weekday(day) and day not in shut
+    return day
+
+
+def _scaled(pct_text: str) -> int:
+    """A percentage text of four decimals in ten-thousandths of a percent, exactly."""
+    return int(Fraction(pct_text) * 10**PCT_DECIMALS)
+
+
+def index_stats(
+    name: str,
+    returns: Sequence[DayReturn],
+    closes: Iterable[tuple[int, int]],
+    as_of_day: int,
+    twr_pct: str | None = None,
+    index_twr_pct: str | None = None,
+    holidays: Iterable[int] = (),
+) -> IndexStats:
+    """Beta and correlation of the tab's day returns against the index ``name`` over the last
+    ``STAT_DAYS`` days both have, and the tab's time-weighted return less the index's.
+
+    A day counts only when the index closed on it and on the trading day before it, so both
+    returns are of the same one day. Fewer than ``STAT_MIN_DAYS`` such days show nothing and say
+    from when (``as_of_day`` is the day asked on). Texts of four decimals, like every figure here.
+    """
+    label, shut = BENCHMARK_LABELS[name], frozenset(holidays)
+    levels = dict(sorted((pair for pair in closes if pair[1] > 0), key=lambda pair: pair[0]))
+    days = list(levels)
+    r_p: list[Fraction] = []
+    r_m: list[Fraction] = []
+    last = None
+    for found in reversed(returns):
+        at = bisect_right(days, found.start) - 1
+        if found.day not in levels or at < 0:
+            continue
+        if business_days_between(days[at], found.day, shut) != 1:
+            continue  # the index has no close for the day before: its move is of two days
+        r_p.append(found.rate)
+        r_m.append(Fraction(levels[found.day], levels[days[at]]) - 1)
+        last = last or found.day
+        if len(r_p) == STAT_DAYS:
+            break
+    r_p.reverse()
+    r_m.reverse()
+    excess = None
+    if twr_pct is not None and index_twr_pct is not None:
+        excess = format_pct(_scaled(twr_pct) - _scaled(index_twr_pct))
+    got = stats.correlation_beta(r_p, r_m, STAT_MIN_DAYS, STAT_DAYS)
+    if got["state"] == "short":
+        ready = _session_after(as_of_day, STAT_MIN_DAYS - len(r_p), shut)
+        return IndexStats(None, None, excess, len(r_p), words.stats_after(STAT_MIN_DAYS, ready))
+    if got["state"] == "no_variation":
+        return IndexStats(None, None, excess, len(r_p), words.stats_flat(label))
+    beta = stats.fraction_str(got["beta"], PCT_DECIMALS)
+    if got["correlation"] is None:
+        return IndexStats(beta, None, excess, len(r_p), words.STATS_TAB_FLAT)
+    correlation = stats.decimal_str(got["correlation"], PCT_DECIMALS)
+    return IndexStats(beta, correlation, excess, len(r_p), words.stats_on(len(r_p), last))
+
+
 # ---------------------------------------------------------------- the whole report
+
+
+def compared(
+    name: str,
+    flows: Iterable[Flow],
+    closes: Iterable[tuple[int, int]],
+    valuation_day: int,
+    now_u: int | None,
+    span: tuple[int, int] | None,
+    moves: Sequence[DayReturn],
+    twr_pct: str | None,
+    holidays: Iterable[int] = (),
+) -> dict:
+    """One ``BenchmarkFigure`` (types.ts): the same money in the index, and the statistics."""
+    levels = list(closes)
+    same = benchmark(name, flows, levels, valuation_day, now_u, span)
+    figures = index_stats(name, moves, levels, valuation_day, twr_pct, same.twr_pct, holidays)
+    return {**same.as_dict(), **figures.as_dict()}
 
 
 def report(
@@ -297,13 +450,17 @@ def report(
     out = performance.summary(flows, value_now_paise, valuation_day)
     days = daily(ledger, quotes, valuation_day, holidays)
     span = days.span()
-    out["twr"] = days.twr().as_dict()
+    shut = sorted(holidays)
+    twr = days.twr()
+    moves = day_returns(performance.periods(days.points, days.opening_paise), shut)
+    out["twr"] = twr.as_dict()
     out["benchmarks"] = [
-        benchmark(
-            name, flows, closes.get(name, ()), valuation_day, (now_u or {}).get(name), span
-        ).as_dict()
+        compared(
+            name, flows, closes.get(name, ()), valuation_day, (now_u or {}).get(name), span,
+            moves, twr.pct, shut,
+        )
         for name in BENCHMARKS
-    ]
+    ]  # fmt: skip
     out["series"] = [point.as_dict() for point in days.series]
     out["by_fy"] = [fy.as_dict() for fy in performance.by_financial_year(ledger)]
     out["income"] = performance.income_report(ledger, valuation_day)

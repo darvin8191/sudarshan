@@ -10,7 +10,8 @@ passes. It passes (exit 0) only when, as the account running it:
   ``/var/lib/sudarshan-portfolio``; ``/var/lib/sudarshan-feed/subscriptions.json``. A folder it can
   enter but not list fails as well, since its files could still be opened by name;
 - it can list ``/etc/sudarshan-family`` and open every file in it, and it runs the app's Python and
-  imports ``sudarshan.family`` (it is running, so it does);
+  loads ``sudarshan.family.service`` with everything that imports (review L6: a missing package or
+  an import that needs a closed path fails here, not at the first start);
 - a connection to 127.0.0.1:5555 (OpenAlgo's market-data bus), to 127.0.0.1:8765 (its WebSocket
   proxy), to 127.0.0.1:5582 (the alerts service, a ring port not on the account's list) and to
   127.0.0.1:1 (a port nothing uses) is refused by the firewall the family set-up installs. The last
@@ -35,6 +36,7 @@ from __future__ import annotations
 
 import argparse
 import errno
+import importlib
 import os
 import pwd
 import socket
@@ -222,12 +224,35 @@ def family_line(folder: Path) -> tuple[bool, str]:
     return True, f"PASS {what}: this account opens all {files} files in {folder}"
 
 
-def python_line() -> tuple[bool, str]:
+#: L6 (review, feat/family-t2): the module the unit starts, loaded here with everything it imports, so a
+#: missing package or an import that needs a closed path fails the check, not the first start.
+SERVICE_MODULE = "sudarshan.family.service"
+
+
+def python_line(load: Callable[[str], object] = importlib.import_module) -> tuple[bool, str]:
     try:
         account = pwd.getpwuid(os.getuid()).pw_name
     except KeyError:
         account = f"uid {os.getuid()}"
-    return True, f"PASS the app's Python: it runs as {account} and imports sudarshan.family"
+    what = (
+        f"FAIL the app's Python: as {account} it cannot load the family service ({SERVICE_MODULE})"
+    )
+    try:
+        load(SERVICE_MODULE)
+    except ImportError as exc:
+        missing = exc.name or "a module it needs"
+        return False, (
+            f"{what}: {missing} is missing; run the deploy again so it installs this release's "
+            "packages"
+        )
+    except OSError as exc:
+        return (
+            False,
+            f"{what}: {exc.filename or 'a file it needs'} cannot be opened as this account",
+        )
+    except Exception:  # its own code failed while loading: a broken release
+        return False, f"{what}: its code failed while loading; install the previous release"
+    return True, f"PASS the app's Python: it runs as {account} and loads the family service"
 
 
 def _failed_with(code: int) -> str:

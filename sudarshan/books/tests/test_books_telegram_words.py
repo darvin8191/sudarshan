@@ -162,6 +162,12 @@ def test_the_bot_s_closeall_reply_says_the_app_s_sentence(monkeypatch, callback,
     monkeypatch.setattr(bot, "log_command", lambda *args, **kwargs: None)
     monkeypatch.setattr(bot, "_running_python_strategies", lambda: [])
     monkeypatch.setattr(service, "_get_sdk_client", lambda telegram_id: client)
+    # "Close all + Stop strategies" acts on this server, so since v0.5.2 (upstream 81fe8eb4) the
+    # bot checks at the press that the chat is linked with this server's API key: the owner's is.
+    monkeypatch.setattr(bot, "get_user_credentials", lambda telegram_id: {"api_key": "owner-key"})
+    monkeypatch.setattr(
+        bot, "get_username_by_apikey", lambda key: "owner" if key == "owner-key" else None
+    )
     query = MagicMock(data=callback, answer=AsyncMock(), edit_message_text=AsyncMock())
     query.from_user.id = 7
     query.message.chat.id = 9

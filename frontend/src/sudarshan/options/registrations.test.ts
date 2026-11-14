@@ -33,19 +33,18 @@ describe('the options screen is registered three times', () => {
     )
   })
 
-  it('has an entry in the profile menu, under Trade, right after the chart', () => {
-    const at = profileMenuItems.findIndex((item) => item.href === '/options')
-    expect(profileMenuItems[at]).toMatchObject({ label: 'Options', group: 'Trade' })
-    expect(profileMenuItems[at - 1]?.href).toBe('/chart')
-    const apiKey = profileMenuItems.findIndex((item) => item.href === '/apikey')
-    expect(profileMenuItems[apiKey + 1]?.href).toBe('/action-center')
-  })
-
-  it('is in the phone menu’s Trade section', () => {
+  it('has an entry in the profile menu, under Trade, right after the chart there', () => {
+    const entry = profileMenuItems.find((item) => item.href === '/options')
+    expect(entry).toMatchObject({ label: 'Options', group: 'Trade' })
     const trade = menuGroups(profileMenuItems, { phone: true }).find(
       (section) => section.group === 'Trade'
     )
-    expect(trade?.items.map((item) => item.href)).toContain('/options')
+    const hrefs = trade?.items.map((item) => item.href) ?? []
+    expect(hrefs[hrefs.indexOf('/options') - 1]).toBe('/chart')
+    // The pins other pages hold are kept: Action Center after API Key, Alerts after Chart.
+    const at = (href: string) => profileMenuItems.findIndex((item) => item.href === href)
+    expect(at('/action-center')).toBe(at('/apikey') + 1)
+    expect(at('/market-alerts')).toBe(at('/chart') + 1)
   })
 
   it('has its bridge registered in app.py', () => {

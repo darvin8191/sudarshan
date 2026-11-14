@@ -1,14 +1,28 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import {
-  CHART_CHIPS,
+  CHART_STYLES,
   chartPath,
-  DEFAULT_CHIP,
   DEFAULT_INSTRUMENT,
-  isChartChip,
-  readChip,
+  DEFAULT_INTERVAL,
+  DEFAULT_PINNED,
+  DEFAULT_STYLE,
+  intervalLabel,
+  intervalName,
+  isCalendarInterval,
+  isInterval,
+  MAX_PINNED,
+  normalizeInterval,
+  readInterval,
   readLastInstrument,
-  saveChip,
+  readPinned,
+  readStudies,
+  readStyle,
+  saveInterval,
   saveLastInstrument,
+  savePinned,
+  saveStudies,
+  saveStyle,
+  togglePin,
 } from './prefs'
 
 const refusing = {
@@ -24,25 +38,154 @@ afterEach(() => {
   localStorage.clear()
 })
 
-describe('the timeframes', () => {
-  it('offers the six the phone chart shows, in order', () => {
-    expect(CHART_CHIPS).toEqual(['1m', '3m', '5m', '15m', '1h', '1D'])
-    expect(isChartChip('15m')).toBe(true)
-    expect(isChartChip('2m')).toBe(false)
-    expect(isChartChip(5)).toBe(false)
+describe('a timeframe', () => {
+  it('is what a broker names one: minutes, hours, seconds, a day, a week or a month', () => {
+    for (const ok of ['1m', '2m', '15m', '30m', '1h', '4h', '30s', 'D', 'W', 'M'])
+      expect(isInterval(ok)).toBe(true)
+    for (const bad of ['', '0m', '1d', '1D', 'm', '5', '15 m', 5, null, '1000m'])
+      expect(isInterval(bad)).toBe(false)
   })
 
-  it('remembers the last one chosen on this device', () => {
-    expect(readChip()).toBe(DEFAULT_CHIP)
-    saveChip('15m')
-    expect(readChip()).toBe('15m')
+  it("reads an older build's 1D as the broker's D", () => {
+    expect(normalizeInterval('1D')).toBe('D')
+    expect(normalizeInterval('W')).toBe('W')
+    expect(normalizeInterval('day')).toBeNull()
   })
 
-  it('falls back to the default for a value an older build saved, or blocked storage', () => {
-    localStorage.setItem('sudarshan-chart-interval', '2h')
-    expect(readChip()).toBe(DEFAULT_CHIP)
-    expect(readChip(refusing)).toBe(DEFAULT_CHIP)
-    expect(() => saveChip('1m', refusing)).not.toThrow()
+  it('has a short chip and words, a month never told from a minute by case alone in words', () => {
+    expect(['1m', '15m', '1h', 'D', 'W', 'M'].map(intervalLabel)).toEqual([
+      '1m',
+      '15m',
+      '1h',
+      '1D',
+      '1W',
+      '1M',
+    ])
+    expect(['1m', '15m', '1h', '2h', '30s', 'D', 'W', 'M'].map(intervalName)).toEqual([
+      '1 minute',
+      '15 minutes',
+      '1 hour',
+      '2 hours',
+      '30 seconds',
+      '1 day',
+      '1 week',
+      '1 month',
+    ])
+    expect(isCalendarInterval('D')).toBe(true)
+    expect(isCalendarInterval('1h')).toBe(false)
+  })
+})
+
+describe('the timeframe last chosen', () => {
+  it('is remembered on this device, any the broker offers', () => {
+    expect(readInterval()).toBe(DEFAULT_INTERVAL)
+    saveInterval('2h')
+    expect(readInterval()).toBe('2h')
+  })
+
+  it("takes an older build's 1D, and falls back on anything else or on blocked storage", () => {
+    localStorage.setItem('sudarshan-chart-interval', '1D')
+    expect(readInterval()).toBe('D')
+    localStorage.setItem('sudarshan-chart-interval', 'two hours')
+    expect(readInterval()).toBe(DEFAULT_INTERVAL)
+    expect(readInterval(refusing)).toBe(DEFAULT_INTERVAL)
+    expect(() => saveInterval('1m', refusing)).not.toThrow()
+  })
+})
+
+describe('the pinned timeframes', () => {
+  it('start as the six the phone chart always offered, short to long', () => {
+    expect(readPinned()).toEqual(['1m', '3m', '5m', '15m', '1h', 'D'])
+    expect(DEFAULT_PINNED).toHaveLength(MAX_PINNED)
+  })
+
+  it('are kept short to long, each once, six at most, whatever was saved', () => {
+    savePinned(['D', '5m', '5m', '1D', '2h'])
+    expect(readPinned()).toEqual(['5m', '2h', 'D'])
+    localStorage.setItem(
+      'sudarshan-chart-pinned',
+      JSON.stringify(['1m', '2m', '3m', '5m', '10m', '15m', '30m', 'nonsense'])
+    )
+    expect(readPinned()).toEqual(['1m', '2m', '3m', '5m', '10m', '15m'])
+  })
+
+  it('fall back to the six for a damaged entry, an empty one, or blocked storage', () => {
+    localStorage.setItem('sudarshan-chart-pinned', 'not json')
+    expect(readPinned()).toEqual([...DEFAULT_PINNED])
+    localStorage.setItem('sudarshan-chart-pinned', '["junk"]')
+    expect(readPinned()).toEqual([...DEFAULT_PINNED])
+    expect(readPinned(refusing)).toEqual([...DEFAULT_PINNED])
+    expect(() => savePinned(['1m'], refusing)).not.toThrow()
+  })
+
+  it('take a pin in its place by length, and give one up', () => {
+    expect(togglePin(['1m', 'D'], '1h')).toEqual({ pinned: ['1m', '1h', 'D'] })
+    expect(togglePin(['1m', '1h', 'D'], '1h')).toEqual({ pinned: ['1m', 'D'] })
+  })
+
+  it('refuse a seventh, and refuse to give up the last', () => {
+    expect(togglePin([...DEFAULT_PINNED], '2h')).toEqual({
+      pinned: [...DEFAULT_PINNED],
+      refused: 'full',
+    })
+    expect(togglePin(['5m'], '5m')).toEqual({ pinned: ['5m'], refused: 'last' })
+  })
+})
+
+describe('the chart style', () => {
+  it('offers five, candles first, Heikin Ashi through the engine transform', () => {
+    expect(CHART_STYLES.map((style) => style.label)).toEqual([
+      'Candles',
+      'Hollow candles',
+      'Bars',
+      'Line',
+      'Heikin Ashi',
+    ])
+    expect(CHART_STYLES.find((style) => style.value === 'heikin-ashi')).toMatchObject({
+      series: 'candlestick',
+      transform: 'heikin-ashi',
+    })
+  })
+
+  it('is one choice for every instrument on this phone, read defensively', () => {
+    expect(readStyle()).toBe(DEFAULT_STYLE)
+    saveStyle('heikin-ashi')
+    expect(readStyle()).toBe('heikin-ashi')
+    localStorage.setItem('sudarshan-chart-style', 'renko')
+    expect(readStyle()).toBe(DEFAULT_STYLE)
+    expect(readStyle(refusing)).toBe(DEFAULT_STYLE)
+    expect(() => saveStyle('line', refusing)).not.toThrow()
+  })
+})
+
+describe('the indicator set', () => {
+  it("is one set for every instrument, kept in order with each study's settings", () => {
+    expect(readStudies()).toEqual([])
+    const set = [
+      { id: 'ema', settings: { length: 21 } },
+      { id: 'rsi', settings: {} },
+    ]
+    saveStudies(set)
+    expect(readStudies()).toEqual(set)
+  })
+
+  it('keeps three at most and drops what is not a study, or a damaged entry', () => {
+    localStorage.setItem(
+      'sudarshan-chart-studies',
+      JSON.stringify([
+        { id: 'ema', settings: {} },
+        { id: '', settings: {} },
+        { id: 'sma' },
+        { id: 'rsi', settings: [] },
+        'macd',
+        ...['a', 'b', 'c', 'd', 'e'].map((id) => ({ id, settings: {} })),
+      ])
+    )
+    expect(readStudies().map((entry) => entry.id)).toEqual(['ema', 'a', 'b'])
+    localStorage.setItem('sudarshan-chart-studies', 'not json')
+    expect(readStudies()).toEqual([])
+    expect(readStudies(refusing)).toEqual([])
+    expect(() => saveStudies([], refusing)).not.toThrow()
   })
 })
 

@@ -3,14 +3,17 @@ import { describe, expect, it } from 'vitest'
 import { closedTrip, trip } from './fixtures'
 import {
   buildUpdate,
+  changedFields,
   checklistFor,
   formOf,
   parseChecklist,
   parseRupees,
   problemsOf,
+  rebase,
   recentStrategies,
   riskText,
   rText,
+  type SheetForm,
   serializeChecklist,
 } from './sheetForm'
 
@@ -168,5 +171,38 @@ describe('the strategies offered', () => {
       trip({ id: 52, strategy: '', opened_ms: 6000 }),
     ]
     expect(recentStrategies(list)).toEqual(['Mine', 'S9', 'S8', 'S7', 'S6', 'S5', 'S4', 'S3'])
+  })
+})
+
+describe('rebase (review M1)', () => {
+  const base: SheetForm = {
+    strategy: 'ORB',
+    setupId: null,
+    risk: '500',
+    checklist: [],
+    mistakes: [1],
+    mood: 'calm',
+    notes: 'First words.',
+  }
+
+  it('keeps what was typed where the other screen changed nothing, and takes its other changes', () => {
+    const mine = { ...base, notes: 'First words. More.', risk: '750' }
+    const theirs = { ...base, mood: 'tired' as const, mistakes: [1, 2] }
+    const out = rebase(base, mine, theirs)
+    expect(out.form).toEqual({ ...theirs, notes: 'First words. More.', risk: '750' })
+    expect(out.typedNotes).toBeNull()
+    expect(out.overlap).toEqual([])
+  })
+
+  it('shows the other screen’s value where both changed, names it, and hands back typed notes', () => {
+    const mine = { ...base, notes: 'Mine.', mood: 'rushed' as const, strategy: 'Gap' }
+    const theirs = { ...base, notes: 'Theirs.', mood: 'tired' as const, strategy: ' Gap ' }
+    const out = rebase(base, mine, theirs)
+    expect(out.form.notes).toBe('Theirs.')
+    expect(out.form.mood).toBe('tired')
+    expect(out.typedNotes).toBe('Mine.')
+    // the same change on both screens is no overlap
+    expect(out.overlap).toEqual(['the mood'])
+    expect(changedFields(base, mine)).toEqual(['strategy', 'mood', 'notes'])
   })
 })

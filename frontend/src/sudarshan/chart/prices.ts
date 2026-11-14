@@ -3,13 +3,18 @@
  * a tick can change it without re-rendering the page around it, and the line
  * under it that says when the last tick came.
  */
+import type { MarketDepth } from 'openalgo-charts'
 import { type LiveStatus, opensAtWords } from '@/lib/trading/liveStatus'
+import { type Direction, directionOf } from '@/sudarshan/dashboard/format'
 import type { PhoneTick } from './phoneChart'
 
 /** The latest price, and the latest one the stream delivered. */
 export interface Prices {
   tick: PhoneTick | null
   streamed: PhoneTick | null
+  /** The five-level book (C9), and the open interest last carried, on a contract. */
+  depth: MarketDepth | null
+  oi: number | null
 }
 
 /** Runs a callback before the next paint, or soon where a page has no paints. */
@@ -26,7 +31,7 @@ const nextFrame: FrameScheduler = (run) => {
  * a burst of ticks between two paints renders the header once, at the last.
  */
 export class PriceStore {
-  private value: Prices = { tick: null, streamed: null }
+  private value: Prices = { tick: null, streamed: null, depth: null, oi: null }
   private readonly listeners = new Set<() => void>()
   private readonly schedule: FrameScheduler
   private pending = false
@@ -45,7 +50,23 @@ export class PriceStore {
   }
 
   set(tick: PhoneTick): void {
-    this.value = { tick, streamed: tick.polled ? this.value.streamed : tick }
+    this.value = {
+      ...this.value,
+      tick,
+      streamed: tick.polled ? this.value.streamed : tick,
+      // A frame that only moved the book says nothing new of open interest.
+      oi: tick.oi ?? this.value.oi,
+    }
+    this.notify()
+  }
+
+  /** The book, on each depth frame: drawn at the next frame with the price. */
+  setDepth(depth: MarketDepth): void {
+    this.value = { ...this.value, depth }
+    this.notify()
+  }
+
+  private notify(): void {
     if (this.pending) return
     this.pending = true
     this.schedule(() => {
@@ -89,4 +110,28 @@ export function tickLine(
     return `Last tick ${clockSeconds.format(new Date(at))}`
   }
   return 'Waiting for the first tick'
+}
+
+/**
+ * Whether the price should be drawn grey: it is not real-time and should be
+ * (reconnecting, delayed, stale), so it must not pass for current.
+ */
+export function priceQuiet(status: LiveStatus | null): boolean {
+  const line = status?.line
+  return (
+    line?.kind === 'polling' ||
+    line?.kind === 'connecting' ||
+    (line?.kind === 'delayed' && line.stale)
+  )
+}
+
+/** The change on the previous close, as a sum and a percentage, and which way; null until both are known. */
+export function changeOn(
+  ltp: number | null,
+  prevClose: number | null,
+  decimals: number
+): { change: number | null; percent: number | null; direction: Direction } {
+  const change = ltp !== null && prevClose !== null ? ltp - prevClose : null
+  const percent = change !== null && prevClose ? (change / prevClose) * 100 : null
+  return { change, percent, direction: change === null ? 'flat' : directionOf(change, decimals) }
 }

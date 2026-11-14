@@ -191,8 +191,9 @@ export default function IVSmile() {
           ? 'rgba(180,160,255,0.1)'
           : 'rgba(255,255,255,0.1)'
         : 'rgba(0,0,0,0.08)',
-      callIV: '#3b82f6',
-      putIV: '#ef4444',
+      // SUDARSHAN T3b (M1.18): the D look's info blue and down, as the table's tokens.
+      callIV: '#006A9D',
+      putIV: '#C3282E',
       spotLine: isDark ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.5)',
       hoverBg: isDark ? (isAnalyzer ? '#2d2545' : '#1e293b') : '#ffffff',
       hoverFont: isDark ? '#e0e0e0' : '#333333',
@@ -517,8 +518,13 @@ export default function IVSmile() {
                     <th className="text-left py-2 px-3 font-medium text-muted-foreground">
                       Strike
                     </th>
-                    <th className="text-right py-2 px-3 font-medium text-blue-500">Call IV</th>
-                    <th className="text-right py-2 px-3 font-medium text-red-500">Put IV</th>
+                    {/* SUDARSHAN T3b (M1.18): calls in the info blue, puts in the down token, as the chart's lines. */}
+                    <th className="text-right py-2 px-3 font-medium text-[color:var(--info)]">
+                      Call IV
+                    </th>
+                    <th className="text-right py-2 px-3 font-medium text-[color:var(--down)]">
+                      Put IV
+                    </th>
                     <th className="text-right py-2 px-3 font-medium text-muted-foreground">
                       Diff (PE-CE)
                     </th>
@@ -538,18 +544,18 @@ export default function IVSmile() {
                           <span className="ml-1 text-xs text-muted-foreground">(ATM)</span>
                         )}
                       </td>
-                      <td className="text-right py-2 px-3 text-blue-500">
+                      <td className="text-right py-2 px-3 text-[color:var(--info)]">
                         {row.ce_iv !== null ? `${row.ce_iv}%` : '-'}
                       </td>
-                      <td className="text-right py-2 px-3 text-red-500">
+                      <td className="text-right py-2 px-3 text-[color:var(--down)]">
                         {row.pe_iv !== null ? `${row.pe_iv}%` : '-'}
                       </td>
                       <td
                         className={`text-right py-2 px-3 ${
                           row.diff !== null && row.diff > 0
-                            ? 'text-red-500'
+                            ? 'text-[color:var(--down)]'
                             : row.diff !== null && row.diff < 0
-                              ? 'text-blue-500'
+                              ? 'text-[color:var(--info)]'
                               : 'text-muted-foreground'
                         }`}
                       >

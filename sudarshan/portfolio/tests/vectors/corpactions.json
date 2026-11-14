@@ -1,0 +1,961 @@
+{
+ "about": "Golden vectors for core/corpactions (PC1, M7.36): Upstox's corporate-action rows as integers, the dates it may write, the two readings of a ratio and what makes an event the same event. Typed by hand from Upstox's documented fields; nothing from the network.",
+ "isin": "INE000A01010",
+ "rows": [
+  {
+   "id": "R-SAMPLE",
+   "why": "the documented sample: Rs 5.50 a share is 55000 amount_u; no ratio",
+   "raw": {
+    "name": "Dividend",
+    "expiry_date": "14 Aug 2025",
+    "amount": 5.5,
+    "ratio": null,
+    "event_details": [
+     {
+      "name": "Announcement date",
+      "value": "25 Apr 2025"
+     },
+     {
+      "name": "Ex dividend date",
+      "value": "14 Aug 2025"
+     },
+     {
+      "name": "Record date",
+      "value": "14 Aug 2025"
+     },
+     {
+      "name": "Dividend type",
+      "value": "Final"
+     },
+     {
+      "name": "Dividend percentage",
+      "value": "55.0"
+     },
+     {
+      "name": "Details",
+      "value": "Final dividend of Rs.5.50 per share"
+     }
+    ]
+   },
+   "expect": {
+    "isin": "INE000A01010",
+    "kind": "dividend",
+    "ex_day": 20250814,
+    "amount_u": 55000,
+    "ratio_num": null,
+    "ratio_den": null,
+    "details": [
+     {
+      "name": "Announcement date",
+      "value": "25 Apr 2025"
+     },
+     {
+      "name": "Ex dividend date",
+      "value": "14 Aug 2025"
+     },
+     {
+      "name": "Record date",
+      "value": "14 Aug 2025"
+     },
+     {
+      "name": "Dividend type",
+      "value": "Final"
+     },
+     {
+      "name": "Dividend percentage",
+      "value": "55.0"
+     },
+     {
+      "name": "Details",
+      "value": "Final dividend of Rs.5.50 per share"
+     }
+    ]
+   },
+   "skip": null
+  },
+  {
+   "id": "R-BONUS",
+   "why": "a bonus 1:1 on 10 Sep 2025; the ratio is kept as written, amount none",
+   "raw": {
+    "name": "Bonus",
+    "expiry_date": "10 Sep 2025",
+    "amount": null,
+    "ratio": "1:1",
+    "event_details": []
+   },
+   "expect": {
+    "isin": "INE000A01010",
+    "kind": "bonus",
+    "ex_day": 20250910,
+    "amount_u": null,
+    "ratio_num": 1,
+    "ratio_den": 1,
+    "details": []
+   },
+   "skip": null
+  },
+  {
+   "id": "R-SPLIT",
+   "why": "a split written 1:5 on 5 Jan 2026 stays (1, 5); a zero amount is no amount",
+   "raw": {
+    "name": "Split",
+    "expiry_date": "05 Jan 2026",
+    "amount": 0,
+    "ratio": "1:5",
+    "event_details": []
+   },
+   "expect": {
+    "isin": "INE000A01010",
+    "kind": "split",
+    "ex_day": 20260105,
+    "amount_u": null,
+    "ratio_num": 1,
+    "ratio_den": 5,
+    "details": []
+   },
+   "skip": null
+  },
+  {
+   "id": "R-RIGHTS",
+   "why": "a rights issue 3:10 with its price of Rs 120.25 a share: 1202500 amount_u",
+   "raw": {
+    "name": "Rights",
+    "expiry_date": "2 Feb 2026",
+    "amount": "120.25",
+    "ratio": "3 : 10",
+    "event_details": []
+   },
+   "expect": {
+    "isin": "INE000A01010",
+    "kind": "rights",
+    "ex_day": 20260202,
+    "amount_u": 1202500,
+    "ratio_num": 3,
+    "ratio_den": 10,
+    "details": []
+   },
+   "skip": null
+  },
+  {
+   "id": "R-NAMES",
+   "why": "the kind is the word in the name, whatever stands beside it",
+   "raw": {
+    "name": "Stock Split",
+    "expiry_date": "5 January 2026",
+    "ratio": "2:10"
+   },
+   "expect": {
+    "isin": "INE000A01010",
+    "kind": "split",
+    "ex_day": 20260105,
+    "amount_u": null,
+    "ratio_num": 2,
+    "ratio_den": 10,
+    "details": []
+   },
+   "skip": null
+  },
+  {
+   "id": "R-ROUND",
+   "why": "Rs 2.00005 a share: 20000.5 amount_u rounds half away from zero to 20001",
+   "raw": {
+    "name": "DIVIDEND",
+    "expiry_date": "2026-08-14",
+    "amount": "2.00005"
+   },
+   "expect": {
+    "isin": "INE000A01010",
+    "kind": "dividend",
+    "ex_day": 20260814,
+    "amount_u": 20001,
+    "ratio_num": null,
+    "ratio_den": null,
+    "details": []
+   },
+   "skip": null
+  },
+  {
+   "id": "R-NO-RATIO",
+   "why": "a bonus whose ratio cannot be read is kept, with no ratio",
+   "raw": {
+    "name": "Bonus",
+    "expiry_date": "10 Sep 2025",
+    "ratio": "one for one"
+   },
+   "expect": {
+    "isin": "INE000A01010",
+    "kind": "bonus",
+    "ex_day": 20250910,
+    "amount_u": null,
+    "ratio_num": null,
+    "ratio_den": null,
+    "details": []
+   },
+   "skip": null
+  },
+  {
+   "id": "R-ZERO-RATIO",
+   "why": "a ratio with a zero in it is no ratio",
+   "raw": {
+    "name": "Split",
+    "expiry_date": "10 Sep 2025",
+    "ratio": "0:5"
+   },
+   "expect": {
+    "isin": "INE000A01010",
+    "kind": "split",
+    "ex_day": 20250910,
+    "amount_u": null,
+    "ratio_num": null,
+    "ratio_den": null,
+    "details": []
+   },
+   "skip": null
+  },
+  {
+   "id": "R-UNKNOWN",
+   "why": "a name SUDARSHAN does not know is left out, never guessed",
+   "raw": {
+    "name": "Demerger",
+    "expiry_date": "10 Sep 2025",
+    "ratio": "1:1"
+   },
+   "expect": null,
+   "skip": "kind"
+  },
+  {
+   "id": "R-TWO-KINDS",
+   "why": "a name with two kinds in it is not guessed either",
+   "raw": {
+    "name": "Bonus and Split",
+    "expiry_date": "10 Sep 2025"
+   },
+   "expect": null,
+   "skip": "kind"
+  },
+  {
+   "id": "R-BAD-DATE",
+   "why": "a date that cannot be read leaves the row out",
+   "raw": {
+    "name": "Dividend",
+    "expiry_date": "to be announced",
+    "amount": 5
+   },
+   "expect": null,
+   "skip": "date"
+  },
+  {
+   "id": "R-NO-DAY",
+   "why": "31 Feb is no day",
+   "raw": {
+    "name": "Dividend",
+    "expiry_date": "31 Feb 2026"
+   },
+   "expect": null,
+   "skip": "date"
+  },
+  {
+   "id": "R-NO-DATE",
+   "why": "no date at all",
+   "raw": {
+    "name": "Dividend",
+    "amount": 5
+   },
+   "expect": null,
+   "skip": "date"
+  },
+  {
+   "id": "R-NOT-A-ROW",
+   "why": "a row that is not an object",
+   "raw": "Dividend",
+   "expect": null,
+   "skip": "row"
+  }
+ ],
+ "days": [
+  {
+   "id": "D1",
+   "text": "14 Aug 2025",
+   "day": 20250814
+  },
+  {
+   "id": "D2",
+   "text": "1 Jan 2026",
+   "day": 20260101
+  },
+  {
+   "id": "D3",
+   "text": "14-Aug-2025",
+   "day": 20250814
+  },
+  {
+   "id": "D4",
+   "text": "14 August 2025",
+   "day": 20250814
+  },
+  {
+   "id": "D5",
+   "text": "2025-08-14",
+   "day": 20250814
+  },
+  {
+   "id": "D6",
+   "text": "2025-08-14T00:00:00+05:30",
+   "day": 20250814
+  },
+  {
+   "id": "D7",
+   "text": "14-08-2025",
+   "day": 20250814
+  },
+  {
+   "id": "D8",
+   "text": " 29 Feb 2024 ",
+   "day": 20240229
+  },
+  {
+   "id": "D9",
+   "text": "29 Feb 2025",
+   "day": null
+  },
+  {
+   "id": "D10",
+   "text": "14 Augustus 2025",
+   "day": null
+  },
+  {
+   "id": "D11",
+   "text": "Aug 2025",
+   "day": null
+  },
+  {
+   "id": "D12",
+   "text": "",
+   "day": null
+  },
+  {
+   "id": "D13",
+   "text": null,
+   "day": null
+  },
+  {
+   "id": "D14",
+   "text": 20250814,
+   "day": null
+  }
+ ],
+ "readings": [
+  {
+   "id": "W-BONUS",
+   "why": "bonus 1:2 is proposed as 1 new for 2 held; the other way 2 for 1",
+   "in": [
+    "bonus",
+    1,
+    2
+   ],
+   "out": [
+    [
+     1,
+     2
+    ],
+    [
+     2,
+     1
+    ]
+   ]
+  },
+  {
+   "id": "W-SPLIT",
+   "why": "split 1:5 is proposed as every 1 become 5; the other way 5 become 1",
+   "in": [
+    "split",
+    1,
+    5
+   ],
+   "out": [
+    [
+     5,
+     1
+    ],
+    [
+     1,
+     5
+    ]
+   ]
+  },
+  {
+   "id": "W-SPLIT-10-2",
+   "why": "a split written 10:2 is proposed as every 10 become 2 (a consolidation); the owner turns it round when it was face value 10 to 2",
+   "in": [
+    "split",
+    10,
+    2
+   ],
+   "out": [
+    [
+     2,
+     10
+    ],
+    [
+     10,
+     2
+    ]
+   ]
+  },
+  {
+   "id": "W-SAME",
+   "why": "1:1 reads one way only",
+   "in": [
+    "bonus",
+    1,
+    1
+   ],
+   "out": [
+    [
+     1,
+     1
+    ]
+   ]
+  },
+  {
+   "id": "W-NONE",
+   "why": "no ratio, no reading",
+   "in": [
+    "bonus",
+    null,
+    null
+   ],
+   "out": []
+  },
+  {
+   "id": "W-DIVIDEND",
+   "why": "a dividend changes no lot",
+   "in": [
+    "dividend",
+    1,
+    2
+   ],
+   "out": []
+  },
+  {
+   "id": "W-RIGHTS",
+   "why": "a rights issue is the owner's own purchase, not a reading",
+   "in": [
+    "rights",
+    3,
+    10
+   ],
+   "out": []
+  }
+ ],
+ "identity": [
+  {
+   "id": "I-SAMPLE",
+   "event": {
+    "isin": "INE000A01010",
+    "kind": "dividend",
+    "ex_day": 20250814,
+    "amount_u": 55000,
+    "ratio_num": null,
+    "ratio_den": null,
+    "details": [
+     {
+      "name": "Announcement date",
+      "value": "25 Apr 2025"
+     },
+     {
+      "name": "Ex dividend date",
+      "value": "14 Aug 2025"
+     },
+     {
+      "name": "Record date",
+      "value": "14 Aug 2025"
+     },
+     {
+      "name": "Dividend type",
+      "value": "Final"
+     },
+     {
+      "name": "Dividend percentage",
+      "value": "55.0"
+     },
+     {
+      "name": "Details",
+      "value": "Final dividend of Rs.5.50 per share"
+     }
+    ]
+   },
+   "text": "INE000A01010|dividend|20250814|55000||final"
+  },
+  {
+   "id": "I-REWORDED",
+   "why": "another wording of the details is still the same event",
+   "event": {
+    "isin": "INE000A01010",
+    "kind": "dividend",
+    "ex_day": 20250814,
+    "amount_u": 55000,
+    "ratio_num": null,
+    "ratio_den": null,
+    "details": [
+     {
+      "name": "Dividend Type",
+      "value": "FINAL"
+     },
+     {
+      "name": "Details",
+      "value": "Final dividend"
+     }
+    ]
+   },
+   "text": "INE000A01010|dividend|20250814|55000||final"
+  },
+  {
+   "id": "I-SPECIAL",
+   "why": "a special dividend of the same day and amount is another event",
+   "event": {
+    "isin": "INE000A01010",
+    "kind": "dividend",
+    "ex_day": 20250814,
+    "amount_u": 55000,
+    "ratio_num": null,
+    "ratio_den": null,
+    "details": [
+     {
+      "name": "Dividend type",
+      "value": "Special"
+     }
+    ]
+   },
+   "text": "INE000A01010|dividend|20250814|55000||special"
+  },
+  {
+   "id": "I-BONUS",
+   "event": {
+    "isin": "INE000A01010",
+    "kind": "bonus",
+    "ex_day": 20250910,
+    "amount_u": null,
+    "ratio_num": 1,
+    "ratio_den": 2,
+    "details": []
+   },
+   "text": "INE000A01010|bonus|20250910||1:2|"
+  }
+ ],
+ "answer": {
+  "id": "A1",
+  "why": "one answer: the sample twice (kept once), a bonus, an unknown name and a bad date",
+  "payload": {
+   "status": "success",
+   "data": [
+    {
+     "name": "Dividend",
+     "expiry_date": "14 Aug 2025",
+     "amount": 5.5,
+     "ratio": null,
+     "event_details": [
+      {
+       "name": "Announcement date",
+       "value": "25 Apr 2025"
+      },
+      {
+       "name": "Ex dividend date",
+       "value": "14 Aug 2025"
+      },
+      {
+       "name": "Record date",
+       "value": "14 Aug 2025"
+      },
+      {
+       "name": "Dividend type",
+       "value": "Final"
+      },
+      {
+       "name": "Dividend percentage",
+       "value": "55.0"
+      },
+      {
+       "name": "Details",
+       "value": "Final dividend of Rs.5.50 per share"
+      }
+     ]
+    },
+    {
+     "name": "Dividend",
+     "expiry_date": "14 Aug 2025",
+     "amount": 5.5,
+     "ratio": null,
+     "event_details": [
+      {
+       "name": "Announcement date",
+       "value": "25 Apr 2025"
+      },
+      {
+       "name": "Ex dividend date",
+       "value": "14 Aug 2025"
+      },
+      {
+       "name": "Record date",
+       "value": "14 Aug 2025"
+      },
+      {
+       "name": "Dividend type",
+       "value": "Final"
+      },
+      {
+       "name": "Dividend percentage",
+       "value": "55.0"
+      },
+      {
+       "name": "Details",
+       "value": "Final dividend of Rs.5.50 per share"
+      }
+     ]
+    },
+    {
+     "name": "Bonus",
+     "expiry_date": "10 Sep 2025",
+     "ratio": "1:1"
+    },
+    {
+     "name": "Demerger",
+     "expiry_date": "10 Sep 2025"
+    },
+    {
+     "name": "Dividend",
+     "expiry_date": "soon"
+    }
+   ]
+  },
+  "events": [
+   {
+    "isin": "INE000A01010",
+    "kind": "dividend",
+    "ex_day": 20250814,
+    "amount_u": 55000,
+    "ratio_num": null,
+    "ratio_den": null,
+    "details": [
+     {
+      "name": "Announcement date",
+      "value": "25 Apr 2025"
+     },
+     {
+      "name": "Ex dividend date",
+      "value": "14 Aug 2025"
+     },
+     {
+      "name": "Record date",
+      "value": "14 Aug 2025"
+     },
+     {
+      "name": "Dividend type",
+      "value": "Final"
+     },
+     {
+      "name": "Dividend percentage",
+      "value": "55.0"
+     },
+     {
+      "name": "Details",
+      "value": "Final dividend of Rs.5.50 per share"
+     }
+    ]
+   },
+   {
+    "isin": "INE000A01010",
+    "kind": "bonus",
+    "ex_day": 20250910,
+    "amount_u": null,
+    "ratio_num": 1,
+    "ratio_den": 1,
+    "details": []
+   }
+  ],
+  "skipped": {
+   "kind": 1,
+   "date": 1,
+   "row": 0
+  }
+ },
+ "effects": [
+  {
+   "id": "E-BONUS",
+   "why": "bonus 1 for 1 on 100: 100 more, 200 in all",
+   "in": [
+    "bonus",
+    100000000,
+    1,
+    1
+   ],
+   "out": [
+    100000000,
+    200000000,
+    false
+   ]
+  },
+  {
+   "id": "E-BONUS-3-2",
+   "why": "bonus 3 for 2 on 10: 10 x 3 / 2 = 15 more, 25 in all",
+   "in": [
+    "bonus",
+    10000000,
+    3,
+    2
+   ],
+   "out": [
+    15000000,
+    25000000,
+    false
+   ]
+  },
+  {
+   "id": "E-BONUS-ODD",
+   "why": "bonus 1 for 2 on 5: 2.5 more: half a share is left over",
+   "in": [
+    "bonus",
+    5000000,
+    1,
+    2
+   ],
+   "out": [
+    2500000,
+    7500000,
+    true
+   ]
+  },
+  {
+   "id": "E-SPLIT",
+   "why": "split every 1 into 5 on 100: 500, which is 400 more",
+   "in": [
+    "split",
+    100000000,
+    5,
+    1
+   ],
+   "out": [
+    400000000,
+    500000000,
+    false
+   ]
+  },
+  {
+   "id": "E-CONSOLIDATE",
+   "why": "every 5 become 1 on 100: 20, which is 80 fewer",
+   "in": [
+    "split",
+    100000000,
+    1,
+    5
+   ],
+   "out": [
+    -80000000,
+    20000000,
+    false
+   ]
+  },
+  {
+   "id": "E-CONSOLIDATE-ODD",
+   "why": "every 10 become 1 on 5: half a share",
+   "in": [
+    "split",
+    5000000,
+    1,
+    10
+   ],
+   "out": [
+    -4500000,
+    500000,
+    true
+   ]
+  }
+ ],
+ "sentences": [
+  {
+   "id": "S-DESIGN",
+   "in": [
+    "bonus",
+    1,
+    1,
+    1,
+    1,
+    100000000
+   ],
+   "out": "Bonus 1:1: you held 100, you get 100 more, 200 in all. Is that right?"
+  },
+  {
+   "id": "S-OTHER",
+   "in": [
+    "bonus",
+    1,
+    2,
+    2,
+    1,
+    100000000
+   ],
+   "out": "Bonus 1:2: you held 100, you get 200 more, 300 in all. Is that right?"
+  },
+  {
+   "id": "S-SPLIT",
+   "in": [
+    "split",
+    1,
+    5,
+    5,
+    1,
+    1250000000
+   ],
+   "out": "Split 1:5: you held 1,250, they become 6,250. Is that right?"
+  },
+  {
+   "id": "S-ODD",
+   "in": [
+    "bonus",
+    1,
+    2,
+    1,
+    2,
+    5000000
+   ],
+   "out": "Bonus 1:2: you held 5, you get 2.5 more, 7.5 in all. Is that right? This leaves part of a share, which a company usually pays in cash."
+  },
+  {
+   "id": "S-BONUS-NO-QTY",
+   "in": [
+    "bonus",
+    1,
+    2,
+    1,
+    2,
+    null
+   ],
+   "out": "Bonus 1:2: 1 new share for every 2 held. Is that right?"
+  },
+  {
+   "id": "S-BONUS-NO-QTY-OTHER",
+   "in": [
+    "bonus",
+    1,
+    2,
+    2,
+    1,
+    null
+   ],
+   "out": "Bonus 1:2: 2 new shares for every 1 held. Is that right?"
+  },
+  {
+   "id": "S-SPLIT-NO-QTY",
+   "in": [
+    "split",
+    1,
+    5,
+    5,
+    1,
+    null
+   ],
+   "out": "Split 1:5: every 1 share becomes 5. Is that right?"
+  },
+  {
+   "id": "S-SPLIT-NO-QTY-OTHER",
+   "in": [
+    "split",
+    1,
+    5,
+    1,
+    5,
+    null
+   ],
+   "out": "Split 1:5: every 5 shares become 1. Is that right?"
+  }
+ ],
+ "eve": [
+  {
+   "id": "V-EVE",
+   "why": "the record of the day before",
+   "in": [
+    [
+     20261016,
+     20261019,
+     20261020
+    ],
+    20261020,
+    20261026
+   ],
+   "out": 20261019
+  },
+  {
+   "id": "V-WEEKEND",
+   "why": "ex-date on a Monday: Friday's record, three days before",
+   "in": [
+    [
+     20261015,
+     20261016
+    ],
+    20261019,
+    20261026
+   ],
+   "out": 20261016
+  },
+  {
+   "id": "V-REACH",
+   "why": "a record exactly 7 days before still says",
+   "in": [
+    [
+     20261013
+    ],
+    20261020,
+    20261026
+   ],
+   "out": 20261013
+  },
+  {
+   "id": "V-TOO-OLD",
+   "why": "a record 8 days before says nothing of that day",
+   "in": [
+    [
+     20261012
+    ],
+    20261020,
+    20261026
+   ],
+   "out": null
+  },
+  {
+   "id": "V-NONE-BEFORE",
+   "why": "records begin on the ex-date: none says",
+   "in": [
+    [
+     20261020,
+     20261021
+    ],
+    20261020,
+    20261026
+   ],
+   "out": null
+  },
+  {
+   "id": "V-NO-RECORDS",
+   "why": "no record at all",
+   "in": [
+    [],
+    20261020,
+    20261026
+   ],
+   "out": null
+  },
+  {
+   "id": "V-TO-COME",
+   "why": "an ex-date to come: the last record there is stands in, however far it is",
+   "in": [
+    [
+     20261001,
+     20261023
+    ],
+    20261210,
+    20261026
+   ],
+   "out": 20261023
+  }
+ ]
+}

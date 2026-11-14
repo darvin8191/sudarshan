@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { useState } from 'react'
 import {
   type InitialEntry,
   MemoryRouter,
@@ -14,20 +15,44 @@ import type { LiveStatus } from '@/lib/trading/liveStatus'
 import { useAuthStore } from '@/stores/authStore'
 import type { FeedLine } from '@/sudarshan/dashboard/live'
 import { rememberProduct } from '@/sudarshan/ticket/productPref'
+import { OPEN_GUARD } from '@/sudarshan/watchlist/openGuard'
 import type { PhoneChartCallbacks, PhoneTick } from './phoneChart'
+import { SIDEWAYS_QUERY } from './usePhoneLayout'
 
 const fakes = vi.hoisted(() => ({
   charts: [] as Array<{
-    opts: { callbacks: PhoneChartCallbacks; appMode: string }
+    opts: { callbacks: PhoneChartCallbacks; appMode: string; style?: string }
     load: ReturnType<typeof vi.fn>
     setAppMode: ReturnType<typeof vi.fn>
+    setStyle: ReturnType<typeof vi.fn>
+    setStudies: ReturnType<typeof vi.fn>
+    setTick: ReturnType<typeof vi.fn>
+    legendRows: ReturnType<typeof vi.fn>
     destroy: ReturnType<typeof vi.fn>
     barAt: ReturnType<typeof vi.fn>
     barX: ReturnType<typeof vi.fn>
+    priceAt: ReturnType<typeof vi.fn>
   }>,
   config: { apiKey: 'test-key', wsUrl: 'ws://test.invalid' } as unknown,
   instrument: { name: 'STATE BANK OF INDIA', lotSize: 1, tickSize: 0.05 } as unknown,
+  /** What the broker offers, as the terminal groups it (Upstox's set). */
+  intervals: null as unknown,
+  /** Every study on offer, and the owner's files that failed, as the host gives them (C4). */
+  catalogue: [] as Array<{ id: string; name: string; category: string; mine: boolean }>,
+  problems: [] as string[],
+  /** A contract's open interest at yesterday's close (C9). */
+  prevOi: null as number | null,
+  /** The price at a held finger's height, as the host gives it (C10). */
+  heldPrice: 814.35 as number | null,
 }))
+
+const UPSTOX_INTERVALS = [
+  { label: 'minutes', items: ['1m', '2m', '3m', '5m', '10m', '15m', '30m'] },
+  { label: 'hours', items: ['1h', '2h', '3h', '4h'] },
+  { label: 'days', items: ['D'] },
+  { label: 'weeks', items: ['W'] },
+  { label: 'months', items: ['M'] },
+]
 
 vi.mock('./phoneChart', () => ({
   isQuoteOnly: (exchange: string) => exchange.endsWith('_INDEX'),
@@ -35,6 +60,51 @@ vi.mock('./phoneChart', () => ({
     opts: unknown
     load = vi.fn(async () => {})
     setAppMode = vi.fn()
+    setStyle = vi.fn(async () => {})
+    setStudies = vi.fn(async (_set: Array<{ id: string }>) => {})
+    setTick = vi.fn()
+    loadIndicatorTier = vi.fn(async () => true)
+    loadMyScripts = vi.fn(async () => fakes.problems)
+    catalogue = vi.fn(() => fakes.catalogue)
+    /** EMA's form, its values over the defaults as the page last set them. */
+    studyForm = vi.fn((index: number) => {
+      const entry = this.setStudies.mock.lastCall?.[0]?.[index] as
+        | { id: string; settings: Record<string, unknown> }
+        | undefined
+      if (!entry) return null
+      return {
+        name: 'EMA',
+        fields: [
+          { key: 'length', type: 'number', label: 'Length', min: 1, max: 500, step: 1 },
+          {
+            key: 'source',
+            type: 'select',
+            label: 'Source',
+            options: [
+              { label: 'Close', value: 'close' },
+              { label: 'Open', value: 'open' },
+            ],
+          },
+        ],
+        values: { length: 9, source: 'close', ...entry.settings },
+      }
+    })
+    studyFacts = vi.fn((id: string) =>
+      id === 'rsi' || id === 'macd' || id === 'atr'
+        ? { name: id.toUpperCase(), placement: 'pane' }
+        : null
+    )
+    /** One line per study the page last set, as the host gives them. */
+    legendRows = vi.fn(() =>
+      (this.setStudies.mock.lastCall?.[0] ?? []).map((entry: { id: string }, i: number) => ({
+        key: `${i}:${entry.id}`,
+        title: entry.id.toUpperCase(),
+        params: '',
+        values: ['1.00'],
+        pane: 0,
+        top: 0,
+      }))
+    )
     destroy = vi.fn()
     barAt = vi.fn(() => ({
       time: Date.UTC(2026, 9, 20, 4, 45) / 1000,
@@ -45,6 +115,7 @@ vi.mock('./phoneChart', () => ({
       volume: 1_234_567,
     }))
     barX = vi.fn(() => 120)
+    priceAt = vi.fn(() => fakes.heldPrice)
     constructor(opts: unknown) {
       this.opts = opts
       fakes.charts.push(this as never)
@@ -54,6 +125,8 @@ vi.mock('./phoneChart', () => ({
 vi.mock('./api', () => ({
   loadFeedConfig: async () => fakes.config,
   loadInstrument: async () => fakes.instrument,
+  loadIntervals: async () => fakes.intervals,
+  loadPreviousOi: async () => fakes.prevOi,
   searchSymbols: async () => [],
 }))
 // Both close themselves the way the real dialogs do: the action's own
@@ -70,10 +143,21 @@ vi.mock('@/components/trading/PlaceOrderDialog', () => ({
     strategy: string
     symbol: string
     exchange: string
+    priceType?: string
+    price?: number
   }) =>
     props.open ? (
       <div role="dialog" aria-label="Order ticket">
-        {[props.action, props.symbol, props.exchange, props.product, props.lotSize, props.strategy]
+        {[
+          props.action,
+          props.symbol,
+          props.exchange,
+          props.product,
+          props.lotSize,
+          props.strategy,
+          props.priceType ?? 'MARKET',
+          props.price ?? 'no price',
+        ]
           .map(String)
           .join(' ')}
         <button
@@ -129,6 +213,8 @@ vi.mock('@/utils/toast', async (importOriginal) => ({
 
 import { QueryClientProvider } from '@tanstack/react-query'
 import { createQueryClient } from '@/app/providers'
+import MarketDataContext from '@/contexts/MarketDataContext'
+import { MarketDataManager } from '@/lib/MarketDataManager'
 import ChartPage from './ChartPage'
 
 function Where() {
@@ -181,6 +267,59 @@ function emit(fn: (callbacks: PhoneChartCallbacks) => void) {
   act(() => fn(chart().opts.callbacks))
 }
 
+/** A finger held on the chart until the candle under it is read. */
+async function hold() {
+  const down = new MouseEvent('pointerdown', { bubbles: true, clientX: 120, clientY: 200 })
+  Object.assign(down, { pointerId: 1, pointerType: 'touch' })
+  fireEvent(screen.getByTestId('chart-surface'), down)
+  const readout = await screen.findByTestId('chart-readout', {}, { timeout: 2000 })
+  fireEvent(
+    readout,
+    Object.assign(new MouseEvent('pointerup', { bubbles: true }), {
+      pointerId: 1,
+      pointerType: 'touch',
+    })
+  )
+  return readout
+}
+
+/** A finger's touch on a control, as a phone sends it before the tap. */
+function touch(element: Element) {
+  const down = new MouseEvent('pointerdown', { bubbles: true })
+  Object.assign(down, { pointerId: 2, pointerType: 'touch' })
+  fireEvent(element, down)
+}
+
+/** The phone, upright or on its side, as the page's media query hears it; turned on demand. */
+function phoneHeld(initial: 'upright' | 'sideways') {
+  let way = initial
+  const listeners = new Set<() => void>()
+  const spy = vi.spyOn(window, 'matchMedia').mockImplementation(
+    (query: string) =>
+      ({
+        get matches() {
+          return way === 'sideways' && query === SIDEWAYS_QUERY
+        },
+        media: query,
+        onchange: null,
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        addEventListener: (_type: string, listener: () => void) => listeners.add(listener),
+        removeEventListener: (_type: string, listener: () => void) => listeners.delete(listener),
+        dispatchEvent: vi.fn(),
+      }) as unknown as MediaQueryList
+  )
+  return {
+    spy,
+    turn(next: 'upright' | 'sideways') {
+      way = next
+      act(() => {
+        for (const listener of [...listeners]) listener()
+      })
+    },
+  }
+}
+
 async function opened(path: InitialEntry = '/chart/NSE/SBIN', before: InitialEntry[] = []) {
   const view = renderAt(path, before)
   await waitFor(() => expect(fakes.charts.length).toBeGreaterThan(0))
@@ -193,6 +332,14 @@ beforeEach(() => {
   fakes.config = { apiKey: 'test-key', wsUrl: 'ws://test.invalid' }
   useAuthStore.setState({ apiKey: 'test-key', sessionChecked: true, brokerSessionExpired: false })
   fakes.instrument = { name: 'STATE BANK OF INDIA', lotSize: 1, tickSize: 0.05 }
+  fakes.intervals = UPSTOX_INTERVALS
+  fakes.catalogue = [
+    { id: 'ichimoku', name: 'Ichimoku Cloud', category: 'Trend', mine: false },
+    { id: 'stochastic', name: 'Stochastic', category: 'Momentum', mine: false },
+  ]
+  fakes.problems = []
+  fakes.prevOi = null
+  fakes.heldPrice = 814.35
   localStorage.clear()
   Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 })
   Object.defineProperty(window, 'innerHeight', { configurable: true, value: 844 })
@@ -298,6 +445,324 @@ describe('the phone chart page at 390 px', () => {
     expect(chart().load).toHaveBeenLastCalledWith('SBIN', 'NSE', '1h')
     expect(screen.getByRole('button', { name: '1h' })).toHaveAttribute('aria-pressed', 'true')
     expect(localStorage.getItem('sudarshan-chart-interval')).toBe('1h')
+  })
+
+  it('offers every timeframe the broker has from More, and a pick off the chips takes its place', async () => {
+    await opened()
+    await userEvent.click(screen.getByRole('button', { name: 'More timeframes' }))
+    const sheet = await screen.findByRole('dialog', { name: 'Timeframe' })
+    for (const heading of ['Minutes', 'Hours', 'Days', 'Weeks', 'Months'])
+      expect(within(sheet).getByRole('heading', { name: heading })).toBeVisible()
+    expect(within(sheet).getByRole('button', { name: '1M, 1 month' })).toBeVisible()
+    await userEvent.click(within(sheet).getByRole('button', { name: '2h, 2 hours' }))
+    expect(chart().load).toHaveBeenLastCalledWith('SBIN', 'NSE', '2h')
+    expect(localStorage.getItem('sudarshan-chart-interval')).toBe('2h')
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Timeframe' })).toBeNull())
+    // Not pinned, so it shows in More's place, as the timeframe in use.
+    const more = screen.getByRole('button', { name: '2h, more timeframes' })
+    expect(more).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: '5m' })).toHaveAttribute('aria-pressed', 'false')
+  })
+
+  it('pins up to six chips, says why a seventh is refused, and keeps the pins on this phone', async () => {
+    await opened()
+    await userEvent.click(screen.getByRole('button', { name: 'More timeframes' }))
+    const sheet = await screen.findByRole('dialog', { name: 'Timeframe' })
+    const pin = (name: string) => within(sheet).getByRole('button', { name: `Pin ${name}` })
+    expect(pin('3 minutes')).toHaveAttribute('aria-pressed', 'true')
+    expect(pin('3 minutes')).toHaveTextContent('Pinned')
+    await userEvent.click(pin('2 hours'))
+    expect(within(sheet).getByRole('status')).toHaveTextContent(
+      'Six timeframes are pinned. Unpin one to pin another.'
+    )
+    expect(pin('2 hours')).toHaveAttribute('aria-pressed', 'false')
+    await userEvent.click(pin('3 minutes'))
+    await userEvent.click(pin('2 hours'))
+    expect(within(sheet).queryByRole('status')).toBeNull()
+    await userEvent.click(within(sheet).getByRole('button', { name: 'Close' }))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Timeframe' })).toBeNull())
+    expect(JSON.parse(localStorage.getItem('sudarshan-chart-pinned') ?? '[]')).toEqual([
+      '1m',
+      '5m',
+      '15m',
+      '1h',
+      '2h',
+      'D',
+    ])
+    const row = screen.getByRole('group', { name: 'Timeframe' })
+    expect(
+      within(row)
+        .getAllByRole('button')
+        .map((b) => b.textContent)
+    ).toEqual(['1m', '5m', '15m', '1h', '2h', '1D', 'More'])
+  })
+
+  it('keeps one chip pinned, and shows only chips the broker offers', async () => {
+    localStorage.setItem('sudarshan-chart-pinned', JSON.stringify(['5m', '45m']))
+    fakes.intervals = [{ label: 'minutes', items: ['1m', '5m', '15m'] }]
+    await opened()
+    const row = screen.getByRole('group', { name: 'Timeframe' })
+    await waitFor(() =>
+      expect(
+        within(row)
+          .getAllByRole('button')
+          .map((b) => b.textContent)
+      ).toEqual(['5m', 'More'])
+    )
+    await userEvent.click(screen.getByRole('button', { name: 'More timeframes' }))
+    const sheet = await screen.findByRole('dialog', { name: 'Timeframe' })
+    await userEvent.click(within(sheet).getByRole('button', { name: 'Pin 5 minutes' }))
+    expect(within(sheet).getByRole('status')).toHaveTextContent(
+      'One timeframe stays pinned above the chart.'
+    )
+  })
+
+  it('moves off a timeframe this broker does not offer, to one it does', async () => {
+    localStorage.setItem('sudarshan-chart-interval', '45m')
+    await opened()
+    await waitFor(() => expect(chart().load).toHaveBeenLastCalledWith('SBIN', 'NSE', '5m'))
+  })
+
+  it('reads a day chart with its old saved name, and stamps its candles with the date', async () => {
+    localStorage.setItem('sudarshan-chart-interval', '1D')
+    await opened()
+    expect(chart().load).toHaveBeenCalledWith('SBIN', 'NSE', 'D')
+    expect(screen.getByRole('button', { name: '1D' })).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  it('changes the chart style from its sheet, for every instrument, and says which is in use', async () => {
+    await opened()
+    expect(chart().opts.style).toBe('candlestick')
+    await userEvent.click(screen.getByRole('button', { name: 'Chart style: Candles' }))
+    const sheet = await screen.findByRole('dialog', { name: 'Chart style' })
+    expect(within(sheet).getByRole('button', { name: 'Candles' })).toHaveAttribute(
+      'aria-pressed',
+      'true'
+    )
+    await userEvent.click(within(sheet).getByRole('button', { name: 'Heikin Ashi' }))
+    expect(chart().setStyle).toHaveBeenLastCalledWith('heikin-ashi')
+    expect(localStorage.getItem('sudarshan-chart-style')).toBe('heikin-ashi')
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Chart style' })).toBeNull())
+    expect(screen.getByRole('button', { name: 'Chart style: Heikin Ashi' })).toBeVisible()
+  })
+
+  it('builds the chart in the style chosen before', async () => {
+    localStorage.setItem('sudarshan-chart-style', 'bar')
+    await opened()
+    expect(chart().opts.style).toBe('bar')
+    expect(screen.getByRole('button', { name: 'Chart style: Bars' })).toBeVisible()
+  })
+
+  it('adds indicators from the common list, for every instrument, and draws a legend line for each', async () => {
+    await opened()
+    expect(chart().setStudies).toHaveBeenLastCalledWith([])
+    await userEvent.click(screen.getByRole('button', { name: 'Indicators' }))
+    const sheet = await screen.findByRole('dialog', { name: 'Indicators' })
+    expect(within(sheet).getByText('No indicators yet. Add one below.')).toBeVisible()
+    // Open interest is a contract's; a share does not offer it.
+    expect(within(sheet).queryByRole('button', { name: 'Add Open interest' })).toBeNull()
+    await userEvent.click(within(sheet).getByRole('button', { name: 'Add EMA' }))
+    await userEvent.click(within(sheet).getByRole('button', { name: 'Add RSI' }))
+    expect(chart().setStudies).toHaveBeenLastCalledWith([
+      { id: 'ema', settings: {} },
+      { id: 'rsi', settings: {} },
+    ])
+    expect(JSON.parse(localStorage.getItem('sudarshan-chart-studies') ?? '[]')).toEqual([
+      { id: 'ema', settings: {} },
+      { id: 'rsi', settings: {} },
+    ])
+    expect(within(sheet).getByRole('button', { name: 'Remove EMA' })).toBeVisible()
+    await userEvent.click(within(sheet).getByRole('button', { name: 'Close' }))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Indicators' })).toBeNull())
+    expect(screen.getByRole('button', { name: 'Indicators 2 on the chart' })).toBeVisible()
+    expect(screen.getByTestId('study-legend')).toHaveTextContent('EMA1.00')
+  })
+
+  it('refuses a fourth indicator and a third pane, each with a sentence, and removes one', async () => {
+    localStorage.setItem(
+      'sudarshan-chart-studies',
+      JSON.stringify(['ema', 'rsi', 'macd'].map((id) => ({ id, settings: {} })))
+    )
+    await opened()
+    await userEvent.click(screen.getByRole('button', { name: 'Indicators 3 on the chart' }))
+    const sheet = await screen.findByRole('dialog', { name: 'Indicators' })
+    expect(sheet).toHaveAccessibleDescription('For every instrument on this phone · 3 of 3')
+    await userEvent.click(within(sheet).getByRole('button', { name: 'Add Supertrend' }))
+    expect(within(sheet).getByRole('status')).toHaveTextContent(
+      'Three indicators at most on the phone chart. Remove one, or open the full terminal.'
+    )
+    await userEvent.click(within(sheet).getByRole('button', { name: 'Remove EMA' }))
+    expect(within(sheet).queryByRole('status')).toBeNull()
+    await userEvent.click(within(sheet).getByRole('button', { name: 'Add ATR' }))
+    expect(within(sheet).getByRole('status')).toHaveTextContent(
+      'Two indicators with a pane of their own at most on the phone chart.'
+    )
+    expect(chart().setStudies).toHaveBeenLastCalledWith(
+      ['rsi', 'macd'].map((id) => ({ id, settings: {} }))
+    )
+  })
+
+  it('offers open interest on a contract, and gives the chart its tick', async () => {
+    fakes.instrument = { name: 'NIFTY 27 OCT 25900 CE', lotSize: 65, tickSize: 0.05 }
+    await opened('/chart/NFO/NIFTY27OCT2625900CE')
+    await waitFor(() => expect(chart().setTick).toHaveBeenCalledWith(0.05))
+    await userEvent.click(screen.getByRole('button', { name: 'Indicators' }))
+    const sheet = await screen.findByRole('dialog', { name: 'Indicators' })
+    await userEvent.click(within(sheet).getByRole('button', { name: 'Add Open interest' }))
+    expect(chart().setStudies).toHaveBeenLastCalledWith([{ id: 'open-interest', settings: {} }])
+  })
+
+  it('changes a study in its own settings sheet, says what is wrong with a number, and Back returns to the list', async () => {
+    localStorage.setItem(
+      'sudarshan-chart-studies',
+      JSON.stringify([{ id: 'ema', settings: { length: 21 } }])
+    )
+    await opened()
+    await userEvent.click(screen.getByRole('button', { name: 'Indicators 1 on the chart' }))
+    const list = await screen.findByRole('dialog', { name: 'Indicators' })
+    await userEvent.click(within(list).getByRole('button', { name: 'Settings for EMA' }))
+    const form = await screen.findByRole('dialog', { name: 'EMA' })
+    const length = within(form).getByRole('textbox', { name: 'Length' })
+    expect(length).toHaveValue('21')
+    expect(length).toHaveAttribute('inputmode', 'decimal')
+    await userEvent.clear(length)
+    await userEvent.type(length, '0{Enter}')
+    expect(within(form).getByText('The lowest allowed is 1')).toBeVisible()
+    expect(chart().setStudies).toHaveBeenLastCalledWith([{ id: 'ema', settings: { length: 21 } }])
+    await userEvent.clear(length)
+    await userEvent.type(length, '50{Enter}')
+    expect(chart().setStudies).toHaveBeenLastCalledWith([{ id: 'ema', settings: { length: 50 } }])
+    expect(JSON.parse(localStorage.getItem('sudarshan-chart-studies') ?? '[]')).toEqual([
+      { id: 'ema', settings: { length: 50 } },
+    ])
+    await userEvent.selectOptions(within(form).getByRole('combobox', { name: 'Source' }), 'open')
+    expect(chart().setStudies).toHaveBeenLastCalledWith([
+      { id: 'ema', settings: { length: 50, source: 'open' } },
+    ])
+    await userEvent.click(within(form).getByRole('button', { name: 'Back to defaults' }))
+    expect(chart().setStudies).toHaveBeenLastCalledWith([{ id: 'ema', settings: {} }])
+    // The phone's own Back, which reaches the page past the open sheet.
+    fireEvent.click(screen.getByText('Phone back'))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'EMA' })).toBeNull())
+    expect(await screen.findByRole('dialog', { name: 'Indicators' })).toBeVisible()
+  })
+
+  it("finds any built-in by name, and lists the owner's own scripts with what failed", async () => {
+    fakes.catalogue = [
+      ...fakes.catalogue,
+      { id: 'my-band', name: 'My Band', category: 'Custom', mine: true },
+    ]
+    fakes.problems = ['broken.js: it does not register anything']
+    await opened()
+    await userEvent.click(screen.getByRole('button', { name: 'Indicators' }))
+    const sheet = await screen.findByRole('dialog', { name: 'Indicators' })
+    const mine = await within(sheet).findByRole('region', { name: 'My scripts' })
+    expect(within(mine).getByText('broken.js: it does not register anything')).toBeVisible()
+    await userEvent.click(within(mine).getByRole('button', { name: 'Add My Band' }))
+    await userEvent.type(within(sheet).getByRole('searchbox'), 'ichi')
+    await userEvent.click(within(sheet).getByRole('button', { name: 'Add Ichimoku Cloud' }))
+    expect(chart().setStudies).toHaveBeenLastCalledWith([
+      { id: 'my-band', settings: {} },
+      { id: 'ichimoku', settings: {} },
+    ])
+    await userEvent.clear(within(sheet).getByRole('searchbox'))
+    await userEvent.type(within(sheet).getByRole('searchbox'), 'zzz')
+    expect(within(sheet).getByText('No indicator by that name.')).toBeVisible()
+  })
+
+  it('shows the best bid and ask with their quantities, tick by tick, and five levels on a tap', async () => {
+    await opened()
+    const book = (bid: number) => ({
+      bids: [100, 99.95, 99.9, 99.85, 99.8].map((p, i) => ({
+        price: p + bid - 100,
+        qty: 650 * (i + 1),
+      })),
+      asks: [100.05, 100.1, 100.15, 100.2, 0].map((p) => ({
+        price: p ? p + bid - 100 : 0,
+        qty: p ? 1_300 : 0,
+      })),
+      ltp: bid,
+    })
+    emit((cb) => {
+      cb.onDepth?.(book(100))
+      cb.onStatus(status({ kind: 'live' }))
+    })
+    await waitFor(() =>
+      expect(screen.getByTestId('depth-strip')).toHaveTextContent(
+        'Bid100.00 × 650Ask100.05 × 1,300'
+      )
+    )
+    await userEvent.click(
+      screen.getByRole('button', {
+        name: /^Market depth: bid 100\.00, ask 100\.05\. Show five levels$/,
+      })
+    )
+    const sheet = await screen.findByRole('dialog', { name: 'Market depth' })
+    const rows = within(sheet).getAllByRole('row')
+    expect(rows).toHaveLength(6)
+    expect(rows[1]).toHaveTextContent('650100.00100.051,300')
+    // An empty level the proxy pads with zeros is a dash, not a price of nothing.
+    expect(rows[5]).toHaveTextContent('3,25099.80——')
+  })
+
+  it('greys the book and says why while prices are not real-time', async () => {
+    await opened()
+    emit((cb) => {
+      cb.onDepth?.({
+        bids: [{ price: 100, qty: 650 }],
+        asks: [{ price: 100.05, qty: 1_300 }],
+        ltp: 100,
+      })
+      cb.onStatus(status({ kind: 'connecting', at: Date.now(), stale: false, again: true }))
+    })
+    const strip = await screen.findByRole('button', {
+      name: /Reconnecting: the book is not current/,
+    })
+    expect(strip).toHaveClass('text-muted-foreground')
+  })
+
+  it("shows a contract's open interest and its change since yesterday, with a sign and an arrow", async () => {
+    fakes.instrument = { name: 'NIFTY 27 OCT 25900 CE', lotSize: 65, tickSize: 0.05 }
+    fakes.prevOi = 1_150_000
+    await opened('/chart/NFO/NIFTY27OCT2625900CE')
+    const line = screen.getByTestId('chart-oi')
+    expect(line).toHaveTextContent('OIwaiting for the first tick')
+    emit((cb) =>
+      cb.onTick({
+        ltp: 142.3,
+        time: null,
+        tradeTime: null,
+        at: Date.now(),
+        polled: false,
+        oi: 1_206_500,
+      })
+    )
+    await waitFor(() => expect(line).toHaveTextContent('OI12.07L+56.5Ksince yesterday'))
+    expect(line.querySelector('[data-direction="up"]')).not.toBeNull()
+  })
+
+  it("says the change is not available where yesterday's open interest is not known, and shows none for a share", async () => {
+    fakes.instrument = { name: 'NIFTY 27 OCT 25900 CE', lotSize: 65, tickSize: 0.05 }
+    await opened('/chart/NFO/NIFTY27OCT2625900CE')
+    emit((cb) =>
+      cb.onTick({
+        ltp: 142.3,
+        time: null,
+        tradeTime: null,
+        at: Date.now(),
+        polled: false,
+        oi: 1_206_500,
+      })
+    )
+    await waitFor(() =>
+      expect(screen.getByTestId('chart-oi')).toHaveTextContent('OI12.07Lchange not available')
+    )
+  })
+
+  it('has no book strip or open interest for an index', async () => {
+    await opened('/chart/NSE_INDEX/NIFTY')
+    expect(screen.queryByTestId('depth-strip')).toBeNull()
+    expect(screen.queryByTestId('chart-oi')).toBeNull()
   })
 
   it("opens the app's own order ticket from Buy and Sell, on Delivery for a share until a pick", async () => {
@@ -454,6 +919,68 @@ describe('the phone chart page at 390 px', () => {
     expect(screen.queryByTestId('chart-readout')).toBeNull()
   })
 
+  it('buys at a held price: the ticket opens with it as a limit, on the same product (C10)', async () => {
+    rememberProduct('NSE', 'MIS')
+    await opened('/chart/NSE/SBIN', ['/dashboard'])
+    await waitFor(() => expect(screen.getByRole('button', { name: 'BUY' })).toBeEnabled())
+    await hold()
+    expect(chart().priceAt).toHaveBeenLastCalledWith(200)
+    expect(screen.getByTestId('chart-held-price')).toHaveTextContent('814.35')
+    const buy = screen.getByRole('button', { name: 'Buy at 814.35' })
+    // The finger's touch on the reading's own button leaves the reading up, so the tap lands.
+    touch(buy)
+    await userEvent.click(buy)
+    expect(screen.getByRole('dialog', { name: 'Order ticket' })).toHaveTextContent(
+      'BUY SBIN NSE MIS 1 chart-trading LIMIT 814.35'
+    )
+    expect(screen.queryByTestId('chart-readout')).toBeNull()
+    // Back closes the ticket and stays on the chart; Buy from the footer is at the market again.
+    await userEvent.click(screen.getByRole('button', { name: 'Phone back' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'BUY' }))
+    expect(screen.getByRole('dialog', { name: 'Order ticket' })).toHaveTextContent(
+      'BUY SBIN NSE MIS 1 chart-trading MARKET no price'
+    )
+  })
+
+  it('takes no tap on the reading in its first half second: the lift of the finger that held is not a press', async () => {
+    OPEN_GUARD.ms = 500
+    await opened()
+    await waitFor(() => expect(screen.getByRole('button', { name: 'BUY' })).toBeEnabled())
+    await hold()
+    fireEvent.click(screen.getByRole('button', { name: 'Buy at 814.35' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    await act(() => new Promise((resolve) => setTimeout(resolve, 520)))
+    fireEvent.click(screen.getByRole('button', { name: 'Buy at 814.35' }))
+    expect(screen.getByRole('dialog', { name: 'Order ticket' })).toHaveTextContent('LIMIT 814.35')
+  })
+
+  it("sells at a held price written in the instrument's decimals", async () => {
+    fakes.heldPrice = 1234.5
+    await opened()
+    await waitFor(() => expect(screen.getByRole('button', { name: 'SELL' })).toBeEnabled())
+    await hold()
+    await userEvent.click(screen.getByRole('button', { name: 'Sell at 1,234.50' }))
+    expect(screen.getByRole('dialog', { name: 'Order ticket' })).toHaveTextContent(
+      'SELL SBIN NSE CNC 1 chart-trading LIMIT 1234.5'
+    )
+  })
+
+  it('offers no order at a held price over the volume or a study, where no price of it is drawn', async () => {
+    fakes.heldPrice = null
+    await opened()
+    await waitFor(() => expect(screen.getByRole('button', { name: 'BUY' })).toBeEnabled())
+    await hold()
+    expect(screen.queryByRole('button', { name: /^(Buy|Sell) at/ })).toBeNull()
+  })
+
+  it('offers no order at a held price on an index, which is not traded', async () => {
+    fakes.heldPrice = 25_912.35
+    await opened('/chart/NSE_INDEX/NIFTY')
+    await hold()
+    expect(screen.queryByRole('button', { name: /^(Buy|Sell) at/ })).toBeNull()
+  })
+
   it('moves the price on a tick alone, at the next frame', async () => {
     await opened()
     emit((cb) =>
@@ -514,6 +1041,29 @@ describe('the phone chart page at 390 px', () => {
     expect(screen.getByRole('status', { name: 'Location' })).toHaveTextContent('/dashboard')
   })
 
+  it('says why when the phone will not keep the screen on, and the switch goes off (C12)', async () => {
+    let allow = false
+    const request = vi.fn(async () => {
+      if (!allow) throw new Error('battery saver is on')
+      return { release: vi.fn(async () => {}), addEventListener() {} }
+    })
+    Object.defineProperty(navigator, 'wakeLock', { configurable: true, value: { request } })
+    await opened()
+    const toggle = screen.getByRole('switch', { name: 'Keep screen on' })
+    await userEvent.click(toggle)
+    await waitFor(() => expect(toggle).not.toBeChecked())
+    const words =
+      'The phone would not keep the screen on. If battery saver is on, turn it off, then switch this on again.'
+    expect(screen.getByText(words)).toBeVisible()
+    expect(toggle).toHaveAccessibleDescription(words)
+    // Switched on again once the phone allows it: the lock is held and the sentence goes.
+    allow = true
+    await userEvent.click(toggle)
+    await waitFor(() => expect(toggle).toBeChecked())
+    expect(screen.queryByText(/would not keep the screen on/)).toBeNull()
+    expect(request).toHaveBeenCalledTimes(2)
+  })
+
   it('keeps the screen on across a switch of instrument', async () => {
     const release = vi.fn(async () => {})
     const request = vi.fn(async () => ({ release, addEventListener() {} }))
@@ -554,6 +1104,39 @@ describe('the phone chart page at 390 px', () => {
     expect(screen.getByRole('status', { name: 'Location' })).toHaveTextContent(
       '/chart/NSE_INDEX/BANKNIFTY'
     )
+  })
+
+  it("draws the screen again for what it shows, not for the app's market data clock (C14)", async () => {
+    // The app's provider makes a new value every second around the same pages,
+    // which only its readers hear; the screen, sheets and all, must not follow it.
+    const value = () => ({ manager: MarketDataManager.getInstance() }) as never
+    let tickClock: () => void = () => {}
+    const pages = (
+      <MemoryRouter initialEntries={['/chart/NSE/SBIN']}>
+        <Routes>
+          <Route path="/chart/:exchange/:symbol" element={<ChartPage />} />
+        </Routes>
+      </MemoryRouter>
+    )
+    function Provider() {
+      const [context, setContext] = useState(value)
+      tickClock = () => setContext(value())
+      return <MarketDataContext.Provider value={context}>{pages}</MarketDataContext.Provider>
+    }
+    render(
+      <QueryClientProvider client={createQueryClient()}>
+        <Provider />
+      </QueryClientProvider>
+    )
+    await waitFor(() => expect(chart().load).toHaveBeenCalled())
+    await waitFor(() => expect(screen.getByRole('button', { name: 'BUY' })).toBeEnabled())
+    // Each drawing of the screen reads the indicator rows once.
+    const drawn = chart().legendRows.mock.calls.length
+    for (let second = 0; second < 3; second++) act(() => tickClock())
+    expect(chart().legendRows.mock.calls.length).toBe(drawn)
+    // What it shows still draws it: a sheet opening.
+    await userEvent.click(screen.getByRole('button', { name: 'Chart style: Candles' }))
+    expect(chart().legendRows.mock.calls.length).toBeGreaterThan(drawn)
   })
 
   it('lets the chart go when the page closes', async () => {
@@ -649,5 +1232,89 @@ describe('a market alert from the phone chart (M10.2)', () => {
   it('offers no bell where market alerts do not reach', async () => {
     await opened('/chart/MCX/GOLDM')
     expect(screen.queryByRole('button', { name: 'Set alert' })).toBeNull()
+  })
+})
+
+describe('the phone on its side (C10)', () => {
+  let held: ReturnType<typeof phoneHeld>
+  afterEach(() => held.spy.mockRestore())
+
+  it('folds the chrome into one strip: back, the price and its state, timeframe, tools, Buy and Sell', async () => {
+    held = phoneHeld('sideways')
+    await opened()
+    const strip = screen.getByTestId('chart-strip')
+    emit((cb) => {
+      cb.onTick({ ltp: 1234.5, time: null, tradeTime: null, at: Date.now(), polled: false })
+      cb.onPrevClose?.(1200)
+      cb.onStatus(status({ kind: 'live' }))
+    })
+    expect(within(strip).getByTestId('chart-ltp')).toHaveTextContent('1,234.50')
+    const change = within(strip).getByTestId('chart-change')
+    expect(change).toHaveTextContent('+₹34.50 (+2.88%)')
+    expect(change.querySelector('[data-direction="up"]')).not.toBeNull()
+    expect(within(strip).getByText('Real-time')).toBeVisible()
+    expect(within(strip).getByRole('heading', { name: 'SBIN' })).toBeVisible()
+    await waitFor(() => expect(within(strip).getByRole('button', { name: 'BUY' })).toBeEnabled())
+    expect(within(strip).getByRole('button', { name: 'SELL' })).toBeEnabled()
+    // The upright layout's rows are folded away; the chart takes the rest.
+    for (const gone of ['Search instruments', 'More timeframes', 'Set alert'])
+      expect(screen.queryByRole('button', { name: gone })).toBeNull()
+    expect(screen.queryByTestId('depth-strip')).toBeNull()
+    expect(screen.queryByRole('link', { name: 'Open in full terminal' })).toBeNull()
+    await userEvent.click(within(strip).getByRole('button', { name: 'Timeframe 5m, change' }))
+    expect(screen.getByRole('dialog', { name: 'Timeframe' })).toBeVisible()
+    fireEvent.click(screen.getByText('Phone back'))
+    await userEvent.click(within(strip).getByRole('button', { name: 'Chart style: Candles' }))
+    expect(screen.getByRole('dialog', { name: 'Chart style' })).toBeVisible()
+    fireEvent.click(screen.getByText('Phone back'))
+    await userEvent.click(within(strip).getByRole('button', { name: 'SELL' }))
+    expect(screen.getByRole('dialog', { name: 'Order ticket' })).toHaveTextContent(
+      'SELL SBIN NSE CNC 1 chart-trading MARKET no price'
+    )
+  })
+
+  it('keeps the chart it has when the phone is turned, either way', async () => {
+    held = phoneHeld('upright')
+    await opened()
+    const surface = screen.getByTestId('chart-surface')
+    expect(screen.queryByTestId('chart-strip')).toBeNull()
+    held.turn('sideways')
+    expect(screen.getByTestId('chart-strip')).toBeVisible()
+    expect(screen.getByTestId('chart-surface')).toBe(surface)
+    held.turn('upright')
+    expect(screen.queryByTestId('chart-strip')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Search instruments' })).toBeVisible()
+    expect(screen.getByTestId('chart-surface')).toBe(surface)
+    expect(fakes.charts).toHaveLength(1)
+    expect(chart().destroy).not.toHaveBeenCalled()
+    expect(chart().load).toHaveBeenCalledOnce()
+  })
+
+  it('reads a candle and buys at a held price on its side too', async () => {
+    held = phoneHeld('sideways')
+    await opened()
+    await waitFor(() => expect(screen.getByRole('button', { name: 'BUY' })).toBeEnabled())
+    await hold()
+    await userEvent.click(screen.getByRole('button', { name: 'Buy at 814.35' }))
+    expect(screen.getByRole('dialog', { name: 'Order ticket' })).toHaveTextContent(
+      'BUY SBIN NSE CNC 1 chart-trading LIMIT 814.35'
+    )
+  })
+
+  it('has no Buy or Sell for an index on its side', async () => {
+    held = phoneHeld('sideways')
+    await opened('/chart/NSE_INDEX/NIFTY')
+    const strip = screen.getByTestId('chart-strip')
+    expect(within(strip).queryByRole('button', { name: 'BUY' })).toBeNull()
+    expect(within(strip).queryByRole('button', { name: 'SELL' })).toBeNull()
+  })
+
+  it('gives every control on the strip a target a thumb can hit: 48 px at least', async () => {
+    held = phoneHeld('sideways')
+    await opened()
+    const buttons = within(screen.getByTestId('chart-strip')).getAllByRole('button')
+    expect(buttons).toHaveLength(6)
+    for (const button of buttons)
+      expect(button.className, button.textContent ?? '').toMatch(/\b(min-)?h-12\b|\bsize-12\b/)
   })
 })

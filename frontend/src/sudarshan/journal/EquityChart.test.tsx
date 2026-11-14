@@ -57,6 +57,9 @@ describe('EquityChart', () => {
       render(<EquityChart equity={analytics().equity} />)
       await waitFor(() => expect(lib.made.length).toBe(2))
       expect(lib.made[1].options.lineColor).toBe('#AC5700')
+      // and the legend's swatch says what the chart draws (review L7)
+      const swatch = screen.getByTestId('drawdown-label').querySelector('line')
+      expect(swatch?.getAttribute('stroke')).toBe('#AC5700')
     } finally {
       delete document.documentElement.dataset.cvd
     }

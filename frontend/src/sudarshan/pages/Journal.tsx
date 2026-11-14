@@ -2,19 +2,24 @@
 // round trips by the journal service (blueprints/sudarshan_journal.py is its bridge). This is the
 // shell: the title, the parts, the Sandbox switch, what is open kept in the address and the
 // states in words. Each part arrives as its own change and replaces its stub.
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { LoaderCircle, Power, RefreshCw, TriangleAlert } from 'lucide-react'
-import type { ReactNode } from 'react'
+import { type ReactNode, useCallback, useEffect, useState } from 'react'
 import { Analytics } from '@/sudarshan/journal/Analytics'
 import { journalCall, problemOf } from '@/sudarshan/journal/api'
-import { JOURNAL_STATE_KEY } from '@/sudarshan/journal/keys'
+import { JOURNAL_KEY, JOURNAL_STATE_KEY } from '@/sudarshan/journal/keys'
 import { ModeChip } from '@/sudarshan/journal/ModeChip'
+import { PartBoundary } from '@/sudarshan/journal/PartBoundary'
 import { PlaybookSheetHost } from '@/sudarshan/journal/PlaybookSheet'
 import { Playbooks } from '@/sudarshan/journal/Playbooks'
 import { Segmented } from '@/sudarshan/journal/Segmented'
 import { TripSheet } from '@/sudarshan/journal/TripSheet'
 import { TripsList } from '@/sudarshan/journal/TripsList'
-import { type JournalView, useJournalOverlay } from '@/sudarshan/journal/useJournalOverlay'
+import {
+  type JournalOverlay,
+  type JournalView,
+  useJournalOverlay,
+} from '@/sudarshan/journal/useJournalOverlay'
 
 const PARTS: ReadonlyArray<{ id: JournalView; label: string }> = [
   { id: 'trades', label: 'Trades' },
@@ -47,6 +52,7 @@ function Notice({
 }
 
 export default function Journal() {
+  const queryClient = useQueryClient()
   const { view, mode, overlay, setView, setMode, open, close } = useJournalOverlay()
   const state = useQuery({
     queryKey: JOURNAL_STATE_KEY,
@@ -64,7 +70,8 @@ export default function Journal() {
         title="Loading the journal"
       />
     )
-  } else if (state.isError) {
+  } else if (state.isError && !result) {
+    // Review L9: a failed re-read keeps what is on screen; only a page with nothing read says it.
     body = (
       <Notice
         icon={<TriangleAlert aria-hidden="true" className="size-6" />}
@@ -104,6 +111,29 @@ export default function Journal() {
   }
 
   const usable = result?.enabled === true
+
+  // Review H2: a sheet holding changes that are not saved is not shut by Back. When Back takes its
+  // entry, the sheet stays, the entry is put back and the sheet asks, as it does for Close and a
+  // tap outside. (Back out of a sheet opened by a link leaves the page; its changes are kept in the
+  // tab and come back when it is opened again.)
+  const [held, setHeld] = useState<JournalOverlay | null>(null)
+  const [asked, setAsked] = useState(0)
+  const sheet = usable ? (overlay ?? held) : null
+  const gone = overlay === null && held !== null
+  useEffect(() => {
+    if (!gone || !held) return
+    open(held)
+    setAsked((n) => n + 1)
+  }, [gone, held, open])
+  const closeSheet = useCallback(() => {
+    setHeld(null)
+    close()
+  }, [close])
+  const holding = useCallback(
+    (shown: JournalOverlay) => (dirty: boolean) => setHeld(dirty ? shown : null),
+    []
+  )
+
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-3 px-4 py-4 md:px-0">
       <div className="flex min-h-12 items-center justify-between gap-2">
@@ -113,17 +143,32 @@ export default function Journal() {
       {usable && (
         <Segmented label="Journal parts" value={view} options={PARTS} onChange={setView} />
       )}
-      {body}
-      {usable && overlay?.kind === 'playbook' && (
-        <PlaybookSheetHost
-          key={overlay.playbookId ?? 'new'}
-          playbookId={overlay.playbookId}
-          onClose={close}
-        />
-      )}
-      {usable && overlay?.kind === 'trade' && (
-        <TripSheet key={overlay.tradeId} tradeId={overlay.tradeId} open onClose={close} />
-      )}
+      {/* Review M6: a part that fails to draw says so in its place; the app stays. */}
+      <PartBoundary
+        key={`${view}:${mode}`}
+        onRetry={() => void queryClient.invalidateQueries({ queryKey: JOURNAL_KEY })}
+      >
+        {body}
+        {sheet?.kind === 'playbook' && (
+          <PlaybookSheetHost
+            key={sheet.playbookId ?? 'new'}
+            playbookId={sheet.playbookId}
+            onClose={closeSheet}
+            onDirty={holding(sheet)}
+            asked={asked}
+          />
+        )}
+        {sheet?.kind === 'trade' && (
+          <TripSheet
+            key={sheet.tradeId}
+            tradeId={sheet.tradeId}
+            open
+            onClose={closeSheet}
+            onDirty={holding(sheet)}
+            asked={asked}
+          />
+        )}
+      </PartBoundary>
     </div>
   )
 }

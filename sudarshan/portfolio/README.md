@@ -158,7 +158,7 @@ two types, and a test holds this table, that map and `kinds.py` to each other.
 
 | op | method | route | limiter | query | request | answer | notes |
 |---|---|---|---|---|---|---|---|
-| `state` | GET | `/state` | read | | `NoArgs` | `PortfolioState` | tabs, members, accounts, job states |
+| `state` | GET | `/state` | read | | `NoArgs` | `PortfolioState` | tabs, members, accounts, job states, the P7 switches |
 | `summary` | GET | `/summary` | read | | `NoArgs` | `PortfolioSummary` | the dashboard card's live-math inputs |
 | `tab_create` | POST | `/tabs` | write | | `TabCreateArgs` | `TabInfo` | |
 | `tab_get` | GET | `/tabs/<id>` | read | `as_of:day, view:int, accounts:ints, classes:strs, tags:strs, held:str` | `TabGetArgs` | `TabView` | |
@@ -180,7 +180,7 @@ two types, and a test holds this table, that map and `kinds.py` to each other.
 | `import_preview` | POST | `/tabs/<id>/imports` | import | | `ImportPreviewArgs` | `ImportPreview` | upload |
 | `import_commit` | POST | `/imports/<id>/commit` | write | | `ImportCommitArgs` | `ImportCommitted` | |
 | `import_discard` | DELETE | `/imports/<id>` | write | | `ImportDiscardArgs` | `ImportDiscarded` | drops a preview or undoes an import |
-| `export_csv` | GET | `/tabs/<id>/export.csv` | read | | `Targets` | `ExportFile` | download |
+| `export_csv` | GET | `/tabs/<id>/export.csv` | read | `view:str` | `ExportArgs` | `ExportFile` | download; `view` from P7 X1 |
 | `performance` | GET | `/tabs/<id>/performance` | read | | `Targets` | `PerformanceReport` | |
 | `layout_get` | GET | `/tabs/<id>/layout` | read | | `Targets` | `LayoutState` | |
 | `layout_set` | PUT | `/tabs/<id>/layout` | write | | `LayoutSetArgs` | `LayoutState` | `spec: null` resets |
@@ -197,11 +197,29 @@ two types, and a test holds this table, that map and `kinds.py` to each other.
 | `share_set` | PUT | `/family/shares` | write | | `ShareSetArgs` | `TabShare` | a new share has no version; a change names its version |
 | `share_remove` | DELETE | `/family/shares` | write | | `ShareRemoveArgs` | `ShareRemoved` | |
 | `member_privacy_set` | PUT | `/family/privacy` | write | | `MemberPrivacySetArgs` | `MemberPrivacy` | a member's privacy floor (cross-design Y6) |
+| `tax_get` | GET | `/tax` | read | `fy:int, member:int` | `TaxGetArgs` | `TaxPack` | P7 `tax`: the working paper of one year and taxpayer |
+| `tax_inputs` | GET | `/tax/inputs` | read | `member:int` | `TaxInputsArgs` | `TaxInputs` | P7 `tax`: the owner's figures and how each account counts |
+| `tax_input_set` | POST | `/tax/inputs` | write | | `TaxInputSetArgs` | `TaxInputSaved` | P7 `tax`: `kind` from a closed list; `dry_run` tells the effect first |
+| `tax_input_delete` | DELETE | `/tax/inputs/<id>` | write | | `TaxInputDeleteArgs` | `Deleted` | P7 `tax` |
+| `tax_csv` | GET | `/tax/export.csv` | read | `fy:int, member:int, schedule:str` | `TaxCsvArgs` | `ExportFile` | P7 `tax`, download |
+| `report_csv` | GET | `/reports/export.csv` | read | `kind:str, fy:int, segment:str` | `ReportCsvArgs` | `ExportFile` | P7 `tax`, download: Upstox's rows as read |
+| `ca_list` | GET | `/corporate-actions` | read | `scope:str, from:day, to:day, isin:str` | `CaListArgs` | `CaList` | P7 `insights` |
+| `ca_decide` | POST | `/corporate-actions/<id>` | write | | `CaDecideArgs` | `CaDecisionRow` | P7 `insights`: nothing changes a lot without it |
+| `dividends` | GET | `/dividends` | read | `fy:int, member:int` | `DividendsArgs` | `DividendsReport` | P7 `insights` |
+| `dividend_set` | POST | `/dividends/<id>` | write | | `DividendSetArgs` | `DividendLine` | P7 `insights` |
+| `calendar` | GET | `/calendar` | read | `from:day, to:day` | `CalendarArgs` | `CalendarReport` | P7 `insights` |
+| `risk` | GET | `/risk` | read | `tab:int` | `RiskArgs` | `RiskReport` | P7 `insights` |
+| `settings_get` | GET | `/settings` | read | | `NoArgs` | `OwnerSettings` | P7 `insights` |
+| `settings_set` | PUT | `/settings` | write | | `SettingsSetArgs` | `OwnerSettings` | P7 `insights` |
+| `goals_list` | GET | `/goals` | read | | `NoArgs` | `GoalsList` | P7 `goals` |
+| `goal_create` | POST | `/goals` | write | | `GoalCreateArgs` | `GoalsList` | P7 `goals` |
+| `goal_update` | PATCH | `/goals/<id>` | write | | `GoalUpdateArgs` | `GoalsList` | P7 `goals` |
+| `export_pdf` | GET | `/tabs/<id>/export.pdf` | read | `view:str` | `ExportArgs` | `ExportPdf` | P7 `goals`, download |
 
 The bridge builds all of these routes from one table (`OPS` in `kinds.py`), so a later op never
 means editing it. An op the service does not have yet answers `not_ready` ("This part of the
-portfolio is not ready yet."). A `dry_run` on `activity_create` and `activity_update` counts
-against the dry-run limiter, not the write limiter.
+portfolio is not ready yet."). A `dry_run` on `activity_create`, `activity_update` and
+`tax_input_set` counts against the dry-run limiter, not the write limiter.
 
 ### Sentences said word for word
 
@@ -330,7 +348,7 @@ two exists in this release. Each purpose has its own principal and its own list 
 |---|---|---|
 | owner (`PORTFOLIO_API_INFO`) | `owner` | the contract's ops, the four sharing ops among them (`shares_list`, `share_set`, `share_remove`, `member_privacy_set`) |
 | family (`PORTFOLIO_FAMILY_API_INFO`) | `viewer:<member id>` | reads: `state`, `summary`, `tab_get`, `performance`, `upstox_book`, `upstox_history`, `shares_for_viewer` |
-| journal (`PORTFOLIO_JOURNAL_API_INFO`) | `sudarshan-journal` | reads: `trades_day`, `order_history`, `historical_trades`, `pnl_report`, `positions`, `funds`, `benchmark_closes` |
+| journal (`PORTFOLIO_JOURNAL_API_INFO`) | `sudarshan-journal` | reads: `trades_day`, `order_history`, `historical_trades`, `pnl_report` (part `charges` also for some days: `from`, `to`, both inside the year), `positions`, `holdings`, `funds`, `benchmark_closes`, and `tax_pack` (`fy`, `member`: the owner's own working paper, as `tax_get` answers it, behind `SUDARSHAN_TAX`) |
 
 * **Family scope** (`sharing.py`): built here, never taken from the caller. Tabs are the member's
   unexpired `tab_share` rows (the member's own row beats their role's) intersected with
@@ -361,6 +379,80 @@ two exists in this release. Each purpose has its own principal and its own list 
   confirmed its own write, so a half-done edit can only leave the member seeing less. "Every member"
   is a share for each role (`role:viewer`, `role:child`); a role share reaches a member once their
   floor names their role.
+* **Schema step 5** (phase P7, one step for the whole phase) adds `owner_setting`, the tax inputs
+  (`tax_opening_lot`, `tax_fmv`, `tax_carry`, `tax_day_override`, `tax_trade_mark`), Upstox's
+  corporate actions (`ca_event`, `ca_read`: public facts, no principal) with the owner's
+  `ca_decision`, `dividend_line` and `goal`, and the column `account.tax_mode`, filled when it is
+  made from each account's own kind (Upstox counts by its reports, every other account by its
+  ledger) and never over a mode already there; an account made later counts by the same rule
+  (`migrations.tax_mode_of`). The deploy's copy of `portfolio.db`, taken before the step runs, is
+  the rollback.
+
+### Phase P7: tax, insights and goals behind three switches
+
+The money features of phase P7 (design p7) register their whole contract at once: every op above
+marked P7, the journal purpose's `tax_pack`, the job `corporate_actions`, the closed lists
+(`TAX_INPUT_KINDS`, `CARRY_BUCKETS`, `CA_KINDS`, `EXPORT_VIEWS`, `SWITCH_NAMES` and the rest) and
+the answer shapes in `types.ts`. Each op answers "not ready" until its lane lands, so no later lane
+edits `kinds.py`, `ops/__init__.py` or `timers.py`.
+
+| switch (`.env`) | name | covers |
+|---|---|---|
+| `SUDARSHAN_TAX` | `tax` | `tax_get`, `tax_inputs`, `tax_input_set`, `tax_input_delete`, `tax_csv`, `report_csv`, `tax_pack` |
+| `SUDARSHAN_PORTFOLIO_INSIGHTS` | `insights` | `ca_list`, `ca_decide`, `dividends`, `dividend_set`, `calendar`, `risk`, `settings_get`, `settings_set`; the job `corporate_actions` |
+| `SUDARSHAN_PORTFOLIO_GOALS` | `goals` | `goals_list`, `goal_create`, `goal_update`, `export_pdf` |
+
+Each is off in code and set by the release that ships its part (`ops/deploy/openalgo-env.conf`).
+Off, its ops answer `not_ready` whatever their module does (`ops.switched`, put on at
+registration), its jobs end at once (`timers.gate_switched`) and nothing is read from Upstox for
+it. The owner's `state` answer carries `switches`, so the page offers a view only while its
+switch is on.
+
+**The tax working paper** (`ops/tax_ops.py`, `tax_adapter.py`). `tax_get` is one taxpayer's
+year (a member; none is the owner, the first member) among the three Upstox keeps; anything older
+is refused with `tax_years`. The adapter turns the reader's cache, Upstox's P&L pairs, the custom
+tabs' ledgers and the owner's inputs into the core's inputs, and the answer is the core's pack
+(`sudarshan/tax/pack.py`) as it is: the one shape the phone and the journal read. A loss carried
+from an earlier year comes from that year's own pack, worked out from the oldest year in reach,
+and a loss the owner entered for a year wins over the computed one (shown beside it). An account
+counts by its `tax_mode`; a ledger entry on the Upstox account is left out, so nothing counts
+twice. The view starts no read of Upstox: what is not read in full is a line of
+`inputs.missing`, and a read in flight for the year puts `tax_reading` first.
+
+A bonus or a split changes the lots of its own account only (owner decision 10; the core's
+`Action.account`): the corporate actions the owner accepted for Upstox (`corpactions`) reach the
+Upstox account, one not decided yet is passed unaccepted (the core changes nothing and says so),
+and a tab's SPLIT entry reaches that tab's accounts (all of the tab's accounts holding the share
+when the entry names none). An Upstox pair lot sold after an accepted split, like a transfer in
+after a tab's split, is put back into the units of its purchase day, so no split is applied twice.
+The paper's `dividends` block is the year's dividend lines of the accounts that count
+(`dividends.for_pack`), with the core's buyback receipt beside them and in the total.
+
+`tax_input_set` keeps one input of a closed kind (`TAX_INPUT_KINDS`): a 31 Jan 2018 price (one
+per share), a purchase from before the records (it wins over Upstox's pair for that share), a loss
+brought forward (one per year, kind and source), a day of delivery, a buyback tender, or the
+readings of the open rules (`owner_setting` `tax:<member id>`, saved from the version it was read
+at, 0 before the first save). Every field is checked and refused in a sentence naming it; a new
+row is made once per `request_id`; an existing one changes from its version. With `dry_run` it
+writes nothing and answers `effect`, the year's headline figures that would change, as sentences.
+
+`tax_csv` writes one schedule of that paper (`TAX_SCHEDULES`: every sale with its cost, expenses,
+gain, term, rate and status, then the year's totals; business income by bucket and kind, with
+charges, net, the turnover method, flags and what differs from Upstox; each set-off, carry and
+lapse; dividends) under a first line naming सुदर्शन · SUDARSHAN, the year and the taxpayer, and
+the working-paper sentence. `report_csv` writes Upstox's trades or P&L pairs of one year and
+segment as the reader kept them (with the year's charges under the pairs), `_partial` in the name
+when the read was not complete; a report not read yet is refused with a sentence. In both,
+numbers are plain with their signs, text a spreadsheet would run as a formula gets an apostrophe
+(`csvutil.guard`), and the file names are ASCII (`SUDARSHAN_Tax_FY2026-27_member1_losses.csv`,
+`SUDARSHAN_Upstox_pnl_FY2026-27_FO.csv`).
+
+A family member sees nothing of this phase: none of its ops is a family op (a test holds
+`FAMILY_OPS` to that), and the mask table (version 3) hides its fields defensively anyway, its
+rupee figures in `cost` too. A closed-world test walks every key of every answer a viewer can be
+given and of every answer of the phase, in `types.ts` and in the service's real answers, and fails
+on a key that no category or `cost` hides, that is not in `never_hidden` and that is not in its
+reviewed list of structural keys: a new field cannot reach a viewer by being forgotten.
 
 ### Import and export
 

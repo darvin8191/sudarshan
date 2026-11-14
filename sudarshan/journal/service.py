@@ -25,6 +25,7 @@ import logging
 import signal
 import time
 from collections.abc import Awaitable, Callable, Iterable
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -130,6 +131,17 @@ async def release_claims(
     return False
 
 
+def resident_mb(status: Path = Path("/proc/self/status")) -> int | None:
+    """The process's resident memory in whole MB (``VmRSS``), or None where it cannot be read."""
+    try:
+        for line in status.read_text().splitlines():
+            if line.startswith("VmRSS:"):
+                return int(line.split()[1]) // 1024
+    except (OSError, ValueError, IndexError):
+        return None
+    return None
+
+
 class Service:
     """The process's state, and the Desk the API serves."""
 
@@ -183,7 +195,8 @@ class Service:
         return self._state
 
     def health(self) -> dict[str, Any]:
-        """The ops document plus the service's own ``journal_state``: states and counts only."""
+        """The ops document plus the service's own ``journal_state``: states and counts only, and
+        the process's resident memory (``rss_mb``; the unit squeezes it at 192 MB: review L18)."""
         return {
             "service": SERVICE,
             "release": installed_release(self.settings.deployed_tag_file),
@@ -198,6 +211,7 @@ class Service:
                     for name, t in self._tasks.items()
                 },
                 **self.counts,
+                "rss_mb": resident_mb(),
                 **({"reason": self.off_reason} if self.off_reason else {}),
             },
         }

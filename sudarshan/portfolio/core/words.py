@@ -195,6 +195,73 @@ def index_missing(label: str) -> str:
     return f"{label} prices are not available yet; the comparison appears when they are."
 
 
+def stats_on(count: int, day: int) -> str:
+    """What beta and correlation rest on (design p7 9.2): "On 60 trading days to 13 Nov 2026"."""
+    return f"On {count} trading days to {date(day)}"
+
+
+def stats_after(need: int, ready_day: int) -> str:
+    """Too few days yet for beta and correlation, and the day there will be enough."""
+    return f"Shown after {need} trading days (from {date(ready_day)})"
+
+
+def stats_flat(label: str) -> str:
+    """The index closed at one level on every day read, so there is nothing to compare with."""
+    return f"{label} did not move on these days, so there is no beta yet."
+
+
+STATS_TAB_FLAT = "This tab's value did not move on these days, so there is no correlation yet."
+
+
+# ---- risk and X-ray (M7.32; design p7 4.7, 9.3) ----
+RISK_NEEDS_YEAR = "Not yet: needs a year of daily history."
+RISK_NO_FALL = "No fall from a high yet."
+RISK_NO_SWING = "The value did not move on these days, so there is no ratio yet."
+RISK_NO_DOWN_DAY = "No losing day yet, so there is no Sortino ratio."
+RISK_SET_EXPENSES = "Set your monthly expenses to check this"
+
+
+def _two(pct_text: str) -> str:
+    """A figure of four decimals as a sentence says it, to two, half up: "22.5650" -> "22.57";
+    one that is whole stays whole: "15.0000" -> "15"."""
+    count = int(pct_text.replace(".", "").lstrip("-"))
+    hundredths = count // 100 + (count % 100 >= 50)
+    sign = "-" if pct_text.startswith("-") and hundredths else ""
+    if hundredths % 100 == 0:
+        return f"{sign}{hundredths // 100}"
+    return f"{sign}{hundredths // 100}.{hundredths % 100:02d}"
+
+
+def risk_days_more(need: int, have: int) -> str:
+    """A risk figure waits for ``need`` day returns and has ``have``."""
+    return f"Shown after {need} trading days of closing values: {need - have} more to go."
+
+
+def risk_basis(day: int) -> str:
+    """What every risk figure rests on: never the tick, always the closing values."""
+    return f"On closing values up to {date(day)}."
+
+
+def risk_over(label: str, weight_pct: str, limit_pct: str, *, sector: bool) -> str:
+    """One holding, or one sector tag, is a larger share than the owner's limit."""
+    what = f"The sector {label}" if sector else label
+    return (
+        f"{what} is {_two(weight_pct)}% of what is held here, above your {_two(limit_pct)}% limit."
+    )
+
+
+def risk_untagged(weight_pct: str) -> str:
+    return f"Untagged: {_two(weight_pct)}%; tag them to check sectors."
+
+
+def risk_months(months: str, target: int, enough: bool) -> str:
+    """How long the cash-like value lasts at the owner's monthly expenses, against his target."""
+    covered = f"Covers {_two(months)} months of your expenses"
+    if enough:
+        return f"{covered}: at or above your target of {target}."
+    return f"{covered}; your target is {target}."
+
+
 #: The names of the bars that hold what has no sector, no cap size or no tag (design 4.8), and the
 #: cap sizes an asset can carry.
 MCAP_LABELS = {"large": "Large cap", "mid": "Mid cap", "small": "Small cap"}

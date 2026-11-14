@@ -9,6 +9,8 @@ from collections.abc import Mapping
 from typing import Any
 
 from .. import __version__, layout, serialize
+from ..config import switch_on
+from ..core.kinds import SWITCH_NAMES
 from ..store import NotFound, Refused, VersionConflict
 from . import op
 from .common import OWNER, answer, caller, given, maybe_whole, parts, scope_now, warmed, whole
@@ -73,7 +75,10 @@ async def _upstox_within(ctx, scope=OWNER, principal: str = "owner") -> dict[str
 async def state(ctx, message):
     _, views = parts(ctx)
     now, scope = ctx.clock(), scope_now()
-    return await answer(lambda: views.state(scope, now=now, version=__version__))
+    found = await answer(lambda: views.state(scope, now=now, version=__version__))
+    if caller().purpose == "owner":  # phase P7: which of its views the page may offer
+        found["switches"] = {name: switch_on(ctx, name) for name in SWITCH_NAMES}
+    return found
 
 
 @op("summary")

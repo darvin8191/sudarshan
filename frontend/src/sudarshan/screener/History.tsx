@@ -98,11 +98,11 @@ const RunLine = memo(function RunLine({
         </span>
         <span className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[0.8125rem] font-medium text-[color:var(--text-secondary)]">
           <span>{run.candle} candle</span>
-          <span className="inline-flex items-center gap-0.5 font-semibold text-[color:var(--profit)]">
+          <span className="inline-flex items-center gap-0.5 font-semibold text-[color:var(--up)]">
             <Plus aria-hidden="true" className="size-3.5" />
             {run.entered} entered
           </span>
-          <span className="inline-flex items-center gap-0.5 font-semibold text-[color:var(--loss)]">
+          <span className="inline-flex items-center gap-0.5 font-semibold text-[color:var(--down)]">
             <Minus aria-hidden="true" className="size-3.5" />
             {run.exited} exited
           </span>

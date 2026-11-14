@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { HOLD_MS, LongPress, type LongPressOptions, SLOP_PX } from './longPress'
+import { HOLD_MS, LongPress, type LongPressOptions, OVER_CHART, SLOP_PX } from './longPress'
 
 /** jsdom has no PointerEvent; a MouseEvent carrying the pointer fields is enough here. */
 function pointer(type: string, init: { id?: number; x?: number; y?: number; kind?: string }) {
@@ -91,6 +91,25 @@ describe('press and hold to read a candle', () => {
     expect(opts.onEnd).toHaveBeenCalledOnce()
     expect(opts.onClear).not.toHaveBeenCalled()
     child.dispatchEvent(pointer('pointerdown', { id: 2, x: 200, y: 300 }))
+    expect(opts.onClear).toHaveBeenCalledOnce()
+  })
+
+  it('leaves a touch on a control over the chart to it: the reading stays and nothing new starts (C10)', () => {
+    const control = document.createElement('div')
+    control.setAttribute(OVER_CHART, '')
+    const button = document.createElement('button')
+    control.appendChild(button)
+    el.appendChild(control)
+    child.dispatchEvent(pointer('pointerdown', { x: 60, y: 300 }))
+    vi.advanceTimersByTime(HOLD_MS)
+    child.dispatchEvent(pointer('pointerup', { x: 60, y: 300 }))
+    button.dispatchEvent(pointer('pointerdown', { id: 2, x: 60, y: 120 }))
+    vi.advanceTimersByTime(HOLD_MS * 2)
+    button.dispatchEvent(pointer('pointerup', { id: 2, x: 60, y: 120 }))
+    expect(opts.onClear).not.toHaveBeenCalled()
+    expect(opts.onStart).toHaveBeenCalledOnce()
+    // The chart itself still clears it.
+    child.dispatchEvent(pointer('pointerdown', { id: 3, x: 200, y: 300 }))
     expect(opts.onClear).toHaveBeenCalledOnce()
   })
 

@@ -77,7 +77,7 @@ export function NoteField({
         </span>
         <span className="flex items-center gap-2">
           {done && !dirty && (
-            <output className="flex items-center gap-1 text-xs font-semibold text-[color:var(--profit)]">
+            <output className="flex items-center gap-1 text-xs font-semibold text-[color:var(--up)]">
               <Check aria-hidden="true" className="size-4" />
               Saved
             </output>

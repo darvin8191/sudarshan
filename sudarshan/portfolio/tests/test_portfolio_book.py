@@ -195,9 +195,9 @@ def test_only_an_archived_tab_is_deleted_and_only_by_typing_its_name(book, world
 def test_members_and_accounts_are_changed_only_from_their_version(book, world):
     me = world["me"]
     renamed = book.member_update(
-        OWNER, me["id"], 1, {"name": "Darvin", "relation": "self"}, now=NOW
+        OWNER, me["id"], 1, {"name": "Account owner", "relation": "self"}, now=NOW
     )
-    assert (renamed["name"], renamed["version"]) == ("Darvin", 2)
+    assert (renamed["name"], renamed["version"]) == ("Account owner", 2)
     with pytest.raises(VersionConflict) as caught:
         book.member_update(OWNER, me["id"], 1, {"name": "x"}, now=NOW)
     assert str(caught.value) == WORDS["version_conflict_item"]
