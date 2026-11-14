@@ -825,6 +825,7 @@ protected     /sudarshan/screener/api/state                                     
 protected     /sudarshan/screener/api/today                                             sudarshan_screener.today
 protected     /sudarshan/screener/api/universes                                         sudarshan_screener.universes
 protected     /sudarshan/session/instrument                                             sudarshan_session_bp.instrument
+protected     /sudarshan/session/today                                                  sudarshan_session_bp.today
 protected     /sudarshan/watchlists/api/copy                                            sudarshan_watchlists.copy
 protected     /sudarshan/watchlists/api/favourites                                      sudarshan_watchlists.favourites
 protected     /sudarshan/watchlists/api/flags                                           sudarshan_watchlists.flags
@@ -920,6 +921,10 @@ FINDINGS: dict[tuple[str, str, str], Finding] = {}
 NOT_OWNER_ONLY = {
     "/sudarshan/session/instrument": (
         "an instrument's trading hours for the chart: upstream's session check, no account data"
+    ),
+    "/sudarshan/session/today": (
+        "the day's market hours and index expiries for the dashboard: upstream's session check, "
+        "calendar facts, no account data"
     ),
 }
 

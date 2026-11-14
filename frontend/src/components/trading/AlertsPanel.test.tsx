@@ -364,3 +364,30 @@ describe('the log of what has fired', () => {
     expect(screen.queryByText(/none/i)).not.toBeInTheDocument()
   })
 })
+
+// SUDARSHAN M4.9 (T5): an alert set here fires only while the terminal runs, so the panel says
+// so and points to the page whose alerts reach the phone with its screen off.
+describe('where these alerts work', () => {
+  const SENTENCE =
+    'These alerts work while this terminal is open. For alerts that reach you with the screen off, use Alerts.'
+
+  it('says so in one sentence, with a link to the alerts that reach the phone', () => {
+    const { view } = viewOf([alert()])
+    render(<AlertsPanel {...props} view={view} />)
+    const link = screen.getByRole('link', { name: 'Alerts' })
+    expect(link).toHaveAttribute('href', '/market-alerts')
+    expect(link.closest('p')).toHaveTextContent(SENTENCE)
+  })
+
+  it('stays on the log tab, while the chart loads and with no alerts at all', async () => {
+    const user = userEvent.setup()
+    const { view } = viewOf([])
+    const { unmount } = render(<AlertsPanel {...props} view={view} />)
+    await user.click(screen.getByRole('tab', { name: /^Log/ }))
+    expect(screen.getByRole('link', { name: 'Alerts' })).toBeInTheDocument()
+    unmount()
+
+    render(<AlertsPanel {...props} view={null} />)
+    expect(screen.getByRole('link', { name: 'Alerts' })).toHaveAttribute('href', '/market-alerts')
+  })
+})

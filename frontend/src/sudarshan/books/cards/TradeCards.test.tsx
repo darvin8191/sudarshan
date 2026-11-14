@@ -105,6 +105,49 @@ describe('Trade book on a phone', () => {
     expect(screen.getByText(/2 trades · 1 buy · 1 sell/)).toBeInTheDocument()
   })
 
+  it('groups the fills of one order on one card: count, quantity, average, each fill (B3)', async () => {
+    const part = (quantity: number, average_price: number, time: string): Trade => ({
+      ...BOUGHT,
+      orderid: '1009',
+      quantity,
+      average_price,
+      trade_value: quantity * average_price,
+      timestamp: `2026-10-20 ${time}`,
+    })
+    await renderPhone(
+      BOUGHT,
+      part(30, 150, '10:41:50'),
+      part(65, 142, '10:41:49'),
+      part(35, 143, '10:41:51')
+    )
+    const cards = within(screen.getByRole('list', { name: 'Trades' })).getAllByRole('link')
+    expect(cards).toHaveLength(2)
+    expect(cards[0]).toHaveTextContent('10:41:51')
+    expect(cards[0]).toHaveTextContent('130 at avg 144.12')
+    expect(cards[0]).toHaveTextContent('3 fills · Value ₹18,735.00')
+    const fills = within(cards[0]).getByTestId('fills').children
+    expect([...fills].map((line) => line.textContent)).toEqual([
+      '65 at 142.0010:41:49',
+      '30 at 150.0010:41:50',
+      '35 at 143.0010:41:51',
+    ])
+    expect(cards[1]).toHaveTextContent('65 at 142.50')
+    expect(within(cards[1]).queryByTestId('fills')).toBeNull()
+    expect(screen.getByText(/4 trades in 2 orders · 4 buy · 0 sell/)).toBeInTheDocument()
+  })
+
+  it('exports the trade book from the app’s own route, never following its redirect (B3)', async () => {
+    const tap = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    const fetch = vi.fn(async () => ({ ok: false, status: 0, headers: { get: () => null } }))
+    vi.stubGlobal('fetch', fetch)
+    await renderPhone(SOLD)
+    await tap.click(screen.getByRole('button', { name: 'Export trade book' }))
+    expect(fetch).toHaveBeenCalledWith(
+      '/tradebook/export',
+      expect.objectContaining({ redirect: 'manual' })
+    )
+  })
+
   it('opens the fill’s chart on a tap', async () => {
     const tap = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
     await renderPhone(SOLD)

@@ -1,7 +1,7 @@
 import { CandlestickChart, Minus, Plus } from 'lucide-react'
 import { memo, type ReactNode, useCallback, useEffect } from 'react'
 import { calculateLiveStats } from '@/hooks/useLivePrice'
-import { cn } from '@/lib/utils'
+import { cn, sanitizeCSV } from '@/lib/utils'
 import { AccessNotice } from '@/sudarshan/AccessNotice'
 import { usePriceAccess, useReadWhenReady } from '@/sudarshan/access'
 import { type FeedRow, useBookFeed } from '@/sudarshan/books/feed'
@@ -23,6 +23,7 @@ import {
   CARD,
   Details,
   EmptyCard,
+  ExportIcon,
   Last,
   LoadingCards,
   Money,
@@ -33,6 +34,7 @@ import {
   SignedPercent,
   STALE,
   StaleBookNote,
+  saveCsv,
   useSandbox,
 } from './parts'
 import { ReadOnlyHoldings, type ReadOnlyHoldingsProps } from './ReadOnlyHoldings'
@@ -107,6 +109,32 @@ export function dayChangeOf(
     base += row.prevClose * quantity
   }
   return { amount, percent: base > 0 ? (amount / base) * 100 : null }
+}
+
+/** A figure for a CSV cell: plain digits, or empty when not known. */
+function csvFigure(value: unknown, decimals?: number): string {
+  const number = figure(value)
+  if (number === null) return ''
+  return String(decimals === undefined ? number : Number(number.toFixed(decimals)))
+}
+
+/**
+ * The holdings as a CSV (B3), in the wide page's export columns, at the prices shown now:
+ * holdings have no export route, so the file is made here.
+ */
+export function holdingsCsv(rows: PricedRow<Holding>[]): string {
+  const header = ['Symbol', 'Exchange', 'Quantity', 'Avg Price', 'LTP', 'Product', 'P&L', 'P&L %']
+  const lines = rows.map((row) => [
+    sanitizeCSV(row.item.symbol),
+    sanitizeCSV(row.item.exchange),
+    csvFigure(row.item.quantity),
+    csvFigure(row.item.average_price),
+    csvFigure(row.ltp),
+    sanitizeCSV(row.item.product),
+    csvFigure(row.pnl, 2),
+    csvFigure(row.pnlPercent, 2),
+  ])
+  return [header, ...lines].map((line) => line.join(',')).join('\n')
 }
 
 /** The holdings' totals: the broker's until a price has moved, then from the prices shown. */
@@ -259,7 +287,12 @@ const HoldingBoard = memo(function HoldingBoard({
 
   return (
     <div className="flex flex-col gap-3">
-      <BookHeading title="Holdings" refreshing={refreshing} onRefresh={refresh} />
+      <BookHeading
+        title="Holdings"
+        refreshing={refreshing}
+        onRefresh={refresh}
+        extra={<ExportIcon what="holdings" run={() => saveCsv(holdingsCsv(rows), 'holdings')} />}
+      />
       {content}
       {overlay?.act === 'sheet' && target && (
         <HoldingSheet

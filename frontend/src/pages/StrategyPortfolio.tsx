@@ -453,11 +453,10 @@ export default function StrategyPortfolio() {
               <h1 className="text-2xl font-bold">Strategy Portfolio</h1>
               {streamingState === 'streaming' && (
                 <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-400">
-                  <span className="relative flex h-1.5 w-1.5">
-                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
-                    <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                  </span>
-                  Live
+                  {/* SUDARSHAN M1.21 (T4): a still mark beside the word, never a pinging one,
+                      and never "Live" for the feed (the word PnLTab uses for the same state). */}
+                  <span className="inline-flex h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                  Streaming
                 </span>
               )}
               {streamingState === 'paused' && (
