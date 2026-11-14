@@ -121,6 +121,35 @@ def test_pnl_hidden_with_quantities_shown_leaves_nothing_to_work_the_pnl_out_fro
     run(go())
 
 
+def test_m4_the_owner_is_told_what_pnl_hidden_leaves_workable_and_the_table_says_the_same():
+    """v0.12.0 review M4: with P&L hidden and quantities shown, a holding still carries its
+    quantity, its live price and its previous close, so a day's change and its value are one
+    multiplication away. The table no longer claims otherwise, and carries the one sentence the
+    owner reads under the P&L switch. If a later change hides one of the three, this test fails
+    and the sentence goes. Fails on the old code: there was no such sentence."""
+    table = json.loads(privacy.FIELDS_FILE.read_text(encoding="utf-8"))
+    shown = {"pnl": False, "qty": True, "funds": False, "orders": True}
+    row = privacy.masked(holding(), privacy.mask_of(privacy.hidden_categories(shown)))
+    day_change = row["qty_u"] * (row["last_price_u"] - row["close_price_u"])
+    assert day_change != 0 and "pnl_paise" not in row and "avg_price_u" not in row
+    note = privacy.PNL_HIDDEN_NOTE
+    assert note == table["pnl_hidden_note"] and "day's change" in note and "quantit" in note
+    assert note.endswith("Hide quantities to hide those too.")
+    assert "pnl_hidden_note" in table["note"] and "does not hide a day's change" in table["note"]
+    hidden = privacy.masked(holding(), privacy.mask_of(privacy.hidden_categories(
+        {**shown, "qty": False})))  # fmt: skip
+    assert "qty_u" not in hidden  # the remedy the sentence names does hide it
+
+
+def test_m4_a_table_without_the_note_is_refused(tmp_path):
+    table = json.loads(privacy.FIELDS_FILE.read_text(encoding="utf-8"))
+    for bad in (None, "", "no full stop", "x" * 201 + "."):
+        path = tmp_path / "fields.json"
+        path.write_text(json.dumps({**table, "pnl_hidden_note": bad}), encoding="utf-8")
+        with pytest.raises(ValueError, match="pnl_hidden_note"):
+            privacy.load_note(path)
+
+
 @pytest.mark.parametrize("field", QTY_FIELDS)
 def test_quantities_alone_hide_every_quantity_and_amount(field):
     assert privacy.is_hidden(field, privacy.mask_of(["qty"]))

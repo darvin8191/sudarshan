@@ -13,7 +13,10 @@ Three rules live here and nowhere else:
 * **P&L hidden hides what it is worked out from** (review H1). Beside a quantity, what a holding
   cost (its average, the amount invested), what it is worth now, a trade's price and the day's
   change in rupees give the P&L away by one subtraction. So while ``pnl`` is hidden, the table's
-  ``cost`` list is hidden too, whatever ``qty`` says.
+  ``cost`` list is hidden too, whatever ``qty`` says. This puts the overall P&L out of reach; it
+  does not hide a day's change or a holding's value from a member shown quantities, who has both
+  from the quantity and the never-hidden price and previous close (v0.12.0 review M4: the
+  table's ``pnl_hidden_note`` tells the owner so where he chooses).
 * **No row, no figures.** A member the owner has not set a privacy row for sees nothing but
   names, symbols and directions: every category is hidden until the owner chooses.
 
