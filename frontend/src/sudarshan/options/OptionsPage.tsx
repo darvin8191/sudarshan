@@ -31,6 +31,7 @@ import { readListing } from './api'
 import { ChainTab } from './ChainTab'
 import { Header } from './Header'
 import { IvTab } from './IvTab'
+import { LegSheets } from './LegSheets'
 import { OiTab } from './OiTab'
 import { readLastChain, saveLastChain } from './prefs'
 import { StraddleTab } from './StraddleTab'
@@ -159,9 +160,10 @@ export default function OptionsPage() {
   const [sheetFollows, setSheetFollows] = useState<string[]>([])
   /** What the Straddle tab needs followed: a far strike's two legs, nothing for a window strike. */
   const [straddleFollows, setStraddleFollows] = useState<string[]>([])
+  const [legFollow, setLegFollow] = useState<string | null>(null)
   const follows = useMemo(
-    () => [...straddleFollows, ...sheetFollows],
-    [straddleFollows, sheetFollows]
+    () => [...straddleFollows, ...sheetFollows, ...(legFollow ? [legFollow] : [])],
+    [straddleFollows, sheetFollows, legFollow]
   )
   const appMode = useThemeStore((state) => state.appMode)
 
@@ -200,6 +202,13 @@ export default function OptionsPage() {
     sheet: follows,
     enabled: ready,
   })
+  // A leg's own sheet keeps that leg followed, as the strike sheet it came from did.
+  const legOpen = sheets.sheet?.sheet === 'leg' ? sheets.sheet : null
+  const legKey =
+    (legOpen &&
+      live.model?.rows.find((each) => each.strike === legOpen.strike)?.[legOpen.side]?.key) ||
+    null
+  useEffect(() => setLegFollow(legKey), [legKey])
   const pickTab = useCallback(
     (next: Tab) => {
       const params = new URLSearchParams(query)
@@ -291,6 +300,15 @@ export default function OptionsPage() {
   const tab = tabOf(query.get('tab'))
   const strikeAsked = Number(query.get('strike'))
   const startAt = query.get('strike') && Number.isFinite(strikeAsked) ? strikeAsked : null
+  const sheetFeed = {
+    lines: live.lines,
+    directions: live.directions,
+    feed: live.feed,
+    now,
+    marketOpen: isOpen(listing.exchange),
+  }
+  const strike = sheets.sheet?.sheet === 'strike' ? sheets.sheet.strike : 0
+  const openLeg = (of: number, side: 'ce' | 'pe') => sheets.open({ sheet: 'leg', strike: of, side })
   const loggedOut = access.state === 'upstox-logged-out' || status.state === 'signin'
   const heldAt = model ? clockTime(model.asOf) : null
   return (
@@ -370,6 +388,19 @@ export default function OptionsPage() {
               )}
             </div>
           )}
+          {model && (
+            <LegSheets
+              model={model}
+              expiry={expiry}
+              leg={legOpen}
+              alert={sheets.sheet?.sheet === 'alert' ? sheets.sheet.alert : null}
+              apiKey={access.apiKey}
+              feed={sheetFeed}
+              onClose={sheets.close}
+              onOrder={(order) => sheets.open({ sheet: 'ticket', order })}
+              onAlert={(alert) => sheets.open({ sheet: 'alert', alert })}
+            />
+          )}
           {model && sheets.sheet?.sheet === 'strike' && (
             <StrikeEntry
               listing={listing}
@@ -377,13 +408,9 @@ export default function OptionsPage() {
               model={model}
               asOf={model.asOf}
               strike={sheets.sheet.strike}
-              feed={{
-                lines: live.lines,
-                directions: live.directions,
-                feed: live.feed,
-                now,
-                marketOpen: isOpen(listing.exchange),
-              }}
+              side={sheets.sheet.side}
+              onLeg={(side) => openLeg(strike, side)}
+              feed={sheetFeed}
               onClose={sheets.close}
               onOrder={(order) => sheets.open({ sheet: 'ticket', order })}
               onFollow={setSheetFollows}

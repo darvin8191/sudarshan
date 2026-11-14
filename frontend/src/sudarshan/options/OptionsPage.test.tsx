@@ -369,7 +369,7 @@ describe('the options page', () => {
     expect(within(sheet).getByRole('button', { name: 'Sell PE' })).toBeEnabled()
     expect(within(sheet).queryByRole('link', { name: /option chain/i })).toBeNull()
     for (const name of ['Edit row', 'Remove row'])
-      expect(within(sheet).getByText(name).closest('button')).not.toBeVisible()
+      expect(within(sheet).queryByText(name)).toBeNull()
     expect(feed.live()).toHaveLength(84) // a followed strike's legs are already on the socket
     fireEvent.click(within(sheet).getByRole('button', { name: 'Close' }))
     await settle()
@@ -455,6 +455,51 @@ describe('the options page', () => {
     )
     expect(drawn[0]).toBe(26_000)
     expect(drawn.at(-1)).toBe(27_000)
+  })
+
+  it('leads the strike sheet with the side that was tapped, and draws no watchlist row’s buttons', async () => {
+    await open()
+    fireEvent.click(document.querySelector('[data-strike="25900"] [data-leg="PE"]') as HTMLElement)
+    await settle()
+    const sheet = screen.getByRole('dialog', { name: 'NIFTY 25,900' })
+    expect(
+      [...sheet.querySelectorAll('thead th')].map((th) => th.textContent).filter(Boolean)
+    ).toEqual(['PE', 'CE'])
+    expect(
+      within(sheet)
+        .getAllByRole('button', { name: /^(Buy|Sell) (CE|PE)$/ })
+        .map((button) => button.textContent)
+    ).toEqual(['Buy PE', 'Sell PE', 'Buy CE', 'Sell CE'])
+    expect(within(sheet).queryByText('Edit row')).toBeNull()
+    expect(within(sheet).queryByText('Remove row')).toBeNull()
+    expect(sheet.parentElement?.querySelector('style')).toBeNull() // no rule hides anything any more
+  })
+
+  it('opens a leg’s own sheet from the strike sheet: its chart, an alert, and the ticket', async () => {
+    await open()
+    fireEvent.click(document.querySelector('[data-strike="25900"] [data-leg="CE"]') as HTMLElement)
+    await settle()
+    vi.mocked(Date.now).mockReturnValue(NOW + 3000) // past the 500 ms guard
+    fireEvent.click(
+      within(screen.getByRole('dialog', { name: 'NIFTY 25,900' })).getByRole('button', {
+        name: 'PE: chart, alert, depth',
+      })
+    )
+    await settle()
+    const leg = screen.getByRole('dialog', { name: 'NIFTY 25900 PE' })
+    expect(within(leg).getByRole('link', { name: /Chart/ })).toHaveAttribute(
+      'href',
+      `/chart/NFO/${symbolOf(25_900, 'PE')}`
+    )
+    expect(within(leg).getByRole('button', { name: /Set alert/ })).toBeInTheDocument()
+    expect(leg).toHaveTextContent('Market depth')
+    // The sheet's own Buy and Sell are the watchlist's: they wait for the lot size it reads itself.
+    expect(within(leg).getByRole('button', { name: 'BUY' })).toBeInTheDocument()
+    // The leg is one of the 84 instruments already followed: its sheet adds none.
+    expect(new Set(feed.live().map((each) => each.split(':').slice(0, 2).join(':'))).size).toBe(84)
+    fireEvent.click(within(leg).getByRole('button', { name: 'Close' }))
+    await settle()
+    expect(screen.queryByRole('dialog')).toBeNull()
   })
 
   it('opens the Straddle tab on a tapped strike, inside the 84 instruments already followed', async () => {
