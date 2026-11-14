@@ -168,7 +168,7 @@ export default function Portfolio() {
     // SUDARSHAN P7 F1: a view's own screen takes its stub's place as it lands.
     body =
       money === 'tax' ? (
-        <TaxView members={members} />
+        <TaxView members={members} insights={moneyViews.includes('calendar')} />
       ) : money === 'calendar' ? (
         <CalendarView tabs={tabs} />
       ) : (

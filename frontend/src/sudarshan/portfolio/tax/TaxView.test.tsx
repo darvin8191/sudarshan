@@ -16,10 +16,12 @@ vi.mock('../api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../api')>()),
   portfolioCall: api.call,
   getTaxInputs: (args: object) => api.call('tax_inputs', args),
+  getDividends: (args: object) => api.call('dividends', args),
 }))
 
 import { createQueryClient } from '@/app/providers'
 import { PortfolioError } from '../api'
+import { DIVIDENDS_OFF } from '../dividends/DividendsCard'
 import type { Member, TaxPack } from '../types'
 import { asOf, fyLabel, fyOfDay } from './format'
 import { needsYou, TAX_NOTICE, TAX_OFF, TaxView } from './TaxView'
@@ -119,6 +121,10 @@ describe('the view', () => {
     expect(within(business).getAllByText('Gain').length).toBeGreaterThan(0)
     expect(within(business).getByText(/1 position is still open/)).toBeTruthy()
     expect(screen.queryByRole('region', { name: 'Needs you' })).toBeNull()
+    // Dividends wait for their own switch, and say so in the card's own sentence.
+    expect(
+      within(screen.getByRole('region', { name: 'Dividends' })).getByText(DIVIDENDS_OFF)
+    ).toBeTruthy()
   })
 
   it('keeps the notice, says the age of the figures and never says Real-time', async () => {

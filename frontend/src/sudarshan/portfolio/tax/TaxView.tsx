@@ -5,11 +5,12 @@
 // here says "Real-time". The owner's own page only; a family viewer is never offered this view.
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { Clock, Info, PencilLine, RefreshCw } from 'lucide-react'
-import { useState } from 'react'
+import { type ReactNode, useState } from 'react'
 import { cn } from '@/lib/utils'
 import { useNow } from '@/sudarshan/dashboard/hooks'
 import { PortfolioError, portfolioCall, problemOf } from '../api'
 import { dayOfInstant } from '../days'
+import { DividendsCard } from '../dividends/DividendsCard'
 import { type Member, REPORT_YEARS, type TaxPack } from '../types'
 import { asOf, fyLabel, fyOfDay } from './format'
 import { InputsSheet } from './InputsSheet'
@@ -99,12 +100,15 @@ function Paper({
   sheet,
   onSheet,
   onClose,
+  dividends,
 }: {
   pack: TaxPack
   onRead: () => void
   sheet: TaxSheet | null
   onSheet: (name: TaxSheet) => void
   onClose: () => void
+  /** The Dividends card, in its place among the heads. */
+  dividends: ReactNode
 }) {
   const now = useNow(60_000)
   const meta = asOf(pack, now)
@@ -133,6 +137,7 @@ function Paper({
       <CapitalGainsCard cg={pack.capital_gains} onSchedule={() => onSheet('tax-sales')} />
       <BusinessCard business={pack.business} />
       <LossesCard pack={pack} />
+      {dividends}
       <ChargesCard pack={pack} />
       <LeftOutCard pack={pack} />
       <Downloads pack={pack} />
@@ -146,7 +151,14 @@ function Paper({
   )
 }
 
-export function TaxView({ members }: { members: readonly Member[] }) {
+export function TaxView({
+  members,
+  insights = false,
+}: {
+  members: readonly Member[]
+  /** The insights switch: the Dividends card reads Upstox's corporate actions behind it. */
+  insights?: boolean
+}) {
   const current = fyOfDay(dayOfInstant(Date.now()))
   const [fy, setFy] = useState(current)
   const [member, setMember] = useState<number | undefined>(undefined)
@@ -208,6 +220,7 @@ export function TaxView({ members }: { members: readonly Member[] }) {
           sheet={sheets.sheet}
           onSheet={sheets.open}
           onClose={sheets.close}
+          dividends={<DividendsCard fy={fy} member={member} on={insights} />}
         />
       )}
       <InputsSheet
