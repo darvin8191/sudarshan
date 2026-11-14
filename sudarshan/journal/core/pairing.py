@@ -22,7 +22,8 @@ The journal pairs only the fills it has seen, so two cases are kept out of every
 
 Rules that each pin a defect:
 
-* The order is (``exch_ts_ms``, ``trade_id``), never the order the fills arrived in.
+* The order is (``exch_ts_ms``, ``trade_id``), never the order the fills arrived in; a trade id
+  that is a number is compared as one ("9" before "10", review L8).
 * The key uses the product *class*: MIS and I are intraday; NRML, CNC and D are one carry class.
 * A ``trade_id`` seen twice is one fill (the first seen wins); a fill whose source is
   ``withdrawn`` is left out; live and sandbox fills are never mixed.
@@ -118,6 +119,15 @@ def held_before(opening: Mapping[str, Any] | None, fills: Iterable[Mapping[str, 
         before += int(fill["qty"]) if str(fill["action"]).upper() == "BUY" else -int(fill["qty"])
     start = qty - before
     return max(start, 0) if cash else start
+
+
+def fill_order(fill: Mapping[str, Any]) -> tuple[int, int, int, str]:
+    """A fill's place in time: its exchange time, then its trade id, a number as a number (an
+    id of other letters after the numbers, as text)."""
+    ident = str(fill["trade_id"])
+    if ident.isdigit():
+        return int(fill["exch_ts_ms"]), 0, int(ident), ""
+    return int(fill["exch_ts_ms"]), 1, 0, ident
 
 
 def _clean(fill: Mapping[str, Any]) -> dict[str, Any]:
@@ -300,7 +310,7 @@ def pair_fills(
         groups.setdefault(key, []).append(fill)
     trips: list[dict[str, Any]] = []
     for key, group in groups.items():
-        group.sort(key=lambda f: (f["exch_ts_ms"], f["trade_id"]))
+        group.sort(key=fill_order)
         trips += _pair_key(group, int(known.get(key) or 0), cash_carry(key[1], key[3]))
     trips.sort(
         key=lambda t: (

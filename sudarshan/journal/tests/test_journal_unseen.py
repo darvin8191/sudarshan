@@ -279,12 +279,16 @@ def test_a_read_that_did_not_happen_is_asked_again_at_the_next_replay(rig):
     record(rig, [sale])  # the portfolio has no answer: nothing kept, the sale reads as a short
     assert [t["status"] for t in rig_trips(rig)] == ["open"]
     answer(rig, "positions", [overnight(FUT, 65)])
-    rig.now = ist_ms(DAY, "10:30:00")
     more = trade_row("t2", "o2", key=FUT, product="D", side="BUY", qty=65, price_u=590_000,
                      at=ist_ms(DAY, "10:20:00"))  # fmt: skip
-    record(rig, [sale, more])
+    asked_before = asked(rig, "positions")
+    record(rig, [sale, more])  # within a minute of the read that failed: not asked again yet
+    assert asked(rig, "positions") == asked_before
+    rig.now += 2 * 60_000
+    record(rig, [sale, more, trade_row("t3", "o3", key=FUT, product="D", side="SELL", qty=65,
+                                       price_u=595_000, at=ist_ms(DAY, "10:25:00"))])  # fmt: skip
     assert [(t["status"], t["side"]) for t in rig_trips(rig)] == [
-        ("unmatched", "long"), ("open", "long"),
+        ("unmatched", "long"), ("closed", "long"),
     ]  # fmt: skip
 
 

@@ -4,16 +4,17 @@ Pure: trips, metrics and calendar rows go in as the journal's own dicts (paise, 
 for ``pdf.render_pdf`` and the CSV text come out. A money cell is a ``doc.Money`` (always signed);
 a side or result is a chip with its word. Nothing here reads a clock or a file.
 
-The CSV (cross-design Y32): a text cell that starts with ``=``, ``+`` or ``@``, or with ``-`` not
-followed by a digit, gets a leading apostrophe, because strategy labels arrive from webhooks and
-a spreadsheet would run them as formulas. Numbers are plain (``-1234.56``): they start with a
-minus and a digit, which the rule leaves alone.
+The CSV (cross-design Y32, review L1): a text cell that starts with ``=``, ``@``, a tab or a
+carriage return, or with ``-`` or ``+`` and is not wholly a number, gets a leading apostrophe,
+because strategy labels arrive from webhooks and a spreadsheet would run them as formulas
+(``-1+1`` is one). Numbers are plain (``-1234.56``): a cell that is wholly a number passes.
 """
 
 from __future__ import annotations
 
 import csv
 import io
+import re
 from collections.abc import Iterable, Mapping, Sequence
 from decimal import Decimal
 from typing import Any
@@ -333,10 +334,14 @@ def broker_charges_table(rows: Sequence[Mapping[str, Any]]) -> D.Table:
 
 
 # ---- the CSV -------------------------------------------------------------------------------
+_NUMBER = re.compile(r"[+-]?\d+(?:\.\d+)?")
+
+
 def csv_cell(value: Any) -> str:
-    """A text cell safe to open in a spreadsheet (Y32); numbers pass through as text."""
+    """A text cell safe to open in a spreadsheet (Y32, review L1); a number passes as it is."""
     text = str(value)
-    if text[:1] in ("=", "+", "@") or (text[:1] == "-" and not text[1:2].isdigit()):
+    first = text[:1]
+    if first in ("=", "@", "\t", "\r") or (first in ("-", "+") and not _NUMBER.fullmatch(text)):
         return "'" + text
     return text
 

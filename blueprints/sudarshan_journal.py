@@ -268,7 +268,8 @@ def _answer(status: int, body: dict):
     if code in ERROR_STATUS and code not in _BRIDGE_ONLY:
         return _error(code, message, error.get("field"))
     # a transport refusal ('busy', 'size', 'timeout', 'failed', ...): the service's own words
-    return _error("unavailable", message or WORDS["failed"])
+    # when they are a sentence for the owner, never a transport's ("method not allowed")
+    return _error("unavailable", _sentence(message) or WORDS["failed"])
 
 
 # -- who may call ------------------------------------------------------------------------------
@@ -495,7 +496,8 @@ def _file(data, csv: bool = False):
         raw = b""
     expected = data.get("file_sha256")
     digest = hashlib.sha256(raw).hexdigest()
-    if not raw or (isinstance(expected, str) and digest != expected.strip().lower()):
+    # a file goes only with the record to check it against: none sent is a refusal (review L6)
+    if not raw or not isinstance(expected, str) or digest != expected.strip().lower():
         logger.error("The journal: a report's file did not match its record; it was not sent")
         return _error("unavailable", WORDS["bad_file"])
     response = Response(raw, status=200, content_type=mime)  # exactly the stored type
