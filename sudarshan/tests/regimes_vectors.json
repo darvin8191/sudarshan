@@ -27,5 +27,56 @@
     {"symbol": "NIFTYFPI01DEC2618000CE", "exchange": "NFO", "expiry": "2026-12-01", "index": true, "stop": "15:40"},
     {"symbol": "NIFTYFPI29DEC2618000CE", "exchange": "NFO", "expiry": "2026-12-29", "index": true, "stop": "15:30"},
     {"symbol": "BANKINDIA29DEC26120CE", "exchange": "NFO", "expiry": "2026-12-29", "index": false, "stop": "15:45"}
-  ]
+  ],
+  "day_facts": {
+    "about": "The day's facts the dashboard's status row and hours sheet read (GET /sudarshan/session/today, instrument_session.day_facts), at moments on both sides of 7 Dec 2026, from the calendar and the master below. The calendar is OpenAlgo's as shipped: a weekday trades at each exchange's usual hours (\"fo\": the regime's F&O close, 15:40 and from 7 Dec 15:45), a closed day opens only the exchanges it lists in their own window, a special day opens only those it lists. The master gives each underlying's expiry days per exchange; indices are the index underlyings. Times are IST: an exchange's as HH:MM on the case's day, every other instant as YYYY-MM-DD HH:MM; null is not given. NIFTY expires on Tuesdays and SENSEX on Thursdays, moved to the day before when that is a holiday (24 Nov 2026).",
+    "usual": {"NSE": ["09:15", "15:30"], "BSE": ["09:15", "15:30"], "NFO": ["09:15", "fo"], "BFO": ["09:15", "fo"], "MCX": ["09:00", "23:55"]},
+    "closed": {
+      "2026-11-10": {"occasion": "Diwali Balipratipada", "open": {"MCX": ["17:00", "23:55"]}},
+      "2026-11-24": {"occasion": "Prakash Gurpurb Sri Guru Nanak Dev", "open": {"MCX": ["17:00", "23:55"]}},
+      "2026-12-25": {"occasion": "Christmas", "open": {}}
+    },
+    "special": {
+      "2026-11-08": {"occasion": "Diwali Laxmi Pujan (Muhurat Trading)", "open": {"NSE": ["14:20", "15:30"], "BSE": ["14:20", "15:30"], "NFO": ["14:20", "15:40"], "BFO": ["14:20", "15:40"], "MCX": ["14:20", "15:30"]}}
+    },
+    "indices": ["NIFTY", "BANKNIFTY", "SENSEX"],
+    "master": {
+      "NFO": {"BANKNIFTY": ["2026-11-23", "2026-12-29"], "NIFTY": ["2026-11-17", "2026-11-23", "2026-12-01", "2026-12-08", "2026-12-29"], "RELIANCE": ["2026-11-23", "2026-12-29"], "BANKBARODA": ["2026-11-23", "2026-12-29"]},
+      "BFO": {"SENSEX": ["2026-11-19", "2026-12-03", "2026-12-10"]}
+    },
+    "cases": [
+      {"now": "2026-11-14 10:00", "note": "a Saturday: no hours, the next open is Monday's",
+       "facts": {"day": "2026-11-14", "trading_day": false, "note": "Weekend", "occasion": null, "exchanges": {}, "expiries": [], "stock_expiries": [], "next_open": "2026-11-16 09:15"}},
+      {"now": "2026-11-16 16:00", "note": "an ordinary Monday after the close: Tuesday's NIFTY expiry is listed",
+       "facts": {"day": "2026-11-16", "trading_day": true, "note": null, "occasion": null,
+                 "exchanges": {"NSE": {"pre_open": "09:00", "open": "09:15", "close": "15:30", "auction_until": null}, "BSE": {"pre_open": "09:00", "open": "09:15", "close": "15:30", "auction_until": null}, "NFO": {"pre_open": null, "open": "09:15", "close": "15:40", "auction_until": null}, "BFO": {"pre_open": null, "open": "09:15", "close": "15:40", "auction_until": null}, "MCX": {"pre_open": null, "open": "09:00", "close": "23:55", "auction_until": null}},
+                 "expiries": [{"underlying": "NIFTY", "exchange": "NFO", "day": "2026-11-17", "stops_at": "2026-11-17 15:40"}], "stock_expiries": [], "next_open": "2026-11-17 09:15"}},
+      {"now": "2026-11-17 11:00", "note": "an expiry day before 7 Dec: NIFTY stops with the F&O close",
+       "facts": {"day": "2026-11-17", "trading_day": true, "note": null, "occasion": null,
+                 "exchanges": {"NSE": {"pre_open": "09:00", "open": "09:15", "close": "15:30", "auction_until": null}, "BSE": {"pre_open": "09:00", "open": "09:15", "close": "15:30", "auction_until": null}, "NFO": {"pre_open": null, "open": "09:15", "close": "15:40", "auction_until": null}, "BFO": {"pre_open": null, "open": "09:15", "close": "15:40", "auction_until": null}, "MCX": {"pre_open": null, "open": "09:00", "close": "23:55", "auction_until": null}},
+                 "expiries": [{"underlying": "NIFTY", "exchange": "NFO", "day": "2026-11-17", "stops_at": "2026-11-17 15:40"}], "stock_expiries": [], "next_open": "2026-11-18 09:15"}},
+      {"now": "2026-11-08 12:00", "note": "Sunday 8 Nov 2026, the Muhurat special session, before its window",
+       "facts": {"day": "2026-11-08", "trading_day": true, "note": "Special session", "occasion": "Diwali Laxmi Pujan (Muhurat Trading)",
+                 "exchanges": {"NSE": {"pre_open": "14:05", "open": "14:20", "close": "15:30", "auction_until": null}, "BSE": {"pre_open": "14:05", "open": "14:20", "close": "15:30", "auction_until": null}, "NFO": {"pre_open": null, "open": "14:20", "close": "15:40", "auction_until": null}, "BFO": {"pre_open": null, "open": "14:20", "close": "15:40", "auction_until": null}, "MCX": {"pre_open": null, "open": "14:20", "close": "15:30", "auction_until": null}},
+                 "expiries": [], "stock_expiries": [], "next_open": "2026-11-08 14:20"}},
+      {"now": "2026-11-23 10:00", "note": "two index expiries and the stocks' on a Monday, moved ahead of Tuesday's holiday",
+       "facts": {"day": "2026-11-23", "trading_day": true, "note": null, "occasion": null,
+                 "exchanges": {"NSE": {"pre_open": "09:00", "open": "09:15", "close": "15:30", "auction_until": null}, "BSE": {"pre_open": "09:00", "open": "09:15", "close": "15:30", "auction_until": null}, "NFO": {"pre_open": null, "open": "09:15", "close": "15:40", "auction_until": null}, "BFO": {"pre_open": null, "open": "09:15", "close": "15:40", "auction_until": null}, "MCX": {"pre_open": null, "open": "09:00", "close": "23:55", "auction_until": null}},
+                 "expiries": [{"underlying": "NIFTY", "exchange": "NFO", "day": "2026-11-23", "stops_at": "2026-11-23 15:40"}, {"underlying": "BANKNIFTY", "exchange": "NFO", "day": "2026-11-23", "stops_at": "2026-11-23 15:40"}],
+                 "stock_expiries": [{"exchange": "NFO", "day": "2026-11-23", "count": 2, "stops_at": "2026-11-23 15:40"}], "next_open": "2026-11-25 09:15"}},
+      {"now": "2026-11-24 11:00", "note": "a holiday: only MCX's evening session",
+       "facts": {"day": "2026-11-24", "trading_day": false, "note": "Holiday", "occasion": "Prakash Gurpurb Sri Guru Nanak Dev",
+                 "exchanges": {"MCX": {"pre_open": null, "open": "17:00", "close": "23:55", "auction_until": null}},
+                 "expiries": [], "stock_expiries": [], "next_open": "2026-11-25 09:15"}},
+      {"now": "2026-12-08 11:00", "note": "an expiry day after 7 Dec: NIFTY stops at 15:30, F&O trades to 15:45, the closing auction prices about 15:40",
+       "facts": {"day": "2026-12-08", "trading_day": true, "note": null, "occasion": null,
+                 "exchanges": {"NSE": {"pre_open": "09:00", "open": "09:15", "close": "15:30", "auction_until": "15:40"}, "BSE": {"pre_open": "09:00", "open": "09:15", "close": "15:30", "auction_until": "15:40"}, "NFO": {"pre_open": null, "open": "09:15", "close": "15:45", "auction_until": null}, "BFO": {"pre_open": null, "open": "09:15", "close": "15:45", "auction_until": null}, "MCX": {"pre_open": null, "open": "09:00", "close": "23:55", "auction_until": null}},
+                 "expiries": [{"underlying": "NIFTY", "exchange": "NFO", "day": "2026-12-08", "stops_at": "2026-12-08 15:30"}], "stock_expiries": [], "next_open": "2026-12-09 09:15"}},
+      {"now": "2026-12-29 11:00", "note": "two index expiries and the stocks' after 7 Dec: the index contracts stop at 15:30, the stocks' at 15:45",
+       "facts": {"day": "2026-12-29", "trading_day": true, "note": null, "occasion": null,
+                 "exchanges": {"NSE": {"pre_open": "09:00", "open": "09:15", "close": "15:30", "auction_until": "15:40"}, "BSE": {"pre_open": "09:00", "open": "09:15", "close": "15:30", "auction_until": "15:40"}, "NFO": {"pre_open": null, "open": "09:15", "close": "15:45", "auction_until": null}, "BFO": {"pre_open": null, "open": "09:15", "close": "15:45", "auction_until": null}, "MCX": {"pre_open": null, "open": "09:00", "close": "23:55", "auction_until": null}},
+                 "expiries": [{"underlying": "NIFTY", "exchange": "NFO", "day": "2026-12-29", "stops_at": "2026-12-29 15:30"}, {"underlying": "BANKNIFTY", "exchange": "NFO", "day": "2026-12-29", "stops_at": "2026-12-29 15:30"}],
+                 "stock_expiries": [{"exchange": "NFO", "day": "2026-12-29", "count": 2, "stops_at": "2026-12-29 15:45"}], "next_open": "2026-12-30 09:15"}}
+    ]
+  }
 }

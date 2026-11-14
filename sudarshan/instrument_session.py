@@ -23,8 +23,8 @@ the regime table's; index contracts and stocks with futures are the master's
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-from datetime import date, datetime
+from collections.abc import Callable, Collection, Mapping, Sequence
+from datetime import date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -35,6 +35,17 @@ FO_EXCHANGES = frozenset({"NFO", "BFO"})
 #: The cash market whose day an instrument follows: an index's is its exchange's.
 CASH_DAY = {"NSE": "NSE", "BSE": "BSE", "NSE_INDEX": "NSE", "BSE_INDEX": "BSE"}
 MINUTE_MS = 60_000
+#: The exchanges whose hours the day's facts carry (the dashboard's status row and hours sheet).
+DAY_EXCHANGES = ("NSE", "BSE", "NFO", "BFO", "MCX")
+#: A cash market's pre-open starts this long before its normal market (09:00 for 09:15).
+PRE_OPEN_MIN = 15
+#: The expiring underlyings the dashboard names first, then the rest in alphabetical order.
+PROMINENT = ("NIFTY", "BANKNIFTY", "SENSEX", "FINNIFTY", "MIDCPNIFTY", "NIFTYNXT50", "BANKEX",
+             "SENSEX50")  # fmt: skip
+#: How far ahead the next trading day is looked for.
+LOOK_AHEAD_DAYS = 15
+#: One day's hours: {exchange: (open, close)} in epoch ms, for each exchange that trades that day.
+Hours = Mapping[str, tuple[int, int]]
 
 
 def midnight_ms(day: date) -> int:
@@ -125,3 +136,144 @@ def facts(symbol: str, exchange: str, now_ms: int) -> dict[str, Any]:
         if late is not None:
             found["closing"] = {"from": late[0], "until": late[1]}
     return found
+
+
+def _prominence(underlying: str) -> tuple[int, str]:
+    return (PROMINENT.index(underlying) if underlying in PROMINENT else len(PROMINENT), underlying)
+
+
+def _next_trading_day(day: date, hours_on: Callable[[date], Hours]) -> date | None:
+    """The first day after ``day`` the cash market trades on, within LOOK_AHEAD_DAYS."""
+    for ahead in range(1, LOOK_AHEAD_DAYS + 1):
+        later = day + timedelta(days=ahead)
+        if "NSE" in hours_on(later):
+            return later
+    return None
+
+
+def _exchange_hours(exchange: str, day: date, span: tuple[int, int]) -> dict[str, int | None]:
+    """An exchange's day: a cash market's pre-open, and from 7 Dec 2026 its closing auction's end
+    (the price at about 15:40, ``Regime.close_after_cash`` after its close); None for the rest."""
+    start, end = span
+    cash = exchange in CASH_DAY
+    after = regimes.regime_on(day).close_after_cash
+    return {
+        "pre_open": start - PRE_OPEN_MIN * MINUTE_MS if cash else None,
+        "open": start,
+        "close": end,
+        "auction_until": end + after * MINUTE_MS if cash and after > 0 else None,
+    }
+
+
+def day_facts(
+    now_ms: int,
+    *,
+    hours_on: Callable[[date], Hours],
+    occasion_on: Callable[[date], tuple[str, str] | None],
+    expiries: Mapping[str, Mapping[str, Collection[date]]] | None,
+    indices: Collection[str],
+) -> dict[str, Any]:
+    """The IST day of ``now_ms`` as the dashboard's status row and hours sheet read it (M3.5,
+    M3.6). Pure: the calendar, the master and the clock are arguments.
+
+    ``hours_on(day)`` gives each exchange that trades that day with its window; ``occasion_on(day)``
+    the calendar's ("special" or "holiday", its words) or None; ``expiries`` the master's expiry days
+    per exchange and underlying, None while it is not loaded; ``indices`` the index underlyings.
+
+    The answer: ``trading_day`` (the cash market trades today), ``note`` ("Weekend", "Holiday",
+    "Special session", "Closed" for a weekday the calendar gives neither hours nor a holiday, or
+    None) and ``occasion`` (the calendar's words for a holiday or a special session); each
+    exchange's hours; the index expiries of today and of the next trading day, each
+    with when its contracts stop trading, and how many stock underlyings expire those days
+    (``expiries`` and ``stock_expiries``, None while the master is not loaded); and ``next_open``,
+    the cash market's next open at or after now. Every instant is epoch milliseconds."""
+    day = datetime.fromtimestamp(now_ms / 1000, IST).date()
+    today, occasion = hours_on(day), occasion_on(day)
+    trading = "NSE" in today
+    if trading:
+        note = "Special session" if occasion and occasion[0] == "special" else None
+    elif occasion is not None:
+        note = "Holiday"
+    else:  # a weekday the calendar gives no hours and no holiday for: closed, cause not claimed
+        note = "Weekend" if day.weekday() >= 5 else "Closed"
+    following = _next_trading_day(day, hours_on)
+    nse = today.get("NSE")
+    if nse is not None and now_ms < nse[0]:
+        next_open: int | None = nse[0]
+    else:
+        next_open = hours_on(following)["NSE"][0] if following else None
+
+    listed: list[dict[str, Any]] | None = None if expiries is None else []
+    stocks: list[dict[str, Any]] | None = None if expiries is None else []
+    for when in (day if trading else None, following):
+        if when is None or listed is None or stocks is None:
+            continue
+        spans = hours_on(when)
+        for exchange in ("NFO", "BFO"):
+            end = spans.get(exchange, (None, None))[1]
+            names = [u for u, days in expiries.get(exchange, {}).items() if when in days]
+            named = sorted((u for u in names if u in indices), key=_prominence)
+            for underlying in named:
+                stop = stop_of(exchange, when, when, index=True, session_end_ms=end)
+                listed.append({"underlying": underlying, "exchange": exchange,
+                               "day": when.isoformat(), "stops_at": stop})  # fmt: skip
+            if len(names) > len(named):
+                stop = stop_of(exchange, when, when, index=False, session_end_ms=end)
+                stocks.append({"exchange": exchange, "day": when.isoformat(),
+                               "count": len(names) - len(named), "stops_at": stop})  # fmt: skip
+    return {
+        "day": day.isoformat(),
+        "trading_day": trading,
+        "note": note,
+        "occasion": occasion[1] if occasion and (note is not None) else None,
+        "exchanges": {
+            exchange: _exchange_hours(exchange, day, today[exchange])
+            for exchange in DAY_EXCHANGES
+            if exchange in today
+        },
+        "expiries": listed,
+        "stock_expiries": stocks,
+        "next_open": next_open,
+    }
+
+
+def _master_expiries() -> dict[str, dict[str, frozenset[date]]] | None:
+    """The in-memory master's NFO and BFO expiry days per underlying; None while it is not loaded
+    (before the morning's download, or after the 03:00 session reset)."""
+    from database.token_db_enhanced import get_cache
+
+    snapshot = get_cache().valid_snapshot()
+    if snapshot is None:
+        return None
+    found: dict[str, dict[str, frozenset[date]]] = {exchange: {} for exchange in FO_EXCHANGES}
+    for (exchange, underlying), texts in snapshot.expiries_by_exchange_underlying.items():
+        if exchange in FO_EXCHANGES and underlying:
+            days = frozenset(day for text in texts if (day := parse_expiry(text)) is not None)
+            found[exchange][underlying] = days
+    return found
+
+
+def today(now_ms: int) -> dict[str, Any]:
+    """``day_facts`` for the IST day of ``now_ms``, from OpenAlgo's market calendar (the one the
+    chart's hours and the instrument facts above read, special sessions and holidays included)
+    and its in-memory master. Reads nothing from the broker and changes nothing."""
+    from database.market_calendar_db import get_effective_session_window, get_holidays_by_year
+
+    def hours_on(day: date) -> dict[str, tuple[int, int]]:
+        found = {}
+        for exchange in DAY_EXCHANGES:
+            window = get_effective_session_window(day, exchange)
+            if window:
+                found[exchange] = (int(window["start_ms"]), int(window["end_ms"]))
+        return found
+
+    def occasion_on(day: date) -> tuple[str, str] | None:
+        kinds = {"SPECIAL_SESSION": "special", "TRADING_HOLIDAY": "holiday"}
+        for row in get_holidays_by_year(day.year):
+            if row.get("date") == day.isoformat() and row.get("holiday_type") in kinds:
+                return kinds[row["holiday_type"]], str(row.get("description") or "")
+        return None
+
+    return day_facts(now_ms, hours_on=hours_on, occasion_on=occasion_on,
+                     expiries=_master_expiries(),
+                     indices=index_contracts.underlyings().indices)  # fmt: skip
