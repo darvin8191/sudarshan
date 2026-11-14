@@ -32,7 +32,11 @@ vi.mock('@/api/trading', () => ({
 }))
 vi.mock('@/components/trading/GttTab', async () => {
   const { createElement } = await import('react')
-  return { default: () => createElement('p', null, 'GTT book, as upstream shows it') }
+  return {
+    // B1: on a phone the GTT tab is cards (GttCards.test.tsx has them).
+    default: ({ cards }: { cards?: boolean }) =>
+      createElement('p', null, cards ? 'GTT book as cards' : 'GTT book, as upstream shows it'),
+  }
 })
 const auth = vi.hoisted(() => ({
   facts: {
@@ -526,11 +530,11 @@ describe('Order book on a phone: the cards', () => {
     expect(chip()).toHaveTextContent('TRIGGER PENDING')
   })
 
-  it('keeps the GTT tab as upstream shows it', async () => {
+  it('hands the GTT tab its cards on a phone', async () => {
     const tap = user()
     await renderPhone(WORKING)
     await tap.click(screen.getByRole('tab', { name: 'GTT' }))
-    expect(await screen.findByText('GTT book, as upstream shows it')).toBeInTheDocument()
+    expect(await screen.findByText('GTT book as cards')).toBeInTheDocument()
   })
 })
 

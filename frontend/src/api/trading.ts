@@ -323,7 +323,8 @@ export const tradingApi = {
   cancelGttOrder: async (triggerId: string): Promise<ApiResponse<{ trigger_id: string }>> => {
     const response = await webClient.post<ApiResponse<{ trigger_id: string }>>(
       '/cancel_gtt_order',
-      { trigger_id: triggerId }
+      { trigger_id: triggerId },
+      { timeout: SEND_TIMEOUT_MS } // SUDARSHAN B1: held as the order cancels are (M6.9)
     )
     return response.data
   },
