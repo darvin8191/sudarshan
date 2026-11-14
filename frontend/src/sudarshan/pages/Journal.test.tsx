@@ -10,10 +10,16 @@ vi.mock('@/sudarshan/journal/api', async (original) => ({
 }))
 
 import { JournalError } from '@/sudarshan/journal/api'
+import { PART_FAILED } from '@/sudarshan/journal/PartBoundary'
 
+const boom = vi.hoisted(() => ({ on: false }))
 vi.mock('@/sudarshan/journal/TripsList', () => ({
-  TripsList: ({ mode }: { mode: string }) => <p data-testid="trips-of">{mode}</p>,
+  TripsList: ({ mode }: { mode: string }) => {
+    if (boom.on) throw new Error('Cannot read properties of undefined')
+    return <p data-testid="trips-of">{mode}</p>
+  },
 }))
+vi.mock('@/utils/errorReporter', () => ({ reportClientError: vi.fn() }))
 
 vi.mock('@/sudarshan/journal/TripSheet', () => ({
   TripSheet: ({
@@ -44,7 +50,10 @@ import Journal from './Journal'
 
 const ON = { enabled: true, data: { enabled: true, fills_today: 0, open_trips: 0 } }
 
-beforeEach(() => call.mockReset())
+beforeEach(() => {
+  call.mockReset()
+  boom.on = false
+})
 
 describe('Journal', () => {
   it('says the journal is switched off, in the server’s words', async () => {
@@ -135,6 +144,25 @@ describe('Journal', () => {
     await user.click(screen.getByRole('button', { name: 'Sheet of trade 5' }))
     await waitFor(() => expect(where()).toBe('/journal'))
     expect(screen.queryByRole('button', { name: /Sheet of trade/ })).toBeNull()
+  })
+
+  it('says a part that cannot be drawn in words, keeps the page, and tries again (review M6)', async () => {
+    const user = userEvent.setup()
+    const quiet = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      boom.on = true
+      call.mockResolvedValue(ON)
+      renderBook('/journal', <Journal />)
+      expect(await screen.findByText(PART_FAILED)).toBeTruthy()
+      expect(screen.getByRole('heading', { name: 'Journal' })).toBeTruthy()
+      expect(screen.getByRole('tablist', { name: 'Journal parts' })).toBeTruthy()
+      expect(screen.queryByText(/Cannot read properties/)).toBeNull()
+      boom.on = false
+      await user.click(screen.getByRole('button', { name: 'Try again' }))
+      expect(await screen.findByTestId('trips-of')).toBeTruthy()
+    } finally {
+      quiet.mockRestore()
+    }
   })
 
   it('opens a trade’s sheet from the address, and closing it leaves the page where it was', async () => {

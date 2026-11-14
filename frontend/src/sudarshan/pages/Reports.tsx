@@ -1,12 +1,14 @@
 // SUDARSHAN M15.10, JD6: the Reports page, phone first. What the platform wrote for the owner and
 // whether it reached Telegram (the Archive), and which reports are made (the Settings). The
 // part shown and the report open are in the address, so Back closes the report first.
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { LoaderCircle, Power, RefreshCw, TriangleAlert } from 'lucide-react'
 import { journalCall, problemOf } from '@/sudarshan/journal/api'
 import { JOURNAL_STATE_KEY } from '@/sudarshan/journal/keys'
+import { PartBoundary } from '@/sudarshan/journal/PartBoundary'
 import { Segmented } from '@/sudarshan/journal/Segmented'
 import { Archive } from '@/sudarshan/reports/Archive'
+import { REPORTS_KEY } from '@/sudarshan/reports/queries'
 import { ReportSheet } from '@/sudarshan/reports/ReportSheet'
 import { Settings } from '@/sudarshan/reports/Settings'
 import { type ReportsView, useReportsOverlay } from '@/sudarshan/reports/useReportsOverlay'
@@ -19,6 +21,7 @@ const PARTS: ReadonlyArray<{ id: ReportsView; label: string }> = [
 const CARD = 'rounded-[1.125rem] border bg-card px-4 py-6 text-center shadow-[var(--shadow-card)]'
 
 export default function Reports() {
+  const queryClient = useQueryClient()
   const { view, reportId, setView, open, close } = useReportsOverlay()
   const state = useQuery({
     queryKey: JOURNAL_STATE_KEY,
@@ -74,8 +77,16 @@ export default function Reports() {
       {usable && (
         <Segmented label="Reports parts" value={view} options={PARTS} onChange={setView} />
       )}
-      {body}
-      {usable && reportId !== null && <ReportSheet key={reportId} id={reportId} onClose={close} />}
+      {/* Review M6: a part that fails to draw says so in its place; the app stays. */}
+      <PartBoundary
+        key={view}
+        onRetry={() => void queryClient.invalidateQueries({ queryKey: REPORTS_KEY })}
+      >
+        {body}
+        {usable && reportId !== null && (
+          <ReportSheet key={reportId} id={reportId} onClose={close} />
+        )}
+      </PartBoundary>
     </div>
   )
 }

@@ -2,13 +2,14 @@
 // round trips by the journal service (blueprints/sudarshan_journal.py is its bridge). This is the
 // shell: the title, the parts, the Sandbox switch, what is open kept in the address and the
 // states in words. Each part arrives as its own change and replaces its stub.
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { LoaderCircle, Power, RefreshCw, TriangleAlert } from 'lucide-react'
 import { type ReactNode, useCallback, useEffect, useState } from 'react'
 import { Analytics } from '@/sudarshan/journal/Analytics'
 import { journalCall, problemOf } from '@/sudarshan/journal/api'
-import { JOURNAL_STATE_KEY } from '@/sudarshan/journal/keys'
+import { JOURNAL_KEY, JOURNAL_STATE_KEY } from '@/sudarshan/journal/keys'
 import { ModeChip } from '@/sudarshan/journal/ModeChip'
+import { PartBoundary } from '@/sudarshan/journal/PartBoundary'
 import { PlaybookSheetHost } from '@/sudarshan/journal/PlaybookSheet'
 import { Playbooks } from '@/sudarshan/journal/Playbooks'
 import { Segmented } from '@/sudarshan/journal/Segmented'
@@ -51,6 +52,7 @@ function Notice({
 }
 
 export default function Journal() {
+  const queryClient = useQueryClient()
   const { view, mode, overlay, setView, setMode, open, close } = useJournalOverlay()
   const state = useQuery({
     queryKey: JOURNAL_STATE_KEY,
@@ -140,26 +142,32 @@ export default function Journal() {
       {usable && (
         <Segmented label="Journal parts" value={view} options={PARTS} onChange={setView} />
       )}
-      {body}
-      {sheet?.kind === 'playbook' && (
-        <PlaybookSheetHost
-          key={sheet.playbookId ?? 'new'}
-          playbookId={sheet.playbookId}
-          onClose={closeSheet}
-          onDirty={holding(sheet)}
-          asked={asked}
-        />
-      )}
-      {sheet?.kind === 'trade' && (
-        <TripSheet
-          key={sheet.tradeId}
-          tradeId={sheet.tradeId}
-          open
-          onClose={closeSheet}
-          onDirty={holding(sheet)}
-          asked={asked}
-        />
-      )}
+      {/* Review M6: a part that fails to draw says so in its place; the app stays. */}
+      <PartBoundary
+        key={`${view}:${mode}`}
+        onRetry={() => void queryClient.invalidateQueries({ queryKey: JOURNAL_KEY })}
+      >
+        {body}
+        {sheet?.kind === 'playbook' && (
+          <PlaybookSheetHost
+            key={sheet.playbookId ?? 'new'}
+            playbookId={sheet.playbookId}
+            onClose={closeSheet}
+            onDirty={holding(sheet)}
+            asked={asked}
+          />
+        )}
+        {sheet?.kind === 'trade' && (
+          <TripSheet
+            key={sheet.tradeId}
+            tradeId={sheet.tradeId}
+            open
+            onClose={closeSheet}
+            onDirty={holding(sheet)}
+            asked={asked}
+          />
+        )}
+      </PartBoundary>
     </div>
   )
 }

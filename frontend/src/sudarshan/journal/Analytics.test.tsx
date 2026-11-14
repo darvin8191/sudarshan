@@ -204,6 +204,32 @@ describe('Analytics', () => {
     expect(within(expiry).getAllByTestId('net').length).toBe(4)
   })
 
+  it('leaves out a part missing from the answer, never the whole page (review M6)', async () => {
+    serve({
+      ...analytics(),
+      equity: undefined,
+      expiry: undefined,
+      calendar: undefined,
+    } as unknown as Answer)
+    show()
+    await screen.findAllByTestId('tile')
+    expect(screen.getByRole('region', { name: 'Filters' })).toBeTruthy()
+    expect(tile('Max drawdown').textContent).toContain('-')
+    expect(screen.queryByTestId('equity')).toBeNull()
+    expect(screen.queryByRole('region', { name: 'Expiry days' })).toBeNull()
+    expect(screen.getByRole('region', { name: 'Heat map' })).toBeTruthy()
+    expect(screen.getByRole('region', { name: 'By strategy' })).toBeTruthy()
+  })
+
+  it('says an answer without its figures cannot be read, in words', async () => {
+    serve({ ...analytics(), metrics: undefined } as unknown as Answer)
+    show()
+    expect(
+      await screen.findByText('OpenAlgo’s answer could not be read. Try again in a minute.')
+    ).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Try again/ })).toBeTruthy()
+  })
+
   it('says there is no charges figure without a winning trade', async () => {
     serve(analytics({ metrics: metrics({ charges_impact_pct: null }) }))
     show()

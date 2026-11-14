@@ -18,7 +18,7 @@ import {
 import { TREND_TEXT, TrendArrow } from '@/sudarshan/dashboard/Trend'
 import { Signed } from '@/sudarshan/portfolio/Signed'
 import { ratioWords, rWords, tileRupees } from './analyticsWords'
-import { journalData, problemOf } from './api'
+import { journalData, problemOf, WORDS } from './api'
 import { CalendarGrid } from './CalendarGrid'
 import { EquityChart } from './EquityChart'
 import {
@@ -283,7 +283,8 @@ function SignedFigure({ paise, word }: { paise: number; word?: boolean }) {
 
 function Tiles({ answer }: { answer: AnalyticsAnswer }) {
   const m = answer.metrics
-  const dd = answer.equity.drawdown
+  // Review M6: a part missing from the answer leaves its own figure out, not the page.
+  const dd = answer.equity?.drawdown ?? null
   const r = rWords(m)
   return (
     <section aria-label="Results" className="flex flex-col gap-2">
@@ -318,13 +319,19 @@ function Tiles({ answer }: { answer: AnalyticsAnswer }) {
         <Tile
           label="Max drawdown"
           note={
-            dd.max_drawdown_pct !== null && dd.max_drawdown_paise !== 0
+            dd && dd.max_drawdown_pct !== null && dd.max_drawdown_paise !== 0
               ? `${dd.max_drawdown_pct.replace('-', '−')}% of capital`
               : undefined
           }
-          size={figureSize(tileRupees(dd.max_drawdown_paise))}
+          size={figureSize(dd ? tileRupees(dd.max_drawdown_paise) : '-')}
         >
-          {dd.max_drawdown_paise === 0 ? 'None' : <SignedFigure paise={dd.max_drawdown_paise} />}
+          {!dd ? (
+            '-'
+          ) : dd.max_drawdown_paise === 0 ? (
+            'None'
+          ) : (
+            <SignedFigure paise={dd.max_drawdown_paise} />
+          )}
         </Tile>
       </div>
       {/* Review M4: one column on a phone, so a figure never runs under the next label. */}
@@ -460,15 +467,19 @@ function BlockTable({
   )
 }
 
+/** Rows whose figures came with the answer. */
+const present = (rows: Array<{ name: string; metrics: Metrics | undefined }>) =>
+  rows.filter((row): row is { name: string; metrics: Metrics } => row.metrics !== undefined)
+
 function ExpirySplit({ split }: { split: AnalyticsAnswer['expiry'] }) {
-  const rows = [
+  const rows = present([
     { name: 'Index expiry day', metrics: split.index_expiry },
     { name: 'Other days', metrics: split.not_index_expiry },
-  ]
-  const own = [
+  ])
+  const own = present([
     { name: 'Own expiry day', metrics: split.own_expiry },
     { name: 'Not its expiry', metrics: split.not_own_expiry },
-  ]
+  ])
   return (
     <section aria-label="Expiry days" className={`${SECTION} flex flex-col gap-3`}>
       <h2 className="text-base font-bold">Expiry days</h2>
@@ -542,7 +553,7 @@ export function Analytics({ mode }: { mode: Mode }) {
   // The strategies seen in any answer of this mode: a filter on one still lists the others.
   const seen = useRef({ mode, names: new Set<string>() })
   if (seen.current.mode !== mode) seen.current = { mode, names: new Set() }
-  for (const row of query.data?.by_strategy ?? []) if (row.name) seen.current.names.add(row.name)
+  for (const row of query.data?.by_strategy ?? []) if (row?.name) seen.current.names.add(row.name)
   if (filter.strategy) seen.current.names.add(filter.strategy)
   const strategies = [...seen.current.names].sort((a, b) => a.localeCompare(b))
 
@@ -578,6 +589,22 @@ export function Analytics({ mode }: { mode: Mode }) {
         </button>
       </div>
     )
+  } else if (answer && !answer.metrics) {
+    // Without its figures the answer cannot be read at all.
+    body = (
+      <div className={`${SECTION} text-center`} aria-live="polite">
+        <TriangleAlert aria-hidden="true" className="mx-auto mb-2 size-6" />
+        <p className="text-base font-bold">{WORDS.unreadable}</p>
+        <button
+          type="button"
+          onClick={() => query.refetch()}
+          className="mt-3 inline-flex min-h-12 items-center justify-center gap-2 rounded-[0.875rem] border border-input bg-card px-4 text-[0.9375rem] font-semibold hover:bg-accent"
+        >
+          <RefreshCw aria-hidden="true" className="size-4" />
+          Try again
+        </button>
+      </div>
+    )
   } else if (answer && answer.metrics.trips === 0) {
     body = (
       <p
@@ -597,18 +624,18 @@ export function Analytics({ mode }: { mode: Mode }) {
           </Problem>
         )}
         <Tiles answer={answer} />
-        <EquityChart equity={answer.equity} />
-        <CalendarGrid calendar={answer.calendar} />
-        <HeatMap cells={answer.heat} />
-        <HoldBars rows={answer.hold} />
+        {answer.equity && <EquityChart equity={answer.equity} />}
+        {answer.calendar && <CalendarGrid calendar={answer.calendar} />}
+        {answer.heat && <HeatMap cells={answer.heat} />}
+        {answer.hold && <HoldBars rows={answer.hold} />}
         <BlockTable
           title="By strategy"
-          rows={answer.by_strategy}
+          rows={answer.by_strategy ?? []}
           first="Strategy"
           unnamed="No strategy"
         />
-        <BlockTable title="By tag" rows={answer.by_tag} first="Tag" unnamed="No tag" />
-        <ExpirySplit split={answer.expiry} />
+        <BlockTable title="By tag" rows={answer.by_tag ?? []} first="Tag" unnamed="No tag" />
+        {answer.expiry && <ExpirySplit split={answer.expiry} />}
         <ChargesLine metrics={answer.metrics} />
         {answer.beta && <BetaLine beta={answer.beta} />}
       </>
