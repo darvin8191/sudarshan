@@ -180,17 +180,25 @@ export function FamilyLayout() {
           <header className="sticky top-0 z-40 border-b bg-card">
             <div
               data-testid="family-bar"
-              className="mx-auto flex h-[3.25rem] max-w-3xl items-center gap-2 px-3 pt-1"
+              // Verification N9: the row wraps. With large text on a small phone the badge does
+              // not fit beside the lockup, and it was cut to an ellipsis that hid "VIEW ONLY".
+              // The badge and the initial now move under the lockup together, and where even a
+              // whole row is too short the badge's words wrap inside it. Nothing is cut.
+              className="mx-auto flex min-h-[3.25rem] max-w-3xl flex-wrap items-center gap-x-2 gap-y-1 px-3 pt-1"
             >
               <BrandLockup className="shrink-0" />
-              <span aria-hidden="true" className="min-w-0 flex-1" />
-              <FamilyBadge limited={me.limited} className="min-w-0 shrink" />
               <span
-                role="img"
-                aria-label={`Signed in as ${me.member.handle}`}
-                className="flex size-8 shrink-0 items-center justify-center rounded-full bg-[color:var(--primary-tint)] text-sm font-bold text-primary"
+                data-testid="family-who"
+                className="ml-auto flex min-w-0 items-center justify-end gap-2"
               >
-                <span aria-hidden="true">{initial}</span>
+                <FamilyBadge limited={me.limited} className="min-w-0 shrink" />
+                <span
+                  role="img"
+                  aria-label={`Signed in as ${me.member.handle}`}
+                  className="flex size-8 shrink-0 items-center justify-center rounded-full bg-[color:var(--primary-tint)] text-sm font-bold text-primary"
+                >
+                  <span aria-hidden="true">{initial}</span>
+                </span>
               </span>
             </div>
             <div className="mx-auto max-w-3xl px-4 pb-2">

@@ -43,6 +43,8 @@ import {
   type ReadOnlyBookProps,
   ReadStamp,
   ServiceWords,
+  UnreadCard,
+  unreadWords,
   ViewerNote,
 } from './readOnlyParts'
 import { useBookOverlay } from './useBookOverlay'
@@ -197,6 +199,7 @@ export function ReadOnlyOrders({
   }, [orphan, close])
 
   const notShared = readState === 'not_shared' || hidden.includes('orders')
+  const unread = unreadWords(readState, words, rows.length, readAt)
 
   let content: ReactNode
   if (notShared) {
@@ -205,6 +208,11 @@ export function ReadOnlyOrders({
     content = <LoadingCards />
   } else if (rows.length === 0 && error) {
     content = <ProblemCard message={error} onRetry={onRetry} />
+  } else if (unread !== null) {
+    // Verification N10 (v0.12.0): not a day without orders: the order book was not read (the
+    // portfolio switched off, or the account out of reach). The service's sentence is the card,
+    // with no filter and no count, as on Positions and Holdings (review M4).
+    content = <UnreadCard text={unread} />
   } else {
     content = (
       <>

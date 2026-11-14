@@ -72,6 +72,43 @@ def json_never_hidden(path: Path = FIELDS_FILE) -> tuple[str, ...]:
     return tuple(json.loads(path.read_text(encoding="utf-8")).get("never_hidden", ()))
 
 
+def _is_freshness(value: object) -> bool:
+    """``core.freshness.Freshness.as_dict()``: a state and a sentence, and nothing else."""
+    return (
+        isinstance(value, Mapping)
+        and set(value) <= {"state", "words"}
+        and isinstance(value.get("state"), str)
+        and (value.get("words") is None or isinstance(value.get("words"), str))
+    )
+
+
+#: The shape a kept-whole field must have to be passed on whole; any other shape is looked inside
+#: like every other field, so a figure put there by mistake is still removed.
+WHOLE_SHAPES = {"fresh": _is_freshness}
+
+
+def load_whole(path: Path = FIELDS_FILE) -> frozenset[str]:
+    """The table's ``kept_whole`` list: never-hidden fields passed on with what is inside them
+    (``fresh``: how old a holding's price is, which a member not shown quantities still needs,
+    because an old number is never shown as current). ValueError when one is not also never
+    hidden, or is one this module does not know the shape of."""
+    table = json.loads(path.read_text(encoding="utf-8"))
+    found = table.get("kept_whole", [])
+    if not isinstance(found, list) or not all(isinstance(e, str) and e for e in found):
+        raise ValueError(f"{path.name}: kept_whole must be a list of field names")
+    if not set(found) <= set(table.get("never_hidden", [])) or not set(found) <= set(WHOLE_SHAPES):
+        raise ValueError(f"{path.name}: kept_whole names a field that is not never hidden")
+    return frozenset(found)
+
+
+KEPT_WHOLE: frozenset[str] = load_whole()
+
+
+def kept_whole(key: object, value: object) -> bool:
+    """Whether the field ``key`` is passed on with everything inside it (the age of a price)."""
+    return key in KEPT_WHOLE and WHOLE_SHAPES[key](value)
+
+
 def hidden_categories(shown: Mapping[str, bool] | None) -> frozenset[str]:
     """The categories a member does not see. ``shown`` maps each category to whether it is shown;
     None (no row) or a category left out is hidden. ``qty`` hidden hides ``pnl`` (Y24)."""
@@ -107,5 +144,7 @@ def viewer_mask() -> frozenset[str]:
 def valid_shown(shown: Mapping[str, bool]) -> str | None:
     """The owner's sentence when a choice cannot be kept, else None (Y24)."""
     if shown.get("pnl") is True and shown.get("qty") is not True:
-        return "Live P&L is worked out from quantities. Show quantities to show P&L."
+        return (
+            "P&L that moves with prices is worked out from quantities. Show quantities to show P&L."
+        )
     return None

@@ -62,6 +62,14 @@ WORDS = {
     "not_shared": NOT_SHARED,
     "portfolio_off": "The portfolio service is switched off on the server.",
     "unreachable": "The account cannot be read right now; prices still move.",
+    # Verification N6 and N7 of v0.12.0 (never a ``Refusal``: the books say them, as the read
+    # state ``unreachable``). The first stands over figures kept from an earlier read; the second
+    # where they were put away after ten minutes without an answer.
+    "unchecked": "What is shared with you could not be checked just now.",
+    "unchecked_long": (
+        "What is shared with you could not be checked for ten minutes, so the figures were put "
+        "away. They come back when the server answers."
+    ),
 }
 
 

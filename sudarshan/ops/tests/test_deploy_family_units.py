@@ -454,3 +454,120 @@ def test_the_family_settings_file_lives_in_its_own_folder(tmp_path):
     done = box.run()
     assert (fam_dir(box) / "family.env").read_text() == "SUDARSHAN_FAMILY='off'\n"
     assert not (box.etc / "family.env").exists()
+
+
+# ---- review N1: the set-up after the install ----------------------------------------------------
+
+
+def fetched(box: Box, url: str) -> int:
+    """How many times the tool asked for ``url`` (the fake curl notes every URL)."""
+    return lines(box, "requests").count(url)
+
+
+@whole_tool
+def test_n1_the_set_up_after_the_install_still_gets_family_env(tmp_path):
+    """v0.12.0 verification N1: family.env was made only while a release was being installed, so
+    an owner who installed first and ran the family set-up afterwards (the order the README gives)
+    never got the file, and the switch line answered "wait ten minutes" for ever. Every run now
+    makes it. Fails on the old tool: no file after the second run."""
+    box = install_box(tmp_path)
+    conf = f"https://raw.githubusercontent.com/{box.OWNER_REPO}/v1.0.1/sudarshan/ops/deploy/family-env.conf"
+    serve_units(box, "v1.0.1", {FAMILY_UNIT: family_unit(box)})
+    box.serve(conf, FAMILY_ENV_LIST.read_bytes())
+    condition_skips(box)
+    done = box.run()  # the install, before any family set-up: nothing of the family is made
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert box.deployed() == "v1.0.1" and not fam_dir(box).exists()
+    assert not (box.state / "family_env_tag").exists()
+    fam_dir(box).mkdir(mode=0o750)  # the owner's set-up, after the install
+    done = box.run()  # the next ten-minute run: the same release, nothing to install
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert "No such file" not in done.stdout + done.stderr  # the first look for its note is quiet
+    env = fam_dir(box) / "family.env"
+    assert env.read_text() == "SUDARSHAN_FAMILY='off'\n"
+    assert (env.stat().st_mode & 0o777) == 0o640
+    assert (box.state / "family_env_tag").read_text() == "v1.0.1\n"
+    asked = fetched(box, conf)
+    systemctl = lines(box, "systemctl")
+    again = (
+        box.run()
+    )  # and after that a run does nothing to the file: no fetch, no word, no restart
+    assert again.returncode == 0, again.stdout + again.stderr
+    assert "ring:" not in again.stdout and "settings:" not in again.stdout
+    assert fetched(box, conf) == asked
+    assert not [line for line in lines(box, "systemctl")[len(systemctl) :] if "restart" in line]
+
+
+@whole_tool
+def test_n1_a_run_never_overwrites_the_owners_switch(tmp_path):
+    box = install_box(tmp_path)
+    conf = f"https://raw.githubusercontent.com/{box.OWNER_REPO}/v1.0.1/sudarshan/ops/deploy/family-env.conf"
+    serve_units(box, "v1.0.1", {FAMILY_UNIT: family_unit(box)})
+    box.serve(conf, FAMILY_ENV_LIST.read_bytes())
+    condition_skips(box)
+    assert box.run().returncode == 0
+    fam_dir(box).mkdir(mode=0o750)
+    env = fam_dir(box) / "family.env"
+    env.write_text("# mine\nSUDARSHAN_FAMILY=on")  # the owner's own, with no final newline
+    for _ in range(2):
+        done = box.run()
+        assert done.returncode == 0, done.stdout + done.stderr
+        assert "No such file" not in done.stderr  # a file with no note yet is looked at quietly
+        assert env.read_text() == "# mine\nSUDARSHAN_FAMILY=on"
+    (box.state / "family_env_tag").unlink()  # as a server that has never run this tool's step
+    env.write_text(
+        "OTHER=1"
+    )  # a file of the owner's without the switch: the key is added, on a line of its own
+    assert box.run().returncode == 0
+    assert env.read_text() == "OTHER=1\nSUDARSHAN_FAMILY='off'\n"
+
+
+@whole_tool
+def test_n1_nothing_before_the_set_up_and_nothing_for_a_release_without_the_family(tmp_path):
+    box = install_box(tmp_path)
+    conf = f"https://raw.githubusercontent.com/{box.OWNER_REPO}/v1.0.1/sudarshan/ops/deploy/family-env.conf"
+    serve_units(box, "v1.0.1", {"sudarshan-alerts.service": UNIT.format(user="sudarshan")})
+    box.serve(conf, FAMILY_ENV_LIST.read_bytes())
+    assert box.run().returncode == 0
+    asked = fetched(box, conf)
+    fam_dir(box).mkdir(mode=0o750)  # set up, but the installed release ships no family unit
+    assert box.run().returncode == 0
+    assert not (fam_dir(box) / "family.env").exists() and fetched(box, conf) == asked
+
+
+@whole_tool
+def test_n1_a_list_that_did_not_arrive_is_asked_for_again_and_a_release_without_one_once(tmp_path):
+    box = install_box(tmp_path)
+    conf = f"https://raw.githubusercontent.com/{box.OWNER_REPO}/v1.0.1/sudarshan/ops/deploy/family-env.conf"
+    serve_units(box, "v1.0.1", {FAMILY_UNIT: family_unit(box)})
+    condition_skips(box)
+    assert box.run().returncode == 0
+    fam_dir(box).mkdir(mode=0o750)
+    box.serve(conf, FAMILY_ENV_LIST.read_bytes(), cut=True)  # cut off in transit
+    assert box.run().returncode == 0
+    assert not (fam_dir(box) / "family.env").exists()
+    assert not (box.state / "family_env_tag").exists()
+    box.serve(conf, FAMILY_ENV_LIST.read_bytes())
+    assert box.run().returncode == 0
+    assert (fam_dir(box) / "family.env").read_text() == "SUDARSHAN_FAMILY='off'\n"
+
+
+@whole_tool
+def test_n1_the_set_up_itself_makes_family_env_once_the_release_is_installed(tmp_path):
+    """The owner is at the set-up, with the release installed: the file the switch line needs is
+    there when the set-up ends, and the set-up says so once. Fails on the old tool: no file."""
+    box = install_box(tmp_path)
+    conf = f"https://raw.githubusercontent.com/{box.OWNER_REPO}/v1.0.1/sudarshan/ops/deploy/family-env.conf"
+    serve_units(box, "v1.0.1", {FAMILY_UNIT: family_unit(box)})
+    box.serve(conf, FAMILY_ENV_LIST.read_bytes())
+    condition_skips(box)
+    assert box.run().returncode == 0
+    fam_dir(box).mkdir(mode=0o750)
+    made = f"family: written in {fam_dir(box)}: family.env, with the family view switched off"
+    done = box.run("--family-provision")
+    assert made in done.stdout.splitlines(), done.stdout + done.stderr
+    assert (fam_dir(box) / "family.env").read_text() == "SUDARSHAN_FAMILY='off'\n"
+    (fam_dir(box) / "family.env").write_text("SUDARSHAN_FAMILY=on\n")  # the owner's switch
+    done = box.run("--family-provision")  # the set-up again: nothing said, nothing changed
+    assert made not in done.stdout
+    assert (fam_dir(box) / "family.env").read_text() == "SUDARSHAN_FAMILY=on\n"

@@ -125,11 +125,19 @@ async function post(sub: PushSubscription, replaces: string | null): Promise<voi
   write(LAST, json.endpoint)
 }
 
-/** Whether this phone is receiving notifications now: permission, and a subscription held. */
-export async function pushStatus(): Promise<PushStatus> {
+/**
+ * Whether the signed-in member is receiving notifications on this phone now: permission, a
+ * subscription held, and that subscription theirs. The service keeps a phone's subscription for
+ * one member only (the one who turned notifications on last), and the flag names that member.
+ * Verification N5 (v0.12.0): this read only the browser, so on a shared phone the second member's
+ * switch said On while nothing was sent to them. For them it is Off, and turning it on
+ * subscribes them.
+ */
+export async function pushStatus(memberId?: number | null): Promise<PushStatus> {
   if (!pushSupported()) return 'unsupported'
   if (Notification.permission === 'denied') return 'blocked'
   if (Notification.permission !== 'granted') return 'off'
+  if (anothers(memberId)) return 'off'
   const reg = await registration()
   const sub = await reg?.pushManager.getSubscription()
   return sub ? 'on' : 'off'

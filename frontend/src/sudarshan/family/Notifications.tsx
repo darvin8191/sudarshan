@@ -77,6 +77,7 @@ function Switch({
 
 export function Notifications() {
   const me = useFamilyMeOptional()
+  const memberId = me?.member.id ?? null
   const client = useQueryClient()
   const settings = useQuery({
     queryKey: SETTINGS_KEY,
@@ -100,11 +101,11 @@ export function Notifications() {
 
   useEffect(() => {
     let live = true
-    void pushStatus().then((now) => live && setStatus(now))
+    void pushStatus(memberId).then((now) => live && setStatus(now))
     return () => {
       live = false
     }
-  }, [])
+  }, [memberId])
 
   const data = settings.data
   const failing = devices.data?.find((device) => device.current)?.notifications != null
@@ -116,15 +117,15 @@ export function Notifications() {
     setProblem(null)
     setSaved(null)
     try {
-      if (on) setStatus(await enablePush(me?.member.id))
+      if (on) setStatus(await enablePush(memberId))
       else {
         await disablePush()
-        setStatus(await pushStatus())
+        setStatus(await pushStatus(memberId))
       }
       refreshDevices()
     } catch (error) {
       setProblem(wordsOf(error))
-      setStatus(await pushStatus())
+      setStatus(await pushStatus(memberId))
     } finally {
       setBusy(false)
     }

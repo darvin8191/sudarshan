@@ -63,10 +63,13 @@ see; stop at the first one that does not.
 1. **The release is installed.** The Family page in your own menu opens and says the family view
    is not set up (or is switched off). Nothing else is needed for the install itself.
 2. **The one-time family set-up**, if this server has not had it: "Running the set-up" in
-   `sudarshan/README.md` (one pasted line, as root). You should see `PASS.` at the end. Within ten
-   minutes the deploy tool's next run makes `/etc/sudarshan-family/family.env` (root:
-   sudarshan-family, mode 640) holding `SUDARSHAN_FAMILY='off'`, from the list this release ships
-   (`sudarshan/ops/deploy/family-env.conf`), and starts the service, which answers "switched off".
+   `sudarshan/README.md` (one pasted line, as root). You should see `PASS.` at the end. The set-up
+   makes `/etc/sudarshan-family/family.env` (root: sudarshan-family, mode 640) holding
+   `SUDARSHAN_FAMILY='off'`, from the list this release ships
+   (`sudarshan/ops/deploy/family-env.conf`), and says `family: written in /etc/sudarshan-family: family.env` when it did.
+   If it could not (GitHub not answering), the deploy tool makes the file at its next run: that
+   step runs on every run, every ten minutes, also when there is nothing to install, and never
+   changes a value you chose. The service then starts and answers "switched off".
 3. **The nginx lines**: "Installing the nginx lines" below, steps 1 to 7. You should see
    `nginx: PASS. The family view's nginx lines are installed, loaded and this release's.`
 4. **The family bot's token** (optional; the view works without it): "The family bot" below,
@@ -77,40 +80,53 @@ see; stop at the first one that does not.
    two services and nothing else:
 
    ```sh
-   sudo bash -c 'set -e; f=/etc/sudarshan-family/family.env; a=/etc/sudarshan/alerts.env; test -f "$f" || { echo "There is no $f yet: do step 2, wait ten minutes for the next deploy run, then run this again. Nothing was changed."; exit 1; }; test -e "$a" || install -m 640 -o root -g sudarshan /dev/null "$a"; for x in "$f" "$a"; do sed -i "/^[[:space:]]*SUDARSHAN_FAMILY[[:space:]]*=/d" "$x"; echo "SUDARSHAN_FAMILY=on" >> "$x"; done; chown root:sudarshan-family "$f"; chmod 640 "$f"; systemctl restart sudarshan-family sudarshan-alerts; echo "The family view is switched on."'
+   sudo bash -c 'set -e; v=on; f=/etc/sudarshan-family/family.env; a=/etc/sudarshan/alerts.env; case "$v" in on|off) ;; *) echo "v must be on or off. Nothing was changed."; exit 1 ;; esac; test -f "$f" || { echo "There is no $f yet: run sudo sudarshan-deploy once (it makes the file after the set-up of step 2), then run this again. Nothing was changed."; exit 1; }; test -e "$a" || install -m 640 -o root -g sudarshan /dev/null "$a"; for x in "$f" "$a"; do sed -i "/^[[:space:]]*SUDARSHAN_FAMILY[[:space:]]*=/d" "$x"; test -z "$(tail -c 1 "$x")" || echo >> "$x"; echo "SUDARSHAN_FAMILY=$v" >> "$x"; grep -qx "SUDARSHAN_FAMILY=$v" "$x" || { echo "The switch could not be written in $x. Nothing was restarted."; exit 1; }; done; chown root:sudarshan-family "$f"; chmod 640 "$f"; systemctl restart sudarshan-family sudarshan-alerts; echo "The family view is switched $(sed -n "s/^SUDARSHAN_FAMILY=//p" "$f")."'
    ```
 
-   You should see `The family view is switched on.` A later release never moves the switch back:
-   a value you chose in either file stays.
-6. **The Family page** now shows the service on and its check passed. Add a member, choose what
-   their privacy hides, share the Upstox tab with them in Portfolio (and any watchlists on the
-   Family page), and send the invite link yourself: it works once, for two hours.
+   You should see `The family view is switched on.` The last word is read back from the file, so
+   it is what was written. A setting that was the last line of either file with no line end after
+   it keeps its own line and its value. A later release never moves the switch back: a value you
+   chose in either file stays.
+6. **The Family page** now shows the service on and its check passed. Add a member and choose
+   what their privacy hides. Then, on the Family page's Shares tab: under "Portfolio tabs" share
+   the Upstox tab with them, and under the watchlists share any lists. Send the invite link
+   yourself: it works once, for two hours.
 7. **First-day checks.** A test member on your own phone joins and sees only what you shared; the
    server's address without `/family` shows the refusal page on that phone; a fill appears on the
    family positions within a few seconds; a list you stop sharing leaves the member's screen; and
    the deploy log has no line starting `WARNING: family`.
 
-To switch it off again, run the line of step 5 with `SUDARSHAN_FAMILY=off` in place of
-`SUDARSHAN_FAMILY=on` (it appears once in the line): every family screen then reads that the view
-is switched off, and members, shares and privacy are kept as they are.
+To switch it off again, run the line of step 5 with `v=off` in place of `v=on` (it appears once,
+near the start of the line). You should see `The family view is switched off.` Every family
+screen then reads that the view is switched off, and members, shares and privacy are kept as
+they are.
 
 ### What decides what a member sees
 
 | what | where you set it | enforced by |
 |---|---|---|
-| positions and holdings | the Upstox tab's share, in Portfolio (view or restricted, with an optional end) | the portfolio service |
+| positions and holdings | the Upstox tab's share: the Family page, Shares tab, "Portfolio tabs" (view or restricted, with an optional end) | the portfolio service |
 | orders and trades | that share, and the member's Orders switch | the portfolio service, and again here |
 | funds | that share, and the member's Funds switch | the portfolio service, and again here |
 | figures inside them (P&L, quantities) | the member's P&L and Quantities switches | the portfolio service, and again here |
 | watchlists | the list's share, on the Family page | OpenAlgo's own note of shared lists |
-| your other portfolio tabs | each tab's share, in Portfolio | the portfolio service |
+| your other portfolio tabs | each tab's share, in the same "Portfolio tabs" section | the portfolio service |
 
 - There is no separate share for a single book: a "book share" decided nothing, so the service
-  refuses one ("Which books a member can open is set by sharing the Upstox tab in Portfolio, and
-  by that member's Orders and Funds switches.") and the Family page no longer offers it.
+  refuses one ("Which books a member can open is set by sharing the Upstox tab under Portfolio
+  tabs on the Family page, and by that member's Orders and Funds switches.") and the Family page
+  no longer offers it.
 - A share you remove, let expire or make restricted stops showing within a minute, at any hour:
   the family service asks the portfolio what each member is shared before it serves a figure it
   kept, once a minute at most, and drops what it kept when that changed.
+- While the portfolio does not answer that question, a page waits three seconds for it, not the
+  twelve a read may take, and says "What is shared with you could not be checked just now."
+  over the figures it kept, with their time: they are never shown as current. After ten minutes
+  without an answer the kept figures are put away and the screen says so; they come back when
+  the portfolio answers again. A member sees less in that time, never more.
+- How old a holding's price is (`fresh`: "Value from 1 Oct · 45 days old") is hidden by no
+  privacy category: it carries no amount and no quantity, and a member who is shown no figures
+  still has to know a number's age.
 - P&L hidden puts the overall P&L out of reach, with every rupee figure and cost price. What
   it cannot hide beside a quantity: "With quantities shown, a member can still work out a day's
   change and a holding's value from the quantity and the price. Hide quantities to hide those
@@ -343,6 +359,12 @@ else of nginx: no other site's file, and of `nginx -t` only whether it passes. F
 run of the deploy tool checks them again, reading only, and its log says it once if they change,
 go missing or are not loaded, or when a later release brings new ones (then do steps 2 and 6
 again; the include line stays). Nothing is said while none of the files is there.
+
+`nginx -t` reads the whole of nginx's configuration, every site on the server with it, and the
+deploy tool runs as root. So a ten-minute run asks for it only when one of these four files has
+changed since it last asked, and keeps the answer until the next change; `sudo sudarshan-deploy
+--nginx-check`, which you run yourself, asks every time. If a run's log says the test did not
+pass "when these files last changed", run the check: it says what holds now.
 
 **Trying the family view on your own phone.** While you are signed in to both, both work. Your own
 sign-in ends at 03:30 and the family one does not, so the next morning your own pages show the

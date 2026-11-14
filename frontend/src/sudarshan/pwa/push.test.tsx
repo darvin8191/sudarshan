@@ -334,4 +334,30 @@ describe('turning notifications off', () => {
     permission = 'denied'
     expect(await pushStatus()).toBe('blocked')
   })
+  // Verification N5 (v0.12.0): the status read only the browser's subscription, which the first
+  // member made, so on a shared phone the second member's switch said On while nothing was sent
+  // to them. The second expectation fails on the old status.
+  it('reads off for a member other than the one who turned notifications on here', async () => {
+    const router = service()
+    permission = 'default'
+    expect(await enablePush(1)).toBe('on')
+    expect(await pushStatus(1)).toBe('on')
+    expect(await pushStatus(2)).toBe('off')
+    // turning it on subscribes this member (the service moves the phone's subscription to them)
+    const posts = () => router.urls().filter((url) => url === SUBSCRIBE).length
+    const before = posts()
+    expect(await enablePush(2)).toBe('on')
+    expect(posts()).toBe(before + 1)
+    expect(window.localStorage.getItem('sd-family-push')).toBe('on:2')
+    expect(await pushStatus(2)).toBe('on')
+    expect(await pushStatus(1)).toBe('off')
+  })
+
+  it('still reads the browser alone where the phone kept no member in its flag', async () => {
+    service()
+    held = subOf('https://push.example.invalid/held')
+    expect(await pushStatus(2)).toBe('on')
+    window.localStorage.setItem('sd-family-push', 'on')
+    expect(await pushStatus(2)).toBe('on')
+  })
 })

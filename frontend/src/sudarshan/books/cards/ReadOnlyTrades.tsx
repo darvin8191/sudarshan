@@ -11,7 +11,14 @@ import { units } from './format'
 import { Hidden } from './Hidden'
 import { EmptyCard, LoadingCards, ProblemCard, price, SideChip } from './parts'
 import { NOT_SHARED } from './ReadOnlyOrders'
-import { type ReadOnlyBookProps, ReadStamp, ServiceWords, ViewerNote } from './readOnlyParts'
+import {
+  type ReadOnlyBookProps,
+  ReadStamp,
+  ServiceWords,
+  UnreadCard,
+  unreadWords,
+  ViewerNote,
+} from './readOnlyParts'
 
 export type ReadOnlyTradesProps = ReadOnlyBookProps<MaskedTrade>
 
@@ -30,6 +37,7 @@ export function ReadOnlyTrades({
   const sorted = useMemo(() => [...rows].sort((a, b) => momentOfRow(b) - momentOfRow(a)), [rows])
   const buys = rows.filter((row) => String(row.transaction_type).toUpperCase() === 'BUY').length
   const notShared = state === 'not_shared' || hidden.includes('orders')
+  const unread = unreadWords(state, words, rows.length, readAt)
 
   let content: ReactNode
   if (notShared) {
@@ -38,6 +46,10 @@ export function ReadOnlyTrades({
     content = <LoadingCards />
   } else if (rows.length === 0 && error) {
     content = <ProblemCard message={error} onRetry={onRetry} />
+  } else if (unread !== null) {
+    // Verification N10 (v0.12.0): not a day without trades: the part was not read. The
+    // service's sentence is the card, as on Positions and Holdings (review M4).
+    content = <UnreadCard text={unread} />
   } else if (rows.length === 0) {
     content = (
       <>

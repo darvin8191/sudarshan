@@ -201,6 +201,55 @@ describe('Portfolio screen', () => {
     expect(allocation.textContent).not.toMatch(/₹/)
   })
 
+  // The age of a price (`fresh`) is hidden by no privacy category (privacy_fields.json version 3).
+  // v0.10.0 left it open: a member not shown quantities lost the line that says how old the
+  // figures are, and the family page showed it to nobody. Fails on the old page: no such line.
+  it('says how old each holding price is, for a member shown no figures too', async () => {
+    routeFetch({
+      '/family/api/portfolio/tabs/2': ok(
+        tabAnswer(
+          2,
+          {
+            rows: [
+              // as the masks leave a row for a member who is shown no figures: the asset, the age
+              {
+                asset: { id: 1, name: 'A fund' },
+                fresh: { state: 'fresh', words: 'NAV of 21 Oct' },
+              },
+              {
+                asset: { id: 2, name: 'Gold' },
+                fresh: { state: 'old', words: 'Value from 1 Oct · 45 days old' },
+              },
+              {
+                asset: { id: 3, name: 'ALPHA', symbol: 'ALPHA' },
+                fresh: { state: 'fresh', words: null },
+              },
+              { asset: { id: 4, name: 'Odd' }, fresh: { state: 'old', words: { paise: 5 } } },
+            ],
+          },
+          { hidden: ['pnl', 'qty', 'funds', 'orders'] }
+        )
+      ),
+      '/family/api/portfolio': ok(portfolio({ hidden: ['pnl', 'qty', 'funds', 'orders'] })),
+    })
+    mount('/family/portfolio?tab=2')
+    const holdings = await screen.findByRole('list', { name: 'Holdings' })
+    const ages = within(holdings).getAllByTestId('holding-age')
+    expect(ages.map((age) => age.textContent)).toEqual([
+      'NAV of 21 Oct',
+      'Old price: Value from 1 Oct · 45 days old',
+      'Old price: Old price',
+    ])
+    // an old price carries an icon and the word, never colour alone (rule 6)
+    expect(ages[0].querySelector('svg')).toBeNull()
+    expect(ages[1].querySelector('svg')).not.toBeNull()
+    expect(ages[1].hasAttribute('data-old')).toBe(true)
+    expect(holdings.textContent).not.toMatch(/₹|\d{3,}/)
+    expect(holdingsOf({ rows: [{ asset: { id: 9, name: 'X' } }] })).toEqual([
+      { key: '9', name: 'X', symbol: null, age: null, old: false },
+    ])
+  })
+
   it('marks the selected tab by weight and a check, never by colour alone (rule 6)', async () => {
     routeFetch({
       '/family/api/portfolio/tabs/2': ok(tabAnswer(2, { rows: [holdingRow('ALPHA')] })),
