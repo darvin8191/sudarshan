@@ -17,6 +17,7 @@ vi.mock('@/api/risk', async (original) => {
   return { ...actual, riskApi: { ...actual.riskApi, saveSettings } }
 })
 
+import { MASKED } from '@/sudarshan/masked'
 import { PHRASE_FORGOTTEN, PHRASE_HINT } from './phrase'
 import {
   BandCard,
@@ -98,6 +99,7 @@ describe('a settings card', () => {
     expect(confirm).toBeDisabled() // until the phrase is typed
     fireEvent.change(screen.getByLabelText('F&O order'), { target: { value: '9' } })
     fireEvent.change(screen.getByLabelText('Confirm phrase'), { target: { value: 'stop' } })
+    expect(screen.getByLabelText('Confirm phrase').className).toContain(MASKED)
     fireEvent.click(confirm)
     // The change the phrase was asked for, not the fields as they are by then.
     await waitFor(() => expect(saveSettings).toHaveBeenLastCalledWith({ max_lots_fo: 5 }, 'stop'))
@@ -245,6 +247,14 @@ describe('the phrase card', () => {
     wrap(<PhraseCard />)
     expect(PHRASE_FORGOTTEN).toBe('If you forget it, it can be set back to STOP on the server.')
     expect(screen.getByTestId('phrase-card')).toHaveTextContent(PHRASE_FORGOTTEN)
+  })
+
+  it('masks the new phrase too, with its own Show', () => {
+    wrap(<PhraseCard />)
+    const box = screen.getByLabelText('New phrase')
+    expect(box.className).toContain(MASKED)
+    fireEvent.click(screen.getByRole('button', { name: 'Show new phrase' }))
+    expect(box.className).not.toContain('-webkit-text-security')
   })
 })
 

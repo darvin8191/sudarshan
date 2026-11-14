@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
+import { PhraseInput } from './PhraseInput'
 import { RISK_AUDIT_KEY, RISK_STATUS_KEY } from './parts'
 import { PHRASE_FORGOTTEN, PHRASE_HINT } from './phrase'
 
@@ -144,14 +145,11 @@ function SaveRow({
           >
             <span>{phraseHint}</span> <span>{PHRASE_HINT}</span>
           </p>
-          <Input
+          <PhraseInput
             id={`${id}-phrase`}
-            aria-describedby={`${id}-hint`}
-            className="h-12 text-base"
-            autoComplete="off"
-            autoCapitalize="characters"
+            describedBy={`${id}-hint`}
             value={saver.phrase}
-            onChange={(event) => saver.setPhrase(event.target.value)}
+            onChange={saver.setPhrase}
           />
           <Button
             variant="outline"
@@ -571,7 +569,7 @@ export function PhraseCard() {
         again once saved.
       </p>
       <p className="text-[0.8125rem] text-[color:var(--text-secondary)]">{PHRASE_FORGOTTEN}</p>
-      <TextField label="New phrase" value={next} onChange={setNext} />
+      <NewPhraseField value={next} onChange={setNext} />
       <SaveRow
         saver={saver}
         label="Change the phrase"
@@ -583,15 +581,8 @@ export function PhraseCard() {
   )
 }
 
-function TextField({
-  label,
-  value,
-  onChange,
-}: {
-  label: string
-  value: string
-  onChange: (next: string) => void
-}) {
+/** The phrase being set, masked like the one it replaces. */
+function NewPhraseField({ value, onChange }: { value: string; onChange: (next: string) => void }) {
   const id = useId()
   return (
     <div className="flex flex-col gap-1">
@@ -599,16 +590,9 @@ function TextField({
         htmlFor={id}
         className="text-[0.875rem] font-semibold text-[color:var(--text-secondary)]"
       >
-        {label}
+        New phrase
       </Label>
-      <Input
-        id={id}
-        className="h-12 text-base"
-        autoComplete="off"
-        autoCapitalize="characters"
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-      />
+      <PhraseInput id={id} value={value} onChange={onChange} what="new phrase" />
     </div>
   )
 }
