@@ -332,6 +332,13 @@ class WebhookHandler(Resource):
             # Verify webhook secret token (Telegram sends this header when secret_token is configured)
             expected_secret = get_webhook_secret()
 
+            # SUDARSHAN: G5. With neither TELEGRAM_WEBHOOK_SECRET nor a bot token set, a call cannot
+            # be verified, so it is refused, as get_webhook_secret says it must be; it was answered
+            # as though it came from Telegram.
+            if not expected_secret:
+                logger.warning("Webhook request refused: no bot token or webhook secret to check it")
+                return make_response("Forbidden", 403)
+
             if expected_secret:
                 received_secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token")
 

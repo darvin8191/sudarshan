@@ -8,6 +8,11 @@
 // hidden figure and is shown as "Hidden"; a key that is `null` is a figure not known yet and is
 // shown as a dash; neither is ever shown as 0.
 //
+// P&L hidden hides what it is worked out from (review H1). Beside a quantity, a value, an amount
+// invested, an average or the day's change in rupees gives the P&L away by one subtraction, so
+// the table's `cost` list goes with P&L on the server, and here nothing is worked out from a
+// quantity while the row's P&L is absent, even from an average a server left in by mistake.
+//
 // The one thing the mask must leave and the portfolio rows do not carry once `qty_u` is gone is
 // the direction of a position. It is assumed to arrive as `side` ('long', 'short' or 'closed'),
 // and where `qty_u` is present its sign decides, so a wrong `side` can never contradict it.
@@ -82,6 +87,24 @@ export const FIELD_CATEGORY: Readonly<Record<string, Category>> = {
   sell_price_u: 'qty',
   value_paise: 'qty',
 }
+
+/**
+ * The fields of the book rows that the table's `cost` list hides whenever P&L is hidden, whatever
+ * quantities say (review H1). The phone's copy of the part the cards use; a test holds it to the
+ * file.
+ */
+export const COST_FIELDS: readonly string[] = [
+  'avg_price_u',
+  'buy_price_u',
+  'sell_price_u',
+  'value_paise',
+  'price_u',
+  'trigger_price_u',
+  'amount_paise',
+]
+
+/** Whether a row's P&L is shown: its figure is there (null is not known yet, not hidden). */
+export const pnlShown = (row: { pnl_paise?: number | null }): boolean => row.pnl_paise !== undefined
 
 /** Fields the mask never removes: the cards depend on them for a child's screen. */
 export const NEVER_HIDDEN: readonly string[] = [
@@ -212,7 +235,8 @@ export function positionFigures(
     ...price,
     side: sideOf(row),
     quantity: typeof qtyU === 'number' ? qtyU / QTY_SCALE : undefined,
-    average: row.avg_price_u === undefined ? undefined : rupees(row.avg_price_u),
+    // an average beside a quantity is the P&L by one subtraction (H1)
+    average: !pnlShown(row) || row.avg_price_u === undefined ? undefined : rupees(row.avg_price_u),
     pnl: pnlPaise === undefined ? undefined : paiseToRupees(pnlPaise),
     pnlPercent,
     realised: row.realised_paise === undefined ? undefined : paiseToRupees(row.realised_paise),
@@ -230,11 +254,18 @@ export interface HoldingFigures extends PriceFigures {
   invested: number | null | undefined
   pnl: number | null | undefined
   pnlPercent: number | null | undefined
-  /** The change since the previous close in rupees; null with no previous close. */
+  /**
+   * The change since the previous close in rupees; null with no previous close, undefined while
+   * the quantity or the P&L is hidden.
+   */
   today: number | null | undefined
 }
 
-/** A holding moved by a tick: value, P&L and today's change at the tick's price. */
+/**
+ * A holding moved by a tick: value, P&L and today's change at the tick's price. While the row's
+ * P&L is hidden, its value, the amount invested, the average and the day's change are hidden too:
+ * beside the quantity each of them gives the P&L away (H1).
+ */
 export function holdingFigures(
   row: MaskedHolding,
   tick: RowTick | undefined,
@@ -245,13 +276,14 @@ export function holdingFigures(
   const priceU = tickU ?? (typeof row.last_price_u === 'number' ? row.last_price_u : null)
   const qtyU = row.qty_u
   const hasQty = typeof qtyU === 'number'
-  const value = !hasQty
+  const costs = hasQty && pnlShown(row)
+  const value = !costs
     ? undefined
     : priceU === null
       ? null
       : paiseToRupees(valuePaise(qtyU, priceU))
   const invested =
-    !hasQty || row.avg_price_u === undefined
+    !costs || row.avg_price_u === undefined
       ? undefined
       : paiseToRupees(valuePaise(qtyU, row.avg_price_u))
   let pnl: number | null | undefined
@@ -271,13 +303,13 @@ export function holdingFigures(
         : (pnl / invested) * 100
   let today: number | null | undefined
   const close = prevCloseOf(row, tick)
-  if (!hasQty) today = undefined
+  if (!costs) today = undefined
   else if (close === null || price.ltp === null) today = null
   else today = (price.ltp - close) * (qtyU / QTY_SCALE)
   return {
     ...price,
     quantity: hasQty ? qtyU / QTY_SCALE : undefined,
-    average: row.avg_price_u === undefined ? undefined : rupees(row.avg_price_u),
+    average: !pnlShown(row) || row.avg_price_u === undefined ? undefined : rupees(row.avg_price_u),
     value,
     invested,
     pnl,
