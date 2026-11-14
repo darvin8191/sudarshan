@@ -609,6 +609,89 @@ def test_the_family_set_up_says_one_line_before_its_pass(edge):
     assert out[-2] == f"family: nginx: the family view's nginx lines are not installed yet {HOWTO}"
 
 
+# ---- review L6: nginx's own test is asked only after a change, or by the owner ---------------------------
+
+
+def asked(edge: Edge) -> int:
+    """How many times nginx was asked to test its configuration."""
+    path = edge.box.web / "nginx_args"
+    return path.read_text().splitlines().count("-t") if path.exists() else 0
+
+
+@whole_tool
+def test_l6_a_run_asks_nginx_only_when_sudarshans_own_files_changed(edge):
+    """v0.12.0 review L6: every ten-minute run asked nginx -t as root, which parses every site's
+    files on a server shared with another system. A run asks once, keeps the answer, and asks
+    again only when one of SUDARSHAN's own four files changed. Fails on the old tool: it asked
+    at every run (3, not 1)."""
+    for _ in range(3):
+        done = edge.box.run()
+        assert done.returncode == 0 and "nginx" not in done.stdout, done.stdout + done.stderr
+    assert asked(edge) == 1
+    edge.age(45)  # one of them changed (its time moved), and nginx was reloaded since
+    assert "nginx" not in edge.box.run().stdout
+    assert asked(edge) == 2
+    os.utime(edge.site, (time.time() - 30, time.time() - 30))  # the site file alone
+    edge.box.run()
+    edge.box.run()
+    assert asked(edge) == 3
+    other = (
+        edge.dir / "sites-enabled" / "other"
+    )  # another site's file is not SUDARSHAN's: no question
+    other.write_text("server { listen 443 ssl; server_name other.example; }\n")
+    edge.box.run()
+    assert asked(edge) == 3
+
+
+@whole_tool
+def test_l6_the_owner_asking_always_tests_and_keeps_nothing(edge):
+    """--nginx-check asks nginx every time, also right after a run that asked, and leaves the
+    run's kept answer as it was. Fails on the old tool at the count a run adds."""
+    edge.box.run()
+    kept = (edge.box.state / "family_nginx_tested").read_bytes()
+    assert kept.endswith(b"\npass\n")
+    for n in (2, 3):
+        rc, out = check(edge)
+        assert (rc, out[:-1]) == (0, passing(edge)) and asked(edge) == n
+    assert (edge.box.state / "family_nginx_tested").read_bytes() == kept
+    edge.box.run()
+    assert asked(edge) == 3  # the run still has its answer
+
+
+@whole_tool
+def test_l6_a_kept_failure_is_said_once_and_asked_again_after_a_change(edge):
+    edge.nginx_test(1)
+    first = edge.box.run()
+    said = [line for line in first.stdout.splitlines() if "family: nginx:" in line]
+    assert len(said) == 1 and "does not pass its own test" in said[0]
+    second = edge.box.run()  # not asked again; the kept answer is said in its own words, once
+    said = [line for line in second.stdout.splitlines() if "family: nginx:" in line]
+    assert len(said) == 1 and said[0].endswith(
+        "family: nginx: nginx's configuration did not pass its own test when these files last changed, "
+        "and a deploy run does not ask again until one of them changes: run sudo sudarshan-deploy "
+        "--nginx-check, which asks now (sudarshan-deploy --nginx-check says more)")  # fmt: skip
+    assert "family: nginx:" not in edge.box.run().stdout
+    assert asked(edge) == 1
+    edge.nginx_test(0)
+    assert check(edge)[0] == 0  # the owner asks: it passes now
+    edge.age(50)  # he changed a file: the run asks again and has nothing to say
+    assert "nginx" not in edge.box.run().stdout
+    assert asked(edge) == 3 and not (edge.box.state / "family_nginx_note").exists()
+
+
+@whole_tool
+@pytest.mark.parametrize("left", [b"", b"abc", b"abc\n", b"abc\npas"])
+def test_l6_a_kept_answer_cut_off_is_no_answer(edge, left):
+    """A run killed while writing leaves a file that exists and is empty or ends mid-line: the
+    next run asks nginx again instead of reading it as an answer."""
+    edge.box.run()
+    kept = edge.box.state / "family_nginx_tested"
+    whole = kept.read_bytes()
+    kept.write_bytes(left.replace(b"abc", whole.split(b"\n")[0]))
+    edge.box.run()
+    assert asked(edge) == 2 and kept.read_bytes() == whole
+
+
 # ---- a real nginx -t ------------------------------------------------------------------------------------
 def nginx_binary() -> str | None:
     for found in (os.environ.get("SUDARSHAN_NGINX"), shutil.which("nginx"), "/usr/sbin/nginx"):

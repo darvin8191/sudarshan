@@ -19,9 +19,11 @@
 # And on every run the price feed's client tokens in /etc/sudarshan/feed-clients are made once if
 # missing (feed_tokens), and, only once the owner's one-time set-up for the family view
 # (sudarshan/ops/family/bootstrap.sh) has made /etc/sudarshan-family, that account's keys are kept
-# there and its check is run (fam_provision). Before that set-up nothing of the family is touched.
+# there, its check is run (fam_provision) and its settings file family.env is made if missing, with the
+# installed release's list and the switch off (fam_env_run). Before that set-up nothing of the family is touched.
 # And once the owner has installed the family view's nginx lines (sudarshan/ops/nginx), every run checks,
-# reading only, that they are still in place, loaded and the release's (ngx_check); it never edits nginx.
+# reading only, that they are still in place, loaded and the release's (ngx_check); it never edits nginx,
+# and it asks nginx to test its configuration only when one of SUDARSHAN's own nginx files has changed.
 # Usage: sudarshan-deploy [--check | --redeploy | --force | --family-provision | --nginx-check]
 #   --check     show latest Release / deployed tag / market state and the .env settings and
 #               calendar lines that release would change, change nothing
@@ -38,7 +40,8 @@
 #               install. Exit 0 = the check passed, 1 = it did not, 2 = no /etc/sudarshan-family yet.
 #   --nginx-check
 #               whether the family view's nginx lines are installed, loaded by nginx and this release's,
-#               one line each, changing nothing (it neither waits for nor stops an install).
+#               one line each, changing nothing (it neither waits for nor stops an install). It always
+#               asks nginx to test its configuration (nginx -t, as root); a run does only after a change.
 #               Exit 0 = all of it holds, 1 = not (each FAIL line says what to do).
 set -Eeuo pipefail
 MODE="deploy"; FORCE=0; REDEPLOY=0; REMOVE_RING=""
@@ -75,6 +78,7 @@ FAM_USER="sudarshan-family"; FAM_UNIT="${FAM_USER}.service"   # the family view 
                         # (P6), and unit_ok allows that account for that unit alone
 RING_VAR="/var/lib"     # where the ring services keep their state: ${RING_VAR}/sudarshan-<service>/
 FAM_DIR="/etc/sudarshan-family"         # the family account's keys (root:sudarshan-family 750, files 640)
+FAM_ENV_TAG="${STATE}/family_env_tag"   # the release whose settings list family.env last took (fam_env_run)
 FEED_DIR="/etc/sudarshan/feed-clients"  # the price feed's client tokens (root:sudarshan 750, files 640)
 log() { echo "[$(date '+%F %T %Z')] $*"; }
 listed() {   # 0 = date $1 starts a line of file $2 (a trailing comment is allowed, as auto-login reads
@@ -1152,6 +1156,7 @@ fam_backup() (   # an install's backup: ${FAM_DIR} into ${bdir}/etc-family (Y1.4
 # and says nothing while none of the three files is there.
 NGX_DIR="/etc/nginx"
 NGX_BIN="nginx"
+NGX_TESTED="${STATE}/family_nginx_tested"   # two lines: ngx_seen when nginx's own test was last asked, then pass or fail
 NGX_SITE_RECORD="${CAL_DIR}/nginx-site"   # one line, written by the owner: the path of the SUDARSHAN site file
 NGX_FILES=(conf.d/sudarshan-family-zones.conf snippets/sudarshan-family.conf snippets/sudarshan-family-proxy.conf)
 # sha256 of ngx_text of each file above as this release ships it in sudarshan/ops/nginx; the test
@@ -1268,6 +1273,17 @@ ngx_site() {   # $1 = the SUDARSHAN site file. For each server block: "server <l
         if (q != "") w = w "\n"; else word_end()
     }' "$1"
 }
+ngx_seen() {   # $1 = the SUDARSHAN site file, when it is known. One word that changes when any of SUDARSHAN's own
+               # nginx files does (its path, times, size or inode; nothing of its text, and no other file).
+               # Nothing when one of them cannot be looked at
+    local f out="" one
+    for f in "${NGX_FILES[@]/#/${NGX_DIR}/}" ${1:+"$1"}; do
+        one="$(stat -L -c '%n %Y %Z %s %i' -- "${f}" 2>/dev/null)" || one="${f} absent"
+        out+="${one}"$'\n'
+    done
+    out+="site ${1:-none}"$'\n'
+    printf '%s' "${out}" | sha256sum | cut -c1-64
+}
 ngx_loaded_at() {   # when the running nginx last loaded its configuration (an epoch second): the start of its
                     # oldest worker that is not shutting down. Nothing when nginx is not running
     local now oldest="" e rest
@@ -1282,7 +1298,7 @@ ngx_check() (   # $1 = report (every line; 0 = no FAIL, 1 = a FAIL), run (the fi
                 # once while it holds) or brief (one line, for the family set-up)
     set +eEu; trap - ERR
     local mode="$1" i f path have=0 tested=0 r kind l443 inc root cf tc site at newest m name want host trust
-    local stray=0 first="" warn=""
+    local stray=0 first="" warn="" seen="" kept="" k1 k2
     local -a lines=() recs=() good=() bad=()
     say() { lines+=("$1 $2"); }
     for f in "${NGX_FILES[@]}"; do if [[ -e "${NGX_DIR}/${f}" || -L "${NGX_DIR}/${f}" ]]; then have=1; fi; done
@@ -1303,15 +1319,33 @@ ngx_check() (   # $1 = report (every line; 0 = no FAIL, 1 = a FAIL), run (the fi
         fi
         say PASS "${path}: in place and this release's"
     done
-    # nginx's own test, by its exit status alone: what it prints can name other sites' files, so it is not read
+    site="$(ngx_site_path)"; r=$?
+    # nginx's own test, by its exit status alone: what it prints can name other sites' files, so it is not read.
+    # It parses the whole configuration, every other site's files with it, as root, so a run (and the set-up)
+    # asks for it only when one of SUDARSHAN's own four files changed since it was last asked (review L6):
+    # ${NGX_TESTED} keeps what those files looked like then and what nginx answered. --nginx-check, which the
+    # owner runs himself, always asks, and keeps nothing (it changes nothing on the server).
+    seen="$(ngx_seen ${site:+"${site}"})"
+    if [[ "${mode}" != "report" && -n "${seen}" ]] && { IFS= read -r k1 && IFS= read -r k2; } < "${NGX_TESTED}" 2>/dev/null \
+            && [[ "${k1}" == "${seen}" && ( "${k2}" == "pass" || "${k2}" == "fail" ) ]]; then
+        kept="${k2}"
+    fi
     if ! command -v "${NGX_BIN}" > /dev/null 2>&1; then
         say FAIL "nginx is not installed on this server, so nothing of these files can be loaded"
-    elif timeout 30 "${NGX_BIN}" -t > /dev/null 2>&1; then
-        tested=1; say PASS "nginx's own test passes"
+    elif [[ "${kept}" == "pass" ]]; then
+        tested=1; say PASS "nginx's own test passed when these files last changed"
+    elif [[ "${kept}" == "fail" ]]; then
+        say FAIL "nginx's configuration did not pass its own test when these files last changed, and a deploy run does not ask again until one of them changes: run sudo sudarshan-deploy --nginx-check, which asks now"
     else
-        say FAIL "nginx's configuration does not pass its own test, so no change of it can be loaded: run sudo nginx -t to see why"
+        if timeout 30 "${NGX_BIN}" -t > /dev/null 2>&1; then
+            tested=1; kept="pass"; say PASS "nginx's own test passes"
+        else
+            kept="fail"; say FAIL "nginx's configuration does not pass its own test, so no change of it can be loaded: run sudo nginx -t to see why"
+        fi
+        if [[ "${mode}" != "report" && -n "${seen}" ]]; then
+            { printf '%s\n%s\n' "${seen}" "${kept}" > "${NGX_TESTED}.new" && mv -fT -- "${NGX_TESTED}.new" "${NGX_TESTED}"; } 2>/dev/null || true
+        fi
     fi
-    site="$(ngx_site_path)"; r=$?
     case ${r} in
         0) ;;
         1) say FAIL "the SUDARSHAN site file is not recorded, so where its include line stands cannot be checked: record it with ${NGX_RECORD}" ;;
@@ -1402,15 +1436,74 @@ ngx_check() (   # $1 = report (every line; 0 = no FAIL, 1 = a FAIL), run (the fi
     esac
     [[ -z "${first}" ]]
 )
+# ---- a ring service's own settings file, /etc/sudarshan/<service>.env (root:sudarshan 640, cross-design
+# R3): a release may ship sudarshan/ops/deploy/<service>-env.conf in openalgo-env.conf's format; each key
+# is added when absent or moved off a default an earlier release shipped, and a value the owner chose
+# stays. A missing file is made first, empty. A release without a list changes nothing here.
+# An install does this for every ring service (ring_deploy). For the family view's file alone every run
+# does it too (fam_env_run, review N1): its folder is made by the owner's set-up, which may come after
+# the install, and the switch-on steps need the file.
+ring_env() {   # $1 = sudarshan-<service>.service
+    (
+        set +eEu; trap - ERR
+        local svc="${1#sudarshan-}" conf out got envf work dir="${CAL_DIR}" group="${RING_USER}"
+        svc="${svc%.service}"
+        [[ "${svc}" =~ ^[a-z0-9]+$ ]] || exit 0
+        if [[ "$1" == "${FAM_UNIT}" ]]; then   # its account cannot read /etc/sudarshan (Y1): its file is in its own folder,
+            dir="${FAM_DIR}"; group="${FAM_USER}"   # which exists only after the owner's set-up (until then the unit cannot start)
+            cal_dir_ok "${FAM_DIR}" || exit 0
+        fi
+        conf="${tmp}/${svc}-env.conf"
+        release_file "${svc}-env.conf" "${tag}" "${conf}"; got=$?
+        if [[ ${got} -eq 3 ]]; then : > "${tmp}/${svc}-env.none"; fi   # this release ships no list (for fam_env_run)
+        [[ ${got} -eq 0 && -s "${conf}" ]] || { [[ ${got} -eq 1 ]] && log "ring: the settings list of ${svc} could not be fetched whole; its file stays as it is"; exit 0; }
+        envf="${dir}/${svc}.env"
+        if [[ -L "${envf}" ]]; then log "ring: ${envf} is a link - left alone"; exit 0; fi
+        if [[ ! -e "${envf}" ]]; then
+            install -m 640 -o root -g "${group}" /dev/null "${envf}" 2>/dev/null || install -m 640 /dev/null "${envf}" || { log "ring: ${envf} could not be made"; exit 0; }
+            log "ring: made ${envf}"
+        fi
+        work="${tmp}/ring-env-${svc}"; mkdir -m 700 -p "${work}"
+        if env_sync apply "${conf}" "${envf}" "${work}" "${bdir}/${svc}.env"; then : > "${work}/applied"   # for fam_env_run
+        else log "WARNING: ring: ${envf} did not take every setting of ${tag}"; fi
+    ) || true
+}
+fam_env_run() {   # every run, the set-up too: the installed release's settings list for the family view's own
+                  # file, ${FAM_DIR}/family.env. Nothing before the owner's set-up has made the folder, nothing
+                  # for a release that ships no family unit, and nothing at all (no fetch either) once the
+                  # file is there and this release's list was applied to it: ${FAM_ENV_TAG} names that release.
+                  # An owner's value is never changed (env_sync), and no service is restarted: the file is
+                  # made with the switch off, which is what the service reads from no file.
+    local tmp tag bdir said=""
+    [[ "${deployed}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 0
+    cal_dir_ok "${FAM_DIR}" || return 0
+    managed_units | grep -Fxq -- "${FAM_UNIT}" || return 0
+    if [[ -f "${FAM_DIR}/family.env" && ! -L "${FAM_DIR}/family.env" ]]; then
+        IFS= read -r said < "${FAM_ENV_TAG}" 2>/dev/null || said=""
+        [[ "${said}" != "${deployed}" ]] || return 0
+    fi
+    tmp="$(mktemp -d)" || return 0
+    tag="${deployed}"; bdir="${tmp}"   # what ring_env reads; the copy env_sync takes first goes with ${tmp}
+    ring_env "${FAM_UNIT}"
+    if [[ -e "${tmp}/ring-env-family/applied" || -e "${tmp}/family-env.none" ]]; then
+        { printf '%s\n' "${deployed}" > "${FAM_ENV_TAG}.new" && mv -fT -- "${FAM_ENV_TAG}.new" "${FAM_ENV_TAG}"; } 2>/dev/null || true
+    fi
+    rm -rf -- "${tmp}"
+}
+deployed="$(cat "${STATE}/deployed_tag" 2>/dev/null || echo none)"
 if [[ "${MODE}" == "remove-ring" ]]; then ring_remove "${REMOVE_RING}"; exit 0; fi
 if [[ "${MODE}" == "nginx" ]]; then rc=0; ngx_check report || rc=$?; exit "${rc}"; fi
 if [[ "${MODE}" == "family" ]]; then
     feed_tokens || true
+    # the settings file the switch-on steps name, at once when the set-up comes after the install (review
+    # N1; a run makes it otherwise). Said only when it was made here.
+    had_env=0; if [[ -e "${FAM_DIR}/family.env" || -L "${FAM_DIR}/family.env" ]]; then had_env=1; fi
+    fam_env_run > /dev/null 2>&1 || true
+    if [[ ${had_env} -eq 0 && -f "${FAM_DIR}/family.env" ]]; then echo "family: made ${FAM_DIR}/family.env, with the family view switched off"; fi
     rc=0; fam_provision setup || rc=$?
     if [[ ${rc} -eq 2 ]]; then echo "family: there is no ${FAM_DIR} yet; the family set-up (sudarshan/ops/family/bootstrap.sh) makes it"; fi
     exit "${rc}"
 fi
-deployed="$(cat "${STATE}/deployed_tag" 2>/dev/null || echo none)"
 # ---- every run, also one that installs nothing or runs in market hours: keep the day files as they
 # are for the market gate (gate_view), then apply the installed release's calendar list (cal_run).
 if [[ "${MODE}" != "check" ]]; then
@@ -1418,6 +1511,7 @@ if [[ "${MODE}" != "check" ]]; then
     else log "WARNING: calendar: the day files could not be kept for the market gate, so this run leaves them alone"; fi
     feed_tokens || true
     fam_provision run || true   # nothing at all until the owner's family set-up has made its folder
+    fam_env_run || true         # its settings file, made once (switch off) when the set-up came after the install
     ngx_check run || true       # nothing at all until the owner has installed the family view's nginx lines
     notice_catch_up
 fi
@@ -1737,33 +1831,6 @@ ring_skipped() {   # $1 = a service: 0 when its last start was skipped because a
                    # (the family view's until its set-up has passed its check). systemd reports such a start as
                    # done and leaves the unit inactive: it is not a failed start, so no warning, no health wait
     [[ "$(systemctl show -p ConditionResult --value -- "$1" 2>/dev/null)" == "no" ]]
-}
-# ---- a ring service's own settings file, /etc/sudarshan/<service>.env (root:sudarshan 640, cross-design
-# R3): a release may ship sudarshan/ops/deploy/<service>-env.conf in openalgo-env.conf's format; each key
-# is added when absent or moved off a default an earlier release shipped, and a value the owner chose
-# stays. A missing file is made first, empty. A release without a list changes nothing here.
-ring_env() {   # $1 = sudarshan-<service>.service
-    (
-        set +eEu; trap - ERR
-        local svc="${1#sudarshan-}" conf out got envf work dir="${CAL_DIR}" group="${RING_USER}"
-        svc="${svc%.service}"
-        [[ "${svc}" =~ ^[a-z0-9]+$ ]] || exit 0
-        if [[ "$1" == "${FAM_UNIT}" ]]; then   # its account cannot read /etc/sudarshan (Y1): its file is in its own folder,
-            dir="${FAM_DIR}"; group="${FAM_USER}"   # which exists only after the owner's set-up (until then the unit cannot start)
-            cal_dir_ok "${FAM_DIR}" || exit 0
-        fi
-        conf="${tmp}/${svc}-env.conf"
-        release_file "${svc}-env.conf" "${tag}" "${conf}"; got=$?
-        [[ ${got} -eq 0 && -s "${conf}" ]] || { [[ ${got} -eq 1 ]] && log "ring: the settings list of ${svc} could not be fetched whole; its file stays as it is"; exit 0; }
-        envf="${dir}/${svc}.env"
-        if [[ -L "${envf}" ]]; then log "ring: ${envf} is a link - left alone"; exit 0; fi
-        if [[ ! -e "${envf}" ]]; then
-            install -m 640 -o root -g "${group}" /dev/null "${envf}" 2>/dev/null || install -m 640 /dev/null "${envf}" || { log "ring: ${envf} could not be made"; exit 0; }
-            log "ring: made ${envf}"
-        fi
-        work="${tmp}/ring-env-${svc}"; mkdir -m 700 -p "${work}"
-        env_sync apply "${conf}" "${envf}" "${work}" "${bdir}/${svc}.env" || log "WARNING: ring: ${envf} did not take every setting of ${tag}"
-    ) || true
 }
 # ---- a ring service's /health after its start (R14: one listener per service on its port). Not
 # answering within 30 s is a WARNING with what the owner can check, never a rollback: trading does
