@@ -15,6 +15,7 @@ class FakeSentinel {
 }
 
 function installWakeLock(request: () => Promise<FakeSentinel>) {
+  // A request the phone answers: each one is a new lock.
   Object.defineProperty(navigator, 'wakeLock', {
     configurable: true,
     value: { request: vi.fn(request) },
@@ -77,8 +78,75 @@ describe('keep the screen on', () => {
   it('switches itself off when the browser refuses, rather than claim a lock nobody holds', async () => {
     installWakeLock(() => Promise.reject(new Error('battery saver is on')))
     const { result } = renderHook(() => useWakeLock())
+    expect(result.current.refused).toBe(false)
     await act(async () => result.current.setOn(true))
     expect(result.current.on).toBe(false)
+    expect(result.current.refused).toBe(true)
+  })
+
+  it('says it was refused until the switch is next turned on, and holds the lock when that is granted (C12)', async () => {
+    let allow = false
+    installWakeLock(async () => {
+      if (!allow) throw new Error('battery saver is on')
+      return new FakeSentinel()
+    })
+    const { result } = renderHook(() => useWakeLock())
+    await act(async () => result.current.setOn(true))
+    expect(result.current.refused).toBe(true)
+    allow = true
+    await act(async () => result.current.setOn(true))
+    expect(result.current.refused).toBe(false)
+    expect(result.current.on).toBe(true)
+  })
+
+  it('asks again at once when the phone drops the lock with the chart in view (C12)', async () => {
+    const sentinels: FakeSentinel[] = []
+    const api = installWakeLock(async () => {
+      const lock = new FakeSentinel()
+      sentinels.push(lock)
+      return lock
+    })
+    const { result } = renderHook(() => useWakeLock())
+    await act(async () => result.current.setOn(true))
+    await act(async () => sentinels[0].release())
+    expect(api.request).toHaveBeenCalledTimes(2)
+    expect(result.current.on).toBe(true)
+    expect(result.current.refused).toBe(false)
+  })
+
+  it('switches off and says so when the phone drops the lock in view and will not give it back (C12)', async () => {
+    const sentinels: FakeSentinel[] = []
+    installWakeLock(async () => {
+      if (sentinels.length > 0) throw new Error('battery saver turned on')
+      const lock = new FakeSentinel()
+      sentinels.push(lock)
+      return lock
+    })
+    const { result } = renderHook(() => useWakeLock())
+    await act(async () => result.current.setOn(true))
+    expect(result.current.on).toBe(true)
+    await act(async () => sentinels[0].release())
+    expect(result.current.on).toBe(false)
+    expect(result.current.refused).toBe(true)
+  })
+
+  it('asks once at a time, so no lock is left held by nobody (C12)', async () => {
+    let answer: ((lock: FakeSentinel) => void) | null = null
+    const api = installWakeLock(
+      () =>
+        new Promise<FakeSentinel>((resolve) => {
+          answer = resolve
+        })
+    )
+    const { result } = renderHook(() => useWakeLock())
+    await act(async () => result.current.setOn(true))
+    // The page comes back into view while the first request is still out.
+    await act(async () => setVisibility('visible'))
+    expect(api.request).toHaveBeenCalledOnce()
+    const lock = new FakeSentinel()
+    await act(async () => answer?.(lock))
+    await act(async () => result.current.setOn(false))
+    expect(lock.released).toBe(true)
   })
 
   it('lets the screen go when the chart closes', async () => {

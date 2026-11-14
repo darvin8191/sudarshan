@@ -77,6 +77,10 @@ WORDS: dict[str, str] = {
     # What a family member is told while the store is off (review L4): the two sentences above
     # are the owner's, and a member can act on neither.
     "viewer_unavailable": "The family view is not available right now. Ask the account owner.",
+    # F10 (feat/family-t2): design 6.7, word for word
+    "push_failing": (
+        "Notifications may not arrive on this phone. Turn them off and on again in Settings."
+    ),
 }
 
 

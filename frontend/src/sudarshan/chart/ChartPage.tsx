@@ -19,9 +19,26 @@
  * This file is layout and wiring only. A tick re-renders the price header and
  * nothing else: the price lives in a small store outside React's tree.
  */
-import { AlertTriangle, ArrowLeft, BellPlus, RefreshCw, Search, SunMedium, X } from 'lucide-react'
+import {
+  AlertTriangle,
+  ArrowLeft,
+  BellPlus,
+  ChevronDown,
+  RefreshCw,
+  Search,
+  SunMedium,
+  X,
+} from 'lucide-react'
 import type { Bar } from 'openalgo-charts'
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react'
 import { Link, Navigate, useLocation, useNavigate, useParams } from 'react-router'
 import { PlaceOrderDialog } from '@/components/trading/PlaceOrderDialog'
 import { SymbolSearchDialog } from '@/components/trading/SymbolSearchDialog'
@@ -29,38 +46,71 @@ import { Switch } from '@/components/ui/switch'
 import { chartHref } from '@/lib/trading/chartLink'
 import { type ChartStateView, chartStateCopy, createChartStateGate } from '@/lib/trading/chartState'
 import { priceDp } from '@/lib/trading/format'
+import { ChromeIcon } from '@/lib/trading/glyphs'
+import { type IntervalGroup, pickInterval as offeredInterval } from '@/lib/trading/intervals'
 import type { LiveStatus } from '@/lib/trading/liveStatus'
 import { cn } from '@/lib/utils'
 import { useThemeStore } from '@/stores/themeStore'
 import { AccessNotice } from '@/sudarshan/AccessNotice'
-import { usePriceAccess } from '@/sudarshan/access'
+import { type PriceAccess, usePriceAccess } from '@/sudarshan/access'
 import { AlertFormSheet, toastAlertSet } from '@/sudarshan/alerts/AlertForm' // SUDARSHAN M10.2
 import { isCovered } from '@/sudarshan/alerts/words'
-import { directionOf, formatPercent, formatPrice, formatRupees } from '@/sudarshan/dashboard/format'
+import { formatPercent, formatPrice, formatRupees } from '@/sudarshan/dashboard/format'
 import { useNow } from '@/sudarshan/dashboard/hooks'
 import { LiveLine } from '@/sudarshan/dashboard/LiveLine'
 import { TREND_TEXT, TrendArrow } from '@/sudarshan/dashboard/Trend'
 import { ticketProduct } from '@/sudarshan/ticket/productPref'
+import { useOpenGuard } from '@/sudarshan/watchlist/openGuard'
 import { showToast } from '@/utils/toast'
 import {
   type FeedConfig,
   type InstrumentInfo,
   loadFeedConfig,
   loadInstrument,
+  loadIntervals,
+  loadPreviousOi,
   searchSymbols,
 } from './api'
+import { DepthSheet, DepthStrip } from './DepthStrip'
+import { IndicatorSettingsSheet } from './IndicatorSettingsSheet'
+import { IndicatorSheet } from './IndicatorSheet'
 import { LongPress } from './longPress'
 import { isQuoteOnly, PhoneChart } from './phoneChart'
 import {
-  CHART_CHIPS,
-  type ChartChip,
+  type CatalogueEntry,
+  COMMON_STUDIES,
+  hasOpenInterest,
+  type Placement,
+  REFUSED,
+  refusal,
+  type StudyEntry,
+  VOLUME_MA,
+  VOLUME_MA_LENGTH,
+} from './phoneStudies'
+import {
+  type ChartStyle,
   chartPath,
-  readChip,
+  intervalLabel,
+  isCalendarInterval,
+  readInterval,
   readLastInstrument,
-  saveChip,
+  readPinned,
+  readStudies,
+  readStyle,
+  saveInterval,
   saveLastInstrument,
+  savePinned,
+  saveStudies,
+  saveStyle,
+  styleOf,
+  togglePin,
 } from './prefs'
-import { PriceStore, tickLine } from './prices'
+import { changeOn, PriceStore, priceQuiet, tickLine } from './prices'
+import { SidewaysStrip } from './SidewaysStrip'
+import { StudyLegend } from './StudyLegend'
+import { StyleSheet } from './StyleSheet'
+import { TimeframeSheet } from './TimeframeSheet'
+import { usePhoneSideways } from './usePhoneLayout'
 import { useWakeLock } from './useWakeLock'
 
 /** The order tag the chart's tickets carry, the same as the /trading terminal's. */
@@ -115,18 +165,39 @@ export default function ChartPage() {
   )
 }
 
-type Inspect = { bar: Bar; x: number | null; y: number }
+/** A candle being read, and the price at the finger's height on the candles' pane (C10). */
+type Inspect = { bar: Bar; x: number | null; y: number; price: number | null }
 
-/** A sheet over the chart, as the browser history entry it is; `alert` is a market alert's form (M10.2). */
-type Sheet = { sheet: 'ticket'; side: 'BUY' | 'SELL' } | { sheet: 'search' } | { sheet: 'alert' }
+/**
+ * A sheet over the chart, as the browser history entry it is; `alert` is a
+ * market alert's form (M10.2). A ticket opened at a held price (C10) carries it.
+ */
+type Sheet =
+  | { sheet: 'ticket'; side: 'BUY' | 'SELL'; price?: number }
+  | { sheet: 'search' }
+  | { sheet: 'alert' }
+  | { sheet: 'timeframe' }
+  | { sheet: 'style' }
+  | { sheet: 'indicators' }
+  | { sheet: 'study'; index: number }
+  | { sheet: 'depth' }
 
 function readSheet(state: unknown): Sheet | null {
   if (!state || typeof state !== 'object') return null
-  const value = state as { sheet?: unknown; side?: unknown }
+  const value = state as { sheet?: unknown; side?: unknown; price?: unknown }
   if (value.sheet === 'search') return { sheet: 'search' }
   if (value.sheet === 'alert') return { sheet: 'alert' }
+  if (value.sheet === 'timeframe') return { sheet: 'timeframe' }
+  if (value.sheet === 'style') return { sheet: 'style' }
+  if (value.sheet === 'indicators') return { sheet: 'indicators' }
+  if (value.sheet === 'depth') return { sheet: 'depth' }
+  const index = (value as { index?: unknown }).index
+  if (value.sheet === 'study' && typeof index === 'number' && Number.isInteger(index) && index >= 0)
+    return { sheet: 'study', index }
   if (value.sheet === 'ticket' && (value.side === 'BUY' || value.side === 'SELL'))
-    return { sheet: 'ticket', side: value.side }
+    return typeof value.price === 'number' && Number.isFinite(value.price) && value.price > 0
+      ? { sheet: 'ticket', side: value.side, price: value.price }
+      : { sheet: 'ticket', side: value.side }
   return null
 }
 
@@ -137,26 +208,59 @@ function firstInHistory(key: string): boolean {
   return state?.idx === 0
 }
 
-function PhoneChartScreen({
-  symbol,
-  exchange,
-  wake,
-}: {
+interface ScreenProps {
   symbol: string
   exchange: string
   wake: WakeLock
-}) {
+}
+
+/**
+ * The chart reads with the API key and today's Upstox login
+ * (src/sudarshan/access.ts), asked here, in a frame of its own: what that
+ * asks through, the app's market data context, is a new value every second
+ * (its page-visibility clock), and the screen below, sheets and all, would
+ * otherwise draw itself again with it every second, frames a phone with five
+ * studies cannot spare (C14). The screen draws again when the access changes.
+ */
+function PhoneChartScreen(props: ScreenProps) {
+  const access = usePriceAccess()
+  return <ChartScreen {...props} access={access} />
+}
+
+const ChartScreen = memo(function ChartScreen({
+  symbol,
+  exchange,
+  wake,
+  access,
+}: ScreenProps & { access: PriceAccess }) {
   const navigate = useNavigate()
   const location = useLocation()
   const appMode = useThemeStore((s) => s.appMode)
-  // The chart reads with the API key and today's Upstox login (src/sudarshan/access.ts).
-  const access = usePriceAccess()
   const ready = access.state === 'ready'
   /** Counts Try again after the stream settings could not be read. */
   const [attempt, setAttempt] = useState(0)
   const [config, setConfig] = useState<FeedConfig | null | undefined>(undefined)
   const [info, setInfo] = useState<InstrumentInfo | null | undefined>(undefined)
-  const [chip, setChip] = useState<ChartChip>(() => readChip())
+  const [timeframe, setTimeframe] = useState(() => readInterval())
+  const [pinned, setPinned] = useState(() => readPinned())
+  /** What the broker offers, once read; null until then, or when it could not be. */
+  const [groups, setGroups] = useState<IntervalGroup[] | null>(null)
+  /** Why the last pin was refused, shown in the timeframe sheet. */
+  const [pinNotice, setPinNotice] = useState<string | null>(null)
+  const [style, setStyle] = useState<ChartStyle>(() => readStyle())
+  /** The style as it is now, for a chart built later; a change reaches a built one through setStyle. */
+  const styleNow = useRef(style)
+  styleNow.current = style
+  /** The indicator set (C3), the phone's, for every instrument. */
+  const [studies, setStudies] = useState<StudyEntry[]>(() => readStudies())
+  const [studyNotice, setStudyNotice] = useState<string | null>(null)
+  /** Counts the chart's study changes, so the sheet and the legend read them again. */
+  const [, setStudyVersion] = useState(0)
+  /** Every study on offer (C4), once the indicator tier is in, and the owner's files that failed. */
+  const [catalogue, setCatalogue] = useState<CatalogueEntry[] | null>(null)
+  const [scriptProblems, setScriptProblems] = useState<string[]>([])
+  /** A contract's open interest at yesterday's close (C9), for the header's change. */
+  const [prevOi, setPrevOi] = useState<number | null>(null)
   const [prevClose, setPrevClose] = useState<number | null>(null)
   const [status, setStatus] = useState<LiveStatus | null>(null)
   const [load, setLoad] = useState<ChartStateView | null>(null)
@@ -173,7 +277,10 @@ function PhoneChartScreen({
   const quoteOnly = isQuoteOnly(exchange)
   const sheet = readSheet(location.state)
   const side = sheet?.sheet === 'ticket' ? sheet.side : null
+  /** The price a ticket opened from a candle reading starts at, as a limit (C10). */
+  const heldPrice = sheet?.sheet === 'ticket' ? sheet.price : undefined
   const searching = sheet?.sheet === 'search'
+  const sideways = usePhoneSideways()
 
   useEffect(() => {
     saveLastInstrument(symbol, exchange)
@@ -218,12 +325,15 @@ function PhoneChartScreen({
       wsUrl: config.wsUrl,
       // The mode as it is now; a later switch reaches the chart through setAppMode.
       appMode: useThemeStore.getState().appMode,
+      style: styleNow.current,
       callbacks: {
         onTick: (tick) => prices.set(tick),
         onPrevClose: setPrevClose,
         onStatus: setStatus,
         onLoad: (state) => gate.set(state),
         onSessionClose: setClosesAt,
+        onStudies: () => setStudyVersion((n) => n + 1),
+        onDepth: (depth) => prices.setDepth(depth),
       },
     })
     setOwner(next)
@@ -239,10 +349,52 @@ function PhoneChartScreen({
   }, [owner, appMode])
 
   useEffect(() => {
+    void owner?.setStyle(style)
+  }, [owner, style])
+
+  useEffect(() => {
+    void owner?.setStudies(studies)
+  }, [owner, studies])
+
+  useEffect(() => {
+    if (owner && info) owner.setTick(info.tickSize)
+  }, [owner, info])
+
+  // Once per contract opened: the open interest the header's change runs from.
+  useEffect(() => {
+    if (!config || !hasOpenInterest(exchange)) return
+    let alive = true
+    void loadPreviousOi(config.apiKey, symbol, exchange).then((value) => {
+      if (alive) setPrevOi(value)
+    })
+    return () => {
+      alive = false
+    }
+  }, [config, symbol, exchange])
+
+  useEffect(() => {
+    if (!config) return
+    let alive = true
+    void loadIntervals(config.apiKey).then((value) => {
+      if (alive) setGroups(value)
+    })
+    return () => {
+      alive = false
+    }
+  }, [config])
+
+  // A timeframe this broker does not offer (saved on another one) gives way to one it does.
+  useEffect(() => {
+    if (!groups) return
+    const offered = offeredInterval(groups, timeframe)
+    if (offered !== timeframe) setTimeframe(offered)
+  }, [groups, timeframe])
+
+  useEffect(() => {
     if (!owner) return
     setInspect(null)
-    void owner.load(symbol, exchange, chip)
-  }, [owner, symbol, exchange, chip])
+    void owner.load(symbol, exchange, timeframe)
+  }, [owner, symbol, exchange, timeframe])
 
   // Press and hold to read a candle.
   useEffect(() => {
@@ -250,7 +402,7 @@ function PhoneChartScreen({
     if (!el || !owner) return
     const read = (x: number, y: number) => {
       const bar = owner.barAt(x)
-      if (bar) setInspect({ bar, x: owner.barX(bar), y })
+      if (bar) setInspect({ bar, x: owner.barX(bar), y, price: owner.priceAt(y) })
     }
     const press = new LongPress(el, {
       onStart: ({ x, y }) => read(x, y),
@@ -261,10 +413,71 @@ function PhoneChartScreen({
     return () => press.destroy()
   }, [owner])
 
-  const pickChip = useCallback((next: ChartChip) => {
-    setChip(next)
-    saveChip(next)
+  const pickChip = useCallback((next: string) => {
+    setTimeframe(next)
+    saveInterval(next)
   }, [])
+
+  /** Add a study to the set, unless five are there or it would make a third pane. */
+  const addStudy = useCallback(
+    (id: string) => {
+      const placementOf = (study: string): Placement =>
+        COMMON_STUDIES.find((c) => c.id === study)?.placement ??
+        owner?.studyFacts(study)?.placement ??
+        'onchart'
+      const refused = refusal(studies, placementOf(id), placementOf)
+      setStudyNotice(refused ? REFUSED[refused] : null)
+      if (refused) return
+      const next = [
+        ...studies,
+        { id, settings: id === VOLUME_MA ? { length: VOLUME_MA_LENGTH } : {} },
+      ]
+      setStudies(next)
+      saveStudies(next)
+    },
+    [owner, studies]
+  )
+
+  /** A study's settings changed (C4), or went back to its defaults (`null`): for every instrument. */
+  const changeStudy = useCallback(
+    (index: number, patch: Record<string, unknown> | null) => {
+      const entry = studies[index]
+      if (!entry) return
+      const settings =
+        patch === null
+          ? entry.id === VOLUME_MA
+            ? { length: VOLUME_MA_LENGTH }
+            : {}
+          : { ...entry.settings, ...patch }
+      const next = studies.map((e, i) => (i === index ? { id: e.id, settings } : e))
+      setStudies(next)
+      saveStudies(next)
+    },
+    [studies]
+  )
+
+  /** The pinned timeframes the broker offers, which are the chips. */
+  const chips = useMemo(
+    () => (groups ? pinned.filter((value) => groups.some((g) => g.items.includes(value))) : pinned),
+    [groups, pinned]
+  )
+
+  const flipPin = useCallback(
+    (next: string) => {
+      const result = togglePin(chips, next)
+      setPinNotice(
+        result.refused === 'full'
+          ? 'Six timeframes are pinned. Unpin one to pin another.'
+          : result.refused === 'last'
+            ? 'One timeframe stays pinned above the chart.'
+            : null
+      )
+      if (result.refused) return
+      setPinned(result.pinned)
+      savePinned(result.pinned)
+    },
+    [chips]
+  )
 
   const search = useCallback(
     (query: string, ex?: string, limit?: number) =>
@@ -364,45 +577,121 @@ function PhoneChartScreen({
   }
 
   const ordersOff = quoteOnly || !info
+  const openTicket = (side: 'BUY' | 'SELL', price?: number) =>
+    openSheet(price === undefined ? { sheet: 'ticket', side } : { sheet: 'ticket', side, price })
+  const openIndicators = () => {
+    setStudyNotice(null)
+    openSheet({ sheet: 'indicators' })
+    if (!owner) return
+    // The built-ins first, then the owner's own files, as the terminal loads them.
+    void owner.loadIndicatorTier().then(async (ready) => {
+      if (!ready) return
+      setCatalogue(owner.catalogue())
+      setScriptProblems(await owner.loadMyScripts())
+      setCatalogue(owner.catalogue())
+    })
+  }
+  const openTimeframes = () => {
+    setPinNotice(null)
+    openSheet({ sheet: 'timeframe' })
+  }
+  /** Buy or Sell at the price under the held finger, where orders can be placed (C10). */
+  const held = inspect?.price ?? null
+  const heldOrder =
+    held !== null && !ordersOff
+      ? {
+          price: formatPrice(held, dp(held)),
+          onOrder: (orderSide: 'BUY' | 'SELL') => {
+            setInspect(null)
+            openTicket(orderSide, held)
+          },
+        }
+      : null
   return (
     <Screen>
-      <AppBar
-        symbol={symbol}
-        exchange={exchange}
-        name={info?.name}
-        onBack={back}
-        onSearch={() => openSheet({ sheet: 'search' })}
-        onAlert={isCovered(exchange) ? () => openSheet({ sheet: 'alert' }) : undefined}
-      />
+      {sideways ? (
+        <SidewaysStrip
+          symbol={symbol}
+          prices={prices}
+          prevClose={prevClose}
+          status={status}
+          dp={dp}
+          timeframe={timeframe}
+          studies={studies.length}
+          style={style}
+          orders={quoteOnly ? 'none' : info ? 'on' : 'off'}
+          onBack={back}
+          onTimeframe={openTimeframes}
+          onIndicators={openIndicators}
+          onStyle={() => openSheet({ sheet: 'style' })}
+          onOrder={(orderSide) => openTicket(orderSide)}
+        />
+      ) : (
+        <>
+          <AppBar
+            symbol={symbol}
+            exchange={exchange}
+            name={info?.name}
+            onBack={back}
+            onSearch={() => openSheet({ sheet: 'search' })}
+            onAlert={isCovered(exchange) ? () => openSheet({ sheet: 'alert' }) : undefined}
+          />
 
-      <PriceHeader
-        prices={prices}
-        prevClose={prevClose}
-        status={status}
-        dp={dp}
-        traded={!quoteOnly}
-        closesAt={closesAt}
-      />
+          <PriceHeader
+            prices={prices}
+            prevClose={prevClose}
+            status={status}
+            dp={dp}
+            traded={!quoteOnly}
+            closesAt={closesAt}
+            openInterest={hasOpenInterest(exchange) ? { prev: prevOi } : null}
+          />
+          {!quoteOnly && (
+            <DepthStrip
+              prices={prices}
+              decimals={dp(prices.get().tick?.ltp ?? 0)}
+              quiet={bookQuiet(status)}
+              onOpen={() => openSheet({ sheet: 'depth' })}
+            />
+          )}
 
-      <fieldset className="flex shrink-0 gap-1 border-b bg-card px-2 py-1">
-        <legend className="sr-only">Timeframe</legend>
-        {CHART_CHIPS.map((value) => (
-          <button
-            key={value}
-            type="button"
-            aria-pressed={value === chip}
-            onClick={() => pickChip(value)}
-            className={cn(
-              'h-12 min-w-12 flex-1 rounded-full text-sm font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-              value === chip
-                ? 'bg-[color:var(--primary-tint)] text-primary shadow-[inset_0_0_0_1.5px_var(--primary)]'
-                : 'text-muted-foreground hover:bg-accent'
-            )}
+          <TimeframeRow
+            chips={chips}
+            current={timeframe}
+            onPick={pickChip}
+            onMore={openTimeframes}
+          />
+
+          <div
+            className="flex shrink-0 gap-1 border-b bg-card px-1 py-0.5"
+            data-testid="chart-tools"
           >
-            {value}
-          </button>
-        ))}
-      </fieldset>
+            <button
+              type="button"
+              onClick={openIndicators}
+              className="inline-flex h-12 min-w-12 items-center gap-1.5 rounded-full px-3 text-sm font-semibold hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <ChromeIcon id="indicators" size={18} className="shrink-0" />
+              Indicators{' '}
+              {studies.length > 0 && (
+                <span className="rounded-full bg-[color:var(--primary-tint)] px-1.5 text-xs font-bold text-primary">
+                  {studies.length} <span className="sr-only">on the chart</span>
+                </span>
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={() => openSheet({ sheet: 'style' })}
+              aria-label={`Chart style: ${styleOf(style).label}`}
+              className="inline-flex h-12 min-w-12 items-center gap-1.5 rounded-full px-3 text-sm font-semibold hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <ChromeIcon id={styleOf(style).glyph} size={18} className="shrink-0" />
+              {styleOf(style).label}
+              <ChevronDown aria-hidden="true" className="size-3.5 shrink-0" />
+            </button>
+          </div>
+        </>
+      )}
 
       <div
         ref={surface}
@@ -410,83 +699,118 @@ function PhoneChartScreen({
         data-testid="chart-surface"
       >
         <div ref={host} className="absolute inset-0" />
-        {inspect && <Crosshair x={inspect.x} y={inspect.y} />}
+        {owner && studies.length > 0 && (
+          <StudyLegend
+            owner={owner}
+            prices={prices}
+            heldTime={inspect?.bar.time ?? null}
+            below={inspect ? (heldOrder ? READOUT_WITH_ORDERS : READOUT) : 0}
+          />
+        )}
+        {inspect && (
+          <Crosshair
+            x={inspect.x}
+            y={inspect.y}
+            price={held === null ? null : formatPrice(held, dp(held))}
+          />
+        )}
         {inspect && (
           <Readout
             bar={inspect.bar}
             dp={dp(inspect.bar.close)}
-            interval={chip}
+            interval={timeframe}
             volume={!quoteOnly}
+            order={heldOrder}
             onClose={() => setInspect(null)}
           />
         )}
         <LoadState
           view={load}
-          onRetry={() => void owner?.load(symbol, exchange, chip)}
+          onRetry={() => void owner?.load(symbol, exchange, timeframe)}
           onDismiss={() => setLoad(null)}
         />
       </div>
 
-      <footer className="shrink-0 border-t bg-card px-3 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
-        <div className="flex min-h-12 items-center justify-between gap-3">
-          {wake.supported ? (
-            <label className="flex min-h-12 items-center gap-2 text-sm font-medium">
-              <SunMedium aria-hidden="true" className="size-4 text-muted-foreground" />
-              Keep screen on
-              <Switch checked={wake.on} onCheckedChange={wake.setOn} />
-            </label>
-          ) : (
-            <span />
+      {!sideways && (
+        <footer className="shrink-0 border-t bg-card px-3 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
+          <div className="flex min-h-12 items-center justify-between gap-3">
+            {wake.supported ? (
+              <label className="flex min-h-12 items-center gap-2 text-sm font-medium">
+                <SunMedium aria-hidden="true" className="size-4 text-muted-foreground" />
+                Keep screen on
+                <Switch
+                  checked={wake.on}
+                  onCheckedChange={wake.setOn}
+                  aria-describedby={wake.refused ? 'chart-wake-refused' : undefined}
+                />
+              </label>
+            ) : (
+              <span />
+            )}
+            <Link
+              to={chartHref(symbol, exchange)}
+              className="inline-flex min-h-12 items-center text-sm font-semibold text-primary underline-offset-4 hover:underline"
+            >
+              Open in full terminal
+            </Link>
+          </div>
+          {wake.refused && (
+            <output
+              id="chart-wake-refused"
+              className="block pb-2 text-xs font-medium text-[color:var(--warning-text)]"
+            >
+              The phone would not keep the screen on. If battery saver is on, turn it off, then
+              switch this on again.
+            </output>
           )}
-          <Link
-            to={chartHref(symbol, exchange)}
-            className="inline-flex min-h-12 items-center text-sm font-semibold text-primary underline-offset-4 hover:underline"
-          >
-            Open in full terminal
-          </Link>
-        </div>
-        <div className="grid grid-cols-2 gap-2">
-          <button
-            type="button"
-            disabled={ordersOff}
-            onClick={() => openSheet({ sheet: 'ticket', side: 'BUY' })}
-            className="h-12 rounded-xl bg-[color:var(--buy-solid)] text-base font-bold tracking-[0.06em] text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-45"
-          >
-            BUY
-          </button>
-          <button
-            type="button"
-            disabled={ordersOff}
-            onClick={() => openSheet({ sheet: 'ticket', side: 'SELL' })}
-            className="h-12 rounded-xl bg-[color:var(--sell-solid)] text-base font-bold tracking-[0.06em] text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-45"
-          >
-            SELL
-          </button>
-        </div>
-        {quoteOnly ? (
-          <p className="mt-1 text-center text-xs font-medium text-muted-foreground">
-            An index is not traded. Open its future or an option to place an order.
-          </p>
-        ) : info === null ? (
-          <p className="mt-1 text-center text-xs font-medium text-muted-foreground">
-            The contract details did not load, so ordering is off here. Open the chart again to
-            retry.
-          </p>
-        ) : null}
-      </footer>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              disabled={ordersOff}
+              onClick={() => openTicket('BUY')}
+              className="h-12 rounded-xl bg-[color:var(--buy-solid)] text-base font-bold tracking-[0.06em] text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-45"
+            >
+              BUY
+            </button>
+            <button
+              type="button"
+              disabled={ordersOff}
+              onClick={() => openTicket('SELL')}
+              className="h-12 rounded-xl bg-[color:var(--sell-solid)] text-base font-bold tracking-[0.06em] text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-45"
+            >
+              SELL
+            </button>
+          </div>
+          {quoteOnly ? (
+            <p className="mt-1 text-center text-xs font-medium text-muted-foreground">
+              An index is not traded. Open its future or an option to place an order.
+            </p>
+          ) : info === null ? (
+            <p className="mt-1 text-center text-xs font-medium text-muted-foreground">
+              The contract details did not load, so ordering is off here. Open the chart again to
+              retry.
+            </p>
+          ) : null}
+        </footer>
+      )}
 
-      {info && (
+      {/* Mounted while open only: closed, it would still draw with every change
+          to the app's market data context. */}
+      {info && side !== null && (
         <PlaceOrderDialog
-          open={side !== null}
+          open
           onOpenChange={(open) => !open && closeSheet()}
           symbol={symbol}
           exchange={exchange}
-          action={side ?? 'BUY'}
+          action={side}
           lotSize={info.lotSize}
           tickSize={info.tickSize}
           // The product picked for this segment on this phone (M8.2), MIS
           // until one is: the owner trades intraday.
           product={ticketProduct(exchange) ?? 'MIS'}
+          // From a candle reading: a limit at the price held (C10); the product rule is the same.
+          priceType={heldPrice === undefined ? undefined : 'LIMIT'}
+          price={heldPrice}
           strategy={STRATEGY}
         />
       )}
@@ -505,6 +829,70 @@ function PhoneChartScreen({
           }}
         />
       )}
+      <IndicatorSheet
+        open={sheet?.sheet === 'indicators'}
+        onOpenChange={(open) => !open && closeSheet()}
+        set={studies}
+        rows={(owner?.legendRows() ?? []).map((row) => ({
+          name: `${row.title} ${row.params}`.trim(),
+          note: row.note,
+        }))}
+        derivative={hasOpenInterest(exchange)}
+        notice={studyNotice}
+        catalogue={catalogue}
+        problems={scriptProblems}
+        onSettings={(index) =>
+          // Over the indicator sheet, so Back returns to it.
+          navigate(location.pathname + location.search, { state: { sheet: 'study', index } })
+        }
+        onAdd={addStudy}
+        onRemove={(index) => {
+          setStudyNotice(null)
+          const next = studies.filter((_, i) => i !== index)
+          setStudies(next)
+          saveStudies(next)
+        }}
+      />
+      <IndicatorSettingsSheet
+        open={sheet?.sheet === 'study'}
+        onOpenChange={(open) => !open && closeSheet()}
+        form={sheet?.sheet === 'study' ? (owner?.studyForm(sheet.index) ?? null) : null}
+        intervals={(groups ?? []).flatMap((g) =>
+          g.items.map((item) => ({ label: intervalLabel(item), value: item }))
+        )}
+        onChange={(patch) => sheet?.sheet === 'study' && changeStudy(sheet.index, patch)}
+        onDefaults={() => sheet?.sheet === 'study' && changeStudy(sheet.index, null)}
+      />
+      <DepthSheet
+        open={sheet?.sheet === 'depth'}
+        onOpenChange={(open) => !open && closeSheet()}
+        prices={prices}
+        decimals={dp(prices.get().tick?.ltp ?? 0)}
+        quiet={bookQuiet(status)}
+      />
+      <StyleSheet
+        open={sheet?.sheet === 'style'}
+        onOpenChange={(open) => !open && closeSheet()}
+        current={style}
+        onPick={(next) => {
+          setStyle(next)
+          saveStyle(next)
+          closeSheet()
+        }}
+      />
+      <TimeframeSheet
+        open={sheet?.sheet === 'timeframe'}
+        onOpenChange={(open) => !open && closeSheet()}
+        groups={groups}
+        current={timeframe}
+        pinned={chips}
+        notice={pinNotice}
+        onPick={(next) => {
+          pickChip(next)
+          closeSheet()
+        }}
+        onTogglePin={flipPin}
+      />
       <SymbolSearchDialog
         open={searching}
         onOpenChange={(open) => !open && closeSheet()}
@@ -521,6 +909,59 @@ function PhoneChartScreen({
         }}
       />
     </Screen>
+  )
+})
+
+/**
+ * The pinned timeframes and, last, More: every timeframe the broker offers,
+ * in a sheet. A timeframe picked there that is not pinned takes More's place,
+ * shown as chosen, so the row always says what the chart shows. Seven at
+ * most, each 48 dp wide, fit a 360 px phone.
+ */
+function TimeframeRow({
+  chips,
+  current,
+  onPick,
+  onMore,
+}: {
+  chips: readonly string[]
+  current: string
+  onPick(interval: string): void
+  onMore(): void
+}) {
+  const elsewhere = !chips.includes(current)
+  const chip = (pressed: boolean) =>
+    cn(
+      'h-12 min-w-12 flex-1 rounded-full text-sm font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+      pressed
+        ? 'bg-[color:var(--primary-tint)] text-primary shadow-[inset_0_0_0_1.5px_var(--primary)]'
+        : 'text-muted-foreground hover:bg-accent'
+    )
+  return (
+    <fieldset className="flex shrink-0 gap-0.5 border-b bg-card px-1 py-1">
+      <legend className="sr-only">Timeframe</legend>
+      {chips.map((value) => (
+        <button
+          key={value}
+          type="button"
+          aria-pressed={value === current}
+          onClick={() => onPick(value)}
+          className={chip(value === current)}
+        >
+          {intervalLabel(value)}
+        </button>
+      ))}
+      <button
+        type="button"
+        aria-pressed={elsewhere}
+        aria-label={elsewhere ? `${intervalLabel(current)}, more timeframes` : 'More timeframes'}
+        onClick={onMore}
+        className={cn(chip(elsewhere), 'inline-flex items-center justify-center gap-0.5')}
+      >
+        {elsewhere ? intervalLabel(current) : 'More'}
+        <ChevronDown aria-hidden="true" className="size-3 shrink-0" />
+      </button>
+    </fieldset>
   )
 }
 
@@ -618,6 +1059,7 @@ function PriceHeader({
   dp,
   traded,
   closesAt,
+  openInterest,
 }: {
   prices: PriceStore
   prevClose: number | null
@@ -627,19 +1069,16 @@ function PriceHeader({
   traded: boolean
   /** The session's close, while the forming bar would run past it. */
   closesAt: number | null
+  /** On a contract: its open interest, with the change since yesterday's close (C9). */
+  openInterest: { prev: number | null } | null
 }) {
-  const { tick, streamed } = useSyncExternalStore(prices.subscribe, prices.get)
+  const { tick, streamed, oi } = useSyncExternalStore(prices.subscribe, prices.get)
   const now = useNow()
   const ltp = tick?.ltp ?? null
   const decimals = dp(ltp ?? 0)
-  const change = ltp !== null && prevClose !== null ? ltp - prevClose : null
-  const percent = change !== null && prevClose ? (change / prevClose) * 100 : null
-  const direction = change === null ? 'flat' : directionOf(change, decimals)
+  const { change, percent, direction } = changeOn(ltp, prevClose, decimals)
   const line = status?.line
-  const quiet =
-    line?.kind === 'polling' ||
-    line?.kind === 'connecting' ||
-    (line?.kind === 'delayed' && line.stale)
+  const quiet = priceQuiet(status)
   return (
     <section aria-label="Price" className="shrink-0 border-b bg-card px-4 pt-2 pb-2">
       {/* Wraps the chip under a price too wide to share the row with it. */}
@@ -691,12 +1130,75 @@ function PriceHeader({
           )}
         </p>
       </div>
+      {openInterest && <OpenInterestLine oi={oi} prev={openInterest.prev} quiet={quiet} />}
     </section>
   )
 }
 
-/** Hair lines through the candle being read and the finger's height. */
-function Crosshair({ x, y }: { x: number | null; y: number }) {
+/**
+ * A contract's open interest (C9) and its change since yesterday's close,
+ * with an arrow and a sign; said in words where either is not known yet.
+ */
+function OpenInterestLine({
+  oi,
+  prev,
+  quiet,
+}: {
+  oi: number | null
+  prev: number | null
+  quiet: boolean
+}) {
+  const change = oi !== null && prev !== null ? oi - prev : null
+  const direction = change === null || change === 0 ? 'flat' : change > 0 ? 'up' : 'down'
+  const sign = change === null || change === 0 ? '' : change > 0 ? '+' : '−'
+  return (
+    <p
+      className={cn(
+        'mt-1 flex items-center gap-1.5 text-xs font-semibold',
+        quiet && 'text-muted-foreground'
+      )}
+      data-testid="chart-oi"
+    >
+      <span className="text-[color:var(--text-tertiary)]">OI</span>
+      {oi === null ? (
+        <span className="font-medium text-muted-foreground">waiting for the first tick</span>
+      ) : (
+        <>
+          <span className="tabular-nums">{compact.format(oi)}</span>
+          {change === null ? (
+            <span className="font-medium text-muted-foreground">change not available</span>
+          ) : (
+            <span
+              className={cn('inline-flex items-center gap-1 tabular-nums', TREND_TEXT[direction])}
+            >
+              <TrendArrow direction={direction} className="size-2" />
+              {sign}
+              {compact.format(Math.abs(change))}
+              <span className="font-medium text-[color:var(--text-tertiary)]">since yesterday</span>
+            </span>
+          )}
+        </>
+      )}
+    </p>
+  )
+}
+
+/** Why the book is not current, in words, or null while it is (C9). */
+function bookQuiet(status: LiveStatus | null): string | null {
+  const line = status?.line
+  if (!line) return null
+  if (line.kind === 'closed') return 'Market closed: the book as the session left it.'
+  if (line.kind === 'connecting') return 'Reconnecting: the book is not current.'
+  if (line.kind === 'polling' || (line.kind === 'delayed' && line.stale))
+    return 'Delayed: the book is not current.'
+  return null
+}
+
+/**
+ * Hair lines through the candle being read and the finger's height, with the
+ * price at that height on the price axis, where the candles' pane has one (C10).
+ */
+function Crosshair({ x, y, price }: { x: number | null; y: number; price: string | null }) {
   return (
     <div aria-hidden="true" className="pointer-events-none absolute inset-0 z-[5]">
       {x !== null && (
@@ -709,26 +1211,50 @@ function Crosshair({ x, y }: { x: number | null; y: number }) {
         className="absolute right-0 left-0 h-px bg-[color:var(--text-tertiary)]"
         style={{ top: y }}
       />
+      {price !== null && (
+        <span
+          className="absolute right-0 -translate-y-1/2 rounded-sm bg-[color:var(--text-primary)] px-1 py-0.5 text-[0.6875rem] leading-none font-semibold text-white tabular-nums"
+          style={{ top: y }}
+          data-testid="chart-held-price"
+        >
+          {price}
+        </span>
+      )}
     </div>
   )
 }
 
-/** The candle under a held finger: when, O H L C, and V where it trades. */
+/** The reading's height, which the study legend moves below: with Buy and Sell at the held price, more. */
+const READOUT = 88
+const READOUT_WITH_ORDERS = READOUT + 52
+
+/**
+ * The candle under a held finger: when, O H L C, and V where it trades; and,
+ * where orders can be placed, Buy and Sell at the price at the finger's
+ * height, each opening the order ticket with that price as a limit (C10).
+ *
+ * It appears under the finger that held, and a finger lifted soon after the
+ * hold is a tap to the browser, landing on whatever is there now: for its
+ * first half second the reading takes no tap (`useOpenGuard`), as a sheet does.
+ */
 function Readout({
   bar,
   dp,
   interval,
   volume,
+  order,
   onClose,
 }: {
   bar: Bar
   dp: number
-  interval: ChartChip
+  interval: string
   volume: boolean
+  /** The held price, written at the instrument's decimals; null where no order can be placed. */
+  order: { price: string; onOrder(side: 'BUY' | 'SELL'): void } | null
   onClose(): void
 }) {
   const at = new Date(bar.time * 1000)
-  const stamp = interval === '1D' ? barDay.format(at) : barStamp.format(at)
+  const stamp = isCalendarInterval(interval) ? barDay.format(at) : barStamp.format(at)
   const cells: Array<[string, string]> = [
     ['O', formatPrice(bar.open, dp)],
     ['H', formatPrice(bar.high, dp)],
@@ -736,10 +1262,18 @@ function Readout({
     ['C', formatPrice(bar.close, dp)],
   ]
   if (volume) cells.push(['V', typeof bar.volume === 'number' ? compact.format(bar.volume) : '—'])
+  const guard = useOpenGuard(true)
   return (
     <div
-      className="absolute top-2 right-2 left-2 z-10 rounded-xl border bg-card py-1 pr-1 pl-3 shadow-[var(--shadow-raised)]"
+      // On a wide or sideways screen, a card at the left that leaves the latest candles in view.
+      className="absolute top-2 right-2 left-2 z-10 rounded-xl border bg-card py-1 pr-1 pl-3 shadow-[var(--shadow-raised)] sm:right-auto sm:w-[28rem]"
       data-testid="chart-readout"
+      // A touch on the reading is its own, not the chart's (longPress OVER_CHART): its taps land.
+      data-over-chart=""
+      data-settling={guard.settling || undefined}
+      onPointerDownCapture={guard.handlers.onPointerDownCapture}
+      onClickCapture={guard.handlers.onClickCapture}
+      onKeyDownCapture={guard.handlers.onKeyDownCapture}
     >
       <div className="flex items-center justify-between">
         <span className="text-xs font-semibold text-muted-foreground">{stamp}</span>
@@ -765,6 +1299,24 @@ function Readout({
           </div>
         ))}
       </dl>
+      {order && (
+        <div className="grid grid-cols-2 gap-2 pr-2 pb-1">
+          <button
+            type="button"
+            onClick={() => order.onOrder('BUY')}
+            className="h-12 rounded-xl border-2 border-[color:var(--buy-solid)] px-2 text-sm font-bold text-[color:var(--buy-solid)] tabular-nums focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            Buy at {order.price}
+          </button>
+          <button
+            type="button"
+            onClick={() => order.onOrder('SELL')}
+            className="h-12 rounded-xl border-2 border-[color:var(--sell-solid)] px-2 text-sm font-bold text-[color:var(--sell-solid)] tabular-nums focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            Sell at {order.price}
+          </button>
+        </div>
+      )}
     </div>
   )
 }

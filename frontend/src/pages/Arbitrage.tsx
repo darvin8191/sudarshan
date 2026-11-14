@@ -414,7 +414,10 @@ export default function Arbitrage() {
 
   const connBadge = () => {
     if (conn.isFallbackMode) return <Badge variant="secondary">REST fallback (after-hours)</Badge>
-    if (conn.isAuthenticated) return <Badge className="bg-emerald-600 text-white">Live</Badge>
+    // SUDARSHAN T3b (M1.18): connected, not "Live", which names the trading mode;
+    // each row's mark says whether its ticks are arriving.
+    if (conn.isAuthenticated)
+      return <Badge className="bg-[color:var(--up-tint)] text-[color:var(--up)]">Connected</Badge>
     if (conn.isConnected) return <Badge variant="secondary">Authenticating…</Badge>
     return <Badge variant="outline">Connecting…</Badge>
   }
@@ -548,22 +551,24 @@ export default function Arbitrage() {
                 ) : (
                   visibleRows.map((row, idx) => {
                     const pctColor =
-                      row.spreadPct == null
+                      row.spreadPct == null || row.spreadPct === 0
                         ? ''
                         : row.spreadPct > 0
-                          ? 'text-emerald-600'
-                          : 'text-red-600'
+                          ? 'text-[color:var(--up)]'
+                          : 'text-[color:var(--down)]'
                     return (
                       <TableRow key={row.pair.id}>
                         <TableCell className="text-muted-foreground">{idx + 1}</TableCell>
                         <TableCell className="font-medium">
                           <div className="flex items-center gap-1.5">
                             <span
+                              aria-hidden="true"
                               className={`inline-block h-2 w-2 rounded-full ${
-                                row.fresh ? 'bg-emerald-500' : 'bg-muted-foreground/40'
+                                row.fresh ? 'bg-[color:var(--up)]' : 'bg-muted-foreground/40'
                               }`}
-                              title={row.fresh ? 'Live' : 'Stale / no recent tick'}
+                              title={row.fresh ? 'Real-time' : 'Stale / no recent tick'}
                             />
+                            <span className="sr-only">{row.fresh ? 'Real-time, ' : 'Stale, '}</span>
                             {row.pair.underlying}
                           </div>
                         </TableCell>
@@ -587,7 +592,9 @@ export default function Arbitrage() {
                           {fmt(row.bestCredit)}
                         </TableCell>
                         <TableCell className={`text-right tabular-nums font-semibold ${pctColor}`}>
-                          {row.spreadPct == null ? '—' : `${row.spreadPct.toFixed(2)}%`}
+                          {row.spreadPct == null
+                            ? '—'
+                            : `${row.spreadPct > 0 ? '+' : ''}${row.spreadPct.toFixed(2)}%`}
                         </TableCell>
                         <TableCell className="text-xs">
                           {row.direction ? directionLabel(row.direction) : '—'}
