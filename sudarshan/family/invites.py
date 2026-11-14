@@ -6,6 +6,11 @@ on, and a TOTP secret made now and sealed with the store key. The owner copies o
 invite: a new one revokes the one before (audited). An invite works once: joining marks it used in
 the same transaction that makes the member's credential and first session.
 
+Opening the link hands out the code app's key (``join_info``), so the first look at it is stamped
+and audited (``invite_opened``, with the device and the keyed hash of the address), and the owner's
+card says "Link opened at 18:02" (review L8): a link opened before the member says they opened it
+is the owner's cue to cancel it. Its one use and two hours stay as they are.
+
 The code is never kept, so a create the owner's bridge retries (the same ``request_id``) gets the
 same link back only from this process's memory (``InviteCodes``, a few entries, each dropped when
 its invite ends); after a restart a retry makes a new link, which revokes the first.
@@ -19,6 +24,8 @@ import hashlib
 import secrets
 import threading
 from typing import Any
+
+from sqlalchemy import update
 
 from . import audit
 from .contract import LIMITS
@@ -140,11 +147,27 @@ def mark_used(tx: Tx, invite_id: int, now: int) -> None:
     tx.update("invite", {"id": invite_id}, {"used_at": now})
 
 
-def open_end(tx: Tx, member_id: int, now: int) -> int | None:
-    """When the member's unused invite ends, while it lasts; None when there is none."""
+def mark_opened(tx: Tx, invite: dict[str, Any], now: int, place: str | None = None,
+                label: str | None = None) -> bool:  # fmt: skip
+    """Stamp the first look at an invite's link and audit it; False when it was opened before.
+    One compare-and-set, so two looks at once stamp and audit one of them."""
+    t = tx.t("invite")
+    done = tx.conn.execute(
+        update(t).where(t.c.id == invite["id"], t.c.opened_at.is_(None)).values(opened_at=now)
+    )
+    if not done.rowcount:
+        return False
+    audit.record(tx, at=now, actor=audit.SYSTEM, kind="invite_opened",
+                 member_id=invite["member_id"], ip_hash=place,
+                 detail={"invite": invite["id"], "device": label})  # fmt: skip
+    return True
+
+
+def open_row(tx: Tx, member_id: int, now: int) -> dict[str, Any] | None:
+    """The member's unused invite while it lasts; None when there is none."""
     t = tx.t("invite")
     found = tx.conn.execute(
         t.select().where(t.c.member_id == member_id, t.c.used_at.is_(None),
                          t.c.revoked_at.is_(None), t.c.expires_at > now)
     ).mappings().first()  # fmt: skip
-    return int(found["expires_at"]) if found is not None else None
+    return dict(found) if found is not None else None

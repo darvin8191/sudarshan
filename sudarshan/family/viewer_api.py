@@ -200,7 +200,7 @@ class ViewerApi:
         return Response.ok(me_of(outcome.session), cookies)  # type: ignore[arg-type]
 
     async def _join_info(self, request: Request, args: dict, session: Any) -> Response:
-        return Response.ok(await self.accounts.join_info(args.get("code")))
+        return Response.ok(await self.accounts.join_info(args.get("code"), self._device(request)))
 
     async def _join(self, request: Request, args: dict, session: Any) -> Response:
         outcome = await self.accounts.join(args.get("code"), args.get("handle"),

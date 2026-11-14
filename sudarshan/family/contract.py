@@ -149,6 +149,7 @@ AUDIT_KINDS = (
     "session_revoked",
     "session_expired",
     "invite_created",
+    "invite_opened",
     "invite_used",
     "invite_revoked",
     "member_created",
@@ -298,8 +299,8 @@ RECORDS = {
     # ---- the owner's admin ops (sealed) ----
     "MemberCard": "id:int, handle:string|null, display_name:string, role:Role, "
     "status:MemberStatus, privacy:Privacy, language:Language, devices:int, "
-    "last_seen_at:int|null, invite_expires_at:int|null, locked_until:int|null, "
-    "telegram_linked:bool, created_at:int, version:int",
+    "last_seen_at:int|null, invite_expires_at:int|null, invite_opened_at:int|null, "
+    "locked_until:int|null, telegram_linked:bool, created_at:int, version:int",
     "Invite": "member_id:int, code:string, path:string, expires_at:int",
     "AuditLine": "id:int, at:int, actor:string, member_id:int|null, kind:AuditKind, "
     "device:string|null, place:string|null, detail:json",

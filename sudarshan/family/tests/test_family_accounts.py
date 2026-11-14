@@ -334,6 +334,37 @@ def test_joining_checks_the_name_the_password_and_the_code(rig):
     assert kinds[-2:] == ["invite_used", "login_ok"]
 
 
+def test_the_first_look_at_a_link_is_audited_and_the_owner_sees_when(rig):
+    """Review L8: opening the link hands out the code app's key, so the first look is stamped and
+    audited with the device, and the owner's card says when; one use and two hours stay."""
+    card = rig.run(rig.acc.member_create({"display_name": "Member A", "role": "viewer"}))
+    invite = rig.run(rig.acc.invite_create({"member_id": card["id"]}))
+    assert rig.run(rig.acc.member_list())[0]["invite_opened_at"] is None
+    rig.clock.step(60_000)
+    opened_at = rig.clock.at
+
+    async def two_looks():
+        return await asyncio.gather(rig.acc.join_info(invite["code"], PHONE),
+                                    rig.acc.join_info(invite["code"], OTHER_PHONE))  # fmt: skip
+
+    first, second = rig.run(two_looks())
+    assert first["totp_key"] == second["totp_key"]
+    rig.clock.step(60_000)
+    rig.run(rig.acc.join_info(invite["code"], OTHER_PHONE))
+    lines = rig.rows("audit", kind="invite_opened")
+    assert len(lines) == 1 and lines[0]["member_id"] == card["id"]
+    assert lines[0]["detail"]["device"] == PHONE.label and lines[0]["ip_hash"] == PHONE.place
+    shown = rig.run(rig.acc.member_list())[0]
+    assert shown["invite_opened_at"] == opened_at and shown["status"] == "invited"
+    again = rig.run(rig.acc.invite_create({"member_id": card["id"]}))  # a new link: not opened
+    assert rig.run(rig.acc.member_list())[0]["invite_opened_at"] is None
+    secret = rig.run(rig.acc.join_info(again["code"], PHONE))["totp_key"]
+    rig.run(rig.acc.join(again["code"], "member_a", PASSWORD, rig.code(secret), PHONE))
+    assert rig.run(rig.acc.member_list())[0]["invite_opened_at"] is None  # no open invite
+    rig.clock.at = again["expires_at"] + 1
+    assert rig.refused(rig.acc.join_info(again["code"])).code == "invite_gone"
+
+
 def test_an_invite_for_a_member_who_joined_is_refused(rig):
     card, _, _ = rig.joined()
     refused = rig.refused(rig.acc.invite_create({"member_id": card["id"]}))

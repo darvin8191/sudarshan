@@ -93,6 +93,7 @@ export type AuditKind =
   | 'session_revoked'
   | 'session_expired'
   | 'invite_created'
+  | 'invite_opened'
   | 'invite_used'
   | 'invite_revoked'
   | 'member_created'
@@ -405,6 +406,7 @@ export interface MemberCard {
   devices: number
   last_seen_at: number | null
   invite_expires_at: number | null
+  invite_opened_at: number | null
   locked_until: number | null
   telegram_linked: boolean
   created_at: number

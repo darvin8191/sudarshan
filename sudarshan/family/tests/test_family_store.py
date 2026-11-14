@@ -108,6 +108,8 @@ def test_a_populated_v1_file_gets_step_2_and_keeps_every_row(folder):
                     "created_at, last_seen_at, absolute_expires_at, idle_expires_at) "
                     "VALUES ('ab', 1, 'Phone', 'Phone', 1, 1, 9, 9)")  # fmt: skip
         con.execute("INSERT INTO audit (at, actor, kind) VALUES (5, 'owner', 'member_created')")
+        con.execute("INSERT INTO invite (member_id, code_hash, totp_secret_enc, expires_at, "
+                    "created_at) VALUES (1, 'h', 's', 9, 1)")  # fmt: skip
         con.execute("PRAGMA user_version = 1")
     finally:
         con.close()
@@ -116,9 +118,11 @@ def test_a_populated_v1_file_gets_step_2_and_keeps_every_row(folder):
         assert again.applied == [2]
         found = again.read_now(lambda tx: (tx.count("member"), tx.count("audit"),
                                            tx.count("signin_lock"), tx.user_version(),
-                                           tx.row("viewer_session", id_hash="ab")))  # fmt: skip
+                                           tx.row("viewer_session", id_hash="ab"),
+                                           tx.row("invite", code_hash="h")))  # fmt: skip
         assert found[:4] == (1, 1, 0, 2)
         assert found[4]["area_hash"] is None and found[4]["device_label"] == "Phone"
+        assert found[5]["opened_at"] is None and found[5]["expires_at"] == 9  # review L8
     finally:
         close(again)
     twice = FamilyStore(path, secrets())

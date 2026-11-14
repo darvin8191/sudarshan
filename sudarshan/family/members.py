@@ -65,6 +65,7 @@ def card(tx: Tx, member: dict[str, Any], now: int) -> dict[str, Any]:
     """A member as the owner's page shows them (the contract's ``MemberCard``)."""
     live_sessions = tx.sessions_live(member["id"], now)
     link = tx.row("telegram_link", member_id=member["id"])
+    invite = invites.open_row(tx, member["id"], now)
     return {
         "id": member["id"],
         "handle": member["handle"],
@@ -75,7 +76,9 @@ def card(tx: Tx, member: dict[str, Any], now: int) -> dict[str, Any]:
         "language": member["language"],
         "devices": len(live_sessions),
         "last_seen_at": max((s["last_seen_at"] for s in live_sessions), default=None),
-        "invite_expires_at": invites.open_end(tx, member["id"], now),
+        "invite_expires_at": invite["expires_at"] if invite else None,
+        # When the open invite's link was first opened (review L8): the code app's key went out.
+        "invite_opened_at": invite["opened_at"] if invite else None,
         # Sign-ins from phones the member has not used, held back by wrong attempts (lockout.py).
         "locked_until": lockout.name_locked_until(tx, member["handle"], now),
         "telegram_linked": bool(link and link.get("chat_id_enc")),

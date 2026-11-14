@@ -15,6 +15,7 @@ V2 (review M2): ``signin_lock``, the counts of wrong sign-ins by the keyed hash 
 The credential's ``failed_count``, ``locked_until`` and ``lock_level`` of V1 are no longer read or
 written. ``viewer_session.area_hash`` (review L3): the keyed hash of the network area a session
 signed in from, which the "new phone" notice compares; rows from before it have none.
+``invite.opened_at`` (review L8): when the link was first opened, which the owner's card shows.
 
 V1 holds every table of the design (4.2), with three additions: ``audit.member_id`` (the member a
 line is about, so the owner's filter by member is exact whoever acted), ``viewer_session.
@@ -208,6 +209,7 @@ def step_2(conn: Connection) -> None:
     for sql in V2:
         conn.exec_driver_sql(sql)
     add_column(conn, "viewer_session", "area_hash", "TEXT")
+    add_column(conn, "invite", "opened_at", "INTEGER")
 
 
 Step = tuple[int, Callable[[Connection], None]]

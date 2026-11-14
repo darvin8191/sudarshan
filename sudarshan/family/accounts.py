@@ -396,11 +396,15 @@ class Accounts:
         outcome.phone = _phone_cookie(tx, device, member_id, credential["password_changed_at"], now)
         return outcome
 
-    async def join_info(self, code: Any) -> dict[str, Any]:
+    async def join_info(self, code: Any, device: Device | None = None) -> dict[str, Any]:
+        """What the join page shows, the code app's key among it: the first look at a link is
+        stamped and audited (review L8), so this is a write."""
         now = self.clock()
 
         def read(tx: Tx) -> dict[str, Any]:
             invite, member = invites.usable(tx, code, now)
+            place, label = (device.place, device.label) if device else (None, None)
+            invites.mark_opened(tx, invite, now, place, label)
             secret = tx.secrets.open(invite["totp_secret_enc"])  # type: ignore[union-attr]
             return {
                 "display_name": member["display_name"],
@@ -410,7 +414,7 @@ class Accounts:
                 "rules": {k: LIMITS[k] for k in ("handle_min", "handle_max", "password_min")},
             }
 
-        return await self.store.read(read)
+        return await self.store.write(read)
 
     async def join(self, code: Any, handle: Any, password: Any, totp: Any,
                    device: Device) -> Outcome:  # fmt: skip

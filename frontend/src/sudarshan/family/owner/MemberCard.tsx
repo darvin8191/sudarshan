@@ -9,6 +9,7 @@ import {
   CirclePause,
   Clock,
   Eye,
+  Link2,
   Lock,
   Send,
   Smartphone,
@@ -19,6 +20,7 @@ import { Chip } from './parts'
 import {
   devicesLine,
   lastSeenLine,
+  openedLine,
   privacyLine,
   ROLE_WORDS,
   type StatusKind,
@@ -51,6 +53,7 @@ export function MemberCard({
 }) {
   const status = statusOf(card, now)
   const role = ROLE_WORDS[card.role]
+  const opened = openedLine(card)
   return (
     <button
       type="button"
@@ -82,6 +85,12 @@ export function MemberCard({
           {status.label}
         </Chip>
       </span>
+      {opened ? (
+        <span className="inline-flex items-center gap-1 text-[0.875rem] font-semibold text-[color:var(--text-secondary)]">
+          <Link2 aria-hidden="true" className="size-3.5" />
+          {opened}
+        </span>
+      ) : null}
       <span className="text-[0.875rem] text-[color:var(--text-secondary)]">
         {privacyLine(card.privacy)}
       </span>
