@@ -327,6 +327,135 @@ def test_each_class_has_its_timeout(name, cls, key):
     assert bp_module._timeout_for(spec) == float(kinds.TIMEOUTS_S[key])
 
 
+# -- the owner's sharing ops (M7.37; cross-design Y6) --------------------------------------------
+
+SHOWN = {"pnl": False, "qty": True, "funds": False, "orders": True}
+SHARING_CALLS = (
+    ("shares_list", "GET", "/family/shares?tab_id=4&viewer=12", None),
+    ("share_set", "PUT", "/family/shares",
+     {"tab_id": 4, "viewer": "12", "level": "view", "expires_at": None, "version": None}),
+    ("share_remove", "DELETE", "/family/shares", {"tab_id": 4, "viewer": "12", "version": 2}),
+    ("member_privacy_set", "PUT", "/family/privacy",
+     {"member": "12", "role": "viewer", "shown": SHOWN, "version": None}),
+)  # fmt: skip
+
+
+class Recording:
+    """The bridge's httpx client, keeping what each request carried."""
+
+    def __init__(self, client):
+        self.client, self.sent = client, []
+
+    def post(self, url, **kwargs):
+        self.sent.append((url.rpartition("/")[2], kwargs["content"]))
+        return self.client.post(url, **kwargs)
+
+
+def test_the_sharing_ops_are_routes_of_the_one_table_and_none_is_the_familys():
+    assert set(kinds.SHARING_OPS) <= set(kinds.OP_NAMES)
+    assert not set(kinds.SHARING_OPS) & set(kinds.FAMILY_OPS)
+    routes = {spec.name: (spec.method, spec.route, spec.cls) for spec in kinds.OPS}
+    assert [routes[name] for name, *_ in SHARING_CALLS] == [
+        ("GET", "/family/shares", "read"), ("PUT", "/family/shares", "write"),
+        ("DELETE", "/family/shares", "write"), ("PUT", "/family/privacy", "write"),
+    ]  # fmt: skip
+
+
+def test_the_bridge_holds_no_key_of_the_family_purpose():
+    source = (REPO / "blueprints" / "sudarshan_portfolio.py").read_text(encoding="utf-8")
+    assert "PORTFOLIO_API_INFO" in source
+    assert "FAMILY_API_INFO" not in source and "JOURNAL_API_INFO" not in source
+
+
+def test_each_sharing_op_is_sealed_under_the_owners_purpose_and_never_the_familys(
+    bridge, desk, monkeypatch
+):
+    from sudarshan.autologin.handoff import HandoffRejected, NonceBook, open_sealed
+    from sudarshan.portfolio.ops import common as ops_common
+    from sudarshan.vault import PORTFOLIO_API_INFO, PORTFOLIO_FAMILY_API_INFO, fernet_for
+
+    seen = []
+
+    def handler(name):
+        async def answer(ctx, message):
+            who = ops_common.caller()
+            seen.append((name, who.purpose, who.principal, dict(message)))
+            return {"op": name}
+
+        return answer
+
+    http = httpx.Client(trust_env=False)
+    recording = Recording(http)
+    monkeypatch.setattr(bp_module, "get_httpx_client", lambda: recording)
+    registry = {name: handler(name) for name in kinds.SHARING_OPS}
+    pepper = os.environ["API_KEY_PEPPER"]
+    with Service(desk, registry, pepper, family=True) as running:
+        monkeypatch.setenv("SUDARSHAN_PORTFOLIO_API_URL", running.url)
+        headers = {**JSON, **as_owner(bridge)}
+        answers = [
+            bridge.open(PREFIX + path, method=method, json=body, headers=headers)
+            for _, method, path, body in SHARING_CALLS
+        ]
+    http.close()
+    for response in answers:
+        assert response.status_code == 200, response.get_json()
+        assert response.get_json()["status"] == "success"
+    # the service, which holds both keys, opened every one under the owner's purpose
+    assert [(name, purpose, who) for name, purpose, who, _ in seen] == [
+        (name, "owner", "owner") for name, *_ in SHARING_CALLS
+    ]
+    assert seen[0][3] == {"tab_id": 4, "viewer": "12"}  # the query, read as the table says
+    for (_, _, _, body), (_, _, _, args) in zip(SHARING_CALLS[1:], seen[1:], strict=True):
+        assert args == body  # the JSON body, as it was sent
+    # and the family's key opens none of what went out
+    owner_key = fernet_for(pepper, PORTFOLIO_API_INFO)
+    family_key = fernet_for(pepper, PORTFOLIO_FAMILY_API_INFO)
+    assert [op for op, _ in recording.sent] == [name for name, *_ in SHARING_CALLS]
+    for op, blob in recording.sent:
+        message = open_sealed(owner_key, blob, op=op, seen=NonceBook(8), now=time.time())
+        assert message["principal"] == "owner"
+        with pytest.raises(HandoffRejected):
+            open_sealed(family_key, blob, op=op, seen=NonceBook(8), now=time.time())
+
+
+def test_a_sharing_write_the_service_did_not_answer_is_not_confirmed(bridge, desk, monkeypatch):
+    calls = Calls()
+
+    async def slow(message):
+        await asyncio.sleep(1.0)
+        return {}
+
+    calls.answers["member_privacy_set"] = slow
+    monkeypatch.setitem(kinds.TIMEOUTS_S, "write", 0.2)
+    with Service(desk, calls.registry(), os.environ["API_KEY_PEPPER"]) as running:
+        monkeypatch.setenv("SUDARSHAN_PORTFOLIO_API_URL", running.url)
+        headers = as_owner(bridge)
+        response = bridge.put(
+            PREFIX + "/family/privacy",
+            json={"member": "12", "role": "viewer", "shown": SHOWN, "version": None},
+            headers={**JSON, **headers},
+        )
+        time.sleep(1.2)
+    assert response.status_code == 504
+    assert error_of(response) == {"code": "not_confirmed", "message": WORDS["not_confirmed"]}
+    assert len(calls.calls) == 1  # never retried
+
+
+def test_a_sharing_refusal_comes_back_in_the_services_words(bridge, desk, monkeypatch):
+    calls = Calls()
+    calls.answers["share_set"] = ApiError(409, "version_conflict", WORDS["version_conflict_item"])
+    with Service(desk, calls.registry(), os.environ["API_KEY_PEPPER"]) as running:
+        monkeypatch.setenv("SUDARSHAN_PORTFOLIO_API_URL", running.url)
+        headers = as_owner(bridge)
+        response = bridge.put(
+            PREFIX + "/family/shares", json=SHARING_CALLS[1][3], headers={**JSON, **headers}
+        )
+    assert response.status_code == 409
+    assert error_of(response) == {
+        "code": "version_conflict", "message": WORDS["version_conflict_item"],
+    }  # fmt: skip
+
+
 # -- import ------------------------------------------------------------------------------------
 
 
@@ -435,6 +564,20 @@ def test_writes_are_limited_to_60_a_minute(limited):
     codes = hits(lambda: client.post(PREFIX + "/tabs", json={}, headers={**JSON, **headers}), 61)
     assert codes[:60] == [200] * 60 and codes[60] == 429
     assert client.get(PREFIX + "/state", headers=JSON).status_code == 200  # reads have their own
+
+
+def test_the_sharing_writes_count_against_the_one_write_limit(limited):
+    client, headers = limited
+    codes = hits(
+        lambda: client.put(PREFIX + "/family/shares", json={}, headers={**JSON, **headers}), 30
+    )
+    codes += hits(
+        lambda: client.put(PREFIX + "/family/privacy", json={}, headers={**JSON, **headers}), 30
+    )
+    assert codes == [200] * 60
+    assert client.post(PREFIX + "/tabs", json={}, headers={**JSON, **headers}).status_code == 429
+    reads = client.get(PREFIX + "/family/shares", headers=JSON)
+    assert reads.status_code == 200  # reads have their own limit
 
 
 def test_imports_are_limited_to_10_a_minute(limited):

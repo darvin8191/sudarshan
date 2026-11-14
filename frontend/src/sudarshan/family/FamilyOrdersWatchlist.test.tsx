@@ -7,6 +7,7 @@ import { act, cleanup, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { PRICE_SCALE, QTY_SCALE } from '@/sudarshan/portfolio/types'
+import { COST_FIELDS } from './books'
 import { resetFamilyManagerForTests } from './familyManager'
 import { ORDER_FIELD_CATEGORY, ORDER_NEVER_HIDDEN, orderFigures, tradeFigures } from './ordersView'
 import FamilyOrders from './pages/FamilyOrders'
@@ -406,6 +407,11 @@ describe('ORDER_FIELD_CATEGORY against the one privacy table', () => {
   })
   it.each(ORDER_NEVER_HIDDEN)('%s is hidden by no category', (field) => {
     for (const category of Object.keys(table.categories)) expect(hides(category, field)).toBe(false)
+  })
+  it('every price and amount of an order or a trade goes with P&L too (review H1)', () => {
+    const money = Object.keys(ORDER_FIELD_CATEGORY).filter((f) => !f.endsWith('qty_u'))
+    expect(money.sort()).toEqual(['amount_paise', 'avg_price_u', 'price_u', 'trigger_price_u'])
+    for (const field of money) expect(COST_FIELDS).toContain(field)
   })
 })
 

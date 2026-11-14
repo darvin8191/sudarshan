@@ -48,7 +48,9 @@ export interface MaskedTrade extends RowBase {
 /**
  * Which category hides each field the order and trade cards read. The one table is
  * sudarshan/family/privacy_fields.json; this is the phone's copy of the part these cards use,
- * and a test holds it to that file so the two cannot drift.
+ * and a test holds it to that file so the two cannot drift. The prices and the amount are in the
+ * table's `cost` list too (books.ts `COST_FIELDS`): the server removes them whenever P&L is
+ * hidden, and a row carries no P&L of its own to tell, so these cards show what is left.
  */
 export const ORDER_FIELD_CATEGORY: Readonly<Record<string, Category>> = {
   qty_u: 'qty',
