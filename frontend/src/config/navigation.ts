@@ -194,8 +194,29 @@ export function menuGroups(items: NavItem[], { phone }: { phone: boolean }): Men
   })
 }
 
-// Shared utility to check if a route is active.
-// Every nav item is a leaf route, so an exact match is all that is needed.
-export function isActiveRoute(pathname: string, href: string): boolean {
-  return pathname === href
+/**
+ * SUDARSHAN: entries whose page owns addresses under its own (`/options/NFO/NIFTY`). Only these
+ * match by prefix; every other entry is a leaf and matches exactly.
+ */
+export const NAV_WITH_CHILDREN: ReadonlySet<string> = new Set(['/options'])
+
+const owns = (pathname: string, href: string): boolean =>
+  pathname === href || (NAV_WITH_CHILDREN.has(href) && pathname.startsWith(`${href}/`))
+
+/**
+ * Whether an entry is the one the address belongs to. An exact match, or for an entry that owns
+ * child addresses a match on whole path segments (`/optionsx` is not `/options`). Where two
+ * entries would both own an address, the longer one alone does, so one address never lights two
+ * entries.
+ */
+export function isActiveRoute(
+  pathname: string,
+  href: string,
+  /** Every entry's address; the app's own lists unless a test says. */
+  known: readonly string[] = [...navItems, ...bottomNavItems, ...profileMenuItems].map(
+    (item) => item.href
+  )
+): boolean {
+  if (!owns(pathname, href)) return false
+  return !known.some((other) => other.length > href.length && owns(pathname, other))
 }

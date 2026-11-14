@@ -225,19 +225,32 @@ export interface ChainRowProps {
   /** The largest open interest among the rows shown. */
   maxOi: number
   onOpen: (strike: number, side: 'ce' | 'pe') => void
+  /** Tapping the strike: its straddle (O8). Absent, the strike is plain text. */
+  onStraddle?: (strike: number) => void
   /** Set by the tab: `rowSignature` of everything above. */
   signature: string
 }
 
 /**
  * One strike of the Chain tab (M11.1, O5): 64 dp, two lines, three columns. Line 1 is last price,
- * strike, last price; line 2 follows the view. A side is one button that opens the strike sheet.
+ * strike, last price; line 2 follows the view. A side is one button that opens the strike sheet,
+ * and the strike is one that opens its straddle ("Straddle at 25,900").
  * The at-the-money row carries the word, a side in the money a tint, a corner mark and the words
  * for a screen reader, a move an arrow and a sign: nothing is told by colour alone, and nothing
  * flashes.
  */
 export const ChainRow = memo(
-  function ChainRow({ row, view, ceTick, peTick, grey, itm, maxOi, onOpen }: ChainRowProps) {
+  function ChainRow({
+    row,
+    view,
+    ceTick,
+    peTick,
+    grey,
+    itm,
+    maxOi,
+    onOpen,
+    onStraddle,
+  }: ChainRowProps) {
     const iv = [row.ce?.greeks?.iv, row.pe?.greeks?.iv].filter(
       (each): each is number => !!each && each > 0
     )
@@ -263,29 +276,52 @@ export const ChainRow = memo(
           share={share(row.ce)}
           onOpen={onOpen}
         />
-        <span className="flex flex-col items-center justify-center gap-0.5 px-1 text-center">
-          <span className="text-[0.9375rem] leading-tight font-bold">
-            {strikeWords(row.strike)}
-          </span>
-          {row.atm && (
-            <span className="rounded bg-[color:var(--primary-tint)] px-1 text-[0.6875rem] leading-tight font-bold text-primary">
-              ATM
-            </span>
-          )}
-          <span className={cn(SMALL, 'text-[color:var(--text-secondary)]')}>
-            {view === 'oi' ? (
-              <>PCR {row.pcr === null ? dash : row.pcr.toFixed(2)}</>
-            ) : (
-              <>IV {iv.length ? (iv.reduce((a, b) => a + b, 0) / iv.length).toFixed(1) : dash}</>
-            )}
-          </span>
-          {!row.live && (
-            <span className={cn(SMALL, 'inline-flex items-center gap-0.5', GREY)}>
-              <Clock aria-hidden="true" className="size-3" />
-              <span className="sr-only">not real-time</span>
-            </span>
-          )}
-        </span>
+        {(() => {
+          const centre = (
+            <>
+              <span className="text-[0.9375rem] leading-tight font-bold">
+                {strikeWords(row.strike)}
+              </span>
+              {row.atm && (
+                <span className="rounded bg-[color:var(--primary-tint)] px-1 text-[0.6875rem] leading-tight font-bold text-primary">
+                  ATM
+                </span>
+              )}
+              <span className={cn(SMALL, 'text-[color:var(--text-secondary)]')}>
+                {view === 'oi' ? (
+                  <>PCR {row.pcr === null ? dash : row.pcr.toFixed(2)}</>
+                ) : (
+                  <>
+                    IV {iv.length ? (iv.reduce((a, b) => a + b, 0) / iv.length).toFixed(1) : dash}
+                  </>
+                )}
+              </span>
+              {!row.live && (
+                <span className={cn(SMALL, 'inline-flex items-center gap-0.5', GREY)}>
+                  <Clock aria-hidden="true" className="size-3" />
+                  <span className="sr-only">not real-time</span>
+                </span>
+              )}
+            </>
+          )
+          const box = 'flex flex-col items-center justify-center gap-0.5 px-1 text-center'
+          return onStraddle && row.ce && row.pe ? (
+            <button
+              type="button"
+              data-straddle-at={row.strike}
+              aria-label={`Straddle at ${strikeWords(row.strike)}${row.atm ? ', at the money' : ''}`}
+              onClick={() => onStraddle(row.strike)}
+              className={cn(
+                box,
+                'min-h-16 outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset'
+              )}
+            >
+              {centre}
+            </button>
+          ) : (
+            <span className={box}>{centre}</span>
+          )
+        })()}
         <Side
           leg={row.pe}
           side="pe"
@@ -300,5 +336,8 @@ export const ChainRow = memo(
       </li>
     )
   },
-  (before, after) => before.signature === after.signature && before.onOpen === after.onOpen
+  (before, after) =>
+    before.signature === after.signature &&
+    before.onOpen === after.onOpen &&
+    before.onStraddle === after.onStraddle
 )

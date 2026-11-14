@@ -1,0 +1,60 @@
+# सुदर्शन / SUDARSHAN watch (M19.5): one look at the server's own health, then it ends.
+# Started by sudarshan-watch.timer every 2 minutes. It reads SUDARSHAN's services on 127.0.0.1,
+# OpenAlgo, the disk, memory, the certificate nginx serves and the instrument list's date, and
+# records what changed in /var/lib/sudarshan-watch (events.jsonl for the notices on Telegram,
+# report.json for the System page). It only reads and records: it never starts, stops or changes
+# a service, holds no Telegram or OpenAlgo key, and looks at nothing on the server that is not
+# SUDARSHAN's or OpenAlgo's. A run takes a second or two, so the deploy tool restarting this
+# unit after an install is harmless.
+# Docs: sudarshan/README.md ("Watching the server"). Optional settings: /etc/sudarshan/watch.env
+# (root:sudarshan 640): the outside heartbeat's link.
+
+[Unit]
+Description=SUDARSHAN watch (one look at the server's health)
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=sudarshan
+Group=sudarshan
+Slice=sudarshan.slice
+WorkingDirectory=/opt/sudarshan/apps/openalgo
+ExecStart=/opt/sudarshan/apps/openalgo/.venv/bin/python -m sudarshan.ops.watch
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+EnvironmentFile=-/etc/sudarshan/watch.env
+# state.json, report.json, events.jsonl and the lock.
+StateDirectory=sudarshan-watch
+StateDirectoryMode=0700
+# Every read gives up after 2 s; a run that is still going after a minute is stopped.
+TimeoutStartSec=60
+TimeoutStopSec=10
+# 720 runs a day: only what a run itself says at notice level or above goes to the journal.
+LogLevelMax=notice
+# Behind everything else on a server that also runs the market.
+Nice=10
+CPUWeight=10
+IOWeight=10
+MemoryMax=128M
+UMask=0077
+LimitCORE=0
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadOnlyPaths=-/etc/sudarshan
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+RestrictNamespaces=yes
+# Loopback for the reads; the network only for the outside heartbeat, once the owner has set it up.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+LockPersonality=yes
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+SystemCallArchitectures=native

@@ -131,6 +131,8 @@ export interface Chip {
   words: string
   tone: Tone
   icon: 'clock' | 'dot' | 'moon' | 'alert' | 'expiry'
+  /** An expiry chip: the first expiry it names, whose option chain a tap opens (O9). */
+  chain?: { exchange: string; underlying: string; day: string }
 }
 
 /** The market chip: NSE's cash session today, from the calendar. */
@@ -180,6 +182,12 @@ export function marketChip(facts: DayFacts | null, failed: boolean, now: number)
   return closed('closed', 'Closed')
 }
 
+const chainOf = (expiry: IndexExpiry) => ({
+  exchange: expiry.exchange,
+  underlying: expiry.underlying,
+  day: expiry.day,
+})
+
 /** NIFTY, BANKNIFTY, SENSEX +2: the names once each, in the server's order. */
 function names(expiries: IndexExpiry[]): string {
   const unique = [...new Set(expiries.map((each) => each.underlying))]
@@ -200,7 +208,7 @@ export function expiryChip(facts: DayFacts | null, now: number): Chip | null {
     const stops = today.map((each) => each.stopsAt).filter((at): at is number => at !== null)
     const stop = stops.length > 0 ? ` · stops ${hhmm(Math.min(...stops))}` : ''
     const words = `Expiry today: ${names(today)}${stop}`
-    return { kind: 'expiry_today', words, tone: 'gold', icon: 'expiry' }
+    return { kind: 'expiry_today', words, tone: 'gold', icon: 'expiry', chain: chainOf(today[0]) }
   }
   const later = facts.expiries.filter((each) => each.day > facts.day)
   const nse = facts.exchanges.NSE
@@ -216,6 +224,7 @@ export function expiryChip(facts: DayFacts | null, now: number): Chip | null {
     words: `Expiry ${when}: ${names(first)}`,
     tone: 'neutral',
     icon: 'expiry',
+    chain: chainOf(first[0]),
   }
 }
 

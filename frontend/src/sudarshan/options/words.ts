@@ -83,3 +83,26 @@ export function optionsPath(
   const tail = query.toString()
   return `/options/${encodeURIComponent(exchange)}/${encodeURIComponent(underlying)}${tail ? `?${tail}` : ''}`
 }
+
+const MONTHS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']
+const DERIVATIVE = new RegExp(
+  `^(.+?)(\\d{2})(${MONTHS.join('|')})(\\d{2})(?:(\\d+(?:\\.\\d+)?)(?:CE|PE)|FUT)$`
+)
+
+/**
+ * The option chain of what another screen shows (O9): an index opens its own chain, an option its
+ * underlying's on that expiry and strike, a future its underlying's. Null for anything else: a
+ * share may have no options, and only the master knows, so no link is offered from its symbol alone.
+ */
+export function chainLinkOf(symbol: string, exchange: string): string | null {
+  const venue = exchange.toUpperCase()
+  const name = symbol.toUpperCase()
+  if (venue === 'NSE_INDEX' || venue === 'BSE_INDEX') return optionsPath(venue, name)
+  if (venue !== 'NFO' && venue !== 'BFO') return null
+  const found = DERIVATIVE.exec(name)
+  if (!found) return null
+  const [, underlying, day, month, year, strike] = found
+  if (strike === undefined) return optionsPath(venue, underlying)
+  const expiry = `20${year}-${String(MONTHS.indexOf(month) + 1).padStart(2, '0')}-${day}`
+  return optionsPath(venue, underlying, { expiry, strike: Number(strike) })
+}
