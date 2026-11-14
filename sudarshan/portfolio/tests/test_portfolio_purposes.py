@@ -119,6 +119,8 @@ def keys(data, found=None):
     if isinstance(data, dict):
         for key, value in data.items():
             found.add(key)
+            if privacy.kept_whole(key, value):
+                continue  # how old a price is: a state and a sentence, hidden by no category
             keys(value, found)
     elif isinstance(data, list):
         for item in data:
