@@ -1784,8 +1784,8 @@ export interface MemberPrivacySetArgs {
 
 // ---- phase P7: the tax working paper (M7.6, M7.7, M7.27, M7.28, M15.5) ----
 // Every figure is computed by the tax core (sudarshan/tax) in the service; the phone formats them
-// and computes none. Not market data: each answer carries when it was worked out. The pack's
-// shape is design p7 4.9; its schedules follow the core's pack when the ops land.
+// and computes none. Not market data: each answer carries when it was worked out. The pack is the
+// core's own (tax/pack.py, design p7 4.9), the one shape the phone and the journal read.
 
 export interface TaxGetArgs {
   /** The year the financial year starts in (2026 is FY 2026-27); none is the year running. */
@@ -1803,30 +1803,57 @@ export interface TaxSource {
   read_at: EpochMs | null
 }
 
-/** One sale, or the part of one taken from one purchase. */
-export interface TaxDisposal {
-  account_id: number
+export type TaxTerm = 'short' | 'long'
+
+/** One sale, or the part of one taken from one purchase, worked out. */
+export interface TaxGain {
+  taxpayer: number
+  account: number
   isin: string
-  name: string | null
-  sale_day: Day
-  qty_u: QtyU
-  sale_paise: Paise
   /** null: no purchase record; such a sale is listed apart and never costed at zero. */
   acquired_day: Day | null
+  sale_day: Day
+  qty_u: QtyU
+  /** What was received. */
+  receipt_paise: Paise
+  /** The sale value used: nil for a buyback taxed as a dividend. */
+  sale_paise: Paise
   cost_paise: Paise | null
-  /** The 31 Jan 2018 price set the cost. */
-  fmv_used: boolean
   expenses_paise: Paise
-  /** The expenses are the year's charges shared over its sales. */
-  allocated: boolean
   /** Negative is a loss; null when the sale is left out of the totals. */
   gain_paise: Paise | null
-  term: 'short' | 'long' | null
+  term: TaxTerm | null
   rate_bp: number | null
-  buyback: boolean
+  status: 'ok' | 'needs_fmv' | 'unknown_cost' | 'exempt_buyback'
+  /** The 31 Jan 2018 price set the cost. */
+  fmv_used: boolean
+  /** The expenses are the year's charges shared over its sales. */
+  allocated: boolean
+  /** A buyback's regime on its day; null for a sale. */
+  buyback: 'exempt' | 'dividend_and_loss' | 'capital_gain' | null
+  dividend_paise: Paise
 }
 
-/** A loss carried to later years. */
+/** The year's gains and losses at one term and rate. */
+export interface TaxBucket {
+  term: TaxTerm
+  rate_bp: number
+  gain_paise: Paise
+  loss_paise: Paise
+}
+
+/** One step of a set-off: a loss used against a gain or a profit. */
+export interface TaxSetOffStep {
+  step: 'same_year' | 'brought_forward'
+  bucket: CarryBucket
+  loss_fy: number
+  against: TaxTerm | 'business' | 'speculative'
+  /** Capital gains only: the rate of the gain it reduced. */
+  rate_bp?: number
+  paise: Paise
+}
+
+/** A loss carried to later years, lapsed, or computed beside the owner's own figure. */
 export interface TaxCarry {
   loss_fy: number
   bucket: CarryBucket
@@ -1836,64 +1863,98 @@ export interface TaxCarry {
   last_fy: number
 }
 
+export interface TaxExemption {
+  limit_paise: Paise
+  used_paise: Paise
+  order: ExemptOrder
+  by_rate: { rate_bp: number; paise: Paise }[]
+}
+
+export interface TaxLine {
+  term: TaxTerm
+  rate_bp: number
+  taxable_paise: Paise
+  tax_paise: Paise
+}
+
+export interface IndicativeTax {
+  lines: TaxLine[]
+  tax_paise: Paise
+  cess_bp: number
+  cess_paise: Paise
+  cess_label: string
+}
+
 export interface CapitalGains {
-  schedule: TaxDisposal[]
+  fy: number
+  schedule: TaxGain[]
+  by_bucket: TaxBucket[]
   st_gain_paise: Paise
   st_loss_paise: Paise
   lt_gain_paise: Paise
   lt_loss_paise: Paise
+  set_off: TaxSetOffStep[]
   /** What was set off against what, as sentences. */
-  set_off: string[]
-  exemption_paise: Paise
-  exemption_limit_paise: Paise
-  exempt_order: ExemptOrder
-  taxable_st_paise: Paise
-  taxable_lt_paise: Paise
-  indicative_tax_paise: Paise
-  cess_paise: Paise
+  set_off_words: string[]
+  exemption: TaxExemption
+  taxable: { st_paise: Paise; lt_paise: Paise }
+  indicative_tax: IndicativeTax
   carried: TaxCarry[]
-  needs_fmv: TaxDisposal[]
-  unknown_cost: TaxDisposal[]
-  exempt_buybacks: TaxDisposal[]
+  lapsed: TaxCarry[]
+  own_figures: TaxCarry[]
+  needs_fmv: TaxGain[]
+  unknown_cost: TaxGain[]
+  exempt_buybacks: TaxGain[]
+  expenses_allocated: boolean
 }
 
 export interface BusinessKind {
-  kind: 'futures' | 'options' | 'speculative'
   gross_paise: Paise
   turnover_paise: Paise
+  count: number
 }
 
 export interface BusinessBlock {
   gross_paise: Paise
+  /** Every part of the charges given, STT included. */
   charges_paise: Paise
   net_paise: Paise
   turnover_paise: Paise
-  by_kind: BusinessKind[]
+  by_kind: Partial<Record<'futures' | 'options' | 'speculative', BusinessKind>>
 }
 
-/** A contract whose profit or loss differs from Upstox's report by more than a rupee. */
+/** A derivative contract: exchange, scrip, expiry, strike (0 for a future), CE, PE or FUT. */
+export type TaxContract = [string, string, Day, PriceU, 'CE' | 'PE' | 'FUT']
+/** A position still open, or past expiry with no settlement price: taxpayer, account,
+ * contract, side, the day it opened, quantity and value. */
+export type TaxPosition = [number, number, TaxContract, 'BUY' | 'SELL', Day, QtyU, Paise]
+
+/** A scrip whose profit or loss differs from Upstox's report by more than a rupee. */
 export interface TaxDiffers {
-  instrument: string
-  ours_paise: Paise
-  upstox_paise: Paise
-}
-
-export interface TaxUnsettled {
-  instrument: string
-  qty_u: QtyU
-  open_day: Day
+  scrip: string
+  own_paise: Paise | null
+  upstox_paise: Paise | null
 }
 
 export interface BusinessIncome {
   non_speculative: BusinessBlock
   speculative: BusinessBlock
   turnover_method: TurnoverMethod
+  turnover_method_label: string
+  turnover_paise: Paise
   /** Sentences that ask the owner to check with the CA, never a verdict. */
   flags: string[]
-  set_off: string[]
+  taxable: { non_speculative_paise: Paise; speculative_paise: Paise }
+  available_other_heads_paise: Paise
+  set_off: TaxSetOffStep[]
+  set_off_words: string[]
   carried: TaxCarry[]
+  lapsed: TaxCarry[]
+  own_figures: TaxCarry[]
   differs: TaxDiffers[]
-  unknown_settlement: TaxUnsettled[]
+  unknown_settlement: TaxPosition[]
+  open: TaxPosition[]
+  assumed_zero_count: number
 }
 
 export interface TaxPayer {
@@ -1905,21 +1966,25 @@ export interface TaxPayer {
 }
 
 export interface TaxDividends {
+  /** From release 2 (M7.29); empty before. */
   by_payer: TaxPayer[]
+  buyback_paise: Paise
   total_paise: Paise
-  tds_expected_paise: Paise
+  tds_expected_paise: Paise | null
   unconfirmed_count: number
 }
 
-export interface TaxSegmentCharges {
-  segment: ReportSegment
-  charges: ChargesBreakdown
+export interface TaxCharges {
+  /** Upstox's own breakdown per segment for the year; a segment not read is absent. */
+  by_segment: Partial<Record<ReportSegment, ChargesBreakdown>>
+  state: ReportState
 }
 
-export interface TaxCharges {
-  /** Upstox's own breakdown per segment for the year. */
-  by_segment: TaxSegmentCharges[]
-  state: ReportState
+/** A sale the paper does not compute (a manual asset, a fund that is not equity). */
+export interface TaxSaleOutside {
+  instrument: string
+  day: Day
+  amount_paise: Paise
 }
 
 export interface TaxInputsUsed {
@@ -1934,6 +1999,7 @@ export interface TaxPack {
   fy_label: string
   taxpayer: number
   as_of_ms: EpochMs
+  as_of_day: Day
   /** The year running: every figure is to date. */
   running: boolean
   /** The working-paper sentence. */
@@ -1942,10 +2008,10 @@ export interface TaxPack {
   inputs: TaxInputsUsed
   capital_gains: CapitalGains
   business: BusinessIncome
-  /** From release 2 (M7.29); null before. */
-  dividends: TaxDividends | null
+  dividends: TaxDividends
   charges: TaxCharges
   not_computed: string[]
+  not_computed_sales: TaxSaleOutside[]
   notes: string[]
 }
 
@@ -2011,24 +2077,34 @@ export interface TaxTradeMark {
   version: number
 }
 
+/** A taxpayer's readings of the open rules; null is the rule's own default reading. */
 export interface TaxSettings {
   member_id: number
-  turnover_method: TurnoverMethod
-  exempt_order: ExemptOrder
-  lt_boundary: LtBoundary
+  turnover_method: TurnoverMethod | null
+  exempt_order: ExemptOrder | null
+  lt_boundary: LtBoundary | null
   allocate_expenses: boolean
+  /** 0 until first saved. */
   version: number
+}
+
+/** An account of the taxpayer and how it counts: by Upstox's reports, by its ledger, or not. */
+export interface TaxAccount {
+  id: number
+  name: string
+  kind: AccountKind
+  tax_mode: TaxMode
 }
 
 export interface TaxInputs {
   member_id: number
+  accounts: TaxAccount[]
   opening_lots: TaxOpeningLot[]
   fmvs: TaxFmv[]
   carries: TaxCarryInput[]
   day_overrides: TaxDayOverride[]
   trade_marks: TaxTradeMark[]
   settings: TaxSettings
-  missing: string[]
 }
 
 export type TaxInputRecord =
@@ -2043,12 +2119,15 @@ export interface TaxInputSetArgs {
   kind: TaxInputKind
   /** The row's own fields, as the matching record holds them (no id, source or version). */
   row: Record<string, unknown>
-  /** An existing row and the version it was read at; none for a new one. */
+  /** An existing row and the version it was read at; none for a new one. The readings always
+   * send the version they were read at (0 before the first save). */
   id?: number
   version?: number
   request_id?: string
-  /** Change nothing; answer what the change would do to the paper. */
+  /** Change nothing; answer what the change would do to the paper of ``fy``. */
   dry_run?: boolean
+  /** The year whose figures a dry run compares; none is the year running. */
+  fy?: number
 }
 
 export interface TaxInputSaved {

@@ -72,8 +72,18 @@ def test_a_tax_input_has_a_dry_run_and_downloads_are_reads():
         assert spec.download and spec.cls == "read" and spec.method == "GET", name
 
 
-def test_no_op_of_the_phase_is_built_yet_so_each_answers_not_ready():
-    assert not set(PHASE_OPS) & set(REGISTRY)
+@pytest.mark.parametrize("name", PHASE_OPS)
+def test_an_op_of_the_phase_is_not_ready_while_its_switch_is_off_built_or_not(name):
+    """An op a lane has built is registered behind its switch; one not built has no handler."""
+    if name not in REGISTRY:
+        return
+    with pytest.raises(ApiError) as refused:
+        run(REGISTRY[name](Ctx(), {}))
+    assert refused.value.code == "not_ready"
+
+
+def test_lane_p_has_built_the_working_papers_reads_and_inputs():
+    assert {"tax_get", "tax_inputs", "tax_input_set", "tax_input_delete"} <= set(REGISTRY)
 
 
 # ---- the switches are off in code ---------------------------------------------------------------
@@ -135,7 +145,9 @@ def test_the_owners_state_names_the_switches_and_a_member_is_told_nothing(tmp_pa
         try:
             answer = await rig.call("state")
             assert answer["data"]["switches"] == {"tax": True, "insights": False, "goals": False}
-            off = await rig.call("tax_get")  # on, but the op is not built yet
+            paper = await rig.call("tax_get")  # its switch is on
+            assert paper["data"]["fy"] == 2026 and "code" not in paper
+            off = await rig.call("goals_list")  # its switch is off
             assert off["code"] == "not_ready"
         finally:
             await rig.svc.api.close()

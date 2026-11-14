@@ -58,7 +58,7 @@ STRUCTURAL = frozenset(
         "unit_label", "product", "multiplier", "collateral_type", "cas", "system", "member_id",
         "account_id", "asset_id", "tab_id", "event_id", "activity_id", "trade_id", "taxpayer",
         "segment", "scope", "source", "basis", "mark", "treat", "bucket", "filename", "member",
-        "level", "hides", "insights",
+        "level", "hides", "insights", "instrument", "tax_mode",
         # when: days, instants and years
         "day", "days", "at", "now", "read_at", "as_of", "as_of_day", "as_of_ms", "due_at",
         "resolved_at", "price_day", "valuation_day", "first_flow_day", "nav_day", "ex_day",
@@ -79,7 +79,7 @@ STRUCTURAL = frozenset(
         "value", "layout", "spec", "defaults", "widgets", "columns", "sort", "group", "filters",
         "classes", "views", "loose_loans", "inputs", "sources", "opening_lots", "fmvs", "carries",
         "day_overrides", "trade_marks", "settings", "events", "to_confirm", "reads", "decisions",
-        "details",
+        "details", "not_computed_sales",
     }
 )  # fmt: skip
 
