@@ -869,14 +869,17 @@ def test_signing_in_is_held_to_a_few_tries_per_address(edge, path):
         assert json.loads(data)["message"].startswith("Too many tries")
     assert len(edge.family.seen) == 4  # the service did no work for the rest
     assert f'request: "POST {path} HTTP/1.1"' in edge.logged("error.log", "limiting requests")
+    time.sleep(2.5)  # one try comes back every 12 seconds, not sooner
+    assert edge.ask("POST", path, PHONE, b"{}")[0] == 429
+    assert len(edge.family.seen) == 4
 
 
 @needs_nginx
-def test_signing_in_is_held_for_everyone_together(edge):
+@pytest.mark.parametrize("path", ["/family/api/login", "/family/api/join"])
+def test_signing_in_is_held_for_everyone_together(edge, path):
     if not edge.realip:
         pytest.skip("this nginx has no realip module to speak for other addresses")
-    answers = [edge.ask("POST", "/family/api/login", PHONE, b"{}", client=f"192.0.2.{i}")
-               for i in range(1, 9)]  # fmt: skip
+    answers = [edge.ask("POST", path, PHONE, b"{}", client=f"192.0.2.{i}") for i in range(1, 9)]
     assert [a[0] for a in answers] == [200] * 6 + [429] * 2
     assert len(edge.family.seen) == 6
 
