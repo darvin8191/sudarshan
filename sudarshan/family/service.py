@@ -203,16 +203,26 @@ class FamilyService(Router):
     async def upgrade(self, request: Request, reader, writer) -> Response | None:
         if not self.enabled:
             return Response.refused(self.off_error or FamilyError("off"))
-        if self.registry.full():
+        # M1 (feat/family-c): the slot is taken before the first await and given back on every
+        # path that does not end in an open socket; the shares are judged with no await between.
+        if not self.registry.reserve():
             return Response.refused(FamilyError("busy"))
         try:
             session = await self.viewer.authorize(request)
-        except FamilyError as exc:
-            return Response.refused(exc)
+        except BaseException as exc:
+            self.registry.release()
+            if isinstance(exc, FamilyError):
+                return Response.refused(exc)
+            raise
         sock = ws.ViewerSocket(reader, writer, session=session.id_hash,
                                member_id=session.member_id, dialect=self.dialect,
                                registry=self.registry)  # fmt: skip
-        await sock.run(request.head)
+        if not self.registry.admit(sock):
+            return Response.refused(FamilyError("busy"))
+        try:
+            await sock.run(request.head)
+        finally:
+            self.registry.discard(sock)
         return None
 
     # ---- what /health shows ---------------------------------------------------------------------

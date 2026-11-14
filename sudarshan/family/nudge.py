@@ -14,8 +14,8 @@ books itself:
   nudges keep coming (Y5: a burst of order activity must not spend the portfolio's minute of reads;
   the last nudge of a burst is always followed by a read). Outside the session a nudge only marks.
 
-After every read the service makes, for whatever reason, each socket of that member whose screen
-shows the part gets ``{"type": "book", "part": ..., "read_at": ms}`` (Y11, ``announce``), so a fill
+After every read the service makes, for whatever reason, each open socket of that member who may
+see the part gets ``{"type": "book", "part": ..., "read_at": ms}`` (Y11, ``announce``), so a fill
 on the owner's side reaches the family screen at once: the page reads the part again.
 """
 
@@ -46,7 +46,7 @@ class Shelf(Protocol):
     def mark_dirty(self, part: str, at: int) -> None: ...
     def watching(self, part: str, now: int) -> bool: ...
     def read_shown(self, part: str) -> int: ...
-    def sockets_showing(self, member_id: int, part: str) -> list[Any]: ...
+    def sockets_for(self, member_id: int, part: str) -> list[Any]: ...
 
 
 class Nudges:
@@ -111,10 +111,10 @@ def book_message(part: str, read_at: int) -> dict[str, Any]:
 
 
 def announce(books: Shelf, member_id: int, part: str, read_at: int) -> int:
-    """Tell every socket of the member whose screen shows ``part`` that it was read again; how
+    """Tell every open socket of the member who may see ``part`` that it was read again; how
     many were told (a socket that is closing or full is skipped, never waited for)."""
     told = 0
-    for sock in books.sockets_showing(member_id, part):
+    for sock in books.sockets_for(member_id, part):
         with contextlib.suppress(Exception):
             told += bool(sock.send(book_message(part, read_at)))
     return told

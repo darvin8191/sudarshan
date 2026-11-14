@@ -13,11 +13,13 @@ The mask is decided twice and the stricter wins (Y6):
 2. this service applies the member's mask again to everything the portfolio answered, before it
    leaves for the phone (``masked``), so a field the portfolio let through is still removed.
 
-Two rules live here: a category the member's row does not say is shown is hidden (a member with
-no choices sees no figures), and quantities hidden hide P&L too (Y24: a P&L that moves with ticks
-is worked out from the quantity, so it would give the quantity away). A field the table names as
-never hidden (the live price and its anchors) is never removed. No I/O after the file is read once
-at import.
+Three rules live here, as in the portfolio's copy: a category the member's row does not say is
+shown is hidden (a member with no choices sees no figures); quantities hidden hide P&L too (Y24: a
+P&L that moves with ticks is worked out from the quantity, so it would give the quantity away);
+and P&L hidden hides the table's ``cost`` list too, whatever quantities say (the family review's
+H1: beside a quantity, an average, an amount invested, a value or a trade's price gives the P&L
+away by one subtraction). A field the table names as never hidden (the live price and its
+anchors) is never removed. No I/O after the file is read once at import.
 """
 
 from __future__ import annotations
@@ -37,30 +39,33 @@ WIRE_MAX = 200
 WIRE_ENTRY_MAX = 64
 
 
-def load(path: Path = FIELDS_FILE) -> tuple[dict[str, frozenset[str]], frozenset[str]]:
-    """The categories of ``path`` as sets of entries, and the fields it says are never hidden.
-    ValueError for a table without exactly the four categories, each a list of field names."""
+def _names(entries: Any, what: str, name: str) -> frozenset[str]:
+    if not isinstance(entries, list) or not entries:
+        raise ValueError(f"{name}: {what} must be a list of field names")
+    if not all(isinstance(e, str) and e.strip("*") and len(e) <= WIRE_ENTRY_MAX for e in entries):
+        raise ValueError(f"{name}: {what} has an entry that is not a field name")
+    return frozenset(entries)
+
+
+def load(
+    path: Path = FIELDS_FILE,
+) -> tuple[dict[str, frozenset[str]], frozenset[str], frozenset[str]]:
+    """The categories of ``path`` as sets of entries, its ``cost`` list (hidden whenever P&L is)
+    and the fields it says are never hidden. ValueError for a table without exactly the four
+    categories, or without a cost list, each a list of field names."""
     table = json.loads(path.read_text(encoding="utf-8"))
     found = table.get("categories")
     if not isinstance(found, Mapping) or set(found) != set(CATEGORIES):
         raise ValueError(f"{path.name} must list exactly {', '.join(CATEGORIES)}")
-    out: dict[str, frozenset[str]] = {}
-    for name in CATEGORIES:
-        entries = found[name]
-        if not isinstance(entries, list) or not entries:
-            raise ValueError(f"{path.name}: {name} must be a list of field names")
-        if not all(
-            isinstance(e, str) and e.strip("*") and len(e) <= WIRE_ENTRY_MAX for e in entries
-        ):
-            raise ValueError(f"{path.name}: {name} has an entry that is not a field name")
-        out[name] = frozenset(entries)
+    out = {name: _names(found[name], name, path.name) for name in CATEGORIES}
+    cost = _names(table.get("cost"), "cost", path.name)
     never = table.get("never_hidden", [])
     if not isinstance(never, list) or not all(isinstance(e, str) and e for e in never):
         raise ValueError(f"{path.name}: never_hidden must be a list of field names")
-    return out, frozenset(never)
+    return out, cost, frozenset(never)
 
 
-TABLE, NEVER_HIDDEN = load()
+TABLE, COST, NEVER_HIDDEN = load()
 
 
 def hidden_categories(privacy: Mapping[str, Any] | None) -> tuple[str, ...]:
@@ -74,10 +79,12 @@ def hidden_categories(privacy: Mapping[str, Any] | None) -> tuple[str, ...]:
 
 
 def mask_of(hidden: Iterable[str]) -> frozenset[str]:
-    """The fields the hidden categories remove: the union of their lists."""
-    out: set[str] = set()
-    for name in hidden:
-        out |= TABLE[name]
+    """The fields the hidden categories remove: the union of their lists, and the ``cost`` list
+    whenever ``pnl`` is one of them (H1)."""
+    names = set(hidden)
+    out: set[str] = set().union(*(TABLE[name] for name in names))
+    if "pnl" in names:
+        out |= COST
     return frozenset(out)
 
 

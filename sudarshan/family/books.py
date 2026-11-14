@@ -26,8 +26,8 @@ memory makes the reads of several members one Upstox call.
 **What the phone gets** (the contract's ``Book``): the portfolio's own rows with the member's mask
 applied once more on the way out (``privacy.masked``: a removed field is absent, never 0), ``side``
 (long, short or closed) on a position whose quantity reached this service, and the read state with
-its sentence when the figures are not current (``words_for``). After every read the member's
-sockets that show the part are told (Y11, ``nudge.announce``).
+its sentence when the figures are not current (``words_for``). After every read each open socket
+of the member who may see the part is told (Y11, ``nudge.announce``).
 """
 
 from __future__ import annotations
@@ -205,6 +205,8 @@ class Books:
         self.dirty_at: dict[str, int] = {}
         #: Called after every read, in order: (member id, part, what is kept now).
         self.after_read: list[Callable[[int, str, Memory], None]] = []
+        #: The open sockets with their members (viewer_ws seats them; until then the screens').
+        self.open_sockets: Callable[[], list[tuple[Any, Mapping[str, Any]]]] = self._screen_sockets
         self.reads = 0
         self._flights: dict[tuple[int, str], asyncio.Task] = {}
         self._wake = asyncio.Event()
@@ -241,9 +243,44 @@ class Books:
                 out[(int(member["id"]), part)] = member
         return out
 
-    def sockets_showing(self, member_id: int, part: str) -> list[Any]:
-        return [sock for sock, (member, name) in self.screens.items()
-                if int(member["id"]) == member_id and part in self._parts_of(member, name)]  # fmt: skip
+    def sockets_for(self, member_id: int, part: str) -> list[Any]:
+        """Every open socket of the member whose privacy lets them see the part, whatever its
+        screen and whether or not it follows a price (Y11: the book message goes to each)."""
+        return [sock for sock, member in self.open_sockets() if int(member["id"]) == member_id
+                and part in privacy.parts_shown(privacy.hidden_categories(member.get("privacy")))]  # fmt: skip
+
+    def _screen_sockets(self) -> list[tuple[Any, Mapping[str, Any]]]:
+        return [(sock, member) for sock, (member, _) in self.screens.items()]
+
+    # ---- what a member may follow (viewer_ws.Source) ------------------------------------------
+    def _rows(self, member_id: int, part: str) -> list[Any]:
+        memory = self.memory.get((member_id, part))
+        return rows_of(memory.data) if memory is not None else []
+
+    def keys(self, member_id: int) -> set[str]:
+        """The instrument keys of the member's own positions and holdings as last read."""
+        return {row["instrument_key"] for part in ("positions", "holdings")
+                for row in self._rows(member_id, part)
+                if isinstance(row, Mapping) and isinstance(row.get("instrument_key"), str)}  # fmt: skip
+
+    def book_keys(self) -> set[str]:
+        """The keys of every member's positions and holdings: the feed claims them first."""
+        return set().union(*(self.keys(member_id) for member_id in {m for m, _ in self.memory}))
+
+    def known(self, member_id: int) -> bool:
+        """Whether both the positions and the holdings of the member have an answer."""
+        for part in ("positions", "holdings"):
+            memory = self.memory.get((member_id, part))
+            if memory is None or (memory.data is None and memory.state != "not_shared"):
+                return False
+        return True
+
+    async def ensure(self, member: Mapping[str, Any]) -> None:
+        """Read the member's positions and holdings that have no answer yet."""
+        for part in ("positions", "holdings"):
+            memory = self.memory.get((int(member["id"]), part))
+            if memory is None or (memory.data is None and memory.state != "not_shared"):
+                await self.read(member, part)
 
     def watching(self, part: str, now: int) -> bool:
         """An open screen shows the part and its session is open: a nudge may read it."""
@@ -481,6 +518,10 @@ class Plane:
         self.parts: dict[str, Callable[[], Awaitable[None]]] = {"books": self.books.run}
         self.closers: list[Callable[[], Awaitable[None]]] = [self.nudges.close, self.books.close]
         self.reports: dict[str, Callable[[], Any]] = {"books": self.books.health}
+        #: The later lanes' pieces (viewer_ws.install: the dialect, the feed link, the symbols).
+        self.dialect: Any = None
+        self.feed: Any = None
+        self.symbols: Any = None
 
     def nudged(self, kind: str, sandbox: bool, at: int) -> bool:
         return self.nudges.nudged(kind, sandbox, at)
@@ -540,5 +581,8 @@ def install(service: Any, keys: PlaneKeys) -> Plane:
     viewer._summary = plane.books.route_summary
     viewer._portfolio = plane.books.route_portfolio
     viewer._portfolio_tab = plane.books.route_portfolio_tab
+    from . import viewer_ws  # F6: the sockets' dialect, the feed link and the symbol map
+
+    viewer_ws.install(plane, service)
     service._job_makers["data"] = lambda _service: plane.run()
     return plane

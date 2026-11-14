@@ -195,3 +195,88 @@ async def signed_in(service: Any, privacy: dict[str, bool], now: int, *,
 
 VIEWER = {"pnl": True, "qty": True, "funds": False, "orders": True}
 CHILD = {"pnl": False, "qty": False, "funds": False, "orders": False}
+
+
+class FakeFeed:
+    """sudarshan-feed as the family service sees it, on ephemeral ports (never 5580 or 5581):
+    PUT/DELETE /claims/<client> (recorded with the Authorization header), GET /health, GET
+    /snapshot over HTTP, and a ZMQ PUB the test publishes ticks and health on."""
+
+    def __init__(self):
+        self.calls: list[tuple[str, str, dict | None, str | None]] = []
+        self.health: dict[str, Any] = {"state": "connected", "subscriptions_live": True,
+                                       "started_at": "2026-11-16T08:58:00+05:30",
+                                       "subscribed": {"ltpc": 60, "full": 40, "total": 100}}  # fmt: skip
+        self.snapshots: dict[str, dict] = {}
+        self.status: dict[str, int] = {"PUT": 200, "DELETE": 200}
+        self.server: asyncio.Server | None = None
+        self.ctx: Any = None
+        self.pub: Any = None
+
+    async def start(self) -> tuple[str, str]:
+        import zmq
+
+        self.server = await asyncio.start_server(self._serve, "127.0.0.1", 0)
+        self.ctx = zmq.Context()
+        self.pub = self.ctx.socket(zmq.PUB)
+        self.pub.setsockopt(zmq.LINGER, 0)
+        self.pub.bind("tcp://127.0.0.1:*")
+        endpoint = self.pub.getsockopt_string(zmq.LAST_ENDPOINT)
+        return f"http://127.0.0.1:{self.server.sockets[0].getsockname()[1]}", endpoint
+
+    def claims(self, method: str = "PUT") -> list[tuple[dict | None, str | None]]:
+        return [(body, auth) for m, path, body, auth in self.calls
+                if m == method and path.startswith("/claims/")]  # fmt: skip
+
+    def publish(self, key: str, frame: dict) -> None:
+        import zmq
+
+        self.pub.send_multipart((key.encode(), json.dumps(frame).encode()), zmq.NOBLOCK)
+
+    def publish_health(self) -> None:
+        self.publish("__health__", self.health)
+
+    async def close(self) -> None:
+        if self.pub is not None:
+            self.pub.close(0)
+            self.ctx.term()
+            self.pub = None
+        if self.server is not None:
+            self.server.close()
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(self.server.wait_closed(), 2)
+
+    async def _serve(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        from urllib.parse import parse_qs, urlsplit
+
+        try:
+            head = await reader.readuntil(b"\r\n\r\n")
+            lines = head.decode("latin-1").split("\r\n")
+            method, target, _ = lines[0].split(" ", 2)
+            headers = {k.strip().lower(): v.strip()
+                       for k, _, v in (line.partition(":") for line in lines[1:]) if k}  # fmt: skip
+            length = int(headers.get("content-length") or 0)
+            raw = await reader.readexactly(length) if length else b""
+            url = urlsplit(target)
+            body = json.loads(raw) if raw else None
+            self.calls.append((method, url.path, body, headers.get("authorization")))
+            status, payload = 200, {"ok": True}
+            if url.path.startswith("/claims/"):
+                status = self.status.get(method, 200)
+                payload = {"ok": True} if status == 200 else {"error": "over the quota"}
+            elif url.path == "/health":
+                payload = self.health
+            elif url.path == "/snapshot":
+                keys = ",".join(parse_qs(url.query).get("keys", [])).split(",")
+                payload = {"ticks": {k: self.snapshots.get(k) for k in keys if k}}
+            data = json.dumps(payload).encode()
+            writer.write(f"HTTP/1.1 {status} X\r\nContent-Type: application/json\r\n"
+                         f"Content-Length: {len(data)}\r\nConnection: close\r\n\r\n".encode() + data)  # fmt: skip
+            await writer.drain()
+        finally:
+            writer.close()
+
+
+def frame(ltp: float, close: float = 100.0, ltt: int = 1_763_265_600_000) -> dict:
+    """A feed frame in ltpc mode."""
+    return {"ltp": ltp, "cp": close, "ltt": ltt, "ltq": 1, "ts_recv": ltt + 5}
