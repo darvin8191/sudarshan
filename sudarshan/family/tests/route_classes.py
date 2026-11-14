@@ -16,7 +16,9 @@ a user who is not the owner. What the suite holds each class to:
                    in one of the classes below.
 ``public_shell``   A React shell view: byte for byte the index.html served at /, which carries no
                    data, a 404 for a page this deployment does not have, or a redirect to another
-                   shell view. Never takes a write.
+                   shell view. Never takes a write. The family shell (FAMILY_SHELL) may differ from
+                   it in one place only: once the build carries the family manifest, the href of
+                   its manifest link names that manifest (FAMILY_MANIFEST_HREF).
 ``public_static``  A file or a fixed document with no account data: answers 200, 304 or 404, never
                    takes a write.
 ``public_auth``    The login flow and what the login page reads: may take a write, and never
@@ -27,7 +29,9 @@ a user who is not the owner. What the suite holds each class to:
                    forwarded: 401, 403 or 404 to every caller; never "success".
 
 No route may raise, open a connection, look up a name, start a process or publish an event other
-than a refusal's ``...FailedEvent`` while it answers any of these callers.
+than a refusal's ``...FailedEvent`` while it answers any of these callers, and that event must be
+one raised while refusing a request for its API key, which reaches no subscriber. No route may
+write a row to the owner's order log or analyzer log for any of them.
 
 A line is ``<class> <rule> <endpoint>``, then ``# <reason>``; a ``## <reason>`` line gives the
 reason for the lines below it, up to the next blank line, that have none of their own. Every line
@@ -51,9 +55,15 @@ CLASSES = (PROTECTED, PUBLIC_SHELL, PUBLIC_STATIC, PUBLIC_AUTH, WEBHOOK, INTERNA
 WRITABLE = frozenset({PROTECTED, PUBLIC_AUTH, WEBHOOK, INTERNAL})
 #: The classes whose every line says why.
 NEEDS_REASON = frozenset({PUBLIC_STATIC, PUBLIC_AUTH, WEBHOOK, INTERNAL})
+#: The family view's shell, /family and every page under it (blueprints/react_app.py,
+#: serve_family_shell; P6 B2): the one public_shell view whose page may differ from the one / serves,
+#: and only in its manifest link's href, which names the family manifest once the build carries it.
+FAMILY_SHELL = "react.react_family_shell"
+FAMILY_MANIFEST_HREF = "/images/sudarshan-family.webmanifest"
 
 TABLE = """
 # --- public_shell: the React shell; every view answers the index.html that / answers ---
+# --- (the family shell's names the family manifest instead, once the build carries it) ---
 public_shell  /                                      react.react_index
 public_shell  /<broker>/auth                         react.react_broker_auth
 public_shell  /about                                 react.react_about
@@ -727,6 +737,7 @@ protected     /sudarshan/family/api/share_list                                  
 protected     /sudarshan/family/api/share_remove                                        sudarshan_family.share_remove
 protected     /sudarshan/family/api/share_set                                           sudarshan_family.share_set
 protected     /sudarshan/family/api/signin_reset                                        sudarshan_family.signin_reset
+protected     /sudarshan/family/api/signin_unlock                                       sudarshan_family.signin_unlock
 protected     /sudarshan/family/api/state                                               sudarshan_family.state
 protected     /sudarshan/journal/api/analytics                                          sudarshan_journal.analytics
 protected     /sudarshan/journal/api/playbooks                                          sudarshan_journal.playbook_create
@@ -850,7 +861,6 @@ protected     /telegram/config                                                  
 protected     /telegram/send-message                                                    telegram_bp.send_message
 protected     /telegram/test-message                                                    telegram_bp.send_test_message
 protected     /telegram/user/<int:telegram_id>/unlink                                   telegram_bp.unlink_user
-protected     /test_chart                                                               pnltracker_bp.test_chart
 protected     /tradebook                                                                orders_bp.tradebook
 protected     /tradebook/export                                                         orders_bp.export_tradebook
 protected     /tradingview/                                                             tv_json_bp.tradingview_json
@@ -895,56 +905,14 @@ class Finding(NamedTuple):
     why: str
 
 
-_WEBSOCKET = (
-    "refuses with 200 and an error body instead of 401: it reads only whether the session names a "
-    "user, not upstream's session check (blueprints/websocket_example.py)"
-)
-
 #: Routes that refuse every caller, but not cleanly, as the walk saw them on 14 Nov 2026 (P6 T1).
 #: Each runs as an expected failure; once its route answers cleanly the suite fails until its line
 #: goes, and a route that starts to answer anything else fails at once. The family view is switched
-#: on only after the G5 suite is green (P6 1), and that includes this list being empty.
-FINDINGS: dict[tuple[str, str, str], Finding] = {
-    ("/api/websocket/health", "websocket.api_websocket_health", "GET"): Finding(
-        200, "Session not found", _WEBSOCKET
-    ),
-    ("/api/websocket/market-data", "websocket.api_websocket_market_data", "GET"): Finding(
-        200, "Session not found", _WEBSOCKET
-    ),
-    ("/api/websocket/metrics", "websocket.api_websocket_metrics", "GET"): Finding(
-        200, "Session not found", _WEBSOCKET
-    ),
-    ("/api/websocket/status", "websocket.api_websocket_status", "GET"): Finding(
-        200, "Session not found", _WEBSOCKET
-    ),
-    ("/api/websocket/subscribe", "websocket.api_websocket_subscribe", "POST"): Finding(
-        200, "Session not found", _WEBSOCKET
-    ),
-    ("/api/websocket/subscriptions", "websocket.api_websocket_subscriptions", "GET"): Finding(
-        200, "Session not found", _WEBSOCKET
-    ),
-    ("/api/websocket/trade-safe", "websocket.api_trade_management_safe", "GET"): Finding(
-        200, "Session not found", _WEBSOCKET
-    ),
-    ("/api/websocket/unsubscribe", "websocket.api_websocket_unsubscribe", "POST"): Finding(
-        200, "Session not found", _WEBSOCKET
-    ),
-    ("/api/websocket/unsubscribe-all", "websocket.api_websocket_unsubscribe_all", "POST"): Finding(
-        200, "Session not found", _WEBSOCKET
-    ),
-    ("/auth/broker", "auth.broker_login", "POST"): Finding(
-        302,
-        "did not return a valid response",
-        "a POST without a session raises (the view returns nothing for it), so the error page's "
-        "redirect to /error answers (blueprints/auth.py)",
-    ),
-    ("/test_chart", "pnltracker_bp.test_chart", "GET"): Finding(
-        302,
-        "TemplateNotFound",
-        "no session check at all: it refuses only because its template is gone and the error "
-        "page's redirect answers (blueprints/pnltracker.py)",
-    ),
-}
+#: on only after the G5 suite is green (P6 1), and that includes this list being empty. The eleven
+#: seen on 14 Nov 2026 were fixed in OpenAlgo's code (branch fix/g5-findings): nine /api/websocket/*
+#: routes answer a valid session only, POST /auth/broker answers as GET does, and /test_chart is
+#: gone; sudarshan/tests/test_g5_*.py hold each fix.
+FINDINGS: dict[tuple[str, str, str], Finding] = {}
 
 #: ``/sudarshan/*`` rules the forged session of a user who is not the owner is not held to: they
 #: are not owner bridges, and read the session with upstream's own check, as upstream's routes do

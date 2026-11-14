@@ -197,10 +197,8 @@ def pnltracker():
     return render_template("pnltracker.html")
 
 
-@pnltracker_bp.route("/test_chart")
-def test_chart():
-    """Test page for LightWeight Charts."""
-    return render_template("test_chart.html")
+# SUDARSHAN: G5. /test_chart is removed. It had no session check, its template is in neither this
+# repository nor upstream's, and nothing links to it, so it could only ever fail.
 
 
 @pnltracker_bp.route("/pnltracker/api/pnl", methods=["POST"])

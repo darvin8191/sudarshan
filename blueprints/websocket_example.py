@@ -3,6 +3,8 @@ Example blueprint showing how to use the WebSocket service layer
 for internal UI components without authentication overhead.
 """
 
+from functools import wraps
+
 from flask import Blueprint, current_app, jsonify, render_template, request, session
 from flask_socketio import emit, join_room, leave_room
 
@@ -25,7 +27,7 @@ from services.websocket_service import (
     unsubscribe_from_symbols,
 )
 from utils.logging import get_logger
-from utils.session import check_session_validity
+from utils.session import check_session_validity, is_session_valid  # SUDARSHAN: G5
 
 # Initialize logger
 logger = get_logger(__name__)
@@ -41,6 +43,34 @@ def get_username_from_session():
     """Get username from current session"""
     username = session.get("user")
     return username if username else None
+
+
+# SUDARSHAN: G5. The /api/websocket/* routes answer a valid session only: the check behind
+# check_session_validity (logged in through the broker step, not past the daily expiry, not ended
+# by a logout of every device). Upstream read only whether the session named a user, so a login
+# stopped after the password step was handed the order-capable API key, and every other caller got
+# a 200 with an error in it. A refusal is a 401 in check_session_validity's own JSON, never a
+# redirect: the owner's screens fetch these without asking for JSON, and a redirect would spend the
+# login page's rate limit. The session is left as it is: the market data manager outlives the page
+# that started it and can ask again while a new login waits for its broker step, and signing that
+# session out would end the login. The routes behind check_session_validity still sign it out.
+_SESSION_EXPIRED = {
+    "status": "error",
+    "error": "session_expired",
+    "message": "Your session has expired. Please log in again.",
+}
+
+
+def valid_session_only(view):
+    """Answer the view for a valid session; refuse anything else with a 401 (see above)."""
+
+    @wraps(view)
+    def wrapper(*args, **kwargs):
+        if not is_session_valid():
+            return jsonify(_SESSION_EXPIRED), 401
+        return view(*args, **kwargs)
+
+    return wrapper
 
 
 @websocket_bp.route("/websocket/dashboard")
@@ -59,6 +89,7 @@ def websocket_test():
 
 # REST endpoints for UI (no additional auth needed - page is already protected)
 @websocket_bp.route("/api/websocket/status", methods=["GET"])
+@valid_session_only  # SUDARSHAN: G5
 def api_websocket_status():
     """Get WebSocket connection status for current user"""
     username = get_username_from_session()
@@ -77,6 +108,7 @@ def api_websocket_status():
 
 
 @websocket_bp.route("/api/websocket/subscriptions", methods=["GET"])
+@valid_session_only  # SUDARSHAN: G5
 def api_websocket_subscriptions():
     """Get current subscriptions for current user"""
     username = get_username_from_session()
@@ -94,6 +126,7 @@ def api_websocket_subscriptions():
 
 
 @websocket_bp.route("/api/websocket/subscribe", methods=["POST"])
+@valid_session_only  # SUDARSHAN: G5
 def api_websocket_subscribe():
     """Subscribe to symbols for current user"""
     username = get_username_from_session()
@@ -113,6 +146,7 @@ def api_websocket_subscribe():
 
 
 @websocket_bp.route("/api/websocket/unsubscribe", methods=["POST"])
+@valid_session_only  # SUDARSHAN: G5
 def api_websocket_unsubscribe():
     """Unsubscribe from symbols for current user"""
     username = get_username_from_session()
@@ -132,6 +166,7 @@ def api_websocket_unsubscribe():
 
 
 @websocket_bp.route("/api/websocket/unsubscribe-all", methods=["POST"])
+@valid_session_only  # SUDARSHAN: G5
 def api_websocket_unsubscribe_all():
     """Unsubscribe from all symbols for current user"""
     username = get_username_from_session()
@@ -147,6 +182,7 @@ def api_websocket_unsubscribe_all():
 
 
 @websocket_bp.route("/api/websocket/market-data", methods=["GET"])
+@valid_session_only  # SUDARSHAN: G5
 def api_websocket_market_data():
     """Get cached market data"""
     username = get_username_from_session()
@@ -163,6 +199,7 @@ def api_websocket_market_data():
 
 
 @websocket_bp.route("/api/websocket/apikey", methods=["GET"])
+@valid_session_only  # SUDARSHAN: G5
 def api_get_websocket_apikey():
     """Get API key for WebSocket authentication"""
     username = get_username_from_session()
@@ -184,6 +221,7 @@ def api_get_websocket_apikey():
 
 
 @websocket_bp.route("/api/websocket/config", methods=["GET"])
+@valid_session_only  # SUDARSHAN: G5
 def api_get_websocket_config():
     """Get WebSocket configuration including URL"""
     username = get_username_from_session()
@@ -214,6 +252,7 @@ def api_get_websocket_config():
 
 
 @websocket_bp.route("/api/websocket/health", methods=["GET"])
+@valid_session_only  # SUDARSHAN: G5
 def api_websocket_health():
     """
     Get comprehensive health status of the market data service.
@@ -273,6 +312,7 @@ def api_websocket_health():
 
 
 @websocket_bp.route("/api/websocket/trade-safe", methods=["GET"])
+@valid_session_only  # SUDARSHAN: G5
 def api_trade_management_safe():
     """
     Quick check if trade management operations are safe to execute.
@@ -300,6 +340,7 @@ def api_trade_management_safe():
 
 
 @websocket_bp.route("/api/websocket/metrics", methods=["GET"])
+@valid_session_only  # SUDARSHAN: G5
 def api_websocket_metrics():
     """
     Get performance metrics for the market data service.
@@ -338,7 +379,7 @@ def handle_connect(auth):
 
 
 @socketio.on("disconnect", namespace="/market")
-def handle_disconnect():
+def handle_disconnect(reason=None):  # SUDARSHAN: G5, Flask-SocketIO 5.6 passes the reason
     """Handle client disconnection"""
     username = get_username_from_session()
     if username:

@@ -664,6 +664,30 @@ def test_loosening_the_daily_limit_on_a_locked_day_is_told_and_the_lock_stays(wo
     assert gate.GATE.day_lock("sandbox") is not None
 
 
+@pytest.mark.parametrize("limit", [9000.0, None], ids=["raised", "turned off"])
+def test_a_wrong_phrase_for_the_daily_limit_is_in_history_as_the_kill_switch_s_is(world, limit):
+    """Backlog 2b (Analyzer session): the kill switch's wrong phrase showed in History and the
+    daily limit's did not. Both are one History line through the same audit, with the sentence
+    the routes answer and never the phrase typed."""
+    client, account, store = world
+    assert _put(client, {"daily_loss_limit": 4000.0}).status_code == 200
+    answer = _put(client, {"daily_loss_limit": limit}, phrase="hunter2-wrong")
+    assert (answer.status_code, answer.get_json()["message"]) == (400, words.PHRASE_WRONG)
+    assert answer.get_json()["needs_phrase"] is True
+    assert store.settings().daily_loss_limit == 4000.0
+    _owner_call(client, "post", "/sudarshan/risk/resume", {"phrase": "nope-text"})
+
+    shown = _owner_call(client, "get", "/sudarshan/risk/audit").get_json()["data"]
+    refused = [row for row in shown if row["kind"] == "phrase_refused"]
+    assert [row["summary"] for row in refused] == [
+        words.phrase_refused(words.PHRASE_ASKED_KS_OFF),
+        words.phrase_refused(words.phrase_asked_settings(["daily_loss_limit"])),
+    ]
+    assert {row["surface"] for row in refused} == {"app"}
+    every = json.dumps([row.__dict__ for row in store.history()], default=str)
+    assert "hunter2" not in every and "nope-text" not in every
+
+
 def test_the_settings_screen_reads_every_setting_but_the_phrase(world):
     client, account, store = world
     data = _owner_call(client, "get", "/sudarshan/risk/settings").get_json()["data"]
