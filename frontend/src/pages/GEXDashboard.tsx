@@ -25,6 +25,7 @@ import { useSupportedExchanges } from '@/hooks/useSupportedExchanges'
 import Plot from '@/lib/Plot2D'
 import { serverSentence } from '@/lib/serverSentence'
 import { useThemeStore } from '@/stores/themeStore'
+import { TimedRefresh } from '@/sudarshan/options/TimedRefresh'
 import { showToast } from '@/utils/toast'
 
 // FNO_EXCHANGES and DEFAULT_UNDERLYINGS are now provided by useSupportedExchanges() hook
@@ -68,6 +69,8 @@ export default function GEXDashboard() {
   const [gexData, setGexData] = useState<GEXDataResponse | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [autoRefresh, setAutoRefresh] = useState(false)
+  // SUDARSHAN (M11.5, T6): when the figures on the page were read.
+  const [updatedAt, setUpdatedAt] = useState<number | null>(null)
   const requestIdRef = useRef(0)
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
@@ -154,6 +157,7 @@ export default function GEXDashboard() {
       if (requestIdRef.current !== requestId) return
       if (response.status === 'success') {
         setGexData(response)
+        setUpdatedAt(Date.now())
       } else {
         showToast.error(response.message || 'Failed to fetch GEX data')
       }
@@ -563,14 +567,15 @@ export default function GEXDashboard() {
             </SelectContent>
           </Select>
 
-          {/* Auto-refresh toggle */}
-          <Button
-            variant={autoRefresh ? 'default' : 'outline'}
-            size="sm"
-            onClick={() => setAutoRefresh(!autoRefresh)}
-          >
-            {autoRefresh ? 'Auto: ON' : 'Auto: OFF'}
-          </Button>
+          {/* SUDARSHAN (M11.5, T6): the timer is off unless switched on, and says what it is */}
+          <TimedRefresh
+            id="timed-refresh"
+            everyMs={AUTO_REFRESH_INTERVAL}
+            on={autoRefresh}
+            onChange={setAutoRefresh}
+            updatedAt={gexData ? updatedAt : null}
+            disabled={!selectedExpiry}
+          />
 
           {/* Refresh */}
           <Button variant="outline" size="sm" onClick={fetchGEXData} disabled={isLoading}>
