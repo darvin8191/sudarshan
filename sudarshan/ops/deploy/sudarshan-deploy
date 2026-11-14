@@ -20,7 +20,9 @@
 # missing (feed_tokens), and, only once the owner's one-time set-up for the family view
 # (sudarshan/ops/family/bootstrap.sh) has made /etc/sudarshan-family, that account's keys are kept
 # there and its check is run (fam_provision). Before that set-up nothing of the family is touched.
-# Usage: sudarshan-deploy [--check | --redeploy | --force | --family-provision]
+# And once the owner has installed the family view's nginx lines (sudarshan/ops/nginx), every run checks,
+# reading only, that they are still in place, loaded and the release's (ngx_check); it never edits nginx.
+# Usage: sudarshan-deploy [--check | --redeploy | --force | --family-provision | --nginx-check]
 #   --check     show latest Release / deployed tag / market state and the .env settings and
 #               calendar lines that release would change, change nothing
 #   --redeploy  install the latest Release again even if it is already deployed (still gated)
@@ -34,6 +36,10 @@
 #               the family view's provision step alone (the feed tokens, the keys, the check), saying
 #               everything it does; bootstrap.sh runs it. Waits up to 15 minutes for a running
 #               install. Exit 0 = the check passed, 1 = it did not, 2 = no /etc/sudarshan-family yet.
+#   --nginx-check
+#               whether the family view's nginx lines are installed, loaded by nginx and this release's,
+#               one line each, changing nothing (it neither waits for nor stops an install).
+#               Exit 0 = all of it holds, 1 = not (each FAIL line says what to do).
 set -Eeuo pipefail
 MODE="deploy"; FORCE=0; REDEPLOY=0; REMOVE_RING=""
 case "${1:-}" in
@@ -42,8 +48,9 @@ case "${1:-}" in
     --force) FORCE=1; REDEPLOY=1 ;;
     --remove-ring) MODE="remove-ring"; REMOVE_RING="${2:-}" ;;
     --family-provision) MODE="family" ;;
+    --nginx-check) MODE="nginx" ;;
     "") ;;
-    *) echo "usage: sudarshan-deploy [--check|--redeploy|--force|--remove-ring sudarshan-<service>|--family-provision]" >&2; exit 2 ;;
+    *) echo "usage: sudarshan-deploy [--check|--redeploy|--force|--remove-ring sudarshan-<service>|--family-provision|--nginx-check]" >&2; exit 2 ;;
 esac
 # shellcheck disable=SC1091
 source /etc/sudarshan/deploy.env
@@ -51,6 +58,8 @@ STATE="/var/lib/sudarshan"; mkdir -p "${STATE}"
 exec 9> "${STATE}/deploy.lock"
 if [[ "${MODE}" == "family" ]]; then   # the owner is waiting at the set-up: an install is waited for, not skipped
     flock -w 900 9 || { echo "An install is still running. Nothing was changed: run the set-up again in a few minutes."; exit 75; }
+elif [[ "${MODE}" == "nginx" ]]; then
+    :   # it only reads, so it takes no lock: an install neither holds it up nor is held up by it
 else
     flock -n 9 || { echo "another deploy is running"; exit 0; }
 fi
@@ -1112,7 +1121,10 @@ fam_provision() (   # $1 = run or setup. 0 = the check passed and provisioned is
             && systemctl is-enabled --quiet "${FAM_UNIT}" 2>/dev/null && ! systemctl is-active --quiet "${FAM_UNIT}" 2>/dev/null; then
         if systemctl start "${FAM_UNIT}" > /dev/null 2>&1; then fam_say "${FAM_UNIT} started"; fi
     fi
-    if [[ "${FAM_TALK}" == 1 ]]; then fam_say "PASS: the family account is set up, and its check finds it closed off from the owner's secrets"; fi
+    if [[ "${FAM_TALK}" == 1 ]]; then
+        ngx_check brief   # the family view's nginx lines, one line (they are the owner's to install, and change nothing here)
+        fam_say "PASS: the family account is set up, and its check finds it closed off from the owner's secrets"
+    fi
     exit 0
 )
 fam_backup() (   # an install's backup: ${FAM_DIR} into ${bdir}/etc-family (Y1.4); a rollback never puts it back (as R12)
@@ -1124,7 +1136,231 @@ fam_backup() (   # an install's backup: ${FAM_DIR} into ${bdir}/etc-family (Y1.4
         rm -rf -- "${bdir}/etc-family"; log "WARNING: family: ${FAM_DIR} could not be copied into the backup"
     fi
 )
+# ---- The family view's nginx lines (P6 O3): three files the owner installs once from sudarshan/ops/nginx
+# at the installed release (sudarshan/family/README.md, "Installing the nginx lines"). This tool never writes
+# nginx; ngx_check only reads, and says for each file whether it is in place (a plain file of root's that no
+# one else can write), this release's (its sha256 is in NGX_SUMS, the owner's cookie name set aside, which
+# is compared with OpenAlgo's .env instead) and loaded (`nginx -T` passes and names it); whether the include
+# line sits in a server block that listens on 443 (so the guard covers every location of that server) whose
+# location / goes to OpenAlgo where the invite page goes; and whether the running nginx was reloaded after
+# the files last changed. --nginx-check says each line; the family set-up adds one; a run logs the first
+# problem once while it holds, and says nothing while none of the three files is there. `nginx -T` reads
+# every site of this nginx: only this server's own lines are looked at, and nothing of it is printed.
+NGX_DIR="/etc/nginx"
+NGX_BIN="nginx"
+NGX_FILES=(conf.d/sudarshan-family-zones.conf snippets/sudarshan-family.conf snippets/sudarshan-family-proxy.conf)
+# sha256 of ngx_text of each file above as this release ships it in sudarshan/ops/nginx; the test
+# sudarshan/ops/tests/test_deploy_nginx_check.py fails until they agree with those files.
+NGX_SUMS=(
+    002b48cc7bbaddea5caf015d73248d1fd3080a7113c647dc14cd2caf00f75f83
+    4439591ae8c9f30c3976904a9a129e74c7f3cf275509dfc899903bd4fa4de396
+    6169cc60889962e492a70a2d28529a922212eea939f95fd4a9bdd14b8438ddc0
+)
+NGX_OPENALGO="http://127.0.0.1:5000"   # where the invite page goes (snippets/sudarshan-family.conf)
+NGX_HOWTO='sudarshan/family/README.md, "Installing the nginx lines"'
+ngx_text() {   # $1 = a file: its text, with the name of OpenAlgo's cookie in the map of $sud_owner made OWNER_COOKIE
+    awk '/^map \$http_cookie \$sud_owner \{/ { o = 1 }
+         o && /=" 1;/ { sub(/\)[A-Za-z0-9_-]+=/, ")OWNER_COOKIE=") }
+         o && /^\}/ { o = 0 }
+         { print }' "$1"
+}
+ngx_cookie() {   # $1 = the zones file: the name of OpenAlgo's session cookie its guard knows
+    awk '/^map \$http_cookie \$sud_owner \{/ { o = 1 }
+         o && /=" 1;/ && match($0, /\)[A-Za-z0-9_-]+=/) { print substr($0, RSTART + 1, RLENGTH - 2); exit }
+         o && /^\}/ { o = 0 }' "$1"
+}
+ngx_env() {   # $1 = a key: its value in OpenAlgo's .env (its last line; quotes and a trailing comment off).
+              # 1 = .env cannot be read; 0 with nothing printed = .env does not set it
+    local line v
+    [[ -f "${ENV_FILE}" && ! -L "${ENV_FILE}" ]] || return 1
+    line="$(timeout 5 grep -E "^[[:space:]]*(export[[:space:]]+)?$1[[:space:]]*=" -- "${ENV_FILE}" 2>/dev/null | tail -n 1)"
+    [[ -n "${line}" ]] || return 0
+    v="${line#*=}"; v="${v%%#*}"; v="${v#"${v%%[![:space:]]*}"}"; v="${v%"${v##*[![:space:]]}"}"
+    v="${v#[\"\']}"; v="${v%[\"\']}"
+    printf '%s\n' "${v}"
+}
+ngx_file_ok() {   # 0 = $1 is a plain file owned by the user this tool runs as, writable by no one else
+    local st
+    [[ -f "$1" && ! -L "$1" ]] && st="$(stat -c '%u %a' -- "$1")" || return 1
+    [[ "${st% *}" == "${EUID}" ]] && (( (8#${st#* } & 8#022) == 0 ))
+}
+ngx_servers() {   # stdin: what `nginx -T` prints. For each server block of a file that is not one of the three:
+                  # "server <listens on 443: 1|0> <includes of sudarshan-family.conf> <proxy_pass of its location />
+                  # or -> <file>"; and "stray <file>" for such an include outside a server block
+    awk '
+    function word_end() { if (inw) { words[nw++] = w; w = ""; inw = 0 } }
+    function directive(   i) {
+        word_end()
+        if (nw > 0 && !skip) {
+            if (nw >= 2 && words[0] == "include" && words[1] ~ /(^|\/)sudarshan-family\.conf$/) {
+                if (insrv && depth == srvdepth) inc++; else print "stray", file
+            }
+            if (insrv && depth == srvdepth && words[0] == "listen")
+                for (i = 1; i < nw; i++) if (words[i] ~ /(^|:)443$/) l443 = 1
+            if (insrv && depth == rootdepth && nw >= 2 && words[0] == "proxy_pass") root = words[1]
+        }
+        nw = 0
+    }
+    function open_block() {
+        word_end(); depth++
+        if (!skip && !insrv && nw >= 1 && words[0] == "server") { insrv = 1; srvdepth = depth; inc = 0; l443 = 0; root = "-" }
+        else if (insrv && depth == srvdepth + 1 && nw == 2 && words[0] == "location" && words[1] == "/") rootdepth = depth
+        nw = 0
+    }
+    function close_block() {
+        word_end(); nw = 0
+        if (insrv && depth == srvdepth) { print "server", l443, inc, root, file; insrv = 0 }
+        if (depth == rootdepth) rootdepth = -1
+        depth--
+    }
+    /^# configuration file .*:$/ {
+        file = substr($0, 22, length($0) - 22)
+        depth = 0; insrv = 0; rootdepth = -1; nw = 0; w = ""; inw = 0; q = ""
+        skip = (file ~ /\/sudarshan-family(-zones|-proxy)?\.conf$/)
+        next
+    }
+    {
+        n = length($0)
+        for (i = 1; i <= n; i++) {
+            c = substr($0, i, 1)
+            if (q != "") {
+                if (c == "\\") { w = w substr($0, i + 1, 1); i++ }
+                else if (c == q) q = ""
+                else w = w c
+                continue
+            }
+            if (c == "#") break
+            if (c == " " || c == "\t" || c == "\r") { word_end(); continue }
+            if (c == "\"" || c == "\047") { word_end(); q = c; inw = 1; continue }
+            if (c == ";") { directive(); continue }
+            if (c == "{") { open_block(); continue }
+            if (c == "}") { close_block(); continue }
+            w = w c; inw = 1
+        }
+        if (q != "") w = w "\n"; else word_end()
+    }'
+}
+ngx_loaded_at() {   # when the running nginx last loaded its configuration (an epoch second): the start of its
+                    # oldest worker that is not shutting down. Nothing when nginx is not running
+    local now oldest="" e rest
+    now="$(date +%s)"
+    while read -r e rest; do
+        [[ "${rest}" == "nginx: worker process" && "${e}" =~ ^[0-9]+$ ]] || continue
+        if [[ -z "${oldest}" || ${e} -gt ${oldest} ]]; then oldest="${e}"; fi
+    done < <(ps -C nginx -o etimes=,args= 2>/dev/null)
+    if [[ -n "${oldest}" ]]; then echo $(( now - oldest )); fi
+}
+ngx_check() (   # $1 = report (every line; 0 = all holds, 1 = not), run (the first problem logged once while it
+                # holds) or brief (one line, for the family set-up)
+    set +eEu; trap - ERR
+    local mode="$1" i f path have=0 dump="" errf rc kind l443 inc root file site="" at newest m name want host
+    local -a lines=() recs=() good=() bad=() stray=()
+    say() { lines+=("$1 $2"); }
+    for f in "${NGX_FILES[@]}"; do if [[ -e "${NGX_DIR}/${f}" || -L "${NGX_DIR}/${f}" ]]; then have=1; fi; done
+    if [[ ${have} -eq 0 ]]; then
+        case "${mode}" in
+            run) fam_once "${STATE}/family_nginx_note" "" ;;
+            brief) echo "family: nginx: the family view's nginx lines are not installed yet (${NGX_HOWTO})" ;;
+            report) echo "nginx: FAIL none of the family view's nginx files is in ${NGX_DIR}: install them (${NGX_HOWTO})" ;;
+        esac
+        exit 1
+    fi
+    if ! command -v "${NGX_BIN}" > /dev/null 2>&1; then
+        say FAIL "nginx is not installed on this server, so nothing of these files can be loaded"
+    else
+        errf="$(mktemp)"; dump="$(timeout 30 "${NGX_BIN}" -T 2>"${errf}")"; rc=$?; rm -f -- "${errf}"
+        if [[ ${rc} -ne 0 ]]; then
+            dump=""; say FAIL "nginx's configuration does not pass its own test, so no change of it can be loaded: run sudo nginx -t to see why"
+        fi
+    fi
+    for i in "${!NGX_FILES[@]}"; do
+        f="${NGX_FILES[$i]}"; path="${NGX_DIR}/${f}"
+        if [[ ! -e "${path}" && ! -L "${path}" ]]; then say FAIL "${path} is missing: install the files again (${NGX_HOWTO})"; continue; fi
+        if ! ngx_file_ok "${path}"; then say FAIL "${path} is not a plain file of root's that only root can write: install the files again"; continue; fi
+        if [[ "$(ngx_text "${path}" | sha256sum | cut -c1-64)" != "${NGX_SUMS[$i]}" ]]; then
+            say FAIL "${path} is not this release's copy (an older release's, or changed by hand): install the files again (${NGX_HOWTO})"; continue
+        fi
+        if [[ -n "${dump}" ]] && ! grep -qxF -- "# configuration file ${path}:" <<< "${dump}"; then
+            if [[ ${i} -eq 0 ]]; then say FAIL "nginx does not load ${path}: nginx.conf must include conf.d/*.conf inside http, as Ubuntu's does"
+            else say FAIL "nginx does not load ${path}: add the include line to the server block for port 443 (${NGX_HOWTO})"; fi
+            continue
+        fi
+        say PASS "${path}: in place and this release's${dump:+, loaded by nginx}"
+    done
+    if [[ -n "${dump}" ]]; then
+        mapfile -t recs < <(printf '%s\n' "${dump}" | ngx_servers)
+        for f in "${recs[@]}"; do
+            if [[ "${f}" == "stray "* ]]; then stray+=("${f#stray }"); continue; fi
+            read -r kind l443 inc root file <<< "${f}"
+            [[ "${kind}" == "server" && "${inc}" =~ ^[0-9]+$ && ${inc} -gt 0 ]] || continue
+            if [[ "${l443}" == 1 ]]; then good+=("${root} ${file}"); else bad+=("${file}"); fi
+        done
+        if [[ ${#stray[@]} -gt 0 ]]; then
+            say FAIL "snippets/sudarshan-family.conf is included outside a server block (${stray[0]}): put the line inside the server block for port 443"
+        elif [[ ${#bad[@]} -gt 0 ]]; then
+            say FAIL "snippets/sudarshan-family.conf is included in a server block that does not listen on port 443 (${bad[0]}): move the line into the server block for port 443"
+        elif [[ ${#good[@]} -eq 0 ]]; then
+            say FAIL "no server block includes snippets/sudarshan-family.conf: add the include line to the server block for port 443 (${NGX_HOWTO})"
+        else
+            root="${good[0]%% *}"; site="${good[0]#* }"
+            say PASS "the guard sits in the server block for port 443 of ${site}, so it covers every location there"
+            if [[ "${root%/}" == "${NGX_OPENALGO}" ]]; then
+                say PASS "the invite page goes to OpenAlgo at ${NGX_OPENALGO#http://}, as location / of that server does"
+            elif [[ "${root}" == "-" ]]; then
+                say FAIL "where location / of that server sends pages could not be read, so the invite page's address (${NGX_OPENALGO#http://}) could not be compared with it"
+            else
+                say FAIL "location / of that server goes to ${root}, but the invite page goes to ${NGX_OPENALGO}: invite links will not open until the two agree"
+            fi
+        fi
+    fi
+    path="${NGX_DIR}/${NGX_FILES[0]}"
+    if ngx_file_ok "${path}"; then
+        name="$(ngx_cookie "${path}")"
+        if want="$(ngx_env SESSION_COOKIE_NAME)" && host="$(ngx_env HOST_SERVER)"; then
+            want="${want:-session}"
+            if [[ "${host}" == https://* ]]; then want="__Secure-${want}"; fi
+            if [[ -n "${name}" && "${name}" == "${want}" ]]; then
+                say PASS "the guard knows OpenAlgo's session cookie, ${name}, as OpenAlgo's .env makes it"
+            else
+                say FAIL "the guard knows OpenAlgo's session cookie as ${name:-nothing}, but OpenAlgo's .env makes it ${want}: put ${want} in its place in ${path} (under map \$http_cookie \$sud_owner), then reload nginx"
+            fi
+        else
+            say FAIL "OpenAlgo's .env could not be read, so the cookie the guard knows could not be compared with it"
+        fi
+    fi
+    if [[ -n "${dump}" ]]; then
+        at="$(ngx_loaded_at)"
+        if [[ -z "${at}" ]]; then
+            say FAIL "nginx is not running"
+        else
+            newest=0
+            for f in "${NGX_FILES[@]/#/${NGX_DIR}/}" ${site:+"${site}"}; do
+                m="$(stat -L -c %Y -- "${f}" 2>/dev/null)" || continue
+                if [[ "${m}" =~ ^[0-9]+$ && ${m} -gt ${newest} ]]; then newest="${m}"; fi
+            done
+            if (( newest > at + 1 )); then
+                say FAIL "nginx has not loaded these files since they last changed: run sudo nginx -t && sudo systemctl reload nginx"
+            else
+                say PASS "the running nginx has loaded them (it was reloaded after they last changed)"
+            fi
+        fi
+    fi
+    local first=""
+    for f in "${lines[@]}"; do if [[ "${f}" == "FAIL "* ]]; then first="${f#FAIL }"; break; fi; done
+    case "${mode}" in
+        report)
+            for f in "${lines[@]}"; do echo "nginx: ${f}"; done
+            if [[ -z "${first}" ]]; then echo "nginx: PASS. The family view's nginx lines are installed, loaded and this release's."; exit 0; fi
+            echo "nginx: FAIL. Nothing was changed; each FAIL line above says what to do."; exit 1 ;;
+        run) fam_once "${STATE}/family_nginx_note" "${first:+family: nginx: ${first} (sudarshan-deploy --nginx-check says more)}" ;;
+        brief)
+            if [[ -z "${first}" ]]; then echo "family: nginx: the family view's nginx lines are installed, loaded and this release's"
+            else echo "family: nginx: ${first}"; fi ;;
+    esac
+    [[ -z "${first}" ]]
+)
 if [[ "${MODE}" == "remove-ring" ]]; then ring_remove "${REMOVE_RING}"; exit 0; fi
+if [[ "${MODE}" == "nginx" ]]; then rc=0; ngx_check report || rc=$?; exit "${rc}"; fi
 if [[ "${MODE}" == "family" ]]; then
     feed_tokens || true
     rc=0; fam_provision setup || rc=$?
@@ -1139,6 +1375,7 @@ if [[ "${MODE}" != "check" ]]; then
     else log "WARNING: calendar: the day files could not be kept for the market gate, so this run leaves them alone"; fi
     feed_tokens || true
     fam_provision run || true   # nothing at all until the owner's family set-up has made its folder
+    ngx_check run || true       # nothing at all until the owner has installed the family view's nginx lines
     notice_catch_up
 fi
 json="$(curl -fsSL --max-time "${FETCH_TIMEOUT}" -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/${OWNER_REPO}/releases/latest" 2>/dev/null)" \
