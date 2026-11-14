@@ -501,6 +501,29 @@ describe('Save', () => {
     })
   })
 
+  it('says nothing of another screen when the read after its own Save comes back', async () => {
+    const user = userEvent.setup()
+    let version = 3
+    let notes = 'Waited for the retest.'
+    api.data.mockImplementation(async (op: string, args?: { notes?: string }) => {
+      if (op === 'trip_get') return detail({ version, note: { ...detail().note, notes, version } })
+      if (op === 'tags_list') return TAGS
+      if (op === 'playbooks_list') return PLAYBOOKS
+      if (op === 'trip_update') {
+        version = 4
+        notes = args?.notes ?? notes
+        return { id: 7, version: 4, words: null }
+      }
+      throw new Error(`unexpected op ${op}`)
+    })
+    show()
+    await user.type(await screen.findByRole('textbox', { name: 'Notes' }), ' Done.')
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(onClose).toHaveBeenCalled())
+    expect(screen.queryByText(/changed on another screen/)).toBeNull()
+    expect(notesField().value).toBe('Waited for the retest. Done.')
+  })
+
   it('hands back the notes typed here when the other screen changed the notes too (review M1)', async () => {
     const user = userEvent.setup()
     serve()

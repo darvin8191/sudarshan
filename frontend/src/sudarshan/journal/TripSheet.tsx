@@ -312,10 +312,16 @@ function nextDraft(prev: Draft | null, trip: TripDetail): Draft {
       return freshDraft(trip, theirs)
     }
     const merged = rebase(prev.base, prev.form, theirs)
+    const typedNotes = merged.typedNotes ?? prev.typedNotes
+    if (changedFields(theirs, merged.form).length === 0 && typedNotes === null) {
+      // The newer read holds just what was typed (this sheet's own Save coming back): nothing to
+      // say about another screen.
+      return freshDraft(trip, theirs)
+    }
     return {
       ...freshDraft(trip, theirs),
       form: merged.form,
-      typedNotes: merged.typedNotes ?? prev.typedNotes,
+      typedNotes,
       overlap: merged.overlap,
       restored: prev.restored,
       moved: true,
