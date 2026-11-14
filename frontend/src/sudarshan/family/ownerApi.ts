@@ -164,6 +164,7 @@ export const ownerApi = {
   inviteCreate: (body: Args<'invite_create'>) => ownerData('invite_create', body),
   inviteRevoke: (body: Args<'invite_revoke'>) => ownerData('invite_revoke', body),
   signinReset: (body: Args<'signin_reset'>) => ownerData('signin_reset', body),
+  signinUnlock: (body: Args<'signin_unlock'>) => ownerData('signin_unlock', body),
   deviceList: (memberId: number, signal?: AbortSignal) =>
     ownerData('device_list', { member_id: memberId }, signal),
   deviceRevoke: (body: Args<'device_revoke'>) => ownerData('device_revoke', body),

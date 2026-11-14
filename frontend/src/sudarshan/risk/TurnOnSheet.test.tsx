@@ -10,6 +10,7 @@ import type { SwitchAnswer } from '@/api/risk'
 import { useAuthStore } from '@/stores/authStore'
 import { useThemeStore } from '@/stores/themeStore'
 import { cancelMark, exitMark, resetSentForTests, sentMarksNow } from '@/sudarshan/books/sent'
+import { MASKED } from '@/sudarshan/masked'
 import { OPEN_GUARD } from '@/sudarshan/watchlist/openGuard'
 
 const api = vi.hoisted(() => ({ preview: vi.fn(), turnOn: vi.fn() }))
@@ -89,7 +90,11 @@ describe('turning the kill switch on', () => {
     expect(turnOn()).toBeDisabled()
     expect(screen.getByRole('checkbox')).not.toBeChecked()
     fireEvent.change(phraseField(), { target: { value: 'stop' } })
+    expect(phraseField().className).toContain(MASKED) // dots, until Show is tapped
     expect(turnOn()).toBeEnabled()
+    fireEvent.click(screen.getByRole('button', { name: 'Show confirm phrase' }))
+    expect(turnOn()).toBeEnabled() // the toggle never sends the form
+    expect(api.turnOn).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole('checkbox'))
     fireEvent.click(turnOn())
     await waitFor(() => expect(api.turnOn).toHaveBeenCalledWith(true, 'stop'))

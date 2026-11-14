@@ -86,7 +86,7 @@ def test_a_lockout_is_one_line_the_desk_can_word_and_names_no_one(flow):
     line = lockouts[0]
     assert line.src == "family" and line.fact("attempts") == "5"
     assert line.fact("device") == PHONE.label and int(line.fact("until")) == (
-        flow.at // 1000 + 15 * 60
+        flow.at // 1000 + 60  # review M2: the first lock of a run is a minute
     )
     assert line.fact("handle") == "" and line.fact("name_members") == ""
     assert stat.S_IMODE(flow.spool.stat().st_mode) == 0o640
