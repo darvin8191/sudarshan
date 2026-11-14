@@ -56,6 +56,7 @@ import { applySessionHours, sessionCalendarFor } from '@/lib/trading/sessionHour
 import { volumePoint } from '@/lib/trading/volumeSettings'
 import type { AppMode } from '@/stores/themeStore'
 import { CHART_BRANDING } from '@/sudarshan/brand'
+import { intervalLabel } from './prefs'
 
 /** How often the quote fallback asks while the stream is down: the same as /trading's. */
 export const QUOTE_FALLBACK_MS = 4000
@@ -256,7 +257,8 @@ export class PhoneChart {
     this.sym = { symbol, exchange }
     this.interval = apiInterval(chip)
     this.bars = []
-    this.setLoad({ kind: 'loading', symbol, interval: chip })
+    const label = intervalLabel(this.interval)
+    this.setLoad({ kind: 'loading', symbol, interval: label })
     this.chart.destroy()
     ;({ chart: this.chart, price: this.price, volume: this.volume } = this.buildChart(exchange))
     this.chart.setDataContext({ symbol, exchange, interval: this.interval })
@@ -278,8 +280,8 @@ export class PhoneChart {
     }
     if (ticket !== this.ticket || this.destroyed) return
     failure ??= bars.length ? null : this.data.getState().error
-    if (failure) this.setLoad(chartLoadFailed(symbol, chip, cleanError(failure)))
-    else if (!bars.length) this.setLoad(chartNoData(symbol, chip))
+    if (failure) this.setLoad(chartLoadFailed(symbol, label, cleanError(failure)))
+    else if (!bars.length) this.setLoad(chartNoData(symbol, label))
     else {
       this.setLoad(CHART_READY)
       // History's last close stands in until the first tick, never over one.

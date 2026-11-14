@@ -27,7 +27,17 @@ const fakes = vi.hoisted(() => ({
   }>,
   config: { apiKey: 'test-key', wsUrl: 'ws://test.invalid' } as unknown,
   instrument: { name: 'STATE BANK OF INDIA', lotSize: 1, tickSize: 0.05 } as unknown,
+  /** What the broker offers, as the terminal groups it (Upstox's set). */
+  intervals: null as unknown,
 }))
+
+const UPSTOX_INTERVALS = [
+  { label: 'minutes', items: ['1m', '2m', '3m', '5m', '10m', '15m', '30m'] },
+  { label: 'hours', items: ['1h', '2h', '3h', '4h'] },
+  { label: 'days', items: ['D'] },
+  { label: 'weeks', items: ['W'] },
+  { label: 'months', items: ['M'] },
+]
 
 vi.mock('./phoneChart', () => ({
   isQuoteOnly: (exchange: string) => exchange.endsWith('_INDEX'),
@@ -54,6 +64,7 @@ vi.mock('./phoneChart', () => ({
 vi.mock('./api', () => ({
   loadFeedConfig: async () => fakes.config,
   loadInstrument: async () => fakes.instrument,
+  loadIntervals: async () => fakes.intervals,
   searchSymbols: async () => [],
 }))
 // Both close themselves the way the real dialogs do: the action's own
@@ -193,6 +204,7 @@ beforeEach(() => {
   fakes.config = { apiKey: 'test-key', wsUrl: 'ws://test.invalid' }
   useAuthStore.setState({ apiKey: 'test-key', sessionChecked: true, brokerSessionExpired: false })
   fakes.instrument = { name: 'STATE BANK OF INDIA', lotSize: 1, tickSize: 0.05 }
+  fakes.intervals = UPSTOX_INTERVALS
   localStorage.clear()
   Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 })
   Object.defineProperty(window, 'innerHeight', { configurable: true, value: 844 })
@@ -298,6 +310,89 @@ describe('the phone chart page at 390 px', () => {
     expect(chart().load).toHaveBeenLastCalledWith('SBIN', 'NSE', '1h')
     expect(screen.getByRole('button', { name: '1h' })).toHaveAttribute('aria-pressed', 'true')
     expect(localStorage.getItem('sudarshan-chart-interval')).toBe('1h')
+  })
+
+  it('offers every timeframe the broker has from More, and a pick off the chips takes its place', async () => {
+    await opened()
+    await userEvent.click(screen.getByRole('button', { name: 'More timeframes' }))
+    const sheet = await screen.findByRole('dialog', { name: 'Timeframe' })
+    for (const heading of ['Minutes', 'Hours', 'Days', 'Weeks', 'Months'])
+      expect(within(sheet).getByRole('heading', { name: heading })).toBeVisible()
+    expect(within(sheet).getByRole('button', { name: '1M, 1 month' })).toBeVisible()
+    await userEvent.click(within(sheet).getByRole('button', { name: '2h, 2 hours' }))
+    expect(chart().load).toHaveBeenLastCalledWith('SBIN', 'NSE', '2h')
+    expect(localStorage.getItem('sudarshan-chart-interval')).toBe('2h')
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Timeframe' })).toBeNull())
+    // Not pinned, so it shows in More's place, as the timeframe in use.
+    const more = screen.getByRole('button', { name: '2h, more timeframes' })
+    expect(more).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: '5m' })).toHaveAttribute('aria-pressed', 'false')
+  })
+
+  it('pins up to six chips, says why a seventh is refused, and keeps the pins on this phone', async () => {
+    await opened()
+    await userEvent.click(screen.getByRole('button', { name: 'More timeframes' }))
+    const sheet = await screen.findByRole('dialog', { name: 'Timeframe' })
+    const pin = (name: string) => within(sheet).getByRole('button', { name: `Pin ${name}` })
+    expect(pin('3 minutes')).toHaveAttribute('aria-pressed', 'true')
+    expect(pin('3 minutes')).toHaveTextContent('Pinned')
+    await userEvent.click(pin('2 hours'))
+    expect(within(sheet).getByRole('status')).toHaveTextContent(
+      'Six timeframes are pinned. Unpin one to pin another.'
+    )
+    expect(pin('2 hours')).toHaveAttribute('aria-pressed', 'false')
+    await userEvent.click(pin('3 minutes'))
+    await userEvent.click(pin('2 hours'))
+    expect(within(sheet).queryByRole('status')).toBeNull()
+    await userEvent.click(within(sheet).getByRole('button', { name: 'Close' }))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Timeframe' })).toBeNull())
+    expect(JSON.parse(localStorage.getItem('sudarshan-chart-pinned') ?? '[]')).toEqual([
+      '1m',
+      '5m',
+      '15m',
+      '1h',
+      '2h',
+      'D',
+    ])
+    const row = screen.getByRole('group', { name: 'Timeframe' })
+    expect(
+      within(row)
+        .getAllByRole('button')
+        .map((b) => b.textContent)
+    ).toEqual(['1m', '5m', '15m', '1h', '2h', '1D', 'More'])
+  })
+
+  it('keeps one chip pinned, and shows only chips the broker offers', async () => {
+    localStorage.setItem('sudarshan-chart-pinned', JSON.stringify(['5m', '45m']))
+    fakes.intervals = [{ label: 'minutes', items: ['1m', '5m', '15m'] }]
+    await opened()
+    const row = screen.getByRole('group', { name: 'Timeframe' })
+    await waitFor(() =>
+      expect(
+        within(row)
+          .getAllByRole('button')
+          .map((b) => b.textContent)
+      ).toEqual(['5m', 'More'])
+    )
+    await userEvent.click(screen.getByRole('button', { name: 'More timeframes' }))
+    const sheet = await screen.findByRole('dialog', { name: 'Timeframe' })
+    await userEvent.click(within(sheet).getByRole('button', { name: 'Pin 5 minutes' }))
+    expect(within(sheet).getByRole('status')).toHaveTextContent(
+      'One timeframe stays pinned above the chart.'
+    )
+  })
+
+  it('moves off a timeframe this broker does not offer, to one it does', async () => {
+    localStorage.setItem('sudarshan-chart-interval', '45m')
+    await opened()
+    await waitFor(() => expect(chart().load).toHaveBeenLastCalledWith('SBIN', 'NSE', '5m'))
+  })
+
+  it('reads a day chart with its old saved name, and stamps its candles with the date', async () => {
+    localStorage.setItem('sudarshan-chart-interval', '1D')
+    await opened()
+    expect(chart().load).toHaveBeenCalledWith('SBIN', 'NSE', 'D')
+    expect(screen.getByRole('button', { name: '1D' })).toHaveAttribute('aria-pressed', 'true')
   })
 
   it("opens the app's own order ticket from Buy and Sell, on Delivery for a share until a pick", async () => {

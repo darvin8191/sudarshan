@@ -1,9 +1,11 @@
 /**
  * The few requests the phone chart makes outside the chart itself: the key
- * and stream address every chart uses, an instrument's contract details, and
- * symbol search. Each resolves to null or an empty list on failure, and the
- * page says what that means; none of them throws.
+ * and stream address every chart uses, an instrument's contract details, the
+ * timeframes the broker offers, and symbol search. Each resolves to null or
+ * an empty list on failure, and the page says what that means; none of them
+ * throws.
  */
+import { type IntervalData, type IntervalGroup, intervalGroups } from '@/lib/trading/intervals'
 import type { SearchRow } from '@/lib/trading/terminal'
 
 export interface FeedConfig {
@@ -63,6 +65,13 @@ export async function loadInstrument(
     lotSize: Number(data.lotsize) > 0 ? Number(data.lotsize) : 1,
     tickSize: Number(data.tick_size) > 0 ? Number(data.tick_size) : 0.05,
   }
+}
+
+/** The timeframes the broker offers, grouped as the terminal groups them; null when not read. */
+export async function loadIntervals(apiKey: string): Promise<IntervalGroup[] | null> {
+  const data = await post<IntervalData>('intervals', { apikey: apiKey })
+  const groups = data ? intervalGroups(data) : []
+  return groups.length ? groups : null
 }
 
 /** Broker symbols matching what was typed, for the shared search dialog. */

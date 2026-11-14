@@ -19,9 +19,18 @@
  * This file is layout and wiring only. A tick re-renders the price header and
  * nothing else: the price lives in a small store outside React's tree.
  */
-import { AlertTriangle, ArrowLeft, BellPlus, RefreshCw, Search, SunMedium, X } from 'lucide-react'
+import {
+  AlertTriangle,
+  ArrowLeft,
+  BellPlus,
+  ChevronDown,
+  RefreshCw,
+  Search,
+  SunMedium,
+  X,
+} from 'lucide-react'
 import type { Bar } from 'openalgo-charts'
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { Link, Navigate, useLocation, useNavigate, useParams } from 'react-router'
 import { PlaceOrderDialog } from '@/components/trading/PlaceOrderDialog'
 import { SymbolSearchDialog } from '@/components/trading/SymbolSearchDialog'
@@ -29,6 +38,7 @@ import { Switch } from '@/components/ui/switch'
 import { chartHref } from '@/lib/trading/chartLink'
 import { type ChartStateView, chartStateCopy, createChartStateGate } from '@/lib/trading/chartState'
 import { priceDp } from '@/lib/trading/format'
+import { type IntervalGroup, pickInterval as offeredInterval } from '@/lib/trading/intervals'
 import type { LiveStatus } from '@/lib/trading/liveStatus'
 import { cn } from '@/lib/utils'
 import { useThemeStore } from '@/stores/themeStore'
@@ -47,20 +57,25 @@ import {
   type InstrumentInfo,
   loadFeedConfig,
   loadInstrument,
+  loadIntervals,
   searchSymbols,
 } from './api'
 import { LongPress } from './longPress'
 import { isQuoteOnly, PhoneChart } from './phoneChart'
 import {
-  CHART_CHIPS,
-  type ChartChip,
   chartPath,
-  readChip,
+  intervalLabel,
+  isCalendarInterval,
+  readInterval,
   readLastInstrument,
-  saveChip,
+  readPinned,
+  saveInterval,
   saveLastInstrument,
+  savePinned,
+  togglePin,
 } from './prefs'
 import { PriceStore, tickLine } from './prices'
+import { TimeframeSheet } from './TimeframeSheet'
 import { useWakeLock } from './useWakeLock'
 
 /** The order tag the chart's tickets carry, the same as the /trading terminal's. */
@@ -118,13 +133,18 @@ export default function ChartPage() {
 type Inspect = { bar: Bar; x: number | null; y: number }
 
 /** A sheet over the chart, as the browser history entry it is; `alert` is a market alert's form (M10.2). */
-type Sheet = { sheet: 'ticket'; side: 'BUY' | 'SELL' } | { sheet: 'search' } | { sheet: 'alert' }
+type Sheet =
+  | { sheet: 'ticket'; side: 'BUY' | 'SELL' }
+  | { sheet: 'search' }
+  | { sheet: 'alert' }
+  | { sheet: 'timeframe' }
 
 function readSheet(state: unknown): Sheet | null {
   if (!state || typeof state !== 'object') return null
   const value = state as { sheet?: unknown; side?: unknown }
   if (value.sheet === 'search') return { sheet: 'search' }
   if (value.sheet === 'alert') return { sheet: 'alert' }
+  if (value.sheet === 'timeframe') return { sheet: 'timeframe' }
   if (value.sheet === 'ticket' && (value.side === 'BUY' || value.side === 'SELL'))
     return { sheet: 'ticket', side: value.side }
   return null
@@ -156,7 +176,12 @@ function PhoneChartScreen({
   const [attempt, setAttempt] = useState(0)
   const [config, setConfig] = useState<FeedConfig | null | undefined>(undefined)
   const [info, setInfo] = useState<InstrumentInfo | null | undefined>(undefined)
-  const [chip, setChip] = useState<ChartChip>(() => readChip())
+  const [timeframe, setTimeframe] = useState(() => readInterval())
+  const [pinned, setPinned] = useState(() => readPinned())
+  /** What the broker offers, once read; null until then, or when it could not be. */
+  const [groups, setGroups] = useState<IntervalGroup[] | null>(null)
+  /** Why the last pin was refused, shown in the timeframe sheet. */
+  const [pinNotice, setPinNotice] = useState<string | null>(null)
   const [prevClose, setPrevClose] = useState<number | null>(null)
   const [status, setStatus] = useState<LiveStatus | null>(null)
   const [load, setLoad] = useState<ChartStateView | null>(null)
@@ -239,10 +264,28 @@ function PhoneChartScreen({
   }, [owner, appMode])
 
   useEffect(() => {
+    if (!config) return
+    let alive = true
+    void loadIntervals(config.apiKey).then((value) => {
+      if (alive) setGroups(value)
+    })
+    return () => {
+      alive = false
+    }
+  }, [config])
+
+  // A timeframe this broker does not offer (saved on another one) gives way to one it does.
+  useEffect(() => {
+    if (!groups) return
+    const offered = offeredInterval(groups, timeframe)
+    if (offered !== timeframe) setTimeframe(offered)
+  }, [groups, timeframe])
+
+  useEffect(() => {
     if (!owner) return
     setInspect(null)
-    void owner.load(symbol, exchange, chip)
-  }, [owner, symbol, exchange, chip])
+    void owner.load(symbol, exchange, timeframe)
+  }, [owner, symbol, exchange, timeframe])
 
   // Press and hold to read a candle.
   useEffect(() => {
@@ -261,10 +304,33 @@ function PhoneChartScreen({
     return () => press.destroy()
   }, [owner])
 
-  const pickChip = useCallback((next: ChartChip) => {
-    setChip(next)
-    saveChip(next)
+  const pickChip = useCallback((next: string) => {
+    setTimeframe(next)
+    saveInterval(next)
   }, [])
+
+  /** The pinned timeframes the broker offers, which are the chips. */
+  const chips = useMemo(
+    () => (groups ? pinned.filter((value) => groups.some((g) => g.items.includes(value))) : pinned),
+    [groups, pinned]
+  )
+
+  const flipPin = useCallback(
+    (next: string) => {
+      const result = togglePin(chips, next)
+      setPinNotice(
+        result.refused === 'full'
+          ? 'Six timeframes are pinned. Unpin one to pin another.'
+          : result.refused === 'last'
+            ? 'One timeframe stays pinned above the chart.'
+            : null
+      )
+      if (result.refused) return
+      setPinned(result.pinned)
+      savePinned(result.pinned)
+    },
+    [chips]
+  )
 
   const search = useCallback(
     (query: string, ex?: string, limit?: number) =>
@@ -384,25 +450,15 @@ function PhoneChartScreen({
         closesAt={closesAt}
       />
 
-      <fieldset className="flex shrink-0 gap-1 border-b bg-card px-2 py-1">
-        <legend className="sr-only">Timeframe</legend>
-        {CHART_CHIPS.map((value) => (
-          <button
-            key={value}
-            type="button"
-            aria-pressed={value === chip}
-            onClick={() => pickChip(value)}
-            className={cn(
-              'h-12 min-w-12 flex-1 rounded-full text-sm font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-              value === chip
-                ? 'bg-[color:var(--primary-tint)] text-primary shadow-[inset_0_0_0_1.5px_var(--primary)]'
-                : 'text-muted-foreground hover:bg-accent'
-            )}
-          >
-            {value}
-          </button>
-        ))}
-      </fieldset>
+      <TimeframeRow
+        chips={chips}
+        current={timeframe}
+        onPick={pickChip}
+        onMore={() => {
+          setPinNotice(null)
+          openSheet({ sheet: 'timeframe' })
+        }}
+      />
 
       <div
         ref={surface}
@@ -415,14 +471,14 @@ function PhoneChartScreen({
           <Readout
             bar={inspect.bar}
             dp={dp(inspect.bar.close)}
-            interval={chip}
+            interval={timeframe}
             volume={!quoteOnly}
             onClose={() => setInspect(null)}
           />
         )}
         <LoadState
           view={load}
-          onRetry={() => void owner?.load(symbol, exchange, chip)}
+          onRetry={() => void owner?.load(symbol, exchange, timeframe)}
           onDismiss={() => setLoad(null)}
         />
       </div>
@@ -505,6 +561,19 @@ function PhoneChartScreen({
           }}
         />
       )}
+      <TimeframeSheet
+        open={sheet?.sheet === 'timeframe'}
+        onOpenChange={(open) => !open && closeSheet()}
+        groups={groups}
+        current={timeframe}
+        pinned={chips}
+        notice={pinNotice}
+        onPick={(next) => {
+          pickChip(next)
+          closeSheet()
+        }}
+        onTogglePin={flipPin}
+      />
       <SymbolSearchDialog
         open={searching}
         onOpenChange={(open) => !open && closeSheet()}
@@ -521,6 +590,59 @@ function PhoneChartScreen({
         }}
       />
     </Screen>
+  )
+}
+
+/**
+ * The pinned timeframes and, last, More: every timeframe the broker offers,
+ * in a sheet. A timeframe picked there that is not pinned takes More's place,
+ * shown as chosen, so the row always says what the chart shows. Seven at
+ * most, each 48 dp wide, fit a 360 px phone.
+ */
+function TimeframeRow({
+  chips,
+  current,
+  onPick,
+  onMore,
+}: {
+  chips: readonly string[]
+  current: string
+  onPick(interval: string): void
+  onMore(): void
+}) {
+  const elsewhere = !chips.includes(current)
+  const chip = (pressed: boolean) =>
+    cn(
+      'h-12 min-w-12 flex-1 rounded-full text-sm font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+      pressed
+        ? 'bg-[color:var(--primary-tint)] text-primary shadow-[inset_0_0_0_1.5px_var(--primary)]'
+        : 'text-muted-foreground hover:bg-accent'
+    )
+  return (
+    <fieldset className="flex shrink-0 gap-0.5 border-b bg-card px-1 py-1">
+      <legend className="sr-only">Timeframe</legend>
+      {chips.map((value) => (
+        <button
+          key={value}
+          type="button"
+          aria-pressed={value === current}
+          onClick={() => onPick(value)}
+          className={chip(value === current)}
+        >
+          {intervalLabel(value)}
+        </button>
+      ))}
+      <button
+        type="button"
+        aria-pressed={elsewhere}
+        aria-label={elsewhere ? `${intervalLabel(current)}, more timeframes` : 'More timeframes'}
+        onClick={onMore}
+        className={cn(chip(elsewhere), 'inline-flex items-center justify-center gap-0.5')}
+      >
+        {elsewhere ? intervalLabel(current) : 'More'}
+        <ChevronDown aria-hidden="true" className="size-3 shrink-0" />
+      </button>
+    </fieldset>
   )
 }
 
@@ -723,12 +845,12 @@ function Readout({
 }: {
   bar: Bar
   dp: number
-  interval: ChartChip
+  interval: string
   volume: boolean
   onClose(): void
 }) {
   const at = new Date(bar.time * 1000)
-  const stamp = interval === '1D' ? barDay.format(at) : barStamp.format(at)
+  const stamp = isCalendarInterval(interval) ? barDay.format(at) : barStamp.format(at)
   const cells: Array<[string, string]> = [
     ['O', formatPrice(bar.open, dp)],
     ['H', formatPrice(bar.high, dp)],
