@@ -198,7 +198,7 @@ two types, and a test holds this table, that map and `kinds.py` to each other.
 | `share_remove` | DELETE | `/family/shares` | write | | `ShareRemoveArgs` | `ShareRemoved` | |
 | `member_privacy_set` | PUT | `/family/privacy` | write | | `MemberPrivacySetArgs` | `MemberPrivacy` | a member's privacy floor (cross-design Y6) |
 | `tax_get` | GET | `/tax` | read | `fy:int, member:int` | `TaxGetArgs` | `TaxPack` | P7 `tax`: the working paper of one year and taxpayer |
-| `tax_inputs` | GET | `/tax/inputs` | read | `member:int` | `TaxInputsArgs` | `TaxInputs` | P7 `tax`: the owner's figures and what the paper lacks |
+| `tax_inputs` | GET | `/tax/inputs` | read | `member:int` | `TaxInputsArgs` | `TaxInputs` | P7 `tax`: the owner's figures and how each account counts |
 | `tax_input_set` | POST | `/tax/inputs` | write | | `TaxInputSetArgs` | `TaxInputSaved` | P7 `tax`: `kind` from a closed list; `dry_run` tells the effect first |
 | `tax_input_delete` | DELETE | `/tax/inputs/<id>` | write | | `TaxInputDeleteArgs` | `Deleted` | P7 `tax` |
 | `tax_csv` | GET | `/tax/export.csv` | read | `fy:int, member:int, schedule:str` | `TaxCsvArgs` | `ExportFile` | P7 `tax`, download |
@@ -348,7 +348,7 @@ two exists in this release. Each purpose has its own principal and its own list 
 |---|---|---|
 | owner (`PORTFOLIO_API_INFO`) | `owner` | the contract's ops, the four sharing ops among them (`shares_list`, `share_set`, `share_remove`, `member_privacy_set`) |
 | family (`PORTFOLIO_FAMILY_API_INFO`) | `viewer:<member id>` | reads: `state`, `summary`, `tab_get`, `performance`, `upstox_book`, `upstox_history`, `shares_for_viewer` |
-| journal (`PORTFOLIO_JOURNAL_API_INFO`) | `sudarshan-journal` | reads: `trades_day`, `order_history`, `historical_trades`, `pnl_report`, `positions`, `funds`, `benchmark_closes` |
+| journal (`PORTFOLIO_JOURNAL_API_INFO`) | `sudarshan-journal` | reads: `trades_day`, `order_history`, `historical_trades`, `pnl_report` (part `charges` also for some days: `from`, `to`, both inside the year), `positions`, `funds`, `benchmark_closes`, and `tax_pack` (`fy`, `member`: the owner's own working paper, as `tax_get` answers it, behind `SUDARSHAN_TAX`) |
 
 * **Family scope** (`sharing.py`): built here, never taken from the caller. Tabs are the member's
   unexpired `tab_share` rows (the member's own row beats their role's) intersected with
@@ -407,6 +407,25 @@ Off, its ops answer `not_ready` whatever their module does (`ops.switched`, put 
 registration), its jobs end at once (`timers.gate_switched`) and nothing is read from Upstox for
 it. The owner's `state` answer carries `switches`, so the page offers a view only while its
 switch is on.
+
+**The tax working paper** (`ops/tax_ops.py`, `tax_adapter.py`). `tax_get` is one taxpayer's
+year (a member; none is the owner, the first member) among the three Upstox keeps; anything older
+is refused with `tax_years`. The adapter turns the reader's cache, Upstox's P&L pairs, the custom
+tabs' ledgers and the owner's inputs into the core's inputs, and the answer is the core's pack
+(`sudarshan/tax/pack.py`) as it is: the one shape the phone and the journal read. A loss carried
+from an earlier year comes from that year's own pack, worked out from the oldest year in reach,
+and a loss the owner entered for a year wins over the computed one (shown beside it). An account
+counts by its `tax_mode`; a ledger entry on the Upstox account is left out, so nothing counts
+twice. The view starts no read of Upstox: what is not read in full is a line of
+`inputs.missing`, and a read in flight for the year puts `tax_reading` first.
+
+`tax_input_set` keeps one input of a closed kind (`TAX_INPUT_KINDS`): a 31 Jan 2018 price (one
+per share), a purchase from before the records (it wins over Upstox's pair for that share), a loss
+brought forward (one per year, kind and source), a day of delivery, a buyback tender, or the
+readings of the open rules (`owner_setting` `tax:<member id>`, saved from the version it was read
+at, 0 before the first save). Every field is checked and refused in a sentence naming it; a new
+row is made once per `request_id`; an existing one changes from its version. With `dry_run` it
+writes nothing and answers `effect`, the year's headline figures that would change, as sentences.
 
 A family member sees nothing of this phase: none of its ops is a family op (a test holds
 `FAMILY_OPS` to that), and the mask table (version 3) hides its fields defensively anyway, its
