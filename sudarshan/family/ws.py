@@ -47,6 +47,12 @@ WRITE_TIMEOUT_S = 10.0
 #: After a close frame, how long the phone has to answer before the connection is dropped.
 CLOSE_TIMEOUT_S = 2.0
 MAX_SOCKETS = 20
+#: M1 (feat/family-c): a member's share of the sockets and a session's, so no one takes every slot
+#: (4 members x 4 fit in 20), and the silence after which a socket counts as dead when its session
+#: asks for another (a ping goes every 25 s, and a live phone answers it).
+PER_MEMBER = 4
+PER_SESSION = 2
+DEAD_AFTER_S = 40.0
 READ_CHUNK = 64 * 1024
 _CLOSE = object()
 
@@ -77,17 +83,54 @@ class Plain:
 
 
 class Registry:
-    """The open sockets, by the hash of the session each belongs to."""
+    """The open sockets, by the hash of the session each belongs to.
 
-    def __init__(self, limit: int = MAX_SOCKETS):
-        self.limit = limit
+    M1 (feat/family-c): a handshake takes its slot with ``reserve`` before its first await and
+    gives it back with ``release`` on a refusal; ``admit`` turns it into the socket under the
+    member's and the session's shares, with no await between the count and the claim. A session
+    at its share gets a new socket only in place of one that is dead (silent past
+    ``DEAD_AFTER_S``): closing a live one would let two tabs close each other in turn."""
+
+    def __init__(self, limit: int = MAX_SOCKETS, per_member: int = PER_MEMBER,
+                 per_session: int = PER_SESSION):  # fmt: skip
+        self.limit, self.per_member, self.per_session = limit, per_member, per_session
         self._by_session: dict[str, set[ViewerSocket]] = {}
+        self._reserved = 0
 
     def __len__(self) -> int:
         return sum(len(found) for found in self._by_session.values())
 
     def full(self) -> bool:
-        return len(self) >= self.limit
+        return len(self) + self._reserved >= self.limit
+
+    def reserve(self) -> bool:
+        """M1: take a slot for a handshake about to be checked; False when every slot is open or
+        taken by another handshake."""
+        if self.full():
+            return False
+        self._reserved += 1
+        return True
+
+    def release(self) -> None:
+        """M1: a reserved slot given back (the handshake was refused)."""
+        self._reserved = max(0, self._reserved - 1)
+
+    def admit(self, sock: ViewerSocket) -> bool:
+        """M1: the reservation becomes ``sock``, or is given back (False) when its member holds
+        their share, or its session does and none of the session's sockets is dead."""
+        self.release()
+        same = [s for s in self._by_session.get(sock.session, ()) if s.closing is None]
+        if len(same) >= self.per_session:
+            dead = [s for s in same if s.clock() - s.heard >= DEAD_AFTER_S]
+            if len(same) - len(dead) >= self.per_session:
+                return False
+            for old in dead:
+                old.close(1001, "")
+        mine = [s for s in self.sockets() if s.member_id == sock.member_id and s.closing is None]
+        if len(mine) >= self.per_member:
+            return False
+        self.add(sock)
+        return True
 
     def add(self, sock: ViewerSocket) -> None:
         self._by_session.setdefault(sock.session, set()).add(sock)

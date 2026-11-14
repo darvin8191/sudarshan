@@ -474,3 +474,17 @@ def test_the_update_ops_answer_done_and_their_refusals_in_words(made, trip_id):
     book = call("playbook_create", ctx, name="Gap fill", rules=["Gap over 1%"])
     call("playbook_update", ctx, id=book["id"], version=1, archived=True)
     assert [p["archived"] for p in call("playbooks_list", ctx) if p["id"] == book["id"]] == [True]
+
+
+def test_a_reversal_carried_overnight_is_paired_whole_when_its_close_comes_another_day(made):
+    """Found in the fix round: the replay of a later day started at the short's opening, the
+    reversal's own fill, and paired all 130 of it as an entry (an open short of 130 after the
+    65 that closed it). The window goes back to the trade that fill closed."""
+    nrml = {"product": "NRML"}
+    put(made, [fill("a1", "BUY", 65, 100, "10:00", day=20261109, **nrml)])
+    put(made, [fill("a2", "SELL", 130, 104, "10:05", day=20261110, **nrml)])
+    put(made, [fill("a3", "BUY", 65, 103, "10:09", day=20261111, **nrml)])
+    first, second = trips(made)
+    assert (first["side"], first["status"], first["gross_paise"]) == ("long", "closed", 26_000)
+    assert (second["side"], second["status"], second["entry_qty"]) == ("short", "closed", 65)
+    assert second["gross_paise"] == 6_500

@@ -14,10 +14,10 @@ const STATE_WORDS: Record<Exclude<RatioState, 'ok'>, string> = {
   no_capital: 'Set your trading capital',
 }
 
-/** A ratio's text, or the words for why it has none. */
+/** A ratio's text, or the words for why it has none; a state this page does not know reads "-". */
 export function ratioWords(value: string | null, state: RatioState, suffix = ''): string {
   if (state === 'ok' && value !== null) return `${value}${suffix}`
-  return state === 'ok' ? 'No trades' : STATE_WORDS[state]
+  return state === 'ok' ? 'No trades' : (STATE_WORDS[state] ?? '-')
 }
 
 /** A big figure for a tile: whole rupees from ₹1,000 up so it fits, paise below that. */
@@ -26,18 +26,25 @@ export function tileRupees(paise: number, signed = true): string {
   return formatRupees(rupees, { decimals: Math.abs(rupees) >= 1000 ? 0 : 2, signed })
 }
 
-const COMPACT = new Intl.NumberFormat('en-IN', { maximumFractionDigits: 1 })
+const ONE_PLACE = new Intl.NumberFormat('en-IN', { maximumFractionDigits: 1 })
 
-/** A signed figure short enough for a calendar cell: +812, −1.2k, +3.4L (lakh). Rupees, no symbol. */
+/** Under 10, one place ("1.2", "9.9"); from 10, whole ("12", "99"). */
+const short = (value: number): string =>
+  value < 9.95 ? ONE_PLACE.format(value) : String(Math.round(value))
+
+/**
+ * A signed figure short enough for a calendar or heat-map cell on a phone: +812, −1.2k, +12k,
+ * +3.4L (lakh), +1.2Cr. Two significant figures past a thousand, so a cell holds five characters
+ * and never cuts one off (review M4); the cell's full figure is read out. Rupees, no symbol.
+ */
 export function compactPaise(paise: number): string {
   const rupees = Math.abs(paise) / PAISE_PER_RUPEE
-  const rounded = Math.round(rupees)
-  if (rounded === 0) return '0'
+  if (Math.round(rupees) === 0) return '0'
   const sign = paise < 0 ? '−' : '+'
-  if (rounded >= 10_000_000) return `${sign}${COMPACT.format(rupees / 10_000_000)}Cr`
-  if (rounded >= 100_000) return `${sign}${COMPACT.format(rupees / 100_000)}L`
-  if (rounded >= 1000) return `${sign}${COMPACT.format(rupees / 1000)}k`
-  return `${sign}${rounded}`
+  if (rupees < 999.5) return `${sign}${Math.round(rupees)}`
+  if (rupees < 99_500) return `${sign}${short(rupees / 1000)}k`
+  if (rupees < 9_950_000) return `${sign}${short(rupees / 100_000)}L`
+  return `${sign}${short(rupees / 10_000_000)}Cr`
 }
 
 /** "R known for 4 of 9" and the average R, or what to do to get one. */

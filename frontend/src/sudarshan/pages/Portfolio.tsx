@@ -2,6 +2,8 @@
 // owner's own tabs, as the portfolio service holds them (blueprints/sudarshan_portfolio.py).
 // This is the shell: the tab strip, what is open kept in the address, and the states in words.
 // Each part of a tab arrives as its own change and replaces its stub in sudarshan/portfolio.
+// SUDARSHAN P7 F0 (M7.27): the money views (tax, risk, calendar, goals) stand beside the tabs at
+// `?view=<name>`, each offered only while the service says its switch is on.
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Archive,
@@ -14,8 +16,16 @@ import {
   TriangleAlert,
 } from 'lucide-react'
 import { useMemo } from 'react'
-import { portfolioCall, problemOf } from '@/sudarshan/portfolio/api'
-import { CustomStub } from '@/sudarshan/portfolio/StubViews'
+import { useNavigate, useSearchParams } from 'react-router'
+import { portfolioCall, problemOf, switchesOf } from '@/sudarshan/portfolio/api'
+import {
+  CustomStub,
+  PhaseChips,
+  PhaseStub,
+  type PhaseView,
+  phaseViewOf,
+  phaseViewsOn,
+} from '@/sudarshan/portfolio/StubViews'
 import { ActivitySheet } from '@/sudarshan/portfolio/sheets/ActivitySheet'
 import { ImportSheet } from '@/sudarshan/portfolio/sheets/ImportSheet'
 import { NewTabSheet } from '@/sudarshan/portfolio/sheets/NewTabSheet'
@@ -38,6 +48,8 @@ import { BottomSheet } from '@/sudarshan/watchlist/BottomSheet'
 export const PORTFOLIO_STATE_KEY = [...PORTFOLIO_KEY, 'state'] as const
 
 const CARD = 'rounded-[1.125rem] border bg-card px-4 py-6 text-center shadow-[var(--shadow-card)]'
+/** The tab strip with nothing selected: a money view is open instead of a tab. */
+const NO_TAB = -1
 const ACTION =
   'inline-flex min-h-12 items-center justify-center gap-2 rounded-[0.875rem] px-4 text-[0.9375rem] font-semibold outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50'
 
@@ -96,7 +108,18 @@ export default function Portfolio() {
   const archived = useMemo(() => custom.filter((t) => t.archived), [custom])
   const accounts = result?.enabled ? result.data.accounts : []
   const members = result?.enabled ? result.data.members : []
-  const shown = tab !== null && custom.some((t) => t.id === tab) ? tab : null
+  // A money view the address names is open only while its switch is on; otherwise the tabs show.
+  const [params] = useSearchParams()
+  const navigate = useNavigate()
+  const moneyViews = phaseViewsOn(switchesOf(result?.enabled ? result.data : null))
+  const money = phaseViewOf(params, moneyViews)
+  const openMoney = (next: PhaseView) => {
+    const after = new URLSearchParams(params)
+    for (const name of ['tab', 'sheet', 'activity', 'asset']) after.delete(name)
+    after.set('view', next)
+    navigate({ search: `?${after.toString()}` }, { replace: true })
+  }
+  const shown = money === null && tab !== null && custom.some((t) => t.id === tab) ? tab : null
   const current = shown === null ? null : (custom.find((t) => t.id === shown) ?? null)
   const queries = useQueryClient()
   const refresh = () => queries.invalidateQueries({ queryKey: PORTFOLIO_KEY })
@@ -139,6 +162,8 @@ export default function Portfolio() {
         </p>
       </Notice>
     )
+  } else if (money !== null) {
+    body = <PhaseStub view={money} />
   } else {
     body =
       current === null ? (
@@ -231,11 +256,12 @@ export default function Portfolio() {
       {usable && (
         <TabStrip
           tabs={tabs}
-          selected={shown}
+          selected={money === null ? shown : NO_TAB}
           onSelect={selectTab}
           onNew={() => open({ kind: 'new-tab' })}
         />
       )}
+      {usable && <PhaseChips views={moneyViews} selected={money} onSelect={openMoney} />}
       {usable && archived.length > 0 && (
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-sm font-semibold text-[color:var(--text-secondary)]">Archived</span>

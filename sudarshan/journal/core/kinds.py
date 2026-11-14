@@ -87,7 +87,11 @@ OUTSIDE_ORDER_WAIT_S = 60
 MODES = ("live", "sandbox")
 ACTIONS = ("BUY", "SELL")
 SIDES = ("long", "short")
-TRIP_STATUSES = ("open", "closed", "orphan")
+#: ``unmatched``: a position the journal did not see opened (held before its first fill of the
+#: instrument), so its entry and its result are not known here; ``expired``: an open contract
+#: whose own expiry day has passed with no closing fill (an expiry has none). Neither is shown as
+#: a position, priced live, claimed at the feed or counted in a figure (review B1).
+TRIP_STATUSES = ("open", "closed", "orphan", "unmatched", "expired")
 LEG_ROLES = ("entry", "exit")
 #: MIS and I are intraday; NRML, CNC and D are one carry class (Upstox maps D to CNC).
 PRODUCT_CLASSES = ("intraday", "carry")
@@ -115,6 +119,10 @@ REPORT_KINDS = ("brief", "eod", "weekly", "monthly", "fy")
 REPORT_STATUSES = ("ready", "sent", "text_only", "not_sent")
 CHARGE_SEGMENTS = ("options", "futures", "equity_delivery", "equity_intraday", "not_modelled")
 CHARGE_PLANS = ("plus", "standard")
+#: The alerts' report desk as the settings answer names it (``settings_ops.desk_state``): the
+#: state its block on the alerts' /health says, or ``unknown`` when the alerts service does not
+#: answer as itself, has no such block, or names a state this release does not know (review M5).
+DESK_STATES = ("on", "starting", "journal_off", "journal_down", "off", "unknown")
 #: What the owner's reports are called on a screen (design 6.4).
 REPORT_TITLES = {
     "brief": "Morning brief",
@@ -181,6 +189,7 @@ ENUMS = {
     "ReportStatus": REPORT_STATUSES,
     "ChargeSegment": CHARGE_SEGMENTS,
     "ChargePlan": CHARGE_PLANS,
+    "DeskState": DESK_STATES,
     "HoldBucket": HOLD_BUCKETS,
     "RatioState": RATIO_STATES,
     "DurationState": DURATION_STATES,
@@ -201,7 +210,7 @@ RECORDS = {
     "hold_s:int|null, strategy:string, strategy_override:string|null, setup_id:int|null, "
     "own_expiry_day:bool, index_expiry_day:bool, risk_paise:int|null, mae_paise:int|null, "
     "mfe_paise:int|null, mae_ms:int|null, mfe_ms:int|null, excursion_source:ExcursionSource, "
-    "excursion_note:string|null, version:int",
+    "excursion_note:string|null, version:int, charges_modelled:bool",
     "TripNote": "round_trip_id:int, notes:string, mistakes:int[], checklist:string, "
     "mood:Mood|null, version:int",
     "Tag": "id:int, kind:TagKind, name:string, colour:TagColour, archived:bool, version:int",
@@ -216,7 +225,11 @@ RECORDS = {
     "profit_factor:string|null, profit_factor_state:RatioState, expectancy_paise:int|null, "
     "avg_win_paise:int|null, avg_loss_paise:int|null, largest_win_paise:int|null, "
     "largest_loss_paise:int|null, payoff:string|null, payoff_state:RatioState, "
-    "r_known:int, r_total:string|null, r_avg:string|null, charges_impact_pct:string|null",
+    "r_known:int, r_total:string|null, r_avg:string|null, charges_impact_pct:string|null, "
+    "charges_estimated:bool, charges_not_estimated:int",
+    # ``charges_estimated``: some trade's charges in the block are the journal's estimate (no
+    # actual figure yet), so the charges and the net say "est."; ``charges_not_estimated``: how
+    # many trades are in a segment the estimate does not cover (no charges counted for them).
     "HoldBucketRow": "bucket:HoldBucket, trips:int, wins:int, net_paise:int",
     "PeriodRow": "key:string, trips:int, wins:int, net_paise:int",
     "Calendar": "days:PeriodRow[], weeks:PeriodRow[], months:PeriodRow[]",
@@ -252,11 +265,12 @@ RECORDS = {
     "ReportEvent": "id:string, src:string, kind:string, report:int, report_kind:ReportKind, "
     "sha256:string|null",
     # ``alerts_on``: false while nothing delivers reports (the alerts service, or its report
-    # desk, switched off: cross-design Y38); ``times``: when each report is built, as the page
-    # prints them (the day ones for today, or the next trading day).
+    # desk, switched off: cross-design Y38), derived from ``desk_state``, the desk's own state
+    # for the page to word; ``times``: when each report is built, as the page prints them (the
+    # day ones for today, or the next trading day).
     "Settings": "capital_base_paise:int|null, eod_on:bool, brief_on:bool, weekly_on:bool, "
     "monthly_on:bool, fy_on:bool, report_language:string, charges_plan:ChargePlan, version:int, "
-    "alerts_on:bool, rate_card:RateCard, times:ReportTimes",
+    "alerts_on:bool, desk_state:DeskState, rate_card:RateCard, times:ReportTimes",
     "RateCard": "version:string, from_day:int",
     "ReportTimes": "brief:string|null, eod:string|null, check:string|null, weekly:string, "
     "monthly:string, fy:string",
@@ -282,13 +296,16 @@ RECORDS = {
 #: ``trip_get``'s answer: the trip, its legs, the owner's note and its orders' references.
 # A row of the trades list: the trip and its mistake tags (the ids of its note's ``mistakes``).
 RECORDS["TripRow"] = RECORDS["Trip"] + ", mistakes:int[]"
-# The trade sheet: the trip, its fills (each as executed: a flip's fill is in both trips, its
-# ``legs`` say how much of it is this trip's), the owner's note (its ``checklist`` is JSON text,
-# ``[{"rule": ..., "yes": ...}]``, or empty), the excursion, the charges estimate of its orders,
-# the first entry order's round trip as OpenAlgo's latency record has it (``latency_ms``), and
-# each order's label.
+# A fill on the trade sheet: as executed (``qty`` is the whole fill), and ``trip_qty``, how much of
+# it is this trip's (a reversal's fill closes one trip and opens the next: the rest is the other's).
+RECORDS["TripFill"] = RECORDS["Fill"] + ", trip_qty:int"
+# The trade sheet: the trip, its fills (each as executed, with this trip's part of it), the owner's
+# note (its ``checklist`` is JSON text, ``[{"rule": ..., "yes": ...}]``, or empty), the excursion,
+# the charges estimate of its orders (each order priced whole, this trip's share by quantity), the
+# first entry order's round trip as OpenAlgo's latency record has it (``latency_ms``), and each
+# order's label.
 RECORDS["TripDetail"] = RECORDS["Trip"] + (
-    ", legs:TripLeg[], fills:Fill[], note:TripNote|null, excursion:Excursion|null, "
+    ", legs:TripLeg[], fills:TripFill[], note:TripNote|null, excursion:Excursion|null, "
     "charges:ChargeEstimate|null, latency_ms:int|null, orders:OrderRef[]"
 )
 

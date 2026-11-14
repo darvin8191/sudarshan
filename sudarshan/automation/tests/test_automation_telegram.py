@@ -27,6 +27,7 @@ REPO = Path(__file__).resolve().parents[3]
 HERE = Path(__file__).resolve().parent
 FORM = {"name": "ORB", "kind": "future", "underlying": "NIFTY", "product": "MIS", "lots": 1}
 OWNER_ID = 7
+OLD_KEY_ID = 9  # linked under the owner's name, but its stored key is not this server's API key
 
 
 class Bot:
@@ -59,13 +60,28 @@ def desk():
 def chat(store, desk, monkeypatch):
     import database.telegram_db as telegram_db
     import database.user_db as user_db
+    import services.telegram_bot_service as bot_service
     from sudarshan.automation import store as store_mod
 
     monkeypatch.setenv(flag.ENV, "sandbox")
-    linked = {OWNER_ID: {"openalgo_username": "owner"}, 8: {"openalgo_username": "kin"}}
+    linked = {
+        OWNER_ID: {"openalgo_username": "owner"},
+        8: {"openalgo_username": "kin"},
+        OLD_KEY_ID: {"openalgo_username": "owner"},
+    }
     monkeypatch.setattr(
         telegram_db, "get_telegram_user", lambda telegram_id: linked.get(telegram_id)
     )
+    # Since v0.5.2 the owner's chat is the one whose stored key is this server's API key now
+    # (sudarshan.guard.telegram.owner_of, through the bot's own _linked_owner): the owner's is.
+    stored = {OWNER_ID: "owner-key", 8: "kin-key", OLD_KEY_ID: "a-key-from-before"}
+    here = {"owner-key": "owner", "kin-key": "kin"}
+    monkeypatch.setattr(
+        bot_service,
+        "get_user_credentials",
+        lambda telegram_id: {"api_key": stored[telegram_id]} if telegram_id in stored else None,
+    )
+    monkeypatch.setattr(bot_service, "get_username_by_apikey", lambda key: here.get(key))
     monkeypatch.setattr(user_db, "find_user_by_username", lambda: SimpleNamespace(username="owner"))
     logged: list[tuple] = []
     monkeypatch.setattr(telegram_db, "log_command", lambda *args, **kwargs: logged.append(args))
@@ -102,11 +118,18 @@ def make(store, state=m.ACTIVE, **change):
 
 @pytest.mark.parametrize(
     ("user_id", "kind"),
-    [(8, "private"), (99, "private"), (OWNER_ID, "group"), (OWNER_ID, "supergroup")],
+    [
+        (8, "private"),
+        (99, "private"),
+        (OLD_KEY_ID, "private"),
+        (OWNER_ID, "group"),
+        (OWNER_ID, "supergroup"),
+    ],
 )
 def test_only_the_owners_own_private_chat_is_answered(chat, store, user_id, kind):
-    """12: the same from another chat is refused. A linked family account, a stranger, and the
-    owner himself in a group all get the one sentence, and nothing changes."""
+    """12: the same from another chat is refused. A linked family account, a stranger, a chat
+    linked under the owner's name whose stored key is not this server's API key, and the owner
+    himself in a group all get the one sentence, and nothing changes."""
     strategy, _ = make(store)
     for args in ((), ("stop", "ORB"), ("stop", "all"), ("start", "ORB", "STOP")):
         assert chat(*args, user_id=user_id, kind=kind) == telegram.ONLY_YOUR_CHAT

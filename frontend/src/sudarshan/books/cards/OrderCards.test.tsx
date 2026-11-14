@@ -18,7 +18,33 @@ const api = vi.hoisted(() => ({
   cancelOrder: vi.fn(),
   cancelAllOrders: vi.fn(),
   modifyOrder: vi.fn(),
+  contractOf: vi.fn(),
 }))
+// B2: the sheet reads the lot size for Repeat; the ticket it opens says what it was opened with.
+vi.mock('@/sudarshan/watchlist/api', () => ({
+  contractOf: (...args: unknown[]) => api.contractOf(...args),
+}))
+vi.mock('@/components/trading/PlaceOrderDialog', async () => {
+  const { createElement } = await import('react')
+  return {
+    PlaceOrderDialog: (props: Record<string, unknown>) =>
+      props.open
+        ? createElement(
+            'section',
+            { 'aria-label': 'Order ticket' },
+            [
+              props.action,
+              props.symbol,
+              props.exchange,
+              `qty ${props.quantity}`,
+              `lot ${props.lotSize}`,
+              `product ${props.product}`,
+              `strategy ${props.strategy}`,
+            ].join(' ')
+          )
+        : null,
+  }
+})
 vi.mock('@/api/trading', () => ({
   tradingApi: {
     getOrders: (...args: unknown[]) => api.getOrders(...args),
@@ -32,7 +58,11 @@ vi.mock('@/api/trading', () => ({
 }))
 vi.mock('@/components/trading/GttTab', async () => {
   const { createElement } = await import('react')
-  return { default: () => createElement('p', null, 'GTT book, as upstream shows it') }
+  return {
+    // B1: on a phone the GTT tab is cards (GttCards.test.tsx has them).
+    default: ({ cards }: { cards?: boolean }) =>
+      createElement('p', null, cards ? 'GTT book as cards' : 'GTT book, as upstream shows it'),
+  }
 })
 const auth = vi.hoisted(() => ({
   facts: {
@@ -266,6 +296,8 @@ beforeEach(() => {
   api.cancelOrder.mockReset().mockResolvedValue({ status: 'success' })
   api.cancelAllOrders.mockReset().mockResolvedValue({ status: 'success', message: 'Done' })
   api.modifyOrder.mockReset().mockResolvedValue({ status: 'success' })
+  api.contractOf.mockReset().mockResolvedValue({ lotSize: 65, tickSize: 0.05 })
+  localStorage.clear()
 })
 
 afterEach(() => {
@@ -526,15 +558,91 @@ describe('Order book on a phone: the cards', () => {
     expect(chip()).toHaveTextContent('TRIGGER PENDING')
   })
 
-  it('keeps the GTT tab as upstream shows it', async () => {
+  it('hands the GTT tab its cards on a phone', async () => {
     const tap = user()
     await renderPhone(WORKING)
     await tap.click(screen.getByRole('tab', { name: 'GTT' }))
-    expect(await screen.findByText('GTT book, as upstream shows it')).toBeInTheDocument()
+    expect(await screen.findByText('GTT book as cards')).toBeInTheDocument()
+  })
+
+  it('exports the order book from the app’s own route, never following its redirect (B3)', async () => {
+    const tap = user()
+    const fetch = vi.fn(async () => ({ ok: false, status: 0, headers: { get: () => null } }))
+    vi.stubGlobal('fetch', fetch)
+    await renderPhone(WORKING)
+    const actions = screen.getByTestId('order-actions')
+    await tap.click(within(actions).getByRole('button', { name: 'Export order book' }))
+    expect(fetch).toHaveBeenCalledWith(
+      '/orderbook/export',
+      expect.objectContaining({ redirect: 'manual' })
+    )
   })
 })
 
 describe('Order book on a phone: the sheet and its actions', () => {
+  it('repeats an order through the app’s ticket: its instrument, side and quantity (B2)', async () => {
+    const tap = user()
+    // The product is the one every ticket opens with: here the pick remembered for F&O.
+    localStorage.setItem('sudarshan-ticket-product', JSON.stringify({ fno: 'NRML' }))
+    await renderPhone(STOP)
+    await tap.click(orderCard('1002'))
+    await settle()
+    await tap.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Repeat' }))
+    expect(screen.getByRole('region', { name: 'Order ticket' })).toHaveTextContent(
+      'SELL NIFTY27OCT2625800PE NFO qty 65 lot 65 product NRML strategy Orders'
+    )
+    expect(where()).toBe('/orderbook?act=sell&row=1002')
+    back()
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'Order ticket' })).toBeNull())
+    expect(where()).toBe('/orderbook')
+  })
+
+  it('offers Repeat on a final order too, and says when it goes to the sandbox (B2)', async () => {
+    const tap = user()
+    theme.appMode = 'analyzer'
+    await renderPhone(FILLED)
+    await tap.click(orderCard('1003'))
+    await settle()
+    const repeat = within(screen.getByRole('dialog')).getByRole('button', {
+      name: 'Repeat in the sandbox',
+    })
+    await tap.click(repeat)
+    expect(screen.getByRole('region', { name: 'Order ticket' })).toHaveTextContent(
+      'BUY NIFTY27OCT2625900CE NFO qty 65 lot 65 product MIS'
+    )
+  })
+
+  it('waits for the lot size before Repeat, and says so when it cannot be read (B2)', async () => {
+    const tap = user()
+    api.contractOf.mockRejectedValueOnce(new Error('Contract not found'))
+    await renderPhone(STOP)
+    await tap.click(orderCard('1002'))
+    await settle()
+    const sheet = screen.getByRole('dialog')
+    expect(within(sheet).getByRole('button', { name: 'Repeat' })).toBeDisabled()
+    expect(sheet).toHaveTextContent(
+      'The lot size could not be read, so the order ticket stays shut.'
+    )
+    await tap.click(within(sheet).getByRole('button', { name: 'Try again' }))
+    await settle()
+    expect(within(sheet).getByRole('button', { name: 'Repeat' })).toBeEnabled()
+  })
+
+  it('names the order type in words and gives Upstox’s reason without its code (B2)', async () => {
+    const tap = user()
+    await renderPhone({
+      ...REFUSED,
+      rejection_reason: 'UDAPI1052: Order price is not within the circuit limits',
+    } as Order)
+    await tap.click(orderCard('1004'))
+    const sheet = screen.getByRole('dialog')
+    expect(within(sheet).getByTestId('rejection-reason')).toHaveTextContent(
+      'Broker says: Order price is not within the circuit limits'
+    )
+    expect(within(sheet).getByTestId('rejection-reason')).not.toHaveTextContent('UDAPI')
+    expect(sheet).toHaveTextContent('Order typeStop-loss limit (SL)')
+  })
+
   it('says why the broker refused an order, in its own words', async () => {
     const tap = user()
     await renderPhone(REFUSED)

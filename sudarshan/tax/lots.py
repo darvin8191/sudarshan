@@ -1,7 +1,8 @@
 """Tax lots (M7.26): first in, first out per taxpayer, account and ISIN, intraday taken out first.
 
 One replay over everything known: opening lots on their acquisition day, then that day's accepted
-bonus and split, then the day's trades by ``seq``. Of one day's trading in one share, the lesser
+bonus and split (on the one account an action names, else on every account holding the share),
+then the day's trades by ``seq``. Of one day's trading in one share, the lesser
 of what was bought and sold is intraday (the earliest buys against the earliest sells) and never
 touches a lot; the rest of the buys open lots and the rest of the sells take the oldest lots. A
 sale with no lot behind it comes out with no cost (never a cost of zero). The rules are the
@@ -107,11 +108,12 @@ def replay(trades, opening=(), actions=(), all_delivery=frozenset(), aliases=Non
 
 
 def _act(book: dict, action: Action, isin: str, out: LotBook) -> None:
-    """A bonus or a split on every account that holds the share on the ex-date."""
+    """A bonus or a split on every account that holds the share on the ex-date, or on the
+    action's own account only when it names one."""
     fmv_day = rules.at(rules.GRANDFATHER, action.ex_day)["fmv_day"]
     for scope, lots in sorted(book.items()):
         held = sum(lot.qty_u for lot in lots)
-        if scope[2] != isin or not held:
+        if scope[2] != isin or not held or action.account not in (None, scope[1]):
             continue
         if not action.accepted:
             out.notes.append(words.action_unconfirmed(action.kind, isin, day_text(action.ex_day)))

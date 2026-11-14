@@ -41,7 +41,10 @@ class Trade:
 @dataclass(frozen=True, slots=True)
 class Action:
     """A bonus (``num`` new for every ``den`` held, at nil cost, dated ``ex_day``) or a split
-    (every ``den`` become ``num``; cost and day stay). Applied only when ``accepted``."""
+    (every ``den`` become ``num``; cost and day stay). Applied only when ``accepted``. With an
+    ``account`` it changes that account's lots only (Upstox's own action for the Upstox account, a
+    tab's entry for the tab's account, so neither reaches the other); with none, every account's
+    that holds the share."""
 
     kind: str
     instrument: str
@@ -50,6 +53,7 @@ class Action:
     den: int
     new_isin: str | None = None
     accepted: bool = True
+    account: int | None = None
 
 
 @dataclass(frozen=True, slots=True)

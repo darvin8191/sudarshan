@@ -284,6 +284,18 @@ afterEach(() => {
 })
 
 describe('Positions on a phone: the cards', () => {
+  it('exports the positions from the app’s own route, never following its redirect (B3)', async () => {
+    const tap = user()
+    const fetch = vi.fn(async () => ({ ok: false, status: 0, headers: { get: () => null } }))
+    vi.stubGlobal('fetch', fetch)
+    await renderPhone(LONG)
+    await tap.click(screen.getByRole('button', { name: 'Export positions' }))
+    expect(fetch).toHaveBeenCalledWith(
+      '/positions/export',
+      expect.objectContaining({ redirect: 'manual' })
+    )
+  })
+
   it('shows each open position as a card, its figures carried by signs and words', async () => {
     await renderPhone(LONG, SHORT)
     expect(screen.queryByRole('table')).toBeNull()

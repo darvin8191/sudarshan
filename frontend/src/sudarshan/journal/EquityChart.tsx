@@ -107,6 +107,8 @@ export function EquityChart({ equity }: { equity: Equity }) {
   const summary = last
     ? `Equity ${tileRupees(last.equity_paise)}. Deepest drawdown ${tileRupees(dd.max_drawdown_paise)}.`
     : ''
+  // The legend's swatch is drawn in what the chart draws (review L7): orange in colour-blind mode.
+  const cvd = colourBlind()
   return (
     <section aria-label="Equity curve" className={`${SECTION} flex flex-col gap-2`}>
       <h2 className="text-base font-bold">Equity and drawdown</h2>
@@ -145,8 +147,21 @@ export function EquityChart({ equity }: { equity: Equity }) {
           </li>
           <li className="inline-flex flex-wrap items-center gap-2" data-testid="drawdown-label">
             <svg aria-hidden="true" width="24" height="12" focusable="false">
-              <rect x="0" y="0" width="24" height="12" fill={CHART_COLOURS.downFill} />
-              <line x1="0" y1="12" x2="24" y2="12" stroke={CHART_COLOURS.down} strokeWidth="2" />
+              <rect
+                x="0"
+                y="0"
+                width="24"
+                height="12"
+                fill={cvd ? CHART_COLOURS.downCvdFill : CHART_COLOURS.downFill}
+              />
+              <line
+                x1="0"
+                y1="12"
+                x2="24"
+                y2="12"
+                stroke={cvd ? CHART_COLOURS.downCvd : CHART_COLOURS.down}
+                strokeWidth="2"
+              />
             </svg>
             <span>
               Drawdown, below the peak:{' '}

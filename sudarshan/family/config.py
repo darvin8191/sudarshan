@@ -12,6 +12,7 @@ read nothing under ``/etc/sudarshan`` or OpenAlgo's ``.env``, so nothing here lo
 | ``SUDARSHAN_FAMILY_FEED_URL`` / ``_FEED_ZMQ`` | ``http://127.0.0.1:5580`` / ``tcp://127.0.0.1:5581`` |
 | ``SUDARSHAN_FAMILY_PORTFOLIO_URL`` | ``http://127.0.0.1:5583`` |
 | ``SUDARSHAN_FAMILY_OPENALGO_URL`` | ``http://127.0.0.1:5000`` |
+| ``SUDARSHAN_FAMILY_JOURNAL_URL`` | ``http://127.0.0.1:5586`` (the summary's trades line, Y16) |
 | ``SUDARSHAN_FAMILY_MAX_MEMBERS`` / ``_MAX_DEVICES`` | ``4`` / ``3`` (lower only) |
 | ``SUDARSHAN_FAMILY_MAX_CLAIMS`` | ``100`` (the feed's quota for this client, cross-design Y12) |
 | ``SUDARSHAN_FAMILY_DIGEST_AFTER_MIN`` | ``25`` (minutes after the day's last close) |
@@ -115,6 +116,7 @@ class Settings:
     feed_zmq: str = f"tcp://{LOOPBACK}:5581"
     portfolio_url: str = f"http://{LOOPBACK}:5583"
     openalgo_url: str = f"http://{LOOPBACK}:5000"
+    journal_url: str = f"http://{LOOPBACK}:5586"  # F10 (feat/family-t2): Y16
     max_members: int = LIMITS["max_members"]
     max_devices: int = LIMITS["max_devices"]
     max_claims: int = 100
@@ -156,6 +158,8 @@ class Settings:
             portfolio_url=_loopback(env, "SUDARSHAN_FAMILY_PORTFOLIO_URL", cls.portfolio_url,
                                     "http"),
             openalgo_url=_loopback(env, "SUDARSHAN_FAMILY_OPENALGO_URL", cls.openalgo_url, "http"),
+            journal_url=_loopback(env, "SUDARSHAN_FAMILY_JOURNAL_URL", cls.journal_url,
+                                  "http"),  # F10 (feat/family-t2)
             max_members=_number(env, "SUDARSHAN_FAMILY_MAX_MEMBERS", LIMITS["max_members"], 1,
                                 LIMITS["max_members"]),
             max_devices=_number(env, "SUDARSHAN_FAMILY_MAX_DEVICES", LIMITS["max_devices"], 1,

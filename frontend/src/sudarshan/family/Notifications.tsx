@@ -261,12 +261,12 @@ export function Notifications() {
                 {each.sent ? (
                   <Check
                     aria-hidden="true"
-                    className="mt-0.5 size-4 shrink-0 text-[color:var(--profit)]"
+                    className="mt-0.5 size-4 shrink-0 text-[color:var(--up)]"
                   />
                 ) : (
                   <X
                     aria-hidden="true"
-                    className="mt-0.5 size-4 shrink-0 text-[color:var(--loss)]"
+                    className="mt-0.5 size-4 shrink-0 text-[color:var(--down)]"
                   />
                 )}
                 <span>

@@ -20,7 +20,8 @@ row he has deleted is never made again while others remain.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
+from typing import Any
 
 from sqlalchemy.engine import Connection, Engine
 
@@ -273,9 +274,10 @@ V1 = (
     )""",
 )
 
-#: The tables that belong to no one: market data and the job log. Every other table has
-#: ``principal`` (a structural test holds the schema to it).
-SHARED_TABLES = ("benchmark_close", "mf_scheme", "job_run")
+#: The tables that belong to no one: market data, the job log and the corporate actions Upstox
+#: lists (public facts, step 5). Every other table has ``principal`` (a structural test holds the
+#: schema to it).
+SHARED_TABLES = ("benchmark_close", "mf_scheme", "job_run", "ca_event", "ca_read")
 
 
 def _v1(conn: Connection) -> None:
@@ -373,8 +375,225 @@ def _v4(conn: Connection) -> None:
         conn.exec_driver_sql(sql)
 
 
+#: V5 (phase P7, design p7 7.1): one step for the whole phase. The owner's settings (the risk
+#: view's and each taxpayer's readings of the open tax rules); the tax inputs he types (purchases
+#: from before Upstox's records, 31 Jan 2018 prices, losses brought forward, days traded as
+#: delivery, buyback tenders); Upstox's corporate actions (public facts, so no principal) with his
+#: decision on each; the dividends expected from them; his goals; and how each account counts for
+#: tax. Additive: new tables and one new column, ``account.tax_mode``, filled when the column is
+#: made from each row's own kind (the Upstox account counts by its reports, every other account by
+#: its ledger) and only where it is empty. A re-run finds the column there and touches no row, so
+#: a mode the owner chose, or an account made since, is never overwritten.
+V5 = (
+    """CREATE TABLE IF NOT EXISTS owner_setting (
+        principal TEXT NOT NULL,
+        name TEXT NOT NULL,
+        value TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        version INTEGER NOT NULL DEFAULT 1,
+        PRIMARY KEY (principal, name)
+    )""",
+    """CREATE TABLE IF NOT EXISTS tax_opening_lot (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        principal TEXT NOT NULL,
+        member_id INTEGER NOT NULL,
+        account_id INTEGER NOT NULL,
+        isin TEXT NOT NULL,
+        acquired_day INTEGER NOT NULL,
+        qty_u INTEGER NOT NULL,
+        cost_paise INTEGER NOT NULL,
+        source TEXT NOT NULL CHECK (source IN ('owner', 'upstox_pair')),
+        note TEXT,
+        request_id TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        version INTEGER NOT NULL DEFAULT 1
+    )""",
+    """CREATE INDEX IF NOT EXISTS tax_opening_lot_member
+        ON tax_opening_lot (principal, member_id, isin)""",
+    """CREATE UNIQUE INDEX IF NOT EXISTS tax_opening_lot_request
+        ON tax_opening_lot (principal, request_id) WHERE request_id IS NOT NULL""",
+    """CREATE TABLE IF NOT EXISTS tax_fmv (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        principal TEXT NOT NULL,
+        isin TEXT NOT NULL,
+        fmv_u INTEGER NOT NULL,
+        source TEXT NOT NULL CHECK (source IN ('owner', 'file')),
+        request_id TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        version INTEGER NOT NULL DEFAULT 1
+    )""",
+    "CREATE UNIQUE INDEX IF NOT EXISTS tax_fmv_one ON tax_fmv (principal, isin)",
+    """CREATE UNIQUE INDEX IF NOT EXISTS tax_fmv_request
+        ON tax_fmv (principal, request_id) WHERE request_id IS NOT NULL""",
+    """CREATE TABLE IF NOT EXISTS tax_carry (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        principal TEXT NOT NULL,
+        member_id INTEGER NOT NULL,
+        loss_fy INTEGER NOT NULL,
+        bucket TEXT NOT NULL CHECK (bucket IN ('stcl', 'ltcl', 'business', 'speculative')),
+        paise INTEGER NOT NULL,
+        source TEXT NOT NULL CHECK (source IN ('owner', 'computed')),
+        note TEXT,
+        request_id TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        version INTEGER NOT NULL DEFAULT 1
+    )""",
+    """CREATE UNIQUE INDEX IF NOT EXISTS tax_carry_one
+        ON tax_carry (principal, member_id, loss_fy, bucket, source)""",
+    """CREATE UNIQUE INDEX IF NOT EXISTS tax_carry_request
+        ON tax_carry (principal, request_id) WHERE request_id IS NOT NULL""",
+    """CREATE TABLE IF NOT EXISTS tax_day_override (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        principal TEXT NOT NULL,
+        member_id INTEGER NOT NULL,
+        account_id INTEGER NOT NULL,
+        isin TEXT NOT NULL,
+        day INTEGER NOT NULL,
+        treat TEXT NOT NULL CHECK (treat IN ('delivery')),
+        request_id TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        version INTEGER NOT NULL DEFAULT 1
+    )""",
+    """CREATE UNIQUE INDEX IF NOT EXISTS tax_day_override_one
+        ON tax_day_override (principal, member_id, account_id, isin, day)""",
+    """CREATE UNIQUE INDEX IF NOT EXISTS tax_day_override_request
+        ON tax_day_override (principal, request_id) WHERE request_id IS NOT NULL""",
+    """CREATE TABLE IF NOT EXISTS tax_trade_mark (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        principal TEXT NOT NULL,
+        member_id INTEGER NOT NULL,
+        account_id INTEGER NOT NULL,
+        isin TEXT NOT NULL,
+        day INTEGER NOT NULL,
+        qty_u INTEGER NOT NULL,
+        price_u INTEGER NOT NULL,
+        mark TEXT NOT NULL CHECK (mark IN ('buyback')),
+        trade_id TEXT,
+        request_id TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        version INTEGER NOT NULL DEFAULT 1
+    )""",
+    """CREATE INDEX IF NOT EXISTS tax_trade_mark_member
+        ON tax_trade_mark (principal, member_id, isin, day)""",
+    """CREATE UNIQUE INDEX IF NOT EXISTS tax_trade_mark_request
+        ON tax_trade_mark (principal, request_id) WHERE request_id IS NOT NULL""",
+    """CREATE TABLE IF NOT EXISTS ca_event (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        isin TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        ex_day INTEGER NOT NULL,
+        amount_u INTEGER,
+        ratio_num INTEGER,
+        ratio_den INTEGER,
+        details TEXT,
+        raw_hash TEXT NOT NULL,
+        read_at INTEGER NOT NULL,
+        gone_at INTEGER
+    )""",
+    "CREATE UNIQUE INDEX IF NOT EXISTS ca_event_hash ON ca_event (raw_hash)",
+    "CREATE INDEX IF NOT EXISTS ca_event_isin ON ca_event (isin, ex_day)",
+    "CREATE INDEX IF NOT EXISTS ca_event_day ON ca_event (ex_day)",
+    """CREATE TABLE IF NOT EXISTS ca_read (
+        isin TEXT PRIMARY KEY,
+        read_at INTEGER,
+        state TEXT NOT NULL,
+        note TEXT
+    )""",
+    """CREATE TABLE IF NOT EXISTS ca_decision (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        principal TEXT NOT NULL,
+        event_id INTEGER NOT NULL,
+        scope TEXT NOT NULL,
+        state TEXT NOT NULL CHECK (state IN ('applied', 'dismissed')),
+        ratio_num INTEGER,
+        ratio_den INTEGER,
+        activity_id INTEGER,
+        request_id TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        version INTEGER NOT NULL DEFAULT 1
+    )""",
+    "CREATE UNIQUE INDEX IF NOT EXISTS ca_decision_one ON ca_decision (principal, event_id, scope)",
+    """CREATE UNIQUE INDEX IF NOT EXISTS ca_decision_request
+        ON ca_decision (principal, request_id) WHERE request_id IS NOT NULL""",
+    """CREATE TABLE IF NOT EXISTS dividend_line (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        principal TEXT NOT NULL,
+        member_id INTEGER NOT NULL,
+        account_id INTEGER NOT NULL,
+        isin TEXT NOT NULL,
+        event_id INTEGER,
+        activity_id INTEGER,
+        fy INTEGER NOT NULL,
+        ex_day INTEGER NOT NULL,
+        qty_u INTEGER NOT NULL,
+        expected_paise INTEGER NOT NULL,
+        state TEXT NOT NULL DEFAULT 'expected'
+            CHECK (state IN ('expected', 'confirmed', 'not_received')),
+        credited_paise INTEGER,
+        tds_paise INTEGER,
+        credited_day INTEGER,
+        request_id TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        version INTEGER NOT NULL DEFAULT 1
+    )""",
+    """CREATE UNIQUE INDEX IF NOT EXISTS dividend_line_one
+        ON dividend_line (principal, account_id, event_id) WHERE event_id IS NOT NULL""",
+    "CREATE INDEX IF NOT EXISTS dividend_line_year ON dividend_line (principal, member_id, fy)",
+    """CREATE UNIQUE INDEX IF NOT EXISTS dividend_line_request
+        ON dividend_line (principal, request_id) WHERE request_id IS NOT NULL""",
+    """CREATE TABLE IF NOT EXISTS goal (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        principal TEXT NOT NULL,
+        member_id INTEGER NOT NULL,
+        name TEXT NOT NULL,
+        name_alt TEXT,
+        target_paise INTEGER NOT NULL,
+        target_day INTEGER NOT NULL,
+        rate_bp INTEGER NOT NULL,
+        tab_ids TEXT NOT NULL DEFAULT '[]',
+        fixed_paise INTEGER,
+        archived INTEGER NOT NULL DEFAULT 0,
+        request_id TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        version INTEGER NOT NULL DEFAULT 1
+    )""",
+    "CREATE INDEX IF NOT EXISTS goal_principal ON goal (principal, archived, id)",
+    """CREATE UNIQUE INDEX IF NOT EXISTS goal_request
+        ON goal (principal, request_id) WHERE request_id IS NOT NULL""",
+)
+#: How an account counts for tax, and where an empty mode comes from: the row's own kind.
+TAX_MODE_DDL = "TEXT CHECK (tax_mode IN ('reports', 'ledger', 'none'))"
+TAX_MODE_BACKFILL = (
+    "UPDATE account SET tax_mode = CASE WHEN kind = 'upstox' THEN 'reports' ELSE 'ledger' END "
+    "WHERE tax_mode IS NULL"
+)
+
+
+def _v5(conn: Connection) -> None:
+    for sql in V5:
+        conn.exec_driver_sql(sql)
+    if add_column(conn, "account", "tax_mode", TAX_MODE_DDL):
+        conn.exec_driver_sql(TAX_MODE_BACKFILL)
+
+
+def tax_mode_of(account: Mapping[str, Any]) -> str:
+    """How an account counts for tax: its own mode, else the one its kind gives (the Upstox
+    account by its reports, every other by its ledger), the rule the step-5 fill wrote. An account
+    made after step 5 has no mode until the owner picks one, and counts the same way."""
+    return account.get("tax_mode") or ("reports" if account.get("kind") == "upstox" else "ledger")
+
+
 Step = tuple[int, Callable[[Connection], None]]
-STEPS: tuple[Step, ...] = ((1, _v1), (2, _v2), (3, _v3), (4, _v4))
+STEPS: tuple[Step, ...] = ((1, _v1), (2, _v2), (3, _v3), (4, _v4), (5, _v5))
 LATEST = STEPS[-1][0]
 
 

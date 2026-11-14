@@ -11,11 +11,13 @@ import {
   cancelMark,
   exitMark,
   exitOrderStatuses,
+  gttMark,
   isHeld,
   NO_ANSWER_HOLD_MS,
   noteCancelBook,
   noteExitBook,
   noteExitOrders,
+  noteGttBook,
   outcomeOf,
   resetSentForTests,
   SENT_HOLD_MS,
@@ -407,6 +409,55 @@ describe('a cancel', () => {
     notePushedFrame({ mode: 'live', orderid: '1001', order_status: 'open' })
     wait(SENT_HOLD_MS)
     expect(cancelMark(sentMarksNow(), false, '1001')?.expired).toBe(true)
+  })
+})
+
+describe('a GTT’s cancel (B1)', () => {
+  const gtt = (sandbox = false) => gttMark(sentMarksNow(), sandbox, 'GTT-1')
+
+  it('lets go when the GTT book shows it gone or ended, in its own book only', () => {
+    settleSends(beginSends('gtt', false, [{ id: 'GTT-1' }, { id: 'GTT-2' }]), 'sent')
+    noteGttBook(true, [])
+    expect(isHeld(gtt())).toBe(true)
+    noteGttBook(false, [
+      { id: 'GTT-1', working: true },
+      { id: 'GTT-2', working: false },
+    ])
+    expect(isHeld(gtt())).toBe(true)
+    expect(gttMark(sentMarksNow(), false, 'GTT-2')).toBeUndefined()
+    noteGttBook(false, [])
+    expect(gtt()).toBeUndefined()
+  })
+
+  it('is not settled by an order book, nor a cancel by the GTT book', () => {
+    settleSends(beginSends('gtt', false, [{ id: 'GTT-1' }]), 'sent')
+    settleSends(beginSends('cancel', false, [{ id: '1001' }]), 'sent')
+    noteGttBook(false, [])
+    expect(gtt()).toBeUndefined()
+    expect(isHeld(cancelMark(sentMarksNow(), false, '1001'))).toBe(true)
+    settleSends(beginSends('gtt', false, [{ id: 'GTT-1' }]), 'sent')
+    noteCancelBook(false, [])
+    expect(cancelMark(sentMarksNow(), false, '1001')).toBeUndefined()
+    expect(isHeld(gtt())).toBe(true)
+  })
+
+  it('is kept across a reload', async () => {
+    settleSends(beginSends('gtt', false, [{ id: 'GTT-1' }]), 'sent')
+    vi.resetModules()
+    const fresh = await import('./sent')
+    expect(fresh.gttMark(fresh.sentMarksNow(), false, 'GTT-1')).toMatchObject({ state: 'sent' })
+    fresh.resetSentForTests()
+  })
+
+  it('runs out 15 s after its answer, the GTT still active; 150 s with no answer', () => {
+    settleSends(beginSends('gtt', false, [{ id: 'GTT-1' }]), 'sent')
+    wait(SENT_HOLD_MS)
+    expect(gtt()?.expired).toBe(true)
+    settleSends(beginSends('gtt', true, [{ id: 'GTT-1' }]), 'unanswered')
+    wait(NO_ANSWER_HOLD_MS - 1_000)
+    expect(isHeld(gtt(true))).toBe(true)
+    wait(1_000)
+    expect(gtt(true)?.expired).toBe(true)
   })
 })
 

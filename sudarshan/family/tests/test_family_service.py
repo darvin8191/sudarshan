@@ -428,7 +428,9 @@ def test_health_carries_counts_and_states_and_no_one(tmp_path):
             state = doc["family_state"]
             assert (state["enabled"], state["members"], state["sessions"]) == (True, 2, 0)
             assert state["store_version"] == migrations.LATEST
-            assert state["jobs"] == {"prune": "running", "sockets": "running", "copy": "running"}
+            jobs = {"prune": "running", "sockets": "running", "copy": "running"}
+            jobs["channels"] = "running"  # F8 (feat/family-t2): the bot (F10: and the outbox)
+            assert state["jobs"] == jobs
             assert set(state["notices"]) == {"written", "failed"} and set(state["copy"]) == {
                 "at",
                 "ok",

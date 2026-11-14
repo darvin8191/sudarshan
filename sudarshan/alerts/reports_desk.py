@@ -16,11 +16,21 @@ else is not sent to. The text goes through OpenAlgo's ``/notify`` as every alert
 (``OpenAlgoTelegram``), the file through ``/notify-file``, whose rules are ``report_files.py``.
 This service never holds the bot token or a chat id.
 
-  Once. Each event id is claimed in alerts.db before its text goes out (the notice desk's table,
-        under the key ``report:<id>``, which no notice id can be). Its row then records how far it
-        got: ``text`` once the text went, an outcome code once it is over, ``told`` once the
-        journal has the outcome. A restart carries on where the row says, so a text is never sent
-        twice; a claim left by a process that stopped mid-send is taken over after CLAIM_S.
+  Once, as far as a record can make it. Each event id is claimed in alerts.db before its text
+        goes out (the notice desk's table, under the key ``report:<id>``, which no notice id can
+        be). Its row then records how far it got: ``text`` once the text went, an outcome code once
+        it is over, ``told`` once the journal has the outcome. A restart carries on where the row
+        says. In three narrow windows a message can go twice, never be lost: a text whose send is
+        cut off by a stop has its claim given back and is sent again; a process that stops
+        between Telegram's answer and the row's write leaves a claim taken over after CLAIM_S; and
+        a file upload slower than FILE_TIMEOUT_S may have gone when it is tried again. That is
+        at-least-once at the edges, the right side to err on for a report (review L4). An older
+        line of a report the journal has announced again (a rebuild of the whole period) is
+        passed over unsent while it has not started: the newer line sends the report as it is.
+  Not stuck. A report that cannot be moved on (its text or file not given, or not taken) is
+        looked at again on each sweep; after STUCK_LOOKS failed looks in a row it waits on its own
+        pause (RETRY_S) while the reports after it go, so one bad file never holds the Day report
+        and the next Morning brief for a day (review M3).
   Paced. The reports lane of the process's one Pacer (outbox.py): a report takes no slot while an
         order alert or a market alert waits, at most REPORTS_PER_MINUTE slots a minute, one for
         its text and one for its file, with the gap between any two messages. The order alerts
@@ -29,10 +39,15 @@ This service never holds the bot token or a chat id.
         notices' quiet hours do not apply; one asked for during the day goes when it is made.
   Text only. A 404 from /notify-file is an older OpenAlgo: the text already went, and it ends
         with LINK_LINE (added when the journal's text lacks it), so nothing is lost. A file whose
-        bytes do not match the event's sha256 is never sent, and the reason says so.
+        bytes match neither the event's sha256 nor the sha256 the journal gives with them (a
+        rebuild after the announcement keeps the report's newest file) is never sent, and the
+        reason says so (review L11).
   Not sent. OpenAlgo's bot stopped, the owner's chat not linked, or Telegram not confirming the
         text after UNCONFIRMED_TRIES: the outcome is told to the journal in words and the report
-        is not tried again. A report older than MAX_AGE_S that never went is history.
+        is not tried again. A report older than MAX_AGE_S that never went is history; its reason
+        names the side that did not answer when the desk knows it (the journal, or OpenAlgo and
+        Telegram, or a missing API key), and says only that it could not be sent within a day
+        when it does not.
 
   Follows the journal. There is one switch, ``SUDARSHAN_JOURNAL`` in OpenAlgo's .env, which a
         release sets and the journal reads (Y37). The desk asks the journal's unsealed /health
@@ -86,6 +101,7 @@ MAX_AGE_S = 24 * 3600.0  # a report older than this that never went is history
 TELL_WITHIN_S = 7 * 24 * 3600.0  # the journal is told about a report too old to send only this long
 TELL_FOR_S = 2 * 24 * 3600.0  # the journal is asked to take an outcome for this long
 UNCONFIRMED_TRIES = 3  # Telegram did not confirm a message (OpenAlgo answered "queued")
+STUCK_LOOKS = 3  # failed looks in a row at one report before the reports after it go first
 GIVE_WAY_S = 1.0  # look again this soon while order or market alerts wait
 SLOT_POLL_S = 0.2
 CONNECT_TIMEOUT_S = 2.0
@@ -147,14 +163,21 @@ OUTCOMES = {
     "to:ref": ("text_only", "OpenAlgo refused the report's file"),
     "to:gone": ("text_only", "the journal no longer has the report's file"),
     "to:old": ("text_only", "the file could not be sent within a day"),
+    "to:old:j": ("text_only", "the file could not be sent within a day: the journal did not give it to the alerts service"),
+    "to:old:t": ("text_only", "the file could not be sent within a day: OpenAlgo or Telegram did not take it"),
     "ns:stop": ("not_sent", "OpenAlgo's Telegram bot is stopped"),
     "ns:link": ("not_sent", "the owner's chat is not linked"),
     "ns:conf": ("not_sent", "Telegram did not confirm it after 3 tries"),
     "ns:ref": ("not_sent", "OpenAlgo refused the message"),
     "ns:gone": ("not_sent", "the journal no longer has this report"),
     "ns:empty": ("not_sent", "the report had no text to send"),
-    "ns:old": ("not_sent", "it waited more than a day for the alerts service, so it was not sent"),
+    "ns:old": ("not_sent", "it could not be sent within a day"),
+    "ns:old:j": ("not_sent", "it could not be sent within a day: the journal did not give it to the alerts service"),
+    "ns:old:t": ("not_sent", "it could not be sent within a day: OpenAlgo or Telegram did not take it"),
+    "ns:old:k": ("not_sent", "it could not be sent within a day: OpenAlgo's API key could not be read"),
 }  # fmt: skip
+#: Which side a wait was on (``_later``), for the reason of a report that could not go in a day.
+JOURNAL_SIDE, TELEGRAM_SIDE, KEY_SIDE = "j", "t", "k"
 #: A text OpenAlgo refused for good (``OpenAlgoTelegram``'s reasons) and its outcome code.
 TEXT_DROPS = {outbox.DROP_REASONS[409]: "ns:stop", outbox.DROP_REASONS[404]: "ns:link"}
 _ID = re.compile(r"[0-9]{1,18}")
@@ -412,8 +435,15 @@ class ReportDesk:
         self._ask_failures = 0  # asks in a row the journal did not answer
         self._failures = 0  # looks in a row that could not finish
         self._tries: dict[tuple[str, str], int] = {}  # (event id, text or file) -> unconfirmed
+        self._looks: dict[str, int] = {}  # event id -> failed looks in a row
+        self._held: dict[str, float] = {}  # event id -> when it may be looked at again
+        self._side: dict[str, str] = {}  # event id -> the side its last wait was on
+        self._quiet_at: float | None = None  # when the journal last said it was not on
+        self._current: str | None = None  # the event the desk is moving on, for ``_later``
         self._sending = False
         self._closing = False
+        #: How the desk waits for a slot: a test drives it with the pacer's own clock.
+        self.sleep: Callable[[float], Awaitable[Any]] = asyncio.sleep
 
     def health(self) -> dict[str, Any]:
         """The report_desk block of the service's /health: plain facts from memory, nothing secret.
@@ -461,17 +491,43 @@ class ReportDesk:
 
         unfinished = sorted((e for e in events if not over(e)), key=lambda e: (e.at, e.id))
         self.waiting = sum(1 for e in unfinished if now - e.at <= TELL_WITHIN_S)
+        self._forget({e.id for e in unfinished})
         hold = await self._journal_on()
         if hold is not None:
             return hold
+        newest: dict[str, str] = {}
+        for event in unfinished:
+            newest[event.fact("report")] = event.id
+        waits = []
         for event in unfinished:
             key = KEY_PREFIX + event.id
             state, at = states.get(key, (None, 0.0))
             if state == CLAIMED and now - at < CLAIM_S:
                 continue  # on its way
-            return await self._advance(event, key, state, now)
+            if state is None and newest.get(event.fact("report")) != event.id:
+                # announced again since (a rebuild of the whole period): the newer line sends it
+                self.store.settle_notices([key], DROPPED, now)
+                continue
+            until = self._held.get(event.id)
+            if until is not None and until > now:
+                waits.append(until - now)  # stuck: on its own pause while the others go
+                continue
+            self._current = event.id
+            try:
+                wait = await self._advance(event, key, state, now)
+            finally:
+                self._current = None
+            if self._held.get(event.id, 0.0) > now:
+                continue  # it failed once too often: the next report goes in this same sweep
+            return wait
         self._failures = 0
-        return POLL_S
+        return min([POLL_S, *waits])
+
+    def _forget(self, live: set[str]) -> None:
+        """Keep the desk's notes only for reports still in the spool and not over."""
+        for notes in (self._looks, self._held, self._side):
+            for event_id in [k for k in notes if k not in live]:
+                notes.pop(event_id, None)
 
     async def _journal_on(self) -> float | None:
         """None while the journal says it is on; otherwise how long to wait before the next look.
@@ -487,6 +543,7 @@ class ReportDesk:
             self._become(state, why)
         if self.state == ON:
             return None
+        self._quiet_at = self.clock().timestamp()
         return max(self._asked + self._holds_s() - clock, 0.05)
 
     def _holds_s(self) -> float:
@@ -529,9 +586,9 @@ class ReportDesk:
             self._tries.pop((event.id, "text"), None)
             return 0.5
         if age > MAX_AGE_S:
-            return await self._end(event, key, report_id, "ns:old", now)
+            return await self._end(event, key, report_id, self._old("ns:old", event), now)
         if not self.owner_ready():
-            return self._later("there is no OpenAlgo API key to send with yet")
+            return self._later("there is no OpenAlgo API key to send with yet", KEY_SIDE)
         if not self.store.claim_notices([key], now, CLAIM_S):
             return POLL_S
         try:
@@ -547,7 +604,7 @@ class ReportDesk:
             return await self._end(event, key, report_id, "ns:gone", now)
         if kind != "ok":
             self.store.release_notices([key])
-            return self._later("the journal did not give the report's text")
+            return self._later("the journal did not give the report's text", JOURNAL_SIDE)
         text = _text_of(data, has_file)
         if text is None:
             return await self._end(event, key, report_id, "ns:empty", now)
@@ -558,6 +615,7 @@ class ReportDesk:
         outcome, why = await self._sending_of(self.send_text(text), (RETRY, ""))
         if outcome == SENT:
             self._tries.pop((event.id, "text"), None)  # the file's tries are its own
+            self._looks.pop(event.id, None)  # a step went: the count of failed looks starts again
             if not has_file:
                 return await self._end(event, key, report_id, "sent", now)
             self.store.settle_notices([key], TEXT, now)
@@ -567,21 +625,23 @@ class ReportDesk:
         if outcome == UNCONFIRMED and self._tried(event.id, "text"):
             return await self._end(event, key, report_id, "ns:conf", now)
         self.store.release_notices([key])
-        return self._later("OpenAlgo or Telegram could not take the text")
+        return self._later("OpenAlgo or Telegram could not take the text", TELEGRAM_SIDE)
 
     async def _file(self, event: Event, key: str, report_id: int, now: float) -> float:
         if now - event.at > MAX_AGE_S:
-            return await self._end(event, key, report_id, "to:old", now)
+            return await self._end(event, key, report_id, self._old("to:old", event), now)
         kind, data = await self.journal.call("report_file", {"id": report_id})
         if kind == "gone":
             return await self._end(event, key, report_id, "to:gone", now)
         if kind != "ok":
-            return self._later("the journal did not give the report's file")
+            return self._later("the journal did not give the report's file", JOURNAL_SIDE)
         found = _file_of(data)
         if found is None:
             return await self._end(event, key, report_id, "to:bad", now)
         name, raw = found
-        if hashlib.sha256(raw).hexdigest() != event.fact("sha256").strip().lower():
+        digest = hashlib.sha256(raw).hexdigest()
+        given = data.get("file_sha256") if isinstance(data.get("file_sha256"), str) else ""
+        if digest not in (event.fact("sha256").strip().lower(), given.strip().lower()):
             log.error("A report's file did not match the journal's record; it was not sent")
             return await self._end(event, key, report_id, "to:sha", now)
         problem = report_files.problem(name, raw)
@@ -598,13 +658,15 @@ class ReportDesk:
             return await self._end(event, key, report_id, outcome, now)
         if outcome == "unconfirmed" and self._tried(event.id, "file"):
             return await self._end(event, key, report_id, "to:conf", now)
-        return self._later("OpenAlgo or Telegram could not take the file")
+        return self._later("OpenAlgo or Telegram could not take the file", TELEGRAM_SIDE)
 
     async def _end(self, event: Event, key: str, report_id: int, code: str, now: float) -> float:
         """Record how a report ended, then tell the journal."""
         self.store.settle_notices([key], code, now)
         self._tries.pop((event.id, "text"), None)
         self._tries.pop((event.id, "file"), None)
+        for notes in (self._looks, self._held, self._side):
+            notes.pop(event.id, None)
         status = OUTCOMES[code][0]
         self.stats[status] += 1
         if status in ("sent", "text_only"):
@@ -636,12 +698,12 @@ class ReportDesk:
         and the pacer's gap and minute budgets. False when the desk is closing."""
         while not self._closing:
             if self.pacer.blocked(self.lane):
-                await asyncio.sleep(GIVE_WAY_S)
+                await self.sleep(GIVE_WAY_S)
                 continue
             wait = self.pacer.allowed_at(self.lane) - self.pacer.clock()
             if wait <= 0:
                 return True
-            await asyncio.sleep(min(wait, SLOT_POLL_S))
+            await self.sleep(min(wait, SLOT_POLL_S))
         return False
 
     async def _sending_of(self, send: Awaitable, failed):
@@ -665,12 +727,38 @@ class ReportDesk:
         self._tries[(event_id, what)] = tries
         return False
 
-    def _later(self, why: str) -> float:
+    def _later(self, why: str, side: str | None = None) -> float:
+        """A look that could not move a report on: the desk's pause before the next look, and
+        the report's own count (after STUCK_LOOKS in a row it waits on its own pause while the
+        reports after it go) and the side it waited on, for the reason if it never goes."""
         delay = RETRY_S[min(self._failures, len(RETRY_S) - 1)]
         if self._failures == 0:
             log.info("A report is waiting: %s; trying again in %.0f s", why, delay)
         self._failures += 1
+        event_id = self._current
+        if event_id is not None:
+            if side is not None:
+                self._side[event_id] = side
+            looks = self._looks.get(event_id, 0) + 1
+            self._looks[event_id] = looks
+            if looks >= STUCK_LOOKS:
+                pause = RETRY_S[min(looks - STUCK_LOOKS, len(RETRY_S) - 1)]
+                self._held[event_id] = self.clock().timestamp() + pause
+                if looks == STUCK_LOOKS:
+                    log.warning("A report could not be moved on after %d tries (%s); the reports "
+                                "after it go first, and it is tried again in %.0f s",
+                                looks, why, pause)  # fmt: skip
         return delay
+
+    def _old(self, code: str, event: Event) -> str:
+        """The outcome code of a report that could not go within a day, naming the side it last
+        waited on (the journal, OpenAlgo and Telegram, the API key); the journal when it said it
+        was not on while the report waited; else the plain code, which guesses no cause."""
+        side = self._side.get(event.id)
+        if side is None and self._quiet_at is not None and self._quiet_at >= event.at:
+            side = JOURNAL_SIDE
+        found = f"{code}:{side}" if side else code
+        return found if found in OUTCOMES else code
 
 
 def journal_url(environ: Mapping[str, str]) -> str:

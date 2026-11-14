@@ -100,6 +100,31 @@ describe('the words and groups', () => {
     expect(groups[1].net_paise).toBe(1000)
   })
 
+  it('counts the trades the day’s sum leaves out, and says when it rests on an estimate (review M7)', () => {
+    const [day] = groupByDay([
+      closedTrip({
+        id: 1,
+        net_paise: 1000,
+        close_day: 20261113,
+        closed_ms: 3,
+        charges_actual_paise: 49,
+      }),
+      {
+        ...closedTrip({ id: 2, net_paise: 0, close_day: 20261113, closed_ms: 2 }),
+        net_paise: null,
+      },
+      closedTrip({ id: 3, net_paise: -400, close_day: 20261113, closed_ms: 1 }),
+    ])
+    expect(day.net_paise).toBe(600)
+    expect(day.missing).toBe(1)
+    expect(day.estimated).toBe(true)
+    const [actual] = groupByDay([
+      closedTrip({ id: 4, net_paise: 1000, close_day: 20261112, charges_actual_paise: 49 }),
+    ])
+    expect(actual.estimated).toBe(false)
+    expect(actual.missing).toBe(0)
+  })
+
   it('a day with no net yet has no sum, rather than a zero', () => {
     const [group] = groupByDay(
       [closedTrip({ id: 1, net_paise: 0, close_day: 20261113, closed_ms: 5 })].map((t) => ({

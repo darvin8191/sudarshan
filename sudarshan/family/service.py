@@ -28,8 +28,9 @@ from typing import Any
 from sudarshan.tasks import cancel_and_wait
 
 from . import accounts as accounts_module
-from . import audit, backup, health, lockout, sessions, ws
+from . import audit, backup, books, health, lockout, sessions, ws  # F5 (feat/family-c): books
 from . import store as store_module
+from . import timers as channels_module  # F8/F10 (feat/family-t2): bot, push, summary
 from .accounts import Accounts, Hasher
 from .admin_api import SealedDoors
 from .config import ConfigError, Keys, Settings, setup_logging
@@ -76,8 +77,11 @@ class FamilyService(Router):
         hasher: Hasher | None = None,
         dialect: ws.Dialect | None = None,
         jobs: dict[str, Job] | None = None,
+        data_plane: Any = None,  # F5 (feat/family-c): the data plane's keys; None: no data plane
     ):
         self.settings, self.keys = settings, keys
+        self.data_plane, self.plane = data_plane, None  # F5 (feat/family-c): books.install
+        self.channels: Any = None  # F8/F10 (feat/family-t2): the channels (timers.install)
         self.enabled = settings.enabled
         #: Why viewers are refused while the view is off: the switch, or the store's sentence.
         self.off_error: FamilyError | None = None if self.enabled else FamilyError("off")
@@ -159,12 +163,15 @@ class FamilyService(Router):
         return {"enabled": self.enabled, "message": None,
                 "store_version": self.store.version if self.store else None,
                 "members": counts["members"], "sessions": counts["sessions"],
-                "sockets": len(self.registry)}  # fmt: skip
+                "sockets": len(self.registry),
+                # F8 (feat/family-t2): the bot's state and the install check
+                **(self.channels.admin_blocks() if self.channels is not None else {})}  # fmt: skip
 
     def nudged(self, kind: str, sandbox: bool, at: int) -> bool:
         """An "orders changed" nudge: whether it made a book read due. The data plane takes it (F5);
         until then none is taken, and a sandbox one never will be (the books are the real account)."""
-        return False
+        # F5 (feat/family-c): the data plane takes it (nudge.Nudges).
+        return self.plane.nudged(kind, sandbox, at) if self.plane is not None else False
 
     def revoked(self, hashes: list[str]) -> None:
         """Sessions just revoked: their sockets are closed now (4401, "Signed out on this device.")."""
@@ -209,16 +216,26 @@ class FamilyService(Router):
     async def upgrade(self, request: Request, reader, writer) -> Response | None:
         if not self.enabled:
             return Response.refused(self.viewer_off())
-        if self.registry.full():
+        # M1 (feat/family-c): the slot is taken before the first await and given back on every
+        # path that does not end in an open socket; the shares are judged with no await between.
+        if not self.registry.reserve():
             return Response.refused(FamilyError("busy"))
         try:
             session = await self.viewer.authorize(request)
-        except FamilyError as exc:
-            return Response.refused(exc)
+        except BaseException as exc:
+            self.registry.release()
+            if isinstance(exc, FamilyError):
+                return Response.refused(exc)
+            raise
         sock = ws.ViewerSocket(reader, writer, session=session.id_hash,
                                member_id=session.member_id, dialect=self.dialect,
                                registry=self.registry)  # fmt: skip
-        await sock.run(request.head)
+        if not self.registry.admit(sock):
+            return Response.refused(FamilyError("busy"))
+        try:
+            await sock.run(request.head)
+        finally:
+            self.registry.discard(sock)
         return None
 
     # ---- what /health shows ---------------------------------------------------------------------
@@ -231,7 +248,12 @@ class FamilyService(Router):
             counts = await self.counts()
         except StoreError:
             counts = {}
-        return health.document(self, counts)
+        doc = health.document(self, counts)
+        if self.plane is not None:  # F5 (feat/family-c): the data plane's counts and states
+            doc["family_state"]["data"] = self.plane.health()
+        if self.channels is not None:  # F8 (feat/family-t2): the channels' counts and states
+            doc["family_state"]["channels"] = self.channels.health()
+        return doc
 
     def _set_state(self, state: str) -> None:
         if state != self._state:
@@ -292,6 +314,11 @@ class FamilyService(Router):
                                  max_devices=self.settings.max_devices)  # fmt: skip
         if isinstance(self.viewer, Viewer):  # a test may have seated its own
             self.viewer = ViewerApi(self.accounts, self.keys.store)
+        # F5 (feat/family-c): the data plane, seated in the viewer API when its keys were given.
+        if self.data_plane is not None and isinstance(self.viewer, ViewerApi):
+            self.plane = books.install(self, self.data_plane)
+        if isinstance(self.viewer, ViewerApi):  # F8/F10 (feat/family-t2): the channels
+            self.channels = channels_module.install(self)
 
     def _keep_off(self, error: FamilyError) -> None:
         self.enabled, self.off_error = False, error
@@ -384,11 +411,12 @@ def main() -> int:
         settings = Settings.from_env()
         setup_logging(settings.log_level)
         keys = Keys.load(settings)
+        plane = books.PlaneKeys.load(settings) if settings.enabled else None  # F5 (feat/family-c)
     except ConfigError as exc:
         log.error("sudarshan-family cannot run: %s", exc)
         return 2
     try:
-        asyncio.run(_run_with_signals(FamilyService(settings, keys)))
+        asyncio.run(_run_with_signals(FamilyService(settings, keys, data_plane=plane)))
     except Exception:  # a bug: systemd restarts it
         log.exception("sudarshan-family stopped unexpectedly")
         return 1

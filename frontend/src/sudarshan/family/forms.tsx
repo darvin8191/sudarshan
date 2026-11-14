@@ -63,7 +63,7 @@ export function Problem({ text, id }: { text: string; id?: string }) {
     <p
       id={id}
       role="alert"
-      className="flex items-start gap-2 text-[0.8125rem] font-semibold text-[color:var(--loss)]"
+      className="flex items-start gap-2 text-[0.8125rem] font-semibold text-[color:var(--down)]"
     >
       <AlertCircle aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
       <span>{text}</span>
@@ -74,9 +74,7 @@ export function Problem({ text, id }: { text: string; id?: string }) {
 /** A line of good news after a save. */
 export function Saved({ text }: { text: string }) {
   return (
-    <output className="block text-[0.8125rem] font-semibold text-[color:var(--profit)]">
-      {text}
-    </output>
+    <output className="block text-[0.8125rem] font-semibold text-[color:var(--up)]">{text}</output>
   )
 }
 
