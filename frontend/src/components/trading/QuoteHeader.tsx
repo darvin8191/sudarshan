@@ -66,12 +66,13 @@ export function QuoteHeader({
                 isPositive ? 'text-[color:var(--up)]' : 'text-[color:var(--down)]'
               )}
             >
-              {isPositive ? '+' : ''}
-              {displayChange.toFixed(2)}
+              {/* SUDARSHAN: a true minus sign, as every SUDARSHAN figure writes a fall. */}
+              {isPositive ? '+' : '\u2212'}
+              {Math.abs(displayChange).toFixed(2)}
               {displayChangePercent !== undefined && (
                 <span className="ml-1">
-                  ({isPositive ? '+' : ''}
-                  {displayChangePercent.toFixed(2)}%)
+                  ({isPositive ? '+' : '\u2212'}
+                  {Math.abs(displayChangePercent).toFixed(2)}%)
                 </span>
               )}
             </span>

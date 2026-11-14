@@ -326,6 +326,17 @@ test.describe(`the dashboard at ${WIDTH} x 800`, () => {
       await expect(page.getByTestId('status-row')).toHaveAttribute('data-ready', 'true')
       await expect(page.getByTestId('navbar-row').getByText(bar.analyze ? 'Analyze' : 'Live').last()).toBeVisible()
       const measured = await page.evaluate(() => {
+        // How far the last letter of SUDARSHAN reaches past the box that clips the lockup (delta
+        // review L5: `toBeVisible` passes on a name cut to "SUDARSH"). The letters' own extent:
+        // the tracking after the last letter is space, not ink.
+        const latinPast = (bar: HTMLElement) => {
+          const caps = bar.querySelector('.sd-lockup__latin') as HTMLElement
+          const clip = (bar.querySelector('.sd-lockup--bar') as HTMLElement).getBoundingClientRect()
+          const range = document.createRange()
+          range.selectNodeContents(caps)
+          const tracking = Number.parseFloat(getComputedStyle(caps).letterSpacing) || 0
+          return range.getBoundingClientRect().right - tracking - clip.right
+        }
         const doc = document.documentElement
         const row = document.querySelector('[data-testid="navbar-row"]') as HTMLElement
         const right = (el: Element | null) => el?.getBoundingClientRect().right ?? Number.NaN
@@ -335,12 +346,14 @@ test.describe(`the dashboard at ${WIDTH} x 800`, () => {
           menu: right(row.querySelector('[aria-label="Open user menu"]')) - doc.clientWidth,
           // How far each script reaches past the link that clips it: none for the Devanagari.
           wordmark: right(row.querySelector('.sd-lockup__wordmark')) - right(link),
+          latin: latinPast(row),
         }
       })
       await page.screenshot({ path: info.outputPath(`bar-${bar.name.replaceAll(' ', '-')}.png`) })
       expect(measured.sideways, 'no sideways scroll').toBeLessThanOrEqual(0)
       expect(measured.menu, 'the profile menu ends inside the screen').toBeLessThanOrEqual(0)
       expect(measured.wordmark, 'the Devanagari name is whole').toBeLessThanOrEqual(0.5)
+      expect(measured.latin, 'SUDARSHAN is whole, never cut mid-word').toBeLessThanOrEqual(0.5)
       await expect(page.getByTestId('navbar-row').getByText('SUDARSHAN')).toBeVisible()
     })
   }
@@ -415,4 +428,85 @@ test.describe(`the dashboard at ${WIDTH} x 800`, () => {
     await expect(page.locator('[data-feed="live"]').first()).toBeVisible()
     await expect(page.getByText(/Open · closes 15:30/)).toBeVisible()
   })
+})
+
+// v0.13.0 review L3: the phone on its side is 800 px wide, past the width at which the app bar's
+// buttons used to shrink to 40 px for a mouse. A finger is asked of the pointer, not of the width.
+test.describe('the app bar with the phone on its side, 800 x 360', () => {
+  test.use({ viewport: { width: 800, height: 360 } })
+
+  test('every app bar control is still a 48 dp target', async ({ page }, info) => {
+    await serve(page, STATES[0])
+    await expect(page.getByTestId('status-row')).toHaveAttribute('data-ready', 'true')
+    const row = page.getByTestId('navbar-row')
+    await expect(row.getByRole('button', { name: 'Open user menu' })).toBeVisible()
+    const small = await row.evaluate((bar) =>
+      [...bar.querySelectorAll<HTMLElement>('a[href], button')]
+        .map((el) => ({ el, box: el.getBoundingClientRect() }))
+        .filter(({ box }) => box.width > 0 && box.height > 0)
+        .filter(({ box }) => box.width < 47.5 || box.height < 47.5)
+        .map(
+          ({ el, box }) =>
+            `${(el.getAttribute('aria-label') || el.textContent || '').trim()} ${box.width}x${box.height}`
+        )
+    )
+    await page.screenshot({ path: info.outputPath('bar-sideways.png') })
+    expect(small, 'app bar targets under 48 x 48').toEqual([])
+    const doc = await page.evaluate(() => ({
+      scroll: document.documentElement.scrollWidth,
+      client: document.documentElement.clientWidth,
+    }))
+    expect(doc.scroll, 'no sideways scroll').toBeLessThanOrEqual(doc.client)
+  })
+})
+
+// v0.13.0 delta review L5: the narrowest phone, the widest account end and the widest face. The
+// Latin name read "SUDARSH" here; it tightens its tracking to the room instead, and stays whole.
+test.describe('the app bar at 320 x 800', () => {
+  test.use({ viewport: { width: 320, height: 800 } })
+
+  for (const bar of [
+    { name: 'in Analyze mode before the fonts arrive', analyze: true, fonts: false },
+    { name: 'in Analyze mode', analyze: true, fonts: true },
+    { name: 'in Live mode before the fonts arrive', analyze: false, fonts: false },
+  ]) {
+    test(`both names are whole: ${bar.name}`, async ({ page }, info) => {
+      if (!bar.fonts) await page.route('**/*.woff2', (route) => route.abort())
+      await serve(page, { ...STATES[0], analyze: bar.analyze })
+      await expect(page.getByTestId('status-row')).toHaveAttribute('data-ready', 'true')
+      await expect(page.getByTestId('navbar-row').getByText(bar.analyze ? 'Analyze' : 'Live').last()).toBeVisible()
+      const measured = await page.evaluate(() => {
+        // How far the last letter of SUDARSHAN reaches past the box that clips the lockup (delta
+        // review L5: `toBeVisible` passes on a name cut to "SUDARSH"). The letters' own extent:
+        // the tracking after the last letter is space, not ink.
+        const latinPast = (bar: HTMLElement) => {
+          const caps = bar.querySelector('.sd-lockup__latin') as HTMLElement
+          const clip = (bar.querySelector('.sd-lockup--bar') as HTMLElement).getBoundingClientRect()
+          const range = document.createRange()
+          range.selectNodeContents(caps)
+          const tracking = Number.parseFloat(getComputedStyle(caps).letterSpacing) || 0
+          return range.getBoundingClientRect().right - tracking - clip.right
+        }
+        const doc = document.documentElement
+        const row = document.querySelector('[data-testid="navbar-row"]') as HTMLElement
+        const right = (el: Element | null) => el?.getBoundingClientRect().right ?? Number.NaN
+        const latin = row.querySelector('.sd-lockup__latin') as HTMLElement
+        return {
+          sideways: doc.scrollWidth - doc.clientWidth,
+          menu: right(row.querySelector('[aria-label="Open user menu"]')) - doc.clientWidth,
+          wordmark: right(row.querySelector('.sd-lockup__wordmark')) - right(row.querySelector('.sd-lockup--bar')),
+          latin: latinPast(row),
+          words: latin.textContent,
+          size: Number.parseFloat(getComputedStyle(latin).fontSize),
+        }
+      })
+      await page.screenshot({ path: info.outputPath(`bar-320-${bar.name.replaceAll(' ', '-')}.png`) })
+      expect(measured.words).toBe('SUDARSHAN')
+      expect(measured.latin, 'SUDARSHAN is whole, never cut mid-word').toBeLessThanOrEqual(0.5)
+      expect(measured.wordmark, 'the Devanagari name is whole').toBeLessThanOrEqual(0.5)
+      expect(measured.size, 'the caps stay readable').toBeGreaterThanOrEqual(8)
+      expect(measured.sideways, 'no sideways scroll').toBeLessThanOrEqual(0)
+      expect(measured.menu, 'the profile menu ends inside the screen').toBeLessThanOrEqual(0)
+    })
+  }
 })
