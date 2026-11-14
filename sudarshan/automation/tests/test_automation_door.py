@@ -76,7 +76,8 @@ def test_flag_off_opens_no_store_and_imports_no_order_code(tmp_path, monkeypatch
     monkeypatch.setenv(flag.ENV, "off")
     made = store_mod.AutomationStore(tmp_path / "never" / "automation.db")
     monkeypatch.setattr(store_mod, "_shared", store_mod.LazyInit(lambda: made, "test"))
-    sys.modules.pop("services.place_smart_order_service", None)
+    # taken out for this test only and put back after it: other tests hold the module
+    monkeypatch.delitem(sys.modules, "services.place_smart_order_service", raising=False)
     got = intake.handle(contract.TOKEN_PREFIX + "x" * 43, b"{}", TV)
     assert (got.status, got.body) == (404, {"status": "error", "message": "Not found"})
     assert not (tmp_path / "never").exists()
