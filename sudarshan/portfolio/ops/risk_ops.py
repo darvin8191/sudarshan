@@ -150,6 +150,12 @@ def _holdings(live) -> list[risk.Holding]:
     return found
 
 
+def _live_rows(live) -> list[dict[str, Any]]:
+    """The rows ``_holdings`` counted, as the tab's own view gives them (``HoldingRow``): what the
+    phone needs to work the same weights out again as ticks move the prices."""
+    return [row for row in live.rows if row["asset"]["kind"] in HOLDING_KINDS]
+
+
 def _liquid(tabs: list[dict[str, Any]], lives: Mapping[int, Any]) -> int:
     """Cash-like value: all of a tab of the kind FD and cash, and elsewhere the assets of the
     class cash."""
@@ -216,6 +222,14 @@ def report(views, tx: Tx, tab_id: int | None, now: int) -> dict[str, Any]:
         "as_of_day": last or today,
         "basis": words.risk_basis(last) if last else words.SERIES_WAITING,
         "risk": figures,
+        # The inputs of ``concentration`` above, read in the same transaction: the phone prices
+        # the rows from ticks newer than ``read_at`` and applies the same rule (risk.json).
+        "live": {
+            "read_at": now,
+            "max_holding_pct": settings["max_holding_pct"],
+            "max_sector_pct": settings["max_sector_pct"],
+            "rows": [row for tab in asked for row in _live_rows(lives[tab["id"]])],
+        },
     }
 
 
