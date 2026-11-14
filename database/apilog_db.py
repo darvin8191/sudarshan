@@ -2,7 +2,7 @@
 
 import json
 import os
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import datetime
 
 import pytz
@@ -12,6 +12,7 @@ from sqlalchemy.orm import scoped_session, sessionmaker
 from sqlalchemy.pool import NullPool
 from sqlalchemy.sql import func
 
+from sudarshan.refused_keys import refused_api_key  # SUDARSHAN: G5
 from utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -54,8 +55,22 @@ def init_db():
     init_db_with_logging(Base, engine, "API Log DB", logger)
 
 
+class _OrderLogExecutor(ThreadPoolExecutor):
+    """SUDARSHAN: G5. The executor every direct order-log and analyzer-log write is handed to. A
+    write handed over while refusing an /api/v1 request for its API key (missing or wrong) is
+    dropped, as the bus drops that request's order events: a refused key is not an order. It is
+    decided here, in the request's own thread; the write itself runs later, outside it."""
+
+    def submit(self, fn, /, *args, **kwargs):
+        if refused_api_key():
+            dropped = Future()
+            dropped.set_result(None)
+            return dropped
+        return super().submit(fn, *args, **kwargs)
+
+
 # Executor for asynchronous tasks
-executor = ThreadPoolExecutor(10)  # Increased from 2 to 10 for better concurrency
+executor = _OrderLogExecutor(10)  # Increased from 2 to 10 for better concurrency
 
 
 def async_log_order(api_type, request_data, response_data):

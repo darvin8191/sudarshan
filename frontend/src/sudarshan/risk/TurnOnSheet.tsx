@@ -5,13 +5,13 @@ import { type RiskStage, riskApi, type SwitchAnswer } from '@/api/risk'
 import { tradingApi } from '@/api/trading'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
-import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useAuthStore } from '@/stores/authStore'
 import { useThemeStore } from '@/stores/themeStore'
 import { BottomSheet } from '@/sudarshan/watchlist/BottomSheet'
 import { type Book, turnOnHeld } from './holds'
 import { actsOn, noteKillSwitch } from './killSwitch'
+import { PhraseInput } from './PhraseInput'
 import { RISK_AUDIT_KEY, RISK_STATUS_KEY, StepList } from './parts'
 import { PHRASE_HINT } from './phrase'
 
@@ -212,16 +212,11 @@ export function TurnOnSheet({
             <Label htmlFor={phraseId} className="text-[0.9375rem] font-semibold">
               Confirm phrase
             </Label>
-            <Input
+            <PhraseInput
               id={phraseId}
               value={phrase}
-              onChange={(event) => setPhrase(event.target.value)}
-              autoComplete="off"
-              autoCorrect="off"
-              autoCapitalize="characters"
-              spellCheck={false}
-              className="h-12 text-base"
-              aria-describedby={`${phraseId}-hint`}
+              onChange={setPhrase}
+              describedBy={`${phraseId}-hint`}
             />
             <p
               id={`${phraseId}-hint`}

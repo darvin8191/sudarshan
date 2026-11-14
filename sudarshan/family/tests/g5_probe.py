@@ -40,8 +40,11 @@ What runs:
   again on a second app built without the shell, where it answers itself.
 - Stubbed: the threads ``create_app`` starts (broker keep-warm, order-update adapters, the health
   collector, the analytics warm-up). The rate limiter is off: a limit is not an authorisation, and
-  a 429 would hide what the route answers. Events published on the event bus are recorded, not
-  delivered.
+  a 429 would hide what the route answers. Events published on the event bus are recorded, with
+  whether each was raised while refusing a request for its API key, and not delivered. Writes
+  handed to the order-log executor run; once the walk is done they are let finish, and the rows of
+  the owner's order log and analyzer log are counted. The page / answers is kept whole, so the
+  test can tell how the family shell's page may differ from it.
 - Every database is a file in the temporary folder (the test sets the URLs; this refuses to run
   otherwise), with the tables setup_environment creates, from its own list, and an owner account.
 - Nothing reaches the network or starts a process: every connect, name lookup and subprocess is
@@ -51,6 +54,7 @@ What runs:
 from __future__ import annotations
 
 import ast
+import base64
 import hashlib
 import json
 import os
@@ -112,8 +116,8 @@ class Ledger:
         self.during = "start-up"
         self.entries: list[dict] = []
 
-    def note(self, kind: str, what: str) -> None:
-        self.entries.append({"kind": kind, "what": what[:SNIPPET], "during": self.during})
+    def note(self, kind: str, what: str, **more) -> None:
+        self.entries.append({"kind": kind, "what": what[:SNIPPET], "during": self.during, **more})
 
     def since(self, mark: int) -> list[dict]:
         return self.entries[mark:]
@@ -193,7 +197,9 @@ def stub_start_up(module: types.ModuleType) -> None:
     portfolio.warm_analytics = lambda: None
     order_updates.start_order_update_adapters_on_boot = lambda db_ready=None: None
     health.start_health_collector = lambda *args, **kwargs: None
-    bus.publish = lambda event: LEDGER.note("event", type(event).__name__)
+    bus.publish = lambda event: LEDGER.note(
+        "event", type(event).__name__, key_refused=bool(getattr(event, "key_refused", False))
+    )
 
 
 def build_app(module: types.ModuleType, *, react: bool):
@@ -399,6 +405,20 @@ def walk(app, who: dict[str, dict], label: str, only: set | None = None) -> list
     return records
 
 
+def shell_page(app) -> str | None:
+    """The page / answers the anonymous caller, base64, whole: the test tells from it how the
+    family shell's page may differ (route_classes.FAMILY_SHELL). None when / answers no page."""
+    LEDGER.during = "GET / for the shell's page"
+    answer = app.test_client(use_cookies=False).get(
+        "/", base_url=BASE_URL, headers=dict(BROWSER, **FORWARDED)
+    )
+    try:
+        return base64.b64encode(answer.get_data()).decode("ascii") if answer.status_code == 200 else None
+    finally:
+        answer.close()
+        LEDGER.during = "between requests"
+
+
 def rules_of(app) -> list[dict]:
     rules = sorted(app.url_map.iter_rules(), key=lambda r: (r.rule, r.endpoint))
     return [{"rule": rule.rule, "endpoint": rule.endpoint,
@@ -446,6 +466,21 @@ def banned_addresses() -> int:
         logs_session.remove()
 
 
+def log_rows() -> dict[str, int]:
+    """The rows in the owner's order log and analyzer log once every write handed to their
+    executors has run. No caller of the walk holds a key, so each row is one a refused key wrote."""
+    from database import analyzer_db, apilog_db
+
+    apilog_db.executor.shutdown(wait=True)
+    analyzer_db.executor.shutdown(wait=True)
+    try:
+        return {"order_logs": apilog_db.OrderLog.query.count(),
+                "analyzer_logs": analyzer_db.AnalyzerLog.query.count()}  # fmt: skip
+    finally:
+        apilog_db.db_session.remove()
+        analyzer_db.db_session.remove()
+
+
 def main(argv: list[str]) -> int:
     report_path = Path(argv[1])
     refuse_unless_isolated(Path.cwd().resolve())
@@ -466,6 +501,7 @@ def main(argv: list[str]) -> int:
     who = callers(app)
     started = time.monotonic()
     report = {"rules": rules_of(app), "requests": walk(app, who, "app")}
+    report["shell_page"] = shell_page(app)
     hidden = {(r["rule"], r["endpoint"], r["method"]) for r in report["requests"]
               if r["reached"] != r["endpoint"]}  # fmt: skip
     report["socketio"] = socket_check(app, who)
@@ -473,6 +509,7 @@ def main(argv: list[str]) -> int:
     bare.db_ready.set()
     report["requests"] += walk(bare, callers(bare), "without-react-shell", hidden)
     report["seconds"] = round(time.monotonic() - started, 1)
+    report["log_rows"] = log_rows()
     report["ledger"] = LEDGER.entries
     report["banned_addresses"] = banned_addresses()
     report_path.write_text(json.dumps(report, indent=1), encoding="utf-8")
