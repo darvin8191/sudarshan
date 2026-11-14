@@ -38,11 +38,20 @@ describe('a send that threw', () => {
     expect(thrownOutcome(answered(404, notFound))).toBe('unanswered')
     // Any status, any body that is not the app's JSON with its status word.
     const bodies = [notFound, '', undefined, null, 'Not Found', [], { detail: 'Not Found' }, 404]
-    for (const status of [400, 401, 403, 404, 405, 408, 409, 413, 422, 429, 499]) {
+    for (const status of [404, 405, 408, 409, 413, 422, 429, 499]) {
       for (const body of bodies) {
         expect(thrownOutcome(answered(status, body)), `${status} ${String(body)}`).toBe(
           'unanswered'
         )
+      }
+    }
+    // A gate before the order view (the security token page, the login check, the web server
+    // refusing the request) answers 400, 401 or 403 with a page: nothing was sent, a refusal.
+    const tokenPage =
+      '<!doctype html><title>400 Bad Request</title><p>The CSRF token is missing.</p>'
+    for (const status of [400, 401, 403]) {
+      for (const body of [tokenPage, '', undefined, null, 'Forbidden']) {
+        expect(thrownOutcome(answered(status, body)), `${status} ${String(body)}`).toBe('refused')
       }
     }
     // The app's own 404 (an order or a position it does not have) is still its refusal.
