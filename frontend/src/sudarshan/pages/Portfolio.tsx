@@ -18,6 +18,7 @@ import {
 import { useMemo } from 'react'
 import { useNavigate, useSearchParams } from 'react-router'
 import { portfolioCall, problemOf, switchesOf } from '@/sudarshan/portfolio/api'
+import { CalendarView } from '@/sudarshan/portfolio/calendar/CalendarView'
 import {
   CustomStub,
   PhaseChips,
@@ -165,7 +166,14 @@ export default function Portfolio() {
     )
   } else if (money !== null) {
     // SUDARSHAN P7 F1: a view's own screen takes its stub's place as it lands.
-    body = money === 'tax' ? <TaxView members={members} /> : <PhaseStub view={money} />
+    body =
+      money === 'tax' ? (
+        <TaxView members={members} />
+      ) : money === 'calendar' ? (
+        <CalendarView tabs={tabs} />
+      ) : (
+        <PhaseStub view={money} />
+      )
   } else {
     body =
       current === null ? (
