@@ -3,7 +3,7 @@ import { cleanup, render, screen, waitFor, within } from '@testing-library/react
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { FamilyBadge } from './FamilyBadge'
+import { FamilyBadge, WIDE_ONLY } from './FamilyBadge'
 import { FamilyLayout } from './FamilyLayout'
 import { resetFamilyManagerForTests } from './familyManager'
 import { useFamilyMe } from './session'
@@ -87,6 +87,58 @@ describe('the badge', () => {
     mount('/family')
     const badge = await screen.findByTestId('family-badge')
     expect(badge.closest('header')?.className).toContain('sticky')
+  })
+})
+
+// Review H2 (v0.12.0): at 360 px the title was cut to one letter for a viewer, and a child's
+// badge pushed the initial off the screen. jsdom lays nothing out, so these pin the structure the
+// fit rests on (each fails on the old bar); the widths themselves are measured in a browser.
+describe('the app bar on a narrow phone', () => {
+  it.each(['viewer', 'child'] as const)(
+    'gives the %s title a line of its own, whole, outside the row the badge is in',
+    async (kind) => {
+      routeFetch({ '/family/api/me': ok(meOf(kind)) })
+      mount('/family/portfolio')
+      const title = await screen.findByRole('heading', { level: 1, name: 'Portfolio' })
+      const bar = screen.getByTestId('family-bar')
+      expect(bar.contains(title)).toBe(false)
+      expect(title.closest('header')).toBe(bar.closest('header'))
+      expect(title.className).not.toContain('truncate')
+      // the row holds the badge and the initial, and nothing in it is the title
+      expect(within(bar).getByTestId('family-badge')).toBeInTheDocument()
+      expect(within(bar).getByRole('img', { name: 'Signed in as member_one' })).toBeInTheDocument()
+    }
+  )
+
+  it('lets the badge give way before the initial does', async () => {
+    routeFetch({ '/family/api/me': ok(meOf('child')) })
+    mount('/family')
+    const badge = await screen.findByTestId('family-badge')
+    const classes = badge.className.split(/\s+/)
+    expect(classes).toContain('min-w-0')
+    expect(classes).not.toContain('shrink-0')
+    const initial = screen.getByRole('img', { name: 'Signed in as member_one' })
+    expect(initial.className.split(/\s+/)).toContain('shrink-0')
+  })
+
+  it('shortens a child badge below 440 px, keeping the lock and the full spoken name', () => {
+    render(<FamilyBadge limited />)
+    const badge = screen.getByTestId('family-badge')
+    const family = badge.querySelector('[data-part="family"]') as HTMLElement
+    expect(family.textContent).toContain('FAMILY')
+    expect(family.className).toBe(WIDE_ONLY)
+    expect(WIDE_ONLY.split(' ')).toContain('hidden')
+    // what is left when that part is hidden
+    expect(badge.textContent?.replace(family.textContent ?? '', '')).toBe('VIEW ONLY · LIMITED')
+    expect(badge).toHaveAccessibleName('Family, view only, limited')
+    expect(badge.querySelector('svg')).not.toBeNull()
+  })
+
+  it('never shortens a viewer badge', () => {
+    render(<FamilyBadge />)
+    const badge = screen.getByTestId('family-badge')
+    expect(badge.querySelector('[data-part="family"]')).toBeNull()
+    expect(badge.textContent).toBe('FAMILY · VIEW ONLY')
   })
 })
 

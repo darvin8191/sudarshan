@@ -1,5 +1,5 @@
-// SUDARSHAN P6 D2 (M2.7, M4.17): the family shell. White app bar with the compact lockup, the
-// screen's title and the FAMILY · VIEW ONLY badge; its own bottom bar from `navigation.ts`; the
+// SUDARSHAN P6 D2 (M2.7, M4.17): the family shell. White app bar with the lockup, the FAMILY ·
+// VIEW ONLY badge and the member's initial, and the screen's title on its own line under them; its own bottom bar from `navigation.ts`; the
 // session check against the viewer API's `me` on mount, on coming back to the page and on any
 // "signed out" answer; the family market manager through `MarketDataContext`.
 //
@@ -140,13 +140,17 @@ export function FamilyLayout() {
     <MarketDataProvider manager={getFamilyManager()}>
       <FamilyMeContext.Provider value={me}>
         <div className="flex min-h-screen flex-col bg-background" data-family-shell>
+          {/* Review H2 (v0.12.0): at 360 px the lockup, the badge and the initial fill the bar, so
+              the title has a line of its own under it and is never cut; the badge is what gives
+              way (it shrinks, and a child's takes its short form), and the initial stays in. */}
           <header className="sticky top-0 z-40 border-b bg-card">
-            <div className="mx-auto flex h-14 max-w-3xl items-center gap-2 px-3">
-              <BrandLockup />
-              <h1 className="sd-display min-w-0 flex-1 truncate text-[1.125rem] font-bold">
-                {title}
-              </h1>
-              <FamilyBadge limited={me.limited} />
+            <div
+              data-testid="family-bar"
+              className="mx-auto flex h-[3.25rem] max-w-3xl items-center gap-2 px-3 pt-1"
+            >
+              <BrandLockup className="shrink-0" />
+              <span aria-hidden="true" className="min-w-0 flex-1" />
+              <FamilyBadge limited={me.limited} className="min-w-0 shrink" />
               <span
                 role="img"
                 aria-label={`Signed in as ${me.member.handle}`}
@@ -154,6 +158,14 @@ export function FamilyLayout() {
               >
                 <span aria-hidden="true">{initial}</span>
               </span>
+            </div>
+            <div className="mx-auto max-w-3xl px-4 pb-2">
+              <h1
+                data-testid="family-title"
+                className="sd-display text-[1.25rem] leading-tight font-bold break-words"
+              >
+                {title}
+              </h1>
             </div>
           </header>
 
