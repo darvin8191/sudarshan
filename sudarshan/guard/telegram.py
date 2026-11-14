@@ -6,8 +6,8 @@
     /killswitch off <phrase>     resume
 
 One command line each, so the bot keeps no conversation state. It answers only a private chat
-with a linked Telegram account whose OpenAlgo user is this install's owner; family members never
-hold an order-capable credential, and linking already needs the API key.
+with a linked Telegram account whose OpenAlgo user is this install's owner and whose stored API key
+is this OpenAlgo's API key now; family members never hold an order-capable credential.
 
 The bot's loop runs on a real OS thread. The kill switch takes the gate's lock, the sandbox's
 locks and the database, so the whole command runs where the web app's own code runs:
@@ -33,13 +33,12 @@ STATUS_TIMEOUT_S = 60.0
 VERBS = ("on", "exit", "off", "", "status")
 
 
-def owner_of(chat, user) -> str | None:
-    """The owner's OpenAlgo username when this is his own private chat with the bot, else None."""
+def _named_owner(user) -> str | None:
+    """The owner's OpenAlgo username when this Telegram account's link row names him, else None.
+    The row only records that /link once succeeded."""
     from database.telegram_db import get_telegram_user
     from database.user_db import find_user_by_username
 
-    if getattr(chat, "type", None) != "private" or user is None:
-        return None
     linked = get_telegram_user(user.id)
     if not linked:
         return None
@@ -47,6 +46,33 @@ def owner_of(chat, user) -> str | None:
     if admin is None or linked.get("openalgo_username") != admin.username:
         return None
     return admin.username
+
+
+def owner_of(chat, user) -> str | None:
+    """The owner's OpenAlgo username when this is his own private chat with the bot, else None.
+
+    The link row naming him is not enough. Until v0.5.2 /link asked whatever host the command named
+    whether the key was good, so a stranger could be linked through a server of his own, under the
+    owner's user name. So the chat's stored key must also be this OpenAlgo's API key now: the check
+    the bot makes before /mode and /stoppython (``services.telegram_bot_service._linked_owner``).
+    """
+    from services.telegram_bot_service import _linked_owner
+
+    if getattr(chat, "type", None) != "private" or user is None:
+        return None
+    username = _named_owner(user)
+    if username is None or _linked_owner(user.id) != username:
+        return None
+    return username
+
+
+def _refused(chat, user) -> str:
+    """What a chat ``owner_of`` refused is told: the owner's own private chat whose stored key is
+    no longer this OpenAlgo's (a key regenerated since he linked, or a link made through another
+    host) is asked to link again; any other chat, that the command works only in his own."""
+    if getattr(chat, "type", None) == "private" and user is not None and _named_owner(user):
+        return words.TG_LINK_AGAIN
+    return words.TG_ONLY_YOUR_CHAT
 
 
 def status_text(owner: killswitch.Owner) -> str:
@@ -73,7 +99,7 @@ def answer(chat, user, verb: str, phrase: str) -> tuple[str, str]:
     """Run one command where the app's code runs; returns the reply and the name logged."""
     username = owner_of(chat, user)
     if username is None:
-        return words.TG_ONLY_YOUR_CHAT, "killswitch_refused"
+        return _refused(chat, user), "killswitch_refused"
     if verb not in VERBS:
         return words.TG_USAGE, "killswitch_usage"
     owner = killswitch.owner_for(username, surface="telegram", actor=f"telegram:{user.id}")
