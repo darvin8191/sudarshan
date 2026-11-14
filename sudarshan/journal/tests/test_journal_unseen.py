@@ -16,12 +16,13 @@ from test_journal_reports import call
 from sudarshan.journal import store
 from sudarshan.journal.book import Facts, replay_tx
 from sudarshan.journal.core import metrics, words
-from sudarshan.journal.core.money import u_to_paise
+from sudarshan.journal.core.money import day_start_ms, u_to_paise
 from sudarshan.journal.core.pairing import (
     held_before,
     pair_fills,
     past_expiry,
     symbol_expiry,
+    unclosed,
 )
 from sudarshan.journal.jobs import check
 from sudarshan.journal.store import JournalStore, Scope
@@ -136,6 +137,67 @@ def test_the_expiry_day_of_a_symbol_and_when_it_has_passed():
     assert not past_expiry("NFO", None, 20261118, after_close=True)
 
 
+# ---- counted again: a trade whose closing was not seen (verification N2) ----------------------
+SHARE = ("live", "NSE", "ACME", "carry")
+LATER = 20261120  # the journal is back after more than its catch-up reaches
+
+
+def test_an_open_share_trade_the_account_no_longer_holds_ends_unmatched_at_the_recount():
+    """The journal saw 100 bought and was then off; the holdings say 60 on the 20th."""
+    bought = [fill("1", "BUY", 100, 200, "10:00:00")]
+    (trip,) = pair_fills(bought, recounts={SHARE: [(LATER, 60)]})
+    assert (trip["status"], trip["side"], trip["entry_qty"], trip["exit_qty"]) == (
+        "unmatched", "long", 100, 0)  # fmt: skip
+    assert (trip["close_day"], trip["closed_ms"]) == (LATER, day_start_ms(LATER))
+    assert trip["gross_paise"] is None and trip["hold_s"] is None and unclosed(trip)
+    assert pair_fills(bought)[0]["status"] == "open"  # without the recount: open for ever
+    # the 60 still held are sold later: listed apart from what was counted, never a new trade
+    sold = [*bought, fill("2", "SELL", 60, 210, "10:00:00", day=20261123)]
+    first, rest = pair_fills(sold, recounts={SHARE: [(LATER, 60)]})
+    assert unclosed(first) and first["exit_qty"] == 0
+    assert (rest["status"], rest["entry_qty"], rest["exit_qty"], rest["close_day"]) == (
+        "unmatched", 0, 60, 20261123)  # fmt: skip
+    assert not unclosed(rest)
+
+
+def test_a_recount_changes_nothing_where_the_account_holds_the_trade_or_more():
+    bought = [fill("1", "BUY", 100, 200, "10:00:00")]
+    for held_now in (100, 150):  # more: a bonus, a transfer in, a purchase not seen
+        (trip,) = pair_fills(bought, recounts={SHARE: [(LATER, held_now)]})
+        assert (trip["status"], trip["closed_ms"]) == ("open", None)
+
+
+def test_a_sale_the_history_brings_later_closes_the_trade_whatever_was_counted():
+    """Counted at 0 on the 20th; the sale of the 19th then arrives: the fills agree with the
+    count, so the trade is closed with its result."""
+    fills = [fill("1", "BUY", 100, 200, "10:00:00"),
+             fill("2", "SELL", 100, 210, "12:00:00", day=20261119)]  # fmt: skip
+    (trip,) = pair_fills(fills, recounts={SHARE: [(LATER, 0)]})
+    assert (trip["status"], trip["gross_paise"], trip["close_day"]) == ("closed", 100_000, 20261119)
+
+
+def test_a_recount_of_a_derivative_ends_the_trip_and_the_rest_is_never_a_new_short():
+    key = ("live", "NFO", FUT_SYMBOL, "carry")
+    base = {"exchange": "NFO", "symbol": FUT_SYMBOL, "product": "NRML"}
+    fills = [fill("1", "BUY", 130, 100, "10:00:00", **base),
+             fill("2", "SELL", 65, 110, "10:00:00", day=20261117, **base)]  # fmt: skip
+    assert live(pair_fills(fills, recounts={key: [(20261116, 65)]})) == [
+        ("unmatched", "long", 130, 0), ("unmatched", "long", 0, 65)]  # fmt: skip
+    assert live(pair_fills(fills)) == [("open", "long", 130, 65)]
+
+
+def test_a_position_opened_before_the_journal_is_not_one_whose_closing_was_not_seen():
+    (trip,) = pair_fills([fill("1", "SELL", 10, 1300, "10:00:00")])
+    assert trip["status"] == "unmatched" and not unclosed(trip)
+    assert words.left_out_line(1, 0, unclosed=2) == (
+        "Not in these figures: 1 position opened before the journal started, 2 trades the "
+        "journal did not see closed. Upstox's own report has them."
+    )
+    assert words.left_out_line(0, 0, unclosed=1) == (
+        "Not in these figures: 1 trade the journal did not see closed. Upstox's own report has it."
+    )
+
+
 # ---- the store's replay ----------------------------------------------------------------------
 @pytest.fixture
 def made(tmp_path):
@@ -179,6 +241,44 @@ def test_an_opening_read_at_first_sight_is_kept_and_paired_from(made):
     assert [(t["status"], t["side"]) for t in trips_of(made)] == [
         ("unmatched", "long"), ("open", "long"),
     ]  # fmt: skip
+
+
+def test_a_recount_is_kept_and_every_later_replay_pairs_from_it(made):
+    """The store's side of N2: the count is kept by its day; the replay ends the open trade
+    there, a later fill runs off what was counted, and a replay of an older day (the history
+    bringing the missed sale) puts the trade right again."""
+    replay(made, [fill("1", "BUY", 100, 200, "10:00:00")])
+    (opened,) = trips_of(made)
+    at = ist_ms(LATER, "22:00:00")
+
+    def count(tx, qty):
+        changed = tx.recount_put("live", ("NSE", "ACME", "carry"), LATER, qty, "holdings", at, at)
+        replay_tx(tx, "live", [], at, Facts(), keys={("NSE", "ACME", "carry"): opened["opened_ms"]})
+        return changed
+
+    assert made.write(OWNER, lambda tx: count(tx, 60)) is True
+    (cut,) = trips_of(made)
+    assert cut["id"] == opened["id"] and unclosed(cut) and cut["close_day"] == LATER
+    assert cut["net_paise"] is None
+    assert made.read(OWNER, lambda tx: tx.left_out("live", LATER, LATER)) == {
+        "unmatched": 0, "expired": 0, "unclosed": 1}  # fmt: skip
+    assert made.read(OWNER, lambda tx: tx.left_out("live", DAY, DAY))["unmatched"] == 0
+    # a sale of the 60 on a later day: its replay starts after the count, and pairs from it
+    replay(made, [fill("2", "SELL", 60, 210, "10:00:00", day=20261123)],
+           now=ist_ms(20261123, "10:01:00"))  # fmt: skip
+    assert [(t["status"], t["entry_qty"], t["exit_qty"]) for t in trips_of(made)] == [
+        ("unmatched", 100, 0), ("unmatched", 0, 60)]  # fmt: skip
+    # the same count again changes nothing; another quantity of the same day replaces it
+    assert made.write(OWNER, lambda tx: count(tx, 60)) is False
+    assert made.read(OWNER, lambda tx: tx.recounts_of("live")) == {
+        ("NSE", "ACME", "carry"): [(LATER, 60)]}  # fmt: skip
+    # the history then brings the sale of 40 that was missed: one trade, closed, with its result
+    replay(made, [fill("h", "SELL", 40, 205, "12:00:00", day=20261118)],
+           now=ist_ms(20261123, "22:00:00"))  # fmt: skip
+    (whole,) = trips_of(made)
+    assert whole["id"] == opened["id"]
+    assert (whole["status"], whole["exit_qty"], whole["close_day"]) == ("closed", 100, 20261123)
+    assert whole["gross_paise"] == 40 * 500 + 60 * 1_000
 
 
 def test_a_replay_never_turns_an_expired_trip_back_into_an_open_one(made):
@@ -343,7 +443,7 @@ def test_a_monthly_statement_says_what_its_figures_leave_out_and_leaves_them_out
     want = metrics.compute([{**t, "charges_paise": t["charges_est_paise"]} for t in closed])
     assert row["rows"]["trades"] == 4 == want["trips"]
     assert row["rows"]["net_paise"] == want["net_paise"]
-    assert row["rows"]["left_out"] == {"unmatched": 1, "expired": 1}
+    assert row["rows"]["left_out"] == {"unmatched": 1, "expired": 1, "unclosed": 0}
     assert f"Net {words.rupees(want['net_paise'], True)}" in row["text"]
     assert "ACME" not in (row["rows"].get("csv") or "")  # neither is a row of the month's CSV
 

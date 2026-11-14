@@ -11,6 +11,7 @@ import {
   CalendarX,
   ChartCandlestick,
   Check,
+  EyeOff,
   FlaskConical,
   History,
   LoaderCircle,
@@ -25,7 +26,7 @@ import { describe } from '@/sudarshan/watchlist/rows'
 import { journalData, problemOf, type SheetFill, type TripDetail, WORDS } from './api'
 import { clearDraft, readDraft, writeDraft } from './drafts'
 import { JOURNAL_KEY } from './keys'
-import { countText, holdWords, openQty, priceText } from './live'
+import { closingNotSeen, countText, dayWords, holdWords, openQty, priceText } from './live'
 import { paiseAmount } from './money'
 import { Problem, SideChip, UnsavedQuestion } from './parts'
 import {
@@ -99,6 +100,11 @@ export const ORPHAN_FILLS =
  */
 export const UNMATCHED_WORDS =
   'This position was opened before the journal started, so the price it was opened at is not known here. Upstox’s own report has it. It is not in your figures.'
+/** A trade the journal saw opened and did not see closed (the nightly count against holdings). */
+export function unclosedWords(day: number | null): string {
+  const when = day === null ? '' : ` on ${dayWords(day)}`
+  return `The journal saw this trade opened but did not see it closed. When it checked your Upstox holdings${when}, these shares were not all there; they may have been sold while the journal was off. Upstox’s own report has the result. It is not in your figures.`
+}
 export const EXPIRED_WORDS =
   'This contract ended at expiry. An expiry has no fill, so the journal cannot work out its result; Upstox’s own report has it. It is not in your figures.'
 
@@ -249,9 +255,10 @@ export function chargesWord(trip: { charges_actual_paise: number | null; fills?:
 }
 
 /** What kind of record the sheet shows, under its title. */
-export function sheetDescription(status: Trip['status']): string {
+export function sheetDescription(status: Trip['status'], unclosed = false): string {
   if (status === 'open') return 'Open trade'
   if (status === 'orphan') return 'Earlier record, kept for your notes'
+  if (status === 'unmatched' && unclosed) return 'Closing not seen by the journal'
   if (status === 'unmatched') return 'Opened before the journal started'
   if (status === 'expired') return 'Ended at expiry'
   return 'Closed trade'
@@ -867,12 +874,13 @@ export function TripSheet({
     )
   } else {
     const kept = trip.status === 'orphan'
-    const unseen = trip.status === 'unmatched'
+    const unclosed = closingNotSeen(trip)
+    const unseen = trip.status === 'unmatched' && !unclosed
     const expired = trip.status === 'expired'
-    const aside = unseen || expired
+    const aside = unseen || unclosed || expired
     const closed = trip.status !== 'open' && !expired
-    const stillOpen = kept || unseen ? '-' : 'Still open'
-    const notKnown = unseen ? 'Not known' : 'Not worked out'
+    const stillOpen = unclosed ? 'Not seen' : kept || unseen ? '-' : 'Still open'
+    const notKnown = unseen || unclosed ? 'Not known' : 'Not worked out'
     const charges = trip.charges_actual_paise ?? trip.charges_est_paise
     const unpriced = trip.charges_modelled === false && trip.charges_actual_paise === null
     const estimate = chargesWord(trip)
@@ -918,12 +926,14 @@ export function TripSheet({
               data-testid="aside-note"
               className="flex items-start gap-2 rounded-[0.875rem] border border-[color:var(--border-strong)] px-3 py-2 text-sm font-medium"
             >
-              {unseen ? (
+              {unclosed ? (
+                <EyeOff aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+              ) : unseen ? (
                 <History aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
               ) : (
                 <CalendarX aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
               )}
-              {unseen ? UNMATCHED_WORDS : EXPIRED_WORDS}
+              {unclosed ? unclosedWords(trip.close_day) : unseen ? UNMATCHED_WORDS : EXPIRED_WORDS}
             </p>
           )}
           <Section title="Result">
@@ -1027,13 +1037,15 @@ export function TripSheet({
       title={
         <span className="inline-flex items-center gap-2">
           {named ? named.title : 'Trade'}
-          {trip && trip.status !== 'unmatched' && <SideChip side={trip.side} />}
+          {trip && (trip.status !== 'unmatched' || closingNotSeen(trip)) && (
+            <SideChip side={trip.side} />
+          )}
         </span>
       }
       description={
         trip && named ? (
           <>
-            {sheetDescription(trip.status)}
+            {sheetDescription(trip.status, closingNotSeen(trip))}
             <span>{` · ${named.detail}`}</span>
           </>
         ) : undefined
