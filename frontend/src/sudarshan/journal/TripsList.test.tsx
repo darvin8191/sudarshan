@@ -45,7 +45,17 @@ import { renderBook } from '@/test/bookPages'
 import { fakeClock, frames } from '@/test/frames'
 import { feed } from '@/test/marketDataHarness'
 import { closedTrip, trip } from './fixtures'
-import { ASIDE_WORDS, EMPTY_WORDS, NO_TOKEN_WORDS, TripsList } from './TripsList'
+import {
+  ASIDE_ALL,
+  ASIDE_CUT_WORDS,
+  ASIDE_NEWEST_WORDS,
+  ASIDE_PAGE,
+  ASIDE_WORDS,
+  asideCount,
+  EMPTY_WORDS,
+  NO_TOKEN_WORDS,
+  TripsList,
+} from './TripsList'
 import type { Tag, Trip } from './types'
 
 const TAGS: Tag[] = [
@@ -53,12 +63,16 @@ const TAGS: Tag[] = [
 ]
 
 function serve(open: Trip[], closed: Array<Trip & { mistakes?: number[] }>, aside: Trip[] = []) {
-  api.data.mockImplementation(async (op: string, args?: { status?: string }) => {
+  api.data.mockImplementation(async (op: string, args?: { status?: string; limit?: number }) => {
     if (op === 'tags_list') return TAGS
     if (op !== 'trips') throw new Error(`unexpected op ${op}`)
     if (args?.status === 'open') return open
     if (args?.status === 'unmatched' || args?.status === 'expired')
-      return aside.filter((t) => t.status === args.status)
+      // the service's order (newest first) and its limit
+      return aside
+        .filter((t) => t.status === args.status)
+        .sort((a, b) => b.id - a.id)
+        .slice(0, args.limit ?? 100)
     return closed
   })
 }
@@ -164,6 +178,7 @@ describe('TripsList', () => {
       ]
     )
     show()
+    fireEvent.click(await screen.findByTestId('aside-fold'))
     const aside = await screen.findAllByTestId('aside-trip')
     expect(aside).toHaveLength(2)
     expect(screen.getByText(ASIDE_WORDS)).toBeTruthy()
@@ -176,11 +191,73 @@ describe('TripsList', () => {
     expect(within(expired).getByText('LONG')).toBeTruthy()
     expect(within(expired).queryByTestId('live-pnl')).toBeNull()
     const order = screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)
-    expect(order).toEqual(['Open', 'Not in the figures', 'Closed'])
+    expect(order).toEqual(['Open', 'Not in the figures2 positions', 'Closed'])
     // Never priced: the live feed is asked about the open trade only.
     act(() => feed.push('NIFTY18NOV2625000CE', 'NFO', { ltp: 50 }))
     flush()
     expect(within(expired).queryByText(/Profit|Loss/)).toBeNull()
+  })
+
+  const expiredTrips = (count: number) =>
+    Array.from({ length: count }, (_, i) =>
+      trip({
+        id: 100 + i,
+        symbol: 'NIFTY18NOV2625000CE',
+        status: 'expired',
+        side: 'short',
+        close_day: 20260101 + i,
+      })
+    )
+
+  it('folds the positions not in the figures to one line with their count, so Closed stands directly under Open (verification N3)', async () => {
+    serve(
+      [trip({ id: 1, symbol: 'SBIN' })],
+      [closedTrip({ id: 3, net_paise: 81250, close_day: 20261112 })],
+      expiredTrips(60)
+    )
+    show()
+    const fold = await screen.findByTestId('aside-fold')
+    expect(fold.getAttribute('aria-expanded')).toBe('false')
+    expect(within(fold).getByTestId('aside-count').textContent).toBe('More than 50 positions')
+    // folded: no card, no explanation, and nothing between the open trade and the closed ones
+    expect(screen.queryAllByTestId('aside-trip')).toHaveLength(0)
+    expect(screen.queryByText(ASIDE_WORDS)).toBeNull()
+    const marks = [...document.querySelectorAll('[data-testid]')].map((n) =>
+      n.getAttribute('data-testid')
+    )
+    const between = marks.slice(marks.indexOf('aside-fold') + 1, marks.indexOf('closed-day'))
+    expect(between).toEqual(['aside-count'])
+    // the first read asked for one more than it shows, never the whole list
+    const asked = api.data.mock.calls.filter(([, a]) => a?.status === 'expired').map(([, a]) => a)
+    expect(asked.every((a) => a.limit === ASIDE_PAGE + 1)).toBe(true)
+  })
+
+  it('opens the fold on the newest of each kind, says so, and reads the rest on Show all', async () => {
+    serve([], [closedTrip({ id: 3, net_paise: 81250, close_day: 20261112 })], expiredTrips(60))
+    show()
+    fireEvent.click(await screen.findByTestId('aside-fold'))
+    expect(screen.getByTestId('aside-fold').getAttribute('aria-expanded')).toBe('true')
+    expect(screen.getAllByTestId('aside-trip')).toHaveLength(ASIDE_PAGE)
+    expect(screen.getByText(ASIDE_NEWEST_WORDS)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Show all' }))
+    await waitFor(() => expect(screen.getAllByTestId('aside-trip')).toHaveLength(60))
+    expect(screen.getByTestId('aside-count').textContent).toBe('60 positions')
+    expect(screen.queryByRole('button', { name: 'Show all' })).toBeNull()
+    expect(screen.queryByText(ASIDE_NEWEST_WORDS)).toBeNull()
+    expect(screen.queryByText(ASIDE_CUT_WORDS)).toBeNull()
+    const last = api.data.mock.calls.filter(([, a]) => a?.status === 'expired').at(-1)
+    expect(last?.[1].limit).toBe(ASIDE_ALL)
+    // folded again on tap
+    fireEvent.click(screen.getByTestId('aside-fold'))
+    expect(screen.queryAllByTestId('aside-trip')).toHaveLength(0)
+  })
+
+  it('counts the positions not in the figures in words', () => {
+    expect(asideCount(1, false)).toBe('1 position')
+    expect(asideCount(12, false)).toBe('12 positions')
+    expect(asideCount(53, true)).toBe('More than 53 positions')
+    expect(ASIDE_NEWEST_WORDS).toContain('the newest 50 of each kind')
+    expect(ASIDE_CUT_WORDS).toContain('the newest 500 of each kind')
   })
 
   it('moves an open trade’s P&L with every tick, signed, with its arrow and its word', async () => {

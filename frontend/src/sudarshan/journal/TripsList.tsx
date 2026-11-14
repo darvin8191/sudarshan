@@ -1,10 +1,12 @@
 // SUDARSHAN M14, JD2: the Trades part. Open trades first with their P&L moving with every tick,
-// then the positions not in the figures (opened before the journal started, or ended at expiry),
-// then closed trades by day, newest first. The service's list is the first snapshot and a re-sync
+// then the positions not in the figures (opened before the journal started, or ended at expiry)
+// folded to one line with their count, then closed trades by day, newest first. The service's list is the first snapshot and a re-sync
 // (useJournalSync); between reads the figures of an open trade move only with ticks.
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   CalendarX,
+  ChevronDown,
+  ChevronUp,
   Clock,
   History,
   LoaderCircle,
@@ -12,7 +14,7 @@ import {
   RefreshCw,
   TriangleAlert,
 } from 'lucide-react'
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useId, useMemo, useRef, useState } from 'react'
 import { cn } from '@/lib/utils'
 import { usePriceAccess } from '@/sudarshan/access'
 import { useMarketOpen, useNow } from '@/sudarshan/dashboard/hooks'
@@ -53,11 +55,19 @@ import type { Mode, Tag, Trip } from './types'
 import { useJournalSync } from './useJournalSync'
 import { LIVE_CAP, type LivePnl, useTripLive } from './useTripLive'
 
-/** The most of each kind of position not in the figures one read lists. */
+/**
+ * The most of each kind of position not in the figures the list reads at first: the newest ones.
+ * One more is asked for, so the list knows whether there are more than it shows.
+ */
 export const ASIDE_PAGE = 50
+/** The most of each kind after "Show all" (the most the service answers in one read). */
+export const ASIDE_ALL = 500
 
 export const ASIDE_WORDS =
   'The journal has no result for these: it did not see them opened, or they ended at expiry with no fill. They are not in your figures; Upstox’s own report has them.'
+
+export const ASIDE_NEWEST_WORDS = `These are the newest ${ASIDE_PAGE} of each kind: opened before the journal, and ended at expiry.`
+export const ASIDE_CUT_WORDS = `These are the newest ${ASIDE_ALL} of each kind. Upstox’s own report has the earlier ones.`
 
 export const EMPTY_WORDS = 'No trades yet. Fills are recorded here as they happen at Upstox.'
 export const NO_TOKEN_WORDS =
@@ -242,6 +252,96 @@ function AsideCard({ trip, onOpen }: { trip: TripRow; onOpen: (id: number) => vo
   )
 }
 
+/** "12 positions"; "More than 50 positions" when the list holds only the newest of them. */
+export function asideCount(shown: number, more: boolean): string {
+  const count = `${countText(shown)} ${shown === 1 ? 'position' : 'positions'}`
+  return more ? `More than ${count}` : count
+}
+
+/**
+ * The positions not in the figures, folded to one line with their count and opened on tap, so
+ * years of expired contracts never stand between the open trades and the closed ones (verification
+ * N3). Opened, it lists the newest of each kind; "Show all" reads the rest, and a list still cut
+ * short says so.
+ */
+function AsideFold({
+  aside,
+  more,
+  all,
+  loading,
+  onAll,
+  onOpen,
+}: {
+  aside: TripRow[]
+  more: boolean
+  all: boolean
+  loading: boolean
+  onAll: () => void
+  onOpen: (id: number) => void
+}) {
+  const [shown, setShown] = useState(false)
+  const listId = useId()
+  const Chevron = shown ? ChevronUp : ChevronDown
+  return (
+    <section aria-label="Not in the figures" className="flex flex-col gap-2">
+      <h2 className="text-[0.9375rem] font-bold">
+        <button
+          type="button"
+          aria-expanded={shown}
+          aria-controls={listId}
+          data-testid="aside-fold"
+          onClick={() => setShown((was) => !was)}
+          className={cn(
+            CARD,
+            'flex min-h-12 w-full items-center justify-between gap-3 px-4 py-2 text-left outline-none hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50'
+          )}
+        >
+          <span>Not in the figures</span>
+          <span className="ml-auto inline-flex shrink-0 items-center gap-1.5 text-[0.8125rem] font-semibold text-[color:var(--text-secondary)]">
+            <span data-testid="aside-count">{asideCount(aside.length, more)}</span>
+            <Chevron aria-hidden="true" className="size-4" />
+          </span>
+        </button>
+      </h2>
+      <div id={listId} hidden={!shown} className="flex flex-col gap-2">
+        {shown && (
+          <>
+            <p className="px-1 text-[0.8125rem] font-medium text-[color:var(--text-secondary)]">
+              {ASIDE_WORDS}
+            </p>
+            <ul className="flex flex-col gap-2">
+              {aside.map((trip) => (
+                <AsideCard key={trip.id} trip={trip} onOpen={onOpen} />
+              ))}
+            </ul>
+            {more && !all && (
+              <>
+                <p className="px-1 text-[0.8125rem] font-medium text-[color:var(--text-secondary)]">
+                  {ASIDE_NEWEST_WORDS}
+                </p>
+                <button
+                  type="button"
+                  disabled={loading}
+                  onClick={onAll}
+                  className="inline-flex min-h-12 items-center justify-center gap-2 rounded-[0.875rem] border border-input bg-card px-4 text-[0.9375rem] font-semibold hover:bg-accent disabled:opacity-60"
+                >
+                  {loading && <LoaderCircle aria-hidden="true" className="size-4 animate-spin" />}
+                  {loading ? 'Reading the rest' : 'Show all'}
+                </button>
+              </>
+            )}
+            {more && all && (
+              <p className="px-1 text-[0.8125rem] font-medium text-[color:var(--text-secondary)]">
+                {ASIDE_CUT_WORDS}
+              </p>
+            )}
+          </>
+        )}
+      </div>
+    </section>
+  )
+}
+
 function ClosedCard({
   trip,
   tags,
@@ -357,21 +457,33 @@ export function useTrips(mode: Mode) {
   const [paging, setPaging] = useState<{ mode: Mode; message: string } | null>(null)
   const [loading, setLoading] = useState<Mode | null>(null)
   const busy = useRef(false)
+  // The modes whose positions not in the figures were asked for whole ("Show all"): every later
+  // read of that mode asks the same, so a re-sync never folds the list back to its newest.
+  const wholeAside = useRef(new Set<Mode>())
+  const [asideAll, setAsideAll] = useState<Mode[]>([])
+  const [asideLoading, setAsideLoading] = useState<Mode | null>(null)
   const query = useQuery({
     queryKey: key,
     queryFn: async (): Promise<TripsRead> => {
+      const all = wholeAside.current.has(mode)
+      // One more than a page is asked for, to know whether there are more; the service answers
+      // ASIDE_ALL at most, so a whole read that comes back full may have been cut short.
+      const limit = all ? ASIDE_ALL : ASIDE_PAGE + 1
+      const keep = all ? ASIDE_ALL : ASIDE_PAGE
       const [open, newest, unmatched, expired] = await Promise.all([
         journalData('trips', { mode, status: 'open' }),
         readClosedPage(mode),
-        journalData('trips', { mode, status: 'unmatched', limit: ASIDE_PAGE }),
-        journalData('trips', { mode, status: 'expired', limit: ASIDE_PAGE }),
+        journalData('trips', { mode, status: 'unmatched', limit }),
+        journalData('trips', { mode, status: 'expired', limit }),
       ])
+      const kinds = [unmatched as TripRow[], expired as TripRow[]]
       // Over what the list holds when the answer is in, earlier pages included.
       return overNewest(
         queryClient.getQueryData<TripsRead>(key),
         open as TripRow[],
         newest,
-        asideOrder([...(unmatched as TripRow[]), ...(expired as TripRow[])])
+        asideOrder(kinds.flatMap((rows) => rows.slice(0, keep))),
+        kinds.some((rows) => rows.length >= limit)
       )
     },
     retry: false,
@@ -395,11 +507,28 @@ export function useTrips(mode: Mode) {
       setLoading(null)
     }
   }, [queryClient, key, mode])
+  const { refetch } = query
+  const showAllAside = useCallback(async () => {
+    if (wholeAside.current.has(mode)) return
+    wholeAside.current.add(mode)
+    setAsideLoading(mode)
+    try {
+      const read = await refetch()
+      if (read.isError) wholeAside.current.delete(mode)
+      else setAsideAll((was) => (was.includes(mode) ? was : [...was, mode]))
+    } finally {
+      setAsideLoading(null)
+    }
+  }, [refetch, mode])
   const data = query.data
   return {
     query,
     open: data?.open ?? [],
     aside: data?.aside ?? [],
+    asideMore: data?.asideMore ?? false,
+    asideAll: asideAll.includes(mode),
+    asideLoading: asideLoading === mode,
+    showAllAside,
     closed: data?.closed ?? [],
     more: data?.more ?? false,
     partial: data?.partial ?? [],
@@ -414,8 +543,21 @@ export function TripsList({ mode, onOpen }: { mode: Mode; onOpen: (id: number) =
   const [market, setMarket] = useState<MarketCalendar>(CALENDAR_LOADING)
   const day = useIstDay()
   const { isOpen, anyOpen } = useMarketOpen(market)
-  const { query, open, aside, closed, more, partial, loadOlder, loadingOlder, pagingError } =
-    useTrips(mode)
+  const {
+    query,
+    open,
+    aside,
+    asideMore,
+    asideAll,
+    asideLoading,
+    showAllAside,
+    closed,
+    more,
+    partial,
+    loadOlder,
+    loadingOlder,
+    pagingError,
+  } = useTrips(mode)
   const tags = useQuery({
     queryKey: [...JOURNAL_KEY, 'tags'],
     queryFn: async () => journalData('tags_list'),
@@ -501,19 +643,15 @@ export function TripsList({ mode, onOpen }: { mode: Mode; onOpen: (id: number) =
           </section>
         )}
         {aside.length > 0 && (
-          <section aria-label="Not in the figures" className="flex flex-col gap-2">
-            <div className="flex flex-col gap-0.5 px-1">
-              <h2 className="text-[0.9375rem] font-bold">Not in the figures</h2>
-              <p className="text-[0.8125rem] font-medium text-[color:var(--text-secondary)]">
-                {ASIDE_WORDS}
-              </p>
-            </div>
-            <ul className="flex flex-col gap-2">
-              {aside.map((trip) => (
-                <AsideCard key={trip.id} trip={trip} onOpen={onOpen} />
-              ))}
-            </ul>
-          </section>
+          <AsideFold
+            key={mode}
+            aside={aside}
+            more={asideMore}
+            all={asideAll}
+            loading={asideLoading}
+            onAll={() => void showAllAside()}
+            onOpen={onOpen}
+          />
         )}
         {days.length > 0 && (
           <section aria-label="Closed trades" className="flex flex-col gap-3">
