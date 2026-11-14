@@ -624,6 +624,50 @@ Tests: `sudarshan/ops/tests/test_backup_retention.py`, `test_backup_run.py`,
 `test_backup_policy.py`, `test_backup_command.py` and `test_backup_unit.py`, with the notice
 wording in `sudarshan/alerts/tests/test_alerts_notices.py`.
 
+### The restore drill (M19.8)
+
+A backup that has never been restored is not a backup. `sudarshan-drill` reads the newest
+complete archive back, by itself, on the first Sunday of each month at 11:00
+(`sudarshan-drill.timer`; never on a listed trading day, never in or just before market hours),
+and tells you the result on Telegram. It restores nothing over live files, stops no service and
+uses no network. In a private scratch folder inside the backup's own folder
+(`/var/lib/sudarshan-backup/drill`, removed again on every outcome) it:
+
+1. reads the archive back against the record it carries, and refuses an incomplete one;
+2. unpacks it;
+3. opens every database read-only, runs SQLite's own check on it, and refuses a store that is
+   newer than this release understands;
+4. checks that OpenAlgo's database holds exactly one owner account, an API key and an Upstox
+   login;
+5. checks that the archive's `.env` has the keys the app cannot start without (never printed);
+6. opens the vault of sealed sign-in details with the key derived from that same `.env`: the
+   step that proves the two restore together.
+
+The result is on the System page, with the first thing that failed in plain words, and in
+`/var/lib/sudarshan-backup/drill.json`. The watch tells you when the last drill is over 100 days
+old. What it proves: the archive can be read back into a working set of files; it does not
+prove that a new server boots ("If the server is lost" below).
+
+To run it by hand, outside market hours, as the service user from the app folder:
+
+```sh
+cd /opt/sudarshan/apps/openalgo && sudo -u sudarshan .venv/bin/python -m sudarshan.ops.drill
+```
+
+It prints one line (`restore drill: passed ...`, or `FAILED:` and the cause) and sends the same
+on Telegram. Without a file name it does nothing on a trading day; give it an archive to test
+that one on any day after the close:
+`sudo -u sudarshan .venv/bin/python -m sudarshan.ops.drill /var/lib/sudarshan-backup/archive/<name>`.
+The deploy tool restarts the unit after an install like every other, so an install on a day
+without trading runs one more drill.
+
+**Your own drill, once a quarter.** The monthly drill never touches the bucket, the encryption
+or your private key. Once a quarter: download a copy from the bucket, decrypt it on the laptop
+and copy it to the server ("Restoring from the offsite copy" above, steps 1 to 3, into a folder
+only `sudarshan` can read), then run the drill on that file with the line above and delete the
+decrypted file from the server and the laptop. This is the only test of the bucket, the
+encryption and the key together.
+
 ## Server notices on Telegram (M18.x)
 
 After an install, a rollback, a service file the unit policy refused, a release that waits for

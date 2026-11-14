@@ -111,6 +111,8 @@ KIND_ORDER = (
     "watch_warning",
     "watch_fine",
     "watch_new",
+    "drill_failed",
+    "drill_passed",
 )
 
 #: Why an install was undone, in the owner's words (the cause only; ``rolled_back`` adds the rest).
@@ -422,6 +424,7 @@ LOOK = "open the System page and have the server looked at"
 RESTARTS = f"The server restarts it by itself; if this message comes again, {LOOK}."
 _MINUTES = re.compile(r"[0-9]{1,5}")
 _GB = re.compile(r"[0-9]{1,5}\.[0-9]")
+_DRILL_NAME = re.compile(r"[A-Za-z0-9._-]{1,60}")
 
 
 def _began(event: Event, now: datetime) -> str:
@@ -596,6 +599,27 @@ def _watch_fine(event: Event, now: datetime) -> list[str]:
     }.get(check, [])
 
 
+def _drill_passed(event: Event, now: datetime) -> list[str]:
+    count = event.fact("databases")
+    opened = f"its {count} databases open" if _MINUTES.fullmatch(count) else "its databases open"
+    return [
+        f"The restore test of the backups passed: the newest backup reads back whole, {opened}, "
+        "and the vault opens with the backup's own keys."
+    ]
+
+
+def _drill_failed(event: Event, now: datetime) -> list[str]:
+    from sudarshan.ops.drill import WORDS  # the same sentences the System page shows
+
+    cause = WORDS.get(event.fact("item"), WORDS["other"])
+    name = event.fact("name")
+    about = f" ({name})" if _DRILL_NAME.fullmatch(name) else ""
+    return [
+        f"The restore test of the backups FAILED. {cause}{about} Until this is put right the "
+        "backups may not restore: open the System page and have the server looked at."
+    ]
+
+
 def _at_once(event: Event) -> bool:
     """Whether a notice goes out in market hours too."""
     if event.kind == "watch_fine":
@@ -618,6 +642,8 @@ _FAMILY_WORDS = {
     "watch_warning": _watch_warning,
     "watch_fine": _watch_fine,
     "watch_new": _watch_new,
+    "drill_passed": _drill_passed,
+    "drill_failed": _drill_failed,
 }
 
 

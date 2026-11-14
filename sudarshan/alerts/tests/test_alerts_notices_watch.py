@@ -263,3 +263,23 @@ def test_news_is_told_at_once_in_the_owners_words():
         "A Telegram account was unlinked from your bot shortly before 10:42 IST."
     )
     assert compose([event("watch_new", "assistant", what="other")], T0) == BRAND
+
+
+def test_the_restore_drills_result_in_the_owners_words():
+    def drill(kind: str, **facts) -> str:
+        made = Event(f"drill-{kind}", kind, T0.timestamp(), "drill-1", "backup", facts)
+        assert not notices._at_once(made), "a drill's result waits for the close"
+        return compose([made], T0).splitlines()[1]
+
+    assert drill("drill_passed", databases="9", archive="sudarshan-backup-x.tar.gz") == (
+        "The restore test of the backups passed: the newest backup reads back whole, its 9 "
+        "databases open, and the vault opens with the backup's own keys."
+    )
+    failed = drill("drill_failed", item="vault_key", name="")
+    assert failed.startswith(
+        "The restore test of the backups FAILED. The vault in the archive does not open with "
+        "the keys in the same archive. Until this is put right"
+    ) and failed.endswith("open the System page and have the server looked at.")
+    assert "(logs.db)" in drill("drill_failed", item="database", name="logs.db")
+    assert "<" not in drill("drill_failed", item="database", name="<b>x</b>")
+    assert "stopped unexpectedly" in drill("drill_failed", item="something-new")
