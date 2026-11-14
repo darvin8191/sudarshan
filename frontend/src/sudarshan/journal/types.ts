@@ -702,6 +702,7 @@ export interface TripDetail {
   latency_ms: number | null
   orders: OrderRef[]
   charges_actual: ChargeActual | null
+  charges_note?: string | null
 }
 
 export interface OpSpec {

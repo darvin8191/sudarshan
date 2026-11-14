@@ -271,10 +271,24 @@ def test_the_restore_drills_result_in_the_owners_words():
         assert not notices._at_once(made), "a drill's result waits for the close"
         return compose([made], T0).splitlines()[1]
 
-    assert drill("drill_passed", databases="9", archive="sudarshan-backup-x.tar.gz") == (
+    assert drill(
+        "drill_passed", databases="9", archive="sudarshan-backup-x.tar.gz", vault="opened"
+    ) == (
         "The restore test of the backups passed: the newest backup reads back whole, its 9 "
         "databases open, and the vault opens with the backup's own keys."
     )
+    # Review L3: a vault with nothing sealed was never opened, and the notice must not say it was.
+    empty = drill("drill_passed", databases="9", vault="empty")
+    assert empty == (
+        "The restore test of the backups passed: the newest backup reads back whole, its 9 "
+        "databases open. The vault holds nothing sealed yet, so there was no sealed record to "
+        "open with the backup's keys; the next test after you save your Upstox sign-in details "
+        "on the Auto login page checks that too."
+    )
+    assert "vault opens" not in empty
+    for unsaid in ({}, {"vault": ""}, {"vault": "<b>"}, {"vault": "yes"}):
+        line = drill("drill_passed", databases="9", **unsaid)
+        assert line.endswith("its 9 databases open.") and "vault" not in line, unsaid
     failed = drill("drill_failed", item="vault_key", name="")
     assert failed.startswith(
         "The restore test of the backups FAILED. The vault in the archive does not open with "

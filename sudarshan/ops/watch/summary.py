@@ -166,7 +166,7 @@ def facts(results: list[checks.Result], usage: Mapping, measured: Mapping[str, i
     for check, names in (
         ("disk", ("free_gb",)),
         ("posture_updates", ("all", "security")),
-        ("backup", ("age_h",)),
+        ("backup", ("age_h", "fy_owed")),
         ("drill", ("days", "cause")),
     ):
         for name in names:

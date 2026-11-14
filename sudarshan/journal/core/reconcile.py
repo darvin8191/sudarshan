@@ -15,7 +15,8 @@ flagged row says which part is off most, in a sentence the owner can act on.
   what its total holds beyond the named parts) is ``unestimated_paise``: in the total gap, and
   named by the sentence when it is the largest part of it.
 * A segment the rate card does not cover at all is never flagged: there is no estimate to be
-  wrong. A month whose row is not read yet has no actual and no flag.
+  wrong. A month whose row is not read yet has no actual and no flag; nor has a month the
+  journal does not cover whole (``NOT_WHOLE``), whose caller passes no actual for it.
 
 No I/O, no clock.
 """
@@ -53,6 +54,11 @@ NOT_MODELLED = (
 )
 NOT_READ = "Upstox's charges for this month are not read yet."
 NOT_ENDED = "Upstox's charges for a month are read from the 3rd of the next month."
+#: A month the journal does not cover whole: Upstox's figure is the whole account's month.
+NOT_WHOLE = (
+    "The journal does not cover the whole of this month, and Upstox's figure is for the whole "
+    "month, so the two are not compared."
+)
 
 
 def _gap(estimate: int, actual: int) -> dict[str, Any]:

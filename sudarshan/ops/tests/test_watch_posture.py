@@ -149,7 +149,7 @@ def test_the_backups_folder_and_the_drills_result(tmp_path):
     assert posture.drill(folder) == {}
     (folder / "archive").mkdir(parents=True)
     names = {
-        "sudarshan-backup-20260331-163000.tar.gz": 3 << 20,  # the 2025-26 year's archive
+        "sudarshan-backup-20260404-163000.tar.gz": 3 << 20,  # the 2025-26 year's archive
         "sudarshan-backup-20261114-163000.tar.gz": 5 << 20,
         "sudarshan-backup-20261115-163000.tar.gz": 6 << 20,  # 17.5 h before NOW
         "sudarshan-backup-20261115-223000-partial.tar.gz": 1 << 20,
@@ -161,6 +161,13 @@ def test_the_backups_folder_and_the_drills_result(tmp_path):
     (folder / "status.json").write_text(json.dumps({"offsite": "ok", "outcome": "ok"}))
     seen = posture.backup(NOW, folder)
     assert seen == {"age_h": 17.5, "size_mb": 6, "offsite": "ok", "fy": "2025-26", "fy_mb": 3}
+    # Review L4: a year's archive still owed its offsite copy is read from the job's own word.
+    for owed, want in (
+        ({"fy": "2025-26", "archive": "sudarshan-backup-20260404-163000.tar.gz"}, "2025-26"),
+        (None, None), ("2025-26", None), ({"fy": "<b>"}, None), ({"fy": 2025}, None),
+    ):  # fmt: skip
+        (folder / "status.json").write_text(json.dumps({"offsite": "ok", "fy_owed": owed}))
+        assert posture.backup(NOW, folder).get("fy_owed") == want, owed
     (folder / "drill.json").write_text(
         json.dumps({"at": "2026-11-01T11:00:05+05:30", "outcome": "passed", "item": ""})
     )

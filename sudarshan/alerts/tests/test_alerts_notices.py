@@ -327,6 +327,24 @@ LOOK = "if it is incomplete again, have the server looked at."
             "Tonight's offsite backup did not upload: the offsite copy did not work. "
             "The local backup is fine.",
         ),
+        (  # review L4: a financial year's archive whose offsite copy did not go
+            {"why": "offsite", "reason": "network", "fy": "2026-27", "fy_tonight": "yes"},
+            "Tonight's backup is the 2026-27 year's archive, and its offsite copy did not "
+            "upload: the server could not reach Oracle's storage. It is sent again at the next "
+            "backup, and the System page says so until it has gone. The copy on the server is "
+            "kept.",
+        ),
+        (
+            {"why": "offsite", "reason": "network", "fy": "2026-27"},
+            "The 2026-27 year's archive still has no offsite copy: the server could not reach "
+            "Oracle's storage. It is sent again at the next backup, and the System page says so "
+            "until it has gone. The copy on the server is kept.",
+        ),
+        (
+            {"why": "offsite", "reason": "network", "fy": "<b>x</b>"},
+            "Tonight's offsite backup did not upload: the server could not reach Oracle's "
+            "storage. The local backup is fine.",
+        ),
         (
             {"why": "offsite", "reason": "refused"},
             "Tonight's offsite backup did not upload: Oracle's storage refused the file. If the "

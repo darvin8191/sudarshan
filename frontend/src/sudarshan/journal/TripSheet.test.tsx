@@ -181,6 +181,24 @@ describe('what happened', () => {
     expect(charges?.textContent).not.toContain('est.')
   })
 
+  it('says why a trade keeps the estimate when Upstox gave only the month', async () => {
+    const why =
+      'Upstox gave only the month’s total, and the journal does not cover the whole month, so these charges stay an estimate.'
+    serve(detail({ charges_note: why }))
+    show()
+    const result = await screen.findByRole('region', { name: 'Result' })
+    expect(within(result).getByTestId('trip-charges-note').textContent).toBe(why)
+    const charges = within(result).getByText('Charges').nextElementSibling
+    expect(charges?.textContent).toContain('est.')
+  })
+
+  it('shows no such line for any other trade', async () => {
+    serve(detail({ charges_note: null }))
+    show()
+    const result = await screen.findByRole('region', { name: 'Result' })
+    expect(within(result).queryByTestId('trip-charges-note')).toBeNull()
+  })
+
   it('says which of Upstox’s figures the actual came from, and opens its parts on a tap', async () => {
     const user = userEvent.setup()
     serve(

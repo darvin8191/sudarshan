@@ -15,6 +15,7 @@ from sudarshan.journal import actual
 from sudarshan.journal.book import Facts, replay_tx
 from sudarshan.journal.jobs import catchup, charges
 from sudarshan.journal.ops import REGISTRY
+from sudarshan.journal.schedule import schedule_for
 from sudarshan.journal.store import Scope
 
 OWNER = Scope.owner()
@@ -89,6 +90,19 @@ def night(rig, today, recent):  # noqa: F811
     before = len(rig.portfolio.calls)
     line = scenario(rig, lambda: charges.actual_charges(rig.svc, recent, rig.now))
     return line, [c[1] for c in rig.portfolio.calls[before:] if c[0] == "pnl_report"]
+
+
+def checked(rig, first, last, but=()):  # noqa: F811
+    """Mark every trading day of ``first`` to ``last`` checked against Upstox's own list, as
+    the close check does each day the journal runs; ``but`` are days it was down."""
+    days = [d for d in actual.trading_days_of(schedule_for(rig.svc), first, last) if d not in but]
+
+    def write(tx):
+        for day in days:
+            tx.day_close_put("live", day, {"reconciled_at": 1, "reconcile_note": "ok"}, 1)
+
+    rig.svc.store.write(OWNER, write)
+    return days
 
 
 def trips(rig):  # noqa: F811
@@ -186,12 +200,127 @@ def test_a_month_is_asked_from_the_third_of_the_next():
 
 
 # ---- a day Upstox does not answer --------------------------------------------------------------
+def seven_nights(rig):  # noqa: F811
+    for today in (20261102, 20261103, 20261104, 20261105, 20261106, 20261109, 20261110):
+        night(rig, today, [])
+
+
+def sheet_of(rig, trip_id):  # noqa: F811
+    async def sheet():
+        return await REGISTRY["trip_get"](rig.svc, {"id": trip_id})
+
+    return scenario(rig, sheet)
+
+
+def test_a_month_the_journal_does_not_cover_whole_never_answers_for_its_days(on):
+    """Review M1, the reviewer's probe. The journal's first fills are on 29 and 30 Oct (it was
+    installed on the 29th); Upstox does not answer by day; its October row, Rs 20,000, is the
+    whole account's month. Shared among the journal's two days, each trade got Rs 10,000 of
+    charges against an estimate under Rs 100. They keep the estimate, and the sheet says why."""
+    thu, fri = 20261029, 20261030
+    put(on, day_trade(thu) + day_trade(fri))
+    assert checked(on, thu, fri) == [thu, fri]  # checked from its first day on, not before
+    whole_october = {"total_paise": 2_000_000, "brokerage_paise": 1_200_000}
+    charges_answers(on, zero={thu, fri}, month=lambda a, b: whole_october)
+    seven_nights(on)
+    assert [(r["period_from"], r["total_paise"]) for r in rows(on, basis="month")] == [
+        (20261001, 2_000_000)]  # fmt: skip
+    assert all(r["asked"] == actual.GIVE_UP for r in rows(on, basis="day"))
+    assert orders(on) == []
+    found = trips(on)
+    assert len(found) == 2
+    for trip in found:
+        assert trip["charges_actual_paise"] is None and trip["charges_actual_basis"] is None
+        assert 0 < trip["charges_est_paise"] < 20_000
+        assert trip["net_paise"] == trip["gross_paise"] - trip["charges_est_paise"]
+        got = sheet_of(on, trip["id"])
+        assert got["charges_actual"] is None
+        assert got["charges_note"] == actual.MONTH_ONLY == (
+            "Upstox gave only the month's total, and the journal does not cover the whole "
+            "month, so these charges stay an estimate.")  # fmt: skip
+    # A replay of the days (a nudge, a late fill) does not bring the month in either.
+    put(on, day_trade(thu, 1))
+    assert orders(on) == [] and all(t["charges_actual_paise"] is None for t in trips(on))
+
+
+def test_one_trading_day_the_journal_was_down_is_a_gap(on):
+    """Covered from the first trading day, but down on Wed 14 Oct: the owner may have traded
+    that day in Upstox's own app, and the month's total would hold its charges."""
+    thu = 20261029
+    put(on, day_trade(thu))
+    days = checked(on, 20261001, 20261031, but={20261014})
+    assert days[0] == 20261001 and 20261014 not in days
+    charges_answers(on, zero={thu}, month=lambda a, b: {"total_paise": 500_000})
+    seven_nights(on)
+    (trip,) = trips(on)
+    assert orders(on) == [] and trip["charges_actual_paise"] is None
+    assert sheet_of(on, trip["id"])["charges_note"] == actual.MONTH_ONLY
+    # The day filled in: the month is whole, and its row answers on the next night that asks.
+    on.svc.store.write(OWNER, lambda tx: tx.day_close_put(
+        "live", 20261014, {"reconciled_at": 1, "reconcile_note": "ok"}, 1))  # fmt: skip
+    on.svc.store.write(
+        OWNER, lambda tx: actual.apply_trips(tx, actual.trips_of_orders(tx, actual.spread_month(
+            tx, thu, "FO", "plus", on.now,
+            actual.covers(tx, actual.trading_days_of(schedule_for(on.svc), 20261001, 20261031)),
+        )), on.now))  # fmt: skip
+    (trip,) = trips(on)
+    assert trip["charges_actual_paise"] == 500_000 and trip["charges_actual_basis"] == "month"
+    assert sheet_of(on, trip["id"])["charges_note"] is None
+
+
+def test_covers_reads_only_days_checked_against_upstox(on):
+    days = [20261001, 20261005]
+    read = on.svc.store.read
+    assert read(OWNER, lambda tx: actual.covers(tx, days)) is False
+    assert read(OWNER, lambda tx: actual.covers(tx, [])) is False  # no trading day: no claim
+    on.svc.store.write(
+        OWNER, lambda tx: tx.day_close_put("live", 20261001, {"reconciled_at": 5}, 5)
+    )
+    # a day's row with no check on it (a note only) is not a checked day
+    on.svc.store.write(
+        OWNER, lambda tx: tx.day_close_put("live", 20261005, {"reconcile_note": "x"}, 5)
+    )
+    assert read(OWNER, lambda tx: actual.covers(tx, days)) is False
+    on.svc.store.write(
+        OWNER, lambda tx: tx.day_close_put("live", 20261005, {"reconciled_at": 6}, 6)
+    )
+    assert read(OWNER, lambda tx: actual.covers(tx, days)) is True
+
+
+def test_a_late_fill_in_a_whole_month_is_shared_again_from_the_month(on):
+    """The replay has no calendar: the month answers again where it answered before."""
+    thu = 20261029
+    put(on, day_trade(thu))
+    checked(on, 20261001, 20261031)
+    charges_answers(on, zero={thu}, month=lambda a, b: {"total_paise": 9_000})
+    seven_nights(on)
+    assert sum(t["charges_actual_paise"] for t in trips(on)) == 9_000
+    put(on, day_trade(thu, 1))
+    found = trips(on)
+    assert len(found) == 2 and sum(t["charges_actual_paise"] for t in found) == 9_000
+    assert {t["charges_actual_basis"] for t in found} == {"month"}
+    assert all(sheet_of(on, t["id"])["charges_note"] is None for t in found)
+
+
+def test_the_note_is_only_for_the_month_only_case(on, rig):  # noqa: F811
+    mon = 20261109
+    put(on, day_trade(mon))
+    charges_answers(on, zero={mon})
+    (trip,) = trips(on)
+    assert sheet_of(on, trip["id"])["charges_note"] is None  # never asked
+    night(on, 20261110, [mon])
+    assert sheet_of(on, trip["id"])["charges_note"] is None  # still being asked
+    on.svc.settings = dataclasses.replace(on.svc.settings, tax=False)
+    assert sheet_of(on, trip["id"])["charges_note"] is None
+
+
 def test_an_all_zero_answer_while_fills_exist_is_not_ready_and_the_month_answers_for_it(on):
     """Mutation 14: an all-zero row taken as the day's actual would give every trade charges of
     0.00. It is asked again for 7 nights, then October's month row, less the days that did
     answer, is shared among the orders of the days left."""
     fri, thu = 20261030, 20261029
     put(on, day_trade(fri) + day_trade(thu) + day_trade(thu, 1))
+    assert len(checked(on, 20261001, 20261031)) >= 20  # the journal ran all of October
     month = {"total_paise": 20_000, "brokerage_paise": 12_000, "gst_paise": 2_160,
              "stt_paise": 5_000, "stamp_duty_paise": None, "transaction_paise": 840}  # fmt: skip
     charges_answers(on, zero={thu}, month=lambda a, b: month)

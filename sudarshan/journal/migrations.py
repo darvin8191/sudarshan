@@ -441,6 +441,9 @@ V6 = (
         PRIMARY KEY (principal, mode, day, order_id)
     )""",
     "CREATE INDEX IF NOT EXISTS charges_order_segment ON charges_order (principal, segment, day)",
+    # ``charges_orders_of`` asks by order id with no day (it runs after every live replay): the
+    # primary key has ``day`` before ``order_id``, so without this it read every row kept.
+    "CREATE INDEX IF NOT EXISTS charges_order_order ON charges_order (principal, mode, order_id)",
 )
 #: The basis of each ``upstox_charges`` row already kept, from what the row itself says: one day,
 #: a whole calendar month (its first day to its last), or anything else, which is the "year so

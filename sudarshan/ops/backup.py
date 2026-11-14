@@ -1059,23 +1059,43 @@ def _offsite_step(settings: Settings, started: datetime, result: Result) -> None
             result.failures.append(Failure(OFFSITE))
         return
     day = started.astimezone(IST).date()
-    outcome = offsite.send(
-        etc_dir=settings.etc_dir,
-        archive=archive,
-        work=settings.work_dir,
-        log_file=settings.state_dir / "offsite.log",
-        release=installed_release(settings.deployed_tag_file),
-        today=day,
-        free_bytes=free_bytes(settings.archive_dir),
-        fy=retention.yearly_label(list_archives(settings.archive_dir), result.archive)
-        if settings.keep_yearly
-        else None,
-    )
+    archives = list_archives(settings.archive_dir)
+    fy = retention.yearly_label(archives, result.archive) if settings.keep_yearly else None
+
+    def send(which: Path, label: str | None) -> offsite.Outcome:
+        return offsite.send(
+            etc_dir=settings.etc_dir,
+            archive=which,
+            work=settings.work_dir,
+            log_file=settings.state_dir / "offsite.log",
+            release=installed_release(settings.deployed_tag_file),
+            today=day,
+            free_bytes=free_bytes(settings.archive_dir),
+            fy=label,
+        )
+
+    owed = owed_year(settings, archives)
+    outcome = send(archive, fy)
+    if fy and outcome.state == "failed":
+        # Tonight's is a year's archive and its copy did not go: owed, under the year's name.
+        owed = {"fy": fy, "archive": result.archive}
+    elif owed and outcome.state == "ok" and owed["archive"] != result.archive:
+        # A year's archive from an earlier night is still owed, and the link works tonight.
+        again = send(settings.archive_dir / owed["archive"], owed["fy"])
+        if again.state == "ok":
+            log.info("offsite: the %s year's archive is sent now", owed["fy"])
+            owed = None
+        elif again.state == "failed":
+            result.failures.append(
+                Failure(OFFSITE, facts={"reason": again.reason, "fy": owed["fy"]})
+            )
+    result.fy_owed, result.fy_owed_known = owed, True
     result.offsite = outcome.state
     if outcome.state == "off":
         _note_disabled(settings, day)
     elif outcome.state == "failed":
-        result.failures.append(Failure(OFFSITE, facts={"reason": outcome.reason}))
+        facts = {"reason": outcome.reason, **({"fy": fy, "fy_tonight": "yes"} if fy else {})}
+        result.failures.append(Failure(OFFSITE, facts=facts))
     if outcome.days_left is not None and outcome.days_left > 0 and outcome.expires:
         record(
             settings.spool,
@@ -1088,6 +1108,28 @@ def _offsite_step(settings: Settings, started: datetime, result: Result) -> None
             days=str(outcome.days_left),
             date=outcome.expires.isoformat(),
         )
+
+
+_FY_LABEL = re.compile(r"\d{4}-\d{2}")
+
+
+def owed_year(settings: Settings, archives: list[retention.Backup]) -> dict[str, str] | None:
+    """The year's archive ``status.json`` says is still owed an offsite copy (review L4), when
+    that still holds: the archive is in the folder and is still that year's own. Anything else
+    in the file is nobody's word and is dropped."""
+    try:
+        with open(settings.status_file, encoding="utf-8") as handle:
+            kept = json.load(handle).get("fy_owed")
+    except (OSError, ValueError, AttributeError):
+        return None
+    if not isinstance(kept, dict):
+        return None
+    label, name = kept.get("fy"), kept.get("archive")
+    if not isinstance(label, str) or not isinstance(name, str) or not _FY_LABEL.fullmatch(label):
+        return None
+    if retention.yearly_label(archives, name) != label:
+        return None
+    return {"fy": label, "archive": name}
 
 
 def _note_disabled(settings: Settings, day: date) -> None:
@@ -1119,6 +1161,11 @@ class Result:
     offsite: str = "off"
     kept: int = 0
     used_bytes: int = 0
+    #: The financial-year archive still owed an offsite copy under the year's own name
+    #: (``{"fy": "2026-27", "archive": name}``), None when none is. Only meaningful once the
+    #: offsite step ran (``fy_owed_known``); a run that never got there keeps what was owed.
+    fy_owed: dict[str, str] | None = None
+    fy_owed_known: bool = False
 
     @property
     def exit_code(self) -> int:
@@ -1353,6 +1400,11 @@ def _write_status(settings: Settings, started: datetime, result: Result) -> None
         "kept": result.kept,
         "used_bytes": result.used_bytes,
         "offsite": result.offsite,
+        # The year's archive still owed its offsite copy; a run that never reached the offsite
+        # step (it failed before, or a command hook sends the copies) keeps what was owed.
+        "fy_owed": result.fy_owed
+        if result.fy_owed_known
+        else owed_year(settings, list_archives(settings.archive_dir)),
         "failures": [{"why": f.why, "names": list(f.names)} for f in result.failures],
     }
     target = settings.status_file

@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from typing import Any
 
+from .. import actual
 from ..book import charges_of, shares_of, update_trip
 from ..core import kinds
 from ..core.metrics import strategy_of
 from ..errors import ApiError
+from ..schedule import schedule_for
 from ..views import (
     actual_out,
     done,
@@ -65,10 +67,27 @@ async def trips(ctx, args):
     return await work(lambda: store.read(OWNER, read))
 
 
+def charges_note(tx, row, legs, sched) -> str | None:
+    """Why a live trade still carries the estimate, when the reason is one the owner cannot
+    see: Upstox answered for its day by the month only, and the journal does not cover that
+    month whole. None for every other trade, and always while ``sched`` is None (the tax
+    switch is off: nothing is read of Upstox's charges)."""
+    if sched is None or row["mode"] != actual.LIVE or row.get("charges_actual_paise") is not None:
+        return None
+    days = {int(leg["day"]) for leg in legs}
+    segments = {actual.SEGMENT_OF.get(leg["exchange"]) for leg in legs} - {None}
+
+    def covered(first: int, last: int) -> bool:
+        return actual.covers(tx, actual.trading_days_of(sched, first, last))
+
+    return actual.MONTH_ONLY if actual.month_only(tx, days, segments, covered) else None
+
+
 @op("trip_get")
 async def trip_get(ctx, args):
     store = need(ctx)
     trip_id = whole(args, "id", low=1)
+    sched = schedule_for(ctx) if getattr(getattr(ctx, "settings", None), "tax", False) else None
 
     def read(tx):
         row = tx.get("round_trip", trip_id)
@@ -106,6 +125,7 @@ async def trip_get(ctx, args):
             "excursion": excursion_out(row),
             "charges": charges,
             "charges_actual": actual_out(row),
+            "charges_note": charges_note(tx, row, legs, sched),
             "latency_ms": (first_ref or {}).get("rtt_ms"),
             "orders": [ref_out(refs[o]) for o in sorted(refs)],
         }

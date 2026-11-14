@@ -12,6 +12,10 @@ inside the caller's transaction.
 * **A month** (``spread_month``), the fallback for days Upstox never answered day by day: once
   every day of a month that is not answered has been asked ``GIVE_UP`` nights, the month's row
   less the answered days is shared among the orders of the days left, marked ``month``.
+  Only for a month the journal covers whole (``covers``): Upstox's month is the whole account's,
+  so in a month with a trading day the journal never checked (its first month, or a day it was
+  down and the history did not rebuild) the trades keep the estimate and say why
+  (``month_only``); two days of fills must never be given a whole month of charges.
 * **A trade** (``apply_trips``) has an actual only when every one of its orders has one: an
   order's share is split among the trades that hold its fills by quantity, and the trade's net
   is then gross less the actual. Until then, and whenever an order of it loses its share, the
@@ -40,6 +44,11 @@ SEGMENT_OF = {"NSE": "EQ", "BSE": "EQ", "NFO": "FO", "BFO": "FO", "MCX": "COM", 
               "BCD": "CD"}  # fmt: skip
 #: The nights a day is asked of Upstox before the month's row answers for it.
 GIVE_UP = 7
+#: On the trade sheet, for a trade that keeps the estimate because of it.
+MONTH_ONLY = (
+    "Upstox gave only the month's total, and the journal does not cover the whole month, so "
+    "these charges stay an estimate."
+)
 #: A part of the spread and the column of ``upstox_charges`` that holds it.
 COLUMN_OF = {
     "brokerage": "brokerage_paise",
@@ -96,6 +105,48 @@ def month_of(day: int) -> tuple[int, int]:
     year, month = day // 10000, day // 100 % 100
     first = year * 10000 + month * 100 + 1
     return first, first - 1 + calendar.monthrange(year, month)[1]
+
+
+def trading_days_of(plan: Any, first: int, last: int) -> list[int]:
+    """The exchange's trading days of ``first`` to ``last``, from the service's calendar
+    (``schedule_for``)."""
+    from datetime import timedelta
+
+    from .core.money import to_date, to_day
+
+    out, cursor, end = [], to_date(first), to_date(last)
+    while cursor <= end:
+        if plan.trading(cursor):
+            out.append(to_day(cursor))
+        cursor += timedelta(days=1)
+    return out
+
+
+def covers(tx: Any, trading_days: Iterable[int]) -> bool:
+    """Whether the live journal covers a period whole: every trading day of it, from the first,
+    with no gap, was checked against Upstox's own list of the day's trades (the close check) or
+    rebuilt from Upstox's history. A day with neither is a day the owner may have traded and the
+    journal holds nothing of."""
+    days = sorted(set(trading_days))
+    return bool(days) and all(
+        (tx.day_close_get(LIVE, d) or {}).get("reconciled_at") is not None for d in days
+    )
+
+
+def month_only(tx: Any, days: Iterable[int], segments: Iterable[str],
+               whole: Any) -> bool:  # fmt: skip
+    """Whether an order day of a trade is one Upstox answered for by its month only, in a month
+    the journal does not cover whole: its own row was given up, the month's row is there, and
+    ``whole(first, last)`` says no. Such a trade keeps the estimate (``MONTH_ONLY``)."""
+    for day in sorted(set(days)):
+        first, last = month_of(day)
+        for segment in sorted(set(segments)):
+            row = tx.upstox_charges_get(segment, day, day)
+            if row is None or ready(row) or int(row.get("asked") or 0) < GIVE_UP:
+                continue
+            if ready(tx.upstox_charges_get(segment, first, last)) and not whole(first, last):
+                return True
+    return False
 
 
 def orders_of(tx: Any, days: Iterable[int], segment: str, plan: str) -> list[dict[str, Any]]:
@@ -156,12 +207,22 @@ def spread_day(tx: Any, day: int, segment: str, plan: str, now: int) -> set[str]
     return _keep(tx, segment, spread_core.spread(parts_of(row), orders), BASIS_DAY, now)
 
 
-def spread_month(tx: Any, day: int, segment: str, plan: str, now: int) -> set[str]:
+def spread_month(tx: Any, day: int, segment: str, plan: str, now: int,
+                 whole: bool | None = None) -> set[str]:  # fmt: skip
     """The month fallback for the month holding ``day`` (see the module's words); the order ids
-    written, none while the month's row is not ready or a day of it is still being asked."""
+    written, none while the month's row is not ready or a day of it is still being asked.
+
+    ``whole`` is whether the journal covers the month whole (``covers``); when it does not,
+    nothing is shared and the trades keep the estimate. None is for a caller without the
+    calendar (a replay): the month answers again only where it has answered before, which it
+    did only as a whole month."""
     first, last = month_of(day)
     month = tx.upstox_charges_get(segment, first, last)
     if not ready(month):
+        return set()
+    if whole is None:
+        whole = BASIS_MONTH in tx.charges_order_days(LIVE, segment, first, last).values()
+    if not whole:
         return set()
     traded = sorted({d for d, exchange in tx.fill_days(LIVE)
                      if first <= d <= last and SEGMENT_OF.get(exchange) == segment})  # fmt: skip

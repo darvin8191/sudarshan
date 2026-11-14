@@ -195,9 +195,13 @@ def counts(app_dir: Path, env_file: Path) -> dict | None:
     return None
 
 
+_FY = re.compile(r"\d{4}-\d{2}")
+
+
 def backup(now: float, folder: Path = BACKUP_DIR) -> dict | None:
     """The nightly backup as its own folder shows it: the newest complete archive's age and size,
-    the newest financial-year archive, and the last run's word on the offsite copy."""
+    the newest financial-year archive, the last run's word on the offsite copy, and the year
+    whose archive is still owed its offsite copy, when one is."""
     try:
         with os.scandir(folder / "archive") as listing:
             entries = [(entry.name, entry.stat(follow_symlinks=False)) for entry in listing]
@@ -223,6 +227,11 @@ def backup(now: float, folder: Path = BACKUP_DIR) -> dict | None:
     status = _json(folder / "status.json")
     if isinstance(status.get("offsite"), str):
         reading["offsite"] = status["offsite"]
+    owed = status.get("fy_owed")
+    if isinstance(owed, dict) and isinstance(owed.get("fy"), str):
+        # A year's archive whose offsite copy has not gone yet (``backup.py`` sends it again).
+        if _FY.fullmatch(owed["fy"]):
+            reading["fy_owed"] = owed["fy"]
     return reading
 
 

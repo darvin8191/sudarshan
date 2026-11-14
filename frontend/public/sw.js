@@ -11,10 +11,15 @@
  *
  *   navigations   network first. The offline page is shown only when the network itself fails,
  *                 never for a 4xx or 5xx answer: the server's own words are the right ones.
- *                 One exception (review L3, M1.17): 502, 503 and 504 are the web server speaking
+ *                 One exception (review L3, M1.17): 502 and 504 are the web server speaking
  *                 while the app behind it restarts, and its bare error page says nothing a
- *                 family member can act on. Those three show the restart page, which says the
- *                 server is restarting and tries again by itself. The status is kept.
+ *                 family member can act on. Those two show the restart page, which says the
+ *                 server is restarting and tries again by itself. So does a 503, unless it is
+ *                 the web server's own bare 503 page: that one is its "too many requests"
+ *                 answer (an app that is down is its 502), and "restarting" would be untrue
+ *                 and would try again every 15 seconds into the same limit. A rate limit is
+ *                 said as one, in the family view's own words, with no retry of its own; the
+ *                 web server's bare 429 page likewise. The status is kept in every case.
  *   /assets/*     cache first (content-hashed, so a hit is never stale).
  *   /images/*     stale-while-revalidate: the kept copy at once, a fresh one fetched behind it,
  *                 so a changed icon or offline script reaches the phone; .webmanifest files are
@@ -33,6 +38,11 @@ const OFFLINE = '/offline.html'
 /** Shown for a navigation the web server answered while the app restarts (M1.17). */
 const RESTARTING = '/images/restarting.html'
 const RESTART_STATUSES = [502, 503, 504]
+/** The statuses the web server gives a request over its rate limit (503 unless told 429). */
+const LIMIT_STATUSES = [429, 503]
+/** The web server's own bare error page: its name alone under a rule, with or without a version. */
+const BARE_PAGE = /<hr>\s*<center>nginx(?:\/[^<]*)?<\/center>/i
+const TOO_MANY = 'Too many tries from this connection. Wait a minute, then try again.'
 const PRECACHE = [
   RESTARTING,
   '/images/android-chrome-192x192.png',
@@ -125,6 +135,45 @@ async function restartPage(status) {
   })
 }
 
+/** Whether an answer is the web server's own rate limit page, not the app's or a restart's. */
+async function rateLimited(answer) {
+  if (!LIMIT_STATUSES.includes(answer.status)) return false
+  try {
+    return BARE_PAGE.test(await answer.clone().text())
+  } catch (_unreadable) {
+    return false
+  }
+}
+
+/**
+ * The rate limit said as one, under the status the server gave. It asks for nothing and does
+ * not try again by itself: another try inside the minute would only be refused again.
+ */
+function tooManyPage(status) {
+  const page =
+    '<!doctype html><html lang="en"><head><meta charset="utf-8" />' +
+    '<meta name="viewport" content="width=device-width, initial-scale=1" />' +
+    '<meta name="color-scheme" content="only light" /><meta name="theme-color" content="#FFFFFF" />' +
+    '<title>सुदर्शन · SUDARSHAN · Too many tries</title><style>' +
+    ':root{color-scheme:only light}*{box-sizing:border-box}' +
+    'body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;' +
+    'padding:16px;background:#f4f6f8;color:#0f1a24;font-family:Barlow,system-ui,sans-serif}' +
+    'main{width:100%;max-width:26rem;padding:28px 20px;background:#fff;border:1px solid #e3e7ec;' +
+    'border-radius:18px;text-align:center}' +
+    '.name{margin:0 0 20px;color:#0e5a73;font-weight:600}h1{margin:0 0 8px;font-size:1.5rem}' +
+    'p{margin:0 0 14px;font-size:1rem;line-height:1.5}' +
+    'a{display:inline-flex;align-items:center;justify-content:center;min-height:48px;min-width:48px;' +
+    'margin-top:8px;padding:0 28px;border-radius:14px;background:#0e5a73;color:#fff;font-weight:600;' +
+    'text-decoration:none}</style></head><body><main>' +
+    '<p class="name"><span lang="sa">सुदर्शन</span> · SUDARSHAN</p><h1>Too many tries</h1>' +
+    `<p>${TOO_MANY}</p><p>Nothing is wrong with the family view or with your sign-in.</p>` +
+    '<a href="">Try again</a></main></body></html>'
+  return new Response(page, {
+    status,
+    headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' },
+  })
+}
+
 async function networkFirstOffline(event) {
   try {
     const fresh = await fetch(event.request)
@@ -132,6 +181,7 @@ async function networkFirstOffline(event) {
     if (fresh.ok && type.includes('text/html')) {
       event.waitUntil(settleRelease(fresh.clone()).catch(() => undefined))
     }
+    if (await rateLimited(fresh)) return tooManyPage(fresh.status)
     if (RESTART_STATUSES.includes(fresh.status)) return (await restartPage(fresh.status)) || fresh
     return fresh
   } catch (_failure) {

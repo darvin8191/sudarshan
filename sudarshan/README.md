@@ -359,14 +359,24 @@ represented a year after its nights are gone. A night is represented by its newe
 archive. The newest complete archive is never removed, whatever else is true: a run of partial
 archives cannot push the last good one out.
 
-**One archive per financial year, kept 8 years (M19.10).** The first complete archive made once
-the market has closed on 31 March (from 16:00) is that financial year's archive, whatever the
-counts above say; one made more than 92 days later is never taken for it. The newest 8 are kept
+**One archive per financial year, kept 8 years (M19.10).** The first complete archive made from
+4 April on is the archive of the financial year that ended on 31 March, whatever the counts
+above say; one made more than 92 days later (after 4 July) is never taken for it. It waits those
+four days so that the year's own papers are in it: the journal builds the year's Tax pack on
+1 April at 07:00, Upstox's charges for the last trading days arrive two nights after each, and
+March's charges are read from 3 April. An archive of 31 March's evening would hold none of them. The newest 8 are kept
 (`SUDARSHAN_BACKUP_KEEP_YEARLY`), for the years the tax records must be kept. Its offsite copy is
 uploaded under a name of its own, `sudarshan-fy-2026-27-YYYYMMDD-HHMMSS-<release>.tar.gz.cms`,
 so that the bucket's delete rules, which name the nightly prefix (step 3 below), never remove
 it. The System page shows the newest year's archive and its size: eight of them must fit the
 size cap and the bucket.
+
+If the upload of a year's archive fails on its night, the job remembers it (`status.json`,
+`fy_owed`) and sends it again under the year's name at the next backup whose own upload works,
+night after night until it has gone. Until then the System page's backup line reads "to look at"
+and says "The 2026-27 year's archive has no offsite copy yet", the Sunday summary says the same,
+and each failed try is a Telegram notice. With a command hook of your own
+(`SUDARSHAN_BACKUP_OFFSITE_CMD`) the hook sends every copy and nothing of this applies.
 
 Then a size cap (10 GB for all of them), which never takes a monthly or a year's archive:
 
@@ -640,8 +650,11 @@ uses no network. In a private scratch folder inside the backup's own folder
 4. checks that OpenAlgo's database holds exactly one owner account, an API key and an Upstox
    login;
 5. checks that the archive's `.env` has the keys the app cannot start without (never printed);
-6. opens the vault of sealed sign-in details with the key derived from that same `.env`: the
-   step that proves the two restore together.
+6. opens the vault of sealed sign-in details with the key derived from that same `.env` (one
+   sealed record of each key the vault names): the step that proves the two restore together.
+   While nothing is sealed yet (you have not saved your Upstox sign-in details on the Auto login
+   page) there is no record to open, and the result says "the vault holds nothing sealed yet"
+   instead of "the vault opens": run the drill again after you save them.
 
 The result is on the System page, with the first thing that failed in plain words, and in
 `/var/lib/sudarshan-backup/drill.json`. The watch tells you when the last drill is over 100 days
@@ -1093,21 +1106,32 @@ is what is down.
 Two things show it:
 
 - **The family app, with no step of yours.** Its service worker keeps the page on the phone and
-  shows it when a page load is answered 502, 503 or 504. It applies from the release that carries
+  shows it when a page load is answered 502 or 504 (and 503 when that is not the web server's
+  "too many requests" answer, which it says as that). It applies from the release that carries
   it, on phones that have opened the family view since.
 - **nginx, once you install the lines below.** They cover the owner's pages too, and a family
   phone that has not kept the page yet. Until then nginx's own error page is shown, as today.
+
+The lines carry the page inside them (`sudarshan/ops/nginx/sudarshan-restart.conf`, written from
+the page by `python -m sudarshan.ops.restart_page --write`; a test fails when the two differ).
+nginx reads no file for it, so nothing can go missing: "502 Bad Gateway" stays 502 and "504
+Gateway Time-out" stays 504, for a page load and for an order alike, each with the page as its
+body. An order sent in the second the app was down is therefore never answered "not found"; the
+phone says it could not confirm the order and keeps its hold, and TradingView sees the gateway
+error it would have seen without these lines.
 
 As for the assistant's lines above: nginx is not SUDARSHAN's alone, the deploy tool never touches
 it, and these lines go into SUDARSHAN's own site and nowhere else. On the server, from the app
 folder (`cd /opt/sudarshan/apps/openalgo`):
 
-1. Copy the page and the lines into root's folders. nginx never reads the app folder itself.
+1. Copy the lines into nginx's own folder. nginx never reads the app folder itself.
 
    ```
-   sudo install -D -m 644 -o root -g root frontend/public/images/restarting.html /usr/share/sudarshan/restarting.html
    sudo install -m 644 -o root -g root sudarshan/ops/nginx/sudarshan-restart.conf /etc/nginx/snippets/sudarshan-restart.conf
    ```
+
+   After a release that changes the page, run this line again and reload nginx (step 3); until
+   then nginx shows the earlier page, which is harmless.
 
 2. Open SUDARSHAN's own site file in nginx and add one line inside its `server { }` block, above
    its `location /` line (below the family view's and the assistant's `include` lines, if they are
@@ -1133,8 +1157,8 @@ folder (`cd /opt/sudarshan/apps/openalgo`):
 What the lines do not change: the answer keeps its status (a restart never reads as success to
 TradingView or to the app's own order calls), anything the app itself answers is passed on as it
 is, and the family view's API keeps its own "did not answer" sentence. After a release that
-changes the page (the changelog says so), run the first `install` line of step 1 again; no reload
-is needed for the page alone. To take the lines out, remove the `include` line, then
+changes the page (the changelog says so), run the `install` line of step 1 again, then step 3:
+the page is part of the lines, so nginx takes it up at the reload. To take the lines out, remove the `include` line, then
 `sudo nginx -t` and `sudo systemctl reload nginx`.
 
 Tests: `sudarshan/ops/tests/test_ops_restart_page.py`, `frontend/src/sudarshan/pwa/restartPage.test.ts`
@@ -1277,7 +1301,7 @@ Each April, for the year just ended:
 | every order request and the broker's answer | OpenAlgo's `logs.db` | SUDARSHAN, for ever |
 | what the risk layer refused, and the kill switch's history | `sudarshan_risk.db` (Settings > Risk > History) | SUDARSHAN, for ever |
 | market alerts that fired | the alerts' history | SUDARSHAN |
-| one full archive of the server from just after 31 March | the nightly backup: the first complete archive made once 31 March's market has closed, and its offsite copy under a name starting `sudarshan-fy-` ("Nightly backups") | SUDARSHAN, for 8 years on the server and in the bucket (once both delete rules carry the prefix filter of step 3); a copy with the year's papers costs nothing |
+| one full archive of the server from just after the year's end, with the year's Tax pack and March's charges in it | the nightly backup: the first complete archive made from 4 April on, and its offsite copy under a name starting `sudarshan-fy-` ("Nightly backups") | SUDARSHAN, for 8 years on the server and in the bucket (once both delete rules carry the prefix filter of step 3); a copy with the year's papers costs nothing |
 | installs, rollbacks, backup failures, restore drills, family sign-ins and every notice the watch told | the server diary, `/var/lib/sudarshan-watch/log/<year>.jsonl` ("Watching the server"), which the nightly backup takes | SUDARSHAN, for 8 years |
 
 A later release adds one records pack a year (the journal's statements with the order, risk and

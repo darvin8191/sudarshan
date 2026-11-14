@@ -92,7 +92,7 @@ def test_no_message_shows_a_code_or_a_section():
 # ---- the op: a year of the journal's own fills against the kept month rows ---------------------
 import dataclasses  # noqa: E402
 
-from test_journal_actual import day_trade, put  # noqa: E402
+from test_journal_actual import checked, day_trade, put  # noqa: E402
 from test_journal_capture import files as files  # noqa: E402, F401  (a fixture)
 from test_journal_capture import ist_ms, scenario  # noqa: E402
 from test_journal_capture import rig as rig  # noqa: E402, F401  (a fixture)
@@ -133,6 +133,7 @@ def test_a_year_of_months_against_the_kept_rows(rig):  # noqa: F811
     rig.svc.settings = dataclasses.replace(rig.svc.settings, tax=True)
     october = day_trade(20261029) + day_trade(20261030)
     put(rig, october + day_trade(20261109))
+    checked(rig, 20261001, 20261031)  # the journal ran all of October
     est = charges_core.estimate(october)["parts"]
     assert est["brokerage_paise"] == 12_000  # four orders on the Plus plan
     read_at = rig.now
@@ -177,6 +178,38 @@ def test_a_year_of_months_against_the_kept_rows(rig):  # noqa: F811
     september = ask(rig, 20261111)["months"][5]
     assert (september["orders"], september["actual_paise"]) == (2, None)
     assert september["words"] == "Upstox's charges for this month are not read yet."
+
+
+def test_a_month_the_journal_does_not_cover_whole_is_not_compared(rig):  # noqa: F811
+    """Review M1: the journal's first fills are on 29 and 30 Oct and Upstox's October row is the
+    whole account's Rs 20,000. Compared, the month was marked "Check" with "check your plan
+    under Reports > Settings", the wrong place to look. It is not compared, and says why."""
+    rig.svc.settings = dataclasses.replace(rig.svc.settings, tax=True)
+    october = day_trade(20261029) + day_trade(20261030)
+    put(rig, october)
+    assert checked(rig, 20261029, 20261030) == [20261029, 20261030]
+    month_answer(rig, "FO", 20261001, 20261031, total_paise=2_000_000,
+                 brokerage_paise=1_200_000)  # fmt: skip
+    got = ask(rig, 20261111)
+    row = got["months"][6]
+    assert (row["label"], row["orders"]) == ("October 2026", 4)
+    assert row["estimate_paise"] == charges_core.estimate(october)["parts"]["total_paise"]
+    assert (row["actual_paise"], row["diff_paise"], row["diff_pct"]) == (None, None, None)
+    assert row["flagged"] is False
+    assert row["words"] == (
+        "The journal does not cover the whole of this month, and Upstox's figure is for the "
+        "whole month, so the two are not compared."
+    )
+    (fo,) = row["segments"]
+    assert (fo["actual_paise"], fo["flagged"], fo["parts"], fo["words"]) == (
+        None, False, [], row["words"])  # fmt: skip
+    assert "plan" not in row["words"] and "Settings" not in row["words"]
+    # Not in the year's figures either: nothing of this month has an actual.
+    assert got["year"] == {"months": 0, "estimate_paise": 0, "actual_paise": None,
+                           "diff_paise": None, "diff_pct": None, "flagged": False}  # fmt: skip
+    # The month made whole is compared as any other.
+    checked(rig, 20261001, 20261031)
+    assert ask(rig, 20261111)["months"][6]["actual_paise"] == 2_000_000
 
 
 def test_a_year_with_no_trades_and_a_year_that_is_over(rig):  # noqa: F811

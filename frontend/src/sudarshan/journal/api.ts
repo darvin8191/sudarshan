@@ -36,6 +36,11 @@ export interface TripDetail extends Trip {
   /** Upstox's own charges as this trade carries them; an older service sends none. */
   charges_actual?: ChargeActual | null
   /**
+   * Why the trade still carries the estimate, when the owner could not tell: Upstox gave only
+   * the month's total and the journal does not cover the whole month. The service's sentence.
+   */
+  charges_note?: string | null
+  /**
    * "First entry order: answered in 412 ms": the round trip of the trade's first entry order, when
    * the platform recorded one (the service's `latency_ms`); never a later order's.
    */

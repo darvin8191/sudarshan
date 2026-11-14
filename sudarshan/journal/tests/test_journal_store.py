@@ -403,6 +403,17 @@ def _populate_step_5(where: Path) -> None:
         )
 
 
+def _order_lookup(where: Path) -> str | None:
+    """The index SQLite uses for the query ``Tx.charges_orders_of`` makes, with the order id
+    among the columns it searches by; None when it only narrows to the owner and the mode."""
+    for row in raw(where, "EXPLAIN QUERY PLAN SELECT * FROM charges_order WHERE "
+                          "principal = 'owner' AND mode = 'live' AND order_id IN ('a', 'b')"):  # fmt: skip
+        detail = str(row[-1])
+        if "order_id" in detail and " INDEX " in detail:
+            return detail.split(" INDEX ")[1].split(" ")[0]
+    return None
+
+
 def test_step_6_on_a_populated_step_5_file(tmp_path, capsys):
     """journal.db step 6 (P7 J1) on what a v0.11.0 install holds: ``--status`` names the step
     and changes nothing; opening applies it once; each charges row is called by what it says
@@ -433,6 +444,8 @@ def test_step_6_on_a_populated_step_5_file(tmp_path, capsys):
         assert raw(where, "SELECT count(*) FROM charges_order") == [(0,)]
         cols = {r[1] for r in raw(where, "PRAGMA table_info(charges_order)")}
         assert {"principal", "created_at", "updated_at"} <= cols
+        # Review L2: an order's share is looked up by order id alone; the step makes its index.
+        assert _order_lookup(where) == "charges_order_order"
     finally:
         opened.close()
     again = JournalStore(where, now=NOW)
@@ -451,6 +464,9 @@ def test_step_6_on_a_populated_step_5_file(tmp_path, capsys):
             ("month",)
         ]
         assert raw(where, "SELECT count(*) FROM upstox_charges") == [(len(CHARGES_ROWS),)]
+        assert _order_lookup(where) == "charges_order_order"
+        assert raw(where, "SELECT count(*) FROM sqlite_master WHERE type = 'index' AND "
+                          "name = 'charges_order_order'") == [(1,)]  # fmt: skip
     finally:
         third.close()
         store.stop()
