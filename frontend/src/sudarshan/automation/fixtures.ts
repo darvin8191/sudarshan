@@ -40,6 +40,8 @@ export function strategy(over: Partial<Strategy> = {}): Strategy {
     size_mode: 'fixed',
     lots: 1,
     quantity: null,
+    multiplier: null,
+    max_lots: null,
     max_age_s: 30,
     max_alerts_day: 20,
     roll_on_expiry_day: false,
