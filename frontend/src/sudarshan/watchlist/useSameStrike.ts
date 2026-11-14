@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { OTHER_EXPIRIES, type OtherExpiry } from './strikeSheet'
-import { callOp } from './v2/api'
+import { callOp, problemOf } from './v2/api'
 
 export interface SameStrikeArgs {
   underlying: string
@@ -15,6 +15,11 @@ export interface SameStrike {
   state: 'loading' | 'error' | 'ready'
   rows: OtherExpiry[]
   retry: () => void
+  /**
+   * The read was refused because the watchlists switch is off on this server: asking again cannot
+   * help, so a host may leave the section out. Any other failure is one to try again.
+   */
+  off: boolean
 }
 
 const NONE: OtherExpiry[] = []
@@ -33,6 +38,7 @@ export function useSameStrike(args: SameStrikeArgs | null): SameStrike {
     key: string
     state: 'error' | 'ready'
     rows: OtherExpiry[]
+    off?: boolean
   } | null>(null)
   const [again, setAgain] = useState(0)
   // biome-ignore lint/correctness/useExhaustiveDependencies: key is the identity of args; again re-reads
@@ -56,8 +62,9 @@ export function useSameStrike(args: SameStrikeArgs | null): SameStrike {
         })
       )
       setRead({ key, state: 'ready', rows })
-    })().catch(() => {
-      if (!stop.signal.aborted) setRead({ key, state: 'error', rows: NONE })
+    })().catch((error: unknown) => {
+      if (stop.signal.aborted) return
+      setRead({ key, state: 'error', rows: NONE, off: problemOf(error).code === 'off' })
     })
     return () => stop.abort()
   }, [key, again])
@@ -65,6 +72,7 @@ export function useSameStrike(args: SameStrikeArgs | null): SameStrike {
   return {
     state: mine?.state ?? 'loading',
     rows: mine?.rows ?? NONE,
+    off: mine?.off === true,
     retry: () => {
       setRead(null)
       setAgain((count) => count + 1)
