@@ -1,0 +1,376 @@
+{
+ "head_of": [
+  {
+   "id": "H-EQ",
+   "note": "a share trade alone is delivery; the day decides intraday",
+   "in": {
+    "taxpayer": 1,
+    "account": 1,
+    "day": 20260803,
+    "seq": 1,
+    "side": "BUY",
+    "qty_u": 1000000,
+    "segment": "EQ",
+    "instrument": "INE000A01010",
+    "price_u": 1000000,
+    "amount_paise": 10000
+   },
+   "out": "delivery_equity"
+  },
+  {
+   "id": "H-FO-FUT",
+   "note": "a future is business, not speculative",
+   "in": {
+    "taxpayer": 1,
+    "account": 1,
+    "day": 20260803,
+    "seq": 1,
+    "side": "BUY",
+    "qty_u": 1000000,
+    "segment": "FO",
+    "instrument": [
+     "NFO",
+     "NIFTY",
+     20261126,
+     0,
+     "FUT"
+    ],
+    "price_u": 1000000,
+    "amount_paise": 10000
+   },
+   "out": "derivative"
+  },
+  {
+   "id": "H-FO-OPT",
+   "note": "an option is business, not speculative",
+   "in": {
+    "taxpayer": 1,
+    "account": 1,
+    "day": 20260803,
+    "seq": 1,
+    "side": "BUY",
+    "qty_u": 1000000,
+    "segment": "FO",
+    "instrument": [
+     "NFO",
+     "NIFTY",
+     20261126,
+     245000000,
+     "CE"
+    ],
+    "price_u": 1000000,
+    "amount_paise": 10000
+   },
+   "out": "derivative"
+  },
+  {
+   "id": "H-COM",
+   "note": "a commodity derivative",
+   "in": {
+    "taxpayer": 1,
+    "account": 1,
+    "day": 20260803,
+    "seq": 1,
+    "side": "BUY",
+    "qty_u": 1000000,
+    "segment": "COM",
+    "instrument": [
+     "MCX",
+     "GOLDM",
+     20261205,
+     0,
+     "FUT"
+    ],
+    "price_u": 1000000,
+    "amount_paise": 10000
+   },
+   "out": "derivative"
+  },
+  {
+   "id": "H-CD",
+   "note": "a currency derivative",
+   "in": {
+    "taxpayer": 1,
+    "account": 1,
+    "day": 20260803,
+    "seq": 1,
+    "side": "BUY",
+    "qty_u": 1000000,
+    "segment": "CD",
+    "instrument": [
+     "CDS",
+     "USDINR",
+     20261127,
+     0,
+     "FUT"
+    ],
+    "price_u": 1000000,
+    "amount_paise": 10000
+   },
+   "out": "derivative"
+  },
+  {
+   "id": "H-MF-EQ",
+   "note": "a fund unit tagged equity",
+   "in": {
+    "taxpayer": 1,
+    "account": 1,
+    "day": 20260803,
+    "seq": 1,
+    "side": "BUY",
+    "qty_u": 1000000,
+    "segment": "MF",
+    "instrument": "INF000A01011",
+    "price_u": 1000000,
+    "amount_paise": 10000,
+    "asset_class": "equity"
+   },
+   "out": "equity_mf"
+  },
+  {
+   "id": "H-MF-NONE",
+   "note": "a fund unit with no tag is not assumed equity",
+   "in": {
+    "taxpayer": 1,
+    "account": 1,
+    "day": 20260803,
+    "seq": 1,
+    "side": "BUY",
+    "qty_u": 1000000,
+    "segment": "MF",
+    "instrument": "INF000A01011",
+    "price_u": 1000000,
+    "amount_paise": 10000
+   },
+   "out": "not_computed"
+  },
+  {
+   "id": "H-MF-DEBT",
+   "note": "a debt fund is outside this engine",
+   "in": {
+    "taxpayer": 1,
+    "account": 1,
+    "day": 20260803,
+    "seq": 1,
+    "side": "BUY",
+    "qty_u": 1000000,
+    "segment": "MF",
+    "instrument": "INF000A01011",
+    "price_u": 1000000,
+    "amount_paise": 10000,
+    "asset_class": "debt"
+   },
+   "out": "not_computed"
+  },
+  {
+   "id": "H-MANUAL",
+   "note": "a hand-kept asset is never computed, whatever its segment",
+   "in": {
+    "taxpayer": 1,
+    "account": 1,
+    "day": 20260803,
+    "seq": 1,
+    "side": "BUY",
+    "qty_u": 1000000,
+    "segment": "EQ",
+    "instrument": "INE000A01010",
+    "price_u": 1000000,
+    "amount_paise": 10000,
+    "asset_class": "manual"
+   },
+   "out": "not_computed"
+  },
+  {
+   "id": "H-LIAB",
+   "note": "a liability is never computed",
+   "in": {
+    "taxpayer": 1,
+    "account": 1,
+    "day": 20260803,
+    "seq": 1,
+    "side": "BUY",
+    "qty_u": 1000000,
+    "segment": "EQ",
+    "instrument": "INE000A01010",
+    "price_u": 1000000,
+    "amount_paise": 10000,
+    "asset_class": "liability"
+   },
+   "out": "not_computed"
+  }
+ ],
+ "intraday_qty": [
+  {
+   "id": "D-I1",
+   "note": "I1: bought 50, sold 80: min(50, 80) = 50 intraday",
+   "in": {
+    "bought_u": 50000000,
+    "sold_u": 80000000,
+    "all_delivery": false
+   },
+   "out": 50000000
+  },
+  {
+   "id": "D-MORE-BUY",
+   "note": "bought 120, sold 70: min = 70 intraday, 50 delivered",
+   "in": {
+    "bought_u": 120000000,
+    "sold_u": 70000000,
+    "all_delivery": false
+   },
+   "out": 70000000
+  },
+  {
+   "id": "D-EQUAL",
+   "note": "a same-day round trip, CNC or not: min(100, 100) = 100",
+   "in": {
+    "bought_u": 100000000,
+    "sold_u": 100000000,
+    "all_delivery": false
+   },
+   "out": 100000000
+  },
+  {
+   "id": "D-BUY-ONLY",
+   "note": "nothing sold: min(40, 0) = 0",
+   "in": {
+    "bought_u": 40000000,
+    "sold_u": 0,
+    "all_delivery": false
+   },
+   "out": 0
+  },
+  {
+   "id": "D-SELL-ONLY",
+   "note": "nothing bought: min(0, 40) = 0",
+   "in": {
+    "bought_u": 0,
+    "sold_u": 40000000,
+    "all_delivery": false
+   },
+   "out": 0
+  },
+  {
+   "id": "D-I2",
+   "note": "I2: the owner marked the day as all delivery: 0",
+   "in": {
+    "bought_u": 50000000,
+    "sold_u": 80000000,
+    "all_delivery": true
+   },
+   "out": 0
+  }
+ ],
+ "head_of_product": [
+  {
+   "id": "P-MIS",
+   "note": "MIS on a cash exchange is intraday",
+   "in": {
+    "exchange": "NSE",
+    "symbol": "XYZ",
+    "product": "MIS",
+    "same_day": true
+   },
+   "out": "intraday_equity"
+  },
+  {
+   "id": "P-CNC",
+   "note": "CNC held overnight is delivery",
+   "in": {
+    "exchange": "NSE",
+    "symbol": "XYZ",
+    "product": "CNC",
+    "same_day": false
+   },
+   "out": "delivery_equity"
+  },
+  {
+   "id": "P-CNC-SAME-DAY",
+   "note": "a CNC round trip inside one day delivered nothing: intraday",
+   "in": {
+    "exchange": "BSE",
+    "symbol": "XYZ",
+    "product": "CNC",
+    "same_day": true
+   },
+   "out": "intraday_equity"
+  },
+  {
+   "id": "P-NFO-NRML",
+   "note": "an F&O trip is a derivative whatever the product",
+   "in": {
+    "exchange": "NFO",
+    "symbol": "XYZ",
+    "product": "NRML",
+    "same_day": false
+   },
+   "out": "derivative"
+  },
+  {
+   "id": "P-NFO-MIS",
+   "note": "an intraday F&O trip is still not speculative",
+   "in": {
+    "exchange": "NFO",
+    "symbol": "XYZ",
+    "product": "MIS",
+    "same_day": true
+   },
+   "out": "derivative"
+  },
+  {
+   "id": "P-BFO",
+   "note": "BSE derivatives",
+   "in": {
+    "exchange": "BFO",
+    "symbol": "XYZ",
+    "product": "NRML",
+    "same_day": false
+   },
+   "out": "derivative"
+  },
+  {
+   "id": "P-MCX",
+   "note": "commodity derivatives",
+   "in": {
+    "exchange": "MCX",
+    "symbol": "XYZ",
+    "product": "NRML",
+    "same_day": false
+   },
+   "out": "derivative"
+  },
+  {
+   "id": "P-CDS",
+   "note": "currency derivatives",
+   "in": {
+    "exchange": "CDS",
+    "symbol": "XYZ",
+    "product": "MIS",
+    "same_day": true
+   },
+   "out": "derivative"
+  },
+  {
+   "id": "P-INDEX",
+   "note": "an index is not traded: not computed",
+   "in": {
+    "exchange": "NSE_INDEX",
+    "symbol": "XYZ",
+    "product": "CNC",
+    "same_day": false
+   },
+   "out": "not_computed"
+  },
+  {
+   "id": "P-NSE-NRML",
+   "note": "NRML is not a cash-market product: not computed",
+   "in": {
+    "exchange": "NSE",
+    "symbol": "XYZ",
+    "product": "NRML",
+    "same_day": false
+   },
+   "out": "not_computed"
+  }
+ ]
+}
