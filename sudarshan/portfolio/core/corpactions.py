@@ -29,7 +29,7 @@ from collections.abc import Mapping
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any
 
-from .days import is_day
+from .days import days_between, is_day
 from .kinds import CA_KINDS, PRICE_SCALE
 
 MONTHS = ("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec")
@@ -192,3 +192,32 @@ def swap(kind: str, first: int, second: int, num: int, den: int) -> tuple[int, i
     if (num, den) not in ways:
         raise ValueError("not a reading of this ratio")
     return ways[-1] if ways[0] == (num, den) else ways[0]
+
+
+# ---- the nightly rotation (design p7 6.2) ----------------------------------------------------
+#: An ISIN is read again once a week; one with an event this near (days ahead) is read nightly.
+ROTATION_DAYS = 7
+NEAR_DAYS = 14
+
+
+def tonight(
+    isins: list[str],
+    read_days: Mapping[str, int | None],
+    near: set[str],
+    today: int,
+    limit: int,
+) -> list[str]:
+    """The ISINs to read tonight, at most ``limit``: first those never read, then those with an
+    event inside ``NEAR_DAYS``, then the ones last read ``ROTATION_DAYS`` or more ago, oldest
+    first. ``read_days`` gives the day of each ISIN's last read (None or absent: never). A week's
+    rotation of N instruments is about N / 7 a night."""
+    known = sorted(set(isins))
+    never = [isin for isin in known if read_days.get(isin) is None]
+    read = [isin for isin in known if read_days.get(isin) is not None]
+    soon = [isin for isin in read if isin in near and read_days[isin] < today]
+    stale = sorted(
+        (isin for isin in read if isin not in near
+         and days_between(read_days[isin], today) >= ROTATION_DAYS),
+        key=lambda isin: (read_days[isin], isin),
+    )  # fmt: skip
+    return (never + soon + stale)[: max(0, limit)]
