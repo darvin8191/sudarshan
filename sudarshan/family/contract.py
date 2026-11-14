@@ -70,6 +70,10 @@ FORWARDED_HEADERS = ("X-Forwarded-For", "X-Forwarded-Proto", "X-Real-IP")
 COOKIE = "__Host-sudarshan_family"
 CSRF_COOKIE = "__Host-sudarshan_family_csrf"
 CSRF_HEADER = "X-Family-CSRF"
+#: The phones a member signed in on (``lockout.py``): HttpOnly, so no page reads it, and kept
+#: across a sign-out so that the member's own phone still signs in while the name is locked.
+PHONE_COOKIE = "__Host-sudarshan_family_phone"
+PHONE_DAYS = 90
 #: The seal purposes of the two sealed doors and of the one call out (``sudarshan/vault/keys.py``
 #: holds the same strings).
 PURPOSES = {
@@ -106,10 +110,12 @@ LIMITS = {
     "internal_lists": 50,
     "ws_symbols": 150,
 }
-#: Failures in a row (since the last good sign-in) that lock a sign-in, and for how long (s).
-LOCKOUT = ((5, 15 * 60), (10, 60 * 60), (15, 24 * 60 * 60))
-#: A failure past the last threshold locks again for the last period every this many failures.
-LOCKOUT_REPEAT = 5
+#: Wrong sign-ins in a row on one count (``lockout.py``; review M2): the failure that first locks,
+#: that lock's length, and the longest any lock lasts (each lock after it is twice the last).
+LOCKOUT = {"after": 5, "first_s": 60, "max_s": 15 * 60}
+#: Sign-ins one network area may fail from phones not known for the names typed, within the
+#: window, before its sign-ins from such phones are refused until the window moves on.
+AREA_LIMIT = {"failures": 20, "window_s": 10 * 60}
 
 # ---- kinds ------------------------------------------------------------------------------------
 ROLES = ("viewer", "child")

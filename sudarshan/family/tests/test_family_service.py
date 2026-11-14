@@ -21,7 +21,7 @@ from family_net import ask, fast_hasher, keys, running, sealed, settings
 from family_testkit import close, set_version
 from websockets.asyncio.client import connect
 
-from sudarshan.family import config, sessions
+from sudarshan.family import config, migrations, sessions
 from sudarshan.family.listener import Response
 from sudarshan.family.service import FamilyService
 from sudarshan.family.store import FamilyStore
@@ -398,7 +398,7 @@ def test_health_carries_counts_and_states_and_no_one(tmp_path):
             assert status == 200 and doc["service"] == "sudarshan-family"
             state = doc["family_state"]
             assert (state["enabled"], state["members"], state["sessions"]) == (True, 2, 0)
-            assert state["store_version"] == 1
+            assert state["store_version"] == migrations.LATEST
             assert state["jobs"] == {"prune": "running", "sockets": "running", "copy": "running"}
             assert set(state["notices"]) == {"written", "failed"} and set(state["copy"]) == {
                 "at",

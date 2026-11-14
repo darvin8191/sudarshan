@@ -73,7 +73,8 @@ def card(tx: Tx, member: dict[str, Any], now: int) -> dict[str, Any]:
         "devices": len(live_sessions),
         "last_seen_at": max((s["last_seen_at"] for s in live_sessions), default=None),
         "invite_expires_at": invites.open_end(tx, member["id"], now),
-        "locked_until": lockout.locked_until(tx.row("credential", member_id=member["id"]), now),
+        # Sign-ins from phones the member has not used, held back by wrong attempts (lockout.py).
+        "locked_until": lockout.name_locked_until(tx, member["handle"], now),
         "telegram_linked": bool(link and link.get("chat_id_enc")),
         "created_at": member["created_at"],
         "version": member["version"],
@@ -167,6 +168,7 @@ def remove(tx: Tx, args: dict[str, Any], now: int) -> tuple[dict[str, Any], list
     tx.member_change(member["id"], args.get("version"), {"status": "removed", "handle": None}, now)
     revoked = sessions.revoke_member(tx, member["id"], now, "removed")
     invites.revoke_open(tx, member["id"], now)
+    lockout.clear_member(tx, member)  # the name is free: a later member starts with no count
     for table in ("credential", "push_subscription", "telegram_link"):
         tx.delete(table, member_id=member["id"])
     audit.record(tx, at=now, actor=audit.OWNER, kind="member_removed", member_id=member["id"],
@@ -183,6 +185,7 @@ def reset_signin(tx: Tx, args: dict[str, Any], now: int) -> tuple[dict[str, Any]
     after = tx.member_change(member["id"], args.get("version"), {"status": "invited"}, now)
     revoked = sessions.revoke_member(tx, member["id"], now, "signin_reset")
     tx.delete("credential", member_id=member["id"])
+    lockout.clear_member(tx, member)  # a fresh start: no count from before the reset holds
     audit.record(tx, at=now, actor=audit.OWNER, kind="signin_reset", member_id=member["id"],
                  detail={"sessions": len(revoked)})  # fmt: skip
     return after, revoked

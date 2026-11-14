@@ -106,6 +106,12 @@ class Secrets:
         gives back nothing (design 2.2: for the device list and the audit only)."""
         return hmac.new(self._hash_key, address.encode("utf-8"), hashlib.sha256).hexdigest()
 
+    def keyed(self, *parts: str) -> str:
+        """A keyed hash of a purpose and its parts (the sign-in counts, the phone tokens, network
+        areas). The parts are joined with a byte no address or name holds, so no two uses meet."""
+        text = "\x1f".join(parts).encode("utf-8")
+        return hmac.new(self._hash_key, text, hashlib.sha256).hexdigest()
+
 
 # ---- the one writer thread -------------------------------------------------------------------
 _pool_lock = threading.Lock()

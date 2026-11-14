@@ -26,7 +26,7 @@ from typing import Any
 from sudarshan.tasks import cancel_and_wait
 
 from . import accounts as accounts_module
-from . import audit, backup, health, sessions, ws
+from . import audit, backup, health, lockout, sessions, ws
 from . import store as store_module
 from .accounts import Accounts, Hasher
 from .admin_api import SealedDoors
@@ -313,16 +313,23 @@ class FamilyService(Router):
 
 
 async def _prune(service: FamilyService) -> None:
-    """Forget sessions that ended more than 90 days ago, now and every six hours."""
+    """Forget sessions that ended more than 90 days ago and counts of wrong sign-ins a day old,
+    now and every six hours."""
     while True:
         if service.store is not None:
             try:
-                gone = await service.store.write(lambda tx: sessions.prune(tx, service.clock()))
+                gone = await service.store.write(lambda tx: _forget(tx, service.clock()))
                 if gone:
                     log.info("forgot %d sessions that ended more than 90 days ago", gone)
             except StoreError as exc:
                 log.error("old sessions could not be forgotten this time (%s)", exc.cause)
         await asyncio.sleep(PRUNE_EVERY_S)
+
+
+def _forget(tx: store_module.Tx, now: int) -> int:
+    """The prune job's one transaction: old counts of wrong sign-ins, then old sessions (counted)."""
+    lockout.prune(tx, now)
+    return sessions.prune(tx, now)
 
 
 async def _sweep(service: FamilyService) -> None:

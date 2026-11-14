@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import hashlib
 import secrets
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from . import audit
@@ -39,11 +39,14 @@ ID_BYTES = 32
 @dataclass(frozen=True)
 class Device:
     """The phone a sign-in comes from: its label (from the browser), its fixed summary and the keyed
-    hash of its address (None when it is not known)."""
+    hash of its address (None when it is not known); the keyed hash of its network area and the
+    phone cookie it sent (``lockout.py``), which is never stored, logged or shown."""
 
     label: str
     summary: str
     place: str | None = None
+    area: str | None = None
+    phone: str | None = field(default=None, repr=False)
 
 
 @dataclass(frozen=True)

@@ -10,6 +10,11 @@ A file whose user_version is newer than this code (a release rolled back after a
 migrated it) is refused (``SchemaTooNew``) and the family view stays off: an older release must not
 write to a schema it does not know. A step is frozen once released; a later change is a new step.
 
+V2 (review M2): ``signin_lock``, the counts of wrong sign-ins by the keyed hash of the name typed
+(and of the phone, for a member's own phone), the same rows for names nobody has (``lockout.py``).
+The credential's ``failed_count``, ``locked_until`` and ``lock_level`` of V1 are no longer read or
+written.
+
 V1 holds every table of the design (4.2), with three additions: ``audit.member_id`` (the member a
 line is about, so the owner's filter by member is exact whoever acted), ``viewer_session.
 revoke_reason``, and ``request_id`` on the rows a create may be retried for. Two rules are in the
@@ -174,13 +179,30 @@ V1 = (
 )
 
 
+V2 = (
+    """CREATE TABLE IF NOT EXISTS signin_lock (
+        key TEXT PRIMARY KEY,
+        member_id INTEGER,
+        failures INTEGER NOT NULL,
+        locked_until INTEGER,
+        failed_at INTEGER NOT NULL
+    )""",
+    "CREATE INDEX IF NOT EXISTS signin_lock_member ON signin_lock (member_id)",
+)
+
+
 def step_1(conn: Connection) -> None:
     for sql in V1:
         conn.exec_driver_sql(sql)
 
 
+def step_2(conn: Connection) -> None:
+    for sql in V2:
+        conn.exec_driver_sql(sql)
+
+
 Step = tuple[int, Callable[[Connection], None]]
-STEPS: tuple[Step, ...] = ((1, step_1),)
+STEPS: tuple[Step, ...] = ((1, step_1), (2, step_2))
 LATEST = STEPS[-1][0]
 
 

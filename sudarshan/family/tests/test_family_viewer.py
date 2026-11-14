@@ -148,6 +148,10 @@ def test_the_two_cookies_are_exactly_what_the_design_says(tmp_path):
         name, value, attrs = attributes(csrf[0])
         assert name == "__Host-sudarshan_family_csrf" and len(value) >= 43
         assert attrs == {"Max-Age=2592000", "Path=/", "Secure", "SameSite=Strict"}  # page reads it
+        kept = [c for c in phone.last_cookies if c.startswith(contract.PHONE_COOKIE + "=")]
+        name, value, attrs = attributes(kept[0])  # review M2: the member's own phone, 90 days
+        assert name == "__Host-sudarshan_family_phone" and len(value) >= 60 and len(kept) == 1
+        assert attrs == {"Max-Age=7776000", "Path=/", "Secure", "SameSite=Strict", "HttpOnly"}
         assert not any("domain=" in c.lower() for c in phone.last_cookies)
 
     scenario(tmp_path, body)
@@ -256,6 +260,36 @@ def test_a_wrong_name_and_a_wrong_password_get_one_answer(tmp_path):
             "POST", "/login", {"handle": "member_a", "password": "wrong " * 3, "totp": "1"}
         )
         assert status == 429 and answer["message"].startswith("Too many wrong attempts. Try again")
+
+    scenario(tmp_path, body)
+
+
+def test_a_stranger_cannot_lock_a_member_out_of_their_phone_nor_learn_the_name(tmp_path):
+    """Review M2, the probe P3 the other way round: a member's name and a name nobody has get the
+    same answers, 429 on the fifth alike; and the member's own phone, signed out, still signs in
+    with the right password and code while the name is locked for every other phone."""
+
+    async def body(world: World):
+        _, secret, phone = await world.member()
+        assert contract.PHONE_COOKIE in phone.jar
+        stranger = Phone(world.port, agent="Mozilla/5.0 (Android 14) Firefox/133.0")
+        await stranger.call("GET", "/me")
+        seen, ghost = [], []
+        for _ in range(6):
+            wrong = {"password": "wrong wrong wrong", "totp": "000000"}
+            seen.append(await stranger.call("POST", "/login", {"handle": "member_a", **wrong}))
+            ghost.append(await stranger.call("POST", "/login", {"handle": "nobody_x", **wrong}))
+        assert [status for status, _ in seen] == [401] * 4 + [429] * 2
+        assert seen == ghost  # the same status and the same sentence, the time included
+        await phone.call("POST", "/logout", {})
+        assert contract.COOKIE not in phone.jar and contract.PHONE_COOKIE in phone.jar
+        world.clock.at += 30_000
+        right = {"handle": "member_a", "password": PASSWORD, "totp": world.code(secret)}
+        new = Phone(world.port)
+        await new.call("GET", "/me")
+        assert (await new.call("POST", "/login", right))[0] == 429  # a phone never used: held
+        status, answer = await phone.call("POST", "/login", right)
+        assert status == 200 and answer["data"]["member"]["handle"] == "member_a"
 
     scenario(tmp_path, body)
 

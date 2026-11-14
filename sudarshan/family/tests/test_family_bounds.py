@@ -72,18 +72,19 @@ def store(tmp_path):
     accounts.stop_hasher()
 
 
-async def burst(acc: Accounts, count: int, handle: str = "nobody_here") -> list[object]:
-    """``count`` sign-ins released together; each one's outcome or refusal."""
+async def burst(acc: Accounts, count: int) -> list[object]:
+    """``count`` sign-ins of names nobody has, one name each (so that no name's own count locks,
+    review M2), released together; each one's outcome or refusal."""
     barrier = asyncio.Barrier(count)
 
-    async def one():
+    async def one(n: int):
         await barrier.wait()
         try:
-            return await acc.login(handle, PASSWORD, "000000", PHONE)
+            return await acc.login(f"nobody_{n:02d}", PASSWORD, "000000", PHONE)
         except FamilyError as exc:
             return exc
 
-    return await asyncio.gather(*(one() for _ in range(count)))
+    return await asyncio.gather(*(one(n) for n in range(count)))
 
 
 def codes(found: list[object]) -> list[str]:
@@ -187,11 +188,14 @@ def test_thirty_unknown_names_cost_at_most_the_slots_and_a_late_sign_in_is_answe
             port = service.listener.port
             hasher.runs = 0  # the dummy hash made at start is not a sign-in
             barrier = asyncio.Barrier(30)
-            body = {"handle": "nobody", "password": "x" * 12, "totp": "000000"}
-            tasks = [asyncio.create_task(post(port, body, barrier)) for _ in range(30)]
+
+            def body(n: int) -> dict:  # one name each: no name's own count locks (review M2)
+                return {"handle": f"nobody_{n:02d}", "password": "x" * 12, "totp": "000000"}
+
+            tasks = [asyncio.create_task(post(port, body(n), barrier)) for n in range(30)]
             await asyncio.sleep(0.05)
             began = time.monotonic()
-            late = await post(port, body)
+            late = await post(port, body(99))
             late_took = time.monotonic() - began
             statuses = await asyncio.gather(*tasks)
             return statuses, late, late_took

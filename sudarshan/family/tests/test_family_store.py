@@ -25,7 +25,7 @@ from sudarshan.tests.fdwatch import FdWatch
 
 TABLES = {
     "member", "credential", "invite", "viewer_session", "push_subscription", "telegram_link",
-    "share", "symbol_map", "outbox", "audit", "job_run",
+    "share", "symbol_map", "outbox", "audit", "job_run", "signin_lock",
 }  # fmt: skip
 
 
@@ -53,7 +53,7 @@ def status_of(path: Path, *extra: str) -> tuple[int, str]:
 
 
 # ---- migrations (design 4.3) -------------------------------------------------------------------
-def test_a_new_file_gets_every_table_at_version_1_in_wal(opened):
+def test_a_new_file_gets_every_table_at_the_latest_version_in_wal(opened):
     def look(tx):
         triggers = {
             r[0]
@@ -65,9 +65,9 @@ def test_a_new_file_gets_every_table_at_version_1_in_wal(opened):
         return set(tables_of(tx.conn)), tx.user_version(), triggers, mode
 
     tables, version, triggers, mode = opened.read_now(look)
-    assert tables == TABLES and version == migrations.LATEST == 1
+    assert tables == TABLES and version == migrations.LATEST == 2
     assert triggers == {"audit_no_update", "audit_no_delete"}
-    assert mode == "wal" and opened.applied == [1]
+    assert mode == "wal" and opened.applied == [1, 2]
 
 
 def test_opening_again_runs_no_step(folder, opened):
@@ -86,11 +86,39 @@ def test_a_populated_copy_forced_back_to_the_old_version_keeps_every_row(folder,
     set_version(folder / "family.db", 0)  # what the file of the release before V1 would say
     again = FamilyStore(folder / "family.db", secrets())
     try:
-        assert again.applied == [1]
+        assert again.applied == [1, 2]
         rows = again.read_now(lambda tx: (tx.count("member"), tx.count("audit"), tx.user_version()))
-        assert rows == (1, 1, 1)
+        assert rows == (1, 1, 2)
     finally:
         close(again)
+
+
+def test_a_populated_v1_file_gets_step_2_and_keeps_every_row(folder, opened):
+    """Review M2's counts table on a file the release before wrote: V1 forced back, rows in it."""
+    member = add_member(opened)
+    opened.write_now(lambda tx: audit.record(tx, at=5, actor="owner", kind="member_created",
+                                             member_id=member["id"]))  # fmt: skip
+    close(opened)
+    path = folder / "family.db"
+    con = raw(path)
+    try:
+        con.execute("DROP TABLE signin_lock")
+        con.execute("PRAGMA user_version = 1")
+    finally:
+        con.close()
+    again = FamilyStore(path, secrets())
+    try:
+        assert again.applied == [2]
+        found = again.read_now(lambda tx: (tx.count("member"), tx.count("audit"),
+                                           tx.count("signin_lock"), tx.user_version()))  # fmt: skip
+        assert found == (1, 1, 0, 2)
+    finally:
+        close(again)
+    twice = FamilyStore(path, secrets())
+    try:
+        assert twice.applied == []  # idempotent: nothing runs again
+    finally:
+        close(twice)
 
 
 def test_a_newer_file_is_refused_in_the_owners_words_and_left_as_it_was(folder, opened):
@@ -107,16 +135,16 @@ def test_a_newer_file_is_refused_in_the_owners_words_and_left_as_it_was(folder, 
     )
     assert caught.value.code == "store_newer" and (caught.value.found, caught.value.known) == (
         99,
-        1,
+        2,
     )
     assert digest(path) == before
     code, said = status_of(path, "--status")
-    assert code == 2 and "version: file 99, code 1" in said and "newer release" in said
+    assert code == 2 and "version: file 99, code 2" in said and "newer release" in said
 
 
 def test_status_with_no_file_makes_none(folder):
     code, said = status_of(folder / "family.db", "--status")
-    assert code == 0 and "version: file none, code 1" in said and "pending: [1]" in said
+    assert code == 0 and "version: file none, code 2" in said and "pending: [1, 2]" in said
     assert not folder.exists()
 
 
@@ -126,7 +154,7 @@ def test_status_opens_read_only_and_changes_nothing(folder, opened):
     path = folder / "family.db"
     before = (sorted(p.name for p in folder.iterdir()), digest(path))
     code, said = status_of(path, "--status")
-    assert code == 0 and "version: file 1, code 1" in said and "pending: none" in said
+    assert code == 0 and "version: file 2, code 2" in said and "pending: none" in said
     assert (sorted(p.name for p in folder.iterdir()), digest(path)) == before
 
 
@@ -160,7 +188,7 @@ def test_migrate_applies_when_the_service_is_down(folder):
         port = free.getsockname()[1]
     code, said = status_of(folder / "family.db", "--port", str(port))
     close(None)
-    assert code == 0 and "applied: [1]" in said
+    assert code == 0 and "applied: [1, 2]" in said
 
 
 # ---- the audit is append-only (M2.12; mutation target 22) ----------------------------------------

@@ -218,7 +218,7 @@ def test_a_code_signs_in_once(rig):
     rig.clock.step(5_000)  # still the same step
     refused = rig.refused(rig.acc.login("member_a", PASSWORD, code, PHONE))
     assert refused.code == "signin_failed"
-    assert rig.rows("credential")[0]["failed_count"] == 1
+    assert [r["failures"] for r in rig.rows("signin_lock")] == [1]
 
 
 # ---- lockout (mutation target 6) ---------------------------------------------------------------------
@@ -227,24 +227,24 @@ def test_lockout_vectors(failures, seconds):
     assert lockout.lock_seconds(failures) == seconds
 
 
-@pytest.mark.parametrize(("failures", "level"), VECTORS["levels"])
-def test_lockout_levels(failures, level):
-    assert lockout.level(failures) == level
-
-
-def test_lockout_15_minutes_then_1_hour_then_24_hours(rig):
+def test_the_back_off_starts_at_one_minute_and_stays_under_fifteen(rig):
+    """Review M2: a lock grows from 1 minute by doubling and never passes 15 minutes, so nobody
+    can keep a name locked for hours with a handful of tries a day."""
     _, secret, _ = rig.joined()
 
     def wrong() -> FamilyError:
         rig.clock.step(1_000)
         return rig.refused(rig.acc.login("member_a", "a wrong passphrase!", "000000", PHONE))
 
+    def lock() -> dict:
+        return rig.rows("signin_lock")[0]
+
     for _ in range(4):
         assert wrong().code == "signin_failed"
     fifth = wrong()
     assert fifth.code == "locked" and fifth.status == 429
-    until = rig.rows("credential")[0]["locked_until"]
-    assert until == rig.clock.at + 15 * MIN
+    until = lock()["locked_until"]
+    assert until == rig.clock.at + MIN
     when = accounts.clock_words(until, rig.clock.at)
     assert str(fifth) == f"Too many wrong attempts. Try again at {when}."
     kind, _member, facts = rig.notices[-1]
@@ -252,30 +252,28 @@ def test_lockout_15_minutes_then_1_hour_then_24_hours(rig):
     assert facts["device"] == PHONE.label
     checked = len(rig.hasher.checked)
     assert wrong().code == "locked"  # during the lock: refused at once, not counted, not verified
-    assert len(rig.hasher.checked) == checked and rig.rows("credential")[0]["failed_count"] == 5
-    rig.clock.at = until
-    for _ in range(4):
-        assert wrong().code == "signin_failed"
-    assert wrong().code == "locked"
-    assert rig.rows("credential")[0]["locked_until"] == rig.clock.at + 60 * MIN
-    rig.clock.at = rig.rows("credential")[0]["locked_until"]
-    for _ in range(4):
-        assert wrong().code == "signin_failed"
-    assert wrong().code == "locked"
-    assert rig.rows("credential")[0]["locked_until"] == rig.clock.at + DAY
-    assert rig.rows("credential")[0]["lock_level"] == 3
+    assert len(rig.hasher.checked) == checked and lock()["failures"] == 5
+    for minutes in (2, 4, 8, 15, 15, 15):  # each failure after a lock locks again, twice as long
+        rig.clock.at = lock()["locked_until"]
+        assert wrong().code == "locked"
+        assert lock()["locked_until"] == rig.clock.at + minutes * MIN
     kinds = [r["kind"] for r in rig.rows("audit")]
-    assert kinds.count("lockout") == 3 and kinds.count("login_failed") == 15
-    rig.clock.at = rig.rows("credential")[0]["locked_until"]
+    assert kinds.count("lockout") == 1 and kinds.count("login_failed") == 11
+    assert [k for k, _m, _f in rig.notices].count("lockout") == 1  # told once a run, not each lock
+    rig.clock.at = lock()["locked_until"]
     assert rig.login(secret=secret).session_id  # a good sign-in clears the count
-    assert rig.rows("credential")[0]["failed_count"] == 0
+    assert rig.rows("signin_lock") == []
 
 
 def test_a_wrong_code_with_the_right_password_counts_and_says_the_same(rig):
     _, secret, _ = rig.joined()
     refused = rig.refused(rig.acc.login("member_a", PASSWORD, "000000", PHONE))
     assert str(refused) == "That sign-in name, password or code did not match."
-    assert rig.rows("audit", kind="login_failed")[0]["detail"] == {"part": "code", "failures": 1}
+    assert rig.rows("audit", kind="login_failed")[0]["detail"] == {
+        "part": "code",
+        "failures": 1,
+        "known_phone": False,
+    }
 
 
 # ---- invites (M2.9) -----------------------------------------------------------------------------------
@@ -428,7 +426,7 @@ def test_a_password_change_signs_out_the_other_devices(rig):
     wrong = rig.refused(rig.acc.change_password(first.session, "not it at all!", "another long one",
                                                 rig.code(secret)))  # fmt: skip
     assert (wrong.code, wrong.field) == ("invalid", "current")
-    assert rig.rows("credential")[0]["failed_count"] == 1
+    assert [r["failures"] for r in rig.rows("signin_lock")] == [1]  # this session's count
     rig.clock.step()
     rig.run(rig.acc.change_password(first.session, PASSWORD, "another long one", rig.code(secret)))
     assert rig.revoked[-1:] == [second.session.id_hash]

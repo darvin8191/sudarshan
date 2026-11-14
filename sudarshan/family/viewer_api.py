@@ -18,6 +18,10 @@ they answer "not ready" to a signed-in member).
   current browser; this is the cheap second lock.
 * **Words**: every answer is a sentence for a person (``words.py``), and a wrong sign-in name, a
   wrong password and a wrong code get the same one.
+* **The phone cookie** ``__Host-sudarshan_family_phone`` (HttpOnly, 90 days, the session cookie's
+  other attributes) is set after a right sign-in, a join and a password change, and kept through a
+  sign-out: it is how the member's own phone still signs in while strangers have locked the name
+  (``lockout.py``). Sign-ins are also counted by the network area of the address nginx gives.
 
 The WebSocket's handshake is checked here too (``authorize``): the same cookie, the same session
 check, the same rule for Origin.
@@ -31,14 +35,24 @@ import secrets
 from typing import Any
 from urllib.parse import urlsplit
 
-from . import sessions, words
+from . import lockout, sessions, words
 from .accounts import Accounts, Outcome, device_from
-from .contract import COOKIE, CSRF_COOKIE, CSRF_HEADER, LIMITS, VIEWER_PREFIX, viewer_op
+from .contract import (
+    COOKIE,
+    CSRF_COOKIE,
+    CSRF_HEADER,
+    LIMITS,
+    PHONE_COOKIE,
+    PHONE_DAYS,
+    VIEWER_PREFIX,
+    viewer_op,
+)
 from .errors import FamilyError
 from .listener import Request, Response
 from .store import Secrets
 
 MAX_AGE_S = LIMITS["session_days"] * 86_400
+PHONE_AGE_S = PHONE_DAYS * 86_400
 CSRF_BYTES = 32
 _ATTRS = "Path=/; Secure; SameSite=Strict"
 
@@ -53,6 +67,10 @@ def cleared_cookie() -> tuple[str, str]:
 
 def csrf_cookie(token: str) -> tuple[str, str]:
     return ("Set-Cookie", f"{CSRF_COOKIE}={token}; Max-Age={MAX_AGE_S}; {_ATTRS}")
+
+
+def phone_cookie(value: str) -> tuple[str, str]:
+    return ("Set-Cookie", f"{PHONE_COOKIE}={value}; Max-Age={PHONE_AGE_S}; {_ATTRS}; HttpOnly")
 
 
 def cookies_of(request: Request) -> dict[str, str]:
@@ -103,8 +121,12 @@ class ViewerApi:
     # ---- what a request carries ----
     def _device(self, request: Request) -> sessions.Device:
         address = request.headers.get("x-real-ip") or (request.peer or ("",))[0]
-        place = self.keys.place(address) if self.keys is not None and address else None
-        return device_from(request.headers.get("user-agent"), place)
+        place = area = None
+        if self.keys is not None and address:
+            place = self.keys.place(address)
+            area = self.keys.keyed("area", lockout.area_of(address))
+        return device_from(request.headers.get("user-agent"), place, area=area,
+                           phone=cookies_of(request).get(PHONE_COOKIE))  # fmt: skip
 
     @staticmethod
     def _same_origin(request: Request) -> bool:
@@ -172,10 +194,10 @@ class ViewerApi:
     # ---- sign-in ----
     @staticmethod
     def _signed_in(outcome: Outcome) -> Response:
-        return Response.ok(
-            me_of(outcome.session),  # type: ignore[arg-type]
-            [session_cookie(outcome.session_id or ""), csrf_cookie(new_csrf())],
-        )
+        cookies = [session_cookie(outcome.session_id or ""), csrf_cookie(new_csrf())]
+        if outcome.phone:
+            cookies.append(phone_cookie(outcome.phone))
+        return Response.ok(me_of(outcome.session), cookies)  # type: ignore[arg-type]
 
     async def _join_info(self, request: Request, args: dict, session: Any) -> Response:
         return Response.ok(await self.accounts.join_info(args.get("code")))
@@ -205,9 +227,12 @@ class ViewerApi:
         return Response.ok(done("signed_out_everywhere"), [cleared_cookie()])
 
     async def _password(self, request: Request, args: dict, session: sessions.Session) -> Response:
-        await self.accounts.change_password(session, args.get("current"), args.get("password"),
-                                            args.get("totp"))  # fmt: skip
-        return Response.ok(done("password_changed"))
+        outcome = await self.accounts.change_password(
+            session, args.get("current"), args.get("password"), args.get("totp"),
+            self._device(request),
+        )  # fmt: skip
+        return Response.ok(done("password_changed"),
+                           [phone_cookie(outcome.phone)] if outcome.phone else [])  # fmt: skip
 
     async def _devices(self, request: Request, args: dict, session: sessions.Session) -> Response:
         return Response.ok(await self.accounts.devices(session))
