@@ -113,6 +113,23 @@ def _name(instrument: Any) -> str:
     return str(instrument or "")
 
 
+def _named(row: Mapping[str, Any], key: str) -> str:
+    """What was sold, by its name with the ISIN beside it where the pack gives a name."""
+    isin, name = _name(row.get(key)), str(row.get("name") or "").strip()
+    return f"{name} ({isin})" if name and name != isin else isin
+
+
+def _names(rows: Sequence[Mapping[str, Any]]) -> tuple[D.Block, ...]:
+    """The name of each ISIN in the sale tables, one a line, under them: a table cell is one
+    line and is cut where it does not fit, and a paragraph is not."""
+    found: dict[str, str] = {}
+    for row in rows:
+        isin, name = str(row.get("isin") or ""), str(row.get("name") or "").strip()
+        if isin and name and name != isin:
+            found.setdefault(isin, name)
+    return _lines([f"{isin}: {name}" for isin, name in sorted(found.items())])
+
+
 def _amounts(rows: Sequence[tuple[str, D.Cell]]) -> D.Table:
     return D.Table((D.Column("", 4.2), D.Column("Amount", 2.0, "r")), tuple(rows))
 
@@ -200,16 +217,18 @@ def capital_blocks(cg: Mapping[str, Any]) -> tuple[D.Block, ...]:
                 empty="No sale of shares or equity fund units in this financial year."),
         *_lines([FMV_MARK] if any(g.get("fmv_used") for g in cg["schedule"]) else ()),
     ]  # fmt: skip
-    aside = [
-        _sale_row(g, STATUS_WORDS.get(g.get("status"), str(g.get("status"))))
-        for key in ("needs_fmv", "unknown_cost", "exempt_buybacks")
-        for g in cg.get(key) or ()
+    left = [
+        g for key in ("needs_fmv", "unknown_cost", "exempt_buybacks") for g in cg.get(key) or ()
     ]
+    aside = [_sale_row(g, STATUS_WORDS.get(g.get("status"), str(g.get("status")))) for g in left]
     if aside:
         out += [
             D.Heading("Sales listed and in no total"),
             D.Table((*SALE_COLUMNS, D.Column("Why", 4.0)), tuple(aside)),
         ]
+    names = _names([*cg["schedule"], *left])
+    if names:
+        out += [D.Heading("Names of the shares and funds sold"), *names]
     return tuple(out)
 
 
@@ -339,9 +358,9 @@ def pack_blocks(pack: Mapping[str, Any]) -> tuple[D.Block, ...]:
     ]  # fmt: skip
     if outside:
         out.append(D.Table(
-            (D.Column("Sold, outside this paper", 3.4), D.Column("Day", 1.4),
-             D.Column("Amount", 1.8, "r")),
-            tuple((_name(r.get("instrument")),
+            (D.Column("Sold, outside this paper", 4.6), D.Column("Day", 1.2),
+             D.Column("Amount", 1.4, "r")),
+            tuple((_named(r, "instrument"),
                    day_text(r["day"]) if r.get("day") else "-", rs(r.get("amount_paise")))
                   for r in outside if isinstance(r, Mapping)),
         ))  # fmt: skip

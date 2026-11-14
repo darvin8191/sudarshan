@@ -11,6 +11,7 @@ server is named here, and nothing outside the server is called.
 from __future__ import annotations
 
 import fcntl
+import ipaddress
 import json
 import os
 import socket
@@ -19,6 +20,7 @@ import urllib.request
 from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from sudarshan.ops.files import read_regular
 
@@ -36,9 +38,13 @@ CPU_STAT = Path("/proc/stat")
 #: The deploy tool holds this for the whole of an install (sudarshan/ops/deploy/sudarshan-deploy).
 DEPLOY_LOCK = Path("/var/lib/sudarshan/deploy.lock")
 CERT_ADDRESS = ("127.0.0.1", 443)
-#: Optional, in /etc/sudarshan/watch.env: the app's name, for a server whose nginx serves more
-#: than one site, so the certificate read is SUDARSHAN's and never another site's.
+#: In /etc/sudarshan/watch.env: the app's own address, when OpenAlgo's HOST_SERVER does not name
+#: it. nginx may serve more than one site on this server, so the certificate is asked for by
+#: SUDARSHAN's own name and checked to be that name's; another site's is never judged.
 CERT_HOST_ENV = "SUDARSHAN_WATCH_CERT_HOST"
+#: What the certificate reading says in place of hours when it did not judge one: no name for
+#: SUDARSHAN's site is known, or the certificate nginx gave is another site's.
+CERT_NO_NAME, CERT_OTHER_SITE = "no_name", "other_site"
 #: Loopback only, whatever proxy the environment names.
 _OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
@@ -139,26 +145,95 @@ def cpu(path: Path = CPU_STAT) -> list[int] | None:
     return None
 
 
-def cert_hours_left(
-    now: float, address=CERT_ADDRESS, timeout: float = TIMEOUT_S, name: str | None = None
-) -> float | None:
-    """Hours until the certificate served at ``address`` runs out. It is read, not judged: an
-    address-only certificate is as good as a named one here. ``name`` (else ``CERT_HOST_ENV``)
-    asks nginx for that site's certificate; without one it is the certificate nginx serves first."""
+def site_name(env_file: Path | None, environ: Mapping[str, str] | None = None) -> str | None:
+    """SUDARSHAN's own address, to ask nginx for its certificate by: ``CERT_HOST_ENV`` from the
+    watch's settings, else the host of ``HOST_SERVER`` in OpenAlgo's .env (the address the owner
+    opens the app at). None when neither names one; this server's own loopback is no name."""
+    environ = os.environ if environ is None else environ
+    named = (environ.get(CERT_HOST_ENV) or "").strip()
+    if not named and env_file is not None:
+        from sudarshan.alerts.config import read_openalgo_env
+
+        try:
+            named = read_openalgo_env(env_file).get("HOST_SERVER") or ""
+        except Exception:
+            named = ""
+    if "//" in named:
+        try:
+            named = urlsplit(named).hostname or ""
+        except ValueError:
+            named = ""
+    named = named.strip().strip("[].").lower()
+    if not named or named == "localhost" or any(c.isspace() or c == "/" for c in named):
+        return None
+    address = _address(named)
+    if address is not None and (address.is_loopback or address.is_unspecified):
+        return None
+    return named
+
+
+def _address(name: str):
+    try:
+        return ipaddress.ip_address(name)
+    except ValueError:
+        return None
+
+
+def _covers(certificate, name: str) -> bool:
+    """Whether a certificate is issued for ``name`` (a DNS name, one leading ``*`` label allowed,
+    or an address). It is not otherwise verified: this only tells whose certificate was given."""
     from cryptography import x509
 
-    name = name or os.environ.get(CERT_HOST_ENV, "").strip() or None
+    try:
+        names = certificate.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
+    except x509.ExtensionNotFound:
+        common = certificate.subject.get_attributes_for_oid(x509.NameOID.COMMON_NAME)
+        return any(str(part.value).lower() == name for part in common)
+    address = _address(name)
+    if address is not None:
+        return address in names.get_values_for_type(x509.IPAddress)
+    for pattern in names.get_values_for_type(x509.DNSName):
+        pattern = pattern.lower().rstrip(".")
+        if pattern == name or (pattern.startswith("*.") and name.split(".", 1)[-1] == pattern[2:]):
+            return True
+    return False
 
+
+def cert_hours_left(
+    now: float,
+    address=CERT_ADDRESS,
+    timeout: float = TIMEOUT_S,
+    name: str | None = None,
+    env_file: Path | None = None,
+) -> float | str | None:
+    """Hours until SUDARSHAN's own certificate, as nginx serves it at ``address``, runs out.
+
+    nginx is asked by ``name`` (else ``site_name``), and the certificate it gives must be that
+    name's own. With no name known the answer is ``CERT_NO_NAME`` and nothing is asked: on a
+    server with more than one site the certificate nginx offers first may be another site's.
+    When the one given is not SUDARSHAN's (nginx has no site of that name on this address), the
+    answer is ``CERT_OTHER_SITE``. An address for a name cannot be sent with the request, so
+    nginx gives its first certificate, and it is judged only when it is issued for that address.
+    None when the certificate could not be read. Its issuer and dates are read, never judged."""
+    from cryptography import x509
+
+    name = (name or "").strip().lower() or site_name(env_file)
+    if name is None:
+        return CERT_NO_NAME
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     context.check_hostname = False
     context.verify_mode = ssl.CERT_NONE
+    asked = None if _address(name) is not None else name
     try:
         with (
             socket.create_connection(address, timeout=timeout) as plain,
-            context.wrap_socket(plain, server_hostname=name) as secure,
+            context.wrap_socket(plain, server_hostname=asked) as secure,
         ):
             der = secure.getpeercert(binary_form=True)
-        ends = x509.load_der_x509_certificate(der).not_valid_after_utc
+        certificate = x509.load_der_x509_certificate(der)
+        if not _covers(certificate, name):
+            return CERT_OTHER_SITE
+        ends = certificate.not_valid_after_utc
     except (OSError, ValueError, TypeError):
         return None
     return (ends.timestamp() - now) / 3600.0
@@ -244,7 +319,7 @@ def gather(
         "mem_available_mb": _or_none(mem_available_mb),
         "mem_total_mb": _or_none(mem_total_mb),
         "cpu": _or_none(cpu),
-        "cert_hours_left": _or_none(cert_hours_left, now),
+        "cert_hours_left": _or_none(lambda: cert_hours_left(now, env_file=env_file)),
         "posture": _or_none(posture.read, now, app_dir, env_file, known_posture),
         "counts": _or_none(posture.counts, app_dir, env_file),
         "backup": _or_none(posture.backup, now),

@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import NamedTuple
 
-RULES_VERSION = "2026.11.14-1"
+RULES_VERSION = "2026.11.15-1"
 CHECKED = 20261114
 RUPEE = 100
 LAKH = 100_000 * RUPEE

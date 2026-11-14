@@ -75,7 +75,13 @@ def build_pack(given: PackInputs) -> dict:
         r.buy_paise + r.sell_paise for r in book.intraday if fy_of(r.close_day) == fy
     )
     traded = sum(t.amount_paise for t in in_year if t.segment == "EQ" and t.kind_hint != "buyback")
-    values = (intraday_value, traded - intraday_value)
+    # Upstox's total covers every cash-segment trade, the ones not computed here included.
+    other = sum(
+        t.amount_paise
+        for t in in_year
+        if t.segment == "EQ" and t.kind_hint != "buyback" and head_of(t) == NOT_COMPUTED
+    )
+    values = (intraday_value, traded - intraday_value - other, other)
     total, stt = (
         business.split_share_charges((share or {}).get(key) or 0, *values)
         for key in ("total_paise", "stt_paise")
@@ -86,6 +92,8 @@ def build_pack(given: PackInputs) -> dict:
         notes.append(words.EXPENSES_ALLOCATED)
     elif share is not None:
         notes.append(words.EXPENSES_LEFT_OUT)
+    if share is not None and other:
+        notes.append(words.CHARGES_OF_OTHERS)
     gains = [
         capgains.gain_of(
             d, given.fmv, given.settings, expenses[n] if expenses and not d.kind_hint else None

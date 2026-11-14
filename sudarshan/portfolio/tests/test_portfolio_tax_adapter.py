@@ -178,6 +178,50 @@ def test_the_core_works_the_year_out_from_them(made):
     assert pack["inputs"]["missing"] and pack["running"] is True
 
 
+#: Units that trade in Upstox's EQ segment and are no company's equity share.
+GOLD_ETF, LIQUID_ETF, REIT, GOLD_BOND = (
+    "INF204KB17I5",
+    "INF732E01037",
+    "INE041025011",
+    "IN0020200013",
+)
+
+
+@pytest.mark.parametrize("isin", [GOLD_ETF, LIQUID_ETF, REIT, GOLD_BOND])
+def test_an_etf_a_reit_or_a_gold_bond_in_upstoxs_share_history_is_listed_and_not_computed(
+    made, monkeypatch, isin
+):
+    """Upstox's history gives such a sale as an EQ row with no class. Bought in January 2024 (its
+    pair says so) and sold above cost, it would be a long-term share gain with the yearly
+    exemption; it is listed under "not computed" with its value and changes no figure."""
+    cache(made)
+    before = build_pack(gathered(made))
+    sale = {**EQ_SALE, "isin": isin, "trade_id": "50020", "scrip_name": "A UNIT", "symbol": "UNIT",
+            "quantity": 1000, "price": 600.0, "amount": 600000.0}  # fmt: skip
+    pair = {**PAIRS["EQ"][0], "isin": isin, "scrip_name": "A UNIT", "quantity": 1000,
+            "buy_average": 100.0, "buy_amount": 100000.0, "sell_average": 600.0,
+            "sell_amount": 600000.0}  # fmt: skip
+    monkeypatch.setitem(TRADES, "EQ", [EQ_SALE, sale])
+    monkeypatch.setitem(PAIRS, "EQ", [PAIRS["EQ"][0], pair])
+    cache(made)
+    given = gathered(made)
+    assert [lot.instrument for lot in given.opening] == [ISIN]  # the unit's pair opens no lot
+    pack = build_pack(given)
+    assert pack["not_computed_sales"] == [
+        {"instrument": isin, "day": 20261027, "amount_paise": 60_000_000}
+    ]
+    assert (
+        "1 sale of assets outside this working paper (sale value Rs 6,00,000)"
+        in (pack["not_computed"][0])
+    )
+    gains, was = pack["capital_gains"], before["capital_gains"]
+    assert len(gains["schedule"]) == 1 and gains["schedule"][0]["isin"] == ISIN
+    # the share's sale takes its own part of the year's charges (1,400 x 26,000 / 6,26,000)
+    assert (was["lt_gain_paise"], gains["lt_gain_paise"]) == (600_000 - 1_400, 600_000 - 58)
+    assert gains["exemption"]["used_paise"] == 600_000 - 58  # the share's gain, never the unit's
+    assert gains["unknown_cost"] == [] and gains["needs_fmv"] == []
+
+
 def test_who_counts_by_what(made):
     """The Upstox account counts by its reports (a ledger entry on it is left out, so nothing
     counts twice), another account by its ledger, one set to none not at all; and a taxpayer is
