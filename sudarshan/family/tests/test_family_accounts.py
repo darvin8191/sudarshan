@@ -218,7 +218,7 @@ def test_a_code_signs_in_once(rig):
     rig.clock.step(5_000)  # still the same step
     refused = rig.refused(rig.acc.login("member_a", PASSWORD, code, PHONE))
     assert refused.code == "signin_failed"
-    assert rig.rows("credential")[0]["failed_count"] == 1
+    assert [r["failures"] for r in rig.rows("signin_lock")] == [1]
 
 
 # ---- lockout (mutation target 6) ---------------------------------------------------------------------
@@ -227,24 +227,24 @@ def test_lockout_vectors(failures, seconds):
     assert lockout.lock_seconds(failures) == seconds
 
 
-@pytest.mark.parametrize(("failures", "level"), VECTORS["levels"])
-def test_lockout_levels(failures, level):
-    assert lockout.level(failures) == level
-
-
-def test_lockout_15_minutes_then_1_hour_then_24_hours(rig):
+def test_the_back_off_starts_at_one_minute_and_stays_under_fifteen(rig):
+    """Review M2: a lock grows from 1 minute by doubling and never passes 15 minutes, so nobody
+    can keep a name locked for hours with a handful of tries a day."""
     _, secret, _ = rig.joined()
 
     def wrong() -> FamilyError:
         rig.clock.step(1_000)
         return rig.refused(rig.acc.login("member_a", "a wrong passphrase!", "000000", PHONE))
 
+    def lock() -> dict:
+        return rig.rows("signin_lock")[0]
+
     for _ in range(4):
         assert wrong().code == "signin_failed"
     fifth = wrong()
     assert fifth.code == "locked" and fifth.status == 429
-    until = rig.rows("credential")[0]["locked_until"]
-    assert until == rig.clock.at + 15 * MIN
+    until = lock()["locked_until"]
+    assert until == rig.clock.at + MIN
     when = accounts.clock_words(until, rig.clock.at)
     assert str(fifth) == f"Too many wrong attempts. Try again at {when}."
     kind, _member, facts = rig.notices[-1]
@@ -252,30 +252,28 @@ def test_lockout_15_minutes_then_1_hour_then_24_hours(rig):
     assert facts["device"] == PHONE.label
     checked = len(rig.hasher.checked)
     assert wrong().code == "locked"  # during the lock: refused at once, not counted, not verified
-    assert len(rig.hasher.checked) == checked and rig.rows("credential")[0]["failed_count"] == 5
-    rig.clock.at = until
-    for _ in range(4):
-        assert wrong().code == "signin_failed"
-    assert wrong().code == "locked"
-    assert rig.rows("credential")[0]["locked_until"] == rig.clock.at + 60 * MIN
-    rig.clock.at = rig.rows("credential")[0]["locked_until"]
-    for _ in range(4):
-        assert wrong().code == "signin_failed"
-    assert wrong().code == "locked"
-    assert rig.rows("credential")[0]["locked_until"] == rig.clock.at + DAY
-    assert rig.rows("credential")[0]["lock_level"] == 3
+    assert len(rig.hasher.checked) == checked and lock()["failures"] == 5
+    for minutes in (2, 4, 8, 15, 15, 15):  # each failure after a lock locks again, twice as long
+        rig.clock.at = lock()["locked_until"]
+        assert wrong().code == "locked"
+        assert lock()["locked_until"] == rig.clock.at + minutes * MIN
     kinds = [r["kind"] for r in rig.rows("audit")]
-    assert kinds.count("lockout") == 3 and kinds.count("login_failed") == 15
-    rig.clock.at = rig.rows("credential")[0]["locked_until"]
+    assert kinds.count("lockout") == 1 and kinds.count("login_failed") == 11
+    assert [k for k, _m, _f in rig.notices].count("lockout") == 1  # told once a run, not each lock
+    rig.clock.at = lock()["locked_until"]
     assert rig.login(secret=secret).session_id  # a good sign-in clears the count
-    assert rig.rows("credential")[0]["failed_count"] == 0
+    assert rig.rows("signin_lock") == []
 
 
 def test_a_wrong_code_with_the_right_password_counts_and_says_the_same(rig):
     _, secret, _ = rig.joined()
     refused = rig.refused(rig.acc.login("member_a", PASSWORD, "000000", PHONE))
     assert str(refused) == "That sign-in name, password or code did not match."
-    assert rig.rows("audit", kind="login_failed")[0]["detail"] == {"part": "code", "failures": 1}
+    assert rig.rows("audit", kind="login_failed")[0]["detail"] == {
+        "part": "code",
+        "failures": 1,
+        "known_phone": False,
+    }
 
 
 # ---- invites (M2.9) -----------------------------------------------------------------------------------
@@ -334,6 +332,37 @@ def test_joining_checks_the_name_the_password_and_the_code(rig):
     assert ("invite_used", done.session.member["id"]) in [(k, m["id"]) for k, m, _ in rig.notices]
     kinds = [r["kind"] for r in rig.rows("audit", member_id=card["id"])]
     assert kinds[-2:] == ["invite_used", "login_ok"]
+
+
+def test_the_first_look_at_a_link_is_audited_and_the_owner_sees_when(rig):
+    """Review L8: opening the link hands out the code app's key, so the first look is stamped and
+    audited with the device, and the owner's card says when; one use and two hours stay."""
+    card = rig.run(rig.acc.member_create({"display_name": "Member A", "role": "viewer"}))
+    invite = rig.run(rig.acc.invite_create({"member_id": card["id"]}))
+    assert rig.run(rig.acc.member_list())[0]["invite_opened_at"] is None
+    rig.clock.step(60_000)
+    opened_at = rig.clock.at
+
+    async def two_looks():
+        return await asyncio.gather(rig.acc.join_info(invite["code"], PHONE),
+                                    rig.acc.join_info(invite["code"], OTHER_PHONE))  # fmt: skip
+
+    first, second = rig.run(two_looks())
+    assert first["totp_key"] == second["totp_key"]
+    rig.clock.step(60_000)
+    rig.run(rig.acc.join_info(invite["code"], OTHER_PHONE))
+    lines = rig.rows("audit", kind="invite_opened")
+    assert len(lines) == 1 and lines[0]["member_id"] == card["id"]
+    assert lines[0]["detail"]["device"] == PHONE.label and lines[0]["ip_hash"] == PHONE.place
+    shown = rig.run(rig.acc.member_list())[0]
+    assert shown["invite_opened_at"] == opened_at and shown["status"] == "invited"
+    again = rig.run(rig.acc.invite_create({"member_id": card["id"]}))  # a new link: not opened
+    assert rig.run(rig.acc.member_list())[0]["invite_opened_at"] is None
+    secret = rig.run(rig.acc.join_info(again["code"], PHONE))["totp_key"]
+    rig.run(rig.acc.join(again["code"], "member_a", PASSWORD, rig.code(secret), PHONE))
+    assert rig.run(rig.acc.member_list())[0]["invite_opened_at"] is None  # no open invite
+    rig.clock.at = again["expires_at"] + 1
+    assert rig.refused(rig.acc.join_info(again["code"])).code == "invite_gone"
 
 
 def test_an_invite_for_a_member_who_joined_is_refused(rig):
@@ -428,7 +457,7 @@ def test_a_password_change_signs_out_the_other_devices(rig):
     wrong = rig.refused(rig.acc.change_password(first.session, "not it at all!", "another long one",
                                                 rig.code(secret)))  # fmt: skip
     assert (wrong.code, wrong.field) == ("invalid", "current")
-    assert rig.rows("credential")[0]["failed_count"] == 1
+    assert [r["failures"] for r in rig.rows("signin_lock")] == [1]  # this session's count
     rig.clock.step()
     rig.run(rig.acc.change_password(first.session, PASSWORD, "another long one", rig.code(secret)))
     assert rig.revoked[-1:] == [second.session.id_hash]
@@ -461,6 +490,31 @@ def test_a_sign_in_from_a_new_phone_is_a_notice_and_a_known_one_is_not(rig):
     assert rig.notices == []
     rig.login(secret=secret, phone=OTHER_PHONE)
     assert [(k, f) for k, _m, f in rig.notices] == [("new_device", {"device": OTHER_PHONE.label})]
+
+
+def test_a_renamed_phone_is_not_new_and_the_same_browser_from_elsewhere_is(rig):
+    """Review L3 (probe P6): the notice compared the label a rename changes, so a renamed phone was
+    "new" at its next sign-in and a stranger with the same Android and Chrome was not. It compares
+    the browser's fixed summary now, and a network area never seen for the member is new too."""
+    home = accounts.device_from(VECTORS["devices"][0][0], "a" * 64, area="area-home")
+    card = rig.run(rig.acc.member_create({"display_name": "Member A", "role": "viewer"}))
+    invite = rig.run(rig.acc.invite_create({"member_id": card["id"]}))
+    secret = rig.run(rig.acc.join_info(invite["code"]))["totp_key"]
+    joined = rig.run(rig.acc.join(invite["code"], "member_a", PASSWORD, rig.code(secret), home))
+    rig.run(rig.acc.rename(joined.session, joined.session.device_id, "Kitchen tablet"))
+    rig.notices.clear()
+    rig.login(secret=secret, phone=home)
+    assert [k for k, _m, _f in rig.notices] == []  # renamed, the same phone where it always is
+    elsewhere = accounts.device_from(VECTORS["devices"][0][0], "z" * 64, area="area-elsewhere")
+    rig.login(secret=secret, phone=elsewhere)
+    assert [(k, f) for k, _m, f in rig.notices] == [("new_device", {"device": home.label})]
+    rig.notices.clear()
+    other = accounts.device_from(VECTORS["devices"][1][0], "a" * 64, area="area-home")
+    rig.login(secret=secret, phone=other)
+    assert [k for k, _m, _f in rig.notices] == ["new_device"]  # another browser at home
+    rig.notices.clear()
+    rig.login(secret=secret, phone=elsewhere)  # seen now: no second notice
+    assert rig.notices == []
 
 
 # ---- the owner's member ops ---------------------------------------------------------------------------
@@ -560,6 +614,51 @@ def test_a_sign_in_reset_revokes_everything_and_the_new_invite_works(rig):
                          PHONE))  # fmt: skip
     cards = rig.run(rig.acc.member_list())
     assert cards[0]["status"] == "active" and cards[0]["devices"] == 1
+
+
+def test_a_pause_holds_through_a_sign_in_reset_until_the_owner_resumes(rig):
+    """Review M4 (probe P5): suspend, reset, join: the member is not active. Only the owner's
+    resume clears the pause; the new password and code app work from then on."""
+    card, _, done = rig.joined()
+    paused = rig.run(rig.acc.member_status({"id": card["id"], "version": 2, "status": "suspended"}))
+    invite = rig.run(rig.acc.signin_reset({"member_id": card["id"], "version": paused["version"]}))
+    shown = rig.run(rig.acc.member_list())[0]
+    assert shown["status"] == "suspended" and shown["invite_expires_at"] == invite["expires_at"]
+    fresh = rig.run(rig.acc.join_info(invite["code"]))["totp_key"]
+    rig.clock.step()
+    told = rig.refused(rig.acc.join(invite["code"], "member_a", "a new long passphrase",
+                                    rig.code(fresh), PHONE))  # fmt: skip
+    assert (told.code, str(told)) == (
+        "signed_out",
+        "The account owner has paused this sign-in. Ask them to resume it.",
+    )
+    after = rig.run(rig.acc.member_list())[0]
+    assert after["status"] == "suspended" and after["devices"] == 0  # no session was made
+    assert rig.refused(rig.acc.join_info(invite["code"])).code == "invite_gone"  # used
+    assert ("invite_used", card["id"]) in [(k, m["id"]) for k, m, _ in rig.notices]
+    rig.clock.step()
+    still = rig.refused(rig.acc.login("member_a", "a new long passphrase", rig.code(fresh), PHONE))
+    assert "paused" in str(still)
+    rig.run(rig.acc.member_status({"id": card["id"], "version": after["version"],
+                                   "status": "active"}))  # fmt: skip
+    rig.clock.step()
+    assert rig.run(rig.acc.login("member_a", "a new long passphrase", rig.code(fresh), PHONE))
+    assert done.session_id not in json.dumps(rig.rows("viewer_session"))
+
+
+def test_a_resume_before_the_new_link_is_used_makes_the_member_invited(rig):
+    card, _, _ = rig.joined()
+    paused = rig.run(rig.acc.member_status({"id": card["id"], "version": 2, "status": "suspended"}))
+    invite = rig.run(rig.acc.signin_reset({"member_id": card["id"], "version": paused["version"]}))
+    version = rig.run(rig.acc.member_list())[0]["version"]
+    resumed = rig.run(rig.acc.member_status({"id": card["id"], "version": version,
+                                             "status": "active"}))  # fmt: skip
+    assert resumed["status"] == "invited"  # active always means a member who can sign in
+    fresh = rig.run(rig.acc.join_info(invite["code"]))["totp_key"]
+    rig.clock.step()
+    joined = rig.run(rig.acc.join(invite["code"], "member_a", "a new long passphrase",
+                                  rig.code(fresh), PHONE))  # fmt: skip
+    assert joined.session.member["status"] == "active"
 
 
 def test_the_owner_lists_and_signs_out_a_members_devices(rig):

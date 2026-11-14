@@ -21,7 +21,7 @@ from family_net import ask, fast_hasher, keys, running, sealed, settings
 from family_testkit import close, set_version
 from websockets.asyncio.client import connect
 
-from sudarshan.family import config, sessions
+from sudarshan.family import config, migrations, sessions
 from sudarshan.family.listener import Response
 from sudarshan.family.service import FamilyService
 from sudarshan.family.store import FamilyStore
@@ -245,6 +245,44 @@ def test_the_size_caps_are_judged_before_the_body_is_read(tmp_path):
     run(scenario())
 
 
+@pytest.mark.parametrize(
+    "head",
+    [
+        "POST /family/api/login HTTP/1.1\r\nHost: x\r\nContent-Length: \xb2\r\n\r\n",
+        "POST /family/api/login HTTP/1.1\r\nHost: x\r\nContent-Length: \xb9\xb3\r\n\r\n",
+        "POST /v1/nudge HTTP/1.1\r\nHost: x\r\nContent-Length: \xb3\r\n\r\n",
+        "GET //[x/ HTTP/1.1\r\nHost: x\r\n\r\n",
+        "GET http://[::1/family/api/me HTTP/1.1\r\nHost: x\r\n\r\n",
+    ],
+    ids=["superscript-two", "superscripts", "nudge-superscript", "open-ipv6-target", "open-host"],
+)
+def test_a_head_it_cannot_read_is_400_in_words_never_a_500(tmp_path, caplog, head):
+    """Review L2: "\\xb2".isdigit() is true and int() refuses it, and urlsplit raises on a target
+    such as //[x/; both reached the catch-all and answered 500 with a traceback in the log."""
+
+    async def scenario():
+        service = service_for(tmp_path)
+        service.viewer = FakeViewer()
+        async with running(service):
+            reader, writer = await asyncio.open_connection("127.0.0.1", service.listener.port)
+            writer.write(head.encode("latin-1"))
+            await writer.drain()
+            raw = await asyncio.wait_for(reader.read(), 15)
+            writer.close()
+            first, _, body = raw.partition(b"\r\n\r\n")
+            assert first.split(b"\r\n")[0] == b"HTTP/1.1 400 Bad Request"
+            assert json.loads(body) == {
+                "status": "error",
+                "code": "invalid",
+                "message": "That was not accepted. Check what you typed and try again.",
+            }
+            assert service.viewer.seen == []
+
+    with caplog.at_level(logging.INFO, logger="sudarshan.family"):
+        run(scenario())
+    assert not [r for r in caplog.records if r.exc_info or r.pathname.endswith("listener.py")]
+
+
 # ---- port, switch, store ------------------------------------------------------------------------------
 def test_a_taken_port_is_said_in_words_and_tried_again(tmp_path, caplog):
     import socket
@@ -318,7 +356,14 @@ def test_switched_off_every_viewer_request_is_told_and_nothing_is_opened(tmp_pat
     run(scenario())
 
 
+VIEWER_OFF = "The family view is not available right now. Ask the account owner."
+UPGRADE = {"Upgrade": "websocket", "Connection": "Upgrade",
+           "Sec-WebSocket-Key": "dGhlIHNhbXBsZSBub25jZQ==", "Sec-WebSocket-Version": "13"}  # fmt: skip
+
+
 def test_a_store_a_newer_release_wrote_keeps_the_view_off_in_the_owners_words(tmp_path):
+    """The owner reads why on his page and in /health; a family phone reads one sentence it can act
+    on, never "install that release again" (review L4)."""
     made = FamilyStore(tmp_path / "state" / "family.db")
     made.close()
     close(None)
@@ -329,8 +374,9 @@ def test_a_store_a_newer_release_wrote_keeps_the_view_off_in_the_owners_words(tm
         async with running(service):
             port = service.listener.port
             status, _, answer = await ask(port, "GET", "/family/api/me")
-            assert (status, answer["code"]) == (503, "store_newer")
-            assert "newer release" in answer["message"]
+            assert (status, answer["code"], answer["message"]) == (503, "off", VIEWER_OFF)
+            status, _, answer = await ask(port, "GET", "/family/ws", headers=UPGRADE)
+            assert (status, answer["message"]) == (503, VIEWER_OFF)
             off = await ask(
                 port,
                 "POST",
@@ -342,6 +388,27 @@ def test_a_store_a_newer_release_wrote_keeps_the_view_off_in_the_owners_words(tm
             )
             health = (await ask(port, "GET", "/health"))[2]["family_state"]
             assert "newer release" in health["reason"] and health["store"] == "closed"
+
+    run(scenario())
+
+
+def test_a_store_that_will_not_open_tells_a_phone_to_ask_the_owner(tmp_path):
+    """Review L4: "check that the server has free disk space" is the owner's sentence."""
+    (tmp_path / "state").write_text("a file where the store's folder should be")
+
+    async def scenario():
+        service = service_for(tmp_path)
+        async with running(service):
+            port = service.listener.port
+            for path in ("/family/api/me", "/family/api/login"):
+                method = "GET" if path.endswith("me") else "POST"
+                status, _, answer = await ask(port, method, path, body=b"{}" * (method == "POST"))
+                assert (status, answer["code"], answer["message"]) == (503, "off", VIEWER_OFF)
+            status, _, answer = await ask(port, "GET", "/family/ws", headers=UPGRADE)
+            assert (status, answer["message"]) == (503, VIEWER_OFF)
+            off = (await ask(port, "POST", "/v1/admin/state",
+                             body=sealed(service.keys.admin, "state")))[2]["data"]  # fmt: skip
+            assert off["enabled"] is False and "free disk space" in off["message"]
 
     run(scenario())
 
@@ -360,7 +427,7 @@ def test_health_carries_counts_and_states_and_no_one(tmp_path):
             assert status == 200 and doc["service"] == "sudarshan-family"
             state = doc["family_state"]
             assert (state["enabled"], state["members"], state["sessions"]) == (True, 2, 0)
-            assert state["store_version"] == 1
+            assert state["store_version"] == migrations.LATEST
             assert state["jobs"] == {"prune": "running", "sockets": "running", "copy": "running"}
             assert set(state["notices"]) == {"written", "failed"} and set(state["copy"]) == {
                 "at",
