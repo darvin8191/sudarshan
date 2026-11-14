@@ -1,7 +1,10 @@
 """Owner vault: small secrets the owner enters on his phone, encrypted at rest (SUDARSHAN).
 
 Values are write-only from the web UI: OpenAlgo can set or clear them and report whether they are
-set, but nothing serves a value back over HTTP. Only the auto-login worker decrypts them.
+set, but nothing serves a value back over HTTP. Only the auto-login worker decrypts them, with one
+exception (review M3, feat/family-c): OpenAlgo's family bridge keeps its note of the lists the
+owner shares here (``family_list_shares``) and reads it back itself; it is no secret, and no route
+serves it.
 """
 
 from .keys import (

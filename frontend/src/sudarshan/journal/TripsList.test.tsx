@@ -45,22 +45,53 @@ import { renderBook } from '@/test/bookPages'
 import { fakeClock, frames } from '@/test/frames'
 import { feed } from '@/test/marketDataHarness'
 import { closedTrip, trip } from './fixtures'
-import { EMPTY_WORDS, NO_TOKEN_WORDS, TripsList } from './TripsList'
+import { ASIDE_WORDS, EMPTY_WORDS, NO_TOKEN_WORDS, TripsList } from './TripsList'
 import type { Tag, Trip } from './types'
 
 const TAGS: Tag[] = [
   { id: 1, kind: 'mistake', name: 'Chased entry', colour: 'gold', archived: false, version: 1 },
 ]
 
-function serve(open: Trip[], closed: Array<Trip & { mistakes?: number[] }>) {
+function serve(open: Trip[], closed: Array<Trip & { mistakes?: number[] }>, aside: Trip[] = []) {
   api.data.mockImplementation(async (op: string, args?: { status?: string }) => {
     if (op === 'tags_list') return TAGS
-    if (op === 'trips') return args?.status === 'open' ? open : closed
-    throw new Error(`unexpected op ${op}`)
+    if (op !== 'trips') throw new Error(`unexpected op ${op}`)
+    if (args?.status === 'open') return open
+    if (args?.status === 'unmatched' || args?.status === 'expired')
+      return aside.filter((t) => t.status === args.status)
+    return closed
   })
 }
 
-vi.setConfig({ testTimeout: 15_000 })
+/** The trades the stand-in service holds, for the tests that page. */
+let store: Trip[] = []
+const DAY2 = Date.UTC(2026, 10, 13, 5, 0) // 13 Nov
+const DAY1 = Date.UTC(2026, 10, 12, 5, 0) // 12 Nov
+
+/**
+ * The service as it pages closed trades (trip_ops, store.trips_page): newest first by close and
+ * then id, `before` strictly before an instant, `from` and `to` on the close day, `limit`.
+ */
+function servePaged() {
+  api.data.mockImplementation(async (op: string, args: Record<string, unknown> = {}) => {
+    if (op === 'tags_list') return TAGS
+    if (op !== 'trips') throw new Error(`unexpected op ${op}`)
+    if (args.status !== 'closed') return []
+    const day = (t: Trip) => t.close_day ?? t.open_day
+    return [...store]
+      .filter((t) => args.before === undefined || (t.closed_ms ?? 0) < Number(args.before))
+      .filter((t) => args.from === undefined || day(t) >= Number(args.from))
+      .filter((t) => args.to === undefined || day(t) <= Number(args.to))
+      .sort((a, b) => (b.closed_ms ?? 0) - (a.closed_ms ?? 0) || b.id - a.id)
+      .slice(0, Number(args.limit ?? 100))
+  })
+}
+const closedReads = () =>
+  api.data.mock.calls
+    .filter(([op, a]) => op === 'trips' && a?.status === 'closed')
+    .map(([, a]) => a as Record<string, unknown>)
+
+vi.setConfig({ testTimeout: 30_000 })
 
 const flush = () => act(() => frames.flush())
 const show = (mode: 'live' | 'sandbox' = 'live', onOpen = vi.fn()) =>
@@ -72,6 +103,7 @@ beforeEach(() => {
   feed.reset()
   api.data.mockReset()
   access.state = 'ready'
+  store = []
 })
 
 describe('TripsList', () => {
@@ -99,6 +131,56 @@ describe('TripsList', () => {
     expect(within(open[1]).getByText('40 qty at 104.00')).toBeTruthy()
     const order = screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)
     expect(order).toEqual(['Open', 'Closed'])
+  })
+
+  it('lists positions not in the figures apart, in words, never as LONG or SHORT for one not seen opened, with no figure and no price', async () => {
+    serve(
+      [trip({ id: 1, symbol: 'SBIN' })],
+      [closedTrip({ id: 3, net_paise: 81250, close_day: 20261112 })],
+      [
+        trip({
+          id: 7,
+          symbol: 'ACME',
+          product: 'CNC',
+          product_class: 'carry',
+          status: 'unmatched',
+          side: 'long',
+          qty_max: 10,
+          entry_qty: 0,
+          entry_avg_u: 0,
+          exit_qty: 10,
+          exit_avg_u: 13_000_000,
+          open_day: 20261110,
+          close_day: 20261110,
+          closed_ms: Date.UTC(2026, 10, 10, 5, 0),
+        }),
+        trip({
+          id: 8,
+          symbol: 'NIFTY18NOV2625000CE',
+          status: 'expired',
+          side: 'long',
+          close_day: 20261118,
+        }),
+      ]
+    )
+    show()
+    const aside = await screen.findAllByTestId('aside-trip')
+    expect(aside).toHaveLength(2)
+    expect(screen.getByText(ASIDE_WORDS)).toBeTruthy()
+    const [expired, unseen] = aside // newest first: 18 Nov, then 10 Nov
+    expect(within(unseen).getByText('Opened before the journal')).toBeTruthy()
+    expect(within(unseen).queryByText('LONG')).toBeNull()
+    expect(within(unseen).queryByText(/₹/)).toBeNull()
+    expect(within(unseen).getByText(/Sold 10 qty/)).toBeTruthy()
+    expect(within(expired).getByText('Ended at expiry')).toBeTruthy()
+    expect(within(expired).getByText('LONG')).toBeTruthy()
+    expect(within(expired).queryByTestId('live-pnl')).toBeNull()
+    const order = screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)
+    expect(order).toEqual(['Open', 'Not in the figures', 'Closed'])
+    // Never priced: the live feed is asked about the open trade only.
+    act(() => feed.push('NIFTY18NOV2625000CE', 'NFO', { ltp: 50 }))
+    flush()
+    expect(within(expired).queryByText(/Profit|Loss/)).toBeNull()
   })
 
   it('moves an open trade’s P&L with every tick, signed, with its arrow and its word', async () => {
@@ -130,12 +212,67 @@ describe('TripsList', () => {
     expect(within(closedGroup).queryByText(/Real-time|Reconnecting|Stale|Market closed/)).toBeNull()
   })
 
-  it('shows a part-closed trade’s open quantity', async () => {
+  it('writes quantities in en-IN digits (review L1)', async () => {
+    serve([trip({ id: 1, entry_qty: 1300, exit_qty: 650 })], [])
+    show()
+    const card = await screen.findByTestId('open-trip')
+    expect(within(card).getByText('650 qty at 100.00')).toBeTruthy()
+    expect(within(card).getByText('Part closed: 650 of 1,300 qty')).toBeTruthy()
+  })
+
+  it('says a trade past the journal’s share of the feed is not priced, never waiting for ever (review L5)', async () => {
+    const many = Array.from({ length: 101 }, (_, n) =>
+      trip({ id: n + 1, opened_ms: Date.UTC(2026, 10, 13, 4, 0) - n })
+    )
+    serve(many, [])
+    show()
+    const cards = await screen.findAllByTestId('open-trip')
+    expect(cards).toHaveLength(101)
+    expect(within(cards[100]).getByText('Not priced: more than 100 open trades')).toBeTruthy()
+    expect(within(cards[0]).getByText('Waiting for a price')).toBeTruthy()
+  })
+
+  it('shows a part-closed trade’s open quantity, and that its figure is on that quantity', async () => {
     serve([trip({ id: 1, entry_qty: 65, exit_qty: 25 })], [])
     show()
     const card = await screen.findByTestId('open-trip')
     expect(within(card).getByText('40 qty at 100.00')).toBeTruthy()
     expect(within(card).getByText('Part closed: 25 of 65 qty')).toBeTruthy()
+    act(() => feed.push('SBIN', 'NSE', { ltp: 101 }))
+    flush()
+    // review M7: what the closed part made is not in this figure
+    expect(within(card).getByTestId('live-pnl').textContent).toContain('on 40 open')
+  })
+
+  it('says a day’s total rests on estimates and leaves out a trade with no net yet (review M7)', async () => {
+    serve(
+      [],
+      [
+        closedTrip({ id: 1, net_paise: 1000, close_day: 20261113, closed_ms: 300 }),
+        {
+          ...closedTrip({ id: 2, net_paise: 0, close_day: 20261113, closed_ms: 200 }),
+          net_paise: null,
+        },
+        closedTrip({
+          id: 3,
+          net_paise: 500,
+          close_day: 20261112,
+          closed_ms: 100,
+          charges_actual_paise: 4049,
+        }),
+      ]
+    )
+    show()
+    const days = await screen.findAllByTestId('closed-day')
+    const today = days[0].firstElementChild?.textContent ?? ''
+    expect(today).toContain('2 trades')
+    expect(today).toContain('+₹10.00')
+    expect(today).toContain('est.')
+    expect(today).toContain('1 not worked out yet')
+    const before = days[1].firstElementChild?.textContent ?? ''
+    expect(before).toContain('+₹5.00')
+    expect(before).not.toContain('est.')
+    expect(before).not.toContain('not worked out')
   })
 
   it('groups closed trades by day, newest first, each with net, sign, hold, strategy and tags', async () => {
@@ -178,7 +315,50 @@ describe('TripsList', () => {
     expect(within(flat).getByText('est.')).toBeTruthy()
     const [win] = within(days[1]).getAllByTestId('closed-trip')
     expect(win.textContent).toContain('+₹812.50')
-    expect(within(win).getByText('Chased entry')).toBeTruthy()
+    // one chip with the count, the names read out (review L8)
+    const mistakes = within(win).getByTestId('trip-tags')
+    expect(mistakes.textContent).toContain('1 mistake')
+    expect(mistakes.getAttribute('title')).toBe('Chased entry')
+    expect(within(mistakes).getByText(/Chased entry/)).toBeTruthy()
+  })
+
+  it('names the contract as the books do, whole, with its strike and CE or PE (review H5)', async () => {
+    serve(
+      [trip({ id: 1, exchange: 'NFO', symbol: 'BANKNIFTY24NOV2655000PE', side: 'short' })],
+      [
+        closedTrip({
+          id: 2,
+          exchange: 'NFO',
+          symbol: 'NIFTY17NOV2625000CE',
+          net_paise: 4_245_451,
+          close_day: 20261113,
+          closed_ms: DAY2 + 1000,
+        }),
+        closedTrip({
+          id: 3,
+          exchange: 'NSE',
+          symbol: 'TATAMOTORS',
+          net_paise: -100,
+          close_day: 20261113,
+        }),
+      ]
+    )
+    show()
+    const card = await screen.findAllByTestId('closed-trip')
+    const name = within(card[0]).getByTestId('trip-name')
+    expect(name.textContent).toBe('NIFTY 25000 CE')
+    expect(name.getAttribute('title')).toBe('NIFTY17NOV2625000CE')
+    expect(name.className).not.toContain('truncate')
+    expect(card[0].textContent).toContain('NFO · 17 Nov 2026')
+    // the figure is not squeezed beside the name: it sits on the line under it
+    const net = within(card[0]).getByTestId('trip-net')
+    expect(name.parentElement?.contains(net)).toBe(false)
+    expect(net.textContent).toContain('+₹42,454.51')
+    expect(within(card[1]).getByTestId('trip-name').textContent).toBe('TATAMOTORS')
+    const open = screen.getByTestId('open-trip')
+    expect(within(open).getByTestId('trip-name').textContent).toBe('BANKNIFTY 55000 PE')
+    expect(open.textContent).toContain('NFO · 24 Nov 2026')
+    expect(within(open).getByText('SHORT')).toBeTruthy()
   })
 
   it('says it in words when there are no trades, and when there is no Upstox sign-in', async () => {
@@ -262,35 +442,26 @@ describe('TripsList', () => {
   })
 
   it('offers earlier trades after a full page, and adds them without repeating', async () => {
-    const page = Array.from({ length: 100 }, (_, n) =>
-      closedTrip({ id: 1000 - n, net_paise: 100, close_day: 20261112, closed_ms: 5000 - n })
-    )
-    api.data.mockImplementation(async (op: string, args: { status?: string; before?: number }) => {
-      if (op === 'tags_list') return TAGS
-      if (args.status === 'open') return []
-      if (args.before !== undefined)
-        return [
-          closedTrip({ id: 7, net_paise: -100, close_day: 20261110, closed_ms: 10 }),
-          page[99],
-        ]
-      return page
-    })
+    store = [
+      ...Array.from({ length: 100 }, (_, n) =>
+        closedTrip({ id: 1000 - n, net_paise: 100, close_day: 20261112, closed_ms: 5000 - n })
+      ),
+      closedTrip({ id: 7, net_paise: -100, close_day: 20261110, closed_ms: 10 }),
+    ]
+    servePaged()
     show()
     await screen.findAllByTestId('closed-trip')
+    expect(screen.getAllByTestId('closed-trip')).toHaveLength(100)
     fireEvent.click(screen.getByRole('button', { name: 'Show earlier trades' }))
     await screen.findByText('Tue 10 Nov 2026')
     expect(screen.getAllByTestId('closed-trip')).toHaveLength(101)
-    // up to and including the last one's close: the service's page ends strictly before it
-    expect(api.data.mock.calls.find(([, a]) => a?.before !== undefined)?.[1].before).toBe(
-      5000 - 99 + 1
-    )
+    // the days before the oldest one held, by the close day
+    expect(closedReads().at(-1)).toMatchObject({ to: 20261111, limit: 100 })
     expect(screen.queryByRole('button', { name: 'Show earlier trades' })).toBeNull()
   })
 
-  it('loses no trade that closed in the same second as the last one shown', async () => {
-    // The service as it pages: closed trades newest first by close time, then id, and a later
-    // page holds those that closed strictly before `before`.
-    const all = [
+  it('loses no trade that closed in the same second as the last one of a page', async () => {
+    store = [
       ...Array.from({ length: 99 }, (_, n) =>
         closedTrip({ id: 1000 - n, net_paise: 100, close_day: 20261112, closed_ms: 5000 - n })
       ),
@@ -298,21 +469,149 @@ describe('TripsList', () => {
       closedTrip({ id: 800, net_paise: -50, close_day: 20261111, closed_ms: 4000 }),
       closedTrip({ id: 7, net_paise: -100, close_day: 20261110, closed_ms: 10 }),
     ]
-    api.data.mockImplementation(
-      async (op: string, args: { status?: string; before?: number; limit?: number }) => {
-        if (op === 'tags_list') return TAGS
-        if (args.status === 'open') return []
-        const before = args.before
-        const rows = before === undefined ? all : all.filter((t) => (t.closed_ms ?? 0) < before)
-        return rows.slice(0, args.limit ?? 100)
-      }
-    )
+    servePaged()
     show()
     await screen.findAllByTestId('closed-trip')
-    expect(screen.getAllByTestId('closed-trip')).toHaveLength(100) // 801 is the last of the page
+    // the page ended at 801; its day is read whole, so 800 is there too
+    expect(screen.getAllByTestId('closed-trip')).toHaveLength(101)
     fireEvent.click(screen.getByRole('button', { name: 'Show earlier trades' }))
     await screen.findByText('Tue 10 Nov 2026')
-    expect(screen.getAllByTestId('closed-trip')).toHaveLength(102) // 800 too, and once each
+    expect(screen.getAllByTestId('closed-trip')).toHaveLength(102)
     expect(screen.queryByRole('button', { name: 'Show earlier trades' })).toBeNull()
+  })
+
+  it('never prints a total for part of a day: the page’s last day is read whole (review H1)', async () => {
+    // 96 trades on 13 Nov, then 8 on 12 Nov: 4 of +₹1,000 and 4 of −₹1,500. A page of 100 ends
+    // after the four winners; the day was 8 trades and −₹2,000.00.
+    let id = 1000
+    for (let n = 0; n < 96; n += 1)
+      store.push(
+        closedTrip({ id: id--, net_paise: 1000, close_day: 20261113, closed_ms: DAY2 - n * 1000 })
+      )
+    for (let n = 0; n < 4; n += 1)
+      store.push(
+        closedTrip({ id: id--, net_paise: 100000, close_day: 20261112, closed_ms: DAY1 - n * 1000 })
+      )
+    for (let n = 0; n < 4; n += 1)
+      store.push(
+        closedTrip({
+          id: id--,
+          net_paise: -150000,
+          close_day: 20261112,
+          closed_ms: DAY1 - 10_000 - n * 1000,
+        })
+      )
+    servePaged()
+    show()
+    await waitFor(() => expect(screen.getAllByTestId('closed-trip')).toHaveLength(104))
+    const days = screen.getAllByTestId('closed-day')
+    const header = days.at(-1)?.firstElementChild?.textContent ?? ''
+    expect(header).toContain('Thu 12 Nov 2026')
+    expect(header).toContain('8 trades')
+    expect(header).toContain('−₹2,000.00')
+    expect(header).not.toContain('+₹4,000.00')
+  })
+
+  it('says "so far" and shows no total for a day it could not read whole', async () => {
+    // A wall of trades in one millisecond: every read of the day gives the same page back.
+    const wall = Array.from({ length: 500 }, (_, n) =>
+      closedTrip({ id: 5000 - n, net_paise: 100, close_day: 20261112, closed_ms: DAY1 })
+    )
+    api.data.mockImplementation(async (op: string, args: Record<string, unknown>) => {
+      if (op === 'tags_list') return TAGS
+      if (args.status !== 'closed') return []
+      return args.from === undefined ? wall.slice(0, 100) : wall
+    })
+    show()
+    await waitFor(() => expect(screen.getAllByTestId('closed-trip')).toHaveLength(500))
+    const header = screen.getByTestId('closed-day').firstElementChild?.textContent ?? ''
+    expect(header).toContain('500 trades so far')
+    expect(header).not.toContain('₹')
+  })
+
+  it('keeps every trade read when a new close re-reads the newest page (review M2)', async () => {
+    // 99 trades on 13 Nov and 1 on 12 Nov fill the first page; 30 on 11 Nov are read with Show
+    // earlier trades. A new close on 13 Nov pushes the 12 Nov trade off the newest page.
+    store = [
+      ...Array.from({ length: 99 }, (_, n) =>
+        closedTrip({
+          id: 1000 - n,
+          net_paise: 1000,
+          close_day: 20261113,
+          closed_ms: DAY2 - n * 1000,
+        })
+      ),
+      closedTrip({ id: 700, net_paise: 2500, close_day: 20261112, closed_ms: DAY1 }),
+      ...Array.from({ length: 30 }, (_, n) =>
+        closedTrip({
+          id: 600 - n,
+          net_paise: 1000,
+          close_day: 20261111,
+          closed_ms: DAY1 - 86_400_000 - n * 1000,
+        })
+      ),
+    ]
+    servePaged()
+    show()
+    await waitFor(() => expect(screen.getAllByTestId('closed-trip')).toHaveLength(100))
+    fireEvent.click(screen.getByRole('button', { name: 'Show earlier trades' }))
+    await waitFor(() => expect(screen.getAllByTestId('closed-trip')).toHaveLength(130))
+    store.push(
+      closedTrip({ id: 2000, net_paise: 5000, close_day: 20261113, closed_ms: DAY2 + 60_000 })
+    )
+    const before = closedReads().length
+    await act(async () => {
+      socket.fire('order_update', {})
+      await vi.advanceTimersByTimeAsync(3_500)
+    })
+    await waitFor(() => expect(closedReads().length).toBeGreaterThan(before))
+    await waitFor(() => expect(screen.getAllByTestId('closed-trip')).toHaveLength(131))
+    expect(screen.getByText('Thu 12 Nov 2026')).toBeTruthy()
+    const days = screen.getAllByTestId('closed-day').map((d) => d.firstElementChild?.textContent)
+    expect(days[0]).toContain('100 trades')
+    expect(days[1]).toContain('1 trade')
+    expect(days[1]).toContain('+₹25.00')
+    expect(days[2]).toContain('30 trades')
+  })
+
+  it('drops a trade the newest page no longer lists, and keeps the earlier days', async () => {
+    store = [
+      ...Array.from({ length: 100 }, (_, n) =>
+        closedTrip({
+          id: 1000 - n,
+          net_paise: 1000,
+          close_day: 20261113,
+          closed_ms: DAY2 - n * 1000,
+        })
+      ),
+      closedTrip({ id: 700, net_paise: 2500, close_day: 20261112, closed_ms: DAY1 }),
+    ]
+    servePaged()
+    show()
+    await waitFor(() => expect(screen.getAllByTestId('closed-trip')).toHaveLength(100))
+    fireEvent.click(screen.getByRole('button', { name: 'Show earlier trades' }))
+    await waitFor(() => expect(screen.getAllByTestId('closed-trip')).toHaveLength(101))
+    // the close check takes one of 13 Nov's trades out (paired again, or withdrawn)
+    store = store.filter((t) => t.id !== 1000)
+    await act(async () => {
+      socket.fire('order_update', {})
+      await vi.advanceTimersByTimeAsync(3_500)
+    })
+    await waitFor(() => expect(screen.getAllByTestId('closed-trip')).toHaveLength(100))
+    expect(screen.getByText('Thu 12 Nov 2026')).toBeTruthy()
+  })
+
+  it('still offers earlier trades when exactly a page came back, and then stops', async () => {
+    store = Array.from({ length: 100 }, (_, n) =>
+      closedTrip({ id: 1000 - n, net_paise: 1000, close_day: 20261113, closed_ms: DAY2 - n * 1000 })
+    )
+    servePaged()
+    show()
+    await waitFor(() => expect(screen.getAllByTestId('closed-trip')).toHaveLength(100))
+    fireEvent.click(screen.getByRole('button', { name: 'Show earlier trades' }))
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: 'Show earlier trades' })).toBeNull()
+    )
+    expect(screen.getAllByTestId('closed-trip')).toHaveLength(100)
   })
 })

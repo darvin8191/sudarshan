@@ -104,6 +104,20 @@ def _lines(*lines: str | None) -> str:
     return "\n".join(line for line in lines if line)
 
 
+def left_out_line(unmatched: int, expired: int, lead: str = "Not in these figures") -> str | None:
+    """What a report's figures leave out (review B1), or None when nothing: positions the
+    journal did not see opened, and contracts that ended at expiry (an expiry has no fill)."""
+    parts = []
+    if unmatched:
+        parts.append(f"{plural(unmatched, 'position')} opened before the journal started")
+    if expired:
+        parts.append(f"{plural(expired, 'contract')} that ended at expiry")
+    if not parts:
+        return None
+    them = "it" if unmatched + expired == 1 else "them"
+    return f"{lead}: {', '.join(parts)}. Upstox's own report has {them}."
+
+
 # ---- the owner's reports ---------------------------------------------------------------------
 def eod(
     day: int,
@@ -121,8 +135,10 @@ def eod(
     fills_recorded: int = 0,
     check_at: str | None = None,
     close_check: Mapping[str, Any] | None = None,
+    left_out: Mapping[str, int] | None = None,
 ) -> str:
-    """The day report (M15.2). ``by_strategy`` rows are ``{name, net_paise, trades}``."""
+    """The day report (M15.2). ``by_strategy`` rows are ``{name, net_paise, trades}``;
+    ``left_out`` the counts the trade count leaves out (``unmatched``, ``expired``)."""
     net = realised_paise + unrealised_paise
     trades_line = _trades_line(trades, wins, losses, flats) if trades else "No trades today"
     strategies = SEP.join(
@@ -149,6 +165,11 @@ def eod(
         f"{SEP}Net {rupees(net, True)} (before charges, est. {rupees(charges_est_paise)})",
         trades_line,
         f"By strategy: {strategies}" if strategies and trades else None,
+        left_out_line(
+            int((left_out or {}).get("unmatched") or 0),
+            int((left_out or {}).get("expired") or 0),
+            "Not in the trade count",
+        ),
         f"Carried overnight: {_positions(carried)}",
         f"{_kill_switch(kill_switch)}{SEP}{lock}",
         fills,
@@ -257,11 +278,15 @@ def period_report(
     beta: Mapping[str, Any] | None = None,
     drawdown: Mapping[str, Any] | None = None,
     footer: Sequence[str] = (),
+    left_out: Mapping[str, int] | None = None,
 ) -> str:
-    """The shared body of the week, month and financial-year reports."""
+    """The shared body of the week, month and financial-year reports. ``left_out`` the counts
+    the figures leave out (``unmatched``, ``expired``): one line when there are any."""
     head = [HEADER, f"{title}{SEP}{label}"]
+    aside = left_out_line(int((left_out or {}).get("unmatched") or 0),
+                          int((left_out or {}).get("expired") or 0))  # fmt: skip
     if not trading_days:
-        return _lines(*head, f"No trading day this {period_word}.", *footer)
+        return _lines(*head, f"No trading day this {period_word}.", aside, *footer)
     m = metrics
     net = f"Net {rupees(m['net_paise'], True)} (after est. charges {rupees(m['charges_paise'])})"
     count = f"Trading days {trading_days}{SEP}"
@@ -312,6 +337,7 @@ def period_report(
         bench,
         beta_line,
         dd,
+        aside,
         *footer,
     )
 

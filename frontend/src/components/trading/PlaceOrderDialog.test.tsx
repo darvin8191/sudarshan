@@ -194,3 +194,46 @@ describe('PlaceOrderDialog while the kill switch is on', () => {
     expect(screen.queryByTestId('kill-switch-note')).toBeNull()
   })
 })
+
+describe('PlaceOrderDialog: size by risk (B4)', () => {
+  beforeEach(() => {
+    placeOrder.mockReset()
+    localStorage.clear()
+  })
+
+  it('is folded until opened, then fills whole lots into the quantity and sends nothing', async () => {
+    render(<PlaceOrderDialog {...nifty} />)
+    // Folded: the quantity is still the ticket's one number box.
+    expect(screen.getAllByRole('spinbutton')).toHaveLength(1)
+    await userEvent.click(screen.getByRole('button', { name: 'Size by risk' }))
+    await userEvent.type(screen.getByLabelText('Risk (₹)'), '4500')
+    await userEvent.type(screen.getByLabelText('Stop price'), '80')
+    // The last price is 100, so a stop at 80 is 20 a unit, 1,500 a lot of 75.
+    expect(screen.getByTestId('risk-size')).toHaveTextContent(
+      '3 lots (225) risk ₹4,500.00, 20.00 a unit to the stop'
+    )
+    await userEvent.click(screen.getByRole('button', { name: 'Set quantity to 3 lots' }))
+    expect(screen.getByText('Total qty: 225')).toBeInTheDocument()
+    expect(placeOrder).not.toHaveBeenCalled()
+    expect(JSON.parse(localStorage.getItem('sudarshan-ticket-risk') ?? '{}')).toEqual({
+      fno: 4500,
+    })
+  })
+
+  it('says where a buy’s stop goes, and offers nothing to fill', async () => {
+    render(<PlaceOrderDialog {...nifty} />)
+    await userEvent.click(screen.getByRole('button', { name: 'Size by risk' }))
+    await userEvent.type(screen.getByLabelText('Risk (₹)'), '4500')
+    await userEvent.type(screen.getByLabelText('Stop price'), '120')
+    expect(screen.getByText('For a buy, the stop goes below the price.')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Set quantity/ })).toBeNull()
+    expect(screen.getByText('Total qty: 150')).toBeInTheDocument()
+  })
+
+  it('opens with the sum last used for the segment on this phone', async () => {
+    localStorage.setItem('sudarshan-ticket-risk', JSON.stringify({ fno: 3000 }))
+    render(<PlaceOrderDialog {...nifty} />)
+    await userEvent.click(screen.getByRole('button', { name: 'Size by risk' }))
+    expect(screen.getByLabelText('Risk (₹)')).toHaveValue(3000)
+  })
+})

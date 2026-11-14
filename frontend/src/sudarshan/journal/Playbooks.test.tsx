@@ -218,6 +218,70 @@ describe('the playbook sheet', () => {
     expect(screen.getByRole('button', { name: 'Open it again' })).toBeTruthy()
   })
 
+  it('asks before closing a playbook holding changes, new or changed (review H2)', async () => {
+    const user = userEvent.setup()
+    serve()
+    const first = show(null)
+    await user.type(await screen.findByLabelText(/^Name \(up to/), 'Gap fade')
+    await user.click(screen.getByRole('button', { name: 'Close' }))
+    expect(onClose).not.toHaveBeenCalled()
+    expect(await screen.findByText('This new playbook is not saved.')).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Keep writing' }))
+    expect((screen.getByLabelText(/^Name \(up to/) as HTMLInputElement).value).toBe('Gap fade')
+    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' })
+    await user.click(await screen.findByRole('button', { name: 'Discard changes' }))
+    expect(onClose).toHaveBeenCalledTimes(1)
+    expect(calls('playbook_create')).toHaveLength(0)
+    first.unmount()
+
+    onClose.mockReset()
+    show(4)
+    const name = await screen.findByLabelText(/^Name \(up to/)
+    await user.click(screen.getByRole('button', { name: 'Close' }))
+    expect(onClose).toHaveBeenCalledTimes(1) // nothing changed: it closes at once
+    onClose.mockReset()
+    await user.type(name, ' 2')
+    await user.click(screen.getByRole('button', { name: 'Close' }))
+    await user.click(await screen.findByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1))
+    expect(calls('playbook_update')[0][1]).toEqual({ id: 4, version: 2, name: 'Opening range 2' })
+  })
+
+  it('keeps what was typed when a newer read of the playbook comes in under it', async () => {
+    const user = userEvent.setup()
+    serve()
+    show(4)
+    const name = await screen.findByLabelText(/^Name \(up to/)
+    await user.type(name, ' 2')
+    api.data.mockImplementation(async (op: string) => {
+      if (op === 'playbook_update')
+        throw new JournalError({ code: 'conflict', message: WORDS.changedElsewhere })
+      return [{ ...OPENING, description: 'Changed on the laptop.', version: 3 }]
+    })
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+    await user.click(await screen.findByRole('button', { name: 'Open it again' }))
+    expect(await screen.findByText(/This playbook was changed on another screen/)).toBeTruthy()
+    expect((screen.getByLabelText(/^Name \(up to/) as HTMLInputElement).value).toBe(
+      'Opening range 2'
+    )
+    // what the other screen saved is shown where nothing was typed
+    expect((screen.getByLabelText('What it is') as HTMLTextAreaElement).value).toBe(
+      'Changed on the laptop.'
+    )
+    api.data.mockImplementation(async (op: string) => {
+      if (op === 'playbook_update') return { id: 4, version: 4, words: null }
+      return [{ ...OPENING, description: 'Changed on the laptop.', version: 3 }]
+    })
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(onClose).toHaveBeenCalled())
+    // only the name, which was typed here: the laptop's description stays
+    expect(calls('playbook_update').at(-1)?.[1]).toEqual({
+      id: 4,
+      version: 3,
+      name: 'Opening range 2',
+    })
+  })
+
   it('archives, and brings back, with the version, and says trades keep it', async () => {
     const user = userEvent.setup()
     serve()

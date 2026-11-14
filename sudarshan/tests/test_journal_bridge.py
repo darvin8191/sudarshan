@@ -313,6 +313,17 @@ def test_a_transport_refusal_is_never_shown_as_a_code(bridge, journal):
     }
 
 
+@pytest.mark.parametrize("words", ["malformed HTTP request", "method not allowed", "", None])
+def test_a_transport_refusal_without_a_sentence_says_the_bridges_own(bridge, journal, words):
+    """Review L6: the service's listener answers some refusals with a transport's words; those
+    never reach the owner."""
+    journal.answers["state"] = (400, {"status": "error", "code": "bad_http", "message": words})
+    as_owner(bridge)
+    response = bridge.get(PREFIX + "/state", headers=JSON)
+    assert response.status_code == 503
+    assert error_of(response) == {"code": "unavailable", "message": WORDS["failed"]}
+
+
 @pytest.mark.parametrize("how", ["missing", "unknown"])
 def test_an_op_the_service_lacks_is_not_ready(bridge, journal, how):
     getattr(journal, how).add("analytics")
@@ -367,12 +378,13 @@ def slow(seconds: float):
 
 
 def test_a_slow_read_is_not_answering_within_its_timeout(bridge, journal, monkeypatch):
-    journal.answers["state"] = slow(1.0)
+    journal.answers["state"] = slow(3.0)
     monkeypatch.setitem(bp_module.TIMEOUTS_S, "read", 0.2)
     as_owner(bridge)
     start = time.monotonic()
     response = bridge.get(PREFIX + "/state", headers=JSON)
-    assert time.monotonic() - start < 0.9
+    # the 0.2 s timeout, not the 3 s answer (review M4: a generous bound only)
+    assert time.monotonic() - start < 2.5
     assert response.status_code == 503
     assert error_of(response)["message"] == WORDS["not_answering"]
 
@@ -538,13 +550,16 @@ def test_a_csv_asked_for_must_come_back_as_a_csv(bridge, journal):
     "answer",
     [
         stored(sha="0" * 64),  # the bytes are not the ones recorded
+        (200, {"status": "success", "data": {  # no record to check them against (review L6)
+            "id": 3, "file_name": "SUDARSHAN_Monthly-statement_202610.pdf",
+            "file_mime": "application/pdf", "file_b64": base64.b64encode(PDF).decode()}}),
         stored(name="statement one.pdf"),  # a name that is not plain ASCII
         stored(name="report.html", mime="text/html"),
         stored(mime="image/png"),  # a type that is not the name's
         (200, {"status": "success", "data": {"file_name": "a.pdf", "file_mime": "application/pdf",
                                              "file_b64": "%%%not base64%%%"}}),
     ],
-    ids=["sha256", "name", "html", "mime", "base64"],
+    ids=["sha256", "no-sha256", "name", "html", "mime", "base64"],
 )  # fmt: skip
 def test_a_file_that_is_not_what_was_stored_is_never_sent(bridge, journal, answer):
     journal.answers["report_file"] = answer
@@ -571,7 +586,40 @@ def test_a_report_without_a_file_and_a_download_refused_by_the_service(bridge, j
     assert error_of(gone) == {"code": "not_found", "message": "This report is not in the archive."}
     journal.answers["report_file"] = (200, {"status": "success", "data": {"enabled": False}})
     off = bridge.get(PREFIX + "/reports/3/file", headers=JSON)
-    assert off.get_json()["enabled"] is False and off.get_json()["message"] == WORDS["off"]
+    assert off.status_code == 503
+    assert error_of(off) == {"code": "unavailable", "message": WORDS["off"]}
+
+
+def test_a_download_while_switched_off_is_refused_in_words_never_a_200(
+    bridge, journal, monkeypatch
+):
+    """Review H4 (v0.11.0): a browser saves a 200 under the name it asked for, so a switched-off
+    answer of 200 came to the phone as a "PDF" holding JSON. Every way of saying off is a 503 with
+    the sentence, and no file name goes with it."""
+    reason = "The journal is switched off until the owner turns it on in OpenAlgo's .env."
+    journal.answers["report_file"] = (
+        200, {"status": "success", "data": {"enabled": False, "message": reason}},
+    )  # fmt: skip
+    as_owner(bridge)
+    answers = [bridge.get(PREFIX + "/reports/3/file", headers=JSON),
+               bridge.get(PREFIX + "/reports/3/file?format=csv", headers=JSON)]  # fmt: skip
+    # the service does not answer in time, and its /health says it is switched off
+    journal.answers["report_file"] = slow(1.0)
+    journal.health = (200, {"journal_state": {"enabled": False, "reason": reason}})
+    monkeypatch.setitem(bp_module.TIMEOUTS_S, "download", 0.2)
+    answers.append(bridge.get(PREFIX + "/reports/3/file", headers=JSON))
+    for response in answers:
+        assert response.status_code == 503
+        assert response.mimetype == "application/json"
+        assert error_of(response) == {"code": "unavailable", "message": reason}
+        assert "Content-Disposition" not in response.headers
+    # a read keeps its switched-off success: the pages say it on their own card
+    journal.answers["state"] = (
+        200, {"status": "success", "data": {"enabled": False, "message": reason}},
+    )  # fmt: skip
+    assert bridge.get(PREFIX + "/state", headers=JSON).get_json() == {
+        "status": "success", "enabled": False, "data": None, "message": reason,
+    }  # fmt: skip
 
 
 def test_a_download_answer_over_its_limit_is_not_sent(bridge, journal, monkeypatch):

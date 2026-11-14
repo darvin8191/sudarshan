@@ -11,6 +11,7 @@ import {
   notConfirmed,
   refusalReason,
   thrownOutcome,
+  withoutCode,
 } from './sendOutcome'
 
 function answered(status: number, data: unknown) {
@@ -92,5 +93,19 @@ describe('an answer', () => {
       expect(text).toMatch(/not confirmed: (it|some \w+) may have gone through/)
       expect(text).not.toMatch(/fail|answer|timed out|error/i)
     }
+  })
+})
+
+describe('Upstox’s words without its code (B1)', () => {
+  it('drops each code as the server does, and keeps the words', () => {
+    expect(withoutCode('UDAPI1150: GTT order is not in a modifiable state')).toBe(
+      'GTT order is not in a modifiable state'
+    )
+    expect(withoutCode('UDAPI1141: Entry rule needed; UDAPI1137 : Two or three rules')).toBe(
+      'Entry rule needed; Two or three rules'
+    )
+    expect(withoutCode('RMS:Margin Exceeds')).toBe('RMS:Margin Exceeds')
+    expect(withoutCode('UDAPI1150: ')).toBe('')
+    expect(withoutCode(undefined)).toBe('')
   })
 })

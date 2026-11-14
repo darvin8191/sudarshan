@@ -3,7 +3,9 @@ import {
   CalendarDays,
   CalendarRange,
   CheckCheck,
+  CircleHelp,
   CircleSlash,
+  Clock,
   Download,
   FileSpreadsheet,
   FileText,
@@ -14,13 +16,16 @@ import {
   Sunset,
 } from 'lucide-react'
 import { type ReactNode, useEffect, useRef, useState } from 'react'
-import { journalData, problemOf, reportFileUrl } from '../journal/api'
+import { journalData, problemOf, reportFile, saveFile } from '../journal/api'
 import { Problem } from '../journal/parts'
 import type { ReportKind } from '../journal/types'
 import { REPORTS_KEY, useArchive, useReportSettings } from './queries'
 import {
   builtWords,
+  DESK_WORDS,
+  type DeskState,
   deliveryOf,
+  deskOf,
   downloadName,
   emptyWords,
   hasCsv,
@@ -43,21 +48,55 @@ const DELIVERY_ICON = {
     <FileText aria-hidden="true" className="size-4 shrink-0 text-[color:var(--text-secondary)]" />
   ),
   not: <CircleSlash aria-hidden="true" className="size-4 shrink-0 text-[color:var(--down)]" />,
+  unknown: (
+    <CircleHelp aria-hidden="true" className="size-4 shrink-0 text-[color:var(--text-secondary)]" />
+  ),
 } as const
+
+/** The glyph beside the desk's sentence: off says so, waiting waits, not known asks. */
+const DESK_ICON: Record<Exclude<DeskState, 'on'>, ReactNode> = {
+  starting: <Clock aria-hidden="true" className="mt-0.5 size-4 shrink-0" />,
+  journal_off: <Clock aria-hidden="true" className="mt-0.5 size-4 shrink-0" />,
+  journal_down: <Clock aria-hidden="true" className="mt-0.5 size-4 shrink-0" />,
+  off: <CircleSlash aria-hidden="true" className="mt-0.5 size-4 shrink-0" />,
+  unknown: <CircleHelp aria-hidden="true" className="mt-0.5 size-4 shrink-0" />,
+}
 
 const BUTTON =
   'inline-flex min-h-12 items-center justify-center gap-2 rounded-[0.875rem] border border-input bg-card px-4 text-[0.9375rem] font-semibold outline-none hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-60'
 
 function Row({
   report,
-  alertsOn,
+  desk,
   onOpen,
 }: {
   report: ReportRow
-  alertsOn: boolean | undefined
+  desk: DeskState | undefined
   onOpen: (id: number) => void
 }) {
-  const delivery = deliveryOf(report, alertsOn)
+  const delivery = deliveryOf(report, desk)
+  const named = `${kindTitle(report.kind)} ${periodWords(report.period_key)}`
+  // Review H4: the file is fetched and checked before it is saved, so a refusal is a sentence
+  // under the row and never a file that will not open. One download at a time per row.
+  const [busy, setBusy] = useState<'file' | 'csv' | null>(null)
+  const [problem, setProblem] = useState<string | null>(null)
+  const fetching = useRef(false)
+  const download = async (format?: 'csv') => {
+    if (fetching.current) return
+    fetching.current = true
+    setBusy(format ?? 'file')
+    setProblem(null)
+    try {
+      saveFile(await reportFile(report.id, format), downloadName(report, format))
+    } catch (error) {
+      setProblem(problemOf(error).message)
+    } finally {
+      fetching.current = false
+      setBusy(null)
+    }
+  }
+  const glyph = (which: 'file' | 'csv', icon: ReactNode) =>
+    busy === which ? <LoaderCircle aria-hidden="true" className="size-4 animate-spin" /> : icon
   return (
     <li
       data-testid="report"
@@ -92,15 +131,17 @@ function Row({
           Open
         </button>
         {report.file_name ? (
-          <a
+          <button
+            type="button"
             className={BUTTON}
-            href={reportFileUrl(report.id)}
-            download={downloadName(report)}
-            aria-label={`Download ${kindTitle(report.kind)} ${periodWords(report.period_key)}`}
+            disabled={busy !== null}
+            aria-busy={busy === 'file'}
+            onClick={() => void download()}
+            aria-label={busy === 'file' ? `Preparing the file of ${named}` : `Download ${named}`}
           >
-            <Download aria-hidden="true" className="size-4" />
-            Download
-          </a>
+            {glyph('file', <Download aria-hidden="true" className="size-4" />)}
+            {busy === 'file' ? 'Preparing the file' : 'Download'}
+          </button>
         ) : (
           <span
             className={`${BUTTON} opacity-60`}
@@ -111,17 +152,22 @@ function Row({
           </span>
         )}
         {hasCsv(report) && (
-          <a
+          <button
+            type="button"
             className={`${BUTTON} col-span-2`}
-            href={reportFileUrl(report.id, 'csv')}
-            download={downloadName(report, 'csv')}
-            aria-label={`Download CSV of ${kindTitle(report.kind)} ${periodWords(report.period_key)}`}
+            disabled={busy !== null}
+            aria-busy={busy === 'csv'}
+            onClick={() => void download('csv')}
+            aria-label={
+              busy === 'csv' ? `Preparing the CSV of ${named}` : `Download CSV of ${named}`
+            }
           >
-            <FileSpreadsheet aria-hidden="true" className="size-4" />
-            Download CSV
-          </a>
+            {glyph('csv', <FileSpreadsheet aria-hidden="true" className="size-4" />)}
+            {busy === 'csv' ? 'Preparing the file' : 'Download CSV'}
+          </button>
         )}
       </div>
+      {problem && <Problem>{problem}</Problem>}
     </li>
   )
 }
@@ -157,7 +203,8 @@ export function Archive({ onOpen }: { onOpen: (id: number) => void }) {
   const archive = useArchive()
   const settings = useReportSettings()
   const { build, asked } = useBuild()
-  const alertsOn = settings.data?.alerts_on
+  const desk = deskOf(settings.data)
+  const deskWords = desk ? DESK_WORDS[desk] : null
   const rows = archive.data
 
   return (
@@ -197,11 +244,13 @@ export function Archive({ onOpen }: { onOpen: (id: number) => void }) {
           it is ready.
         </output>
       )}
-      {alertsOn === false && (
-        <p className="flex items-start gap-1.5 text-sm text-[color:var(--text-secondary)]">
-          <CircleSlash aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
-          Reports are built and kept here, but none can be sent while the alerts service is switched
-          off on the server.
+      {desk && desk !== 'on' && deskWords && (
+        <p
+          className="flex items-start gap-1.5 text-sm text-[color:var(--text-secondary)]"
+          data-testid="desk"
+        >
+          {DESK_ICON[desk]}
+          {deskWords}
         </p>
       )}
       {archive.isPending ? (
@@ -226,7 +275,7 @@ export function Archive({ onOpen }: { onOpen: (id: number) => void }) {
           {[...(rows ?? [])]
             .sort((a, b) => b.built_ms - a.built_ms)
             .map((report) => (
-              <Row key={report.id} report={report} alertsOn={alertsOn} onOpen={onOpen} />
+              <Row key={report.id} report={report} desk={desk} onOpen={onOpen} />
             ))}
         </ul>
       )}

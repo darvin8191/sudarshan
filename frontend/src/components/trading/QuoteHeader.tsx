@@ -60,7 +60,8 @@ export function QuoteHeader({
 
   if (isLoading) {
     return (
-      <div className="p-3 bg-muted/30 rounded-lg animate-pulse">
+      // SUDARSHAN M1.21 (T4): a still placeholder while the quote loads, never a pulse.
+      <div className="p-3 bg-muted/30 rounded-lg">
         <div className="h-4 bg-muted rounded w-24 mb-2" />
         <div className="h-6 bg-muted rounded w-32" />
       </div>
