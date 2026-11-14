@@ -197,7 +197,8 @@ export function orderLine(order: {
     order.lots === undefined ? '' : ` (${order.lots} ${order.lots === 1 ? 'lot' : 'lots'})`
   const tick = order.tickSize ?? 0.05
   const said = (value: number) => roundToTick(value, tick).toFixed(tickDecimals(tick))
-  const price = order.priceType === 'LIMIT' || order.priceType === 'SL' ? ` ${said(order.price)}` : ''
+  const price =
+    order.priceType === 'LIMIT' || order.priceType === 'SL' ? ` ${said(order.price)}` : ''
   const trigger =
     order.priceType === 'SL' || order.priceType === 'SL-M' ? `, trigger ${said(order.trigger)}` : ''
   const elsewhere =

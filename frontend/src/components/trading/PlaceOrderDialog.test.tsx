@@ -417,7 +417,22 @@ describe('PlaceOrderDialog: one press, and the line is the order', () => {
     expect(place.mock.calls[0][0]).toMatchObject({ price: 803.15, exchange: 'NSE' })
   })
 
-  it('names BSE in the line when BSE is picked, and sends the order there (N2)', async () => {
+  it('names BSE in the line once it is picked in the ticket, and sends the order there (N2)', async () => {
+    const place = vi.fn().mockResolvedValue({ orderId: '1' })
+    render(<PlaceOrderDialog {...sbin} price={803.15} place={place} />)
+    const line = screen.getByTestId('ticket-summary')
+    expect(line).toHaveTextContent('SELL 1 SBIN · LIMIT 803.15 · CNC')
+    await userEvent.click(screen.getByRole('combobox', { name: 'Exchange' }))
+    await userEvent.click(await screen.findByRole('option', { name: 'BSE' }))
+    expect(line).toHaveTextContent('SELL 1 SBIN on BSE · LIMIT 803.15 · CNC')
+    const button = screen.getByRole('button', { name: 'Place SELL Order' })
+    expect(button).toHaveAccessibleDescription('SELL 1 SBIN on BSE · LIMIT 803.15 · CNC')
+    await userEvent.click(button)
+    await waitFor(() => expect(place).toHaveBeenCalledTimes(1))
+    expect(place.mock.calls[0][0]).toMatchObject({ exchange: 'BSE', price: 803.15, symbol: 'SBIN' })
+  })
+
+  it('names BSE in the line for a ticket opened on BSE, and sends the order there (N2)', async () => {
     const place = vi.fn().mockResolvedValue({ orderId: '1' })
     render(<PlaceOrderDialog {...sbin} exchange="BSE" price={803.15} place={place} />)
     expect(screen.getByTestId('ticket-summary')).toHaveTextContent(
