@@ -86,6 +86,12 @@ KEEP_MS = 6 * 3_600_000
 ROW_PARTS = ("positions", "holdings", "orders", "trades")
 #: Review M3 (v0.12.0): what a member is shared is asked of the portfolio again this often at most.
 SHARES_EVERY_MS = 60_000
+#: Verification N6: a page waits this long for that answer, not the portfolio client's 12 s, so
+#: it answers within a few seconds while the portfolio accepts a connection and says nothing.
+SHARES_WAIT_S = 3.0
+#: Verification N7: figures kept while the portfolio gives no answer about the share are put
+#: away after this long without one. The member sees less, never more.
+SHARES_KEEP_MS = 600_000
 
 
 def clock_text(ms: int) -> str:
@@ -168,10 +174,13 @@ class Memory:
 @dataclass(frozen=True)
 class Shared:
     """What the portfolio last said of a member's share of the Upstox books, and when it was
-    asked: ``sign`` is ``sign_of`` its answer, None while it has given none."""
+    asked: ``sign`` is ``sign_of`` its answer, None while it has given none. ``down_since`` is
+    when the portfolio first failed to answer the question (no connection, a refusal that is not
+    "not shared", or no answer within a page's wait), None once it has answered again."""
 
     at: int
     sign: tuple[str | None, tuple[str, ...]] | None = None
+    down_since: int | None = None
 
 
 def sign_of(found: Any) -> tuple[str | None, tuple[str, ...]] | None:
@@ -374,6 +383,12 @@ class Books:
             await self.confirm(member)
         now = self.clock()
         key, old = (member_id, part), self.memory.get((member_id, part))
+        if self.put_away(member_id, now):
+            # N7: no figure is read and kept again until the portfolio says what is shared
+            kept = self.memory[key] = Memory("unchecked", None, None, now)
+            if old is None or old.state != "unchecked":  # said once, not at every re-sync
+                self._tell(member_id, part, kept, "a family book read could not be passed on")
+            return kept
         try:
             data = await self.portfolio.call("upstox_book", member_id, {"parts": [part]},
                                              mask=privacy.mask_for(member))  # fmt: skip
@@ -389,12 +404,15 @@ class Books:
             kept = Memory(state, old.data if keep else None, old.read_at if keep else None, now)
         self.memory[key] = kept
         self.reads += 1
+        self._tell(member_id, part, kept, "a family book read could not be passed on")
+        return kept
+
+    def _tell(self, member_id: int, part: str, kept: Memory, failed: str) -> None:
         for hook in list(self.after_read):
             try:
                 hook(member_id, part, kept)
             except Exception:
-                log.exception("a family book read could not be passed on")
-        return kept
+                log.exception(failed)
 
     # ---- what is still shared (review M3 of v0.12.0) -------------------------------------------
     def _confirm_due(self, member_id: int, now: int) -> bool:
@@ -418,46 +436,86 @@ class Books:
         )  # fmt: skip
         return task
 
-    async def confirm(self, member: Mapping[str, Any]) -> None:
-        """Before a kept answer is served: what it came through still stands, or it is dropped."""
+    async def confirm(self, member: Mapping[str, Any], wait_s: float | None = None) -> bool:
+        """Before a kept answer is served: what it came through still stands, or it is dropped.
+        ``wait_s`` bounds the wait (N6: a page's; the question itself goes on and is not asked
+        twice). Whether the portfolio's latest answer is in: False while it is not answering."""
+        member_id = int(member["id"])
         task = self.confirm_start(member)
         if task is not None:
-            await asyncio.shield(task)
+            if wait_s is None:
+                await asyncio.shield(task)
+            else:
+                done, _ = await asyncio.wait({task}, timeout=wait_s)  # never cancels the question
+                if not done:
+                    self._down(member_id, self.clock())
+        return not self.unchecked(member_id)
+
+    def _down(self, member_id: int, now: int) -> Shared:
+        """Note that the portfolio did not answer what the member is shared; when it began."""
+        last = self.shared.get(member_id)
+        if last is None:
+            last = self.shared[member_id] = Shared(now, None, now)
+        elif last.down_since is None:
+            last = self.shared[member_id] = Shared(last.at, last.sign, now)
+        return last
+
+    def unchecked(self, member_id: int) -> bool:
+        """Whether the portfolio is not answering what the member is shared (N6)."""
+        last = self.shared.get(member_id)
+        return last is not None and last.down_since is not None
+
+    def put_away(self, member_id: int, now: int) -> bool:
+        """Whether that has lasted ``SHARES_KEEP_MS``: nothing of the member's is kept (N7)."""
+        last = self.shared.get(member_id)
+        return (last is not None and last.down_since is not None
+                and not 0 <= now - last.down_since < SHARES_KEEP_MS)  # fmt: skip
 
     async def _confirm(self, member: dict[str, Any]) -> None:
         member_id = int(member["id"])
-        last = self.shared.get(member_id)
+        down = False
         try:
             found = await self.portfolio.call("shares_for_viewer", member_id,
                                               mask=privacy.mask_for(member))  # fmt: skip
             sign = sign_of(found)
         except Refusal as exc:
-            sign = (None, ()) if exc.state == "not_shared" else None
+            sign, down = ((None, ()), False) if exc.state == "not_shared" else (None, True)
         except Exception:
             log.exception("what a family member is shared could not be asked")
-            sign = None
+            sign, down = None, True
         now = self.clock()
+        last = self.shared.get(member_id)  # read now: a page's wait may have noted it down
         if sign is None:  # no answer: nothing is known to have changed; asked again in a minute
-            self.shared[member_id] = Shared(now, last.sign if last is not None else None)
+            if not down:  # an answer that is not this op's says nothing either way
+                self.shared[member_id] = Shared(now, last.sign if last is not None else None,
+                                                last.down_since if last is not None else None)  # fmt: skip
+                return
+            since = self._down(member_id, now).down_since
+            self.shared[member_id] = Shared(now, last.sign if last is not None else None, since)
+            if self.put_away(member_id, now):  # N7: ten minutes without an answer
+                self.forget(member_id, gone=False, state="unchecked")
             return
         self.shared[member_id] = Shared(now, sign)
+        for key in [k for k, kept in self.memory.items()
+                    if k[0] == member_id and kept.state == "unchecked"]:  # fmt: skip
+            del self.memory[key]  # answering again: what was put away is read at the next look
+            self._wake.set()
         if sign[0] is None or last is None or last.sign != sign:
             self.forget(member_id, gone=sign[0] is None)
 
-    def forget(self, member_id: int, *, gone: bool) -> int:
-        """Drop every kept part of the member (its share was removed, expired or changed): no
-        figure of theirs stays in memory, their sockets are told and let go of the rows' symbols,
-        and the next answer is read again. How many parts were dropped."""
+    def forget(self, member_id: int, *, gone: bool, state: str | None = None) -> int:
+        """Drop every kept part of the member (its share was removed, expired or changed, or
+        could not be checked for ten minutes: ``state`` ``unchecked``): no figure of theirs stays
+        in memory, their sockets are told and let go of the rows' symbols, and the next answer is
+        read again. How many parts were dropped."""
         dropped = 0
+        state = state or ("not_shared" if gone else "closed")
         for key in [k for k, kept in self.memory.items() if k[0] == member_id
                     and kept.data is not None]:  # fmt: skip
-            kept = self.memory[key] = Memory("not_shared" if gone else "closed")
+            tried = self.clock() if state == "unchecked" else 0
+            kept = self.memory[key] = Memory(state, None, None, tried)
             dropped += 1
-            for hook in list(self.after_read):
-                try:
-                    hook(member_id, key[1], kept)
-                except Exception:
-                    log.exception("a dropped family book could not be passed on")
+            self._tell(member_id, key[1], kept, "a dropped family book could not be passed on")
         self.dropped += dropped
         if dropped:
             self._wake.set()
@@ -474,7 +532,8 @@ class Books:
         """The re-sync: start every read an open screen is due; how many started. What no screen
         has shown for ``KEEP_MS`` is forgotten (member ids only grow as members come and go)."""
         now, started, shown = self.clock(), 0, self.shown()
-        kept = {member_id for (member_id, _), m in self.memory.items() if m.data is not None}
+        kept = {member_id for (member_id, _), m in self.memory.items()
+                if m.data is not None or m.state == "unchecked"}  # fmt: skip
         seated = {int(member["id"]): member for _, member in self.open_sockets()}
         for member_id, member in seated.items():  # M3: a kept answer on an open socket
             if member_id in kept and self._confirm_due(member_id, now):
@@ -518,17 +577,31 @@ class Books:
         if part not in privacy.parts_shown(hidden):
             return {**base, "read_at": None, "state": "not_shared",
                     "words": WORDS["not_shared"], "rows": []}  # fmt: skip
-        memory = self.memory.get((int(member["id"]), part)) or Memory("closed")
+        member_id = int(member["id"])
+        memory = self.memory.get((member_id, part)) or Memory("closed")
         state = memory.state
         if state == "ok" and not self.market.open(part, now):
             state = "closed"
         rows = privacy.masked(rows_of(memory.data), privacy.mask_of(hidden))
-        return {**base, "read_at": memory.read_at, "state": state,
-                "words": words_for(part, state, memory.read_at), "rows": rows}  # fmt: skip
+        words = words_for(part, state, memory.read_at) if state != "unchecked" else None
+        if state == "unchecked" or self.put_away(member_id, now):
+            # N7: put away after ten minutes without an answer about the share, and said so
+            return {**base, "read_at": None, "state": "unreachable",
+                    "words": WORDS["unchecked_long"], "rows": []}  # fmt: skip
+        if self.unchecked(member_id) and state in ("ok", "closed", "budget", "unreachable"):
+            # N6: the share could not be checked, so what is kept is never served as current
+            at = clock_text(memory.read_at) if memory.read_at is not None else None
+            state = "unreachable"
+            words = WORDS["unchecked"] + (f" Figures from {at}." if at else "")
+        return {**base, "read_at": memory.read_at, "state": state, "words": words, "rows": rows}
 
     async def _fresh(self, member: Mapping[str, Any], part: str, now: int) -> None:
         if part in privacy.parts_shown(privacy.hidden_categories(member.get("privacy"))):
-            await self.confirm(member)  # M3: a kept answer is served only while its share stands
+            # M3: a kept answer is served only while its share stands. N6: the page waits a few
+            # seconds for that answer, and reads nothing new while it has not come (the portfolio
+            # is not answering; the open screens' re-sync goes on asking).
+            if not await self.confirm(member, SHARES_WAIT_S):
+                return
             if self.due(int(member["id"]), part, self.clock(), "page"):
                 await self.read(member, part)
 

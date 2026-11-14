@@ -736,6 +736,141 @@ def test_m3_while_the_portfolio_does_not_answer_what_is_kept_stays_and_is_asked_
     run(go())
 
 
+# ---- v0.12.0 verification N6, N7: while the portfolio gives no answer about the share ------------
+def test_n6_a_page_answers_within_a_few_seconds_while_the_portfolio_hangs(monkeypatch):
+    """N6: the share question and the read each waited the client's 12 s, so the summary (two
+    parts) could take about 36 s against nginx's 30. A page now waits ``SHARES_WAIT_S`` for the
+    share answer, reads nothing new while it has not come, and says the shares could not be
+    checked over what it kept: never as current. Fails on the old code: the page waited for the
+    question (here, for as long as it hung) and answered the kept rows as "closed"."""
+
+    async def go():
+        monkeypatch.setattr(books_module, "SHARES_WAIT_S", 0.05)
+        clock = Clock(ist(MONDAY, 19))
+        books, client = shelf(clock, {"positions": [position()], "funds": [{"x": 1}]})
+        client.shares = shared_answer(hides=())
+        who = member(shown={"pnl": True, "qty": True, "funds": True, "orders": True})
+        await books._fresh(who, "positions", clock())
+        assert books.book_of(who, "positions", clock())["state"] == "closed"
+        gate, answer = asyncio.Event(), client.call
+
+        async def hangs(op, member_id, args=None, *, mask, tabs=None):
+            client.calls.append((op, member_id, dict(args or {}), mask))
+            await gate.wait()  # the portfolio took the connection and says nothing
+            raise Refusal("unreachable")
+
+        client.call = hangs
+        clock.at += 61_000
+        started = asyncio.get_running_loop().time()
+        seat = type("Seat", (), {"member": who})()
+        done = await asyncio.wait_for(books.route_summary(None, {}, seat), 2.0)
+        assert asyncio.get_running_loop().time() - started < 1.0
+        body = done.payload["data"]
+        assert body["state"] == "unreachable"
+        assert body["words"] == "What is shared with you could not be checked just now. " \
+            "Figures from 19:00:00."  # fmt: skip
+        book = books.book_of(who, "positions", clock())
+        assert (book["state"], len(book["rows"])) == ("unreachable", 1) and book["words"] == body[
+            "words"
+        ]
+        assert len(client.asked()) == 2 and len(client.reads()) == 1  # one question, no new read
+        gate.set()
+        await settle(books)
+        client.call = answer  # it answers again: the next page is as before
+        clock.at += 61_000
+        await books._fresh(who, "positions", clock())
+        again = books.book_of(who, "positions", clock())
+        assert (again["state"], len(again["rows"])) == ("closed", 1)
+        assert again["words"] == "Market closed \u00b7 figures from 19:00:00"
+
+    run(go())
+
+
+def test_n7_kept_figures_are_put_away_after_ten_minutes_without_an_answer_and_say_why():
+    """N7: while the portfolio gave no answer about the share (a seal key that no longer matches,
+    the portfolio switched off or down), an open screen kept its figures until the service
+    restarted. After ``SHARES_KEEP_MS`` without an answer they are put away, the socket is told,
+    the symbols are let go, the sentence says why, and nothing is read or kept again until the
+    portfolio answers. Fails on the old code: the rows were still served hours later."""
+
+    async def go():
+        clock = Clock(ist(MONDAY, 19))
+        books, client = shelf(clock, {"holdings": [holding()]})
+        client.shares = shared_answer()
+        sock, who = Sock(), member()
+        books.open_sockets = lambda: [(sock, who)]
+        told = []
+        books.after_read.append(lambda member_id, part, kept: told.append((part, kept.state)))
+        books.screen(sock, who, "holdings")
+        await settle(books)
+        assert books.keys(1) and told == [("holdings", "ok")]
+        client.shares_down = True
+        for _ in range(10):  # nine minutes after the first unanswered question: kept, not checked
+            clock.at += 61_000
+            books.step()
+            await settle(books)
+        held = books.book_of(who, "holdings", clock())
+        assert (held["state"], len(held["rows"])) == ("unreachable", 1)
+        assert held["words"].startswith("What is shared with you could not be checked just now.")
+        assert books.dropped == 0
+        clock.at += 61_000  # past the tenth minute
+        books.step()
+        await settle(books)
+        gone = books.book_of(who, "holdings", clock())
+        assert (gone["state"], gone["rows"], gone["read_at"]) == ("unreachable", [], None)
+        assert gone["words"] == (
+            "What is shared with you could not be checked for ten minutes, so the figures were "
+            "put away. They come back when the server answers."
+        )
+        assert books.memory[(1, "holdings")].data is None and books.keys(1) == set()
+        assert told[-1] == ("holdings", "unchecked") and books.dropped == 1
+        reads = len(client.reads())
+        for _ in range(5):  # hours later: still nothing, no read of the account, said once
+            clock.at += 3_600_000
+            books.step()
+            await settle(books)
+            await books._fresh(who, "holdings", clock())
+        assert len(client.reads()) == reads and told.count(("holdings", "unchecked")) == 1
+        assert books.book_of(who, "holdings", clock())["rows"] == []
+        client.shares_down = False  # the portfolio answers again: the open screen fills
+        clock.at += 61_000
+        books.step()
+        await settle(books)
+        books.step()
+        await settle(books)
+        back = books.book_of(who, "holdings", clock())
+        assert len(back["rows"]) == 1 and back["state"] in ("ok", "closed")
+
+    run(go())
+
+
+def test_n7_the_bound_is_kept_at_the_door_too_and_a_removed_share_still_wins():
+    """Between the tenth minute and the next question the kept rows are still in memory: the
+    answer leaves them out already. And an answer that the share is gone is "Not shared with
+    you", not the put-away sentence."""
+
+    async def go():
+        clock = Clock(ist(MONDAY, 19))
+        books, client = shelf(clock, {"holdings": [holding()]})
+        client.shares = shared_answer()
+        who = member()
+        await books._fresh(who, "holdings", clock())
+        client.shares_down = True
+        clock.at += 61_000
+        await books._fresh(who, "holdings", clock())  # the first question without an answer
+        clock.at += books_module.SHARES_KEEP_MS - 1
+        assert len(books.book_of(who, "holdings", clock())["rows"]) == 1
+        clock.at += 1
+        assert books.memory[(1, "holdings")].data is not None
+        assert books.book_of(who, "holdings", clock())["rows"] == []
+        client.shares_down, client.shares = False, shared_answer(level=None)
+        await books._fresh(who, "holdings", clock())
+        gone = books.book_of(who, "holdings", clock())
+        assert (gone["state"], gone["words"], gone["rows"]) == ("not_shared", NOT_SHARED, [])
+
+    run(go())
+
+
 def test_m3_one_question_at_a_time_and_what_is_remembered_is_bounded():
     """fd-audit: two pages asking together make one question; a member with nothing kept and no
     socket is forgotten after six hours; ``close`` ends a question still on its way."""
