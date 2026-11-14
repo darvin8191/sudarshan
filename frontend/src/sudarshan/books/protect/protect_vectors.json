@@ -1,0 +1,251 @@
+{
+ "about": "Protect (M5.6): holding, last price and what was typed in; the check, and the exact request out. A request is always a SINGLE sell for delivery (CNC) at a limit of the trigger, with exactly one of the two trigger fields set.",
+ "requests": [
+  {
+   "name": "a stop 2% below the price",
+   "holding": {
+    "symbol": "RELIANCE",
+    "exchange": "NSE",
+    "quantity": 50,
+    "product": "CNC"
+   },
+   "last": 1265.3,
+   "trigger": 1240,
+   "quantity": 50,
+   "check": {
+    "ok": true,
+    "side": "falls"
+   },
+   "request": {
+    "apikey": "KEY",
+    "strategy": "Protect",
+    "trigger_type": "SINGLE",
+    "exchange": "NSE",
+    "symbol": "RELIANCE",
+    "action": "SELL",
+    "product": "CNC",
+    "quantity": 50,
+    "pricetype": "LIMIT",
+    "price": 1240,
+    "triggerprice_sl": 1240,
+    "triggerprice_tg": 0
+   }
+  },
+  {
+   "name": "a target above the price, part of the holding",
+   "holding": {
+    "symbol": "SBIN",
+    "exchange": "BSE",
+    "quantity": 100,
+    "product": "CNC"
+   },
+   "last": 800,
+   "trigger": 880.5,
+   "quantity": 40,
+   "check": {
+    "ok": true,
+    "side": "rises"
+   },
+   "request": {
+    "apikey": "KEY",
+    "strategy": "Protect",
+    "trigger_type": "SINGLE",
+    "exchange": "BSE",
+    "symbol": "SBIN",
+    "action": "SELL",
+    "product": "CNC",
+    "quantity": 40,
+    "pricetype": "LIMIT",
+    "price": 880.5,
+    "triggerprice_sl": 0,
+    "triggerprice_tg": 880.5
+   }
+  },
+  {
+   "name": "exactly 0.5% below is far enough",
+   "holding": {
+    "symbol": "SBIN",
+    "exchange": "NSE",
+    "quantity": 10,
+    "product": "CNC"
+   },
+   "last": 1000,
+   "trigger": 995,
+   "quantity": 10,
+   "check": {
+    "ok": true,
+    "side": "falls"
+   },
+   "request": {
+    "apikey": "KEY",
+    "strategy": "Protect",
+    "trigger_type": "SINGLE",
+    "exchange": "NSE",
+    "symbol": "SBIN",
+    "action": "SELL",
+    "product": "CNC",
+    "quantity": 10,
+    "pricetype": "LIMIT",
+    "price": 995,
+    "triggerprice_sl": 995,
+    "triggerprice_tg": 0
+   }
+  }
+ ],
+ "refused": [
+  {
+   "name": "at the last price it would sell at once",
+   "last": 1000,
+   "trigger": 1000,
+   "says": "within 0.5% of the last price"
+  },
+  {
+   "name": "just under the last price",
+   "last": 1000,
+   "trigger": 995.05,
+   "says": "within 0.5% of the last price"
+  },
+  {
+   "name": "just over the last price",
+   "last": 1000,
+   "trigger": 1004.95,
+   "says": "within 0.5% of the last price"
+  },
+  {
+   "name": "no last price",
+   "last": null,
+   "trigger": 950,
+   "says": "The last price is not showing"
+  },
+  {
+   "name": "a last price of 0",
+   "last": 0,
+   "trigger": 950,
+   "says": "The last price is not showing"
+  },
+  {
+   "name": "nothing typed",
+   "last": 1000,
+   "trigger": null,
+   "says": "Type the price"
+  },
+  {
+   "name": "a negative price",
+   "last": 1000,
+   "trigger": -5,
+   "says": "Type the price"
+  }
+ ],
+ "holdings": [
+  {
+   "name": "shares on NSE",
+   "holding": {
+    "symbol": "RELIANCE",
+    "exchange": "NSE",
+    "quantity": 50,
+    "product": "CNC"
+   },
+   "protectable": true
+  },
+  {
+   "name": "shares on BSE",
+   "holding": {
+    "symbol": "RELIANCE",
+    "exchange": "BSE",
+    "quantity": 1,
+    "product": "CNC"
+   },
+   "protectable": true
+  },
+  {
+   "name": "an option position",
+   "holding": {
+    "symbol": "NIFTY24NOV2625000CE",
+    "exchange": "NFO",
+    "quantity": 65,
+    "product": "NRML"
+   },
+   "protectable": false
+  },
+  {
+   "name": "a future",
+   "holding": {
+    "symbol": "RELIANCE24NOV26FUT",
+    "exchange": "NFO",
+    "quantity": 500,
+    "product": "NRML"
+   },
+   "protectable": false
+  },
+  {
+   "name": "a BSE derivative",
+   "holding": {
+    "symbol": "SENSEX26NOV26FUT",
+    "exchange": "BFO",
+    "quantity": 20,
+    "product": "NRML"
+   },
+   "protectable": false
+  },
+  {
+   "name": "a commodity",
+   "holding": {
+    "symbol": "GOLDM05DEC26FUT",
+    "exchange": "MCX",
+    "quantity": 1,
+    "product": "NRML"
+   },
+   "protectable": false
+  },
+  {
+   "name": "intraday shares",
+   "holding": {
+    "symbol": "RELIANCE",
+    "exchange": "NSE",
+    "quantity": 50,
+    "product": "MIS"
+   },
+   "protectable": false
+  },
+  {
+   "name": "nothing held",
+   "holding": {
+    "symbol": "RELIANCE",
+    "exchange": "NSE",
+    "quantity": 0,
+    "product": "CNC"
+   },
+   "protectable": false
+  },
+  {
+   "name": "sold more than held",
+   "holding": {
+    "symbol": "RELIANCE",
+    "exchange": "NSE",
+    "quantity": -5,
+    "product": "CNC"
+   },
+   "protectable": false
+  },
+  {
+   "name": "an F&O row whose product reads CNC is still not shares",
+   "holding": {
+    "symbol": "NIFTY24NOV2625000CE",
+    "exchange": "NFO",
+    "quantity": 65,
+    "product": "CNC"
+   },
+   "protectable": false
+  },
+  {
+   "name": "an index is not a holding",
+   "holding": {
+    "symbol": "NIFTY",
+    "exchange": "NSE_INDEX",
+    "quantity": 1,
+    "product": "CNC"
+   },
+   "protectable": false
+  }
+ ]
+}

@@ -1,4 +1,4 @@
-import { CandlestickChart, Minus, Plus } from 'lucide-react'
+import { CandlestickChart, Minus, Plus, ShieldCheck } from 'lucide-react'
 import { memo, type ReactNode, useCallback, useEffect } from 'react'
 import { calculateLiveStats } from '@/hooks/useLivePrice'
 import { cn, sanitizeCSV } from '@/lib/utils'
@@ -6,6 +6,9 @@ import { AccessNotice } from '@/sudarshan/AccessNotice'
 import { usePriceAccess, useReadWhenReady } from '@/sudarshan/access'
 import { type FeedRow, useBookFeed } from '@/sudarshan/books/feed'
 import type { TickDirection } from '@/sudarshan/books/prices'
+import { ProtectPanel } from '@/sudarshan/books/protect/ProtectPanel'
+import { protectedLine } from '@/sudarshan/books/protect/protect' // SUDARSHAN G1 (M5.6)
+import { useProtectBook } from '@/sudarshan/books/protect/useProtect'
 import { SymbolChartLink } from '@/sudarshan/chart/SymbolChartLink'
 import { formatRupees } from '@/sudarshan/dashboard/format'
 import { LiveLine } from '@/sudarshan/dashboard/LiveLine'
@@ -188,6 +191,8 @@ const HoldingBoard = memo(function HoldingBoard({
   // No key or no Upstox login: the notice says which, never "No holdings".
   const access = usePriceAccess()
   useReadWhenReady(access.state, error !== null, refresh)
+  // SUDARSHAN G1 (M5.6): the working sell GTTs on these holdings, when Protect is switched on.
+  const protect = useProtectBook(apiKey, useSandbox(), bookAt)
   const figuresStale = (line.kind === 'delayed' || line.kind === 'connecting') && line.stale
 
   const target =
@@ -277,6 +282,7 @@ const HoldingBoard = memo(function HoldingBoard({
                 }
                 stale={stale(feedRowOf(row))}
                 onOpen={openSheet}
+                protect={protect.of(row.item).map(protectedLine).join(' · ') || null}
               />
             )
           })}
@@ -303,6 +309,11 @@ const HoldingBoard = memo(function HoldingBoard({
           onClose={close}
           onBuy={() => order(target, 'BUY')}
           onSell={() => order(target, 'SELL')}
+          protect={
+            protect.shown ? (
+              <ProtectPanel holding={target.item} last={target.ltp} book={protect} />
+            ) : null
+          }
         />
       )}
     </div>
@@ -404,6 +415,7 @@ const HoldingCard = memo(function HoldingCard({
   dayPercent,
   stale,
   onOpen,
+  protect,
 }: {
   id: string
   symbol: string
@@ -418,6 +430,8 @@ const HoldingCard = memo(function HoldingCard({
   dayPercent: number | null
   stale: boolean
   onOpen: (id: string) => void
+  /** "Protected: sell 50 at 1,240.00", when a sell GTT is working on it. */
+  protect: string | null
 }) {
   const named = describe(symbol, exchange)
   return (
@@ -454,6 +468,15 @@ const HoldingCard = memo(function HoldingCard({
             </span>
           </span>
         </span>
+        {protect && (
+          <span
+            data-protect="true"
+            className="flex items-center gap-1.5 text-xs leading-tight font-semibold text-[color:var(--info)]"
+          >
+            <ShieldCheck aria-hidden="true" className="size-3.5 shrink-0" />
+            <span className="min-w-0 truncate">{protect}</span>
+          </span>
+        )}
       </button>
     </li>
   )
@@ -468,6 +491,7 @@ function HoldingSheet({
   onClose,
   onBuy,
   onSell,
+  protect,
 }: {
   row: PricedRow<Holding>
   stale: boolean
@@ -476,6 +500,8 @@ function HoldingSheet({
   onClose: () => void
   onBuy: () => void
   onSell: () => void
+  /** SUDARSHAN G1 (M5.6): the holding's Protect, when it is switched on. */
+  protect: ReactNode
 }) {
   const holding = row.item
   const { symbol, exchange, product } = holding
@@ -534,6 +560,8 @@ function HoldingSheet({
             <ActionWords sandbox={sandbox}>Sell</ActionWords>
           </button>
         </div>
+
+        {protect}
 
         <SymbolChartLink symbol={symbol} exchange={exchange} className={cn(OUTLINED, 'w-full')}>
           <CandlestickChart aria-hidden="true" className="size-5" />

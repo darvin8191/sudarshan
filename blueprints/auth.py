@@ -1106,6 +1106,7 @@ def get_session_status():
 
         # Get API key for the user
         api_key = get_api_key_for_tradingview(session.get("user"))
+        from sudarshan.books import protect_flag  # SUDARSHAN G1
 
         # Include active session count
         from database.auth_db import get_active_sessions
@@ -1120,6 +1121,9 @@ def get_session_status():
                 "broker": session.get("broker"),
                 "api_key": api_key,
                 "active_sessions": active_count,
+                # SUDARSHAN G1 (M5.6): whether a holding's sheet may offer Protect. The page's
+                # switch only; no order code reads it.
+                "gtt_protect": protect_flag.stage(),
             }
         )
 

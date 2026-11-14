@@ -3,6 +3,7 @@ import { useAuthStore } from '@/stores/authStore'
 import { useBrokerStore } from '@/stores/brokerStore'
 import { useSessionStore } from '@/stores/sessionStore'
 import { useThemeStore } from '@/stores/themeStore'
+import { noteProtectStage } from '@/sudarshan/books/protect/stage'
 import { inFamilyScope } from '@/sudarshan/pwa/register' // SUDARSHAN P6 D2
 
 interface AuthSyncProps {
@@ -62,6 +63,7 @@ export async function syncSession({ keepOnFailure = false }: SyncOptions = {}): 
       // SUDARSHAN: whether today's broker login is still good. After the key,
       // so a screen never sees "logged in, no key" on its way to ready.
       setBrokerSession(data.broker_session_expired === true)
+      noteProtectStage(data.gtt_protect) // SUDARSHAN G1 (M5.6): the Protect switch
       // Fetch broker capabilities (exchanges, type, features)
       await fetchCapabilities()
       if (signedOutSince()) {
