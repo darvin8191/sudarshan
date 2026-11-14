@@ -167,6 +167,7 @@ public_shell  /strategy/<int:strategy_id>/edit       react.react_strategy_edit
 public_shell  /strategy/new                          react.react_strategy_new
 public_shell  /strategybuilder                       react.react_strategybuilder
 public_shell  /strategybuilder/portfolio             react.react_strategybuilder_portfolio
+public_shell  /system                              react.react_system
 public_shell  /telegram                              react.react_telegram_index
 public_shell  /telegram/analytics                    react.react_telegram_analytics
 public_shell  /telegram/config                       react.react_telegram_config
@@ -849,6 +850,8 @@ protected     /sudarshan/screener/api/today                                     
 protected     /sudarshan/screener/api/universes                                         sudarshan_screener.universes
 protected     /sudarshan/session/instrument                                             sudarshan_session_bp.instrument
 protected     /sudarshan/session/today                                                  sudarshan_session_bp.today
+protected     /sudarshan/system/api/assistant/disconnect                                sudarshan_system.disconnect
+protected     /sudarshan/system/api/status                                              sudarshan_system.status
 protected     /sudarshan/watchlists/api/copy                                            sudarshan_watchlists.copy
 protected     /sudarshan/watchlists/api/favourites                                      sudarshan_watchlists.favourites
 protected     /sudarshan/watchlists/api/flags                                           sudarshan_watchlists.flags
