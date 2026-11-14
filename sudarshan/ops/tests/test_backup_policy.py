@@ -120,7 +120,7 @@ def test_a_cap_the_untouchable_archives_already_fill_stops_the_night_and_says_so
         sparse(server.seed(ist(2026, 10, day), 1), 4 * GIB)  # three nights of 4 GiB, cap 10 GiB
     old = server.seed(ist(2026, 6, 1), 100)  # outside the three nights and the one month kept
 
-    result = go(server, settings=server.settings(keep_daily=3, keep_monthly=1))
+    result = go(server, settings=server.settings(keep_daily=3, keep_monthly=1, keep_yearly=0))
 
     assert (result.outcome, result.archive, result.exit_code) == (FAILED, "", 1)
     assert [f.why for f in result.failures] == [CAP]

@@ -1,0 +1,106 @@
+{
+ "labels": [
+  [
+   "2027-03-31 15:59:59",
+   null,
+   "on 31 March before 16:00 the year that is ending is not whole yet, and last year's window is long over"
+  ],
+  [
+   "2027-03-31 16:00:00",
+   "2026-27",
+   "from 16:00 on 31 March the year is whole"
+  ],
+  [
+   "2027-03-31 16:30:02",
+   "2026-27",
+   "the evening run of 31 March"
+  ],
+  [
+   "2027-04-01 16:30:02",
+   "2026-27",
+   "the day after"
+  ],
+  [
+   "2027-06-30 22:30:00",
+   "2026-27",
+   "the last day of the window"
+  ],
+  [
+   "2027-07-01 16:30:00",
+   null,
+   "after the window an archive is no year's archive"
+  ],
+  [
+   "2026-11-14 16:30:00",
+   null,
+   "a server first installed in November"
+  ],
+  [
+   "2100-03-31 16:00:00",
+   "2099-00",
+   "the label keeps two digits"
+  ]
+ ],
+ "yearlies": [
+  {
+   "name": "the first complete archive after the close of 31 March is the year's",
+   "archives": [
+    "20270330-163000",
+    "20270331-163000",
+    "20270331-223000",
+    "20270401-163000"
+   ],
+   "yearly": {
+    "2026-27": "20270331-163000"
+   }
+  },
+  {
+   "name": "an archive of 31 March before 16:00 is not the ending year's",
+   "archives": [
+    "20270331-100000",
+    "20270401-163000"
+   ],
+   "yearly": {
+    "2026-27": "20270401-163000"
+   }
+  },
+  {
+   "name": "a partial archive does not count",
+   "archives": [
+    "20270331-163000-partial",
+    "20270331-223000-partial",
+    "20270402-163000",
+    "20270403-163000"
+   ],
+   "yearly": {
+    "2026-27": "20270402-163000"
+   }
+  },
+  {
+   "name": "a year with only partial archives has no archive",
+   "archives": [
+    "20270331-163000-partial"
+   ],
+   "yearly": {}
+  },
+  {
+   "name": "a server that was down in April takes the first one after it came back",
+   "archives": [
+    "20270329-163000",
+    "20270518-163000",
+    "20270519-163000"
+   ],
+   "yearly": {
+    "2026-27": "20270518-163000"
+   }
+  },
+  {
+   "name": "a server down until July has no archive for that year",
+   "archives": [
+    "20270329-163000",
+    "20270702-163000"
+   ],
+   "yearly": {}
+  }
+ ]
+}

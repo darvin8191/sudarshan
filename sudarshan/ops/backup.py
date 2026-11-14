@@ -51,7 +51,8 @@ after the wait) says nothing by itself. When that leaves the newest complete arc
 ``OVERDUE_S`` (30 hours) old it tells the owner, once a day (cause ``overdue``); with no complete
 archive on the server at all it judges nothing, since a night skipped on a new server is not late.
 
-Keeping them: ``retention.py`` (30 daily and 12 monthly archives, then the size cap). Space is
+Keeping them: ``retention.py`` (30 daily and 12 monthly archives, one per financial year for 8
+years, then the size cap, which never takes a year's archive). Space is
 checked before anything is written: an archive that does not fit is not started, and the owner
 is told why.
 
@@ -206,6 +207,7 @@ class Settings:
     deployed_tag_file: Path
     keep_daily: int = 30
     keep_monthly: int = 12
+    keep_yearly: int = 8
     max_bytes: int = 10 * GIB
     min_free_bytes: int = 2 * GIB
     min_gap_s: float = 8 * 3600.0
@@ -245,6 +247,7 @@ class Settings:
             deployed_tag_file=Path(get("SUDARSHAN_DEPLOYED_TAG_FILE") or DEPLOYED_TAG_FILE),
             keep_daily=int(_number(env, "SUDARSHAN_BACKUP_KEEP_DAILY", 30, 1, 366)),
             keep_monthly=int(_number(env, "SUDARSHAN_BACKUP_KEEP_MONTHLY", 12, 0, 120)),
+            keep_yearly=int(_number(env, "SUDARSHAN_BACKUP_KEEP_YEARLY", 8, 0, 50)),
             max_bytes=int(_number(env, "SUDARSHAN_BACKUP_MAX_GB", 10, 0.01, 1e6) * GIB),
             min_free_bytes=int(_number(env, "SUDARSHAN_BACKUP_MIN_FREE_GB", 2, 0, 1e7) * GIB),
             min_gap_s=_number(env, "SUDARSHAN_BACKUP_MIN_GAP_HOURS", 8, 0, 72) * 3600.0,
@@ -1054,6 +1057,9 @@ def _offsite_step(settings: Settings, started: datetime, result: Result) -> None
         release=installed_release(settings.deployed_tag_file),
         today=day,
         free_bytes=free_bytes(settings.archive_dir),
+        fy=retention.yearly_label(list_archives(settings.archive_dir), result.archive)
+        if settings.keep_yearly
+        else None,
     )
     result.offsite = outcome.state
     if outcome.state == "off":
@@ -1204,7 +1210,12 @@ def _run_locked(
         return Result(FAILED, failures=[Failure(OTHER)])
 
     # What lies outside the counts goes first: it is never wanted, and it is space given back.
-    by_count = retention.plan(existing, daily=settings.keep_daily, monthly=settings.keep_monthly)
+    by_count = retention.plan(
+        existing,
+        daily=settings.keep_daily,
+        monthly=settings.keep_monthly,
+        yearly=settings.keep_yearly,
+    )
     remove(archive_dir, by_count.delete)
     # Then the cap, for the archive about to be written. If it cannot fit even with the oldest
     # dailies gone, nothing more is removed: they are worth more than a promise to fit.
@@ -1213,6 +1224,7 @@ def _run_locked(
         list(by_count.keep),
         daily=settings.keep_daily,
         monthly=settings.keep_monthly,
+        yearly=settings.keep_yearly,
         cap_bytes=settings.max_bytes,
         reserve=guess,
     )
@@ -1280,6 +1292,7 @@ def _write(
             list_archives(archive_dir),
             daily=settings.keep_daily,
             monthly=settings.keep_monthly,
+            yearly=settings.keep_yearly,
             cap_bytes=settings.max_bytes,
         )
         remove(archive_dir, settled.delete)
@@ -1441,6 +1454,7 @@ def check(settings: Settings, now: datetime) -> str:
         existing,
         daily=settings.keep_daily,
         monthly=settings.keep_monthly,
+        yearly=settings.keep_yearly,
         cap_bytes=settings.max_bytes,
         reserve=int(found.total * COMPRESSED_GUESS),
     )

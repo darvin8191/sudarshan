@@ -114,11 +114,22 @@ def say_date(day: date) -> str:
     return f"{day.day} {MONTHS[day.month - 1]} {day.year}"
 
 
-def object_name(archive: str, release: str | None) -> str:
-    """``sudarshan-backup-20261109-163102-v0.7.0.tar.gz.cms``: the date and the release, no host."""
+#: A financial year's archive is uploaded under this prefix instead of the nightly one, so the
+#: owner's lifecycle rules, which name the nightly prefix, never expire it (M18.11, M19.10).
+FY_PREFIX = "sudarshan-fy-"
+NIGHTLY_PREFIX = "sudarshan-backup-"
+_FY = re.compile(r"[0-9]{4}-[0-9]{2}")
+
+
+def object_name(archive: str, release: str | None, fy: str | None = None) -> str:
+    """``sudarshan-backup-20261109-163102-v0.7.0.tar.gz.cms``: the date and the release, no host.
+    With ``fy`` (``2026-27``), the financial year's archive:
+    ``sudarshan-fy-2026-27-20270331-163102-v0.13.1.tar.gz.cms``."""
     stem = archive[: -len(".tar.gz")] if archive.endswith(".tar.gz") else archive
     partial = "-partial" if stem.endswith("-partial") else ""
     stem = stem.removesuffix("-partial")
+    if fy and _FY.fullmatch(fy) and not partial and stem.startswith(NIGHTLY_PREFIX):
+        stem = f"{FY_PREFIX}{fy}-{stem.removeprefix(NIGHTLY_PREFIX)}"
     return f"{stem}-{release or 'norelease'}{partial}.tar.gz.cms"
 
 
@@ -391,6 +402,7 @@ def send(
     today: date,
     free_bytes: int,
     sleep: Callable[[float], None] = time.sleep,
+    fy: str | None = None,
 ) -> Outcome:
     """Encrypt and upload one archive. Never raises: the outcome says what happened."""
     try:
@@ -403,7 +415,7 @@ def send(
     if left <= 0:  # the expiry date the console shows: the link may stop at any time that day
         return Outcome("failed", "expired", left, config.expires)
     warn = left if left <= WARN_DAYS else None
-    name = object_name(archive.name, release)
+    name = object_name(archive.name, release, fy)
     sealed = work / f"offsite-{name}"
     try:
         work.mkdir(mode=0o700, parents=True, exist_ok=True)

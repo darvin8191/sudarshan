@@ -357,7 +357,18 @@ each night's archive into a root-owned folder is possible later and is the owner
 nights that have one, and the newest of each of the 12 most recent months, so a month is still
 represented a year after its nights are gone. A night is represented by its newest *complete*
 archive. The newest complete archive is never removed, whatever else is true: a run of partial
-archives cannot push the last good one out. Then a size cap (10 GB for all of them):
+archives cannot push the last good one out.
+
+**One archive per financial year, kept 8 years (M19.10).** The first complete archive made once
+the market has closed on 31 March (from 16:00) is that financial year's archive, whatever the
+counts above say; one made more than 92 days later is never taken for it. The newest 8 are kept
+(`SUDARSHAN_BACKUP_KEEP_YEARLY`), for the years the tax records must be kept. Its offsite copy is
+uploaded under a name of its own, `sudarshan-fy-2026-27-YYYYMMDD-HHMMSS-<release>.tar.gz.cms`,
+so that the bucket's delete rules, which name the nightly prefix (step 3 below), never remove
+it. The System page shows the newest year's archive and its size: eight of them must fit the
+size cap and the bucket.
+
+Then a size cap (10 GB for all of them), which never takes a monthly or a year's archive:
 
 - before anything is written, what is outside the counts goes, and then the oldest nights, never a
   month's archive, never the three newest and never the newest complete one, until the new
@@ -393,6 +404,7 @@ value that cannot be used is refused by name and the owner is told):
 | --- | --- | --- |
 | `SUDARSHAN_BACKUP_KEEP_DAILY` | 30 | nights kept (1 to 366) |
 | `SUDARSHAN_BACKUP_KEEP_MONTHLY` | 12 | months kept (0 to 120) |
+| `SUDARSHAN_BACKUP_KEEP_YEARLY` | 8 | financial-year archives kept (0 to 50; 0 keeps none) |
 | `SUDARSHAN_BACKUP_MAX_GB` | 10 | size cap for all archives (0.01 and up) |
 | `SUDARSHAN_BACKUP_MIN_FREE_GB` | 2 | free space to leave beyond the archive (0 and up) |
 | `SUDARSHAN_BACKUP_MIN_GAP_HOURS` | 8 | a complete archive newer than this ends a run (0 to 72) |
@@ -447,8 +459,11 @@ empty settings file, with `install`; the settings are written by `sudarshan`, th
    bucket: under Features, Object versioning must read Enabled. (For a bucket made earlier,
    choose Enable there, then Enable versioning.)
 3. In the bucket, open Policies, then Lifecycle policy rules, and make two rules with Create rule.
-   Each has Lifecycle action Delete, Number of days 30 (or what you like, the same in both), and
-   the State switch on:
+   Each has Lifecycle action Delete, Number of days 30 (or what you like, the same in both), the
+   State switch on, and under Object name filters one filter of the kind **Include by prefix**
+   with the text `sudarshan-backup-` (so the rule deletes the nightly copies only, and never a
+   financial year's archive, whose name starts `sudarshan-fy-`; if you made the two rules before
+   v0.13.1 without this filter, edit both and add it before the first 31 March):
    - Target **Latest version of objects**: after 30 days the newest version of a copy becomes a
      previous version;
    - Target **Previous versions of objects**: a previous version is deleted 30 days after it
