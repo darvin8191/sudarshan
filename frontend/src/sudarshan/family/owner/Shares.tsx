@@ -1,11 +1,11 @@
 // SUDARSHAN P6 D7b (M8.15, M7.37): what the owner shares with the family. Watchlists (pick lists,
-// for one member or every member), Books (positions, holdings, orders, trades and funds, one
-// member at a time, beside what that member's privacy hides) and Portfolio tabs (one member or
+// for one member or every member), Books (no switch: one line saying what decides which books a
+// member can open, and the way to both places) and Portfolio tabs (one member or
 // every member, View or Restricted, an optional end: PortfolioTabShares.tsx, kept in the
 // portfolio). One share is one switch; a switch sends once however it is tapped (the section
 // holds one write at a time) and shows the service's sentence.
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { EyeOff, Loader2 } from 'lucide-react'
+import { ArrowDown, ChevronRight, Loader2 } from 'lucide-react'
 import { useState } from 'react'
 import { watchlistApi } from '@/api/watchlist'
 import { Label } from '@/components/ui/label'
@@ -15,7 +15,7 @@ import type { MemberCard, Share, ShareKind } from '../types'
 import { SHARES_KEY } from './keys'
 import { PortfolioTabShares } from './PortfolioTabShares'
 import { CARD, ROW, SaidLine, useOnce } from './parts'
-import { BOOK_HIDDEN_BY, BOOK_PARTS, coveredByAll, rowFor, type Target } from './shareRules'
+import { coveredByAll, rowFor, type Target } from './shareRules'
 
 const SELECT =
   'h-12 w-full rounded-md border border-[color:var(--input)] bg-card px-3 text-base outline-none focus-visible:ring-2 focus-visible:ring-ring'
@@ -168,68 +168,92 @@ function Watchlists({ members, shares }: { members: MemberCard[]; shares: readon
   )
 }
 
-function Books({ members, shares }: { members: MemberCard[]; shares: readonly Share[] }) {
-  const [id, setId] = useState<number | null>(members[0]?.id ?? null)
-  const member = members.find((m) => m.id === id) ?? members[0]
-  const swap = useShareSwitch(shares)
+export const BOOKS_RULE =
+  'Books are not switched on one by one. A member can open your books only while the Upstox tab is shared with them. Orders and trades also need their Orders switch, and funds their Funds switch.'
+
+const LINK =
+  'flex min-h-12 w-full items-center justify-between gap-3 rounded-xl border px-3 text-left text-[0.9375rem] font-semibold outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring'
+
+const shownWord = (on: boolean) => (on ? 'shown' : 'hidden')
+
+/**
+ * Review H1 (v0.12.0): which books a member can open is decided by the Upstox tab's share and by
+ * the member's Orders and Funds switches, and by nothing else. This section had a switch for each
+ * book that the server kept and never read; it now says what decides it and leads to both places.
+ */
+function Books({
+  members,
+  onOpenMember,
+}: {
+  members: MemberCard[]
+  onOpenMember?: (id: number) => void
+}) {
+  const toTabs = () => {
+    const heading = document.getElementById('share-tabs')
+    heading?.scrollIntoView?.({ block: 'start' })
+    heading?.focus?.()
+  }
   return (
     <section aria-labelledby="share-books" className={`${CARD} flex flex-col gap-3`}>
       <h2 id="share-books" className="text-[1.0625rem] font-bold">
         Books
       </h2>
-      <Note>
-        Which of your books a member can open. What their privacy hides stays hidden even where a
-        book is shared.
-      </Note>
-      {member ? (
-        <>
-          <TargetPicker
-            id="share-books-target"
-            members={members}
-            value={member.id}
-            onChange={(next) => setId(next === 'all' ? null : next)}
-            every={false}
-          />
-          <SaidLine said={swap.said} />
-          <ul className="flex flex-col divide-y divide-[color:var(--divider)]">
-            {BOOK_PARTS.map(({ part, label }) => {
-              const on = rowFor(shares, 'book', part, member.id) !== undefined
-              const category = BOOK_HIDDEN_BY[part as keyof typeof BOOK_HIDDEN_BY]
-              const hidden = category !== undefined && !member.privacy[category]
-              return (
-                <li key={part} className={ROW}>
-                  <div className="flex flex-col">
-                    <Label htmlFor={`share-book-${part}`}>{label}</Label>
-                    <span className="text-[0.8125rem] text-[color:var(--text-tertiary)]">
-                      {on ? 'Shared' : 'Not shared'}
-                    </span>
-                    {hidden ? (
-                      <span className="flex items-center gap-1 text-[0.8125rem] text-[color:var(--warning-text)]">
-                        <EyeOff aria-hidden="true" className="size-3.5" />
-                        Hidden by their privacy settings
-                      </span>
-                    ) : null}
-                  </div>
-                  <Switch
-                    id={`share-book-${part}`}
-                    checked={on}
-                    disabled={swap.pending}
-                    aria-label={`Share ${label}`}
-                    onCheckedChange={(next) => swap.flip('book', part, member.id, next, label)}
-                  />
-                </li>
-              )
-            })}
-          </ul>
-        </>
-      ) : (
+      <p className="text-[0.9375rem] leading-snug">{BOOKS_RULE}</p>
+      <button type="button" className={LINK} onClick={toTabs}>
+        <span>Upstox tab share</span>
+        <span className="flex shrink-0 items-center gap-1 text-[0.8125rem] font-medium text-[color:var(--text-tertiary)]">
+          Portfolio tabs
+          <ArrowDown aria-hidden="true" className="size-4" />
+        </span>
+      </button>
+      {members.length === 0 ? (
         <p className="text-[0.9375rem]">Add a member first.</p>
+      ) : (
+        <ul aria-label="Orders and Funds switches" className="flex flex-col gap-2">
+          {members.map((member) => {
+            const state = `Orders and trades ${shownWord(member.privacy.orders)} · Funds ${shownWord(member.privacy.funds)}`
+            const body = (
+              <span className="flex min-w-0 flex-col py-2">
+                <span className="truncate">{member.display_name}</span>
+                <span className="text-[0.8125rem] font-medium text-[color:var(--text-tertiary)]">
+                  {state}
+                </span>
+              </span>
+            )
+            return (
+              <li key={member.id}>
+                {onOpenMember ? (
+                  <button
+                    type="button"
+                    className={LINK}
+                    aria-label={`Privacy settings of ${member.display_name}: ${state}`}
+                    onClick={() => onOpenMember(member.id)}
+                  >
+                    {body}
+                    <ChevronRight aria-hidden="true" className="size-4 shrink-0" />
+                  </button>
+                ) : (
+                  <div className={LINK.replace(' hover:bg-accent', '')}>{body}</div>
+                )}
+              </li>
+            )
+          })}
+        </ul>
       )}
     </section>
   )
 }
 
-export function Shares({ members, now = Date.now() }: { members: MemberCard[]; now?: number }) {
+export function Shares({
+  members,
+  now = Date.now(),
+  onOpenMember,
+}: {
+  members: MemberCard[]
+  now?: number
+  /** Opens a member's sheet, where the Orders and Funds switches are. */
+  onOpenMember?: (id: number) => void
+}) {
   const shares = useQuery({
     queryKey: SHARES_KEY,
     queryFn: ({ signal }) => ownerApi.shareList(signal),
@@ -255,7 +279,7 @@ export function Shares({ members, now = Date.now() }: { members: MemberCard[]; n
   return (
     <div className="flex flex-col gap-4">
       <Watchlists members={live} shares={shares.data} />
-      <Books members={live} shares={shares.data} />
+      <Books members={live} onOpenMember={onOpenMember} />
       <PortfolioTabShares members={live} now={now} />
     </div>
   )

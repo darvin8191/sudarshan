@@ -203,6 +203,18 @@ describe('the Family page', () => {
     expect(await screen.findByText('Store version 5')).toBeInTheDocument()
   })
 
+  // Review H1 (v0.12.0): the Books section leads to the switches that decide it.
+  it('opens a member sheet from the Books section of Shares, on the Shares tab', async () => {
+    api.memberList.mockResolvedValue([cardOf()])
+    mount()
+    await screen.findByText('Test One')
+    await userEvent.click(screen.getByRole('tab', { name: 'Shares' }))
+    await userEvent.click(
+      await screen.findByRole('button', { name: /Privacy settings of Test One/ })
+    )
+    expect(await screen.findByRole('button', { name: 'Save changes' })).toBeInTheDocument()
+  })
+
   it('shows the service state with the message when the family view is off', async () => {
     api.memberList.mockRejectedValue(
       new OwnerError('off', 'The family view is switched off on the server.')

@@ -27,7 +27,7 @@ import type { TabShare } from '@/sudarshan/portfolio/types'
 import { OwnerError } from '../ownerApi'
 import { cardOf, NOW, shareOf } from './fixtures'
 import { END_AFTER_NOW, ENDED_BLOCKS, TABS_NOTE, UPSTOX_NOTE } from './PortfolioTabShares'
-import { Shares } from './Shares'
+import { BOOKS_RULE, Shares } from './Shares'
 
 const members = [
   cardOf(),
@@ -48,12 +48,12 @@ const watchlists = [
   { id: 8, name: 'Long term', position: 1, items: [] },
 ]
 
-function mount() {
+function mount(onOpenMember?: (id: number) => void) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const spy = vi.spyOn(client, 'invalidateQueries')
   render(
     <QueryClientProvider client={client}>
-      <Shares members={members} now={NOW} />
+      <Shares members={members} now={NOW} onOpenMember={onOpenMember} />
     </QueryClientProvider>
   )
   return { spy }
@@ -226,47 +226,60 @@ describe('sharing watchlists', () => {
   })
 })
 
-describe('sharing books', () => {
-  it('shows the five books of a member, and shares one for that member', async () => {
-    api.shareSet.mockResolvedValue(shareOf({ kind: 'book', ref: 'orders' }))
-    mount()
-    const books = (await screen.findByRole('heading', { name: 'Books' })).closest(
-      'section'
-    ) as HTMLElement
-    for (const label of ['Positions', 'Holdings', 'Orders', 'Trades', 'Funds']) {
-      expect(within(books).getByRole('switch', { name: `Share ${label}` })).toBeInTheDocument()
-    }
-    await userEvent.click(within(books).getByRole('switch', { name: 'Share Orders' }))
-    expect(api.shareSet).toHaveBeenCalledWith(
-      expect.objectContaining({ kind: 'book', ref: 'orders', member_id: 1, role: null })
+// Review H1 (v0.12.0): the server never read a share row of kind `book`, so a switch here said
+// "Not shared" above a book the member was reading. Each of these fails on the old section.
+describe('books', () => {
+  const section = async () =>
+    (await screen.findByRole('heading', { name: 'Books' })).closest('section') as HTMLElement
+
+  it('has no switch and never says Shared or Not shared beside a book', async () => {
+    portfolio.call.mockImplementation(
+      portfolioAnswers({ shares: [tabShare({ tab_id: 1, viewer: 'role:viewer' })] })
     )
+    mount()
+    const books = await section()
+    expect(within(books).queryAllByRole('switch')).toHaveLength(0)
+    expect(within(books).queryByText('Not shared')).toBeNull()
+    expect(within(books).queryByText('Shared')).toBeNull()
+    expect(within(books).queryByLabelText('Share with')).toBeNull()
+    expect(within(books).getByText(BOOKS_RULE)).toBeInTheDocument()
   })
 
-  it('says beside a book what the member privacy hides, with an icon and the words', async () => {
-    mount()
-    const books = (await screen.findByRole('heading', { name: 'Books' })).closest(
-      'section'
-    ) as HTMLElement
-    // The first member shows orders, hides funds.
-    expect(within(books).getAllByText('Hidden by their privacy settings')).toHaveLength(1)
-    await userEvent.selectOptions(within(books).getByLabelText('Share with'), '2')
-    // The second member hides orders, trades and funds.
-    expect(within(books).getAllByText('Hidden by their privacy settings')).toHaveLength(3)
+  it('never writes a share of kind book, whatever is tapped in the section', async () => {
+    const opened: number[] = []
+    mount((id) => opened.push(id))
+    const books = await section()
+    for (const button of within(books).getAllByRole('button')) await userEvent.click(button)
+    expect(api.shareSet).not.toHaveBeenCalled()
+    expect(api.shareRemove).not.toHaveBeenCalled()
   })
 
-  it('stops sharing a book with the row version', async () => {
-    api.shareList.mockResolvedValue([
-      shareOf({ id: 5, kind: 'book', ref: 'holdings', member_id: 1, version: 2 }),
-    ])
-    api.shareRemove.mockResolvedValue({ ok: true, words: null })
+  it('says what each member Orders and Funds switches stand at, and opens their sheet', async () => {
+    const opened: number[] = []
+    mount((id) => opened.push(id))
+    const books = await section()
+    // The first member shows orders and hides funds; the second hides both.
+    const first = within(books).getByRole('button', { name: /Privacy settings of Test One/ })
+    expect(first.textContent).toContain('Orders and trades shown · Funds hidden')
+    const second = within(books).getByRole('button', { name: /Privacy settings of Test Two/ })
+    expect(second.textContent).toContain('Orders and trades hidden · Funds hidden')
+    await userEvent.click(second)
+    expect(opened).toEqual([2])
+  })
+
+  it('leads to the Portfolio tabs section, where the Upstox tab is shared', async () => {
     mount()
-    const books = (await screen.findByRole('heading', { name: 'Books' })).closest(
-      'section'
-    ) as HTMLElement
-    const holdings = within(books).getByRole('switch', { name: 'Share Holdings' })
-    await waitFor(() => expect(holdings).toHaveAttribute('aria-checked', 'true'))
-    await userEvent.click(holdings)
-    expect(api.shareRemove).toHaveBeenCalledWith({ id: 5, version: 2 })
+    const books = await section()
+    const tabs = await screen.findByRole('heading', { name: 'Portfolio tabs' })
+    await userEvent.click(within(books).getByRole('button', { name: /Upstox tab share/ }))
+    expect(tabs).toHaveFocus()
+  })
+
+  it('leaves a book row an earlier release made out of the page', async () => {
+    api.shareList.mockResolvedValue([shareOf({ id: 5, kind: 'book', ref: 'holdings' })])
+    mount()
+    const books = await section()
+    expect(within(books).queryByText(/Holdings/)).toBeNull()
   })
 })
 

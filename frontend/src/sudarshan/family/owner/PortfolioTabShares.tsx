@@ -35,7 +35,7 @@ import { ROLE_WORDS, whenOf } from './words'
 export const TABS_NOTE =
   'A member sees a shared tab with what their privacy allows. Restricted shows the holdings by name only, with no figure.'
 export const UPSTOX_NOTE =
-  'The family view reads positions, holdings, orders and trades from this tab, so a member sees the Books above only while it is shared with them.'
+  'The family view reads positions, holdings, orders and trades from this tab, so a member can open your books only while it is shared with them.'
 export const ENDED_BLOCKS =
   'While this ended share stays, the share with every member does not reach them either.'
 export const PICK_END = 'Choose when the share ends.'
@@ -345,7 +345,7 @@ export function PortfolioTabShares({ members, now }: { members: MemberCard[]; no
 
   return (
     <section aria-labelledby="share-tabs" className={`${CARD} flex flex-col gap-3`}>
-      <h2 id="share-tabs" className="text-[1.0625rem] font-bold">
+      <h2 id="share-tabs" tabIndex={-1} className="scroll-mt-20 text-[1.0625rem] font-bold outline-none">
         Portfolio tabs
       </h2>
       <p className="text-[0.8125rem] text-[color:var(--text-tertiary)]">{TABS_NOTE}</p>
