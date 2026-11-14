@@ -28,6 +28,8 @@ export const DAY_READS = 20
 
 export interface TripsRead {
   open: TripRow[]
+  /** Opened before the journal started, or ended at expiry: never in a figure (read whole). */
+  aside: TripRow[]
   /** Whole days, newest first by close and then id, as the service orders them. */
   closed: TripRow[]
   /** Whether there may be days before the oldest one held. */
@@ -110,11 +112,12 @@ export async function readClosedPage(mode: Mode, to?: number): Promise<ClosedPag
 export function overNewest(
   held: TripsRead | undefined,
   open: TripRow[],
-  newest: ClosedPage
+  newest: ClosedPage,
+  aside: TripRow[] = []
 ): TripsRead {
   if (!newest.full) {
     // The page held everything there is: whatever else was held is gone.
-    return { open, closed: newest.rows, more: false, partial: newest.partial }
+    return { open, aside, closed: newest.rows, more: false, partial: newest.partial }
   }
   const oldest = newest.rows.at(-1)
   const edge = oldest ? dayOf(oldest) : Number.POSITIVE_INFINITY
@@ -122,6 +125,7 @@ export function overNewest(
   const kept = (held?.closed ?? []).filter((t) => dayOf(t) < edge && !ids.has(t.id))
   return {
     open,
+    aside,
     closed: [...newest.rows, ...kept].sort(byClose),
     more: kept.length > 0 ? (held?.more ?? true) : true,
     partial: [...newest.partial, ...(held?.partial ?? []).filter((day) => day < edge)],

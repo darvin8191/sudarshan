@@ -1,8 +1,17 @@
 // SUDARSHAN M14, JD2: the Trades part. Open trades first with their P&L moving with every tick,
+// then the positions not in the figures (opened before the journal started, or ended at expiry),
 // then closed trades by day, newest first. The service's list is the first snapshot and a re-sync
 // (useJournalSync); between reads the figures of an open trade move only with ticks.
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Clock, LoaderCircle, NotebookPen, RefreshCw, TriangleAlert } from 'lucide-react'
+import {
+  CalendarX,
+  Clock,
+  History,
+  LoaderCircle,
+  NotebookPen,
+  RefreshCw,
+  TriangleAlert,
+} from 'lucide-react'
 import { useCallback, useMemo, useRef, useState } from 'react'
 import { cn } from '@/lib/utils'
 import { usePriceAccess } from '@/sudarshan/access'
@@ -43,6 +52,12 @@ import {
 import type { Mode, Tag, Trip } from './types'
 import { useJournalSync } from './useJournalSync'
 import { LIVE_CAP, type LivePnl, useTripLive } from './useTripLive'
+
+/** The most of each kind of position not in the figures one read lists. */
+export const ASIDE_PAGE = 50
+
+export const ASIDE_WORDS =
+  'The journal has no result for these: it did not see them opened, or they ended at expiry with no fill. They are not in your figures; Upstox’s own report has them.'
 
 export const EMPTY_WORDS = 'No trades yet. Fills are recorded here as they happen at Upstox.'
 export const NO_TOKEN_WORDS =
@@ -176,6 +191,57 @@ function OpenCard({
   )
 }
 
+/** One position the journal pairs no result for: what it is, in words and an icon, never a
+ * LONG or SHORT for one it did not see opened, and no figure. Named whole, as every card (H5). */
+function AsideCard({ trip, onOpen }: { trip: TripRow; onOpen: (id: number) => void }) {
+  const unseen = trip.status === 'unmatched'
+  const named = describe(trip.symbol, trip.exchange)
+  return (
+    <li>
+      <button
+        type="button"
+        onClick={() => onOpen(trip.id)}
+        data-testid="aside-trip"
+        className={cn(
+          CARD,
+          'flex min-h-12 w-full flex-col gap-1.5 px-4 py-3 text-left outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50'
+        )}
+      >
+        <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+          <span
+            data-testid="trip-name"
+            title={trip.symbol}
+            className="min-w-0 text-base leading-tight font-bold [overflow-wrap:anywhere]"
+          >
+            {named.title}
+          </span>
+          {!unseen && <SideChip side={trip.side} />}
+        </span>
+        <span className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
+          <span className="text-xs font-medium text-[color:var(--text-tertiary)]">
+            {named.detail}
+          </span>
+          <span className="ml-auto inline-flex shrink-0 items-center gap-1 text-[0.8125rem] font-semibold text-[color:var(--text-secondary)]">
+            {unseen ? (
+              <History aria-hidden="true" className="size-3.5" />
+            ) : (
+              <CalendarX aria-hidden="true" className="size-3.5" />
+            )}
+            {unseen ? 'Opened before the journal' : 'Ended at expiry'}
+          </span>
+        </span>
+        <span className="text-[0.8125rem] font-medium text-[color:var(--text-secondary)]">
+          {unseen
+            ? `${trip.side === 'long' ? 'Sold' : 'Bought back'} ${countText(trip.exit_qty)} qty; the price it was opened at is not known here`
+            : `${countText(openQty(trip))} qty at ${priceText(trip.entry_avg_u)}${
+                trip.close_day !== null ? `, expired ${dayWords(trip.close_day)}` : ''
+              }`}
+        </span>
+      </button>
+    </li>
+  )
+}
+
 function ClosedCard({
   trip,
   tags,
@@ -212,7 +278,7 @@ function ClosedCard({
               <OutcomeWord paise={net} show={net === 0} />
               {trip.charges_actual_paise === null && (
                 <span className="text-[0.6875rem] font-semibold text-[color:var(--text-tertiary)]">
-                  est.
+                  {trip.charges_modelled === false ? 'no charges counted' : 'est.'}
                 </span>
               )}
             </span>
@@ -232,6 +298,12 @@ function ClosedCard({
       </button>
     </li>
   )
+}
+
+/** Positions not in the figures, newest first: by the day each ended, else the day it opened. */
+export function asideOrder(trips: TripRow[]): TripRow[] {
+  const day = (t: TripRow) => t.close_day ?? t.open_day
+  return [...trips].sort((a, b) => day(b) - day(a) || b.id - a.id)
 }
 
 /**
@@ -288,12 +360,19 @@ export function useTrips(mode: Mode) {
   const query = useQuery({
     queryKey: key,
     queryFn: async (): Promise<TripsRead> => {
-      const [open, newest] = await Promise.all([
+      const [open, newest, unmatched, expired] = await Promise.all([
         journalData('trips', { mode, status: 'open' }),
         readClosedPage(mode),
+        journalData('trips', { mode, status: 'unmatched', limit: ASIDE_PAGE }),
+        journalData('trips', { mode, status: 'expired', limit: ASIDE_PAGE }),
       ])
       // Over what the list holds when the answer is in, earlier pages included.
-      return overNewest(queryClient.getQueryData<TripsRead>(key), open as TripRow[], newest)
+      return overNewest(
+        queryClient.getQueryData<TripsRead>(key),
+        open as TripRow[],
+        newest,
+        asideOrder([...(unmatched as TripRow[]), ...(expired as TripRow[])])
+      )
     },
     retry: false,
     staleTime: 0,
@@ -320,6 +399,7 @@ export function useTrips(mode: Mode) {
   return {
     query,
     open: data?.open ?? [],
+    aside: data?.aside ?? [],
     closed: data?.closed ?? [],
     more: data?.more ?? false,
     partial: data?.partial ?? [],
@@ -334,7 +414,7 @@ export function TripsList({ mode, onOpen }: { mode: Mode; onOpen: (id: number) =
   const [market, setMarket] = useState<MarketCalendar>(CALENDAR_LOADING)
   const day = useIstDay()
   const { isOpen, anyOpen } = useMarketOpen(market)
-  const { query, open, closed, more, partial, loadOlder, loadingOlder, pagingError } =
+  const { query, open, aside, closed, more, partial, loadOlder, loadingOlder, pagingError } =
     useTrips(mode)
   const tags = useQuery({
     queryKey: [...JOURNAL_KEY, 'tags'],
@@ -373,7 +453,7 @@ export function TripsList({ mode, onOpen }: { mode: Mode; onOpen: (id: number) =
         </button>
       </div>
     )
-  } else if (open.length === 0 && closed.length === 0) {
+  } else if (open.length === 0 && closed.length === 0 && aside.length === 0) {
     body = (
       <div className={cn(CARD, 'px-4 py-6 text-center')}>
         <NotebookPen
@@ -416,6 +496,21 @@ export function TripsList({ mode, onOpen }: { mode: Mode; onOpen: (id: number) =
                   now={now}
                   onOpen={onOpen}
                 />
+              ))}
+            </ul>
+          </section>
+        )}
+        {aside.length > 0 && (
+          <section aria-label="Not in the figures" className="flex flex-col gap-2">
+            <div className="flex flex-col gap-0.5 px-1">
+              <h2 className="text-[0.9375rem] font-bold">Not in the figures</h2>
+              <p className="text-[0.8125rem] font-medium text-[color:var(--text-secondary)]">
+                {ASIDE_WORDS}
+              </p>
+            </div>
+            <ul className="flex flex-col gap-2">
+              {aside.map((trip) => (
+                <AsideCard key={trip.id} trip={trip} onOpen={onOpen} />
               ))}
             </ul>
           </section>

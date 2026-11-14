@@ -349,38 +349,62 @@ async def test_no_slot_while_market_alerts_wait_and_none_between_text_and_file(r
     assert rig.order == ["text", "file"]
 
 
+class Clock:
+    """The pacer's clock under the test's hand: the desk's waits move it on, never real time
+    (review M4: a stall on a loaded runner can no longer fail a bound)."""
+
+    def __init__(self, start: float = 1_000.0):
+        self.now = start
+        self._real = asyncio.sleep
+
+    def __call__(self) -> float:
+        return self.now
+
+    async def sleep(self, seconds: float) -> None:
+        self.now += max(seconds, 0.0)
+        await self._real(0)
+
+
+def on_clock(rig) -> Clock:
+    clock = Clock()
+    rig.pacer.clock = clock
+    rig.desk.sleep = clock.sleep
+    return clock
+
+
 @sync
-async def test_four_slots_a_minute(rig, monkeypatch):
-    monkeypatch.setattr(outbox, "MINUTE_S", 0.8)
+async def test_four_slots_a_minute(rig):
     times = []
     for report_id in range(1, 6):
         rig.journal.add(report_id, text=f"सुदर्शन · SUDARSHAN\nbrief {report_id}", data=None)
         write_report(rig.spool, report_id, data=None, kind="brief", at=time.time() + report_id)
+    clock = on_clock(rig)
 
-    async def timed(text):
-        times.append(time.monotonic())
+    async def stamped(text):
+        times.append(clock())
         return SENT, ""
 
-    rig.desk.send_text = timed
-    start = time.monotonic()
+    rig.desk.send_text = stamped
+    start = clock()
     for _ in range(5):
         await rig.desk.sweep()
     assert len(times) == 5
-    assert all(t - start < 0.5 for t in times[:4])
-    assert times[4] - times[0] >= 0.75  # the fifth waited for the lane's minute
+    assert all(t - start < 4 * outbox.MIN_GAP_S for t in times[:4])  # the gap between each
+    assert times[4] - times[0] >= outbox.MINUTE_S  # the fifth waited for the lane's minute
 
 
 @sync
-async def test_a_report_with_a_file_takes_two_of_the_four(rig, monkeypatch):
-    monkeypatch.setattr(outbox, "MINUTE_S", 0.8)
+async def test_a_report_with_a_file_takes_two_of_the_four(rig):
     for report_id in (1, 2, 3):
         rig.journal.add(report_id)
         write_report(rig.spool, report_id, at=time.time() + report_id)
-    start = time.monotonic()
+    clock = on_clock(rig)
+    start = clock()
     await rig.sweeps(2)
-    assert rig.order == ["text", "file", "text", "file"] and time.monotonic() - start < 0.5
+    assert rig.order == ["text", "file", "text", "file"]
+    assert clock() - start < 4 * outbox.MIN_GAP_S  # no wait for a minute yet
     await rig.sweeps()
-    assert time.monotonic() - start >= 0.75  # the third report's text waited for a slot
+    assert clock() - start >= outbox.MINUTE_S  # the third report's text waited for a slot
     assert len(rig.journal.deliveries) == 3
 
 
@@ -464,12 +488,43 @@ def test_the_reasons_are_the_owners_words():
 
 @sync
 async def test_a_sha256_mismatch_is_not_sent_and_is_told_in_words(rig):
-    rig.journal.add(7, data=PDF + b"changed after the event was written")
+    """Bytes that match neither the event's sha256 nor the one the journal gives with them."""
+    rig.journal.add(7, data=PDF)
+    broken = PDF + b"changed on the way"
+    rig.journal.next["report_file"] = [("ok", {
+        "id": 7, "file_name": NAME, "file_mime": "application/pdf", "file_sha256": sha(PDF),
+        "file_b64": base64.b64encode(broken).decode()})]  # fmt: skip
     write_report(rig.spool, 7, data=PDF)
     await rig.sweeps()
     assert rig.order == ["text"] and rig.files.sent == []
     assert rig.journal.deliveries == [delivered(rig, "text_only", "to:sha")]
     assert "did not match" in OUTCOMES["to:sha"][1]
+
+
+@sync
+async def test_a_file_rebuilt_after_its_line_was_written_goes_as_the_journal_now_has_it(rig):
+    """Review L11: the report was rebuilt before the desk sent it, so its file's sha256 is not
+    the line's any more; the journal gives the bytes with their own sha256 and they match it."""
+    rebuilt = PDF + b"rebuilt before delivery"
+    rig.journal.add(7, data=rebuilt)
+    write_report(rig.spool, 7, data=PDF)
+    await rig.sweeps()
+    assert rig.order == ["text", "file"] and rig.files.sent[0][1] == rebuilt
+    assert rig.journal.deliveries == [delivered(rig, "sent")]
+
+
+@sync
+async def test_an_older_line_of_a_report_announced_again_is_passed_over(rig):
+    """A part period announced, then the whole one (journal review M2) before the desk sent the
+    first: the newer line sends the report as it is now, once."""
+    rig.journal.add(7)
+    first = write_report(rig.spool, 7, event_id="report-7-1", at=time.time() - 60)
+    write_report(rig.spool, 7, event_id="report-7-2")
+    await rig.sweeps(2)
+    assert rig.order == ["text", "file"]  # once
+    assert rig.journal.deliveries == [delivered(rig, "sent")]
+    states = rig.store.notice_states([reports_desk.KEY_PREFIX + first])
+    assert states[reports_desk.KEY_PREFIX + first][0] == reports_desk.DROPPED
 
 
 @sync
@@ -519,6 +574,79 @@ async def test_an_old_report_is_not_sent_and_the_journal_is_told_once(rig):
     await rig.sweeps(3)
     assert rig.order == []
     assert rig.journal.deliveries == [delivered(rig, "not_sent", "ns:old")]
+
+
+def on_clock_of(rig) -> dict:
+    """The desk's own (service) clock under the test's hand, in epoch seconds."""
+    seen = {"now": time.time()}
+    rig.desk.clock = lambda: datetime.fromtimestamp(seen["now"], IST)
+    return seen
+
+
+@sync
+async def test_a_report_too_old_to_send_names_the_side_that_did_not_answer(rig):
+    """The builder's open item and review L5: the reason named the alerts service even when it
+    was the journal that did not answer. It names the side the desk last waited on, and says
+    only that it could not be sent within a day when the desk does not know."""
+    seen = on_clock_of(rig)
+    rig.journal.add(7)
+    write_report(rig.spool, 7, data=None, kind="brief", at=seen["now"] - 10)
+    rig.journal.next["report_get"] = [("down", None)]
+    await rig.sweeps()  # the journal did not give the text
+    seen["now"] += 25 * 3600
+    await rig.sweeps()
+    assert rig.journal.deliveries == [delivered(rig, "not_sent", "ns:old:j")]
+    assert OUTCOMES["ns:old:j"][1] == (
+        "it could not be sent within a day: the journal did not give it to the alerts service"
+    )
+    assert OUTCOMES["ns:old"][1] == "it could not be sent within a day"  # no guess
+    assert all(len(code) <= 10 for code in OUTCOMES)  # alerts.db's state column
+
+
+@sync
+async def test_a_report_whose_text_telegram_would_not_take_says_so_when_too_old(rig):
+    seen = on_clock_of(rig)
+    rig.journal.add(7, data=None)
+    write_report(rig.spool, 7, data=None, kind="brief", at=seen["now"] - 10)
+    rig.text.answers = [(RETRY, "")]
+    await rig.sweeps()
+    seen["now"] += 25 * 3600
+    await rig.sweeps()
+    assert rig.journal.deliveries == [delivered(rig, "not_sent", "ns:old:t")]
+
+
+@sync
+async def test_one_report_that_cannot_move_does_not_hold_the_ones_after_it(rig):
+    """Review M3: report 1's file call always fails; within three looks the desk moves on and
+    report 2 (the Day report) goes; report 1 is tried again on its own pause."""
+    seen = on_clock_of(rig)
+    rig.journal.add(1, name="SUDARSHAN_Monthly-statement_202611.pdf")
+    rig.journal.add(2)
+    write_report(rig.spool, 1, kind="monthly", at=seen["now"] - 30)
+    write_report(rig.spool, 2, at=seen["now"] - 20)
+    real, broken = rig.journal.call, {"on": True}
+
+    async def call(op, args):
+        if op == "report_file" and args.get("id") == 1 and broken["on"]:
+            rig.journal.calls.append((op, dict(args)))
+            return "down", None
+        return await real(op, args)
+
+    rig.journal.call = call
+    for _ in range(3):
+        await rig.desk.sweep()
+    told = {d["report_id"]: d["status"] for d in rig.journal.deliveries}
+    assert told == {2: "sent"}  # the Day report went, its text and its file
+    assert rig.text.texts.count(DAY_TEXT) == 2  # report 1's text went once, then report 2's
+    asked = [a["id"] for op, a in rig.journal.calls if op == "report_file"]
+    assert asked.count(1) == 3  # tried three times, now on its own pause
+    broken["on"] = False
+    await rig.desk.sweep()  # still on its pause: not asked
+    assert [a["id"] for op, a in rig.journal.calls if op == "report_file"].count(1) == 3
+    seen["now"] += 1  # past its pause (the tests' RETRY_S is 0.05 s)
+    await rig.desk.sweep()
+    told = {d["report_id"]: d["status"] for d in rig.journal.deliveries}
+    assert told == {2: "sent", 1: "sent"}
 
 
 @sync

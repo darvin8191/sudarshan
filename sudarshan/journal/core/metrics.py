@@ -1,7 +1,9 @@
 """Journal metrics over closed trips (JA2, M14.3; design 5.2).
 
 A trip is a dict: ``net_paise`` (gross minus charges: an estimate until the actual arrives),
-optional ``gross_paise`` and ``charges_paise`` (default: net and 0), ``risk_paise`` (planned stop
+optional ``gross_paise`` and ``charges_paise`` (default: net and 0), optional
+``charges_actual_paise`` (None while the charges are an estimate) and ``charges_modelled`` (False
+for a segment the estimate does not cover; default True), ``risk_paise`` (planned stop
 distance x quantity, or None), ``open_day``, ``close_day``, ``hold_s``, ``strategy`` and
 ``strategy_override``, ``tags`` (names) and ``playbook`` (a name or None). Only closed trips are
 passed in.
@@ -110,6 +112,12 @@ def compute(trips: Iterable[Trip]) -> dict[str, Any]:
         out["charges_impact_pct"] = money.ratio_str(charges * 100, win_gross, FLAT_PLACES["pct"])
     else:
         out["charges_impact_pct"] = None
+    actual = [t.get("charges_actual_paise") is not None for t in rows]
+    modelled = [t.get("charges_modelled", True) is not False for t in rows]
+    out["charges_estimated"] = any(m and not a for m, a in zip(modelled, actual, strict=True))
+    out["charges_not_estimated"] = sum(
+        1 for m, a in zip(modelled, actual, strict=True) if not m and not a
+    )
     return out
 
 

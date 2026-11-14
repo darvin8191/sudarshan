@@ -289,11 +289,7 @@ function Tiles({ answer }: { answer: AnalyticsAnswer }) {
   return (
     <section aria-label="Results" className="flex flex-col gap-2">
       <div className="grid grid-cols-2 gap-2">
-        <Tile
-          label="Net"
-          note={`${m.trips} ${m.trips === 1 ? 'trade' : 'trades'}`}
-          size={figureSize(tileRupees(m.net_paise))}
-        >
+        <Tile label="Net" note={netNote(m)} size={figureSize(tileRupees(m.net_paise))}>
           <SignedFigure paise={m.net_paise} word />
         </Tile>
         <Tile
@@ -492,7 +488,27 @@ function ExpirySplit({ split }: { split: AnalyticsAnswer['expiry'] }) {
   )
 }
 
+/**
+ * Whether a block's charges are the journal's estimate: the service says so (`charges_estimated`);
+ * an older service that does not say is taken as estimating, as it always did.
+ */
+export const chargesEstimated = (m: Metrics): boolean => m.charges_estimated !== false
+
+/** The Net tile's note: the count, and "charges est." while any trade's charges are estimated. */
+export function netNote(m: Metrics): string {
+  const count = `${m.trips} ${m.trips === 1 ? 'trade' : 'trades'}`
+  return m.trips > 0 && chargesEstimated(m) ? `${count}, charges est.` : count
+}
+
+/** The trades whose segment the charges estimate does not cover (BSE, currency, commodity). */
+export function notEstimatedWords(m: Metrics): string | null {
+  const n = m.charges_not_estimated ?? 0
+  if (n <= 0) return null
+  return `${n} ${n === 1 ? 'trade is' : 'trades are'} on an exchange whose charges are not estimated, so no charges are counted for ${n === 1 ? 'it' : 'them'}.`
+}
+
 function ChargesLine({ metrics }: { metrics: Metrics }) {
+  const missing = notEstimatedWords(metrics)
   return (
     <section aria-label="Charges" className={`${SECTION} flex flex-col gap-1`}>
       <h2 className="text-base font-bold">What charges took</h2>
@@ -500,9 +516,17 @@ function ChargesLine({ metrics }: { metrics: Metrics }) {
         {metrics.charges_impact_pct === null
           ? 'No winning trades in this period, so there is no figure for what charges took of them.'
           : `Charges took ${metrics.charges_impact_pct}% of the gross profit of your winning trades.`}{' '}
-        Charges in all: {tileRupees(metrics.charges_paise, false)}{' '}
-        <span className="text-[color:var(--text-tertiary)]">est.</span>
+        Charges in all: {tileRupees(metrics.charges_paise, false)}
+        {chargesEstimated(metrics) && (
+          <>
+            {' '}
+            <span className="text-[color:var(--text-tertiary)]">est.</span>
+          </>
+        )}
       </p>
+      {missing && (
+        <p className="text-[0.8125rem] font-medium text-[color:var(--text-secondary)]">{missing}</p>
+      )}
     </section>
   )
 }

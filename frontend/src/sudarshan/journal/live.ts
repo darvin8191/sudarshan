@@ -122,7 +122,9 @@ export function groupByDay<T extends Trip>(trips: readonly T[]): DayGroup<T>[] {
         trips: sorted,
         net_paise: priced.length ? priced.reduce((sum, t) => sum + (t.net_paise ?? 0), 0) : null,
         missing: sorted.length - priced.length,
-        estimated: priced.some((t) => t.charges_actual_paise === null),
+        estimated: priced.some(
+          (t) => t.charges_actual_paise === null && t.charges_modelled !== false
+        ),
       }
     })
 }

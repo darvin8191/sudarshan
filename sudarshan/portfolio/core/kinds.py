@@ -458,6 +458,7 @@ JOURNAL_OPS = (
     "historical_trades",
     "pnl_report",
     "positions",
+    "holdings",
     "funds",
     "benchmark_closes",
 )

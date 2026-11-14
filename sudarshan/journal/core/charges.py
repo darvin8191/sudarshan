@@ -18,6 +18,10 @@ report replaces it (next release).
   is kept for the case where the owner changes plan, and carries the surface split.
 * BSE, currency, commodity and any segment without a row are NOT MODELLED: the estimate says so
   and charges nothing, rather than guess.
+* An order shared by two trades (a reversal: SELL 130 against a long of 65 closes it and opens a
+  short of 65) is priced once, whole, and each trade takes its share by quantity (``allocate``):
+  the cut points are rounded, never the shares, so the trades' shares add up to the order's own
+  figures to the paisa and the day's total (review M1).
 
 Rates were read from the Upstox charges page on 14 Nov 2026 (summarised by a fetch tool, so every
 row is also marked "to verify" against the page itself). Exchange rates moved on 1 Mar 2026 and
@@ -177,6 +181,54 @@ def estimate_order(
     return parts, True
 
 
+def allocate(parts: Mapping[str, int], before: int, take: int, whole: int) -> dict[str, int]:
+    """The share of one order's charges (``parts`` as ``estimate_order`` gives them) that its
+    units ``before`` to ``before + take`` carry, of its ``whole`` quantity: each part split by
+    quantity at cut points rounded half-up, so the shares of all its holders add up exactly."""
+    whole = max(int(whole), before + take, 1)
+    out = {
+        k: money.div_half_up(int(parts[k]) * (before + take), whole)
+        - money.div_half_up(int(parts[k]) * before, whole)
+        for k in PARTS
+    }
+    out["total"] = sum(out[k] for k in PARTS)
+    return out
+
+
+def _answer(total: Mapping[str, int], modelled: bool, plan: str, orders: int) -> dict[str, Any]:
+    return {
+        "parts": {
+            "brokerage_paise": total["brokerage"],
+            "stt_paise": total["stt"],
+            "exchange_paise": total["exchange"],
+            "sebi_paise": total["sebi"],
+            "stamp_paise": total["stamp"],
+            "gst_paise": total["gst"],
+            "total_paise": total["total"],
+        },
+        "modelled": modelled,
+        "plan": plan,
+        "orders": orders,
+    }
+
+
+def estimate_shared(
+    orders: Mapping[Any, tuple[list[Mapping[str, Any]], int, int, int]], plan: str = DEFAULT_PLAN
+) -> dict[str, Any]:
+    """The estimate of one trade's part of its orders: each value is (the order's every fill of
+    the day, the units of it before this trade's, this trade's units, the order's quantity). The
+    order is priced whole and this trade takes its share (``allocate``)."""
+    total = dict.fromkeys((*PARTS, "total"), 0)
+    modelled = True
+    for rows, before, take, whole in orders.values():
+        parts, ok = estimate_order(rows, plan)
+        modelled = modelled and ok
+        share = allocate(parts, before, take, whole)
+        for k in total:
+            total[k] += share[k]
+    return _answer(total, modelled, plan, len(orders))
+
+
 def estimate(fills: Iterable[Mapping[str, Any]], plan: str = DEFAULT_PLAN) -> dict[str, Any]:
     """The estimate of a set of fills (a trip's, a day's): orders found by ``order_id`` and day.
 
@@ -196,20 +248,7 @@ def estimate(fills: Iterable[Mapping[str, Any]], plan: str = DEFAULT_PLAN) -> di
         modelled = modelled and ok
         for k in total:
             total[k] += parts[k]
-    return {
-        "parts": {
-            "brokerage_paise": total["brokerage"],
-            "stt_paise": total["stt"],
-            "exchange_paise": total["exchange"],
-            "sebi_paise": total["sebi"],
-            "stamp_paise": total["stamp"],
-            "gst_paise": total["gst"],
-            "total_paise": total["total"],
-        },
-        "modelled": modelled,
-        "plan": plan,
-        "orders": len(orders),
-    }
+    return _answer(total, modelled, plan, len(orders))
 
 
 def estimate_gap(estimate_paise: int, actual_paise: int) -> dict[str, Any]:

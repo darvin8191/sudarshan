@@ -3,7 +3,9 @@ announced (JB9, M15.3 to M15.5; design 3.5 and 3.6, cross-design Y8, Y22, Y32, Y
 
 * **Words** are ``core/words.py``'s (``weekly``, ``monthly``, ``fy``), every figure from ``core/``:
   the metrics of the period's closed live trips, the equity curve and its deepest drawdown on the
-  trading capital, the week against NIFTY 50 and beta through the portfolio.
+  trading capital, the week against NIFTY 50 and beta through the portfolio. One line says what
+  the figures leave out when the period has any (review B1): positions the journal did not see
+  opened with a fill in the period, and contracts that ended at expiry in it.
 * **The file** is the renderer's (JB8) and one per report, as the archive keeps one: the week's is
   the equity-curve PNG (Telegram shows it as a photo), the month's and the year's a PDF. The
   month's trades as CSV (stdlib ``csv``, Y32) are kept in the row's own ``rows`` and answered by
@@ -11,7 +13,8 @@ announced (JB9, M15.3 to M15.5; design 3.5 and 3.6, cross-design Y8, Y22, Y32, Y
 * **The keys** of the archive: ``2026W45`` (ISO week, Monday to Sunday), ``202610`` and
   ``FY2526`` (the year starting 1 April 2025). A period still running (built on request) is
   worked out to today and says so in its label; the job builds the whole period, and a rebuild
-  of a key replaces its text and file, announcing only a row that is new.
+  of a key replaces its text and file. A build is announced when the report was never announced,
+  or was announced as a part period and this build is the whole (review M2).
 * **The tax pack is a working paper**: it says to verify it with a CA and that the broker's own
   report is the filing source, and it carries no section number of any Act. Its trades are
   grouped by kind and holding period, never by a legal term.
@@ -31,14 +34,15 @@ from datetime import date, timedelta
 from typing import Any
 
 from . import serialize
-from .core import benchmark, equity, kinds, metrics, words
+from .core import benchmark, equity, kinds, lots, metrics, words
+from .core import charges as charges_core
 from .core.money import ist_clock, ist_day, to_date, to_day
 from .portfolio import PortfolioUnavailable, link_for
 from .render import doc as D
 from .render import tables
 from .render.pdf import render_pdf
 from .render.png import render_equity_png
-from .reports import OWNER, _thread, announce_report, archive, report_switch
+from .reports import OWNER, _thread, announce_once, archive, report_switch
 from .schedule import schedule_for
 
 PERIOD_KINDS = ("weekly", "monthly", "fy")
@@ -61,6 +65,11 @@ FY_CHARGES_NOT_READ = (
 )
 FY_TRADES_NOTE = (
     "The trades themselves are listed in each Monthly statement, with a CSV of the month."
+)
+#: The tax pack's "What this paper leaves out" block (review H1): always the estimate line,
+#: and a line for each kind of trade that has no figure in it when the year has any.
+FY_ESTIMATES = (
+    "Charges are the journal's estimates from Upstox's published rates, not Upstox's own figures."
 )
 MIME = {"pdf": "application/pdf", "png": "image/png", "csv": "text/csv"}
 
@@ -184,9 +193,68 @@ def _read(span: Span, fy_start: int | None):
         first = tx.min_of("round_trip", "close_day", mode="live", status="closed")
         charges = (tx.rows("upstox_charges", order="segment", financial_year=fy_start)
                    if fy_start is not None else [])  # fmt: skip
-        return trips, beta_trips, notes, tags, books, first, tx.settings(), charges
+        aside = tx.left_out("live", span.start, span.end)
+        sold = _sold(tx, span) if fy_start is not None else []
+        return trips, beta_trips, notes, tags, books, first, tx.settings(), charges, aside, sold
 
     return read
+
+
+def _sold(tx: Any, span: Span) -> list[tuple[dict[str, Any], list[dict[str, Any]], dict]]:
+    """The carry trades with a sale in the year, each with its legs as ``core/lots`` reads them
+    and its charges per day and side (the estimate of those orders, as the trade's own)."""
+    from .book import charges_of
+
+    plan = tx.settings().get("charges_plan") or charges_core.DEFAULT_PLAN
+    out = []
+    for trip in tx.trips_sold_in("live", span.start, span.end):
+        legs = tx.legs_of(trip["id"])
+        refs = tx.order_refs("live", {leg["order_id"] for leg in legs})
+        by_trade = {leg["trade_id"]: leg for leg in legs}
+        groups: dict[tuple[int, str], list[dict[str, Any]]] = {}
+        for leg in legs:
+            groups.setdefault((int(leg["day"]), leg["action"]), []).append(
+                {"trade_id": leg["trade_id"], "qty": leg["leg_qty"]}
+            )
+        fees = {k: int(charges_of(v, by_trade, refs, "live", plan)["parts"]["total_paise"])
+                for k, v in groups.items()}  # fmt: skip
+        rows = [{"day": leg["day"], "action": leg["action"], "qty": leg["leg_qty"],
+                 "price_u": leg["price_u"]} for leg in legs]  # fmt: skip
+        out.append((trip, rows, fees))
+    return out
+
+
+def tax_entries(span: Span, rows: list[dict[str, Any]], sold: list) -> list[dict[str, Any]]:
+    """The kinds table's rows for the year (review H1): every sale of a carried position in the
+    year, matched to its purchases by ``core/lots``, under its own kind and holding period; and
+    every other trade closed in the year (intraday) as one row."""
+    entries = []
+    for trip, legs, fees in sold:
+        found = lots.lots_of(legs, trip["side"], fees)
+        entries += tables.lot_entries(str(trip["exchange"]), found, span.start, span.end)
+    for trip in rows:
+        if trip.get("product_class") == "carry":
+            continue  # booked sale by sale above
+        gross = trip["gross_paise"] if trip.get("gross_paise") is not None else trip["net_paise"]
+        entries.append(tables.tax_entry(tables.kind_of_trade(trip), gross,
+                                        int(trip.get("charges_paise") or 0)))  # fmt: skip
+    return entries
+
+
+def leaves_out(rows: list[dict[str, Any]], aside: Mapping[str, int]) -> tuple[str, ...]:
+    """The tax pack's "What this paper leaves out" lines (review H1)."""
+    lines = [FY_ESTIMATES]
+    unpriced = sum(1 for t in rows if tables.unpriced(t))
+    if unpriced:
+        lines.append(
+            f"Charges for BSE, currency and commodity trades are not estimated: "
+            f"{words.plural(unpriced, 'trade')} here {'shows' if unpriced == 1 else 'show'} "
+            "none. Upstox's own report has them."
+        )
+    line = words.left_out_line(int(aside.get("unmatched") or 0), int(aside.get("expired") or 0))
+    if line:
+        lines.append(line)
+    return tuple(lines)
 
 
 async def _index_week(service: Any, plan: Any, span: Span, net: int,
@@ -231,13 +299,19 @@ def built_label(now: int) -> str:
 
 def _paragraph(text: str, kind: str) -> D.Paragraph:
     """The words as a PDF paragraph: without the brand line and the title line (the page has
-    both), the pointer to this very report and the working-paper line (its own note)."""
+    both), the pointer to this very report and the working-paper line (its own note); the tax
+    pack's line of what its figures leave out is in its own block."""
     drop = {words.OPEN_FULL_REPORT, words.FY_NOTE}
     title = f"{kinds.REPORT_TITLES[kind]}{words.SEP}"
+    aside = "Not in these figures:" if kind == "fy" else None
     para = D.Paragraph.from_words(text)
     return D.Paragraph(
-        tuple(ln for ln in para.lines if ln not in drop and not ln.startswith(title))
-    )
+        tuple(
+            ln for ln in para.lines
+            if ln not in drop and not ln.startswith(title)
+            and not (aside and ln.startswith(aside))
+        )
+    )  # fmt: skip
 
 
 def monthly_pdf(span: Span, text: str, rows: list[dict[str, Any]], now: int) -> bytes:
@@ -259,15 +333,19 @@ def monthly_pdf(span: Span, text: str, rows: list[dict[str, Any]], now: int) -> 
 
 
 def fy_pdf(span: Span, text: str, rows: list[dict[str, Any]], charges: list[dict[str, Any]],
-           now: int) -> bytes:  # fmt: skip
+           now: int, entries: list[dict[str, Any]] | None = None,
+           left_out: tuple[str, ...] = ()) -> bytes:  # fmt: skip
     m = metrics.compute(rows)
     cal = metrics.calendar(rows)
     charges_block: tuple[D.Block, ...] = (
         (tables.broker_charges_table(charges),) if charges
         else (D.Paragraph((FY_CHARGES_NOT_READ,)),)
     )  # fmt: skip
+    kinds_rows = entries if entries is not None else tax_entries(span, rows, [])
     blocks = (
         D.Note(words.FY_NOTE),
+        D.Heading("What this paper leaves out"),
+        D.Paragraph(left_out or (FY_ESTIMATES,)),
         tables.summary_figures(m),
         D.Heading("Summary"),
         _paragraph(text, "fy"),
@@ -276,7 +354,8 @@ def fy_pdf(span: Span, text: str, rows: list[dict[str, Any]], charges: list[dict
         D.Heading("By strategy"),
         tables.strategy_table(metrics.blocks(rows, "strategy")),
         D.Heading("By kind of trade"),
-        tables.kinds_table(rows),
+        tables.kinds_table(kinds_rows),
+        D.Paragraph((tables.KINDS_NOTE,)),
         D.Heading("Charges as Upstox reports them"),
         *charges_block,
         D.Paragraph((FY_TRADES_NOTE,)),
@@ -288,12 +367,13 @@ def fy_pdf(span: Span, text: str, rows: list[dict[str, Any]], charges: list[dict
 # ---- the build -------------------------------------------------------------------------------
 async def build_period(service: Any, kind: str, span: Span, now: int, announce: bool = True) -> int:
     """Build (or rebuild) the report of ``kind`` for ``span``: words, file, archive row, and one
-    line for the report desk when the row is new. Returns the report's id."""
+    line for the report desk when this build is due one (``reports.announce_once``: never
+    announced, or announced as a part period and this is the whole). Returns the report's id."""
     # The analytics op's own helpers; imported here because the ops package imports this module.
     from .ops.analytics_ops import beta_of, for_core, trading_days
 
     read = _read(span, 2000 + int(span.key[2:4]) if kind == "fy" else None)
-    trips, beta_trips, notes, tags, books, first, settings, charges = await _thread(
+    trips, beta_trips, notes, tags, books, first, settings, charges, aside, sold = await _thread(
         lambda: service.store.read(OWNER, read)
     )
     rows = [for_core(t, tags, books, notes.get(t["id"])) for t in trips]
@@ -304,6 +384,7 @@ async def build_period(service: Any, kind: str, span: Span, now: int, announce: 
     curve = equity.equity_curve(rows, days, capital)
     extra = _words_inputs(span, rows, days)
     extra["drawdown"] = curve["drawdown"]
+    extra["left_out"] = aside
     if kind == "weekly":
         extra["benchmark"] = await _index_week(service, plan, span, block["net_paise"], capital)
         beta_rows = [for_core(t, tags, books, None) for t in beta_trips]
@@ -319,20 +400,21 @@ async def build_period(service: Any, kind: str, span: Span, now: int, announce: 
         file = ("pdf", await _thread(lambda: monthly_pdf(span, text, rows, now)))
     else:
         text = words.fy(span.label, len(days), block, **extra)
-        file = ("pdf", await _thread(lambda: fy_pdf(span, text, rows, charges, now)))
+        entries = tax_entries(span, rows, sold)
+        aside_lines = leaves_out(rows, aside)
+        file = ("pdf", await _thread(lambda: fy_pdf(span, text, rows, charges, now, entries,
+                                                    aside_lines)))  # fmt: skip
     summary = {"start": span.start, "end": span.end, "trading_days": len(days),
                "trades": block["trips"], "wins": block["wins"], "losses": block["losses"],
                "flats": block["flats"], "net_paise": block["net_paise"],
-               "charges_paise": block["charges_paise"], "partial": span.partial}  # fmt: skip
+               "charges_paise": block["charges_paise"], "partial": span.partial,
+               "left_out": aside}  # fmt: skip
     if kind == "monthly":
         summary["csv"] = tables.trades_csv(rows)
-    report_id, new = await archive(service, kind, span.key, text, summary, now, announce=False)
+    report_id, _ = await archive(service, kind, span.key, text, summary, now, announce=False)
     sha = await keep_file(service, report_id, kind, span.key, file[0], file[1], now)
-    if new and announce:
-        built = await _thread(
-            lambda: service.store.read(OWNER, lambda tx: tx.get("report", report_id))
-        )
-        await announce_report(service, report_id, kind, built["built_ms"], sha)
+    if announce:  # after the file is kept, so a fault before here announces on the retry (M2)
+        await announce_once(service, report_id, kind, sha, span.partial, now)
     return report_id
 
 

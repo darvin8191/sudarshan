@@ -20,9 +20,15 @@ import {
   type TripNote,
 } from './types'
 
+/**
+ * A fill on the trade sheet: as executed, and `trip_qty`, how much of it is this trade's (a
+ * reversal's fill closes one trade and opens the next). An older service sends no `trip_qty`.
+ */
+export type SheetFill = Fill & { trip_qty?: number }
+
 /** The detail the trade sheet draws. The contract's `Trip` is the row; the rest rides beside it. */
 export interface TripDetail extends Trip {
-  fills?: Fill[]
+  fills?: SheetFill[]
   note?: TripNote | null
   excursion?: Excursion | null
   charges?: ChargeEstimate | null

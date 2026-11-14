@@ -7,6 +7,7 @@ const day = (id: number, close_day: number, closed_ms: number) =>
 
 const held = (over: Partial<TripsRead> = {}): TripsRead => ({
   open: [],
+  aside: [],
   closed: [day(5, 20261113, 500), day(4, 20261112, 400), day(3, 20261111, 300)],
   more: true,
   partial: [],
