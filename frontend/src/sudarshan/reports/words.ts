@@ -1,5 +1,5 @@
-import type { Report, ReportKind, ReportTimes, Settings } from '../journal/types'
-import { REPORT_TITLES } from '../journal/types'
+import type { DeskState, Report, ReportKind, ReportTimes, Settings } from '../journal/types'
+import { DESK_STATES, REPORT_TITLES } from '../journal/types'
 
 /**
  * What a service older than this page may leave out of its answers, read when the bridge sends
@@ -19,6 +19,39 @@ export type ReportRow = Report & ReportExtra
 export type SettingsRead = Omit<Settings, keyof SettingsExtra> & SettingsExtra
 
 export const ALERTS_OFF = 'the alerts service is switched off on the server'
+
+/**
+ * Where the alerts' report desk stands, as the journal says (review M5): every settings answer
+ * carries it (the contract's `DeskState`), `unknown` when the alerts service did not answer as
+ * itself, is too old to say, or names a state the journal does not know.
+ */
+export type { DeskState }
+const KNOWN_DESK_STATES: readonly string[] = DESK_STATES
+
+/**
+ * The desk's state from the settings answer; undefined until it is read. A state this page does
+ * not know (one a later journal names) reads as unknown, never as on or off.
+ */
+export function deskOf(settings: { desk_state: string } | undefined): DeskState | undefined {
+  if (!settings) return undefined
+  const state: unknown = settings.desk_state
+  return typeof state === 'string' && KNOWN_DESK_STATES.includes(state)
+    ? (state as DeskState)
+    : 'unknown'
+}
+
+/** One sentence over the archive for each state; none while reports go out. */
+export const DESK_WORDS: Record<DeskState, string | null> = {
+  on: null,
+  starting: 'The alerts service is starting. Reports waiting here are sent once it is up.',
+  journal_off:
+    'The alerts service last found the journal switched off. It asks again within a minute, then sends what is waiting.',
+  journal_down:
+    'The alerts service could not reach the journal just now. It tries again shortly, then sends what is waiting.',
+  off: 'Reports are built and kept here, but none can be sent while the alerts service is switched off on the server.',
+  unknown:
+    'Whether reports can be sent just now is not known. They are built and kept here either way; check that sudarshan-alerts is running on the server.',
+}
 
 export const KIND_ORDER: ReportKind[] = ['eod', 'brief', 'weekly', 'monthly', 'fy']
 
@@ -80,11 +113,16 @@ export function emptyWords(times: SettingsExtra['times']): string {
 
 export const kindTitle = (kind: ReportKind): string => REPORT_TITLES[kind]
 
-/** The delivery of one report in words, and which glyph carries it: never colour alone. */
+/**
+ * The delivery of one report in words, and which glyph carries it: never colour alone. The words
+ * come from what the journal recorded and the desk's state (review M5), never a guess: a report
+ * not sent says its own recorded reason first, and a status this page does not know reads
+ * "Delivery not known".
+ */
 export function deliveryOf(
   report: ReportRow,
-  alertsOn: boolean | undefined
-): { tone: 'sent' | 'text' | 'not'; word: string; detail: string | null } {
+  desk: DeskState | undefined
+): { tone: 'sent' | 'text' | 'not' | 'unknown'; word: string; detail: string | null } {
   if (report.status === 'sent') return { tone: 'sent', word: 'Sent', detail: null }
   if (report.status === 'text_only') {
     return {
@@ -93,14 +131,22 @@ export function deliveryOf(
       detail: 'The file did not go; open the report to read it here.',
     }
   }
-  const reason = report.reason?.trim()
   if (report.status === 'not_sent') {
-    if (alertsOn === false) return { tone: 'not', word: `Not sent: ${ALERTS_OFF}`, detail: null }
-    return { tone: 'not', word: reason ? `Not sent: ${reason}` : 'Not sent', detail: null }
+    const reason = report.reason?.trim()
+    if (reason) return { tone: 'not', word: `Not sent: ${reason}`, detail: null }
+    if (desk === 'off') return { tone: 'not', word: `Not sent: ${ALERTS_OFF}`, detail: null }
+    return { tone: 'not', word: 'Not sent', detail: null }
   }
-  // Ready: built and waiting for its turn at the alerts service.
-  if (alertsOn === false) return { tone: 'not', word: `Not sent: ${ALERTS_OFF}`, detail: null }
-  return { tone: 'text', word: 'Ready to send', detail: null }
+  if (report.status === 'ready') {
+    // Built and waiting for its turn at the alerts service.
+    if (desk === 'off') return { tone: 'not', word: `Not sent: ${ALERTS_OFF}`, detail: null }
+    return {
+      tone: 'text',
+      word: 'Ready to send',
+      detail: desk === 'unknown' ? 'Whether it can be sent just now is not known.' : null,
+    }
+  }
+  return { tone: 'unknown', word: 'Delivery not known', detail: null }
 }
 
 const ascii = (text: string): string => text.replace(/[^A-Za-z0-9]+/g, '_').replace(/^_+|_+$/g, '')

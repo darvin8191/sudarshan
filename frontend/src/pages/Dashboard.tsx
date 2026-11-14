@@ -1,28 +1,16 @@
-import {
-  AlertTriangle,
-  BarChart3,
-  BookOpen,
-  CheckCircle2,
-  ChevronRight,
-  ExternalLink,
-  FileText,
-  Loader2,
-  PlugZap,
-  Search,
-  Zap,
-} from 'lucide-react'
+import { AlertTriangle } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router'
 import { tradingApi } from '@/api/trading'
-import { cn } from '@/lib/utils'
 import { onModeChange } from '@/stores/themeStore'
 import { AccessNotice } from '@/sudarshan/AccessNotice'
 import { usePriceAccess } from '@/sudarshan/access'
 import { useBookSync } from '@/sudarshan/books/useBookSync'
-import { formatAmount } from '@/sudarshan/dashboard/format'
+import { AlertsCard } from '@/sudarshan/dashboard/AlertsCard' // SUDARSHAN D5
 import { HoldingsCard } from '@/sudarshan/dashboard/HoldingsCard'
 import { useMarketOpen } from '@/sudarshan/dashboard/hooks'
 import { IndexStrip } from '@/sudarshan/dashboard/IndexStrip'
+import { Lapsed, type NoPrices } from '@/sudarshan/dashboard/Lapsed' // SUDARSHAN D3
 import type { PositionsSnapshot } from '@/sudarshan/dashboard/live'
 import {
   CALENDAR_LOADING,
@@ -34,6 +22,9 @@ import { type DashboardFunds, PnlCard } from '@/sudarshan/dashboard/PnlCard'
 import { PortfolioCard } from '@/sudarshan/dashboard/PortfolioCard'
 import { usePortfolioCard } from '@/sudarshan/dashboard/portfolioCard'
 import { ScreenerCard } from '@/sudarshan/dashboard/ScreenerCard'
+import { Shortcuts } from '@/sudarshan/dashboard/Shortcuts' // SUDARSHAN D7
+import { StatusRow } from '@/sudarshan/dashboard/StatusRow' // SUDARSHAN D2
+import { SystemList } from '@/sudarshan/dashboard/SystemList' // SUDARSHAN D7
 
 interface MasterContractStatus {
   status: 'pending' | 'downloading' | 'success' | 'error'
@@ -65,64 +56,6 @@ async function readPositions(apiKey: string | null): Promise<PositionsSnapshot |
   }
 }
 
-/** The master contract's state as a chip: an icon and words, never a coloured dot alone. */
-const CONTRACT_CHIP = {
-  success: {
-    icon: CheckCircle2,
-    label: 'Master contract ready',
-    tone: 'border-[color:var(--live-border)] bg-[color:var(--live-tint)] text-[color:var(--live-ink)]',
-  },
-  downloading: {
-    icon: Loader2,
-    label: 'Downloading master contract',
-    tone: 'border-[color:var(--gold)] bg-[color:var(--gold-tint)] text-[color:var(--gold-ink)]',
-  },
-  error: {
-    icon: AlertTriangle,
-    label: 'Master contract failed',
-    tone: 'border-[color:var(--down)] bg-[color:var(--down-tint)] text-[color:var(--down)]',
-  },
-  pending: {
-    icon: Loader2,
-    label: 'Checking master contract',
-    tone: 'border-border bg-muted text-muted-foreground',
-  },
-} as const
-
-const QUICK_ACCESS = [
-  {
-    href: '/search',
-    label: 'Symbols',
-    description: 'Universal symbology across brokers',
-    icon: Search,
-  },
-  {
-    href: '/pnl-tracker',
-    label: 'P&L Tracker',
-    description: 'Live intraday MTM tracker',
-    icon: BarChart3,
-  },
-  {
-    href: '/logs',
-    label: 'Live Logs',
-    description: 'Real-time trading activity logs',
-    icon: FileText,
-  },
-  {
-    href: '/logs/latency',
-    label: 'Latency Monitor',
-    description: 'Monitor order & API latency',
-    icon: Zap,
-  },
-  {
-    href: 'https://docs.openalgo.in',
-    label: 'Documentation',
-    description: 'Tutorials, API docs & features',
-    icon: BookOpen,
-    external: true,
-  },
-] as const
-
 export default function Dashboard() {
   const [marginData, setMarginData] = useState<DashboardFunds | null>(null)
   // SUDARSHAN: the key once prices can be read (the API key and today's Upstox
@@ -152,6 +85,17 @@ export default function Dashboard() {
   useEffect(() => {
     anyMarketOpen.current = anyOpen
   }, [anyOpen])
+  // SUDARSHAN M3.4 (D3, decision 3): no dead end while prices cannot be read. Today's Upstox
+  // login has lapsed (the server's session check, or the funds read refused for it) or there
+  // is no API key: the status row says so first, one card stands where the indices and the
+  // P&L are, and the rest of the page stays. Upstream's broker-expired page is gone (#1400's
+  // reconnect is the card's Reconnect).
+  const noPrices: NoPrices | null =
+    brokerExpired || access.state === 'upstox-logged-out'
+      ? 'upstox-logged-out'
+      : access.state === 'no-api-key'
+        ? 'no-api-key'
+        : null
 
   // Fetch dashboard funds data
   const fetchFundsData = useCallback(async () => {
@@ -184,6 +128,7 @@ export default function Dashboard() {
       if (read !== readCount.current) return
 
       if (data.status === 'success' && data.data) {
+        setBrokerExpired(false) // SUDARSHAN D3: logged in again
         setMarginData(data.data)
         setPositions(book)
         setSyncedAt(Date.now())
@@ -211,7 +156,10 @@ export default function Dashboard() {
   // drifts far. One read at a time, and none while the page is hidden. Three
   // broker reads each time.
   const marketOpenNow = useCallback(() => anyMarketOpen.current(), [])
-  useBookSync(fetchFundsData, { marketOpen: marketOpenNow })
+  // SUDARSHAN D3: not while the session check says prices cannot be read. A login made elsewhere
+  // (auto-login, another phone) brings the key back, and the read above runs again for it; a
+  // lapse only the funds read noticed is read again here, so the figures come back by themselves.
+  useBookSync(fetchFundsData, { marketOpen: marketOpenNow, enabled: access.state === 'ready' })
 
   // Listen for mode changes and refresh data
   useEffect(() => {
@@ -258,36 +206,6 @@ export default function Dashboard() {
     return () => clearInterval(interval)
   }, [checkMasterContractStatus])
 
-  const contract = CONTRACT_CHIP[masterContract.status] ?? CONTRACT_CHIP.pending
-  const ContractIcon = contract.icon
-  const spinning = masterContract.status === 'downloading' || masterContract.status === 'pending'
-
-  // Broker token expired but the app session is fine: send the user to the
-  // broker reconnect flow, not /login (which would bounce back) — #1400.
-  // SUDARSHAN: also as soon as the session check says so, before the funds
-  // read comes back, so the cards never show first.
-  if (brokerExpired || access.state === 'upstox-logged-out') {
-    return (
-      <div className="mx-auto flex min-h-[50vh] max-w-md flex-col items-center justify-center gap-4 text-center">
-        <span className="flex size-14 items-center justify-center rounded-2xl bg-[color:var(--gold-tint)] text-[color:var(--gold-ink)]">
-          <PlugZap aria-hidden="true" className="size-7" />
-        </span>
-        <h1 className="sd-display text-[1.75rem] leading-tight font-bold">
-          Broker Session Expired
-        </h1>
-        <p className="text-muted-foreground">
-          Your broker token has expired (brokers roll tokens daily). Reconnect to continue trading.
-        </p>
-        <Link
-          to="/broker"
-          className="inline-flex min-h-12 items-center justify-center rounded-[0.875rem] bg-primary px-6 text-base font-semibold text-primary-foreground outline-none hover:bg-primary/90 focus-visible:ring-[3px] focus-visible:ring-ring/50"
-        >
-          Reconnect Broker
-        </Link>
-      </div>
-    )
-  }
-
   // If not authenticated, show login prompt
   if (!isAuthenticated) {
     return (
@@ -306,42 +224,24 @@ export default function Dashboard() {
 
   return (
     <div className="flex flex-col gap-2.5 md:gap-4">
-      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
-        <h1 className="sd-display text-[1.75rem] leading-none font-bold md:text-[2rem]">
-          Dashboard
-        </h1>
-        <Link
-          to="/master-contract"
-          className="-my-1.5 inline-flex min-h-12 items-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          title={masterContract.message}
-        >
-          <span
-            className={cn(
-              'flex h-8 items-center gap-1.5 rounded-full border px-3 text-[0.8125rem] font-semibold',
-              contract.tone
-            )}
-          >
-            <ContractIcon
-              aria-hidden="true"
-              className={cn('size-4 shrink-0', spinning && 'animate-spin')}
-            />
-            {contract.label}
-            {masterContract.status === 'success' && masterContract.total_symbols ? (
-              <span className="hidden font-medium sm:inline">
-                · {formatAmount(masterContract.total_symbols, 0)} symbols
-              </span>
-            ) : null}
-          </span>
-        </Link>
-      </div>
+      <h1 className="sd-display text-[1.75rem] leading-none font-bold md:text-[2rem]">Dashboard</h1>
+      {/* SUDARSHAN M3.5, M3.6, M3.2 (D2): the market and expiry chips, and the master contract
+          only while it is not ready. */}
+      <StatusRow day={day} contract={masterContract} noPrices={noPrices} />
 
       <MarketCalendarSource key={day} onChange={setMarket} />
-      <AccessNotice access={access} />
-      <IndexStrip apiKey={apiKey} marketOpen={marketOpen} />
+      {noPrices ? (
+        <Lapsed reason={noPrices} />
+      ) : (
+        <>
+          <AccessNotice access={access} />
+          <IndexStrip apiKey={apiKey} marketOpen={marketOpen} />
+        </>
+      )}
 
       <div className="grid items-start gap-2.5 md:gap-4 lg:grid-cols-2">
         <div className="flex min-w-0 flex-col gap-2.5 md:gap-4">
-          {error && !marginData ? (
+          {noPrices ? null : error && !marginData ? (
             <section
               role="alert"
               className="flex flex-col items-start gap-3 rounded-[1.125rem] border border-[color:var(--down)] bg-card px-4 py-3.5 shadow-[var(--shadow-card)]"
@@ -373,6 +273,7 @@ export default function Dashboard() {
               positions={positions}
               syncedAt={syncedAt}
               syncFailed={error !== null}
+              onRetry={fetchFundsData}
               marketOpen={marketOpen}
             />
           )}
@@ -380,63 +281,18 @@ export default function Dashboard() {
               switch (Display settings) is on; it replaces it a release after his check (P5). */}
           {portfolioCard && <PortfolioCard marketOpen={marketOpen} />}
           <HoldingsCard apiKey={apiKey} marketOpen={marketOpen} />
-          {/* SUDARSHAN M9 UI8: the screener's day, live from its run pushes. */}
-          <ScreenerCard marketOpen={marketOpen} />
+          {/* SUDARSHAN M3.8 (D5): the market alerts fired today, live from the alerts push. */}
+          <AlertsCard />
         </div>
 
-        <section
-          aria-labelledby="sd-quick-access"
-          className="min-w-0 rounded-[1.125rem] border bg-card px-4 pt-1 pb-1 shadow-[var(--shadow-card)]"
-        >
-          <h2 id="sd-quick-access" className="flex h-11 items-center text-[0.9375rem] font-bold">
-            Quick Access
-          </h2>
-          <ul>
-            {QUICK_ACCESS.map((item) => {
-              const Icon = item.icon
-              const inner = (
-                <>
-                  <span className="flex size-9 shrink-0 items-center justify-center rounded-[0.6875rem] bg-[color:var(--brand-tint)] text-[color:var(--brand)]">
-                    <Icon aria-hidden="true" className="size-[1.125rem]" />
-                  </span>
-                  <span className="flex min-w-0 flex-1 flex-col gap-px">
-                    <span className="text-[0.90625rem] font-semibold">{item.label}</span>
-                    <span className="text-[0.78125rem] leading-snug font-medium text-[color:var(--text-tertiary)]">
-                      {item.description}
-                    </span>
-                  </span>
-                  {'external' in item ? (
-                    <ExternalLink
-                      aria-hidden="true"
-                      className="size-4 shrink-0 text-[color:var(--text-tertiary)]"
-                    />
-                  ) : (
-                    <ChevronRight
-                      aria-hidden="true"
-                      className="size-[1.125rem] shrink-0 text-[color:var(--text-tertiary)]"
-                    />
-                  )}
-                </>
-              )
-              const row =
-                'flex min-h-14 items-center gap-3 rounded-lg py-2 outline-none hover:bg-accent/60 focus-visible:ring-2 focus-visible:ring-ring'
-              return (
-                <li key={item.href} className="border-t border-[color:var(--divider)]">
-                  {'external' in item ? (
-                    <a href={item.href} target="_blank" rel="noopener noreferrer" className={row}>
-                      {inner}
-                      <span className="sr-only">(opens in a new tab)</span>
-                    </a>
-                  ) : (
-                    <Link to={item.href} className={row}>
-                      {inner}
-                    </Link>
-                  )}
-                </li>
-              )
-            })}
-          </ul>
-        </section>
+        {/* SUDARSHAN D7: the right-hand column on a wide screen (design 3.1): the screener's
+            day, the shortcuts and the System pages, in place of upstream's Quick Access. */}
+        <div className="flex min-w-0 flex-col gap-2.5 md:gap-4">
+          {/* SUDARSHAN M9 UI8: the screener's day, live from its run pushes. */}
+          <ScreenerCard marketOpen={marketOpen} />
+          <Shortcuts />
+          <SystemList contract={masterContract} />
+        </div>
       </div>
     </div>
   )

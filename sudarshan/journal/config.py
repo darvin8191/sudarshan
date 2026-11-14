@@ -76,8 +76,9 @@ def setup_logging(env: Mapping[str, str] | None = None) -> None:
     name = (env if env is not None else os.environ).get("SUDARSHAN_JOURNAL_LOG_LEVEL", "INFO")
     level = getattr(logging, name.strip().upper(), logging.INFO)
     logging.basicConfig(level=level, format=LOG_FORMAT, force=True)
-    # Library debug output can carry URLs and headers; nothing of theirs belongs in our log.
-    for library in ("httpx", "httpcore", "sqlalchemy"):
+    # Library debug output can carry URLs and headers; nothing of theirs belongs in our log. The
+    # PDF's font subsetting logs about 150 lines a build at INFO (review L2).
+    for library in ("httpx", "httpcore", "sqlalchemy", "fontTools", "fpdf", "PIL"):
         logging.getLogger(library).setLevel(logging.WARNING)
 
 

@@ -171,6 +171,28 @@ afterEach(() => {
 })
 
 describe('Holdings on a phone', () => {
+  it('exports the holdings as a CSV made from the cards: holdings have no route (B3)', async () => {
+    const tap = user()
+    const made: Blob[] = []
+    const urls = URL as unknown as Record<string, unknown>
+    urls.createObjectURL = vi.fn((blob: Blob) => made.push(blob) && 'blob:csv')
+    urls.revokeObjectURL = vi.fn()
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+    const fetch = vi.fn()
+    vi.stubGlobal('fetch', fetch)
+    try {
+      await renderPhone(RELIANCE, HDFCBANK)
+      await tap.click(screen.getByRole('button', { name: 'Export holdings' }))
+      expect(made).toHaveLength(1)
+      expect(made[0].type).toBe('text/csv;charset=utf-8')
+      expect(click).toHaveBeenCalledOnce()
+      expect(fetch).not.toHaveBeenCalled()
+    } finally {
+      delete urls.createObjectURL
+      delete urls.revokeObjectURL
+    }
+  })
+
   it('sums up the holdings: current value, invested, overall P&L and the day’s change', async () => {
     await renderPhone(RELIANCE, HDFCBANK)
     expect(screen.queryByRole('table')).toBeNull()

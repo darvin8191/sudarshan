@@ -955,7 +955,8 @@ export default function OrderBook() {
         </TabsContent>
 
         <TabsContent value="gtt" className="space-y-6">
-          <GttTab />
+          {/* SUDARSHAN B1 (M5.6, M6.1): on a phone a card per GTT, with the tab's own handlers. */}
+          <GttTab cards={phone} />
         </TabsContent>
       </Tabs>
 

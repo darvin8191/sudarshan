@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  contractWords,
   directionOf,
   formatAmount,
   formatPercent,
@@ -45,5 +46,27 @@ describe('dashboard figures', () => {
     expect(toNumber(undefined)).toBeNull()
     expect(toNumber('abc')).toBeNull()
     expect(toNumber(Number.NaN)).toBeNull()
+  })
+})
+
+// SUDARSHAN D4: the position rows name a contract as a broker's app does.
+describe('contractWords', () => {
+  it('names an option by its strike and side, and a future, with the expiry beside', () => {
+    expect(contractWords('NIFTY17NOV2625900CE')).toEqual({
+      name: 'NIFTY 25,900 CE',
+      expiry: '17 Nov',
+    })
+    expect(contractWords('BANKNIFTY29DEC2658000PE')).toEqual({
+      name: 'BANKNIFTY 58,000 PE',
+      expiry: '29 Dec',
+    })
+    expect(contractWords('VEDL25APR24292.5CE')).toEqual({ name: 'VEDL 292.5 CE', expiry: '25 Apr' })
+    expect(contractWords('NIFTY24NOV26FUT')).toEqual({ name: 'NIFTY FUT', expiry: '24 Nov' })
+    expect(contractWords('NIFTYNXT5024NOV26FUT').name).toBe('NIFTYNXT50 FUT')
+  })
+
+  it('keeps anything else as it is, with no expiry', () => {
+    expect(contractWords('RELIANCE')).toEqual({ name: 'RELIANCE', expiry: null })
+    expect(contractWords('NIFTY')).toEqual({ name: 'NIFTY', expiry: null })
   })
 })

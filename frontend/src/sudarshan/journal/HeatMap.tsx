@@ -4,7 +4,7 @@
 // trades beyond a dash.
 import { cn } from '@/lib/utils'
 import { directionOf, formatRupees } from '@/sudarshan/dashboard/format'
-import { TREND_TEXT, TrendArrow } from '@/sudarshan/dashboard/Trend'
+import { TREND_TEXT } from '@/sudarshan/dashboard/Trend'
 import { compactPaise } from './analyticsWords'
 import { type HeatCell, PAISE_PER_RUPEE } from './types'
 
@@ -55,12 +55,21 @@ export function HeatMap({ cells }: { cells: readonly HeatCell[] }) {
       <p className="text-[0.8125rem] text-[color:var(--text-secondary)]">
         Net by weekday and the hour the trade was entered; the small number is the trades.
       </p>
+      {hours.length > 7 && (
+        <p className="text-[0.8125rem] text-[color:var(--text-secondary)]">
+          Swipe the grid sideways for the other hours.
+        </p>
+      )}
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[19rem] table-fixed border-separate border-spacing-1 text-center">
+        {/* Review M4: 7 hours fit a phone 360 px wide; more hours scroll, said above. */}
+        <table
+          className="w-full table-fixed border-separate border-spacing-1 text-center"
+          style={{ minWidth: `${2 + hours.length * 2}rem` }}
+        >
           <caption className="sr-only">Net and trades by weekday and entry hour</caption>
           <thead>
             <tr>
-              <td className="w-9" />
+              <td className="w-8" />
               {hours.map((h) => (
                 <th
                   key={h}
@@ -103,12 +112,11 @@ export function HeatMap({ cells }: { cells: readonly HeatCell[] }) {
                       aria-label={`${WEEKDAY[d]} ${h}:00: net ${formatRupees(cell.net_paise / PAISE_PER_RUPEE, { signed: true })}, ${cell.trips} ${cell.trips === 1 ? 'trade' : 'trades'}`}
                       style={{ background: tintOf(cell.net_paise, biggest) || undefined }}
                       className={cn(
-                        'h-12 rounded-md border border-[color:var(--divider)] px-0.5 align-middle',
+                        'h-12 overflow-hidden rounded-md border border-[color:var(--divider)] px-0.5 align-middle',
                         TREND_TEXT[dir]
                       )}
                     >
-                      <span className="inline-flex items-center gap-0.5 text-[0.75rem] leading-none font-bold">
-                        <TrendArrow direction={dir} className="size-[0.4375rem]" />
+                      <span className="block text-[0.625rem] leading-none font-bold whitespace-nowrap">
                         {compactPaise(cell.net_paise)}
                       </span>
                       <span className="block text-[0.625rem] leading-tight font-medium text-[color:var(--text-secondary)]">

@@ -48,8 +48,9 @@ def test_view_serves_the_react_app_only():
 def test_entry_in_the_profile_menu():
     source = (REPO / "frontend" / "src" / "config" / "navigation.ts").read_text(encoding="utf-8")
     menu = source.split("export const profileMenuItems: NavItem[] = [", 1)[1].split("\n]\n", 1)[0]
-    chart = "{ href: '/chart', label: 'Chart', icon: ChartCandlestick },"
-    alerts = "{ href: '/market-alerts', label: 'Alerts', icon: BellRing }"
+    # Chart under Trade, Alerts under Analyse in the menu sheet (M1.11: every entry names its group).
+    chart = "{ href: '/chart', label: 'Chart', icon: ChartCandlestick, group: 'Trade' },"
+    alerts = "{ href: '/market-alerts', label: 'Alerts', icon: BellRing, group: 'Analyse' }"
     assert alerts in menu
     # Right after Chart: only its comment line between them.
     between = menu.split(chart, 1)[1].split(alerts, 1)[0]

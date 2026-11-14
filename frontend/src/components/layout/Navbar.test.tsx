@@ -2,6 +2,7 @@ import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { fakeScreen } from '@/test/screenWidth'
 import { Navbar } from './Navbar'
 
 vi.mock('@/hooks/useProfileMenuItems', () => ({
@@ -80,6 +81,69 @@ describe('Navbar', () => {
     expect(profile).toHaveAttribute('aria-current', 'page')
     expect(trading).not.toHaveAttribute('aria-current')
     expect(currentLinks(sheet)).toEqual([profile])
+  })
+})
+
+// SUDARSHAN M1.11 (T1): the menu sheet's four headings, and Trading on a phone.
+describe('Navbar menu sheet groups', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  async function openSheet(pathname: string) {
+    const user = userEvent.setup()
+    renderNavbar(pathname)
+    await user.click(screen.getByRole('button', { name: 'Toggle menu' }))
+    return screen.findByRole('dialog', { name: 'Navigation Menu' })
+  }
+
+  it('lists the pages under Trade, Analyse, Automate and System, in that order', async () => {
+    const sheet = await openSheet('/dashboard')
+
+    const headings = within(sheet).getAllByRole('heading', { level: 3 })
+    expect(headings.map((heading) => heading.textContent)).toEqual([
+      'Trade',
+      'Analyse',
+      'Automate',
+      'System',
+    ])
+    const trade = within(sheet).getByRole('navigation', { name: 'Trade' })
+    expect(within(trade).getByRole('link', { name: 'Tradebook' })).toBeVisible()
+    const system = within(sheet).getByRole('navigation', { name: 'System' })
+    const names = within(system)
+      .getAllByRole('link')
+      .map((link) => link.textContent)
+    expect(names).toEqual(['Profile', 'Logs', 'Docs'])
+  })
+
+  it('opens the phone chart from Trading on a phone', async () => {
+    fakeScreen('phone')
+    const sheet = await openSheet('/chart')
+
+    const trading = within(sheet).getByRole('link', { name: 'Trading' })
+    expect(trading).toHaveAttribute('href', '/chart')
+    expect(trading).toHaveAttribute('aria-current', 'page')
+    const hrefs = within(sheet)
+      .getAllByRole('link')
+      .map((link) => link.getAttribute('href'))
+    expect(hrefs).not.toContain('/trading')
+  })
+
+  it('keeps the terminal for Trading on a wide screen', async () => {
+    fakeScreen('wide')
+    const sheet = await openSheet('/dashboard')
+
+    expect(within(sheet).getByRole('link', { name: 'Trading' })).toHaveAttribute('href', '/trading')
+  })
+
+  it('makes every row a 48dp target', async () => {
+    const sheet = await openSheet('/dashboard')
+
+    const rows = within(sheet)
+      .getAllByRole('link')
+      .filter((link) => link.closest('nav'))
+    expect(rows.length).toBeGreaterThan(0)
+    for (const row of rows) expect(row).toHaveClass('min-h-12')
   })
 })
 

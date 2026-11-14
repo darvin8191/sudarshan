@@ -180,3 +180,72 @@ export function recentStrategies(trips: readonly Trip[], n = 8): string[] {
   }
   return out
 }
+
+/** What a field of the sheet is called in a sentence. */
+export const FIELD_WORDS: Record<keyof SheetForm, string> = {
+  strategy: 'the strategy',
+  setupId: 'the playbook',
+  risk: 'the risk',
+  checklist: 'the checklist',
+  mistakes: 'the mistakes',
+  mood: 'the mood',
+  notes: 'the notes',
+}
+
+const FIELDS = Object.keys(FIELD_WORDS) as Array<keyof SheetForm>
+
+/** Whether two values of a field mean the same, as a Save would send them. */
+function sameField(key: keyof SheetForm, a: SheetForm, b: SheetForm): boolean {
+  switch (key) {
+    case 'strategy':
+      return a.strategy.trim() === b.strategy.trim()
+    case 'risk': {
+      const x = parseRupees(a.risk)
+      const y = parseRupees(b.risk)
+      return x.valid && y.valid ? x.paise === y.paise : a.risk.trim() === b.risk.trim()
+    }
+    case 'checklist':
+      return serializeChecklist(a.checklist) === serializeChecklist(b.checklist)
+    case 'mistakes':
+      return sameList(
+        [...a.mistakes].sort((p, q) => p - q),
+        [...b.mistakes].sort((p, q) => p - q)
+      )
+    default:
+      return a[key] === b[key]
+  }
+}
+
+/** The fields `form` changed from `base`. */
+export const changedFields = (base: SheetForm, form: SheetForm): Array<keyof SheetForm> =>
+  FIELDS.filter((key) => !sameField(key, base, form))
+
+export interface Rebased {
+  form: SheetForm
+  /** Notes typed here that the other screen's notes replaced in the field: handed back, never lost. */
+  typedNotes: string | null
+  /** The other fields both screens changed, in words; the other screen's values are shown. */
+  overlap: string[]
+}
+
+/**
+ * The owner's changes laid over a newer read of the trade (review M1). A field changed only here
+ * keeps what was typed, a field changed only on the other screen takes its value, and a field both
+ * changed takes the other screen's value: named in `overlap`, or for the notes handed back whole in
+ * `typedNotes`, so what was typed is never lost and nothing saved elsewhere is overwritten unseen.
+ */
+export function rebase(base: SheetForm, mine: SheetForm, theirs: SheetForm): Rebased {
+  const form: SheetForm = { ...theirs }
+  const overlap: string[] = []
+  let typedNotes: string | null = null
+  for (const key of changedFields(base, mine)) {
+    if (sameField(key, base, theirs) || sameField(key, mine, theirs)) {
+      Object.assign(form, { [key]: mine[key] })
+    } else if (key === 'notes') {
+      typedNotes = mine.notes
+    } else {
+      overlap.push(FIELD_WORDS[key])
+    }
+  }
+  return { form, typedNotes, overlap }
+}

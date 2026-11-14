@@ -1,11 +1,83 @@
+import { CandlestickChart } from 'lucide-react'
 import { describe, expect, it } from 'vitest'
 import {
   bottomNavItems,
   isActiveRoute,
+  menuGroups,
   mobileSheetItems,
+  NAV_GROUPS,
   navItems,
   profileMenuItems,
 } from './navigation'
+
+// SUDARSHAN M1.11 (T1): the phone menu under four headings.
+describe('menu groups', () => {
+  const every = [...navItems, ...profileMenuItems]
+  const groupOf = (href: string) => every.find((item) => item.href === href)?.group
+  const sheet = (phone: boolean) =>
+    menuGroups([...profileMenuItems, ...mobileSheetItems], { phone })
+
+  it('names a group for every navbar and profile entry', () => {
+    for (const item of every) expect(NAV_GROUPS).toContain(item.group)
+  })
+
+  it('puts the trading, analysis and automation pages under their headings, the rest under System', () => {
+    const trade = ['/watchlist', '/chart', '/positions', '/orderbook', '/holdings', '/scalping']
+    expect([...trade, '/strategy', '/trading', '/tradebook'].map(groupOf)).toEqual(
+      Array(9).fill('Trade')
+    )
+    const analyse = ['/screener', '/market-alerts', '/tools', '/portfolio', '/journal', '/reports']
+    expect(analyse.map(groupOf)).toEqual(Array(6).fill('Analyse'))
+    expect(['/flow', '/python', '/platforms'].map(groupOf)).toEqual(Array(3).fill('Automate'))
+    const system = ['/profile', '/apikey', '/action-center', '/master-contract', '/logs', '/about']
+    expect(system.map(groupOf)).toEqual(Array(6).fill('System'))
+  })
+
+  it('lists the groups in order and every entry once, in the order given', () => {
+    const groups = sheet(false)
+    expect(groups.map(({ group }) => group)).toEqual(['Trade', 'Analyse', 'Automate', 'System'])
+    const listed = groups.flatMap(({ items }) => items.map((item) => item.href))
+    const given = [...new Set([...profileMenuItems, ...mobileSheetItems].map((item) => item.href))]
+    expect([...listed].sort()).toEqual([...given].sort()) // nothing hidden, nothing twice
+    expect(groups[1].items.map((item) => item.label)).toEqual([
+      'Alerts',
+      'Screener',
+      'Portfolio',
+      'Journal',
+      'Reports',
+      'Tools',
+    ])
+    // API Key and Action Center stay side by side, as the profile menu pins them.
+    const system = groups[3].items.map((item) => item.href)
+    expect(system.indexOf('/action-center')).toBe(system.indexOf('/apikey') + 1)
+  })
+
+  it('opens the phone chart for Trading on a phone, folded into the Chart entry', () => {
+    const phone = sheet(true).find(({ group }) => group === 'Trade')?.items ?? []
+    expect(phone.map((item) => item.href)).not.toContain('/trading')
+    expect(phone.filter((item) => item.href === '/chart').map((item) => item.label)).toEqual([
+      'Chart',
+    ])
+    const wide = sheet(false).find(({ group }) => group === 'Trade')?.items ?? []
+    expect(wide.find((item) => item.label === 'Trading')?.href).toBe('/trading')
+  })
+
+  it('sends Trading itself to the phone chart when the menu has no Chart, and an entry with no group to System', () => {
+    const trading = {
+      href: '/trading',
+      label: 'Trading',
+      icon: CandlestickChart,
+      group: 'Trade' as const,
+    }
+    const loose = { href: '/somewhere', label: 'Somewhere', icon: CandlestickChart }
+    const groups = menuGroups([trading, loose], { phone: true })
+    expect(groups).toEqual([
+      { group: 'Trade', items: [{ ...trading, href: '/chart' }] },
+      { group: 'System', items: [loose] },
+    ])
+    expect(trading.href).toBe('/trading') // the list itself is left as it was
+  })
+})
 
 describe('Navigation Config', () => {
   describe('navItems', () => {

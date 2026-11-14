@@ -239,7 +239,7 @@ export function SymbolHeader({
               <span
                 className={cn(
                   'absolute inline-flex h-full w-full rounded-full opacity-75',
-                  isLive ? 'animate-ping bg-emerald-400' : 'bg-muted-foreground/40'
+                  isLive ? 'bg-emerald-400' : 'bg-muted-foreground/40' // SUDARSHAN T4: still
                 )}
               />
               <span

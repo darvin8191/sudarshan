@@ -348,7 +348,7 @@ two exists in this release. Each purpose has its own principal and its own list 
 |---|---|---|
 | owner (`PORTFOLIO_API_INFO`) | `owner` | the contract's ops, the four sharing ops among them (`shares_list`, `share_set`, `share_remove`, `member_privacy_set`) |
 | family (`PORTFOLIO_FAMILY_API_INFO`) | `viewer:<member id>` | reads: `state`, `summary`, `tab_get`, `performance`, `upstox_book`, `upstox_history`, `shares_for_viewer` |
-| journal (`PORTFOLIO_JOURNAL_API_INFO`) | `sudarshan-journal` | reads: `trades_day`, `order_history`, `historical_trades`, `pnl_report` (part `charges` also for some days: `from`, `to`, both inside the year), `positions`, `funds`, `benchmark_closes`, and `tax_pack` (`fy`, `member`: the owner's own working paper, as `tax_get` answers it, behind `SUDARSHAN_TAX`) |
+| journal (`PORTFOLIO_JOURNAL_API_INFO`) | `sudarshan-journal` | reads: `trades_day`, `order_history`, `historical_trades`, `pnl_report` (part `charges` also for some days: `from`, `to`, both inside the year), `positions`, `holdings`, `funds`, `benchmark_closes`, and `tax_pack` (`fy`, `member`: the owner's own working paper, as `tax_get` answers it, behind `SUDARSHAN_TAX`) |
 
 * **Family scope** (`sharing.py`): built here, never taken from the caller. Tabs are the member's
   unexpired `tab_share` rows (the member's own row beats their role's) intersected with

@@ -24,10 +24,16 @@ import {
 import { useLiveQuote } from '@/hooks/useLiveQuote'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/authStore'
+import { useThemeStore } from '@/stores/themeStore'
 // SUDARSHAN: where the quote stands (Real-time, Reconnecting, Updated, Market closed).
 import { QuoteStatus } from '@/sudarshan/books/QuoteStatus'
 // SUDARSHAN M20.7: the kill switch's line on the ticket.
 import { KillSwitchNote } from '@/sudarshan/risk/RiskBanner'
+// SUDARSHAN B5 (M5.9): the margin the order needs and the funds available; it holds nothing back.
+import { MarginLine } from '@/sudarshan/ticket/MarginLine'
+// SUDARSHAN B4 (M5.11): size by risk, which fills the quantity box and sends nothing.
+import { SizeByRisk } from '@/sudarshan/ticket/SizeByRisk'
+import { entryOf } from '@/sudarshan/ticket/sizeHelper'
 // SUDARSHAN M6.9: a ticket that has just opened takes no tap for half a second.
 import { useOpenGuard } from '@/sudarshan/watchlist/openGuard'
 import { showToast } from '@/utils/toast'
@@ -157,6 +163,8 @@ export function PlaceOrderDialog({
   onError,
 }: PlaceOrderDialogProps) {
   const { apiKey } = useAuthStore()
+  // SUDARSHAN B5: Analyze mode's funds are the sandbox's; the margin line says so.
+  const sandbox = useThemeStore((state) => state.appMode) === 'analyzer'
   // SUDARSHAN M6.9: the second tap of a double tap on the Add, Buy more or Sell
   // that opened the ticket lands on it (on SELL, at 412x915, after "Buy more").
   const guard = useOpenGuard(open)
@@ -380,6 +388,12 @@ export function PlaceOrderDialog({
   // Get display quantity based on mode
   const displayQuantity = quantityMode === 'lots' ? lotMultiplier : formQuantity
 
+  // SUDARSHAN B4: the size the risk allows, in units, into the quantity box.
+  const fillQuantity = (units: number) => {
+    setFormQuantity(units)
+    setLotMultiplier(Math.max(1, Math.round(units / lotSize)))
+  }
+
   // Determine if we're still loading initial data
   const isLoading = isLoadingQuotes && !mergedData.ltp && !isConnected
 
@@ -511,6 +525,20 @@ export function PlaceOrderDialog({
               </div>
             )}
           </div>
+
+          {/* SUDARSHAN B4 (M5.11): a risk and a stop give whole lots for the box above. */}
+          <SizeByRisk
+            exchange={exchange_}
+            side={formAction}
+            lotSize={usesLots ? lotSize : 1}
+            entry={entryOf({
+              priceType: formPriceType,
+              price: formPrice,
+              trigger: formTriggerPrice,
+              ltp: mergedData.ltp,
+            })}
+            onFill={fillQuantity}
+          />
 
           {/* Exchange, for cash equity only. The same scrip is listed on both
               NSE and BSE, so the user picks where to route. Derivatives are
@@ -644,6 +672,22 @@ export function PlaceOrderDialog({
               </div>
             </div>
           )}
+
+          {/* SUDARSHAN B5 (M5.9): read on open and on change; it never holds the button back. */}
+          <MarginLine
+            apiKey={apiKey}
+            sandbox={sandbox}
+            order={{
+              symbol,
+              exchange: exchange_,
+              action: formAction,
+              quantity: formQuantity,
+              pricetype: formPriceType,
+              product: formProduct,
+              price: formPrice,
+              triggerPrice: formTriggerPrice,
+            }}
+          />
         </div>
 
         <DialogFooter className="gap-2 sm:gap-0">

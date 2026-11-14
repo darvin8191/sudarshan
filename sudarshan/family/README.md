@@ -74,3 +74,146 @@ The one-time set-up that makes the account, the folders and the firewall allow-l
 | `viewer_api.py` | the viewer API: cookies, CSRF, sign-in, the member's own account | F4 |
 | `notices.py`, `backup.py` | the owner's notices, the store's copy for the nightly backup | F11 |
 | `derive.py`, `check.py` | the one-time set-up's pieces (the deploy runs them) | O2' |
+
+## Installing the nginx lines (O3)
+
+Family phones reach the family view through nginx, and nginx keeps them out of everything else
+of OpenAlgo. Three files in `sudarshan/ops/nginx/` do that, installed once by you and never
+changed by the deploy tool:
+
+| file | goes to | what it does |
+|---|---|---|
+| `sudarshan-family-zones.conf` | `/etc/nginx/conf.d/` | tells a family phone (the family view's cookie, without OpenAlgo's own) from your phone, lists what a family phone may reach, and sets the sign-in limits |
+| `sudarshan-family.conf` | `/etc/nginx/snippets/` | the guard (one line at the top of the server, so it covers every location: pages, `/api`, `/auth`, `/sudarshan`, `/socket.io`, `/ws`), the refusal page, the family service's paths, the invite page |
+| `sudarshan-family-proxy.conf` | `/etc/nginx/snippets/` | what the family service's paths share: the phone's own address, a 64 KiB cap, time limits, and nginx's own refusals in plain words |
+
+What changes, once they are in:
+
+- A family phone opening anything of OpenAlgo gets a page that says "This part of सुदर्शन /
+  SUDARSHAN is for the account owner", with a button to the family view. It reaches only the
+  family view (`/family/...`) and the files its pages load. OpenAlgo itself refuses such a phone
+  anyway (it never holds an OpenAlgo session); nginx is the second lock.
+  - The guard is one line at the top of the server rather than a line in each location, so every
+    location the site has, or gains later, is covered.
+  - The refusal page is held by nginx itself rather than taken from the app's build, so it leaves
+    the site's own error pages alone and still answers while OpenAlgo restarts.
+  - The server's address alone and About are refused too: both open your own app, whose every
+    request the guard refuses, so a family phone gets the refusal page and its button instead of
+    a broken page.
+- Your phone and laptop, TradingView, Telegram and every other caller see no change: the guard
+  acts only on a phone that carries the family cookie and not OpenAlgo's.
+- Signing in and joining are held to 5 tries a minute from one connection, and 12 a minute from
+  everyone together; past that the phone reads "Too many tries from this connection. Wait a
+  minute, then try again." and the family service does no work for it. A refused sign-in is in
+  nginx's error log with the address it came from.
+- The family service's private routes and its `/health` cannot be reached from outside: nginx
+  hands the service only `/family/api/...` and `/family/ws`, cleaned of `../` tricks.
+- An invite link carries its code in the address, so the invite page and its details are kept
+  out of nginx's access log, and the page asks the phone not to pass its address on to the
+  requests it makes next.
+
+### Your steps, once the release that carries the family view is installed
+
+1. On the laptop, open the SSH session to the server.
+2. Paste this line (it fetches the three files from GitHub at the release installed on the server,
+   as the family set-up did, and copies them into place, owned by root, mode 644):
+
+   ```sh
+   sudo bash -c 'set -e; d="$(mktemp -d)"; trap "rm -rf \"$d\"" EXIT; . /etc/sudarshan/deploy.env; t="$(cat /var/lib/sudarshan/deployed_tag)"; for f in sudarshan-family-zones.conf sudarshan-family.conf sudarshan-family-proxy.conf; do curl -fsSL "https://raw.githubusercontent.com/${REPO#https://github.com/}/$t/sudarshan/ops/nginx/$f" -o "$d/$f"; done; install -m 644 -o root -g root "$d/sudarshan-family-zones.conf" /etc/nginx/conf.d/; install -m 644 -o root -g root "$d/sudarshan-family.conf" "$d/sudarshan-family-proxy.conf" /etc/nginx/snippets/; echo "copied the nginx files of $t"'
+   ```
+
+   You should see `copied the nginx files of v...`. A `curl` error means the installed release has
+   no such files yet: nothing was copied.
+3. Open the SUDARSHAN site (the file step 03-A wrote; `ls /etc/nginx/sites-enabled/` lists the
+   sites): `sudo nano /etc/nginx/sites-enabled/<that file>`. In the `server { ... }` block that
+   has `listen 443`, add this one line below its `ssl_`, `add_header`, `set` and `if` lines and
+   above its first `location`, then save (Ctrl+O, Enter, Ctrl+X):
+
+   ```nginx
+       include snippets/sudarshan-family.conf;
+   ```
+
+4. Record which file that is, so the deploy tool's check reads that file and no other site's:
+
+   ```sh
+   echo /etc/nginx/sites-enabled/<that file> | sudo tee /etc/sudarshan/nginx-site
+   ```
+
+   You should see the path printed back.
+5. Optional, and worth doing if OpenAlgo's `.env` sets `TRUST_PROXY_HEADERS = 'TRUE'` (the check
+   warns when it does and these lines are missing): in the same file, inside the `location / { ... }`
+   of that server block, add these two lines, because otherwise anyone can write an address of
+   their choosing in these two headers, which OpenAlgo believes before nginx's own, and so put
+   that address on OpenAlgo's ban list or step round its sign-in limiter:
+
+   ```nginx
+           proxy_set_header CF-Connecting-IP "";
+           proxy_set_header True-Client-IP "";
+   ```
+
+6. Test, then reload. Never restart: a reload keeps every open connection, and if the test fails
+   nothing is reloaded and the site keeps running as before.
+
+   ```sh
+   sudo nginx -t && sudo systemctl reload nginx
+   ```
+
+   You should see `syntax is ok` and `test is successful`. If not, the line nginx names is the
+   one to fix (most often the include line outside the 443 server block); or undo (below).
+7. Check it:
+
+   ```sh
+   sudo sudarshan-deploy --nginx-check
+   ```
+
+   You should see `nginx: PASS` lines and, last, `nginx: PASS. The family view's nginx lines are
+   installed, loaded and this release's.` Each `nginx: FAIL` line says what to do, and a
+   `nginx: WARN` line says what is worth doing (step 5). One FAIL you may meet: OpenAlgo's session
+   cookie is named by `SESSION_COOKIE_NAME` in OpenAlgo's `.env` (`session` unless it was
+   changed); if the check says the guard knows it under another name, put the name it gives in
+   place of `__Secure-session` in `/etc/nginx/conf.d/sudarshan-family-zones.conf` (the line under
+   `map $http_cookie $sud_owner`), then step 6 again.
+8. On a family phone (a test member on your own phone works too): the family view opens, and the
+   server's address without `/family` shows the refusal page.
+
+The check reads the three files, the site file you recorded and OpenAlgo's `.env`, and nothing
+else of nginx: no other site's file, and of `nginx -t` only whether it passes. From then on every
+run of the deploy tool checks them again, reading only, and its log says it once if they change,
+go missing or are not loaded, or when a later release brings new ones (then do steps 2 and 6
+again; the include line stays). Nothing is said while none of the files is there.
+
+**Trying the family view on your own phone.** While you are signed in to both, both work. Your own
+sign-in ends at 03:30 and the family one does not, so the next morning your own pages show the
+family refusal page: open the family view, Settings, tap Sign out next to this phone, then sign
+in as usual. A second browser on the phone for the family view avoids this.
+
+**To undo:** take the include line out of the site first, then
+`sudo rm /etc/nginx/conf.d/sudarshan-family-zones.conf /etc/nginx/snippets/sudarshan-family.conf
+/etc/nginx/snippets/sudarshan-family-proxy.conf /etc/sudarshan/nginx-site`, then step 6. Family
+phones then cannot reach the family view (its pages say it is not set up); nothing else changes.
+The two lines of step 5 can stay: they help OpenAlgo whether or not the family view is there.
+
+**What this does not cover.**
+
+- A family phone that once opened your own sign-in page holds an OpenAlgo cookie (an empty one,
+  without your session), and nginx then takes it for yours: that phone meets OpenAlgo as any
+  stranger does, and OpenAlgo refuses it, but it sees OpenAlgo's sign-in page instead of the
+  refusal page. Clearing the site's data in Chrome on that phone and signing in to the family view
+  again brings the refusal page back.
+- nginx's error log can still name an invite's address if the family service is down at that
+  moment (OpenAlgo's own logs mask the code). An invite works once, for two hours.
+- The family account's firewall (made by the one-time set-up, and proved by the family check at
+  every deploy run) refuses your ports, OpenAlgo's market-data bus (5555) and its WebSocket proxy
+  (8765) among them, and every local port the family view does not use. It allows OpenAlgo itself
+  on 127.0.0.1:5000, which the family view reads the shared watchlists through. So a break-in into
+  the family service could reach OpenAlgo there directly, without nginx and its guard, as a
+  stranger: the sign-in page and the public pages, never an order, which needs your session or API
+  key. If OpenAlgo's `.env` sets `TRUST_PROXY_HEADERS = 'TRUE'`, such a process could also give any
+  address as its own, and so draw OpenAlgo's ban of an address onto yours or step round its sign-in
+  limit; with `'FALSE'`, OpenAlgo's own default, it cannot. Step 5 does not help there: such a
+  process does not pass through nginx.
+
+Tests: `sudarshan/family/tests/test_nginx_text.py` (every rule on the files' text, and the same
+files run in a real nginx in front of fake services when an nginx binary is found:
+`SUDARSHAN_NGINX`, then `nginx` on the PATH, then `/usr/sbin/nginx`) and
+`sudarshan/ops/tests/test_deploy_nginx_check.py` (the deploy tool's check).

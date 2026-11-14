@@ -3,6 +3,7 @@ import { useMemo } from 'react'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useMarketData } from '@/hooks/useMarketData'
 import { cn } from '@/lib/utils'
+import { istTime } from '@/sudarshan/books/time'
 import { directionOf, formatRupees, toNumber } from './format'
 import { useNow } from './hooks'
 import { LiveLine } from './LiveLine'
@@ -14,7 +15,9 @@ import {
   type MarketOpen,
   openPositions,
   type PositionsSnapshot,
+  positionRows,
 } from './live'
+import { PositionRows, type RowMask } from './PositionRows'
 import { TREND_TEXT, TrendArrow } from './Trend'
 
 /** The funds summary /auth/dashboard-data returns, figures as strings. */
@@ -64,15 +67,14 @@ interface PnlCardProps {
   syncedAt?: number | null
   /** The last re-read failed, so the figures shown are from the one before it. */
   syncFailed?: boolean
+  /** Read the broker again now (SUDARSHAN D3: the failed read's Try again). */
+  onRetry?: () => void
+  /** What a family member's mask hides in the position rows (design 7). */
+  mask?: RowMask
   marketOpen?: MarketOpen
 }
 
 const NOT_KNOWN: MarketOpen = () => null
-
-function openCount(count: number): string {
-  if (count === 0) return 'No open positions'
-  return count === 1 ? '1 open position' : `${count} open positions`
-}
 
 /**
  * Today's P&L, live, then the funds available and the share of margin in use.
@@ -91,6 +93,8 @@ export function PnlCard({
   positions = null,
   syncedAt = null,
   syncFailed = false,
+  onRetry,
+  mask,
   marketOpen = NOT_KNOWN,
 }: PnlCardProps) {
   const held = useMemo(() => openPositions(positions?.positions ?? []), [positions])
@@ -181,20 +185,36 @@ export function PnlCard({
         </p>
       )}
 
-      {showFigures && positions && (
+      {showFigures && positions && held.length === 0 && (
         <p className="text-[0.78125rem] font-medium text-[color:var(--text-tertiary)]">
-          {openCount(held.length)}
+          No open positions
         </p>
       )}
+      {/* SUDARSHAN M3.3 (D4): the open positions, live from the same ticks; no actions here. */}
+      {showFigures && positions && (
+        <PositionRows rows={positionRows(positions, prices)} readAt={syncedAt} mask={mask} />
+      )}
 
+      {/* SUDARSHAN D3 (M3.1): a failed re-read keeps the last figures and says when they were read. */}
       {showFigures && syncFailed && (
-        <output className="flex items-start gap-1.5 text-[0.78125rem] font-medium">
-          <AlertTriangle
-            aria-hidden="true"
-            className="mt-px size-3.5 shrink-0 text-[color:var(--warning-text)]"
-          />
-          Could not refresh just now. Showing the last figures.
-        </output>
+        <div className="flex flex-wrap items-center gap-x-2 text-[0.78125rem] font-medium">
+          <output className="flex items-start gap-1.5">
+            <AlertTriangle
+              aria-hidden="true"
+              className="mt-px size-3.5 shrink-0 text-[color:var(--warning-text)]"
+            />
+            Could not read the broker{syncedAt ? ` · last read ${istTime(syncedAt)}` : ''}
+          </output>
+          {onRetry && (
+            <button
+              type="button"
+              onClick={onRetry}
+              className="-my-2 inline-flex min-h-12 items-center rounded-lg px-2 font-semibold text-[color:var(--brand)] outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              Try again
+            </button>
+          )}
+        </div>
       )}
 
       <div aria-hidden="true" className="my-2 h-px bg-[color:var(--divider)]" />
@@ -252,6 +272,13 @@ export function PnlCard({
 
       {showFigures && !margin && (
         <p className="text-[0.78125rem] font-medium text-muted-foreground">No margin in use</p>
+      )}
+
+      {/* SUDARSHAN D3 (M3.1): funds, margin and realised P&L are as of the broker's last read. */}
+      {showFigures && syncedAt !== null && !syncFailed && (
+        <p className="mt-1 text-[0.75rem] font-medium text-[color:var(--text-tertiary)]">
+          Broker read {istTime(syncedAt)}
+        </p>
       )}
     </section>
   )

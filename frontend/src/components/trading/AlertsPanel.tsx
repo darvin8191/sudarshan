@@ -23,6 +23,7 @@
 import { Bell, Eraser, Loader2, MoreHorizontal, Pause, Play, Settings2, Trash2 } from 'lucide-react'
 import type { Alert } from 'openalgo-charts'
 import { useMemo, useState } from 'react'
+import { Link } from 'react-router'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -549,6 +550,20 @@ export function AlertsPanel({ view, log, paneLabel, onEdit, onClearLog, revision
           ))
         )}
       </div>
+
+      {/* SUDARSHAN M4.9 (T5): where these alerts work, and where to set one that reaches the
+          phone with its screen off. */}
+      <p className="shrink-0 border-t px-2 py-2 text-[11px] leading-4 text-muted-foreground">
+        These alerts work while this terminal is open. For alerts that reach you with the screen
+        off, use{' '}
+        <Link
+          to="/market-alerts"
+          className="font-medium text-primary underline underline-offset-2 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        >
+          Alerts
+        </Link>
+        .
+      </p>
     </PanelShell>
   )
 }

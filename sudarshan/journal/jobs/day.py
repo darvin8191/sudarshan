@@ -146,7 +146,15 @@ async def _thread(fn):
 
 
 async def close_day(service: Any, today: int, now: int, late: bool) -> str:
-    """Write today's ``day_close`` for the live account; returns the job log's line."""
+    """Write today's ``day_close`` for the live account; returns the job log's line. Run late
+    (the journal started after the close), it reads the day's trades first, as the close check
+    does, so its counts are not those of a journal that has not read the day yet (review L17)."""
+    read_first = ""
+    if late:
+        from ..capture import capture_for
+
+        out = await capture_for(service).read_live("close_reconcile", withdraw=False)
+        read_first = f"the day's trades read first: {out.line()}; "
     try:
         answer = await link_for(service).positions()
     except PortfolioUnavailable as exc:
@@ -193,7 +201,7 @@ async def close_day(service: Any, today: int, now: int, late: bool) -> str:
 
     values = await _thread(lambda: service.store.write(OWNER, write))
     positions = "read" if figure is not None else "not read"
-    line = (
+    line = read_first + (
         f"positions {positions}, {values['trades_closed']} trades closed, "
         f"{values['fills_live']} fills recorded live, "
         f"{len(values['positions_overnight'])} carried"

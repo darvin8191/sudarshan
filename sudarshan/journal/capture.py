@@ -368,7 +368,17 @@ class Capture:
                 tx.order_ref_note(mode, order_id, first, now)
             for order_id, values in (labels or {}).items():
                 tx.order_ref_set(mode, order_id, values, now)
-            gone = tx.fills_withdraw(mode, withdraw_day, listed, now) if withdraw_day else 0
+            gone = 0
+            if withdraw_day and not listed:
+                # An empty list while the journal holds the day's fills is an answer it does not
+                # trust (review L9): nothing is taken out until a read lists the day's trades.
+                held = sum(1 for f in tx.fills_of(mode, day=withdraw_day)
+                           if f["source"] != "withdrawn")  # fmt: skip
+                if held:
+                    log.warning("Upstox listed no trades for the day while the journal holds %d; "
+                                "none is taken out", held)  # fmt: skip
+            elif withdraw_day:
+                gone = tx.fills_withdraw(mode, withdraw_day, listed, now)
             return counts, gone
 
         counts, gone = await self._thread(lambda: store.write(OWNER, write))

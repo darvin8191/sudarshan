@@ -308,7 +308,8 @@ export function ManualLegBuilder({
         {resolvedContract && (
           <div className="hidden items-center gap-2 text-[11px] sm:flex">
             <span className="flex items-center gap-1.5 text-muted-foreground">
-              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" />
+              {/* SUDARSHAN M1.21 (T4): a still mark, never a pulsing one. */}
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
               LTP
               <span className="font-bold tabular-nums text-foreground">
                 ₹{resolvedContract.marketPrice.toFixed(2)}

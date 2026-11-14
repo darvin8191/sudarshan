@@ -212,14 +212,16 @@ def test_the_catch_up_reads_today_and_fills_the_unmarked_days_from_history(rig):
     assert fills["h1"]["source"] == "stream_read" and fills["h1"]["product"] == "MIS"
     # the product of the day's recorded fill of the instrument, so the two make one trip
     assert fills["h2"]["source"] == "history" and fills["h2"]["product"] == "MIS"
-    assert fills["h2"]["order_id"] == "h:h2" and "h3" not in fills
+    h2_order = "h:20261106:NFO:NIFTY25NOV2625000CE:MIS:SELL"  # one order a side and day (M1)
+    assert fills["h2"]["order_id"] == h2_order and "h3" not in fills
     assert fills["h4"]["symbol"] == "NIFTY03NOV2625000CE" and fills["h4"]["exchange"] == "NFO"
     assert fills["h4"]["product"] == "NRML"  # nothing recorded of it that day: the carry class
     trips = rig.svc.store.read(OWNER, lambda tx: tx.rows("round_trip", open_day=fri))
     assert [(t["status"], t["gross_paise"]) for t in trips] == [("closed", 6_500)]
     assert fills["h5"]["product"] == "CNC" and fills["h5"]["exchange"] == "NSE"
     refs = rig.refs()
-    assert refs["h:h2"]["surface"] == "history" and refs["h:h2"]["strategy"] == "Trade history"
+    assert refs[h2_order]["surface"] == "history"
+    assert refs[h2_order]["strategy"] == "Trade history"
     assert {"t1", "t2", "t3"} <= set(fills)  # today's trades, read once more
     notes = {d: (closing_of(rig, d) or {}).get("reconcile_note") or "" for d in (fri, thu, wed)}
     assert notes[thu] == "checked"

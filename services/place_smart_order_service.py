@@ -19,6 +19,7 @@ from utils.constants import (
     VALID_PRODUCT_TYPES,
 )
 from utils.event_bus import bus
+from utils.httpx_client import UNANSWERED_ORDER_MESSAGE, watch_for_unanswered_writes
 from utils.logging import get_logger
 
 # Initialize logger
@@ -216,8 +217,12 @@ def place_smart_order_with_auth(
         ))
         return False, error_response, 404
 
+    unanswered: list[str] = []
     try:
-        res, response_data, order_id = broker_module.place_smartorder_api(order_data, auth_token)
+        with watch_for_unanswered_writes() as unanswered:
+            res, response_data, order_id = broker_module.place_smartorder_api(
+                order_data, auth_token
+            )
         # SUDARSHAN M6.9: what it sent goes to the alert, not into the answer.
         sent = response_data.pop("sent", None) if isinstance(response_data, dict) else None
 
@@ -283,14 +288,16 @@ def place_smart_order_with_auth(
         logger.exception(f"Error in broker_module.place_smartorder_api: {e}")
         error_response = {
             "status": "error",
-            "message": "Failed to place smart order due to internal error",
+            "message": UNANSWERED_ORDER_MESSAGE
+            if unanswered
+            else "Failed to place smart order due to internal error",
         }
         bus.publish(OrderFailedEvent(
             mode="live", api_type="placesmartorder",
             request_data=order_request_data, response_data=error_response,
             api_key=api_key, error_message=str(e),
         ))
-        return False, error_response, 500
+        return False, error_response, 502 if unanswered else 500
 
     if res and res.status == 200:
         return True, order_response_data, 200
@@ -300,6 +307,11 @@ def place_smart_order_with_auth(
             if isinstance(response_data, dict)
             else "Failed to place smart order"
         )
+        # SUDARSHAN M6.9: the Upstox module's own "not confirmed" sentence is kept; any other
+        # words for an order whose reply was lost (an exception's, say) give way to upstream's.
+        fork_said = isinstance(response_data, dict) and response_data.get("not_confirmed") is True
+        if unanswered and not fork_said:
+            message = UNANSWERED_ORDER_MESSAGE
         error_response = {"status": "error", "message": message}
         # SUDARSHAN M6.8: an exit the guard sent nothing for (another for that position is on its
         # way) is told on Telegram, which hears of no other failure
@@ -312,6 +324,8 @@ def place_smart_order_with_auth(
             api_key=api_key, error_message=message,
         ))
         status_code = res.status if res and hasattr(res, "status") else 500
+        if unanswered:
+            status_code = 502
         return False, error_response, status_code
 
 
