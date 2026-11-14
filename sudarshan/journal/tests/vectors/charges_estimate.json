@@ -1,0 +1,115 @@
+{
+  "about": "Golden figures for charges_estimate (B6, M5.10): one order as the ticket holds it, priced on the rate card of the clock's day as one executed order. Worked by hand from the card's rows (core/charges.py, edition 2026-11-14.2), each part rounded half-up to the paisa on the order's turnover, GST 18% of brokerage + exchange + SEBI. Turnover is quantity x price in paise. Every value is synthetic.",
+  "vectors": [
+    {
+      "id": "G1",
+      "what": "options, buy",
+      "day": 20261116,
+      "plan": "plus",
+      "args": {"exchange": "NFO", "symbol": "NIFTY24NOV2625000CE", "action": "BUY", "quantity": 65, "price_u": 1312000, "product": "MIS"},
+      "work": "turnover 65 x 131.20 = 8,528.00 = 852,800 paise; brokerage 3,000; STT none on a buy; exchange 852,800 x 0.03553% = 302.99984 -> 303; SEBI 852,800 x 0.0001% = 0.8528 -> 1; stamp 852,800 x 0.003% = 25.584 -> 26; GST (3,000 + 303 + 1) x 18% = 594.72 -> 595; total 3,925",
+      "expect": {"segment": "options", "modelled": true, "turnover_paise": 852800, "left_out": [],
+                 "parts": {"brokerage_paise": 3000, "stt_paise": 0, "exchange_paise": 303, "sebi_paise": 1, "stamp_paise": 26, "gst_paise": 595, "total_paise": 3925}}
+    },
+    {
+      "id": "G2",
+      "what": "options, sell",
+      "day": 20261116,
+      "plan": "plus",
+      "args": {"exchange": "NFO", "symbol": "NIFTY24NOV2625000CE", "action": "SELL", "quantity": 65, "price_u": 1312000, "product": "NRML"},
+      "work": "turnover 852,800 paise; brokerage 3,000; STT 852,800 x 0.15% = 1,279.2 -> 1,279; exchange 303; SEBI 1; stamp none on a sale; GST 595; total 5,178",
+      "expect": {"segment": "options", "modelled": true, "turnover_paise": 852800, "left_out": [],
+                 "parts": {"brokerage_paise": 3000, "stt_paise": 1279, "exchange_paise": 303, "sebi_paise": 1, "stamp_paise": 0, "gst_paise": 595, "total_paise": 5178}}
+    },
+    {
+      "id": "G3",
+      "what": "futures, buy",
+      "day": 20261116,
+      "plan": "plus",
+      "args": {"exchange": "NFO", "symbol": "NIFTY24NOV26FUT", "action": "BUY", "quantity": 65, "price_u": 258743000, "product": "NRML"},
+      "work": "turnover 65 x 25,874.30 = 16,81,829.50 = 168,182,950 paise; brokerage 3,000; STT none on a buy; exchange 168,182,950 x 0.00183% = 3,077.747985 -> 3,078; SEBI 168.18295 -> 168; stamp 168,182,950 x 0.002% = 3,363.659 -> 3,364; GST (3,000 + 3,078 + 168) x 18% = 1,124.28 -> 1,124; total 10,734",
+      "expect": {"segment": "futures", "modelled": true, "turnover_paise": 168182950, "left_out": [],
+                 "parts": {"brokerage_paise": 3000, "stt_paise": 0, "exchange_paise": 3078, "sebi_paise": 168, "stamp_paise": 3364, "gst_paise": 1124, "total_paise": 10734}}
+    },
+    {
+      "id": "G4",
+      "what": "futures, sell",
+      "day": 20261116,
+      "plan": "plus",
+      "args": {"exchange": "NFO", "symbol": "NIFTY24NOV26FUT", "action": "SELL", "quantity": 65, "price_u": 258743000, "product": "MIS"},
+      "work": "turnover 168,182,950 paise; brokerage 3,000; STT 168,182,950 x 0.05% = 84,091.475 -> 84,091; exchange 3,078; SEBI 168; stamp none on a sale; GST 1,124; total 91,461",
+      "expect": {"segment": "futures", "modelled": true, "turnover_paise": 168182950, "left_out": [],
+                 "parts": {"brokerage_paise": 3000, "stt_paise": 84091, "exchange_paise": 3078, "sebi_paise": 168, "stamp_paise": 0, "gst_paise": 1124, "total_paise": 91461}}
+    },
+    {
+      "id": "G5",
+      "what": "equity delivery, buy",
+      "day": 20261116,
+      "plan": "plus",
+      "args": {"exchange": "NSE", "symbol": "SBIN", "action": "BUY", "quantity": 10, "price_u": 8030500, "product": "CNC"},
+      "work": "turnover 10 x 803.05 = 8,030.50 = 803,050 paise; brokerage 3,000; STT 803,050 x 0.1% = 803.05 -> 803; exchange 803,050 x 0.00307% = 24.653635 -> 25; SEBI 0.80305 -> 1; stamp 803,050 x 0.015% = 120.4575 -> 120; GST (3,000 + 25 + 1) x 18% = 544.68 -> 545; total 4,494",
+      "expect": {"segment": "equity_delivery", "modelled": true, "turnover_paise": 803050, "left_out": [],
+                 "parts": {"brokerage_paise": 3000, "stt_paise": 803, "exchange_paise": 25, "sebi_paise": 1, "stamp_paise": 120, "gst_paise": 545, "total_paise": 4494}}
+    },
+    {
+      "id": "G6",
+      "what": "equity delivery, sell (the depository charge is named as left out)",
+      "day": 20261116,
+      "plan": "plus",
+      "args": {"exchange": "NSE", "symbol": "SBIN", "action": "SELL", "quantity": 10, "price_u": 8030500, "product": "CNC"},
+      "work": "turnover 803,050 paise; brokerage 3,000; STT on both sides 803; exchange 25; SEBI 1; stamp none on a sale; GST 545; total 4,374",
+      "expect": {"segment": "equity_delivery", "modelled": true, "turnover_paise": 803050, "left_out": ["Depository charge"],
+                 "parts": {"brokerage_paise": 3000, "stt_paise": 803, "exchange_paise": 25, "sebi_paise": 1, "stamp_paise": 0, "gst_paise": 545, "total_paise": 4374}}
+    },
+    {
+      "id": "G7",
+      "what": "equity intraday, buy",
+      "day": 20261116,
+      "plan": "plus",
+      "args": {"exchange": "NSE", "symbol": "SBIN", "action": "BUY", "quantity": 100, "price_u": 8030500, "product": "MIS"},
+      "work": "turnover 100 x 803.05 = 80,305.00 = 8,030,500 paise; brokerage 3,000; STT none on a buy; exchange 8,030,500 x 0.00307% = 246.53635 -> 247; SEBI 8.0305 -> 8; stamp 8,030,500 x 0.003% = 240.915 -> 241; GST (3,000 + 247 + 8) x 18% = 585.9 -> 586; total 4,082",
+      "expect": {"segment": "equity_intraday", "modelled": true, "turnover_paise": 8030500, "left_out": [],
+                 "parts": {"brokerage_paise": 3000, "stt_paise": 0, "exchange_paise": 247, "sebi_paise": 8, "stamp_paise": 241, "gst_paise": 586, "total_paise": 4082}}
+    },
+    {
+      "id": "G8",
+      "what": "equity intraday, sell",
+      "day": 20261116,
+      "plan": "plus",
+      "args": {"exchange": "NSE", "symbol": "SBIN", "action": "SELL", "quantity": 100, "price_u": 8030500, "product": "MIS"},
+      "work": "turnover 8,030,500 paise; brokerage 3,000; STT 8,030,500 x 0.025% = 2,007.625 -> 2,008; exchange 247; SEBI 8; stamp none on a sale; GST 586; total 5,849",
+      "expect": {"segment": "equity_intraday", "modelled": true, "turnover_paise": 8030500, "left_out": [],
+                 "parts": {"brokerage_paise": 3000, "stt_paise": 2008, "exchange_paise": 247, "sebi_paise": 8, "stamp_paise": 0, "gst_paise": 586, "total_paise": 5849}}
+    },
+    {
+      "id": "G9",
+      "what": "an exchange the card does not cover: not modelled, every part 0, never a figure",
+      "day": 20261116,
+      "plan": "plus",
+      "args": {"exchange": "BSE", "symbol": "SBIN", "action": "BUY", "quantity": 10, "price_u": 8030500, "product": "CNC"},
+      "work": "BSE has no row on the card: nothing is guessed",
+      "expect": {"segment": "not_modelled", "modelled": false, "turnover_paise": 803050, "left_out": [],
+                 "parts": {"brokerage_paise": 0, "stt_paise": 0, "exchange_paise": 0, "sebi_paise": 0, "stamp_paise": 0, "gst_paise": 0, "total_paise": 0}}
+    },
+    {
+      "id": "G10",
+      "what": "the standard plan in the settings: an API order's Rs 10",
+      "day": 20261116,
+      "plan": "standard",
+      "args": {"exchange": "NFO", "symbol": "NIFTY24NOV2625000CE", "action": "SELL", "quantity": 65, "price_u": 1312000, "product": "MIS"},
+      "work": "as G2 with brokerage 1,000 (the ticket's order is an API order); GST (1,000 + 303 + 1) x 18% = 234.72 -> 235; total 1,000 + 1,279 + 303 + 1 + 235 = 2,818",
+      "expect": {"segment": "options", "modelled": true, "turnover_paise": 852800, "left_out": [],
+                 "parts": {"brokerage_paise": 1000, "stt_paise": 1279, "exchange_paise": 303, "sebi_paise": 1, "stamp_paise": 0, "gst_paise": 235, "total_paise": 2818}}
+    },
+    {
+      "id": "G11",
+      "what": "the card of the clock's day: options STT before 1 April 2026",
+      "day": 20260315,
+      "plan": "plus",
+      "args": {"exchange": "NFO", "symbol": "NIFTY26MAR2625000CE", "action": "SELL", "quantity": 65, "price_u": 1312000, "product": "MIS"},
+      "work": "STT 852,800 x 0.1% = 852.8 -> 853 (the 0.15% row starts on 1 Apr 2026); exchange 0.03553% from 1 Mar 2026 = 303; SEBI 1; GST 595; total 3,000 + 853 + 303 + 1 + 595 = 4,752",
+      "expect": {"segment": "options", "modelled": true, "turnover_paise": 852800, "left_out": [],
+                 "parts": {"brokerage_paise": 3000, "stt_paise": 853, "exchange_paise": 303, "sebi_paise": 1, "stamp_paise": 0, "gst_paise": 595, "total_paise": 4752}}
+    }
+  ]
+}
