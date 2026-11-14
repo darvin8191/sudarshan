@@ -14,6 +14,7 @@ import { Unplug } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router'
 import { PlaceOrderDialog } from '@/components/trading/PlaceOrderDialog'
+import { cn } from '@/lib/utils'
 import { AccessNotice } from '@/sudarshan/AccessNotice'
 import { usePriceAccess } from '@/sudarshan/access'
 import { useMarketOpen, useNow } from '@/sudarshan/dashboard/hooks'
@@ -26,6 +27,7 @@ import {
 import { readListing } from './api'
 import { ChainTab } from './ChainTab'
 import { Header } from './Header'
+import { OiTab } from './OiTab'
 import { readLastChain, saveLastChain } from './prefs'
 import { StrikeEntry } from './StrikeEntry'
 import { useSheets } from './sheets'
@@ -39,6 +41,13 @@ const ACTION =
 const QUIET =
   'inline-flex min-h-12 items-center rounded-sm text-sm font-semibold text-[color:var(--brand)] underline underline-offset-2 outline-none focus-visible:ring-2 focus-visible:ring-ring'
 const NOTE = 'text-sm font-semibold text-[color:var(--text-secondary)]'
+
+type Tab = 'chain' | 'oi'
+const TABS: Array<{ tab: Tab; label: string }> = [
+  { tab: 'chain', label: 'Chain' },
+  { tab: 'oi', label: 'OI' },
+]
+const tabOf = (text: string | null): Tab => TABS.find((each) => each.tab === text)?.tab ?? 'chain'
 
 export const LOGIN_NEEDED = "Today's Upstox login is needed to read the option chain."
 const WIDE_CHAIN = 'Open the wide option chain'
@@ -177,6 +186,16 @@ export default function OptionsPage() {
 
   const { status, model } = live
   const ticket = sheets.sheet?.sheet === 'ticket' ? sheets.sheet.order : null
+  const dim = live.line.kind !== 'live' && live.line.kind !== 'closed' && !live.feed.connected
+  const tab = tabOf(query.get('tab'))
+  const strikeAsked = Number(query.get('strike'))
+  const startAt = query.get('strike') && Number.isFinite(strikeAsked) ? strikeAsked : null
+  const pickTab = (next: Tab) => {
+    const params = new URLSearchParams(query)
+    if (next === 'chain') params.delete('tab')
+    else params.set('tab', next)
+    setQuery(params, { replace: true })
+  }
   const loggedOut = access.state === 'upstox-logged-out' || status.state === 'signin'
   const heldAt = model ? clockTime(model.asOf) : null
   return (
@@ -189,7 +208,11 @@ export default function OptionsPage() {
         now={now}
         bare={!ready || loggedOut}
         onUnderlying={pickUnderlying}
-        onExpiry={(next) => setQuery({ expiry: next }, { replace: true })}
+        onExpiry={(next) => {
+          const params = new URLSearchParams(query)
+          params.set('expiry', next)
+          setQuery(params, { replace: true })
+        }}
       />
       {loggedOut ? (
         <LoginNeeded
@@ -223,13 +246,46 @@ export default function OptionsPage() {
             </div>
           )}
           {model && (
-            <ChainTab
-              model={model}
-              chainKey={`${listing.exchange}:${listing.underlying}:${expiry}`}
-              directions={live.directions}
-              dim={live.line.kind !== 'live' && live.line.kind !== 'closed' && !live.feed.connected}
-              onOpen={openStrike}
-            />
+            <div
+              role="tablist"
+              aria-label="Views of the chain"
+              className="grid grid-flow-col auto-cols-fr gap-1 border-b border-[color:var(--border-subtle)]"
+            >
+              {TABS.map((each) => (
+                <button
+                  key={each.tab}
+                  type="button"
+                  role="tab"
+                  id={`sd-options-tab-${each.tab}`}
+                  aria-selected={tab === each.tab}
+                  aria-controls="sd-options-panel"
+                  onClick={() => pickTab(each.tab)}
+                  className={cn(
+                    '-mb-px min-h-12 border-b-[3px] text-[0.9375rem] font-semibold outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                    tab === each.tab
+                      ? 'border-[color:var(--brand)] font-bold text-primary'
+                      : 'border-transparent text-[color:var(--text-secondary)]'
+                  )}
+                >
+                  {each.label}
+                </button>
+              ))}
+            </div>
+          )}
+          {model && (
+            <div role="tabpanel" id="sd-options-panel" aria-labelledby={`sd-options-tab-${tab}`}>
+              {tab === 'oi' && <OiTab model={model} dim={dim} />}
+              {tab === 'chain' && (
+                <ChainTab
+                  model={model}
+                  chainKey={`${listing.exchange}:${listing.underlying}:${expiry}`}
+                  directions={live.directions}
+                  dim={dim}
+                  startAt={startAt}
+                  onOpen={openStrike}
+                />
+              )}
+            </div>
           )}
           {model && sheets.sheet?.sheet === 'strike' && (
             <StrikeEntry

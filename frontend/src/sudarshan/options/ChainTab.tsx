@@ -26,6 +26,7 @@ export function ChainTab({
   chainKey,
   directions,
   dim,
+  startAt = null,
   onOpen,
 }: {
   model: ChainModel
@@ -34,6 +35,8 @@ export function ChainTab({
   directions: ReadonlyMap<string, TickDirection>
   /** The followed figures are not current (the socket is down, or they are stale). */
   dim: boolean
+  /** The strike the address named: the list opens around it instead of the money. */
+  startAt?: number | null
   onOpen: (strike: number, side: 'ce' | 'pe') => void
 }) {
   const [view, setView] = useState<ChainView>('price')
@@ -46,10 +49,11 @@ export function ChainTab({
   // The rows drawn are fixed when the chain opens: the money walking does not move the list.
   const [anchor, setAnchor] = useState<{ key: string; strike: number } | null>(null)
   const anchored = anchor !== null && anchor.key === chainKey
-  const anchorStrike = anchored ? anchor.strike : model.atm
+  const start = startAt !== null && strikes.includes(startAt) ? startAt : model.atm
+  const anchorStrike = anchored ? anchor.strike : start
   useEffect(() => {
-    if (!anchored && model.atm !== null) setAnchor({ key: chainKey, strike: model.atm })
-  }, [anchored, chainKey, model.atm])
+    if (!anchored && start !== null) setAnchor({ key: chainKey, strike: start })
+  }, [anchored, chainKey, start])
   const near = useMemo(
     () => new Set(around(strikes, anchorStrike, SHOWN_SIDE)),
     [strikes, anchorStrike]
@@ -68,7 +72,8 @@ export function ChainTab({
   const list = useRef<HTMLUListElement>(null)
   // biome-ignore lint/correctness/useExhaustiveDependencies: once for each chain, when its rows are first drawn
   useEffect(() => {
-    list.current?.querySelector('[data-atm]')?.scrollIntoView?.({ block: 'center' })
+    const row = list.current?.querySelector(`[data-strike="${anchorStrike}"]`)
+    row?.scrollIntoView?.({ block: 'center' })
   }, [chainKey])
 
   return (

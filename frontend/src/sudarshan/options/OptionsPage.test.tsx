@@ -414,6 +414,33 @@ describe('the options page', () => {
     same.rows = []
   }, 20_000)
 
+  it('switches between the Chain and the OI tab, kept in the address beside the expiry', async () => {
+    await open('/options/NFO/NIFTY?expiry=2026-11-24')
+    const tabs = within(screen.getByRole('tablist')).getAllByRole('tab')
+    expect(tabs.map((tab) => tab.textContent)).toEqual(['Chain', 'OI'])
+    expect(tabs[0]).toHaveAttribute('aria-selected', 'true')
+    fireEvent.click(tabs[1])
+    await settle()
+    expect(where()).toBe('/options/NFO/NIFTY?expiry=2026-11-24&tab=oi')
+    expect(screen.getByRole('tab', { name: 'OI' })).toHaveAttribute('aria-selected', 'true')
+    expect(document.querySelector('[data-oi-facts]')).not.toBeNull()
+    expect(document.querySelector('[data-chain-rows]')).toBeNull()
+    expect(feed.live()).toHaveLength(84) // one model, one set of ticks: the tab changes nothing on the socket
+    expect(chainRead).toHaveBeenCalledTimes(1)
+    fireEvent.click(screen.getByRole('tab', { name: 'Chain' }))
+    await settle()
+    expect(where()).toBe('/options/NFO/NIFTY?expiry=2026-11-24')
+  })
+
+  it('opens the list around the strike the address names', async () => {
+    await open('/options/NFO/NIFTY?strike=26500')
+    const drawn = [...document.querySelectorAll<HTMLElement>('[data-strike]')].map((row) =>
+      Number(row.dataset.strike)
+    )
+    expect(drawn[0]).toBe(26_000)
+    expect(drawn.at(-1)).toBe(27_000)
+  })
+
   it('lets every subscription go when the page is left', async () => {
     const view = await open()
     expect(feed.live()).toHaveLength(84)
