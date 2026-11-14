@@ -393,16 +393,36 @@ html[data-cvd='1'] {
     margin-right: calc(-1 * var(--sd-latin-tracking, 0.4em));
   }
 
-  /* App bar: icon 34px beside the wordmark at about 25px over 10px caps. */
+  /* App bar: icon 34px beside the wordmark at about 25px over 10px caps.
+
+     The lockup gives way before the page scrolls sideways (SCR-P item 5). Its room is what the
+     account controls leave, and they grow: the Analyze chip is wider than the Live one, the kill
+     switch adds a chip, and until Khand arrives the tracked caps are a fifth wider in the
+     fallback face. So the bar's lockup is one wrapping row, one line tall: when the icon and the
+     name do not fit side by side the icon drops to a second line, which is clipped away, and both
+     scripts stay (owner rule 2). Shorter still, the name's own right edge is clipped: never a
+     control, and never the page's width. */
   .sd-lockup--bar {
-    gap: 0.625rem;
+    display: flex;
+    flex-flow: row-reverse wrap;
+    justify-content: flex-end;
+    align-content: flex-start;
+    column-gap: 0.625rem;
+    min-width: 0;
+    height: 2.625rem;
+    overflow: clip;
   }
   .sd-lockup--bar .sd-lockup__icon {
     width: 2.125rem;
     height: 2.125rem;
   }
+  /* First in the row, so it is the one that stays on the first line; row-reverse puts the icon,
+     which follows it, on its left. */
   .sd-lockup--bar .sd-lockup__name {
+    order: -1;
     gap: 0.125rem;
+    height: 2.625rem;
+    justify-content: center;
   }
   .sd-lockup--bar .sd-lockup__wordmark {
     --sd-wordmark-weight: 22;
@@ -411,8 +431,8 @@ html[data-cvd='1'] {
   .sd-lockup--bar .sd-lockup__latin {
     font-size: 0.625rem;
   }
-  /* The narrowest phones: the icon steps aside so the account controls fit
-     beside both scripts down to 320px. */
+  /* The narrowest phones never show the icon, also where the lockup is not let shrink (the
+     family bar). */
   @media (max-width: 359.98px) {
     .sd-lockup--bar .sd-lockup__icon {
       display: none;
