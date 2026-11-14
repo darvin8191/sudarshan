@@ -1230,9 +1230,22 @@ export class TradingTerminal {
   private readonly liveClock = new LiveBarClock({
     builder: () => (this.destroyed ? null : this.builder),
     onBar: (update) => this.onClockBar(update),
-    history: () => this.data,
+    // SUDARSHAN M4.1 (SCR-F): a hidden page reads nothing for the clock.
+    history: () => (this.data ? this.clockHistory : null),
     now: () => this.frames.clock.seconds(),
   })
+  /**
+   * SUDARSHAN M4.1 (SCR-F): history as the candle clock repairs it. A hidden
+   * page reads none unless an alert is waiting on the candle, the rule the
+   * re-sync below follows; the return to the page reads the gap instead.
+   */
+  private readonly clockHistory = {
+    bars: () => this.data?.bars() ?? [],
+    refresh: (): Promise<unknown> =>
+      !this.data || (document.visibilityState === 'hidden' && !this.alertsArmed())
+        ? Promise.resolve()
+        : this.data.refresh(),
+  }
   /** SUDARSHAN M4.1: live, delayed, stale or closed: what the pane's marker says. */
   private readonly liveStatus = new LiveStatusTracker({
     exchange: '',
@@ -1595,6 +1608,11 @@ export class TradingTerminal {
     }
     const hiddenAt = this.hiddenAt
     this.hiddenAt = null
+    // SUDARSHAN M4.1 (SCR-F): a sleeping device stops the clock timers run on,
+    // so a timer set before the sleep still has the rest of its wait to run
+    // after it. The candle clock is aimed again from now, or a candle nobody
+    // trades would open up to a bar late.
+    if (!this.destroyed && this.builder?.hasSession()) this.liveClock.start()
     if (hiddenAt !== null && Date.now() - hiddenAt > WAKE_RECONNECT_MS && this.wsOpened)
       void this.checkStream(hiddenAt)
   }
