@@ -1,5 +1,6 @@
 /** The Journal shell: its states in words, its parts, and the Sandbox switch that never mixes modes. */
-import { screen, waitFor } from '@testing-library/react'
+import { focusManager } from '@tanstack/react-query'
+import { act, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -162,6 +163,33 @@ describe('Journal', () => {
       expect(await screen.findByTestId('trips-of')).toBeTruthy()
     } finally {
       quiet.mockRestore()
+    }
+  })
+
+  it('keeps the page when a re-read of the journal’s state fails (review L9)', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      call
+        .mockResolvedValueOnce(ON)
+        .mockRejectedValue(
+          new JournalError({
+            code: 'unavailable',
+            message: 'The journal service is not answering.',
+          })
+        )
+      renderBook('/journal', <Journal />)
+      expect(await screen.findByTestId('trips-of')).toBeTruthy()
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(31_000)
+        focusManager.setFocused(false)
+        focusManager.setFocused(true)
+      })
+      await waitFor(() => expect(call.mock.calls.length).toBeGreaterThan(1))
+      expect(screen.getByTestId('trips-of')).toBeTruthy()
+      expect(screen.queryByText('The journal service is not answering.')).toBeNull()
+    } finally {
+      focusManager.setFocused(undefined)
+      vi.useRealTimers()
     }
   })
 

@@ -70,7 +70,8 @@ export default function Journal() {
         title="Loading the journal"
       />
     )
-  } else if (state.isError) {
+  } else if (state.isError && !result) {
+    // Review L9: a failed re-read keeps what is on screen; only a page with nothing read says it.
     body = (
       <Notice
         icon={<TriangleAlert aria-hidden="true" className="size-6" />}

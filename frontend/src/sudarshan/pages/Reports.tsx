@@ -40,7 +40,8 @@ export default function Reports() {
         <p className="text-base font-bold">Loading the reports</p>
       </div>
     )
-  } else if (state.isError) {
+  } else if (state.isError && !result) {
+    // Review L9: a failed re-read keeps what is on screen; only a page with nothing read says it.
     body = (
       <div className={CARD} aria-live="polite">
         <TriangleAlert aria-hidden="true" className="mx-auto mb-2 size-6" />
