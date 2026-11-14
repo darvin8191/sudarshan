@@ -319,7 +319,9 @@ def test_the_shipped_list_on_a_fresh_install(tmp_path):
     assert after["SUDARSHAN_PORTFOLIO"] == "on"  # M7: the portfolio is switched on by the release
     assert after["SUDARSHAN_WATCHLISTS_V2"] == "off"  # M8.4: Watchlists v2 ships off
     assert after["SUDARSHAN_JOURNAL"] == "on"  # M14, M15: the journal is switched on by the release
+    assert after["SUDARSHAN_AUTOMATION"] == "sandbox"  # M12.11: automation in the sandbox first
     managed = {
+        "SUDARSHAN_AUTOMATION",
         "SUDARSHAN_PORTFOLIO",
         "SUDARSHAN_WATCHLISTS_V2",
         "SUDARSHAN_JOURNAL",
@@ -332,6 +334,37 @@ def test_the_shipped_list_on_a_fresh_install(tmp_path):
         k: v for k, v in before.items() if k not in managed
     }
     assert "left alone" not in out
+
+
+@pytest.mark.parametrize("owners", [b"off", b"'off'", b"on"])
+def test_the_automation_stage_has_no_old_value_so_the_owners_choice_stays(tmp_path, owners):
+    """M12.11: the release sets automation to the sandbox where .env does not name it. An owner
+    who turned it off keeps it off through every later deploy, and no deploy of this list ever
+    moves it to "on": the line lists no old value, and its value is sandbox."""
+    words = [
+        line.split("#", 1)[0].split()
+        for line in SHIPPED_LIST.read_text().splitlines()
+        if line.split("#", 1)[0].strip()
+    ]
+    assert [w for w in words if w[0] == "SUDARSHAN_AUTOMATION"] == [
+        ["SUDARSHAN_AUTOMATION", "sandbox"]
+    ]
+    original = b"APP_KEY='k'\nSUDARSHAN_AUTOMATION=" + owners + b"\n"
+    env, out = _applied(tmp_path, original, SHIPPED_LIST.read_bytes())
+    assert env.startswith(original), "the owner's line stays byte for byte"
+    assert "SUDARSHAN_AUTOMATION left alone: the owner chose its value" in out
+
+
+def test_the_app_reads_the_shipped_automation_line_as_the_sandbox_stage(tmp_path, monkeypatch):
+    """What the deploy writes is what sudarshan/automation/flag.py reads: sandbox, never on."""
+    from sudarshan.automation import flag
+
+    env, _out = _applied(tmp_path, b"APP_KEY='k'\n", SHIPPED_LIST.read_bytes())
+    written = _read_by_openalgo(env)["SUDARSHAN_AUTOMATION"]
+    monkeypatch.setenv(flag.ENV, written)
+    assert flag.stage() == flag.SANDBOX
+    monkeypatch.delenv(flag.ENV)
+    assert flag.stage() == flag.OFF  # and without the line it is off
 
 
 @pytest.mark.parametrize("owners", [b"off", b"'off'", b"0"])

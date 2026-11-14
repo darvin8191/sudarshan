@@ -726,6 +726,61 @@ network namespace of its own), `test_deploy_family.py` (the deploy tool's side, 
 without the set-up gets nothing but the tokens), `test_backup_family.py`, and
 `sudarshan/family/tests/`.
 
+## Automation: TradingView alerts (M12.1)
+
+A TradingView alert of one of your strategies reaches `POST /sudarshan/tv/<token>`, and SUDARSHAN
+decides whether it becomes one order. It adds no way of its own to send an order: an alert that
+passes becomes one smart order through OpenAlgo's own service, so the exit holds, the sizing from
+positions and fills, and the risk guard all apply as they do to an order you place yourself.
+
+- **The alert carries no secret.** Each strategy has its own link; the link's token is the
+  credential and is kept on the server only as a hash. The API key no longer goes into TradingView.
+- **Every alert says where the strategy should be after it** (long, short or flat). A repeated
+  alert finds the position already there; a missed one is put right by the next.
+- **One alert, one order.** The same alert delivered twice is handled once. An alert that fired
+  before a newer one was applied is not applied. A late alert (30 s by default, per strategy)
+  that would open, add or reverse is not sent; a late exit still goes.
+- **The size is yours.** A fixed number of lots or shares per strategy; TradingView's quantity is
+  not used.
+- **An exit goes to the contract that was entered**, whatever the expiry rule gives today.
+- **Sandbox or Live is the strategy's own**, never the app's mode. Stopped or Active is one
+  switch per strategy; `/auto` on Telegram shows and moves it.
+
+`SUDARSHAN_AUTOMATION` in OpenAlgo's `.env` (set by the release, above):
+
+| value | what it does |
+|---|---|
+| `off` (in code) | the alert links answer as links nobody made; nothing is opened or sent |
+| `sandbox` | every strategy sends to the sandbox, whatever the app's mode; Live cannot be chosen |
+| `on` | a strategy may be set to Live, with your confirm phrase, while `SUDARSHAN_RISK_GUARD` is `on` too |
+
+What it needs on the server:
+
+1. The nginx lines of the next section, so only TradingView's addresses reach the links.
+2. `TRUST_PROXY_HEADERS` on in OpenAlgo's `.env`. Behind nginx the app otherwise sees every
+   caller as this server itself, and refuses every alert as coming from an address that is not
+   TradingView's. The Automation page says so when that has happened. Turn it on only with the
+   nginx lines installed: they are what makes the header trustworthy for these links. The
+   setting applies to the whole site, so when you turn it on also put these three lines into the
+   site's own `location /` block (and `/socket.io/`), or a visitor could name any address as his
+   own to the login limit and the ban list:
+
+   ```
+   proxy_set_header CF-Connecting-IP "";
+   proxy_set_header True-Client-IP "";
+   proxy_set_header X-Client-IP "";
+   ```
+3. Semi-auto order mode off. In that mode an order waits in the Action Center and is then sent
+   wherever the app's mode points at that moment, so Automation does not use it and says so.
+
+What it does not do: option strategies, a size that follows TradingView's, limit orders, rolling
+a held position to the next contract, replaying a missed alert. A strategy and your own trades in
+the same contract and product are one position: an alert will "correct" a manual trade there.
+
+Code: `sudarshan/automation/` (rules and sentences are pure: `rules.py`, `payload.py`,
+`symbols.py`, `words.py`), `blueprints/sudarshan_automation.py`. Tests:
+`sudarshan/automation/tests/`.
+
 ## The fence around the alert links (M12.2)
 
 OpenAlgo has three addresses that take an alert without a login: the strategy module's
