@@ -9,7 +9,9 @@ for exactly these reads, each answered with ``read_at``:
     order_history(order_id)                 one order's rows (its type and time, for an order
                                             placed outside OpenAlgo)
     historical_trades(segment, from, to, page)
-    pnl_report(segment, fy, part, page)     Upstox's matched pairs and charges
+    pnl_report(segment, fy, part, page)     Upstox's matched pairs and charges (the charges of
+                                            one day or one month with ``from`` and ``to``)
+    tax_pack(fy)                            the tax working paper the Tax pack prints
     positions, funds                        the day report's figure and the brief's lines
     positions, holdings                     what was held before the journal's first fill of an
                                             instrument, read once at first sight (review B1)
@@ -53,6 +55,7 @@ WORDS = {
     "refused": "The portfolio service did not accept the journal's request; the two may hold "
     "different keys. Restart both services.",
     "failed": "The portfolio service could not read Upstox just now.",
+    "not_ready": "That part of the portfolio service is switched off on the server.",
 }
 
 
@@ -129,7 +132,7 @@ class PortfolioLink:
         if envelope.get("status") != "success":
             code = envelope.get("code")
             kind = "refused" if code in ("forbidden", "principal") else "failed"
-            raise self._fail(kind)
+            raise self._fail("not_ready" if code == "not_ready" else kind)
         data = envelope.get("data")
         if not isinstance(data, dict):
             raise self._fail("failed")
@@ -159,11 +162,24 @@ class PortfolioLink:
         )
 
     async def pnl_report(self, segment: str, fy: int, part: str, page: int = 1,
-                         page_size: int | None = None):  # fmt: skip
+                         page_size: int | None = None, *, start: int | None = None,
+                         end: int | None = None):  # fmt: skip
+        """``start`` and ``end`` (days of the year, part ``charges`` only): the charges of
+        those days alone, one day or one month, in place of the whole year's."""
         args: dict[str, Any] = {"segment": segment, "fy": fy, "part": part, "page": page}
         if page_size is not None:
             args["page_size"] = page_size
+        if start is not None and end is not None:
+            args.update({"from": start, "to": end})
         return await self.call("pnl_report", **args)
+
+    async def tax_pack(self, fy: int, member: int | None = None) -> dict[str, Any]:
+        """The tax working paper of a financial year (the year it starts in), as the portfolio
+        computes it with ``sudarshan/tax``; the journal prints it and computes none of it."""
+        args: dict[str, Any] = {"fy": fy}
+        if member is not None:
+            args["member"] = member
+        return await self.call("tax_pack", **args)
 
     async def benchmark_closes(self, index: str, start: int, end: int) -> dict[str, Any]:
         return await self.call("benchmark_closes", index=index, **{"from": start, "to": end})

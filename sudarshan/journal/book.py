@@ -61,6 +61,7 @@ from typing import Any
 
 from sudarshan.portfolio.core.kinds import QTY_SCALE
 
+from . import actual
 from .core import charges as charges_core
 from .core import kinds, pairing
 from .core.money import day_start_ms as money_day_start
@@ -276,6 +277,8 @@ def replay_tx(tx: Tx, mode: str, days: Iterable[int], now: int, facts: Facts,
     counts = {"keys": 0, "new": 0, "kept": 0, "orphaned": 0, "forgotten": 0, "unmatched": 0,
               "expired": 0}  # fmt: skip
     today = ist_day(now)
+    days = list(days)
+    written: set[int] = set()
     for key, (qty, source) in facts.openings.items():
         if facts.opening_day is not None and facts.opening_ms is not None:
             tx.opening_put(mode, key, qty, facts.opening_day, source, facts.opening_ms, now)
@@ -347,6 +350,7 @@ def replay_tx(tx: Tx, mode: str, days: Iterable[int], now: int, facts: Facts,
             else:
                 trip_id = tx.trip_insert(values, now)
                 counts["new"] += 1
+            written.add(trip_id)
             legs = [(int(by_trade[leg["trade_id"]]["id"]), leg["role"], leg["qty"])
                     for leg in trip["legs"]]  # fmt: skip
             tx.legs_replace(trip_id, legs, now)
@@ -360,6 +364,8 @@ def replay_tx(tx: Tx, mode: str, days: Iterable[int], now: int, facts: Facts,
             else:
                 tx.trip_forget(int(trip["id"]))
                 counts["forgotten"] += 1
+    # The replay writes the estimate; Upstox's actual, where the orders have one, goes back on.
+    actual.after_replay(tx, mode, days, written, facts.plan, now)
     return counts
 
 

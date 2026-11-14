@@ -128,6 +128,9 @@ CHARGE_SEGMENTS = (
     "options_exercise",
 )
 CHARGE_PLANS = ("plus", "standard")
+#: Which of Upstox's rows a trade's actual charges came from: the day's own, or the month's
+#: (for a day Upstox never answered by itself).
+CHARGE_BASES = ("day", "month")
 #: The alerts' report desk as the settings answer names it (``settings_ops.desk_state``): the
 #: state its block on the alerts' /health says, or ``unknown`` when the alerts service does not
 #: answer as itself, has no such block, or names a state this release does not know (review M5).
@@ -198,6 +201,7 @@ ENUMS = {
     "ReportStatus": REPORT_STATUSES,
     "ChargeSegment": CHARGE_SEGMENTS,
     "ChargePlan": CHARGE_PLANS,
+    "ChargeBasis": CHARGE_BASES,
     "DeskState": DESK_STATES,
     "HoldBucket": HOLD_BUCKETS,
     "RatioState": RATIO_STATES,
@@ -219,7 +223,8 @@ RECORDS = {
     "hold_s:int|null, strategy:string, strategy_override:string|null, setup_id:int|null, "
     "own_expiry_day:bool, index_expiry_day:bool, risk_paise:int|null, mae_paise:int|null, "
     "mfe_paise:int|null, mae_ms:int|null, mfe_ms:int|null, excursion_source:ExcursionSource, "
-    "excursion_note:string|null, version:int, charges_modelled:bool",
+    "excursion_note:string|null, version:int, charges_modelled:bool, "
+    "charges_actual_basis:ChargeBasis|null",
     "TripNote": "round_trip_id:int, notes:string, mistakes:int[], checklist:string, "
     "mood:Mood|null, version:int",
     "Tag": "id:int, kind:TagKind, name:string, colour:TagColour, archived:bool, version:int",
@@ -259,6 +264,12 @@ RECORDS = {
     "ChargeParts": "brokerage_paise:int, stt_paise:int, exchange_paise:int, sebi_paise:int, "
     "stamp_paise:int, gst_paise:int, total_paise:int",
     "ChargeEstimate": "parts:ChargeParts, modelled:bool, plan:ChargePlan, orders:int",
+    # Upstox's own charges as this trade carries them (M14.2): each part Upstox names, in its
+    # order, the trade's share of it; ``partial`` when Upstox left one of the usual parts empty
+    # (``missing`` names them, as labels); ``basis``: from the day's own figures or the month's.
+    "ChargeActualPart": "part:string, label:string, paise:int",
+    "ChargeActual": "parts:ChargeActualPart[], total_paise:int, basis:ChargeBasis, "
+    "partial:bool, missing:string[]",
     "Analytics": "metrics:Metrics, hold:HoldBucketRow[], calendar:Calendar, equity:Equity, "
     "heat:HeatCell[], by_strategy:BlockRow[], by_tag:BlockRow[], by_playbook:BlockRow[], "
     "expiry:ExpirySplit, beta:Beta|null",
@@ -310,12 +321,14 @@ RECORDS["TripRow"] = RECORDS["Trip"] + ", mistakes:int[]"
 RECORDS["TripFill"] = RECORDS["Fill"] + ", trip_qty:int"
 # The trade sheet: the trip, its fills (each as executed, with this trip's part of it), the owner's
 # note (its ``checklist`` is JSON text, ``[{"rule": ..., "yes": ...}]``, or empty), the excursion,
-# the charges estimate of its orders (each order priced whole, this trip's share by quantity), the
+# the charges estimate of its orders (each order priced whole, this trip's share by quantity),
+# Upstox's actual charges once every order of it has them (``charges_actual``), the
 # first entry order's round trip as OpenAlgo's latency record has it (``latency_ms``), and each
 # order's label.
 RECORDS["TripDetail"] = RECORDS["Trip"] + (
     ", legs:TripLeg[], fills:TripFill[], note:TripNote|null, excursion:Excursion|null, "
-    "charges:ChargeEstimate|null, latency_ms:int|null, orders:OrderRef[]"
+    "charges:ChargeEstimate|null, latency_ms:int|null, orders:OrderRef[], "
+    "charges_actual:ChargeActual|null"
 )
 
 

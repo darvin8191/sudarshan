@@ -444,7 +444,7 @@ V6 = (
 )
 #: The basis of each ``upstox_charges`` row already kept, from what the row itself says: one day,
 #: a whole calendar month (its first day to its last), or anything else, which is the "year so
-#: far" row the catch-up kept until now.
+#: far" row the catch-up kept until now. ``asked`` counts the nights a period was asked for.
 BASIS_DAY, BASIS_MONTH, BASIS_YTD = "day", "month", "ytd"
 
 
@@ -470,6 +470,9 @@ def _v6(conn: Connection) -> None:
     two new columns stay NULL."""
     add_column(conn, "upstox_charges", "sebi_paise", "INTEGER")
     add_column(conn, "upstox_charges", "dp_paise", "INTEGER")
+    # How many nights the period was asked of Upstox: a day that answers nothing is asked again
+    # only so many nights. Every row already kept was read at least once.
+    add_column(conn, "upstox_charges", "asked", "INTEGER NOT NULL DEFAULT 1")
     if add_column(conn, "upstox_charges", "basis", "TEXT"):
         for segment, start, end in conn.exec_driver_sql(
             "SELECT segment, period_from, period_to FROM upstox_charges"

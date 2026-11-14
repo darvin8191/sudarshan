@@ -58,6 +58,25 @@ def excursion_out(row: Mapping[str, Any]) -> dict[str, Any] | None:
             "capture_pct": capture, "note": row.get("excursion_note")}  # fmt: skip
 
 
+def actual_out(row: Mapping[str, Any]) -> dict[str, Any] | None:
+    """A trip's actual charges (``ChargeActual``), or None while it carries the estimate."""
+    from .actual import PART_LABELS
+    from .core.spread import ACTUAL_PARTS
+
+    kept = row.get("charges_actual_parts")
+    if row.get("charges_actual_paise") is None or not isinstance(kept, Mapping):
+        return None
+    parts = kept.get("parts") or {}
+    return {
+        "parts": [{"part": p, "label": PART_LABELS[p], "paise": int(parts[p])}
+                  for p in ACTUAL_PARTS if p in parts],
+        "total_paise": int(row["charges_actual_paise"]),
+        "basis": row.get("charges_actual_basis") or "day",
+        "partial": bool(kept.get("partial")),
+        "missing": [PART_LABELS.get(m, m) for m in kept.get("missing") or []],
+    }  # fmt: skip
+
+
 def note_out(row: Mapping[str, Any] | None) -> dict[str, Any] | None:
     return None if row is None else pick(row, NOTE)
 

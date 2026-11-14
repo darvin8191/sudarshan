@@ -125,6 +125,7 @@ export type ChargeSegment =
   | 'not_modelled'
   | 'options_exercise'
 export type ChargePlan = 'plus' | 'standard'
+export type ChargeBasis = 'day' | 'month'
 export type DeskState = 'on' | 'starting' | 'journal_off' | 'journal_down' | 'off' | 'unknown'
 export type HoldBucket = 'under_5m' | '5_30m' | '30m_2h' | 'over_2h' | '1_5d' | 'over_5d'
 export type RatioState =
@@ -203,6 +204,7 @@ export interface Trip {
   excursion_note: string | null
   version: number
   charges_modelled: boolean
+  charges_actual_basis: ChargeBasis | null
 }
 
 export interface TripNote {
@@ -383,6 +385,20 @@ export interface ChargeEstimate {
   orders: number
 }
 
+export interface ChargeActualPart {
+  part: string
+  label: string
+  paise: number
+}
+
+export interface ChargeActual {
+  parts: ChargeActualPart[]
+  total_paise: number
+  basis: ChargeBasis
+  partial: boolean
+  missing: string[]
+}
+
 export interface Analytics {
   metrics: Metrics
   hold: HoldBucketRow[]
@@ -559,6 +575,7 @@ export interface TripRow {
   excursion_note: string | null
   version: number
   charges_modelled: boolean
+  charges_actual_basis: ChargeBasis | null
   mistakes: number[]
 }
 
@@ -619,6 +636,7 @@ export interface TripDetail {
   excursion_note: string | null
   version: number
   charges_modelled: boolean
+  charges_actual_basis: ChargeBasis | null
   legs: TripLeg[]
   fills: TripFill[]
   note: TripNote | null
@@ -626,6 +644,7 @@ export interface TripDetail {
   charges: ChargeEstimate | null
   latency_ms: number | null
   orders: OrderRef[]
+  charges_actual: ChargeActual | null
 }
 
 export interface OpSpec {
