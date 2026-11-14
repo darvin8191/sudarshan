@@ -650,8 +650,11 @@ uses no network. In a private scratch folder inside the backup's own folder
 4. checks that OpenAlgo's database holds exactly one owner account, an API key and an Upstox
    login;
 5. checks that the archive's `.env` has the keys the app cannot start without (never printed);
-6. opens the vault of sealed sign-in details with the key derived from that same `.env`: the
-   step that proves the two restore together.
+6. opens the vault of sealed sign-in details with the key derived from that same `.env` (one
+   sealed record of each key the vault names): the step that proves the two restore together.
+   While nothing is sealed yet (you have not saved your Upstox sign-in details on the Auto login
+   page) there is no record to open, and the result says "the vault holds nothing sealed yet"
+   instead of "the vault opens": run the drill again after you save them.
 
 The result is on the System page, with the first thing that failed in plain words, and in
 `/var/lib/sudarshan-backup/drill.json`. The watch tells you when the last drill is over 100 days

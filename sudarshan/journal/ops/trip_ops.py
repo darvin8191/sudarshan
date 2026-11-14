@@ -87,7 +87,7 @@ def charges_note(tx, row, legs, sched) -> str | None:
 async def trip_get(ctx, args):
     store = need(ctx)
     trip_id = whole(args, "id", low=1)
-    sched = schedule_for(ctx) if getattr(ctx.settings, "tax", False) else None
+    sched = schedule_for(ctx) if getattr(getattr(ctx, "settings", None), "tax", False) else None
 
     def read(tx):
         row = tx.get("round_trip", trip_id)
