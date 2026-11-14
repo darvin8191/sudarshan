@@ -78,7 +78,11 @@ export function useSaveSettings() {
     try {
       const answer = await riskApi.saveSettings(changes, withPhrase)
       setSaid({ ok: answer.ok, message: answer.message })
+      // History is read again after every answer, as the kill switch's sheets read it: a wrong
+      // phrase is a line there (what was asked, never what was typed), and so is a saved change.
+      void queryClient.invalidateQueries({ queryKey: RISK_AUDIT_KEY })
       if (answer.needsPhrase) {
+        if (withPhrase !== undefined) setPhrase('') // a wrong phrase is typed again, not kept
         setPending(changes)
         return false
       }
@@ -86,7 +90,6 @@ export function useSaveSettings() {
       setPhrase('')
       if (answer.ok || answer.code === 409) {
         void queryClient.invalidateQueries({ queryKey: RISK_STATUS_KEY })
-        void queryClient.invalidateQueries({ queryKey: RISK_AUDIT_KEY })
       }
       return answer.ok
     } catch {

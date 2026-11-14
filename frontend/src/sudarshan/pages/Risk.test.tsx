@@ -3,7 +3,7 @@
  * one before it leaves the page, and nothing polls (rule 7): the status is read once and again
  * when the server announces a change.
  */
-import { screen, waitFor } from '@testing-library/react'
+import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -13,6 +13,7 @@ const api = vi.hoisted(() => ({
   preview: vi.fn(),
   turnOn: vi.fn(),
   resume: vi.fn(),
+  saveSettings: vi.fn(),
 }))
 vi.mock('@/api/risk', () => ({ riskApi: api }))
 vi.mock('@/api/trading', () => ({
@@ -155,6 +156,77 @@ describe('the Risk page', () => {
     expect(
       screen.getByText(/Live orders are not checked and Upstox is not touched/)
     ).toBeInTheDocument()
+  })
+})
+
+const SETTINGS = {
+  daily_loss_limit: 4000,
+  band_on: false,
+  band_opt_pct: 20,
+  band_opt_min_rs: 2,
+  band_fut_pct: 1,
+  band_cash_pct: 5,
+  band_both_sides: false,
+  size_on: false,
+  max_lots_fo: 2,
+  max_qty_cash: 1000,
+  burst_on: false,
+  burst_n: 10,
+  burst_window_s: 60,
+  revoke_mcp: true,
+  phrase_set: true,
+  updated_at: '2026-11-14T04:00:00+00:00',
+  updated_by: 'owner',
+}
+
+describe('a wrong confirm phrase for the daily limit', () => {
+  it("is in History at once, as the kill switch's is, and the box is emptied", async () => {
+    // Backlog 2b (Analyzer session): the server wrote the line, but the page read History again
+    // only after a save went through, so the owner never saw it.
+    const refused = 'A wrong confirm phrase was refused when asked to change the daily loss limit.'
+    api.status.mockResolvedValue({ ...status({ known: true, on: false }), settings: SETTINGS })
+    api.saveSettings
+      .mockResolvedValueOnce({
+        code: 400,
+        ok: false,
+        message: 'Loosening a limit needs your confirm phrase. Nothing was saved.',
+        settings: SETTINGS,
+        needsPhrase: true,
+      })
+      .mockResolvedValueOnce({
+        code: 400,
+        ok: false,
+        message: 'The confirm phrase does not match. Nothing was changed.',
+        settings: SETTINGS,
+        needsPhrase: true,
+      })
+    renderBook('/risk', <Risk />)
+    await settle()
+    await pass(100)
+    expect(screen.getByText(/^Nothing yet\./)).toBeInTheDocument()
+
+    const card = within(screen.getByRole('region', { name: 'Daily loss limit' }))
+    fireEvent.change(card.getByLabelText('Limit for the day'), { target: { value: '9000' } })
+    fireEvent.click(card.getByRole('button', { name: 'Save the daily limit' }))
+    const box = await card.findByLabelText('Confirm phrase')
+    api.audit.mockResolvedValue([
+      {
+        at: new Date().toISOString(),
+        last_at: new Date().toISOString(),
+        kind: 'phrase_refused',
+        pipe: null,
+        surface: 'app',
+        count: 1,
+        summary: refused,
+      },
+    ])
+    fireEvent.change(box, { target: { value: 'hunter2' } })
+    fireEvent.click(card.getByRole('button', { name: 'Confirm with your phrase' }))
+
+    expect(await screen.findByText(refused)).toBeInTheDocument()
+    expect(api.saveSettings).toHaveBeenLastCalledWith({ daily_loss_limit: 9000 }, 'hunter2')
+    expect(card.getByLabelText('Confirm phrase')).toHaveValue('')
+    expect(card.getByText('The confirm phrase does not match. Nothing was changed.')).toBeVisible()
   })
 })
 
