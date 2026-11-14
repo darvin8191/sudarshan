@@ -1,9 +1,9 @@
 // SUDARSHAN M14, JD2: the Trades part. Open trades first with their P&L moving with every tick,
 // then closed trades by day, newest first. The service's list is the first snapshot and a re-sync
 // (useJournalSync); between reads the figures of an open trade move only with ticks.
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Clock, LoaderCircle, NotebookPen, RefreshCw, TriangleAlert } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import { cn } from '@/lib/utils'
 import { usePriceAccess } from '@/sudarshan/access'
 import { useMarketOpen, useNow } from '@/sudarshan/dashboard/hooks'
@@ -18,6 +18,7 @@ import { Signed } from '@/sudarshan/portfolio/Signed'
 import { journalData, problemOf } from './api'
 import { JOURNAL_KEY } from './keys'
 import {
+  type DayGroup,
   dayWords,
   excursionBar,
   groupByDay,
@@ -29,26 +30,21 @@ import {
 import { paiseText } from './money'
 import { OutcomeWord, SideChip, StrategyChip } from './parts'
 import { TagIcons } from './tags'
+import {
+  dayBefore,
+  overNewest,
+  readClosedPage,
+  type TripRow,
+  type TripsRead,
+  withEarlier,
+} from './tripsPaging'
 import type { Mode, Tag, Trip } from './types'
 import { useJournalSync } from './useJournalSync'
 import { type LivePnl, useTripLive } from './useTripLive'
 
-/** A page of closed trades. */
-export const CLOSED_PAGE = 100
-
 export const EMPTY_WORDS = 'No trades yet. Fills are recorded here as they happen at Upstox.'
 export const NO_TOKEN_WORDS =
   'Fills are recorded when Upstox reports them; sign in to Upstox for today’s to show at once. The day’s close check, after the market closes, records them in any case.'
-
-/** A trade as the list reads it: the contract's row, and the tags the service may name on it. */
-export type TripRow = Trip & { mistakes?: number[] }
-
-interface TripsRead {
-  open: TripRow[]
-  closed: TripRow[]
-  /** Whether a full page of closed trades came back: there may be earlier ones. */
-  more: boolean
-}
 
 const CARD = 'rounded-[1.125rem] border bg-card shadow-[var(--shadow-card)]'
 
@@ -197,69 +193,80 @@ function ClosedCard({
   )
 }
 
-/** The trades of one mode: open and closed, read from the journal. */
+/**
+ * A day's line over its trades: the count and the day's net. A day not read whole (more trades on
+ * it than the list could read) says "so far" and shows no total, never a sum of part of it.
+ */
+function DayHeader({ group, partial }: { group: DayGroup<TripRow>; partial: boolean }) {
+  const count = group.trips.length
+  return (
+    <div className="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-0.5 px-1 text-[0.8125rem] font-semibold text-[color:var(--text-secondary)]">
+      <span>{dayWords(group.day)}</span>
+      <span className="ml-auto inline-flex flex-wrap items-baseline justify-end gap-x-2">
+        <span>
+          {count} {count === 1 ? 'trade' : 'trades'}
+          {partial && ' so far'}
+        </span>
+        {!partial && group.net_paise !== null && <Signed paise={group.net_paise} />}
+      </span>
+    </div>
+  )
+}
+
+/**
+ * The trades of one mode: open and closed, read from the journal. Closed trades come in whole days
+ * and every page read is kept in the query's cache, so a re-read of the newest page never drops a
+ * trade read before it (tripsPaging.ts, reviews H1 and M2). Each mode has its own entry: nothing
+ * read for one is shown for the other.
+ */
 export function useTrips(mode: Mode) {
-  const [older, setOlder] = useState<TripRow[]>([])
-  const [more, setMore] = useState<boolean | null>(null)
-  const [paging, setPaging] = useState<string | null>(null)
-  useEffect(() => {
-    // Another mode never mixes with this one: nothing read for one is kept for the other.
-    void mode
-    setOlder([])
-    setMore(null)
-    setPaging(null)
-  }, [mode])
+  const queryClient = useQueryClient()
+  const key = useMemo(() => [...JOURNAL_KEY, 'trips', mode] as const, [mode])
+  // The earlier page's sentence and wait belong to the mode they were asked in.
+  const [paging, setPaging] = useState<{ mode: Mode; message: string } | null>(null)
+  const [loading, setLoading] = useState<Mode | null>(null)
+  const busy = useRef(false)
   const query = useQuery({
-    queryKey: [...JOURNAL_KEY, 'trips', mode],
+    queryKey: key,
     queryFn: async (): Promise<TripsRead> => {
-      const [open, closed] = await Promise.all([
+      const [open, newest] = await Promise.all([
         journalData('trips', { mode, status: 'open' }),
-        journalData('trips', { mode, status: 'closed', limit: CLOSED_PAGE }),
+        readClosedPage(mode),
       ])
-      return {
-        open: open as TripRow[],
-        closed: closed as TripRow[],
-        more: closed.length >= CLOSED_PAGE,
-      }
+      // Over what the list holds when the answer is in, earlier pages included.
+      return overNewest(queryClient.getQueryData<TripsRead>(key), open as TripRow[], newest)
     },
     retry: false,
     staleTime: 0,
     refetchOnWindowFocus: false,
   })
-  const data = query.data
   const loadOlder = useCallback(async () => {
-    const shown = [...(data?.closed ?? []), ...older]
-    const last = shown.at(-1)
-    if (!last || last.closed_ms === null) return
+    const held = queryClient.getQueryData<TripsRead>(key)
+    const to = held ? dayBefore(held) : null
+    if (to === null || busy.current) return
+    busy.current = true
+    setLoading(mode)
     setPaging(null)
     try {
-      // The service pages closed trades by their close time, strictly before `before`, and
-      // several can close in the same second: asking up to and including the last one's time,
-      // and leaving out what is already shown, loses none that share it.
-      const page = (await journalData('trips', {
-        mode,
-        status: 'closed',
-        limit: CLOSED_PAGE,
-        before: last.closed_ms + 1,
-      })) as TripRow[]
-      const fresh = page.filter((t) => !shown.some((n) => n.id === t.id))
-      setOlder((now) => [...now, ...fresh.filter((t) => !now.some((n) => n.id === t.id))])
-      setMore(page.length >= CLOSED_PAGE && fresh.length > 0)
+      const page = await readClosedPage(mode, to)
+      queryClient.setQueryData<TripsRead>(key, (now) => (now ? withEarlier(now, page) : now))
     } catch (error) {
-      setPaging(problemOf(error).message)
+      setPaging({ mode, message: problemOf(error).message })
+    } finally {
+      busy.current = false
+      setLoading(null)
     }
-  }, [data, older, mode])
-  const closed = useMemo(() => {
-    const first = data?.closed ?? []
-    return [...first, ...older.filter((t) => !first.some((f) => f.id === t.id))]
-  }, [data, older])
+  }, [queryClient, key, mode])
+  const data = query.data
   return {
     query,
     open: data?.open ?? [],
-    closed,
-    more: more ?? data?.more ?? false,
+    closed: data?.closed ?? [],
+    more: data?.more ?? false,
+    partial: data?.partial ?? [],
     loadOlder,
-    pagingError: paging,
+    loadingOlder: loading === mode,
+    pagingError: paging?.mode === mode ? paging.message : null,
   }
 }
 
@@ -268,7 +275,8 @@ export function TripsList({ mode, onOpen }: { mode: Mode; onOpen: (id: number) =
   const [market, setMarket] = useState<MarketCalendar>(CALENDAR_LOADING)
   const day = useIstDay()
   const { isOpen, anyOpen } = useMarketOpen(market)
-  const { query, open, closed, more, loadOlder, pagingError } = useTrips(mode)
+  const { query, open, closed, more, partial, loadOlder, loadingOlder, pagingError } =
+    useTrips(mode)
   const tags = useQuery({
     queryKey: [...JOURNAL_KEY, 'tags'],
     queryFn: async () => journalData('tags_list'),
@@ -357,13 +365,7 @@ export function TripsList({ mode, onOpen }: { mode: Mode; onOpen: (id: number) =
             <h2 className="px-1 text-[0.9375rem] font-bold">Closed</h2>
             {days.map((group) => (
               <div key={group.day} className="flex flex-col gap-2" data-testid="closed-day">
-                <div className="flex items-baseline justify-between gap-2 px-1 text-[0.8125rem] font-semibold text-[color:var(--text-secondary)]">
-                  <span>{dayWords(group.day)}</span>
-                  <span className="inline-flex items-baseline gap-2">
-                    {group.trips.length} {group.trips.length === 1 ? 'trade' : 'trades'}
-                    {group.net_paise !== null && <Signed paise={group.net_paise} />}
-                  </span>
-                </div>
+                <DayHeader group={group} partial={partial.includes(group.day)} />
                 <ul className="flex flex-col gap-2">
                   {group.trips.map((trip) => (
                     <ClosedCard
@@ -387,10 +389,14 @@ export function TripsList({ mode, onOpen }: { mode: Mode; onOpen: (id: number) =
             {more && (
               <button
                 type="button"
+                disabled={loadingOlder}
                 onClick={() => void loadOlder()}
-                className="inline-flex min-h-12 items-center justify-center rounded-[0.875rem] border border-input bg-card px-4 text-[0.9375rem] font-semibold hover:bg-accent"
+                className="inline-flex min-h-12 items-center justify-center gap-2 rounded-[0.875rem] border border-input bg-card px-4 text-[0.9375rem] font-semibold hover:bg-accent disabled:opacity-60"
               >
-                Show earlier trades
+                {loadingOlder && (
+                  <LoaderCircle aria-hidden="true" className="size-4 animate-spin" />
+                )}
+                {loadingOlder ? 'Reading earlier trades' : 'Show earlier trades'}
               </button>
             )}
           </section>
