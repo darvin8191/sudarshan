@@ -128,3 +128,5 @@ DIVIDEND_TDS = (
     Row(20250401, {"threshold": 10_000 * RUPEE, "rate_bp": 1000}, "1961 Act s.194; 2025 Act s.393",
         verify=True),
 )  # fmt: skip
+#: A scrip whose own profit differs from Upstox's report by more than this is listed (paise).
+DIFFERS_ABOVE = (Row(0, 1 * RUPEE, "a rupee of rounding between two reports"),)
