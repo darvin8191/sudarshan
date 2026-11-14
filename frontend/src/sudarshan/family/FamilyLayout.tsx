@@ -41,7 +41,9 @@ const LOGIN = '/family/login'
 function isActive(pathname: string, href: string): boolean {
   const here = bare(pathname)
   const there = bare(href)
-  return there === bare(FAMILY_HOME) ? here === there : here === there || here.startsWith(`${there}/`)
+  return there === bare(FAMILY_HOME)
+    ? here === there
+    : here === there || here.startsWith(`${there}/`)
 }
 
 /** The phone can not reach the service and there is no earlier answer to keep showing. */

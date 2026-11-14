@@ -9,13 +9,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { bottomNavItems, mobileSheetItems, navItems, profileMenuItems } from '@/config/navigation'
-import {
-  FAMILY_HOME,
-  familyBarItems,
-  familyMenu,
-  familyMoreItems,
-  familyTitle,
-} from './navigation'
+import { FAMILY_HOME, familyBarItems, familyMenu, familyMoreItems, familyTitle } from './navigation'
 import { meOf } from './testing/fixtures'
 
 const APP = readFileSync(join(process.cwd(), 'src', 'App.tsx'), 'utf8')

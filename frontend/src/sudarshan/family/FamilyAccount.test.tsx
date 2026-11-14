@@ -4,12 +4,7 @@ import { cleanup, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { resetFamilyManagerForTests } from './familyManager'
-import FamilyJoin, {
-  KEY_COPIED,
-  KEY_NOT_COPIED,
-  keyInGroups,
-  strengthOf,
-} from './pages/FamilyJoin'
+import FamilyJoin, { KEY_COPIED, KEY_NOT_COPIED, keyInGroups, strengthOf } from './pages/FamilyJoin'
 import FamilyLogin from './pages/FamilyLogin'
 import FamilySettings from './pages/FamilySettings'
 import { FakeSocket, fail, meOf, ok, routeFetch } from './testing/fixtures'

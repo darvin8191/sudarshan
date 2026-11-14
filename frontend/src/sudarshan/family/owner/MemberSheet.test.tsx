@@ -452,7 +452,9 @@ describe('the request id', () => {
     )
     const { spy } = mount()
     await userEvent.click(screen.getByRole('button', { name: 'Suspend' }))
-    await userEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Suspend' }))
+    await userEvent.click(
+      within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Suspend' })
+    )
     const said = await screen.findByText(/^Not confirmed/)
     expect(said.textContent).not.toMatch(/fail/i)
     expect(spy).toHaveBeenCalled() // the members are read again to see what happened

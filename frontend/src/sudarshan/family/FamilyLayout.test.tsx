@@ -97,21 +97,21 @@ describe('the badge', () => {
 // badge pushed the initial off the screen. jsdom lays nothing out, so these pin the structure the
 // fit rests on (each fails on the old bar); the widths themselves are measured in a browser.
 describe('the app bar on a narrow phone', () => {
-  it.each(['viewer', 'child'] as const)(
-    'gives the %s title a line of its own, whole, outside the row the badge is in',
-    async (kind) => {
-      routeFetch({ '/family/api/me': ok(meOf(kind)) })
-      mount('/family/portfolio')
-      const title = await screen.findByRole('heading', { level: 1, name: 'Portfolio' })
-      const bar = screen.getByTestId('family-bar')
-      expect(bar.contains(title)).toBe(false)
-      expect(title.closest('header')).toBe(bar.closest('header'))
-      expect(title.className).not.toContain('truncate')
-      // the row holds the badge and the initial, and nothing in it is the title
-      expect(within(bar).getByTestId('family-badge')).toBeInTheDocument()
-      expect(within(bar).getByRole('img', { name: 'Signed in as member_one' })).toBeInTheDocument()
-    }
-  )
+  it.each([
+    'viewer',
+    'child',
+  ] as const)('gives the %s title a line of its own, whole, outside the row the badge is in', async (kind) => {
+    routeFetch({ '/family/api/me': ok(meOf(kind)) })
+    mount('/family/portfolio')
+    const title = await screen.findByRole('heading', { level: 1, name: 'Portfolio' })
+    const bar = screen.getByTestId('family-bar')
+    expect(bar.contains(title)).toBe(false)
+    expect(title.closest('header')).toBe(bar.closest('header'))
+    expect(title.className).not.toContain('truncate')
+    // the row holds the badge and the initial, and nothing in it is the title
+    expect(within(bar).getByTestId('family-badge')).toBeInTheDocument()
+    expect(within(bar).getByRole('img', { name: 'Signed in as member_one' })).toBeInTheDocument()
+  })
 
   it('lets the badge give way before the initial does', async () => {
     routeFetch({ '/family/api/me': ok(meOf('child')) })

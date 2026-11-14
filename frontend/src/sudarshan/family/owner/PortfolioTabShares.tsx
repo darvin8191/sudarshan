@@ -345,7 +345,11 @@ export function PortfolioTabShares({ members, now }: { members: MemberCard[]; no
 
   return (
     <section aria-labelledby="share-tabs" className={`${CARD} flex flex-col gap-3`}>
-      <h2 id="share-tabs" tabIndex={-1} className="scroll-mt-20 text-[1.0625rem] font-bold outline-none">
+      <h2
+        id="share-tabs"
+        tabIndex={-1}
+        className="scroll-mt-20 text-[1.0625rem] font-bold outline-none"
+      >
         Portfolio tabs
       </h2>
       <p className="text-[0.8125rem] text-[color:var(--text-tertiary)]">{TABS_NOTE}</p>

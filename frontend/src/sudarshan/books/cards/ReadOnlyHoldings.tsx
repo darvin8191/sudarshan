@@ -7,7 +7,6 @@
 // `holdingFigures`).
 import { useEffect, useMemo } from 'react'
 import { cn } from '@/lib/utils'
-import { formatRupees } from '@/sudarshan/dashboard/format'
 import { LiveLine } from '@/sudarshan/dashboard/LiveLine'
 import {
   type HoldingFigures,

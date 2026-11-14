@@ -407,7 +407,9 @@ describe('a part that was not read is not an empty account', () => {
     noZero()
   })
 
-  it.each(CASES)('Dashboard, %s: no figure and no count, the sentence once', async (state, words) => {
+  it.each(
+    CASES
+  )('Dashboard, %s: no figure and no count, the sentence once', async (state, words) => {
     routeFetch({
       '/family/api/market': ok(market),
       '/family/api/books/positions': unread('positions', state, words),
@@ -449,7 +451,9 @@ describe('the read stamp', () => {
   it('promises the 45 s refresh only while a market is open', async () => {
     routeFetch({ '/family/api/books/positions': ok(bookOf('positions', [FULL_POSITION])) })
     mount('/family/positions', <FamilyPositions />)
-    expect(await screen.findByText(/Positions from .* · refresh on every order and every 45 s/)).toBeTruthy()
+    expect(
+      await screen.findByText(/Positions from .* · refresh on every order and every 45 s/)
+    ).toBeTruthy()
     await waitFor(() => expect(FakeSocket.instances.length).toBeGreaterThan(0))
     act(() => {
       FakeSocket.last().open()
