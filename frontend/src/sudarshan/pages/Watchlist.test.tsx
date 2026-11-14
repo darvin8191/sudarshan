@@ -38,7 +38,15 @@ interface List {
 }
 
 const server = vi.hoisted(() => {
-  const state = { lists: [] as List[], nextId: 1000, reorderDelay: 0 }
+  const state = {
+    lists: [] as List[],
+    nextId: 1000,
+    /**
+     * While set, a move is taken but not answered until the test resolves it. A gate the test
+     * opens, not a delay: on a busy machine a timer can run out before the next tap is in.
+     */
+    reorderGate: null as Promise<void> | null,
+  }
   /** What the server did, in order. */
   const log: string[] = []
   const copy = <T,>(value: T): T => JSON.parse(JSON.stringify(value))
@@ -79,7 +87,7 @@ const server = vi.hoisted(() => {
     }),
     reorderItems: vi.fn(async (id: number, order: number[]) => {
       log.push(`reorder ${order.join(',')} sent`)
-      if (state.reorderDelay) await new Promise((done) => setTimeout(done, state.reorderDelay))
+      if (state.reorderGate) await state.reorderGate
       const list = find(id)
       list.items = order
         .map((itemId) => list.items.find((item) => item.id === itemId))
@@ -373,7 +381,7 @@ beforeEach(() => {
   localStorage.clear()
   server.state.lists = JSON.parse(JSON.stringify([MAIN, OPTIONS]))
   server.state.nextId = 1000
-  server.state.reorderDelay = 0
+  server.state.reorderGate = null
   server.log.length = 0
   for (const fn of Object.values(server.api)) fn.mockClear()
   calendar.state.open = true
@@ -503,8 +511,9 @@ describe('Watchlist lists', () => {
       expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Options1'])
     )
     expect(screen.getByRole('tab', { name: /Options/ })).toHaveAttribute('aria-selected', 'true')
-    // The sheet's Back lands in a router transition, which can commit a render after the tabs
-    // change: on a loaded machine the address was read before it, and the test failed at random.
+    // The dialog leaves with the list (the read after the delete), and the confirmation leaves
+    // the address after that, as a navigation the router commits as a React transition: on a
+    // busy machine it lands after the tabs, so it is waited for, not read at once.
     await waitFor(() => expect(where()).toHaveTextContent(/^\/watchlist$/))
   })
 
@@ -580,6 +589,12 @@ describe('Watchlist lists', () => {
     expect(rows[1]).toHaveTextContent(/^SBINNSE/)
   })
 
+  /** The rows of the open list in edit mode, top first, by their Move up buttons. */
+  const editOrder = () =>
+    screen
+      .getAllByRole('button', { name: /^Move .* up$/ })
+      .map((button) => button.getAttribute('aria-label'))
+
   it('saves edits one after another, so the screen ends as the server does', async () => {
     const user = userEvent.setup()
     server.state.lists[0].items.push({ id: 13, symbol: 'INFY', exchange: 'NSE', position: 2 })
@@ -587,20 +602,48 @@ describe('Watchlist lists', () => {
     await screen.findByRole('tab', { name: /Main/ })
     await openMenu(user, 'Reorder or remove')
 
-    // A remove tapped while a slow move is still being saved.
-    server.state.reorderDelay = 300
+    // A remove tapped while a move is still being saved. The move is answered only when the
+    // test says so: with a timer, a slow machine let it finish before the remove was tapped,
+    // and the read after the remove had already happened when the reads were counted.
+    let answerMove = () => {}
+    server.state.reorderGate = new Promise<void>((done) => {
+      answerMove = done
+    })
     await user.click(screen.getByRole('button', { name: 'Move SBIN down' }))
     await user.click(screen.getByRole('button', { name: 'Remove INFY' }))
+    // Both show at once; the remove waits for the move, and nothing is read while one is out.
+    expect(editOrder()).toEqual(['Move NIFTY up', 'Move SBIN up'])
+    expect(server.log).toEqual(['reorder 12,11,13 sent'])
     const reads = server.api.list.mock.calls.length
 
+    await act(async () => answerMove())
     await waitFor(() => expect(server.log).toContain('remove 13'))
     expect(server.log).toEqual(['reorder 12,11,13 sent', 'reorder 12,11,13 saved', 'remove 13'])
     await waitFor(() => expect(server.api.list).toHaveBeenCalledTimes(reads + 1))
-    const order = () =>
-      screen
-        .getAllByRole('button', { name: /^Move .* up$/ })
-        .map((button) => button.getAttribute('aria-label'))
-    expect(order()).toEqual(['Move NIFTY up', 'Move SBIN up'])
+    await settle()
+    expect(server.api.list).toHaveBeenCalledTimes(reads + 1)
+    expect(editOrder()).toEqual(['Move NIFTY up', 'Move SBIN up'])
+    expect(server.state.lists[0].items.map((item) => item.symbol)).toEqual(['NIFTY', 'SBIN'])
+  })
+
+  it('reads the lists once after each save when a remove comes after the move is saved', async () => {
+    // The other order of the two taps: the move is saved and read back before the remove.
+    const user = userEvent.setup()
+    server.state.lists[0].items.push({ id: 13, symbol: 'INFY', exchange: 'NSE', position: 2 })
+    renderPage()
+    await screen.findByRole('tab', { name: /Main/ })
+    await openMenu(user, 'Reorder or remove')
+    const reads = server.api.list.mock.calls.length
+
+    await user.click(screen.getByRole('button', { name: 'Move SBIN down' }))
+    await waitFor(() => expect(server.api.list).toHaveBeenCalledTimes(reads + 1))
+    await user.click(screen.getByRole('button', { name: 'Remove INFY' }))
+    await waitFor(() => expect(server.api.list).toHaveBeenCalledTimes(reads + 2))
+    await settle()
+
+    expect(server.log).toEqual(['reorder 12,11,13 sent', 'reorder 12,11,13 saved', 'remove 13'])
+    expect(server.api.list).toHaveBeenCalledTimes(reads + 2)
+    expect(editOrder()).toEqual(['Move NIFTY up', 'Move SBIN up'])
     expect(server.state.lists[0].items.map((item) => item.symbol)).toEqual(['NIFTY', 'SBIN'])
   })
 

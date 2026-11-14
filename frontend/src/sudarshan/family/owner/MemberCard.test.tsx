@@ -56,6 +56,34 @@ describe('a member card', () => {
     }
   })
 
+  it('says when the open invite link was first opened, with an icon beside the words', () => {
+    // Review L8: the link hands out the code app's key; the owner sees that it went out.
+    const invited = { status: 'invited', handle: null, invite_expires_at: NOW + 600_000 } as const
+    const { unmount } = render(
+      <MemberCard
+        card={cardOf({ ...invited, invite_opened_at: NOW - 1_680_000 })}
+        now={NOW}
+        onOpen={() => {}}
+      />
+    )
+    const line = screen.getByText('Link opened at 15:02')
+    expect(line.querySelector('svg')).not.toBeNull()
+    unmount()
+    render(<MemberCard card={cardOf(invited)} now={NOW} onOpen={() => {}} />)
+    expect(screen.queryByText(/Link opened/)).toBeNull()
+  })
+
+  it('says nothing of a link once the invite is used or gone', () => {
+    render(
+      <MemberCard
+        card={cardOf({ invite_expires_at: null, invite_opened_at: NOW - 60_000 })}
+        now={NOW}
+        onOpen={() => {}}
+      />
+    )
+    expect(screen.queryByText(/Link opened/)).toBeNull()
+  })
+
   it('opens the member by id when tapped, and is a button at least 48 dp tall', async () => {
     const onOpen = vi.fn()
     render(<MemberCard card={cardOf({ id: 4 })} now={NOW} onOpen={onOpen} />)

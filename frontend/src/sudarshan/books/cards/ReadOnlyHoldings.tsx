@@ -1,7 +1,10 @@
 // SUDARSHAN P6 D4 (M3.1, M6.7): the Holdings cards for a family viewer, the counterpart of
 // ReadOnlyPositions. `HoldingCards` takes this path when it is given `readOnly`. No Buy more, no
 // Sell, no order ticket, no chart link; a figure the member's mask removed shows as Hidden and is
-// never worked out from what is left (a value without its quantity would be a guess).
+// never worked out from what is left (a value without its quantity would be a guess). While P&L
+// is hidden, the current value, the amount invested, the average and the day's change show as
+// Hidden too, header and sheet alike: beside the quantity each gives the P&L away (review H1,
+// `holdingFigures`).
 import { useEffect, useMemo } from 'react'
 import { cn } from '@/lib/utils'
 import { formatRupees } from '@/sudarshan/dashboard/format'

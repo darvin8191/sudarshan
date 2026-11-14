@@ -1,0 +1,1772 @@
+{
+ "pair": [
+  {
+   "id": "B1",
+   "note": "T1 buy 65 at 100, sell at 130: +1,950. T2 buy at 80, sell at 40: -2,600. T3 sell at 120, buy back at 100: +1,300. T4 buy at 30 and held past expiry with no settlement price: taken as worthless, -1,950, flagged",
+   "in": {
+    "trades": [
+     {
+      "taxpayer": 1,
+      "account": 1,
+      "day": 20260803,
+      "seq": 1,
+      "side": "BUY",
+      "segment": "FO",
+      "instrument": [
+       "NFO",
+       "NIFTY",
+       20260827,
+       245000000,
+       "CE"
+      ],
+      "qty_u": 65000000,
+      "price_u": 1000000,
+      "amount_paise": 650000
+     },
+     {
+      "taxpayer": 1,
+      "account": 1,
+      "day": 20260804,
+      "seq": 2,
+      "side": "SELL",
+      "segment": "FO",
+      "instrument": [
+       "NFO",
+       "NIFTY",
+       20260827,
+       245000000,
+       "CE"
+      ],
+      "qty_u": 65000000,
+      "price_u": 1300000,
+      "amount_paise": 845000
+     },
+     {
+      "taxpayer": 1,
+      "account": 1,
+      "day": 20260805,
+      "seq": 3,
+      "side": "BUY",
+      "segment": "FO",
+      "instrument": [
+       "NFO",
+       "NIFTY",
+       20260827,
+       245000000,
+       "CE"
+      ],
+      "qty_u": 65000000,
+      "price_u": 800000,
+      "amount_paise": 520000
+     },
+     {
+      "taxpayer": 1,
+      "account": 1,
+      "day": 20260806,
+      "seq": 4,
+      "side": "SELL",
+      "segment": "FO",
+      "instrument": [
+       "NFO",
+       "NIFTY",
+       20260827,
+       245000000,
+       "CE"
+      ],
+      "qty_u": 65000000,
+      "price_u": 400000,
+      "amount_paise": 260000
+     },
+     {
+      "taxpayer": 1,
+      "account": 1,
+      "day": 20260807,
+      "seq": 5,
+      "side": "SELL",
+      "segment": "FO",
+      "instrument": [
+       "NFO",
+       "NIFTY",
+       20260827,
+       245000000,
+       "CE"
+      ],
+      "qty_u": 65000000,
+      "price_u": 1200000,
+      "amount_paise": 780000
+     },
+     {
+      "taxpayer": 1,
+      "account": 1,
+      "day": 20260810,
+      "seq": 6,
+      "side": "BUY",
+      "segment": "FO",
+      "instrument": [
+       "NFO",
+       "NIFTY",
+       20260827,
+       245000000,
+       "CE"
+      ],
+      "qty_u": 65000000,
+      "price_u": 1000000,
+      "amount_paise": 650000
+     },
+     {
+      "taxpayer": 1,
+      "account": 1,
+      "day": 20260811,
+      "seq": 7,
+      "side": "BUY",
+      "segment": "FO",
+      "instrument": [
+       "NFO",
+       "NIFTY",
+       20260827,
+       245000000,
+       "CE"
+      ],
+      "qty_u": 65000000,
+      "price_u": 300000,
+      "amount_paise": 195000
+     }
+    ],
+    "as_of_day": 20260901,
+    "settlements": []
+   },
+   "out": {
+    "realised": [
+     {
+      "kind": "options",
+      "open_day": 20260803,
+      "close_day": 20260804,
+      "qty_u": 65000000,
+      "buy_paise": 650000,
+      "sell_paise": 845000,
+      "pnl_paise": 195000,
+      "flag": null
+     },
+     {
+      "kind": "options",
+      "open_day": 20260805,
+      "close_day": 20260806,
+      "qty_u": 65000000,
+      "buy_paise": 520000,
+      "sell_paise": 260000,
+      "pnl_paise": -260000,
+      "flag": null
+     },
+     {
+      "kind": "options",
+      "open_day": 20260807,
+      "close_day": 20260810,
+      "qty_u": 65000000,
+      "buy_paise": 650000,
+      "sell_paise": 780000,
+      "pnl_paise": 130000,
+      "flag": null
+     },
+     {
+      "kind": "options",
+      "open_day": 20260811,
+      "close_day": 20260827,
+      "qty_u": 65000000,
+      "buy_paise": 195000,
+      "sell_paise": 0,
+      "pnl_paise": -195000,
+      "flag": "assumed_zero"
+     }
+    ],
+    "unknown_settlement": 0,
+    "open": 0
+   }
+  },
+  {
+   "id": "B2",
+   "note": "futures: buy 65 at 24,000, sell 24,100: +6,500; sell 65 at 24,200, buy 24,250: -3,250",
+   "in": {
+    "trades": [
+     {
+      "taxpayer": 1,
+      "account": 1,
+      "day": 20260803,
+      "seq": 8,
+      "side": "BUY",
+      "segment": "FO",
+      "instrument": [
+       "NFO",
+       "NIFTY",
+       20260827,
+       0,
+       "FUT"
+      ],
+      "qty_u": 65000000,
+      "price_u": 240000000,
+      "amount_paise": 156000000
+     },
+     {
+      "taxpayer": 1,
+      "account": 1,
+      "day": 20260804,
+      "seq": 9,
+      "side": "SELL",
+      "segment": "FO",
+      "instrument": [
+       "NFO",
+       "NIFTY",
+       20260827,
+       0,
+       "FUT"
+      ],
+      "qty_u": 65000000,
+      "price_u": 241000000,
+      "amount_paise": 156650000
+     },
+     {
+      "taxpayer": 1,
+      "account": 1,
+      "day": 20260805,
+      "seq": 10,
+      "side": "SELL",
+      "segment": "FO",
+      "instrument": [
+       "NFO",
+       "NIFTY",
+       20260827,
+       0,
+       "FUT"
+      ],
+      "qty_u": 65000000,
+      "price_u": 242000000,
+      "amount_paise": 157300000
+     },
+     {
+      "taxpayer": 1,
+      "account": 1,
+      "day": 20260806,
+      "seq": 11,
+      "side": "BUY",
+      "segment": "FO",
+      "instrument": [
+       "NFO",
+       "NIFTY",
+       20260827,
+       0,
+       "FUT"
+      ],
+      "qty_u": 65000000,
+      "price_u": 242500000,
+      "amount_paise": 157625000
+     }
+    ],
+    "as_of_day": 20260901,
+    "settlements": []
+   },
+   "out": {
+    "realised": [
+     {
+      "kind": "futures",
+      "open_day": 20260803,
+      "close_day": 20260804,
+      "qty_u": 65000000,
+      "buy_paise": 156000000,
+      "sell_paise": 156650000,
+      "pnl_paise": 650000,
+      "flag": null
+     },
+     {
+      "kind": "futures",
+      "open_day": 20260805,
+      "close_day": 20260806,
+      "qty_u": 65000000,
+      "buy_paise": 157625000,
+      "sell_paise": 157300000,
+      "pnl_paise": -325000,
+      "flag": null
+     }
+    ],
+    "unknown_settlement": 0,
+    "open": 0
+   }
+  },
+  {
+   "id": "B3",
+   "note": "a short opened 30 Mar 2026 at 50 and bought back 2 Apr 2026 at 20: one piece of +1,950 that belongs to the year it was closed in, FY 2026-27",
+   "in": {
+    "trades": [
+     {
+      "taxpayer": 1,
+      "account": 1,
+      "day": 20260330,
+      "seq": 12,
+      "side": "SELL",
+      "segment": "FO",
+      "instrument": [
+       "NFO",
+       "NIFTY",
+       20260428,
+       230000000,
+       "PE"
+      ],
+      "qty_u": 65000000,
+      "price_u": 500000,
+      "amount_paise": 325000
+     },
+     {
+      "taxpayer": 1,
+      "account": 1,
+      "day": 20260402,
+      "seq": 13,
+      "side": "BUY",
+      "segment": "FO",
+      "instrument": [
+       "NFO",
+       "NIFTY",
+       20260428,
+       230000000,
+       "PE"
+      ],
+      "qty_u": 65000000,
+      "price_u": 200000,
+      "amount_paise": 130000
+     }
+    ],
+    "as_of_day": 20260901,
+    "settlements": []
+   },
+   "out": {
+    "realised": [
+     {
+      "kind": "options",
+      "open_day": 20260330,
+      "close_day": 20260402,
+      "qty_u": 65000000,
+      "buy_paise": 130000,
+      "sell_paise": 325000,
+      "pnl_paise": 195000,
+      "flag": null
+     }
+    ],
+    "unknown_settlement": 0,
+    "open": 0
+   }
+  },
+  {
+   "id": "B4",
+   "note": "buy 130 at 100 (13,000), sell 65 at 110 and 65 the next day at 90: two pieces, each against half the cost 6,500: +650 and -650",
+   "in": {
+    "trades": [
+     {
+      "taxpayer": 1,
+      "account": 1,
+      "day": 20260803,
+      "seq": 14,
+      "side": "BUY",
+      "segment": "FO",
+      "instrument": [
+       "NFO",
+       "NIFTY",
+       20260827,
+       245000000,
+       "CE"
+      ],
+      "qty_u": 130000000,
+      "price_u": 1000000,
+      "amount_paise": 1300000
+     },
+     {
+      "taxpayer": 1,
+      "account": 1,
+      "day": 20260804,
+      "seq": 15,
+      "side": "SELL",
+      "segment": "FO",
+      "instrument": [
+       "NFO",
+       "NIFTY",
+       20260827,
+       245000000,
+       "CE"
+      ],
+      "qty_u": 65000000,
+      "price_u": 1100000,
+      "amount_paise": 715000
+     },
+     {
+      "taxpayer": 1,
+      "account": 1,
+      "day": 20260805,
+      "seq": 16,
+      "side": "SELL",
+      "segment": "FO",
+      "instrument": [
+       "NFO",
+       "NIFTY",
+       20260827,
+       245000000,
+       "CE"
+      ],
+      "qty_u": 65000000,
+      "price_u": 900000,
+      "amount_paise": 585000
+     }
+    ],
+    "as_of_day": 20260901,
+    "settlements": []
+   },
+   "out": {
+    "realised": [
+     {
+      "kind": "options",
+      "open_day": 20260803,
+      "close_day": 20260804,
+      "qty_u": 65000000,
+      "buy_paise": 650000,
+      "sell_paise": 715000,
+      "pnl_paise": 65000,
+      "flag": null
+     },
+     {
+      "kind": "options",
+      "open_day": 20260803,
+      "close_day": 20260805,
+      "qty_u": 65000000,
+      "buy_paise": 650000,
+      "sell_paise": 585000,
+      "pnl_paise": -65000,
+      "flag": null
+     }
+    ],
+    "unknown_settlement": 0,
+    "open": 0
+   }
+  },
+  {
+   "id": "B5",
+   "note": "a future bought and still open past expiry with no settlement price: its result is not known, so it is listed and left out, never closed at 0",
+   "in": {
+    "trades": [
+     {
+      "taxpayer": 1,
+      "account": 1,
+      "day": 20260803,
+      "seq": 17,
+      "side": "BUY",
+      "segment": "FO",
+      "instrument": [
+       "NFO",
+       "NIFTY",
+       20260827,
+       0,
+       "FUT"
+      ],
+      "qty_u": 65000000,
+      "price_u": 240000000,
+      "amount_paise": 156000000
+     }
+    ],
+    "as_of_day": 20260901,
+    "settlements": []
+   },
+   "out": {
+    "realised": [],
+    "unknown_settlement": 1,
+    "open": 0
+   }
+  },
+  {
+   "id": "B5-settled",
+   "note": "the same future with the settlement price 24,150: closed on the expiry day, 65 x 150 = +9,750",
+   "in": {
+    "trades": [
+     {
+      "taxpayer": 1,
+      "account": 1,
+      "day": 20260803,
+      "seq": 18,
+      "side": "BUY",
+      "segment": "FO",
+      "instrument": [
+       "NFO",
+       "NIFTY",
+       20260827,
+       0,
+       "FUT"
+      ],
+      "qty_u": 65000000,
+      "price_u": 240000000,
+      "amount_paise": 156000000
+     }
+    ],
+    "as_of_day": 20260901,
+    "settlements": [
+     [
+      [
+       "NFO",
+       "NIFTY",
+       20260827,
+       0,
+       "FUT"
+      ],
+      241500000
+     ]
+    ]
+   },
+   "out": {
+    "realised": [
+     {
+      "kind": "futures",
+      "open_day": 20260803,
+      "close_day": 20260827,
+      "qty_u": 65000000,
+      "buy_paise": 156000000,
+      "sell_paise": 156975000,
+      "pnl_paise": 975000,
+      "flag": null
+     }
+    ],
+    "unknown_settlement": 0,
+    "open": 0
+   }
+  },
+  {
+   "id": "B6-option-settled",
+   "note": "a call bought at 30 and settled at 12.50 on expiry: 65 x 12.50 = 812.50 against 1,950: -1,137.50, not flagged",
+   "in": {
+    "trades": [
+     {
+      "taxpayer": 1,
+      "account": 1,
+      "day": 20260811,
+      "seq": 19,
+      "side": "BUY",
+      "segment": "FO",
+      "instrument": [
+       "NFO",
+       "NIFTY",
+       20260827,
+       245000000,
+       "CE"
+      ],
+      "qty_u": 65000000,
+      "price_u": 300000,
+      "amount_paise": 195000
+     }
+    ],
+    "as_of_day": 20260901,
+    "settlements": [
+     [
+      [
+       "NFO",
+       "NIFTY",
+       20260827,
+       245000000,
+       "CE"
+      ],
+      125000
+     ]
+    ]
+   },
+   "out": {
+    "realised": [
+     {
+      "kind": "options",
+      "open_day": 20260811,
+      "close_day": 20260827,
+      "qty_u": 65000000,
+      "buy_paise": 195000,
+      "sell_paise": 81250,
+      "pnl_paise": -113750,
+      "flag": null
+     }
+    ],
+    "unknown_settlement": 0,
+    "open": 0
+   }
+  },
+  {
+   "id": "B7-short-expires",
+   "note": "a put sold at 40 and never bought back: taken as worthless, the whole premium 2,600 is profit, flagged",
+   "in": {
+    "trades": [
+     {
+      "taxpayer": 1,
+      "account": 1,
+      "day": 20260811,
+      "seq": 20,
+      "side": "SELL",
+      "segment": "FO",
+      "instrument": [
+       "NFO",
+       "NIFTY",
+       20260827,
+       240000000,
+       "PE"
+      ],
+      "qty_u": 65000000,
+      "price_u": 400000,
+      "amount_paise": 260000
+     }
+    ],
+    "as_of_day": 20260901,
+    "settlements": []
+   },
+   "out": {
+    "realised": [
+     {
+      "kind": "options",
+      "open_day": 20260811,
+      "close_day": 20260827,
+      "qty_u": 65000000,
+      "buy_paise": 0,
+      "sell_paise": 260000,
+      "pnl_paise": 260000,
+      "flag": "assumed_zero"
+     }
+    ],
+    "unknown_settlement": 0,
+    "open": 0
+   }
+  },
+  {
+   "id": "B8-flip",
+   "note": "long 65 at 100; sell 130 at 120 closes the 65 (+1,300) and opens a short of 65 at 120; buy 65 at 90 closes it (+1,950)",
+   "in": {
+    "trades": [
+     {
+      "taxpayer": 1,
+      "account": 1,
+      "day": 20260803,
+      "seq": 21,
+      "side": "BUY",
+      "segment": "FO",
+      "instrument": [
+       "NFO",
+       "NIFTY",
+       20260827,
+       245000000,
+       "CE"
+      ],
+      "qty_u": 65000000,
+      "price_u": 1000000,
+      "amount_paise": 650000
+     },
+     {
+      "taxpayer": 1,
+      "account": 1,
+      "day": 20260804,
+      "seq": 22,
+      "side": "SELL",
+      "segment": "FO",
+      "instrument": [
+       "NFO",
+       "NIFTY",
+       20260827,
+       245000000,
+       "CE"
+      ],
+      "qty_u": 130000000,
+      "price_u": 1200000,
+      "amount_paise": 1560000
+     },
+     {
+      "taxpayer": 1,
+      "account": 1,
+      "day": 20260805,
+      "seq": 23,
+      "side": "BUY",
+      "segment": "FO",
+      "instrument": [
+       "NFO",
+       "NIFTY",
+       20260827,
+       245000000,
+       "CE"
+      ],
+      "qty_u": 65000000,
+      "price_u": 900000,
+      "amount_paise": 585000
+     }
+    ],
+    "as_of_day": 20260901,
+    "settlements": []
+   },
+   "out": {
+    "realised": [
+     {
+      "kind": "options",
+      "open_day": 20260803,
+      "close_day": 20260804,
+      "qty_u": 65000000,
+      "buy_paise": 650000,
+      "sell_paise": 780000,
+      "pnl_paise": 130000,
+      "flag": null
+     },
+     {
+      "kind": "options",
+      "open_day": 20260804,
+      "close_day": 20260805,
+      "qty_u": 65000000,
+      "buy_paise": 585000,
+      "sell_paise": 780000,
+      "pnl_paise": 195000,
+      "flag": null
+     }
+    ],
+    "unknown_settlement": 0,
+    "open": 0
+   }
+  },
+  {
+   "id": "B9-not-expired",
+   "note": "bought and still open on the expiry day itself: not closed, not assumed worthless, in no total",
+   "in": {
+    "trades": [
+     {
+      "taxpayer": 1,
+      "account": 1,
+      "day": 20260811,
+      "seq": 24,
+      "side": "BUY",
+      "segment": "FO",
+      "instrument": [
+       "NFO",
+       "NIFTY",
+       20260827,
+       245000000,
+       "CE"
+      ],
+      "qty_u": 65000000,
+      "price_u": 300000,
+      "amount_paise": 195000
+     }
+    ],
+    "as_of_day": 20260827,
+    "settlements": []
+   },
+   "out": {
+    "realised": [],
+    "unknown_settlement": 0,
+    "open": 1
+   }
+  },
+  {
+   "id": "B10-first-in-first-out",
+   "note": "buy 65 at 100 then 65 at 110; sell 65 at 120: the first lot goes (+1,300), the second stays open before expiry",
+   "in": {
+    "trades": [
+     {
+      "taxpayer": 1,
+      "account": 1,
+      "day": 20260803,
+      "seq": 25,
+      "side": "BUY",
+      "segment": "FO",
+      "instrument": [
+       "NFO",
+       "NIFTY",
+       20260827,
+       245000000,
+       "CE"
+      ],
+      "qty_u": 65000000,
+      "price_u": 1000000,
+      "amount_paise": 650000
+     },
+     {
+      "taxpayer": 1,
+      "account": 1,
+      "day": 20260804,
+      "seq": 26,
+      "side": "BUY",
+      "segment": "FO",
+      "instrument": [
+       "NFO",
+       "NIFTY",
+       20260827,
+       245000000,
+       "CE"
+      ],
+      "qty_u": 65000000,
+      "price_u": 1100000,
+      "amount_paise": 715000
+     },
+     {
+      "taxpayer": 1,
+      "account": 1,
+      "day": 20260805,
+      "seq": 27,
+      "side": "SELL",
+      "segment": "FO",
+      "instrument": [
+       "NFO",
+       "NIFTY",
+       20260827,
+       245000000,
+       "CE"
+      ],
+      "qty_u": 65000000,
+      "price_u": 1200000,
+      "amount_paise": 780000
+     }
+    ],
+    "as_of_day": 20260810,
+    "settlements": []
+   },
+   "out": {
+    "realised": [
+     {
+      "kind": "options",
+      "open_day": 20260803,
+      "close_day": 20260805,
+      "qty_u": 65000000,
+      "buy_paise": 650000,
+      "sell_paise": 780000,
+      "pnl_paise": 130000,
+      "flag": null
+     }
+    ],
+    "unknown_settlement": 0,
+    "open": 1
+   }
+  },
+  {
+   "id": "B11-per-account",
+   "note": "account 1 buys and account 2 sells the same contract: two open positions, nothing paired",
+   "in": {
+    "trades": [
+     {
+      "taxpayer": 1,
+      "account": 1,
+      "day": 20260803,
+      "seq": 28,
+      "side": "BUY",
+      "segment": "FO",
+      "instrument": [
+       "NFO",
+       "NIFTY",
+       20260827,
+       245000000,
+       "CE"
+      ],
+      "qty_u": 65000000,
+      "price_u": 1000000,
+      "amount_paise": 650000
+     },
+     {
+      "taxpayer": 1,
+      "account": 2,
+      "day": 20260804,
+      "seq": 29,
+      "side": "SELL",
+      "segment": "FO",
+      "instrument": [
+       "NFO",
+       "NIFTY",
+       20260827,
+       245000000,
+       "CE"
+      ],
+      "qty_u": 65000000,
+      "price_u": 1200000,
+      "amount_paise": 780000
+     }
+    ],
+    "as_of_day": 20260810,
+    "settlements": []
+   },
+   "out": {
+    "realised": [],
+    "unknown_settlement": 0,
+    "open": 2
+   }
+  },
+  {
+   "id": "B12-odd-paise",
+   "note": "3 units bought for 100.00 in all and sold one at a time for 40 each: costs 3,333, 3,334 and 3,333 paise, so the cost is used up exactly",
+   "in": {
+    "trades": [
+     {
+      "taxpayer": 1,
+      "account": 1,
+      "day": 20260803,
+      "seq": 30,
+      "side": "BUY",
+      "segment": "FO",
+      "instrument": [
+       "NFO",
+       "NIFTY",
+       20260827,
+       245000000,
+       "CE"
+      ],
+      "qty_u": 3000000,
+      "price_u": 333333,
+      "amount_paise": 10000
+     },
+     {
+      "taxpayer": 1,
+      "account": 1,
+      "day": 20260804,
+      "seq": 31,
+      "side": "SELL",
+      "segment": "FO",
+      "instrument": [
+       "NFO",
+       "NIFTY",
+       20260827,
+       245000000,
+       "CE"
+      ],
+      "qty_u": 1000000,
+      "price_u": 400000,
+      "amount_paise": 4000
+     },
+     {
+      "taxpayer": 1,
+      "account": 1,
+      "day": 20260805,
+      "seq": 32,
+      "side": "SELL",
+      "segment": "FO",
+      "instrument": [
+       "NFO",
+       "NIFTY",
+       20260827,
+       245000000,
+       "CE"
+      ],
+      "qty_u": 1000000,
+      "price_u": 400000,
+      "amount_paise": 4000
+     },
+     {
+      "taxpayer": 1,
+      "account": 1,
+      "day": 20260806,
+      "seq": 33,
+      "side": "SELL",
+      "segment": "FO",
+      "instrument": [
+       "NFO",
+       "NIFTY",
+       20260827,
+       245000000,
+       "CE"
+      ],
+      "qty_u": 1000000,
+      "price_u": 400000,
+      "amount_paise": 4000
+     }
+    ],
+    "as_of_day": 20260901,
+    "settlements": []
+   },
+   "out": {
+    "realised": [
+     {
+      "kind": "options",
+      "open_day": 20260803,
+      "close_day": 20260804,
+      "qty_u": 1000000,
+      "buy_paise": 3333,
+      "sell_paise": 4000,
+      "pnl_paise": 667,
+      "flag": null
+     },
+     {
+      "kind": "options",
+      "open_day": 20260803,
+      "close_day": 20260805,
+      "qty_u": 1000000,
+      "buy_paise": 3334,
+      "sell_paise": 4000,
+      "pnl_paise": 666,
+      "flag": null
+     },
+     {
+      "kind": "options",
+      "open_day": 20260803,
+      "close_day": 20260806,
+      "qty_u": 1000000,
+      "buy_paise": 3333,
+      "sell_paise": 4000,
+      "pnl_paise": 667,
+      "flag": null
+     }
+    ],
+    "unknown_settlement": 0,
+    "open": 0
+   }
+  },
+  {
+   "id": "B13-shares-passed-over",
+   "note": "a share trade is not paired here",
+   "in": {
+    "trades": [
+     {
+      "taxpayer": 1,
+      "account": 1,
+      "day": 20260803,
+      "seq": 34,
+      "side": "BUY",
+      "segment": "EQ",
+      "instrument": "INE000A01010",
+      "qty_u": 10000000,
+      "price_u": 1000000,
+      "amount_paise": 100000
+     }
+    ],
+    "as_of_day": 20260901,
+    "settlements": []
+   },
+   "out": {
+    "realised": [],
+    "unknown_settlement": 0,
+    "open": 0
+   }
+  }
+ ],
+ "income": [
+  {
+   "id": "B1-income",
+   "note": "B1 in FY 2026-27: net -1,300; turnover 1,950 + 2,600 + 1,300 + 1,950 = 7,800; charges 250.75 (all parts, STT too) make the net -1,550.75; a loss, so the low-margin sentence",
+   "in": {
+    "fy": 2026,
+    "realised": [
+     {
+      "kind": "options",
+      "open_day": 20260803,
+      "close_day": 20260804,
+      "qty_u": 65000000,
+      "buy_paise": 650000,
+      "sell_paise": 845000,
+      "pnl_paise": 195000,
+      "flag": null
+     },
+     {
+      "kind": "options",
+      "open_day": 20260805,
+      "close_day": 20260806,
+      "qty_u": 65000000,
+      "buy_paise": 520000,
+      "sell_paise": 260000,
+      "pnl_paise": -260000,
+      "flag": null
+     },
+     {
+      "kind": "options",
+      "open_day": 20260807,
+      "close_day": 20260810,
+      "qty_u": 65000000,
+      "buy_paise": 650000,
+      "sell_paise": 780000,
+      "pnl_paise": 130000,
+      "flag": null
+     },
+     {
+      "kind": "options",
+      "open_day": 20260811,
+      "close_day": 20260827,
+      "qty_u": 65000000,
+      "buy_paise": 195000,
+      "sell_paise": 0,
+      "pnl_paise": -195000,
+      "flag": "assumed_zero"
+     }
+    ],
+    "charges_paise": 25075
+   },
+   "out": {
+    "non_speculative": {
+     "gross_paise": -130000,
+     "charges_paise": 25075,
+     "net_paise": -155075,
+     "turnover_paise": 780000
+    },
+    "speculative": {
+     "gross_paise": 0,
+     "charges_paise": 0,
+     "net_paise": 0,
+     "turnover_paise": 0
+    },
+    "turnover_paise": 780000,
+    "flags": [
+     "low"
+    ]
+   }
+  },
+  {
+   "id": "B1-plus-premium",
+   "note": "the older method adds the premium of options sold: 8,450 + 2,600 + 7,800 + 0 = 18,850; turnover 7,800 + 18,850 = 26,650; the income is the same",
+   "in": {
+    "fy": 2026,
+    "realised": [
+     {
+      "kind": "options",
+      "open_day": 20260803,
+      "close_day": 20260804,
+      "qty_u": 65000000,
+      "buy_paise": 650000,
+      "sell_paise": 845000,
+      "pnl_paise": 195000,
+      "flag": null
+     },
+     {
+      "kind": "options",
+      "open_day": 20260805,
+      "close_day": 20260806,
+      "qty_u": 65000000,
+      "buy_paise": 520000,
+      "sell_paise": 260000,
+      "pnl_paise": -260000,
+      "flag": null
+     },
+     {
+      "kind": "options",
+      "open_day": 20260807,
+      "close_day": 20260810,
+      "qty_u": 65000000,
+      "buy_paise": 650000,
+      "sell_paise": 780000,
+      "pnl_paise": 130000,
+      "flag": null
+     },
+     {
+      "kind": "options",
+      "open_day": 20260811,
+      "close_day": 20260827,
+      "qty_u": 65000000,
+      "buy_paise": 195000,
+      "sell_paise": 0,
+      "pnl_paise": -195000,
+      "flag": "assumed_zero"
+     }
+    ],
+    "method": "abs_pnl_plus_sale_premium"
+   },
+   "out": {
+    "non_speculative": {
+     "gross_paise": -130000,
+     "charges_paise": 0,
+     "net_paise": -130000,
+     "turnover_paise": 2665000
+    },
+    "speculative": {
+     "gross_paise": 0,
+     "charges_paise": 0,
+     "net_paise": 0,
+     "turnover_paise": 0
+    },
+    "turnover_paise": 2665000,
+    "flags": [
+     "low"
+    ]
+   }
+  },
+  {
+   "id": "B2-income",
+   "note": "B2: net 6,500 - 3,250 = 3,250; turnover 9,750; 33% of turnover, no flag",
+   "in": {
+    "fy": 2026,
+    "realised": [
+     {
+      "kind": "futures",
+      "open_day": 20260803,
+      "close_day": 20260804,
+      "qty_u": 65000000,
+      "buy_paise": 156000000,
+      "sell_paise": 156650000,
+      "pnl_paise": 650000,
+      "flag": null
+     },
+     {
+      "kind": "futures",
+      "open_day": 20260805,
+      "close_day": 20260806,
+      "qty_u": 65000000,
+      "buy_paise": 157625000,
+      "sell_paise": 157300000,
+      "pnl_paise": -325000,
+      "flag": null
+     }
+    ]
+   },
+   "out": {
+    "non_speculative": {
+     "gross_paise": 325000,
+     "charges_paise": 0,
+     "net_paise": 325000,
+     "turnover_paise": 975000
+    },
+    "speculative": {
+     "gross_paise": 0,
+     "charges_paise": 0,
+     "net_paise": 0,
+     "turnover_paise": 0
+    },
+    "turnover_paise": 975000,
+    "flags": []
+   }
+  },
+  {
+   "id": "B2-plus-premium",
+   "note": "futures have no premium: 9,750 under the older method too",
+   "in": {
+    "fy": 2026,
+    "realised": [
+     {
+      "kind": "futures",
+      "open_day": 20260803,
+      "close_day": 20260804,
+      "qty_u": 65000000,
+      "buy_paise": 156000000,
+      "sell_paise": 156650000,
+      "pnl_paise": 650000,
+      "flag": null
+     },
+     {
+      "kind": "futures",
+      "open_day": 20260805,
+      "close_day": 20260806,
+      "qty_u": 65000000,
+      "buy_paise": 157625000,
+      "sell_paise": 157300000,
+      "pnl_paise": -325000,
+      "flag": null
+     }
+    ],
+    "method": "abs_pnl_plus_sale_premium"
+   },
+   "out": {
+    "non_speculative": {
+     "gross_paise": 325000,
+     "charges_paise": 0,
+     "net_paise": 325000,
+     "turnover_paise": 975000
+    },
+    "speculative": {
+     "gross_paise": 0,
+     "charges_paise": 0,
+     "net_paise": 0,
+     "turnover_paise": 0
+    },
+    "turnover_paise": 975000,
+    "flags": []
+   }
+  },
+  {
+   "id": "B3-earlier-year",
+   "note": "the short of 30 Mar closed 2 Apr 2026 is not in FY 2025-26",
+   "in": {
+    "fy": 2025,
+    "realised": [
+     {
+      "kind": "options",
+      "open_day": 20260330,
+      "close_day": 20260402,
+      "qty_u": 65000000,
+      "buy_paise": 130000,
+      "sell_paise": 325000,
+      "pnl_paise": 195000,
+      "flag": null
+     }
+    ]
+   },
+   "out": {
+    "non_speculative": {
+     "gross_paise": 0,
+     "charges_paise": 0,
+     "net_paise": 0,
+     "turnover_paise": 0
+    },
+    "speculative": {
+     "gross_paise": 0,
+     "charges_paise": 0,
+     "net_paise": 0,
+     "turnover_paise": 0
+    },
+    "turnover_paise": 0,
+    "flags": []
+   }
+  },
+  {
+   "id": "B3-later-year",
+   "note": "it is in FY 2026-27: +1,950, turnover 1,950",
+   "in": {
+    "fy": 2026,
+    "realised": [
+     {
+      "kind": "options",
+      "open_day": 20260330,
+      "close_day": 20260402,
+      "qty_u": 65000000,
+      "buy_paise": 130000,
+      "sell_paise": 325000,
+      "pnl_paise": 195000,
+      "flag": null
+     }
+    ]
+   },
+   "out": {
+    "non_speculative": {
+     "gross_paise": 195000,
+     "charges_paise": 0,
+     "net_paise": 195000,
+     "turnover_paise": 195000
+    },
+    "speculative": {
+     "gross_paise": 0,
+     "charges_paise": 0,
+     "net_paise": 0,
+     "turnover_paise": 0
+    },
+    "turnover_paise": 195000,
+    "flags": []
+   }
+  },
+  {
+   "id": "S1-two-buckets",
+   "note": "intraday shares +500 and -300 (speculative: gross 200, turnover 800, charges 40) beside B2 (charges 100): the buckets never mix; turnover 9,750 + 800 = 10,550; net 3,150 + 160 = 3,310, well above 6%",
+   "in": {
+    "fy": 2026,
+    "realised": [
+     {
+      "kind": "futures",
+      "open_day": 20260803,
+      "close_day": 20260804,
+      "qty_u": 65000000,
+      "buy_paise": 156000000,
+      "sell_paise": 156650000,
+      "pnl_paise": 650000,
+      "flag": null
+     },
+     {
+      "kind": "futures",
+      "open_day": 20260805,
+      "close_day": 20260806,
+      "qty_u": 65000000,
+      "buy_paise": 157625000,
+      "sell_paise": 157300000,
+      "pnl_paise": -325000,
+      "flag": null
+     },
+     {
+      "kind": "speculative",
+      "open_day": 20260803,
+      "close_day": 20260803,
+      "qty_u": 50000000,
+      "buy_paise": 1000000,
+      "sell_paise": 1050000,
+      "pnl_paise": 50000,
+      "flag": null
+     },
+     {
+      "kind": "speculative",
+      "open_day": 20260804,
+      "close_day": 20260804,
+      "qty_u": 100000000,
+      "buy_paise": 500000,
+      "sell_paise": 470000,
+      "pnl_paise": -30000,
+      "flag": null
+     }
+    ],
+    "charges_paise": 10000,
+    "speculative_charges_paise": 4000
+   },
+   "out": {
+    "non_speculative": {
+     "gross_paise": 325000,
+     "charges_paise": 10000,
+     "net_paise": 315000,
+     "turnover_paise": 975000
+    },
+    "speculative": {
+     "gross_paise": 20000,
+     "charges_paise": 4000,
+     "net_paise": 16000,
+     "turnover_paise": 80000
+    },
+    "turnover_paise": 1055000,
+    "flags": []
+   }
+  },
+  {
+   "id": "F1-above-10-crore",
+   "note": "+6 crore and -5 crore: turnover 11 crore, above 10 crore; net 1 crore is 9%, no low-margin sentence",
+   "in": {
+    "fy": 2026,
+    "realised": [
+     {
+      "kind": "futures",
+      "open_day": 20260803,
+      "close_day": 20260804,
+      "qty_u": 65000000,
+      "buy_paise": 0,
+      "sell_paise": 6000000000,
+      "pnl_paise": 6000000000,
+      "flag": null
+     },
+     {
+      "kind": "futures",
+      "open_day": 20260803,
+      "close_day": 20260804,
+      "qty_u": 65000000,
+      "buy_paise": 5000000000,
+      "sell_paise": 0,
+      "pnl_paise": -5000000000,
+      "flag": null
+     }
+    ]
+   },
+   "out": {
+    "non_speculative": {
+     "gross_paise": 1000000000,
+     "charges_paise": 0,
+     "net_paise": 1000000000,
+     "turnover_paise": 11000000000
+    },
+    "speculative": {
+     "gross_paise": 0,
+     "charges_paise": 0,
+     "net_paise": 0,
+     "turnover_paise": 0
+    },
+    "turnover_paise": 11000000000,
+    "flags": [
+     "digital"
+    ]
+   }
+  },
+  {
+   "id": "F1-exactly-10-crore",
+   "note": "+5.5 crore and -4.5 crore: turnover exactly 10 crore is not above it: the between-the-limits sentence; net 1 crore is 10%",
+   "in": {
+    "fy": 2026,
+    "realised": [
+     {
+      "kind": "futures",
+      "open_day": 20260803,
+      "close_day": 20260804,
+      "qty_u": 65000000,
+      "buy_paise": 0,
+      "sell_paise": 5500000000,
+      "pnl_paise": 5500000000,
+      "flag": null
+     },
+     {
+      "kind": "futures",
+      "open_day": 20260803,
+      "close_day": 20260804,
+      "qty_u": 65000000,
+      "buy_paise": 4500000000,
+      "sell_paise": 0,
+      "pnl_paise": -4500000000,
+      "flag": null
+     }
+    ]
+   },
+   "out": {
+    "non_speculative": {
+     "gross_paise": 1000000000,
+     "charges_paise": 0,
+     "net_paise": 1000000000,
+     "turnover_paise": 10000000000
+    },
+    "speculative": {
+     "gross_paise": 0,
+     "charges_paise": 0,
+     "net_paise": 0,
+     "turnover_paise": 0
+    },
+    "turnover_paise": 10000000000,
+    "flags": [
+     "base"
+    ]
+   }
+  },
+  {
+   "id": "F2-between",
+   "note": "+80 lakh and -70 lakh: turnover 1.5 crore, between the limits; net 10 lakh is 6.67%",
+   "in": {
+    "fy": 2026,
+    "realised": [
+     {
+      "kind": "futures",
+      "open_day": 20260803,
+      "close_day": 20260804,
+      "qty_u": 65000000,
+      "buy_paise": 0,
+      "sell_paise": 800000000,
+      "pnl_paise": 800000000,
+      "flag": null
+     },
+     {
+      "kind": "futures",
+      "open_day": 20260803,
+      "close_day": 20260804,
+      "qty_u": 65000000,
+      "buy_paise": 700000000,
+      "sell_paise": 0,
+      "pnl_paise": -700000000,
+      "flag": null
+     }
+    ]
+   },
+   "out": {
+    "non_speculative": {
+     "gross_paise": 100000000,
+     "charges_paise": 0,
+     "net_paise": 100000000,
+     "turnover_paise": 1500000000
+    },
+    "speculative": {
+     "gross_paise": 0,
+     "charges_paise": 0,
+     "net_paise": 0,
+     "turnover_paise": 0
+    },
+    "turnover_paise": 1500000000,
+    "flags": [
+     "base"
+    ]
+   }
+  },
+  {
+   "id": "F3-low-margin",
+   "note": "+50 lakh and -47 lakh: turnover 97 lakh, under 1 crore; net 3 lakh is 3.09%, under 6%",
+   "in": {
+    "fy": 2026,
+    "realised": [
+     {
+      "kind": "futures",
+      "open_day": 20260803,
+      "close_day": 20260804,
+      "qty_u": 65000000,
+      "buy_paise": 0,
+      "sell_paise": 500000000,
+      "pnl_paise": 500000000,
+      "flag": null
+     },
+     {
+      "kind": "futures",
+      "open_day": 20260803,
+      "close_day": 20260804,
+      "qty_u": 65000000,
+      "buy_paise": 470000000,
+      "sell_paise": 0,
+      "pnl_paise": -470000000,
+      "flag": null
+     }
+    ]
+   },
+   "out": {
+    "non_speculative": {
+     "gross_paise": 30000000,
+     "charges_paise": 0,
+     "net_paise": 30000000,
+     "turnover_paise": 970000000
+    },
+    "speculative": {
+     "gross_paise": 0,
+     "charges_paise": 0,
+     "net_paise": 0,
+     "turnover_paise": 0
+    },
+    "turnover_paise": 970000000,
+    "flags": [
+     "low"
+    ]
+   }
+  },
+  {
+   "id": "F4-exactly-6-percent",
+   "note": "+53 lakh and -47 lakh: turnover exactly 1 crore (not above it) and net exactly 6% (not below it): no sentence",
+   "in": {
+    "fy": 2026,
+    "realised": [
+     {
+      "kind": "futures",
+      "open_day": 20260803,
+      "close_day": 20260804,
+      "qty_u": 65000000,
+      "buy_paise": 0,
+      "sell_paise": 530000000,
+      "pnl_paise": 530000000,
+      "flag": null
+     },
+     {
+      "kind": "futures",
+      "open_day": 20260803,
+      "close_day": 20260804,
+      "qty_u": 65000000,
+      "buy_paise": 470000000,
+      "sell_paise": 0,
+      "pnl_paise": -470000000,
+      "flag": null
+     }
+    ]
+   },
+   "out": {
+    "non_speculative": {
+     "gross_paise": 60000000,
+     "charges_paise": 0,
+     "net_paise": 60000000,
+     "turnover_paise": 1000000000
+    },
+    "speculative": {
+     "gross_paise": 0,
+     "charges_paise": 0,
+     "net_paise": 0,
+     "turnover_paise": 0
+    },
+    "turnover_paise": 1000000000,
+    "flags": []
+   }
+  },
+  {
+   "id": "F5-charges-make-it-low",
+   "note": "the same with charges of 1,000: net falls under 6%",
+   "in": {
+    "fy": 2026,
+    "realised": [
+     {
+      "kind": "futures",
+      "open_day": 20260803,
+      "close_day": 20260804,
+      "qty_u": 65000000,
+      "buy_paise": 0,
+      "sell_paise": 530000000,
+      "pnl_paise": 530000000,
+      "flag": null
+     },
+     {
+      "kind": "futures",
+      "open_day": 20260803,
+      "close_day": 20260804,
+      "qty_u": 65000000,
+      "buy_paise": 470000000,
+      "sell_paise": 0,
+      "pnl_paise": -470000000,
+      "flag": null
+     }
+    ],
+    "charges_paise": 100000
+   },
+   "out": {
+    "non_speculative": {
+     "gross_paise": 60000000,
+     "charges_paise": 100000,
+     "net_paise": 59900000,
+     "turnover_paise": 1000000000
+    },
+    "speculative": {
+     "gross_paise": 0,
+     "charges_paise": 0,
+     "net_paise": 0,
+     "turnover_paise": 0
+    },
+    "turnover_paise": 1000000000,
+    "flags": [
+     "low"
+    ]
+   }
+  }
+ ],
+ "other": [
+  {
+   "id": "X1-share-charges",
+   "note": "share charges of 1,000.01 split by traded value 3 : 1 between intraday and delivery: 75,000.75 and 25,000.25 paise; the spare paisa to the .75",
+   "in": {
+    "split": [
+     100001,
+     300000,
+     100000
+    ]
+   },
+   "out": [
+    75001,
+    25000
+   ]
+  },
+  {
+   "id": "X2-differs",
+   "note": "own NIFTY result -1,300 against Upstox's -1,300.50 is within a rupee; own BANKNIFTY 0 against Upstox's 250 is listed with both; a scrip only here is listed against nothing",
+   "in": {
+    "fy": 2026,
+    "realised": [
+     {
+      "kind": "options",
+      "open_day": 20260803,
+      "close_day": 20260804,
+      "qty_u": 65000000,
+      "buy_paise": 650000,
+      "sell_paise": 845000,
+      "pnl_paise": 195000,
+      "flag": null
+     },
+     {
+      "kind": "options",
+      "open_day": 20260805,
+      "close_day": 20260806,
+      "qty_u": 65000000,
+      "buy_paise": 520000,
+      "sell_paise": 260000,
+      "pnl_paise": -260000,
+      "flag": null
+     },
+     {
+      "kind": "options",
+      "open_day": 20260807,
+      "close_day": 20260810,
+      "qty_u": 65000000,
+      "buy_paise": 650000,
+      "sell_paise": 780000,
+      "pnl_paise": 130000,
+      "flag": null
+     },
+     {
+      "kind": "options",
+      "open_day": 20260811,
+      "close_day": 20260827,
+      "qty_u": 65000000,
+      "buy_paise": 195000,
+      "sell_paise": 0,
+      "pnl_paise": -195000,
+      "flag": "assumed_zero"
+     },
+     {
+      "kind": "futures",
+      "open_day": 20260803,
+      "close_day": 20260804,
+      "qty_u": 65000000,
+      "buy_paise": 10000,
+      "sell_paise": 40000,
+      "pnl_paise": 30000,
+      "flag": null,
+      "scrip": "FINNIFTY"
+     }
+    ],
+    "upstox": {
+     "NIFTY": -130050,
+     "BANKNIFTY": 25000
+    }
+   },
+   "out": [
+    {
+     "scrip": "BANKNIFTY",
+     "own_paise": null,
+     "upstox_paise": 25000
+    },
+    {
+     "scrip": "FINNIFTY",
+     "own_paise": 30000,
+     "upstox_paise": null
+    }
+   ]
+  }
+ ]
+}

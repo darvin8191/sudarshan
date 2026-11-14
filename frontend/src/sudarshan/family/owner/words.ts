@@ -48,6 +48,14 @@ export function privacyLine(privacy: Privacy): string {
 /** Cross-design Y24: P&L is worked out from quantities, so P&L is offered only with them. */
 export const PNL_NEEDS_QTY = 'Live P&L is worked out from quantities'
 
+/**
+ * Review H1: beside a quantity, any rupee figure gives the P&L away, so hiding P&L hides them all
+ * (the `cost` list of privacy_fields.json). Said under the switches while P&L is hidden.
+ */
+export const PNL_HIDES_MONEY =
+  'Hidden, and every rupee figure with it: cost, value, the day’s change'
+export const FUNDS_WITHOUT_AMOUNTS = 'Shown without amounts while P&L is hidden'
+
 /** The privacy as the page sends it: with quantities off, P&L goes off with them. */
 export function settled(privacy: Privacy): Privacy {
   return privacy.qty ? privacy : { ...privacy, pnl: false }
@@ -87,6 +95,15 @@ export function statusOf(card: MemberCard, now: number): StatusChip {
   return { kind: 'active', label: 'Active' }
 }
 
+/**
+ * Review L8: when the open invite's link was first opened (it hands out the code app's key). A
+ * link opened before the member says they opened it is the owner's cue to cancel it.
+ */
+export function openedLine(card: MemberCard): string | null {
+  if (card.invite_expires_at === null || card.invite_opened_at === null) return null
+  return `Link opened at ${clockOf(card.invite_opened_at)}`
+}
+
 export function devicesLine(count: number): string {
   if (count === 0) return 'No devices'
   return count === 1 ? '1 device' : `${count} devices`
@@ -106,6 +123,7 @@ export const AUDIT_WORDS: Record<AuditKind, string> = {
   session_revoked: 'Device signed out',
   session_expired: 'Sign-in expired',
   invite_created: 'Invite made',
+  invite_opened: 'Invite link opened',
   invite_used: 'Invite used',
   invite_revoked: 'Invite cancelled',
   member_created: 'Member added',
@@ -115,6 +133,7 @@ export const AUDIT_WORDS: Record<AuditKind, string> = {
   member_removed: 'Member removed',
   privacy_changed: 'Privacy changed',
   signin_reset: 'Sign-in reset',
+  signin_unlocked: 'Sign-in unlocked',
   share_set: 'Sharing set',
   share_removed: 'Sharing removed',
   device_renamed: 'Device renamed',

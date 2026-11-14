@@ -134,7 +134,9 @@ def test_the_numbers_the_design_names():
     assert (lim["handle_min"], lim["handle_max"], lim["password_min"]) == (3, 20, 12)
     assert (lim["session_days"], lim["idle_days"], lim["invite_hours"]) == (30, 14, 2)
     assert (lim["admin_bytes"], lim["nudge_bytes"], lim["viewer_bytes"]) == (65536, 4096, 65536)
-    assert c.LOCKOUT == ((5, 900), (10, 3600), (15, 86400)) and c.LOCKOUT_REPEAT == 5
+    assert c.LOCKOUT == {"after": 5, "first_s": 60, "max_s": 900}  # review M2: short back-off
+    assert c.AREA_LIMIT == {"failures": 20, "window_s": 600}
+    assert (c.PHONE_COOKIE, c.PHONE_DAYS) == ("__Host-sudarshan_family_phone", 90)
     for status in c.ERROR_STATUS.values():
         assert 400 <= status < 600
 
