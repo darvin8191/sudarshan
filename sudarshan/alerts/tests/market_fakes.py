@@ -1,4 +1,7 @@
-"""sudarshan-feed as market alerts see it, on 127.0.0.1: a ZMQ PUB and the HTTP API they use."""
+"""sudarshan-feed as market alerts see it, on 127.0.0.1: a ZMQ PUB and the HTTP API they use.
+
+The publisher is an XPUB, which delivers as a PUB does and is also told each subscription, so a
+test can wait until a topic has reached it (``follows``) and never has to sleep and hope."""
 
 from __future__ import annotations
 
@@ -24,6 +27,8 @@ class FakeFeed:
     ``PUT``/``DELETE /claims/<client>`` (recording each body) and ``GET /snapshot``.
 
     ``health`` is the document published; ``refuse`` (status, error) answers the next claim.
+    ``follows(key)`` says whether a subscriber's topic has reached the publisher: a frame sent
+    before that is lost, and one sent after it is delivered.
     """
 
     def __init__(self, clock, beat_s: float = 0.05):
@@ -43,12 +48,15 @@ class FakeFeed:
         self.answering = True
         #: Seconds a claim waits before it is answered (a slow feed).
         self.put_delay = 0.0
+        self._topics: set[bytes] = set()
 
     async def __aenter__(self) -> FakeFeed:
         self.ctx = zmq.asyncio.Context()
-        self.pub = self.ctx.socket(zmq.PUB)
+        self.pub = self.ctx.socket(zmq.XPUB)
         self.pub.setsockopt(zmq.LINGER, 0)
         self.pub.bind("tcp://127.0.0.1:*")
+        #: The same socket without asyncio, to take the subscriptions it was told at once.
+        self._told = zmq.Socket.shadow(self.pub.underlying)
         self.endpoint = self.pub.getsockopt_string(zmq.LAST_ENDPOINT)
         self.server = await asyncio.start_server(self._serve, "127.0.0.1", 0)
         self.port = self.server.sockets[0].getsockname()[1]
@@ -75,6 +83,20 @@ class FakeFeed:
     def keys(self) -> dict[str, str]:
         """The last claim's keys."""
         return self.claims[-1]["keys"] if self.claims else {}
+
+    def follows(self, key: str) -> bool:
+        """Whether the publisher holds a subscription to ``key`` now. The messages are taken
+        here, in the call that applies them to the socket, so the answer is never behind it."""
+        while True:
+            try:
+                told = self._told.recv(zmq.DONTWAIT)
+            except zmq.Again:
+                break
+            if told[:1] == b"\x01":
+                self._topics.add(told[1:])
+            elif told[:1] == b"\x00":
+                self._topics.discard(told[1:])
+        return key.encode() in self._topics
 
     async def _heartbeat(self) -> None:
         while True:
