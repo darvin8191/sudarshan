@@ -105,6 +105,8 @@ export const profileMenuItems: NavItem[] = [
   // SUDARSHAN P6 D2 (M2.7): the owner's Family page, right after Risk. The viewer's own pages are
   // not listed here: their menu is sudarshan/family/navigation.ts (cross-design Y35, Y36).
   { href: '/family-members', label: 'Family', icon: Users },
+  // SUDARSHAN M12.1: the TradingView strategies whose alerts become orders.
+  { href: '/automation', label: 'Automation', icon: Workflow },
   { href: '/telegram', label: 'Telegram Bot', icon: MessageSquare },
   { href: '/whatsapp', label: 'WhatsApp Bot', icon: MessageCircle },
   // SUDARSHAN (cross-design Y36): Watchlist, Screener, Portfolio, Journal, Reports, then Holdings.

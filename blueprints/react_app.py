@@ -827,6 +827,12 @@ def react_risk():
     return serve_react_app()
 
 
+# SUDARSHAN M12.1: Automation, the TradingView strategies (its API is /sudarshan/automation/api/*)
+@react_bp.route("/automation", strict_slashes=False)
+def react_automation():
+    return serve_react_app()
+
+
 # SUDARSHAN M4.15: the phone chart. A bare /chart opens the last instrument.
 @react_bp.route("/chart", strict_slashes=False)
 def react_phone_chart():
