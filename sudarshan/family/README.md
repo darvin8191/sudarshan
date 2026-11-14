@@ -7,8 +7,9 @@ runs as its own account and can read none of the owner's secrets.
 
 Status: on this branch (`feat/family-a`): the contract (F0), the store (F1), the accounts (F3), the
 service and its unit (F2), the viewer API for sign-in and the member's own account (F4), and the
-owner's notices, the store's nightly copy and the audit op (F11). The data plane, the WebSocket
-dialect, the bot and Web Push are other lanes; their routes answer "not ready" until they land.
+owner's notices, the store's nightly copy and the audit op (F11). On `feat/family-t2`: the family
+bot (F8, "Channels" below). The data plane, the WebSocket dialect and Web Push are other lanes;
+their routes answer "not ready" until they land.
 `sudarshan/STATUS.md` has one row per feature. The service ships switched off
 (`SUDARSHAN_FAMILY=off`).
 
@@ -40,6 +41,7 @@ the deploy, the owner   -> GET  127.0.0.1:5585/health                 (counts an
 | `seal-admin.key`, `seal-nudge.key`, `seal-internal.key`, `seal-portfolio-family.key`, `seal-journal-family.key` | the derived seal keys (urlsafe base64, 32 bytes each): the service never derives a key itself | provision (from `python -m sudarshan.family.derive`, run as `sudarshan`) |
 | `store.key` | 32 random bytes (standard base64): the key of the secrets at rest in the store | provision, once |
 | `vapid_private.pem`, `vapid_public.txt` | the Web Push key pair | provision, once |
+| `telegram_bot_token` | the family bot's token (one line, as BotFather shows it): read again when the file changes | the owner, once (Channels, below); the deploy never writes it |
 | `feed-token` | this service's token for the price feed's write calls | provision |
 | `nse_holidays.txt`, `nse_extra_trading_days.txt` | copies of the exchange's day files | provision, when they change |
 | `family.env` | the settings, read as the unit's environment | the owner |
@@ -74,3 +76,68 @@ The one-time set-up that makes the account, the folders and the firewall allow-l
 | `viewer_api.py` | the viewer API: cookies, CSRF, sign-in, the member's own account | F4 |
 | `notices.py`, `backup.py` | the owner's notices, the store's copy for the nightly backup | F11 |
 | `derive.py`, `check.py` | the one-time set-up's pieces (the deploy runs them) | O2' |
+| `bot.py`, `bot_words.py`, `telegram_client.py`, `quiet.py` (market hours) | the family bot: link codes, the read-only command table, two languages, its own pacer per chat | F8 |
+
+## Channels
+
+### The family bot (F8, M16.4)
+
+A second Telegram bot, separate from the owner's: only this service holds its token, and it can
+show what each member may see and nothing else. There is no command that places, changes or
+cancels an order, and its HTTP client can reach only Telegram's API and two loopback services
+(the portfolio on 5583, the price feed on 5580); a request anywhere else is refused before it
+leaves.
+
+| command | answers |
+|---|---|
+| `/status` | the market (open or closed, "Real-time" only while ticks arrive) and the indices |
+| `/positions`, `/holdings` | the account owner's positions or holdings, under the member's privacy, with the time of the figures |
+| `/orders` | today's orders, when orders are shared with the member |
+| `/portfolio` | the portfolios shared with the member |
+| `/quiet on`, `/quiet off` | quiet hours for the daily summary (sign-in notices are never quiet) |
+| `/language en`, `/language gu` | English or Gujarati for the bot and the notifications |
+| `/help`, `/stop` | the list; unlink this chat |
+
+Anything else is answered "This bot only shows information. It cannot place, change or cancel an
+order." A member links their chat from Settings, Link Telegram: the link works once, for 10
+minutes. A chat that is not linked is only told how to link. Groups are never answered.
+
+**The owner's steps, once.** The deploy does not make the token file; the owner puts it there.
+
+1. In Telegram, open @BotFather and send `/newbot`. For the name, type
+   `सुदर्शन / SUDARSHAN · Family`; for the user name, any free name ending in `bot`. BotFather
+   answers with the token: a number, a colon and about 35 letters and digits. Copy it into your
+   password manager; never paste it into a chat.
+2. The family set-up (`sudarshan/ops/family/bootstrap.sh`) must have run, so that
+   `/etc/sudarshan-family` exists on the server.
+3. On the laptop, save the lines below as `sudarshan-family-bot.bat` (in Notepad: Save as, then
+   Save as type "All files"), change `USER@SERVER` in its third line to the login you already use
+   for the server, and double-click it:
+
+   ```bat
+   @echo off
+   setlocal
+   set "SERVER=USER@SERVER"
+   ssh -t %SERVER% "sudo test -d /etc/sudarshan-family || { echo 'The family set-up has not been run on this server yet. Nothing was changed.'; exit 1; }; read -rs -p 'Family bot token (nothing shows as you paste it; press Enter after it): ' t; echo; [[ $t =~ ^[0-9]{5,16}:[A-Za-z0-9_-]{30,64}$ ]] || { echo 'Not saved: that is not a bot token as BotFather shows it. Nothing was changed.'; exit 1; }; printf '%%s\n' $t | sudo install -o root -g sudarshan-family -m 640 /dev/stdin /etc/sudarshan-family/telegram_bot_token && echo 'Saved. The family bot starts within a minute.'"
+   if errorlevel 1 (
+     echo The token was not saved: read the lines above, fix what they name and run this file again.
+     pause
+     exit /b 1
+   )
+   pause
+   exit /b 0
+   ```
+
+   It asks for your password on the server once (`[sudo] password for ...:`), then for the token
+   in a hidden prompt: paste it (a right-click pastes) and press Enter. Nothing shows as you
+   paste, and the token is never on a screen, in a file on the laptop or in the shell history.
+   The file it writes is `/etc/sudarshan-family/telegram_bot_token`, root:sudarshan-family 640.
+4. Open Family on your phone: the Family bot card reads "Polling" within a minute. No restart is
+   needed; the service reads the file again whenever it changes.
+
+**When the card says otherwise.** "Token missing": the file is not there, or does not hold a token
+as BotFather shows it (run step 3 again). "Telegram refused the token": the token was revoked or
+mistyped; in @BotFather send `/token` (or `/revoke`, if it may have leaked), then run step 3 with
+the new one. You also get one Telegram notice from the owner's bot when Telegram refuses a token.
+If the service's journal says another program is using the token, a second copy of the bot is
+running somewhere: stop it, or revoke the token and save a new one.
