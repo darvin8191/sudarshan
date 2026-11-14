@@ -9,6 +9,7 @@ import {
   refusal,
   type StudyEntry,
   skipReason,
+  studyFields,
   VOLUME_MA,
   volumeMaAt,
   volumeMaLength,
@@ -119,5 +120,56 @@ describe('the volume average', () => {
     expect(volumeMaLength({ length: '' })).toBe(20)
     expect(volumeMaLength({ length: 1 })).toBe(20)
     expect(volumeMaLength({})).toBe(20)
+  })
+})
+
+describe("a study's settings on the phone", () => {
+  const sources = [
+    { label: 'Close', value: 'close' },
+    { label: 'Open', value: 'open' },
+  ]
+
+  it('draws numbers, switches, choices and text, a price source as a choice, and leaves colours out', () => {
+    const fields = studyFields(
+      [
+        { key: 'length', type: 'number', label: 'Length', default: 9, min: 1, max: 500, step: 1 },
+        { key: 'source', type: 'source', label: 'Source', default: 'close' },
+        { key: 'color', type: 'color', label: 'Color', default: '#4f8cff' },
+        {
+          key: 'showBand',
+          type: 'boolean',
+          label: 'Show band',
+          default: true,
+          tooltip: 'The band',
+        },
+        {
+          key: 'mode',
+          type: 'select',
+          label: 'Mode',
+          default: 'a',
+          options: [{ label: 'A', value: 'a' }, 'b'],
+          visibleWhen: { key: 'showBand', is: true },
+        },
+        { key: 'timeframe', type: 'interval', label: 'Timeframe', default: '' },
+        { key: 'session', type: 'session', label: 'Session', default: '0915-1530' },
+        { type: 'number' },
+      ],
+      sources
+    )
+    expect(fields.map((f) => [f.key, f.type])).toEqual([
+      ['length', 'number'],
+      ['source', 'select'],
+      ['showBand', 'boolean'],
+      ['mode', 'select'],
+      ['timeframe', 'interval'],
+    ])
+    expect(fields[0]).toMatchObject({ min: 1, max: 500, step: 1 })
+    expect(fields[1].options).toBe(sources)
+    expect(fields[2].tooltip).toBe('The band')
+    expect(fields[3].options).toEqual([
+      { label: 'A', value: 'a' },
+      { label: 'b', value: 'b' },
+    ])
+    expect(fields[3].visibleWhen).toEqual({ key: 'showBand', is: true })
   })
 })

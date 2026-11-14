@@ -33,6 +33,9 @@ const fakes = vi.hoisted(() => ({
   instrument: { name: 'STATE BANK OF INDIA', lotSize: 1, tickSize: 0.05 } as unknown,
   /** What the broker offers, as the terminal groups it (Upstox's set). */
   intervals: null as unknown,
+  /** Every study on offer, and the owner's files that failed, as the host gives them (C4). */
+  catalogue: [] as Array<{ id: string; name: string; category: string; mine: boolean }>,
+  problems: [] as string[],
 }))
 
 const UPSTOX_INTERVALS = [
@@ -53,6 +56,31 @@ vi.mock('./phoneChart', () => ({
     setStudies = vi.fn(async (_set: Array<{ id: string }>) => {})
     setTick = vi.fn()
     loadIndicatorTier = vi.fn(async () => true)
+    loadMyScripts = vi.fn(async () => fakes.problems)
+    catalogue = vi.fn(() => fakes.catalogue)
+    /** EMA's form, its values over the defaults as the page last set them. */
+    studyForm = vi.fn((index: number) => {
+      const entry = this.setStudies.mock.lastCall?.[0]?.[index] as
+        | { id: string; settings: Record<string, unknown> }
+        | undefined
+      if (!entry) return null
+      return {
+        name: 'EMA',
+        fields: [
+          { key: 'length', type: 'number', label: 'Length', min: 1, max: 500, step: 1 },
+          {
+            key: 'source',
+            type: 'select',
+            label: 'Source',
+            options: [
+              { label: 'Close', value: 'close' },
+              { label: 'Open', value: 'open' },
+            ],
+          },
+        ],
+        values: { length: 9, source: 'close', ...entry.settings },
+      }
+    })
     studyFacts = vi.fn((id: string) =>
       id === 'rsi' || id === 'macd' || id === 'atr'
         ? { name: id.toUpperCase(), placement: 'pane' }
@@ -229,6 +257,11 @@ beforeEach(() => {
   useAuthStore.setState({ apiKey: 'test-key', sessionChecked: true, brokerSessionExpired: false })
   fakes.instrument = { name: 'STATE BANK OF INDIA', lotSize: 1, tickSize: 0.05 }
   fakes.intervals = UPSTOX_INTERVALS
+  fakes.catalogue = [
+    { id: 'ichimoku', name: 'Ichimoku Cloud', category: 'Trend', mine: false },
+    { id: 'stochastic', name: 'Stochastic', category: 'Momentum', mine: false },
+  ]
+  fakes.problems = []
   localStorage.clear()
   Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 })
   Object.defineProperty(window, 'innerHeight', { configurable: true, value: 844 })
@@ -498,6 +531,64 @@ describe('the phone chart page at 390 px', () => {
     const sheet = await screen.findByRole('dialog', { name: 'Indicators' })
     await userEvent.click(within(sheet).getByRole('button', { name: 'Add Open interest' }))
     expect(chart().setStudies).toHaveBeenLastCalledWith([{ id: 'open-interest', settings: {} }])
+  })
+
+  it('changes a study in its own settings sheet, says what is wrong with a number, and Back returns to the list', async () => {
+    localStorage.setItem(
+      'sudarshan-chart-studies',
+      JSON.stringify([{ id: 'ema', settings: { length: 21 } }])
+    )
+    await opened()
+    await userEvent.click(screen.getByRole('button', { name: 'Indicators 1 on the chart' }))
+    const list = await screen.findByRole('dialog', { name: 'Indicators' })
+    await userEvent.click(within(list).getByRole('button', { name: 'Settings for EMA' }))
+    const form = await screen.findByRole('dialog', { name: 'EMA' })
+    const length = within(form).getByRole('textbox', { name: 'Length' })
+    expect(length).toHaveValue('21')
+    expect(length).toHaveAttribute('inputmode', 'decimal')
+    await userEvent.clear(length)
+    await userEvent.type(length, '0{Enter}')
+    expect(within(form).getByText('The lowest allowed is 1')).toBeVisible()
+    expect(chart().setStudies).toHaveBeenLastCalledWith([{ id: 'ema', settings: { length: 21 } }])
+    await userEvent.clear(length)
+    await userEvent.type(length, '50{Enter}')
+    expect(chart().setStudies).toHaveBeenLastCalledWith([{ id: 'ema', settings: { length: 50 } }])
+    expect(JSON.parse(localStorage.getItem('sudarshan-chart-studies') ?? '[]')).toEqual([
+      { id: 'ema', settings: { length: 50 } },
+    ])
+    await userEvent.selectOptions(within(form).getByRole('combobox', { name: 'Source' }), 'open')
+    expect(chart().setStudies).toHaveBeenLastCalledWith([
+      { id: 'ema', settings: { length: 50, source: 'open' } },
+    ])
+    await userEvent.click(within(form).getByRole('button', { name: 'Back to defaults' }))
+    expect(chart().setStudies).toHaveBeenLastCalledWith([{ id: 'ema', settings: {} }])
+    // The phone's own Back, which reaches the page past the open sheet.
+    fireEvent.click(screen.getByText('Phone back'))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'EMA' })).toBeNull())
+    expect(await screen.findByRole('dialog', { name: 'Indicators' })).toBeVisible()
+  })
+
+  it("finds any built-in by name, and lists the owner's own scripts with what failed", async () => {
+    fakes.catalogue = [
+      ...fakes.catalogue,
+      { id: 'my-band', name: 'My Band', category: 'Custom', mine: true },
+    ]
+    fakes.problems = ['broken.js: it does not register anything']
+    await opened()
+    await userEvent.click(screen.getByRole('button', { name: 'Indicators' }))
+    const sheet = await screen.findByRole('dialog', { name: 'Indicators' })
+    const mine = await within(sheet).findByRole('region', { name: 'My scripts' })
+    expect(within(mine).getByText('broken.js: it does not register anything')).toBeVisible()
+    await userEvent.click(within(mine).getByRole('button', { name: 'Add My Band' }))
+    await userEvent.type(within(sheet).getByRole('searchbox'), 'ichi')
+    await userEvent.click(within(sheet).getByRole('button', { name: 'Add Ichimoku Cloud' }))
+    expect(chart().setStudies).toHaveBeenLastCalledWith([
+      { id: 'my-band', settings: {} },
+      { id: 'ichimoku', settings: {} },
+    ])
+    await userEvent.clear(within(sheet).getByRole('searchbox'))
+    await userEvent.type(within(sheet).getByRole('searchbox'), 'zzz')
+    expect(within(sheet).getByText('No indicator by that name.')).toBeVisible()
   })
 
   it("opens the app's own order ticket from Buy and Sell, on Delivery for a share until a pick", async () => {

@@ -149,3 +149,72 @@ export function volumeMaLength(settings: Record<string, unknown>): number {
   const n = Math.round(Number(settings.length))
   return Number.isFinite(n) && n >= 2 && n <= 500 ? n : VOLUME_MA_LENGTH
 }
+
+/** A study the sheet can add: a built-in, or one of the owner's own scripts (C4). */
+export interface CatalogueEntry {
+  id: string
+  name: string
+  category: string
+  mine: boolean
+}
+
+/** One control of a study's settings on the phone (C4). */
+export interface StudyField {
+  key: string
+  type: 'number' | 'boolean' | 'select' | 'text' | 'interval' | 'time'
+  label: string
+  tooltip?: string
+  options?: ReadonlyArray<{ label: string; value: string }>
+  min?: number
+  max?: number
+  step?: number
+  /** Shown only while this holds over the form's values. */
+  visibleWhen?: unknown
+}
+
+export interface StudyForm {
+  name: string
+  fields: StudyField[]
+  values: Record<string, unknown>
+}
+
+const FIELD_TYPES = new Set(['number', 'boolean', 'select', 'text', 'interval', 'time'])
+
+/**
+ * A descriptor's inputs as the phone draws them: numbers, switches, choices
+ * and text, a price source as a choice among the engine's sources. Colours
+ * and line styles stay with the full terminal's form.
+ */
+export function studyFields(
+  inputs: readonly unknown[],
+  sources: ReadonlyArray<{ label: string; value: string }>
+): StudyField[] {
+  const fields: StudyField[] = []
+  for (const raw of inputs) {
+    const input = raw as Record<string, unknown>
+    if (typeof input.key !== 'string' || typeof input.type !== 'string') continue
+    const source = input.type === 'source'
+    if (!source && !FIELD_TYPES.has(input.type)) continue
+    const field: StudyField = {
+      key: input.key,
+      type: source ? 'select' : (input.type as StudyField['type']),
+      label: typeof input.label === 'string' ? input.label : input.key,
+    }
+    if (typeof input.tooltip === 'string') field.tooltip = input.tooltip
+    if (source) field.options = sources
+    else if (Array.isArray(input.options))
+      field.options = input.options.map((o) =>
+        typeof o === 'object' && o !== null
+          ? {
+              label: String((o as { label: unknown }).label),
+              value: String((o as { value: unknown }).value),
+            }
+          : { label: String(o), value: String(o) }
+      )
+    for (const bound of ['min', 'max', 'step'] as const)
+      if (typeof input[bound] === 'number') field[bound] = input[bound] as number
+    if (input.visibleWhen) field.visibleWhen = input.visibleWhen
+    fields.push(field)
+  }
+  return fields
+}

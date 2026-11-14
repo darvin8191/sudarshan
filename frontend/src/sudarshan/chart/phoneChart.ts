@@ -22,12 +22,15 @@ import {
   type DataLoadingSnapshot,
   getIndicator,
   hasIndicator,
+  INDICATOR_SOURCES,
   type IndicatorApi,
   InvalidationLevel,
+  indicatorDefaults,
   type LtpEvent,
   type MarketDepth,
   OpenAlgoDataFeed,
   OpenAlgoWsFeed,
+  registeredIndicators,
   type SeriesApi,
   withBarCache,
 } from 'openalgo-charts'
@@ -60,11 +63,14 @@ import { volumePoint } from '@/lib/trading/volumeSettings'
 import type { AppMode } from '@/stores/themeStore'
 import { CHART_BRANDING } from '@/sudarshan/brand'
 import {
+  type CatalogueEntry,
   legendValues,
   type Placement,
   type StudyEntry,
   type StudyFacts,
+  type StudyForm,
   skipReason,
+  studyFields,
   VOLUME_MA,
   volumeMaAt,
   volumeMaLength,
@@ -162,6 +168,8 @@ export class PhoneChart {
   /** Each entry's study on the current chart, or null where it is skipped or drawn by the host. */
   private studyApis: Array<IndicatorApi | null> = []
   private indicatorsReady = false
+  /** The engine's own ids, from its indicator tier's list (C4). */
+  private builtIns: Set<string> | null = null
   /** The volume pane's moving average, when the set holds one and the instrument trades. */
   private volumeMa: SeriesApi | null = null
   /** The instrument's tick, for the price axis and a study's `ctx.tickSize`. */
@@ -386,11 +394,110 @@ export class PhoneChart {
    */
   async setStudies(set: readonly StudyEntry[]): Promise<void> {
     if (this.destroyed) return
-    this.studies = set.map((entry) => ({ id: entry.id, settings: { ...entry.settings } }))
-    if (this.studies.some((entry) => entry.id !== VOLUME_MA)) await this.loadIndicatorTier()
+    const next = set.map((entry) => ({ id: entry.id, settings: { ...entry.settings } }))
+    // The same studies with other settings (C4): changed where they stand, nothing re-added.
+    const same =
+      this.studyApis.length === next.length &&
+      next.every((entry, i) => entry.id === this.studies[i]?.id)
+    this.studies = next
+    if (same) {
+      next.forEach((entry, i) => {
+        const api = this.studyApis[i]
+        if (api) api.setSettings(this.settingsOf(entry), { force: true })
+      })
+      if (this.bars.length) this.draw()
+      this.cb.onStudies?.()
+      return
+    }
+    if (next.some((entry) => entry.id !== VOLUME_MA)) await this.loadIndicatorTier()
+    // A saved set naming the owner's own studies loads just the files they come from (C4).
+    const missing = next.map((e) => e.id).filter((id) => id !== VOLUME_MA && !hasIndicator(id))
+    if (this.indicatorsReady && missing.length) await this.restoreMine(missing)
     if (this.destroyed) return
     this.applyStudies()
     if (this.bars.length) this.draw()
+  }
+
+  /** A study's settings over its defaults, so a key cleared from the set returns to its default. */
+  private settingsOf(entry: StudyEntry): Record<string, unknown> {
+    return hasIndicator(entry.id)
+      ? { ...indicatorDefaults(getIndicator(entry.id)), ...entry.settings }
+      : entry.settings
+  }
+
+  /**
+   * The owner's own studies a saved set names: the JavaScript files that
+   * register them, then the OpenScript studies when one is a script, as the
+   * terminal restores a layout. Failures are said when the sheet opens.
+   */
+  private async restoreMine(ids: string[]): Promise<void> {
+    try {
+      const { ensureCustomIndicators } = await import('@/lib/trading/customIndicators')
+      await ensureCustomIndicators(ids)
+      const { fileForScriptId } = await import('@/lib/trading/openscriptFiles')
+      if (ids.some((id) => fileForScriptId(id) !== null)) {
+        const { loadOpenScriptStudies } = await import('@/lib/trading/openscriptStudies')
+        await loadOpenScriptStudies()
+      }
+    } catch {
+      /* skipped with a line until the next load */
+    }
+  }
+
+  /**
+   * Every study the owner can add (C4): the engine's built-ins and his own,
+   * the JavaScript indicators and then the OpenScript studies on the server,
+   * loaded in that order after the built-in tier, exactly as the terminal
+   * loads them, so one of his reusing a built-in id overrides it the same way.
+   * The loaders' own sentences come back for a file that would not load.
+   */
+  async loadMyScripts(): Promise<string[]> {
+    if (!(await this.loadIndicatorTier())) return []
+    const problems: string[] = []
+    try {
+      const { loadCustomIndicators } = await import('@/lib/trading/customIndicators')
+      const custom = await loadCustomIndicators()
+      for (const e of custom.errors) problems.push(`${e.file}: ${e.message}`)
+      const { loadOpenScriptStudies } = await import('@/lib/trading/openscriptStudies')
+      const scripts = await loadOpenScriptStudies()
+      for (const e of scripts.errors) problems.push(`${e.file}: ${e.message}`)
+    } catch {
+      problems.push('Your scripts could not be read. Check the connection, then open this again.')
+    }
+    return problems
+  }
+
+  /** The catalogue the sheet searches: built-ins, and the owner's own marked so, by name. */
+  catalogue(): CatalogueEntry[] {
+    if (!this.indicatorsReady) return []
+    const builtIns = this.builtIns ?? new Set<string>()
+    return registeredIndicators()
+      .map((d) => ({
+        id: d.id,
+        name: d.name,
+        category: d.category ?? 'Other',
+        mine: !builtIns.has(d.id),
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name))
+  }
+
+  /** The settings form of the set's study at `index` (C4), from the engine's own descriptor. */
+  studyForm(index: number): StudyForm | null {
+    const entry = this.studies[index]
+    if (!entry) return null
+    if (entry.id === VOLUME_MA)
+      return {
+        name: 'Volume moving average',
+        fields: [{ key: 'length', type: 'number', label: 'Length', min: 2, max: 500, step: 1 }],
+        values: { length: volumeMaLength(entry.settings) },
+      }
+    if (!this.indicatorsReady || !hasIndicator(entry.id)) return null
+    const descriptor = getIndicator(entry.id)
+    return {
+      name: descriptor.name,
+      fields: studyFields(descriptor.inputs ?? [], INDICATOR_SOURCES),
+      values: this.settingsOf(entry),
+    }
   }
 
   /** What the registry says of a study: its name and where it draws; null for an id it does not hold. */
@@ -409,7 +516,9 @@ export class PhoneChart {
   async loadIndicatorTier(): Promise<boolean> {
     if (this.indicatorsReady) return true
     try {
-      await import('openalgo-charts/indicators')
+      const tier = await import('openalgo-charts/indicators')
+      // The tier's own list, so a script another page loaded first is never taken for a built-in.
+      this.builtIns = new Set(tier.BUILTIN_INDICATORS.map((d) => d.id))
       this.indicatorsReady = true
     } catch {
       /* the next set or sheet asks again */

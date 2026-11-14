@@ -23,6 +23,38 @@ vi.mock('@/lib/trading/sessionHours', () => ({
       exceptions: {},
     }),
 }))
+const scripts = vi.hoisted(() => ({
+  order: [] as string[],
+  ensure: vi.fn(async (_ids: string[]) => ({ loaded: [], errors: [] })),
+}))
+// The owner's own files, from the server in the app: here, the order they are loaded in.
+vi.mock('@/lib/trading/customIndicators', () => ({
+  ensureCustomIndicators: async (ids: string[]) => {
+    scripts.order.push('custom')
+    const { registerIndicator } = await import('openalgo-charts')
+    for (const id of ids.filter((one) => one.startsWith('my-')))
+      registerIndicator({
+        id,
+        name: 'My Band',
+        category: 'Custom',
+        placement: 'onchart',
+        inputs: [{ key: 'width', type: 'number', label: 'Width', default: 2 }],
+        plots: [{ key: 'mid', type: 'line', title: 'Mid', style: { color: '#123456' } }],
+        calc: (bars: Array<{ close: number }>) => ({ mid: bars.map((bar) => bar.close) }),
+      } as never)
+    return scripts.ensure(ids)
+  },
+  loadCustomIndicators: async () => {
+    scripts.order.push('custom')
+    return { loaded: [], errors: [{ file: 'broken.js', message: 'it does not register anything' }] }
+  },
+}))
+vi.mock('@/lib/trading/openscriptStudies', () => ({
+  loadOpenScriptStudies: async () => {
+    scripts.order.push('openscript')
+    return { loaded: [], errors: [] }
+  },
+}))
 vi.mock('@/lib/trading/previousClose', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/trading/previousClose')>()),
   previousClose: async () => null,
@@ -184,5 +216,77 @@ describe('the indicator set on the chart', () => {
     expect(engine(chart).priceScaleOptions().minMove).toBe(0.05)
     await chart.setStyle('bar')
     expect(engine(chart).priceScaleOptions().minMove).toBe(0.05)
+  })
+
+  it("lists every built-in by name, and marks the owner's own", async () => {
+    const view = mountChart()
+    await view.chart.loadIndicatorTier()
+    const builtIns = view.chart.catalogue().filter((study) => !study.mine)
+    expect(builtIns).toHaveLength(112)
+    expect(builtIns.map((s) => s.name)).toEqual(
+      [...builtIns.map((s) => s.name)].sort((a, b) => a.localeCompare(b))
+    )
+    await view.chart.setStudies([{ id: 'my-band', settings: {} }])
+    expect(view.chart.catalogue().find((study) => study.id === 'my-band')).toMatchObject({
+      name: 'My Band',
+      mine: true,
+    })
+  })
+
+  it("loads the owner's JavaScript indicators before his OpenScript studies, and says what failed", async () => {
+    scripts.order.length = 0
+    const view = mountChart()
+    const problems = await view.chart.loadMyScripts()
+    expect(scripts.order).toEqual(['custom', 'openscript'])
+    expect(problems).toEqual(['broken.js: it does not register anything'])
+  })
+
+  it('restores a saved set naming one of his own from just the file it comes from', async () => {
+    scripts.ensure.mockClear()
+    const view = mountChart()
+    await view.chart.setStudies([
+      { id: 'ema', settings: {} },
+      { id: 'my-restored', settings: { width: 3 } },
+    ])
+    await view.chart.load('SBIN', 'NSE', '5m')
+    expect(scripts.ensure).toHaveBeenCalledWith(['my-restored'])
+    expect(
+      engine(view.chart)
+        .indicators()
+        .map((s) => s.indicatorId)
+    ).toEqual(['ema', 'my-restored'])
+  })
+
+  it("gives the settings form from the engine's descriptor, its values over the defaults", async () => {
+    const { chart } = await opened()
+    const form = chart.studyForm(0)
+    expect(form?.name).toBe('EMA')
+    expect(form?.fields.map((f) => [f.key, f.type])).toEqual([
+      ['length', 'number'],
+      ['source', 'select'],
+      ['timeframe', 'interval'],
+    ])
+    expect(form?.values).toMatchObject({ length: 21, source: 'close', timeframe: '' })
+    expect(chart.studyForm(9)).toBeNull()
+  })
+
+  it('changes a setting where the study stands, without adding it again', async () => {
+    const { chart } = await opened()
+    const before = engine(chart)
+      .indicators()
+      .map((s) => s.id)
+    await chart.setStudies([
+      { id: 'ema', settings: { length: 50 } },
+      { id: 'rsi', settings: {} },
+    ])
+    const after = engine(chart).indicators()
+    expect(after.map((s) => s.id)).toEqual(before)
+    expect(after[0].settings().length).toBe(50)
+    // Back to defaults: a key left out of the set returns to the descriptor's default.
+    await chart.setStudies([
+      { id: 'ema', settings: {} },
+      { id: 'rsi', settings: {} },
+    ])
+    expect(engine(chart).indicators()[0].settings().length).toBe(9)
   })
 })

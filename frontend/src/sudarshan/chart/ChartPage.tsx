@@ -61,10 +61,12 @@ import {
   loadIntervals,
   searchSymbols,
 } from './api'
+import { IndicatorSettingsSheet } from './IndicatorSettingsSheet'
 import { IndicatorSheet } from './IndicatorSheet'
 import { LongPress } from './longPress'
 import { isQuoteOnly, PhoneChart } from './phoneChart'
 import {
+  type CatalogueEntry,
   COMMON_STUDIES,
   hasOpenInterest,
   type Placement,
@@ -160,6 +162,7 @@ type Sheet =
   | { sheet: 'timeframe' }
   | { sheet: 'style' }
   | { sheet: 'indicators' }
+  | { sheet: 'study'; index: number }
 
 function readSheet(state: unknown): Sheet | null {
   if (!state || typeof state !== 'object') return null
@@ -169,6 +172,9 @@ function readSheet(state: unknown): Sheet | null {
   if (value.sheet === 'timeframe') return { sheet: 'timeframe' }
   if (value.sheet === 'style') return { sheet: 'style' }
   if (value.sheet === 'indicators') return { sheet: 'indicators' }
+  const index = (value as { index?: unknown }).index
+  if (value.sheet === 'study' && typeof index === 'number' && Number.isInteger(index) && index >= 0)
+    return { sheet: 'study', index }
   if (value.sheet === 'ticket' && (value.side === 'BUY' || value.side === 'SELL'))
     return { sheet: 'ticket', side: value.side }
   return null
@@ -215,6 +221,9 @@ function PhoneChartScreen({
   const [studyNotice, setStudyNotice] = useState<string | null>(null)
   /** Counts the chart's study changes, so the sheet and the legend read them again. */
   const [, setStudyVersion] = useState(0)
+  /** Every study on offer (C4), once the indicator tier is in, and the owner's files that failed. */
+  const [catalogue, setCatalogue] = useState<CatalogueEntry[] | null>(null)
+  const [scriptProblems, setScriptProblems] = useState<string[]>([])
   const [prevClose, setPrevClose] = useState<number | null>(null)
   const [status, setStatus] = useState<LiveStatus | null>(null)
   const [load, setLoad] = useState<ChartStateView | null>(null)
@@ -376,6 +385,24 @@ function PhoneChartScreen({
     [owner, studies]
   )
 
+  /** A study's settings changed (C4), or went back to its defaults (`null`): for every instrument. */
+  const changeStudy = useCallback(
+    (index: number, patch: Record<string, unknown> | null) => {
+      const entry = studies[index]
+      if (!entry) return
+      const settings =
+        patch === null
+          ? entry.id === VOLUME_MA
+            ? { length: VOLUME_MA_LENGTH }
+            : {}
+          : { ...entry.settings, ...patch }
+      const next = studies.map((e, i) => (i === index ? { id: e.id, settings } : e))
+      setStudies(next)
+      saveStudies(next)
+    },
+    [studies]
+  )
+
   /** The pinned timeframes the broker offers, which are the chips. */
   const chips = useMemo(
     () => (groups ? pinned.filter((value) => groups.some((g) => g.items.includes(value))) : pinned),
@@ -532,8 +559,15 @@ function PhoneChartScreen({
           type="button"
           onClick={() => {
             setStudyNotice(null)
-            void owner?.loadIndicatorTier()
             openSheet({ sheet: 'indicators' })
+            if (!owner) return
+            // The built-ins first, then the owner's own files, as the terminal loads them.
+            void owner.loadIndicatorTier().then(async (ready) => {
+              if (!ready) return
+              setCatalogue(owner.catalogue())
+              setScriptProblems(await owner.loadMyScripts())
+              setCatalogue(owner.catalogue())
+            })
           }}
           className="inline-flex h-12 min-w-12 items-center gap-1.5 rounded-full px-3 text-sm font-semibold hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
@@ -676,6 +710,12 @@ function PhoneChartScreen({
         }))}
         derivative={hasOpenInterest(exchange)}
         notice={studyNotice}
+        catalogue={catalogue}
+        problems={scriptProblems}
+        onSettings={(index) =>
+          // Over the indicator sheet, so Back returns to it.
+          navigate(location.pathname + location.search, { state: { sheet: 'study', index } })
+        }
         onAdd={addStudy}
         onRemove={(index) => {
           setStudyNotice(null)
@@ -683,6 +723,16 @@ function PhoneChartScreen({
           setStudies(next)
           saveStudies(next)
         }}
+      />
+      <IndicatorSettingsSheet
+        open={sheet?.sheet === 'study'}
+        onOpenChange={(open) => !open && closeSheet()}
+        form={sheet?.sheet === 'study' ? (owner?.studyForm(sheet.index) ?? null) : null}
+        intervals={(groups ?? []).flatMap((g) =>
+          g.items.map((item) => ({ label: intervalLabel(item), value: item }))
+        )}
+        onChange={(patch) => sheet?.sheet === 'study' && changeStudy(sheet.index, patch)}
+        onDefaults={() => sheet?.sheet === 'study' && changeStudy(sheet.index, null)}
       />
       <StyleSheet
         open={sheet?.sheet === 'style'}
