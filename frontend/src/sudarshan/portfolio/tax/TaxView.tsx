@@ -4,21 +4,23 @@
 // data: the meta line says when it was worked out and how old the read of Upstox is, and nothing
 // here says "Real-time". The owner's own page only; a family viewer is never offered this view.
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
-import { Clock, Info, RefreshCw } from 'lucide-react'
+import { Clock, Info, PencilLine, RefreshCw } from 'lucide-react'
 import { useState } from 'react'
 import { cn } from '@/lib/utils'
 import { useNow } from '@/sudarshan/dashboard/hooks'
 import { PortfolioError, portfolioCall, problemOf } from '../api'
 import { dayOfInstant } from '../days'
-import { PORTFOLIO_KEY } from '../tab/ActivityTab'
 import { type Member, REPORT_YEARS, type TaxPack } from '../types'
 import { asOf, fyLabel, fyOfDay } from './format'
+import { InputsSheet } from './InputsSheet'
+import { TAX_KEY } from './keys'
 import { ChargesCard, Downloads, LeftOutCard, LossesCard, ReadsCard, readingOf } from './MoreCards'
 import { CARD, Card, OUTLINE, Sentences } from './parts'
 import { ScheduleSheet } from './ScheduleSheet'
 import { BusinessCard, CapitalGainsCard } from './TaxCards'
+import { type TaxSheet, useTaxSheet } from './useTaxSheet'
 
-export const TAX_KEY = [...PORTFOLIO_KEY, 'tax'] as const
+export { TAX_KEY }
 /** The view's own sentence while its switch is off on the server (the op answers `not_ready`). */
 export const TAX_OFF =
   'The tax working paper is switched off on the server. It opens here once a release switches it on.'
@@ -91,9 +93,20 @@ export function needsYou(pack: TaxPack): string[] {
   ]
 }
 
-function Paper({ pack, onRead }: { pack: TaxPack; onRead: () => void }) {
+function Paper({
+  pack,
+  onRead,
+  sheet,
+  onSheet,
+  onClose,
+}: {
+  pack: TaxPack
+  onRead: () => void
+  sheet: TaxSheet | null
+  onSheet: (name: TaxSheet) => void
+  onClose: () => void
+}) {
   const now = useNow(60_000)
-  const [schedule, setSchedule] = useState(false)
   const meta = asOf(pack, now)
   const needs = needsYou(pack)
   return (
@@ -111,17 +124,21 @@ function Paper({ pack, onRead }: { pack: TaxPack; onRead: () => void }) {
       {needs.length > 0 && (
         <Card title="Needs you">
           <Sentences lines={needs} warn />
+          <button type="button" onClick={() => onSheet('tax-inputs')} className={OUTLINE}>
+            <PencilLine aria-hidden="true" className="size-4" />
+            Open Inputs
+          </button>
         </Card>
       )}
-      <CapitalGainsCard cg={pack.capital_gains} onSchedule={() => setSchedule(true)} />
+      <CapitalGainsCard cg={pack.capital_gains} onSchedule={() => onSheet('tax-sales')} />
       <BusinessCard business={pack.business} />
       <LossesCard pack={pack} />
       <ChargesCard pack={pack} />
       <LeftOutCard pack={pack} />
       <Downloads pack={pack} />
       <ScheduleSheet
-        open={schedule}
-        onClose={() => setSchedule(false)}
+        open={sheet === 'tax-sales'}
+        onClose={onClose}
         cg={pack.capital_gains}
         fyLabel={pack.fy_label}
       />
@@ -142,11 +159,18 @@ export function TaxView({ members }: { members: readonly Member[] }) {
         ? READING_MS
         : false,
   })
+  const sheets = useTaxSheet()
   const years = Array.from({ length: REPORT_YEARS }, (_, n) => current - n)
   const problem = query.error ? problemOf(query.error) : null
   return (
     <div className="flex flex-col gap-3">
-      <h2 className="sd-display text-[1.375rem] leading-tight font-bold">Tax</h2>
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="sd-display text-[1.375rem] leading-tight font-bold">Tax</h2>
+        <button type="button" onClick={() => sheets.open('tax-inputs')} className={OUTLINE}>
+          <PencilLine aria-hidden="true" className="size-4" />
+          Inputs
+        </button>
+      </div>
       <Picker
         label="Financial year"
         options={years.map((year) => ({ value: year, label: fyLabel(year) }))}
@@ -178,8 +202,21 @@ export function TaxView({ members }: { members: readonly Member[] }) {
           Working out {fyLabel(fy)}.
         </p>
       ) : (
-        <Paper pack={query.data} onRead={() => void query.refetch()} />
+        <Paper
+          pack={query.data}
+          onRead={() => void query.refetch()}
+          sheet={sheets.sheet}
+          onSheet={sheets.open}
+          onClose={sheets.close}
+        />
       )}
+      <InputsSheet
+        open={sheets.sheet === 'tax-inputs'}
+        onClose={sheets.close}
+        pack={query.data}
+        member={member}
+        fy={fy}
+      />
       <p
         role="note"
         className="sticky bottom-[calc(4.75rem+env(safe-area-inset-bottom))] z-10 flex items-start gap-2 rounded-[0.875rem] border border-[color:var(--gold)] bg-[color:var(--gold-tint)] px-3 py-2 text-sm font-semibold text-[color:var(--warning-text)] md:bottom-2"

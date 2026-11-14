@@ -6,14 +6,16 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, within } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { MemoryRouter } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const api = vi.hoisted(() => ({ call: vi.fn() }))
 vi.mock('../api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../api')>()),
   portfolioCall: api.call,
+  getTaxInputs: (args: object) => api.call('tax_inputs', args),
 }))
 
 import { createQueryClient } from '@/app/providers'
@@ -30,17 +32,30 @@ function pack(change: (pack: TaxPack) => void = () => {}): TaxPack {
   return out
 }
 
+const INPUTS = {
+  member_id: 1,
+  accounts: [],
+  opening_lots: [],
+  fmvs: [],
+  carries: [],
+  day_overrides: [],
+  trade_marks: [],
+  settings: {},
+}
 const OWNER: Member = { id: 1, name: 'Owner', relation: null, version: 1 }
 
 function show(answer: TaxPack | PortfolioError, members: Member[] = [OWNER]) {
   api.call.mockImplementation(async (op: string) => {
+    if (op === 'tax_inputs') return { enabled: true, data: INPUTS }
     if (op !== 'tax_get') throw new Error(`unexpected op ${op}`)
     if (answer instanceof PortfolioError) throw answer
     return { enabled: true, data: answer }
   })
   return render(
     <QueryClientProvider client={createQueryClient()}>
-      <TaxView members={members} />
+      <MemoryRouter initialEntries={['/portfolio?view=tax']}>
+        <TaxView members={members} />
+      </MemoryRouter>
     </QueryClientProvider>
   )
 }
@@ -198,5 +213,19 @@ describe('the view', () => {
       await screen.findByText('Upstox keeps the last three financial years only.')
     ).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy()
+  })
+
+  it('opens the inputs from the header and from what needs the owner, and Back closes the sheet', async () => {
+    show(
+      pack((x) => {
+        x.inputs.missing = ['Losses from earlier years may be missing.']
+      })
+    )
+    await userEvent.click(await screen.findByRole('button', { name: 'Open Inputs' }))
+    const sheet = await screen.findByRole('dialog', { name: 'Inputs' })
+    expect(await within(sheet).findByText('Losses brought forward')).toBeTruthy()
+    await userEvent.click(within(sheet).getByRole('button', { name: 'Close' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(screen.getByRole('button', { name: 'Inputs' }).className).toContain('min-h-12')
   })
 })
