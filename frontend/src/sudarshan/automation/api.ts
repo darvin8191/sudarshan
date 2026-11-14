@@ -3,13 +3,16 @@
 // here, refusals included: their sentence is what the page shows.
 import { webClient } from '@/api/client'
 import {
+  type AlertsAnswer,
   AUTOMATION_ROUTES,
   type CheckAnswer,
   type CreateAnswer,
   type ListAnswer,
+  type Mode,
   type OneAnswer,
   type OthersAnswer,
   type StrategyForm,
+  type StrategyState,
 } from './types'
 
 export type Answer<T> = ({ ok: true } & T) | { ok: false; message: string; field?: string }
@@ -58,6 +61,7 @@ async function read<T>(route: Route, params?: object): Promise<T> {
 export const LIST_KEY = ['sudarshan-automation', 'list'] as const
 export const OTHERS_KEY = ['sudarshan-automation', 'others'] as const
 export const oneKey = (id: number) => ['sudarshan-automation', 'one', id] as const
+export const alertsKey = (id: number) => ['sudarshan-automation', 'alerts', id] as const
 export const dayKey = (id: number) => ['sudarshan-automation', 'day', id] as const
 
 export const automationApi = {
@@ -70,6 +74,14 @@ export const automationApi = {
   /** A new link: the old one stops working. The answer is the only place the link is. */
   newLink: (id: number, version: number) =>
     ask<CreateAnswer>(AUTOMATION_ROUTES.token, { id, version }),
+  /** The switch. The phrase is asked for only where a Live strategy is started. */
+  setState: (id: number, version: number, state: StrategyState, phrase?: string) =>
+    ask<OneAnswer>(AUTOMATION_ROUTES.state, { id, version, state, ...(phrase && { phrase }) }),
+  setMode: (id: number, version: number, mode: Mode, phrase?: string) =>
+    ask<OneAnswer>(AUTOMATION_ROUTES.mode, { id, version, mode, ...(phrase && { phrase }) }),
+  /** One page of a strategy's alert lines, newest first; `before` is the last line's id. */
+  alerts: (strategy: number, before?: number) =>
+    read<AlertsAnswer>(AUTOMATION_ROUTES.alerts, { strategy, ...(before && { before }) }),
   /** What one alert's text would do now. Nothing is sent. */
   check: (id: number, message: string) =>
     ask<CheckAnswer>(AUTOMATION_ROUTES.check, { id, message }),

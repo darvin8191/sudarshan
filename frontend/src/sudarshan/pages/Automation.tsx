@@ -7,9 +7,12 @@ import {
   FlaskConical,
   Link2,
   Loader2,
+  Pause,
   Pencil,
+  Play,
   Plus,
   Radio,
+  ScrollText,
   TriangleAlert,
   Workflow,
 } from 'lucide-react'
@@ -17,10 +20,12 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router'
 import { useSocketContext } from '@/components/socket/SocketProvider'
 import { Button } from '@/components/ui/button'
-import { automationApi, dayKey, LIST_KEY, OTHERS_KEY } from '@/sudarshan/automation/api'
+import { alertsKey, automationApi, dayKey, LIST_KEY, OTHERS_KEY } from '@/sudarshan/automation/api'
+import { LogSheet } from '@/sudarshan/automation/LogSheet'
 import { SetupSheet } from '@/sudarshan/automation/SetupSheet'
 import { StrategyCard } from '@/sudarshan/automation/StrategyCard'
 import { StrategySheet } from '@/sudarshan/automation/StrategySheet'
+import { SwitchSheet } from '@/sudarshan/automation/SwitchSheet'
 import {
   AUTOMATION_EVENT,
   type AutomationEvent,
@@ -110,6 +115,7 @@ export default function Automation() {
       queryClient.setQueryData<ListAnswer>(LIST_KEY, (old) => (old ? applied(old, event) : old))
       void queryClient.invalidateQueries({ queryKey: LIST_KEY })
       void queryClient.invalidateQueries({ queryKey: dayKey(event.strategy_id) })
+      void queryClient.invalidateQueries({ queryKey: alertsKey(event.strategy_id) })
     }
     const onConnect = () =>
       void queryClient.invalidateQueries({ queryKey: ['sudarshan-automation'] })
@@ -196,6 +202,28 @@ export default function Automation() {
               actions={
                 <div className="mt-3 grid grid-cols-2 gap-2">
                   <Button
+                    variant={strategy.state === 'stopped' ? 'default' : 'outline'}
+                    className="h-12"
+                    aria-haspopup="dialog"
+                    onClick={() => openSheet('switch', strategy.id)}
+                  >
+                    {strategy.state === 'stopped' ? (
+                      <Play aria-hidden="true" className="size-5" />
+                    ) : (
+                      <Pause aria-hidden="true" className="size-5" />
+                    )}
+                    {strategy.state === 'stopped' ? 'Start' : 'Stop'}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="h-12"
+                    aria-haspopup="dialog"
+                    onClick={() => openSheet('log', strategy.id)}
+                  >
+                    <ScrollText aria-hidden="true" className="size-5" />
+                    Log
+                  </Button>
+                  <Button
                     variant="outline"
                     className="h-12"
                     aria-haspopup="dialog"
@@ -225,6 +253,17 @@ export default function Automation() {
         onClose={closeSheet}
         strategy={sheet?.kind === 'edit' ? chosen : null}
         onCreated={madeLink}
+      />
+      <LogSheet
+        open={sheet?.kind === 'log' && chosen !== null}
+        onClose={closeSheet}
+        strategy={sheet?.kind === 'log' ? chosen : null}
+      />
+      <SwitchSheet
+        open={sheet?.kind === 'switch' && chosen !== null}
+        onClose={closeSheet}
+        strategy={sheet?.kind === 'switch' ? chosen : null}
+        list={data}
       />
       <SetupSheet
         open={sheet?.kind === 'setup' && chosen !== null}
