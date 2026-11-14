@@ -97,6 +97,24 @@ describe('journalCall', () => {
     expect(problem).toEqual({ code: 'conflict', message: WORDS.changedElsewhere })
   })
 
+  it('knows the bridge’s conflict by its own code, whatever the status (review P8)', () => {
+    const problem = problemOf(
+      refused(422, {
+        status: 'error',
+        error: { code: 'version_conflict', message: 'This was changed on another screen.' },
+      })
+    )
+    expect(problem.code).toBe('conflict')
+    expect(
+      problemOf(
+        refused(429, {
+          status: 'error',
+          error: { code: 'rate_limited', message: 'Too many requests. Wait a minute.' },
+        })
+      ).code
+    ).toBe('busy')
+  })
+
   it('says a CSRF refusal as the session having ended', () => {
     expect(problemOf(refused(400, 'The CSRF token has expired.')).code).toBe('unauthorized')
   })

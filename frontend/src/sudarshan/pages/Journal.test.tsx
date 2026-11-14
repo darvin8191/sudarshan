@@ -16,14 +16,30 @@ vi.mock('@/sudarshan/journal/TripsList', () => ({
 }))
 
 vi.mock('@/sudarshan/journal/TripSheet', () => ({
-  TripSheet: ({ tradeId, onClose }: { tradeId: number; onClose: () => void }) => (
-    <button type="button" onClick={onClose}>
-      {`Sheet of trade ${tradeId}`}
-    </button>
+  TripSheet: ({
+    tradeId,
+    onClose,
+    onDirty,
+    asked,
+  }: {
+    tradeId: number
+    onClose: () => void
+    onDirty?: (dirty: boolean) => void
+    asked?: number
+  }) => (
+    <div>
+      <button type="button" onClick={onClose}>
+        {`Sheet of trade ${tradeId}`}
+      </button>
+      <button type="button" onClick={() => onDirty?.(true)}>
+        Type a note
+      </button>
+      <p data-testid="asked">{asked}</p>
+    </div>
   ),
 }))
 
-import { renderBook, where } from '@/test/bookPages'
+import { back, renderBook, where } from '@/test/bookPages'
 import Journal from './Journal'
 
 const ON = { enabled: true, data: { enabled: true, fills_today: 0, open_trips: 0 } }
@@ -84,6 +100,41 @@ describe('Journal', () => {
     expect(on.getAttribute('aria-checked')).toBe('true')
     await user.click(on)
     await waitFor(() => expect(where()).toBe('/journal'))
+  })
+
+  it('lets Back close a sheet that holds nothing typed', async () => {
+    call.mockResolvedValue(ON)
+    // the sheet was opened from the list: its entry is the page's own
+    renderBook('/journal', <Journal />, [
+      '/dashboard',
+      '/journal',
+      { pathname: '/journal', search: '?trade=5', state: { sdOverlay: true } },
+    ])
+    await screen.findByRole('button', { name: 'Sheet of trade 5' })
+    expect(screen.getByTestId('asked').textContent).toBe('0')
+    // with nothing typed, Back closes it
+    back()
+    await waitFor(() => expect(where()).toBe('/journal'))
+    expect(screen.queryByRole('button', { name: /Sheet of trade/ })).toBeNull()
+  })
+
+  it('asks instead of closing when Back meets a sheet holding changes', async () => {
+    const user = userEvent.setup()
+    call.mockResolvedValue(ON)
+    renderBook('/journal', <Journal />, [
+      '/dashboard',
+      '/journal',
+      { pathname: '/journal', search: '?trade=5', state: { sdOverlay: true } },
+    ])
+    await user.click(await screen.findByRole('button', { name: 'Type a note' }))
+    back()
+    await waitFor(() => expect(screen.getByTestId('asked').textContent).toBe('1'))
+    expect(screen.getByRole('button', { name: 'Sheet of trade 5' })).toBeTruthy()
+    await waitFor(() => expect(where()).toBe('/journal?trade=5'))
+    // the answer closes it, and Back from the page then leaves the sheet's entry behind
+    await user.click(screen.getByRole('button', { name: 'Sheet of trade 5' }))
+    await waitFor(() => expect(where()).toBe('/journal'))
+    expect(screen.queryByRole('button', { name: /Sheet of trade/ })).toBeNull()
   })
 
   it('opens a trade’s sheet from the address, and closing it leaves the page where it was', async () => {

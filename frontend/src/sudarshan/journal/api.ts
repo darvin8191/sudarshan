@@ -118,6 +118,19 @@ function problemForStatus(status: number): JournalProblem {
   return { code: 'unavailable', message: WORDS.unavailable }
 }
 
+/**
+ * The bridge's codes the page acts on, by the bridge's own names (blueprints/sudarshan_journal.py
+ * ERROR_STATUS), so a conflict is known by its code and not only by its status (review P8).
+ */
+const KNOWN_CODES: Record<string, ProblemCode> = {
+  conflict: 'conflict',
+  version_conflict: 'conflict',
+  busy: 'busy',
+  rate_limited: 'busy',
+  unauthorized: 'unauthorized',
+  forbidden: 'forbidden',
+}
+
 function problemFrom(body: unknown): JournalProblem | null {
   if (!body || typeof body !== 'object') return null
   const raw = (body as { error?: unknown }).error
@@ -129,11 +142,7 @@ function problemFrom(body: unknown): JournalProblem | null {
         : text((body as { message?: unknown }).message)
   if (!message) return null
   const code = raw && typeof raw === 'object' ? text((raw as { code?: unknown }).code) : null
-  const known: ProblemCode =
-    code === 'conflict' || code === 'busy' || code === 'unauthorized' || code === 'forbidden'
-      ? code
-      : 'refused'
-  return { code: known, message }
+  return { code: KNOWN_CODES[code ?? ''] ?? 'refused', message }
 }
 
 const asText = (data: unknown): string =>
