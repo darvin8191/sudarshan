@@ -1,7 +1,14 @@
 /** The calendar: every day with trades carries its net as text, with sign and arrow; months move. */
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
-import { CalendarGrid, daysByNumber, monthCells, monthsOf } from './CalendarGrid'
+import {
+  CalendarGrid,
+  daysByNumber,
+  isoWeekOf,
+  monthCells,
+  monthsOf,
+  weeksOfMonth,
+} from './CalendarGrid'
 import { analytics } from './fixtures'
 
 describe('the month grid', () => {
@@ -48,7 +55,38 @@ describe('CalendarGrid', () => {
     expect(screen.getByRole('heading', { name: 'November 2026' })).toBeTruthy()
     expect(screen.getByText(/Month net/).textContent).toContain('+₹397.50')
     const weeks = screen.getByRole('list', { name: 'Weeks' })
-    expect(within(weeks).getByText('Week 2026-W46')).toBeTruthy()
+    expect(within(weeks).getByText('Week 46')).toBeTruthy()
+  })
+
+  it('names a week "Week 45" and lists only the weeks of the month shown (review M8)', () => {
+    const calendar = analytics().calendar
+    calendar.weeks = [
+      { key: '2026W45', trips: 20, wins: 12, net_paise: 9_800_000 },
+      { key: '2026W46', trips: 22, wins: 13, net_paise: 2_545_678 },
+      { key: '2026W40', trips: 2, wins: 1, net_paise: 1000 },
+      { key: 'odd-key', trips: 1, wins: 1, net_paise: 1 },
+    ]
+    render(<CalendarGrid calendar={calendar} />)
+    const rows = within(screen.getByRole('list', { name: 'Weeks' })).getAllByRole('listitem')
+    expect(rows).toHaveLength(2)
+    expect(rows[0].textContent).toContain('Week 45')
+    expect(rows[1].textContent).toContain('Week 46')
+    expect(screen.queryByText(/2026W|odd-key/)).toBeNull()
+  })
+
+  it('works out ISO weeks across a year’s turn', () => {
+    expect(isoWeekOf(20261109)).toEqual({ year: 2026, week: 46 })
+    expect(isoWeekOf(20261101)).toEqual({ year: 2026, week: 44 })
+    expect(isoWeekOf(20261231)).toEqual({ year: 2026, week: 53 })
+    expect(isoWeekOf(20270104)).toEqual({ year: 2027, week: 1 })
+    const weeks = weeksOfMonth(
+      [
+        { key: '2026W53', trips: 1, wins: 1, net_paise: 1 },
+        { key: '2027-W01', trips: 1, wins: 1, net_paise: 1 },
+      ],
+      202701
+    )
+    expect(weeks.map((w) => w.week)).toEqual([53, 1])
   })
 
   it('moves between the months that have trades', () => {
