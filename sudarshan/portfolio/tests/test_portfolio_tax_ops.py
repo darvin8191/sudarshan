@@ -344,3 +344,20 @@ def test_a_dry_run_says_what_leaving_an_account_out_changes_and_writes_nothing(c
     assert call(ctx, "tax_get")["capital_gains"]["st_gain_paise"] == before
     call(ctx, "tax_input_set", kind="account_mode", row=mode(account), version=1)
     assert call(ctx, "tax_get")["capital_gains"]["st_gain_paise"] == 0
+
+
+# ---- the dry runs the Inputs sheet asks for (lane G: every kind is checked before its save) ------
+def test_a_dry_run_of_the_readings_and_of_a_tender_says_its_effect_and_writes_nothing(ctx):
+    row = {"member_id": 1, "turnover_method": "abs_pnl_plus_sale_premium",
+           "exempt_order": None, "lt_boundary": None, "allocate_expenses": False}  # fmt: skip
+    shown = call(ctx, "tax_input_set", kind="settings", row=row, version=0, dry_run=True)
+    assert shown["row"] is None
+    assert shown["effect"] == [
+        "In FY 2026-27 this changes long-term gain from Rs 5,986 to Rs 6,000."
+    ]
+    assert call(ctx, "tax_inputs")["settings"]["version"] == 0
+    tender = {"member_id": 1, "account_id": ctx.upstox_id, "isin": ISIN, "day": 20260715,
+              "qty_u": 5 * U, "price_u": 30_000_000, "trade_id": None}  # fmt: skip
+    shown = call(ctx, "tax_input_set", kind="trade_mark", row=tender, dry_run=True)
+    assert shown["row"] is None and shown["effect"][0].startswith("In FY 2026-27 this changes ")
+    assert call(ctx, "tax_inputs")["trade_marks"] == []
