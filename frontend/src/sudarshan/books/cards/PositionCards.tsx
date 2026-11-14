@@ -54,6 +54,8 @@ import {
   Confirm,
   Details,
   EmptyCard,
+  ExportIcon,
+  exportBook,
   Last,
   LoadingCards,
   Money,
@@ -330,6 +332,9 @@ function feedRowOf(row: PricedRow<Position>): FeedRow {
   }
 }
 
+/** The day's positions as a CSV, from the app's own export route (B3). */
+const exportPositions = () => exportBook('/positions/export', 'positions')
+
 /** Why Exit all sends nothing with no position open. */
 export const NOTHING_TO_EXIT = 'Nothing is open to exit.'
 
@@ -523,7 +528,12 @@ const PositionBoard = memo(function PositionBoard({
 
   return (
     <div className="flex flex-col gap-3">
-      <BookHeading title="Positions" refreshing={refreshing} onRefresh={refresh} />
+      <BookHeading
+        title="Positions"
+        refreshing={refreshing}
+        onRefresh={refresh}
+        extra={<ExportIcon what="positions" run={exportPositions} />}
+      />
       {content}
 
       {overlay?.act === 'sheet' && target && (
