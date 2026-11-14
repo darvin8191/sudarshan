@@ -27,7 +27,7 @@ import type { TabShare } from '@/sudarshan/portfolio/types'
 import { OwnerError } from '../ownerApi'
 import { cardOf, NOW, shareOf } from './fixtures'
 import { END_AFTER_NOW, ENDED_BLOCKS, TABS_NOTE, UPSTOX_NOTE } from './PortfolioTabShares'
-import { BOOKS_RULE, Shares } from './Shares'
+import { BOOKS_RULE, CHOOSE_FIRST, EVERY_NOTE, Shares } from './Shares'
 
 const members = [
   cardOf(),
@@ -106,39 +106,95 @@ const tabShare = (over: Partial<TabShare>): TabShare => ({
   version: 1,
   ...over,
 })
+/** Choose who the watchlist switches share with (nobody is chosen at first: verification N8). */
+async function choose(target: 'all' | '1' | '2') {
+  await screen.findByText('Morning list')
+  await userEvent.selectOptions(
+    await screen.findByLabelText('Share with', { selector: '#share-lists-target' }),
+    target
+  )
+}
+const EVERY = 'Share Morning list with every member'
+
 const writes = (op: string) =>
   portfolio.call.mock.calls.filter(([name]) => name === op).map(([, args]) => args)
 
 describe('sharing watchlists', () => {
-  it('lists the owner lists, none shared yet, for every member first', async () => {
+  // Verification N8 (v0.12.0): the picker stood at "Every member" and the whole row was the
+  // switch's label, so one stray tap on a list's name while scrolling shared it with everyone.
+  // Each of the next three fails on the old section.
+  it('lists the owner lists with nobody chosen and no switch to flip by mistake', async () => {
+    api.shareList.mockResolvedValue([
+      shareOf({ id: 11, ref: '8', member_id: 1 }),
+      shareOf({ id: 12, ref: '8', member_id: 2 }),
+    ])
     mount()
-    const morning = await screen.findByRole('switch', { name: 'Share Morning list' })
-    expect(morning).toHaveAttribute('aria-checked', 'false')
-    expect(screen.getByLabelText('Share with', { selector: '#share-lists-target' })).toHaveValue(
-      'all'
+    expect(await screen.findByText('1 symbol · Not shared')).toBeInTheDocument()
+    expect(screen.getByText('0 symbols · Shared with 2 members')).toBeInTheDocument()
+    expect(screen.getByLabelText('Share with', { selector: '#share-lists-target' })).toHaveValue('')
+    expect(screen.getByText(CHOOSE_FIRST)).toBeInTheDocument()
+    const section = screen.getByRole('heading', { name: 'Watchlists' }).closest('section')
+    expect(within(section as HTMLElement).queryAllByRole('switch')).toHaveLength(0)
+    await userEvent.click(screen.getByText('Morning list'))
+    await userEvent.click(screen.getByText('1 symbol · Not shared'))
+    expect(api.shareSet).not.toHaveBeenCalled()
+  })
+
+  it('shares with every member only from the switch itself, after Every member is chosen', async () => {
+    api.shareSet.mockResolvedValue(shareOf())
+    mount()
+    await choose('all')
+    expect(screen.getByText(EVERY_NOTE)).toBeInTheDocument()
+    const toggle = screen.getByRole('switch', { name: EVERY })
+    // the row's text is not the switch's label: a tap on it does nothing
+    expect(toggle.closest('[data-switch-row]')?.tagName).toBe('DIV')
+    await userEvent.click(screen.getByText('Morning list'))
+    await userEvent.click(screen.getByText('1 symbol · Not shared with every member'))
+    expect(api.shareSet).not.toHaveBeenCalled()
+    // the switch has a 48 dp square of its own
+    const target = toggle.closest('label') as HTMLElement
+    expect(target).toHaveAttribute('data-switch-target')
+    expect(target.className.split(/\s+/)).toEqual(expect.arrayContaining(['min-h-12', 'min-w-12']))
+    await userEvent.click(toggle)
+    expect(api.shareSet).toHaveBeenCalledTimes(1)
+    expect(api.shareSet).toHaveBeenCalledWith(
+      expect.objectContaining({ ref: '7', member_id: null })
     )
-    expect(screen.getByText('1 symbol · Not shared')).toBeInTheDocument()
-    expect(screen.getByText('0 symbols · Not shared')).toBeInTheDocument()
+  })
+
+  it('starts at the one member where there is only one', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={client}>
+        <Shares members={[members[0]]} now={NOW} />
+      </QueryClientProvider>
+    )
+    await screen.findByRole('switch', { name: 'Share Morning list' })
+    expect(screen.getByLabelText('Share with', { selector: '#share-lists-target' })).toHaveValue(
+      '1'
+    )
   })
 
   // Review M6 (v0.12.0): the switch alone was the 44 x 24 target. The whole 48 dp row is its
   // label now. On the old row a tap on the line under the name did nothing.
-  it('shares a list from a tap anywhere on its row, once', async () => {
+  it('shares a list with one member from a tap anywhere on its row, once', async () => {
     api.shareSet.mockResolvedValue(shareOf())
     mount()
+    await choose('1')
     const toggle = await screen.findByRole('switch', { name: 'Share Morning list' })
     const row = toggle.closest('label') as HTMLElement
     expect(row).toHaveAttribute('data-switch-row')
     expect(row.className.split(/\s+/)).toEqual(expect.arrayContaining(['min-h-12', 'w-full']))
     await userEvent.click(screen.getByText('1 symbol · Not shared'))
     expect(api.shareSet).toHaveBeenCalledTimes(1)
-    expect(api.shareSet).toHaveBeenCalledWith(expect.objectContaining({ ref: '7' }))
+    expect(api.shareSet).toHaveBeenCalledWith(expect.objectContaining({ ref: '7', member_id: 1 }))
   })
 
   it('shares a list with every member: no member and no role', async () => {
     api.shareSet.mockResolvedValue(shareOf())
     mount()
-    await userEvent.click(await screen.findByRole('switch', { name: 'Share Morning list' }))
+    await choose('all')
+    await userEvent.click(screen.getByRole('switch', { name: EVERY }))
     expect(api.shareSet).toHaveBeenCalledWith({
       kind: 'watchlist',
       ref: '7',
@@ -153,10 +209,7 @@ describe('sharing watchlists', () => {
   it('shares a list with one member', async () => {
     api.shareSet.mockResolvedValue(shareOf())
     mount()
-    await userEvent.selectOptions(
-      await screen.findByLabelText('Share with', { selector: '#share-lists-target' }),
-      '2'
-    )
+    await choose('2')
     await userEvent.click(screen.getByRole('switch', { name: 'Share Long term' }))
     expect(api.shareSet).toHaveBeenCalledWith(
       expect.objectContaining({ kind: 'watchlist', ref: '8', member_id: 2 })
@@ -167,7 +220,8 @@ describe('sharing watchlists', () => {
     api.shareList.mockResolvedValue([shareOf({ id: 11, ref: '7', member_id: null, version: 4 })])
     api.shareRemove.mockResolvedValue({ ok: true, words: null })
     mount()
-    const morning = await screen.findByRole('switch', { name: 'Share Morning list' })
+    await choose('all')
+    const morning = screen.getByRole('switch', { name: EVERY })
     await waitFor(() => expect(morning).toHaveAttribute('aria-checked', 'true'))
     await userEvent.click(morning)
     expect(api.shareRemove).toHaveBeenCalledWith({ id: 11, version: 4 })
@@ -177,10 +231,7 @@ describe('sharing watchlists', () => {
   it('shows a list shared with every member as shared for one member, and leaves that switch alone', async () => {
     api.shareList.mockResolvedValue([shareOf({ id: 11, ref: '7', member_id: null })])
     mount()
-    await userEvent.selectOptions(
-      await screen.findByLabelText('Share with', { selector: '#share-lists-target' }),
-      '1'
-    )
+    await choose('1')
     const morning = screen.getByRole('switch', { name: 'Share Morning list' })
     await waitFor(() => expect(morning).toHaveAttribute('aria-checked', 'true'))
     expect(morning).toBeDisabled()
@@ -195,7 +246,8 @@ describe('sharing watchlists', () => {
       })
     )
     mount()
-    const morning = await screen.findByRole('switch', { name: 'Share Morning list' })
+    await choose('1')
+    const morning = screen.getByRole('switch', { name: 'Share Morning list' })
     await userEvent.dblClick(morning)
     expect(api.shareSet).toHaveBeenCalledTimes(1)
     expect(screen.getByRole('switch', { name: 'Share Long term' })).toBeDisabled()
@@ -210,7 +262,8 @@ describe('sharing watchlists', () => {
       })
     )
     mount()
-    const morning = await screen.findByRole('switch', { name: 'Share Morning list' })
+    await choose('1')
+    const morning = screen.getByRole('switch', { name: 'Share Morning list' })
     act(() => {
       morning.click()
       morning.click()
@@ -227,7 +280,8 @@ describe('sharing watchlists', () => {
       )
     )
     const { spy } = mount()
-    await userEvent.click(await screen.findByRole('switch', { name: 'Share Morning list' }))
+    await choose('1')
+    await userEvent.click(screen.getByRole('switch', { name: 'Share Morning list' }))
     const said = await screen.findByText(/^Not confirmed/)
     expect(said.textContent).not.toMatch(/fail/i)
     expect(spy).toHaveBeenCalled()
@@ -264,7 +318,8 @@ describe('books', () => {
     // refusal a share switch does get is shown word for word.
     api.shareSet.mockRejectedValue(new OwnerError('invalid', BOOKS_RULE))
     mount()
-    await userEvent.click(await screen.findByRole('switch', { name: 'Share Morning list' }))
+    await choose('1')
+    await userEvent.click(screen.getByRole('switch', { name: 'Share Morning list' }))
     const said = await screen.findAllByText(BOOKS_RULE)
     expect(said.some((el) => el.closest('output') !== null)).toBe(true)
   })
