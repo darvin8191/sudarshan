@@ -126,3 +126,24 @@ def test_the_tax_pack_says_what_it_leaves_out_and_how_its_kinds_are_made(rig):
     assert "Charges are the journal's estimates" in text
     assert "first in, first out" in text
     assert "Equity delivery, held up to 12 months" in text
+
+
+def test_a_reversal_orders_charges_are_booked_once_across_its_two_trades(rig):
+    """The tax pack's sales take the same share of a shared order as the trades (review M1)."""
+    rows = [
+        {**fill("r1", "BUY", 65, 100, 20260615), "exchange": "NFO",
+         "symbol": "NIFTY30JUL2625000CE", "product": "NRML", "order_id": "A"},
+        {**fill("r2", "SELL", 130, 104, 20260701), "exchange": "NFO",
+         "symbol": "NIFTY30JUL2625000CE", "product": "NRML", "order_id": "B"},
+        {**fill("r3", "BUY", 65, 103, 20260710), "exchange": "NFO",
+         "symbol": "NIFTY30JUL2625000CE", "product": "NRML", "order_id": "C"},
+    ]  # fmt: skip
+    store = rig.svc.store
+    for row in rows:
+        store.write(OWNER, lambda tx, row=row: tx.fills_upsert([row], 1))
+        store.write(OWNER, lambda tx, row=row: replay_tx(tx, "live", {row["day"]}, 1, Facts()))
+    trips = store.read(OWNER, lambda tx: tx.rows("round_trip", order="opened_ms"))
+    assert [t["status"] for t in trips] == ["closed", "closed"]
+    entries = entries_of(rig, "FY2627", 20270402)
+    assert len(entries) == 2
+    assert sum(e["charges_paise"] for e in entries) == sum(t["charges_est_paise"] for t in trips)

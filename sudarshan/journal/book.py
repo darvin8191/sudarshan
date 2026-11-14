@@ -178,6 +178,24 @@ def order_context(tx: Tx, mode: str, order_ids: Iterable[str]) -> dict[OrderKey,
     return out
 
 
+def shares_of(tx: Tx, row: Mapping[str, Any],
+              order_ids: Iterable[str]) -> dict[OrderKey, OrderShare]:  # fmt: skip
+    """Each order of a stored trip with its every fill, the units of it the trips opened before
+    this one hold, and its quantity: the trip's share of the order's charges (review M1), for
+    the trade sheet and the tax pack, as the replay gave it."""
+    whole = order_context(tx, row["mode"], order_ids)
+    me = (int(row["opened_ms"]), int(row["id"]))
+    before: dict[OrderKey, int] = {}
+    for leg in tx.order_legs(row["mode"], order_ids):
+        if (int(leg["opened_ms"]), int(leg["trip_id"])) < me:
+            key = (str(leg["order_id"]), int(leg["day"]))
+            before[key] = before.get(key, 0) + int(leg["qty"])
+    return {
+        key: (fills, before.get(key, 0), sum(int(f["qty"]) for f in fills))
+        for key, fills in whole.items()
+    }
+
+
 def trip_values(trip: Mapping[str, Any], by_trade: Mapping[str, Mapping[str, Any]],
                 refs: Mapping[str, Mapping[str, Any]], mode: str, facts: Facts,
                 orders: Mapping[OrderKey, OrderShare] | None = None) -> dict[str, Any]:  # fmt: skip
@@ -201,6 +219,25 @@ def trip_values(trip: Mapping[str, Any], by_trade: Mapping[str, Mapping[str, Any
     if trip["open_day"] in facts.checked_days:
         values["index_expiry_day"] = trip["open_day"] in facts.index_days
     return values
+
+
+def window(tx: Tx, mode: str, key: tuple[str, str, str],
+           from_ms: int) -> tuple[list[dict[str, Any]], int]:  # fmt: skip
+    """The stored trips a replay from ``from_ms`` reaches, and the instant its pairing starts:
+    the opening of the earliest trip still reaching it. A trip that ended at that instant shares
+    its last fill with the one that opened there (a reversal: SELL 130 closing a long of 65 and
+    opening a short of 65), so the window goes back to its opening too, and so on; otherwise a
+    replay of a later day paired the reversal's whole fill as an entry (SELL 130 short). An
+    orphan never pulls the window back (it may be months old); one inside it can still be
+    matched and come back."""
+    exchange, symbol, pclass = key
+    anchor = from_ms
+    while True:
+        reaching = tx.trips_of_key(mode, exchange, symbol, pclass, anchor)
+        earliest = min([anchor, *(t["opened_ms"] for t in reaching if t["status"] != "orphan")])
+        if earliest == anchor:
+            return reaching, anchor
+        anchor = earliest
 
 
 def _start(tx: Tx, mode: str, key: tuple[str, str, str], anchor: int,
@@ -231,10 +268,7 @@ def replay_tx(tx: Tx, mode: str, days: Iterable[int], now: int, facts: Facts) ->
     openings = tx.openings_of(mode)
     for (exchange, symbol, pclass), from_ms in keys_touched(tx, mode, days).items():
         counts["keys"] += 1
-        reaching = tx.trips_of_key(mode, exchange, symbol, pclass, from_ms)
-        # An orphan never pulls the window back (it may be months old); one inside the window
-        # can still be matched and come back.
-        anchor = min([from_ms, *(t["opened_ms"] for t in reaching if t["status"] != "orphan")])
+        reaching, anchor = window(tx, mode, (exchange, symbol, pclass), from_ms)
         stored = [t for t in reaching if t["opened_ms"] >= anchor]
         fills = [
             f
@@ -260,8 +294,11 @@ def replay_tx(tx: Tx, mode: str, days: Iterable[int], now: int, facts: Facts) ->
         for trip in made:
             shares: dict[OrderKey, OrderShare] = {}
             for key, take in portions(trip["legs"], by_trade).items():
-                fills_of_order = whole.get(key) or [by_trade[leg["trade_id"]] for leg in
-                                                    trip["legs"]]  # fmt: skip
+                fills_of_order = whole.get(key) or [
+                    by_trade[leg["trade_id"]] for leg in trip["legs"]
+                    if (str(by_trade[leg["trade_id"]]["order_id"]),
+                        int(by_trade[leg["trade_id"]]["day"])) == key
+                ]  # fmt: skip
                 total = sum(int(f["qty"]) for f in fills_of_order)
                 shares[key] = (fills_of_order, given.get(key, 0), total)
                 given[key] = given.get(key, 0) + take

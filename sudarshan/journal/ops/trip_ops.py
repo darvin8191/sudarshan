@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..book import charges_of, order_context, update_trip
+from ..book import charges_of, shares_of, update_trip
 from ..core import kinds
 from ..core.metrics import strategy_of
 from ..errors import ApiError
@@ -105,22 +105,6 @@ async def trip_get(ctx, args):
             404, "not_found", "This trade is not in the journal any more. Open the list again."
         )
     return found
-
-
-def shares_of(tx, row, order_ids):
-    """Each order of a trip with its every fill, the units of it the trips opened before this one
-    hold, and its quantity: the trip's share of the order's charges (review M1)."""
-    whole = order_context(tx, row["mode"], order_ids)
-    me = (int(row["opened_ms"]), int(row["id"]))
-    before: dict[tuple[str, int], int] = {}
-    for leg in tx.order_legs(row["mode"], order_ids):
-        if (int(leg["opened_ms"]), int(leg["trip_id"])) < me:
-            key = (str(leg["order_id"]), int(leg["day"]))
-            before[key] = before.get(key, 0) + int(leg["qty"])
-    return {
-        key: (fills, before.get(key, 0), sum(int(f["qty"]) for f in fills))
-        for key, fills in whole.items()
-    }
 
 
 @op("trip_update")

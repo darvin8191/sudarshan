@@ -203,21 +203,25 @@ def _read(span: Span, fy_start: int | None):
 def _sold(tx: Any, span: Span) -> list[tuple[dict[str, Any], list[dict[str, Any]], dict]]:
     """The carry trades with a sale in the year, each with its legs as ``core/lots`` reads them
     and its charges per day and side (the estimate of those orders, as the trade's own)."""
-    from .book import charges_of
+    from .book import charges_of, shares_of
 
     plan = tx.settings().get("charges_plan") or charges_core.DEFAULT_PLAN
     out = []
     for trip in tx.trips_sold_in("live", span.start, span.end):
         legs = tx.legs_of(trip["id"])
-        refs = tx.order_refs("live", {leg["order_id"] for leg in legs})
+        order_ids = {leg["order_id"] for leg in legs}
+        refs = tx.order_refs("live", order_ids)
+        shares = shares_of(tx, trip, order_ids)  # an order shared with another trade: its share
         by_trade = {leg["trade_id"]: leg for leg in legs}
         groups: dict[tuple[int, str], list[dict[str, Any]]] = {}
         for leg in legs:
             groups.setdefault((int(leg["day"]), leg["action"]), []).append(
                 {"trade_id": leg["trade_id"], "qty": leg["leg_qty"]}
             )
-        fees = {k: int(charges_of(v, by_trade, refs, "live", plan)["parts"]["total_paise"])
-                for k, v in groups.items()}  # fmt: skip
+        fees = {
+            k: int(charges_of(v, by_trade, refs, "live", plan, shares)["parts"]["total_paise"])
+            for k, v in groups.items()
+        }
         rows = [{"day": leg["day"], "action": leg["action"], "qty": leg["leg_qty"],
                  "price_u": leg["price_u"]} for leg in legs]  # fmt: skip
         out.append((trip, rows, fees))
