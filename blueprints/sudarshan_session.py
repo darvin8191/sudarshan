@@ -5,7 +5,15 @@
 answers ``{"status": "success", "data": {"day", "stops_at", "closing"}}`` for today in India
 (``sudarshan/instrument_session.py``): when an expiring contract stops trading on its expiry day,
 and the window after the cash close in which a closing print belongs to the day's last candle.
-Read-only, the logged-in session only; it changes nothing, so it is no write route.
+
+    GET /sudarshan/session/today
+
+answers the day's facts for the dashboard's status row and hours sheet (M3.5, M3.6:
+``instrument_session.today``): whether the market trades today and why not, each exchange's hours,
+the index expiries of today and of the next trading day with when their contracts stop, and the
+next open. Both read OpenAlgo's calendar and master, never the broker. Read-only, the logged-in
+session only (a family phone, which has none, is refused); they change nothing, so they are no
+write routes.
 """
 
 from __future__ import annotations
@@ -24,6 +32,7 @@ sudarshan_session_bp = Blueprint("sudarshan_session_bp", __name__, url_prefix="/
 
 PICK_AGAIN = "Pick the instrument again: its symbol or exchange did not come with the request."
 NOT_READ = "The trading hours of this instrument could not be read. The chart keeps the exchange's."
+HOURS_NOT_READ = "Today's market hours could not be read. Try again in a moment."
 
 
 def _now_ms() -> int:
@@ -42,4 +51,15 @@ def instrument():
     except Exception:
         logger.exception("the session facts of %s on %s could not be read", symbol, exchange)
         return jsonify({"status": "error", "message": NOT_READ}), 503
+    return jsonify({"status": "success", "data": data})
+
+
+@sudarshan_session_bp.route("/today", methods=["GET"])
+@check_session_validity
+def today():
+    try:
+        data = instrument_session.today(_now_ms())
+    except Exception:
+        logger.exception("today's market hours and expiries could not be read")
+        return jsonify({"status": "error", "message": HOURS_NOT_READ}), 503
     return jsonify({"status": "success", "data": data})
