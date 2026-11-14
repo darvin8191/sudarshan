@@ -246,6 +246,76 @@ def test_the_catch_up_reads_today_and_fills_the_unmarked_days_from_history(rig):
     assert [c[0] for c in rig.portfolio.calls].count("historical_trades") == 4
 
 
+# ---- shares on a day rebuilt from the history (verification N1) -------------------------------
+def share_row(trade_id, day_, side, qty, price_u):
+    return history_row(trade_id, day_, side, segment="EQ", key=STOCK["token"], symbol="ACME",
+                       scrip_name="ACME", option_type=None, strike_price_u=None, expiry=None,
+                       qty=qty, price_u=price_u)  # fmt: skip
+
+
+def rebuild(rig, rows, holdings=()):
+    """The 22:00 catch-up of Mon 9 Nov with ``rows`` as Upstox's history, nothing traded today."""
+    rig.answer_trades([])
+    rig.portfolio.answers["holdings"] = {"state": "ok", "read_at": 1, "note": None,
+                                         "data": list(holdings)}  # fmt: skip
+    rig.portfolio.answers["historical_trades"] = {
+        "state": "ok", "read_at": 1, "note": None, "total_pages": 1,
+        "total_records": len(rows), "rows": rows}  # fmt: skip
+    rig.portfolio.answers["pnl_report"] = {"state": "ok", "read_at": 1, "rows": [],
+                                           "page_size": 5000, "charges": {}}  # fmt: skip
+    rig.now = ist_ms(DAY, "22:00:00")
+    scenario(rig, lambda: catchup.catch_up(rig.svc, DAY, rig.now, False))
+    return rig.svc.store.read(OWNER, lambda tx: tx.rows("round_trip", order="opened_ms,id"))
+
+
+def test_an_intraday_share_short_on_a_history_day_is_one_closed_short(rig):
+    """Measured by the verifier: SELL 10 (trade 101) then BUY 10 (trade 102) of one share on a
+    day rebuilt from the history, nothing held, came out as a sale of shares held before the
+    journal plus an open LONG of 10 that does not exist."""
+    fri = 20261106
+    trips = rebuild(rig, [share_row("101", fri, "SELL", 10, 5_000_000),
+                          share_row("102", fri, "BUY", 10, 4_950_000)])  # fmt: skip
+    assert [(t["status"], t["side"], t["product_class"], t["entry_qty"], t["exit_qty"],
+             t["gross_paise"]) for t in trips] == [("closed", "short", "intraday", 10, 10, 5_000)]  # fmt: skip
+    fills = {f["trade_id"]: f for f in rig.fills()}
+    assert {f["product"] for f in fills.values()} == {"MIS"}
+    assert fills["101"]["order_id"] == "h:20261106:NSE:ACME:MIS:SELL"
+    note = closing_of(rig, fri)["reconcile_note"]
+    assert note.endswith("2 of them are share trades that bought and sold the same quantity "
+                         "that day, counted as bought and sold the same day (intraday).")  # fmt: skip
+    # no read of what was held: an intraday key has no opening
+    assert not [c for c in rig.portfolio.calls if c[0] == "holdings"]
+
+
+def test_a_delivery_sale_on_a_history_day_of_shares_held_before_is_still_unmatched(rig):
+    """Held 100 for months, sold 40 on a history day: the quantities differ, so it stays a
+    delivery sale, listed apart and never a short."""
+    from test_journal_unseen import holding
+
+    fri = 20261106
+    trips = rebuild(rig, [share_row("101", fri, "SELL", 40, 5_000_000)],
+                    holdings=[holding(STOCK["token"], 60)])  # fmt: skip
+    assert [(t["status"], t["side"], t["product"], t["exit_qty"], t["gross_paise"])
+            for t in trips] == [("unmatched", "long", "CNC", 40, None)]  # fmt: skip
+    assert "intraday" not in closing_of(rig, fri)["reconcile_note"]
+
+
+def test_same_day_shares_only_where_the_days_buys_and_sales_are_equal():
+    def f(day_, action, qty, exchange="NSE", symbol="ACME", product="CNC"):
+        return {"day": day_, "exchange": exchange, "symbol": symbol, "product": product,
+                "action": action, "qty": qty}  # fmt: skip
+
+    equal = [f(1, "SELL", 6), f(1, "SELL", 4), f(1, "BUY", 10)]  # in parts, sale first
+    uneven = [f(1, "SELL", 10, symbol="OTHER"), f(1, "BUY", 6, symbol="OTHER")]
+    other_day = [f(1, "BUY", 5, symbol="TWO"), f(2, "SELL", 5, symbol="TWO")]  # carried a day
+    option = [f(1, "SELL", 65, "NFO", "X", "NRML"), f(1, "BUY", 65, "NFO", "X", "NRML")]
+    lone = [f(1, "BUY", 3, symbol="LONE")]
+    assert catchup.same_day_shares(equal + uneven + other_day + option + lone) == 3
+    assert {x["product"] for x in equal} == {"MIS"}
+    assert {x["product"] for x in uneven + other_day + lone} == {"CNC"}
+    assert {x["product"] for x in option} == {"NRML"}
+
+
 def closing_of(rig, day_):
     return rig.svc.store.read(OWNER, lambda tx: tx.day_close_get("live", day_))
 

@@ -11,6 +11,12 @@ every ring service; the journal never reads the Upstox token):
    such a fill is put at noon of its day (the pairing then orders a day's fills by trade number),
    takes the product the day's recorded fills of its instrument carry when they carry one, else
    the carry class, and its order is labelled from the history alone, never asked about again.
+   A share is the exception (verification N1): when the day's history trades of it bought and
+   sold the same quantity, they are counted as intraday (``same_day_shares``). Nothing of it was
+   carried either way, and the exchange nets a day's delivery buy and sale of one share as
+   intraday too; left in the carry class, a short sale before its covering buy read as a sale
+   of shares held before the journal plus a purchase still open, a LONG that does not exist.
+   A day whose quantities differ keeps the carry class (a delivery sale stays one).
    The history names no order either, so the trades of one instrument, product, side and day are
    taken as one order (``history_order_id``): one brokerage, as an order filled in parts pays,
    never one a trade (review M1); the trade sheet says such charges are from Upstox's history.
@@ -38,6 +44,7 @@ from typing import Any
 from ..capture import capture_for
 from ..core import kinds
 from ..core.money import to_date, to_day, u_to_paise
+from ..core.pairing import CASH_EXCHANGES
 from ..openalgo_ro import RecordsUnavailable, records_for
 from ..portfolio import PortfolioUnavailable, link_for
 from ..schedule import JobFailed, register_job, schedule_for
@@ -154,6 +161,25 @@ def history_order_id(fill: Mapping[str, Any]) -> str:
     return f"h:{fill['day']}:{fill['exchange']}:{fill['symbol']}:{fill['product']}:{fill['action']}"
 
 
+def same_day_shares(fills: list[dict[str, Any]]) -> int:
+    """Give the intraday product to the share fills of each day and instrument whose bought and
+    sold quantities are equal (see the module's words, step 2); returns how many fills changed.
+    ``fills`` are history fills whose product is still the carry class assumed for a share."""
+    days: dict[tuple[int, str, str], list[dict[str, Any]]] = {}
+    for f in fills:
+        if f["exchange"] in CASH_EXCHANGES and f["product"] == "CNC":
+            days.setdefault((f["day"], f["exchange"], f["symbol"]), []).append(f)
+    changed = 0
+    for group in days.values():
+        bought = sum(f["qty"] for f in group if f["action"] == "BUY")
+        sold = sum(f["qty"] for f in group if f["action"] == "SELL")
+        if bought and bought == sold:
+            for f in group:
+                f["product"] = "MIS"
+            changed += len(group)
+    return changed
+
+
 def pair_row(row: Mapping[str, Any], segment: str, fy: int, now: int) -> dict[str, Any]:
     """One of Upstox's matched pairs as an ``upstox_pair`` row, its hash over what it says."""
     fields = ("scrip_name", "isin", "trade_type", "qty_u", "buy_date", "sell_date",
@@ -242,10 +268,19 @@ async def history(service: Any, days: list[int], now: int) -> str:
 
     held, products = await _read(service, known)
     fresh = [f for f in kept if f["trade_id"] not in held]
+    assumed = []
     for f in fresh:  # the product the day's recorded fills of the instrument carry, if only one
         found = products.get((f["day"], f["exchange"], f["symbol"])) or set()
         if len(found) == 1:
             f["product"] = next(iter(found))
+        else:
+            assumed.append(f)
+    same_day: dict[int, int] = {}
+    if same_day_shares(assumed):
+        for f in assumed:
+            if f["product"] == "MIS":
+                same_day[f["day"]] = same_day.get(f["day"], 0) + 1
+    for f in fresh:
         f["order_id"] = history_order_id(f)
     labels = {f["order_id"]: {"strategy": HISTORY_LABEL, "surface": "history"} for f in fresh}
     if fresh:
@@ -261,6 +296,11 @@ async def history(service: Any, days: list[int], now: int) -> str:
                 f"{'trade' if count == 1 else 'trades'}. That history has no times or products, "
                 "so these trades are ordered by trade number and counted as carried."
             )
+            if same_day.get(day):
+                note += (
+                    f" {same_day[day]} of them are share trades that bought and sold the same "
+                    "quantity that day, counted as bought and sold the same day (intraday)."
+                )
             tx.day_close_put("live", day, {"reconciled_at": now, "reconcile_note": note}, now)
 
     await _write(service, mark)

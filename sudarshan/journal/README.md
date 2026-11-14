@@ -43,6 +43,14 @@ what was held of it, so a position opened before the journal and closed on a day
 Upstox's history after its expiry shows as ended at expiry, not as opened before; either way it
 is out of the figures.
 
+A day rebuilt from Upstox's trade history (the journal was down, or the three trading days
+before the install) has no products. A derivative trade is taken as carried. A share's trades of
+one day are taken as intraday when that day's bought and sold quantities are equal (nothing of
+it was carried either way), else as delivery. So an intraday short on such a day is one closed
+short, and a delivery sale of shares held before is still listed apart. Limit: a day that mixes
+both in one share with unequal quantities (shorted intraday and also bought for delivery) is
+taken as delivery whole; check that share against the Upstox app.
+
 ## Units
 
 | what | unit | name |
