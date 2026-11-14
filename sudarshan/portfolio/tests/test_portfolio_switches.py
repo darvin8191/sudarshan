@@ -76,6 +76,7 @@ def test_a_tax_input_has_a_dry_run_and_downloads_are_reads():
 #: its switch says. One line per pull request, so that lanes landing side by side merge cleanly.
 BUILT = {
     "risk", "settings_get", "settings_set",  # R4 (M7.32)
+    "goals_list", "goal_create", "goal_update",  # R6 (M7.34)
 }  # fmt: skip
 
 
