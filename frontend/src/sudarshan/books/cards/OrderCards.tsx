@@ -5,7 +5,7 @@ import { useThemeStore } from '@/stores/themeStore'
 import { AccessNotice } from '@/sudarshan/AccessNotice'
 import { usePriceAccess, useReadWhenReady } from '@/sudarshan/access'
 import { type FeedRow, useBookFeed } from '@/sudarshan/books/feed'
-import { type BookOrder, isFinalStatus, reasonOf } from '@/sudarshan/books/orderFold'
+import { type BookOrder, isFinalStatus } from '@/sudarshan/books/orderFold'
 import type { TickDirection } from '@/sudarshan/books/prices'
 import {
   cancelMark,
@@ -27,6 +27,7 @@ import { describe } from '@/sudarshan/watchlist/rows'
 import type { Order } from '@/types/trading'
 import { showToast } from '@/utils/toast'
 import { clockOf, figure, momentOf, type OrderState, orderState, units } from './format'
+import { RepeatButton, RepeatTicket, rejectionWords, typeText } from './OrderSheet'
 import {
   ActionWords,
   CARD,
@@ -515,7 +516,19 @@ const OrderBoard = memo(function OrderBoard({
             swap({ act: 'modify', row: target.orderid })
           }}
           onCancel={() => swap({ act: 'cancel', row: target.orderid })}
+          apiKey={apiKey}
+          onRepeat={() =>
+            swap({
+              act: String(target.action).toUpperCase() === 'SELL' ? 'sell' : 'buy',
+              row: target.orderid,
+            })
+          }
         />
+      )}
+
+      {/* B2: Repeat's ticket, the app's own, on the order's instrument, side and quantity. */}
+      {(overlay?.act === 'buy' || overlay?.act === 'sell') && target && (
+        <RepeatTicket order={target} apiKey={apiKey} onClose={close} />
       )}
 
       <Confirm
@@ -653,7 +666,10 @@ const OrderCard = memo(function OrderCard({
   )
 })
 
-/** One order's sheet: Modify and Cancel while it works, the broker's reason when refused, its chart. */
+/**
+ * One order's sheet: Modify and Cancel while it works, the broker's reason when refused, Repeat
+ * (B2, OrderSheet.tsx), its chart and its details.
+ */
 function OrderSheet({
   order,
   state,
@@ -668,6 +684,8 @@ function OrderSheet({
   onClose,
   onModify,
   onCancel,
+  apiKey,
+  onRepeat,
 }: {
   order: BookOrder
   state: OrderState
@@ -685,10 +703,14 @@ function OrderSheet({
   onClose: () => void
   onModify: () => void
   onCancel: () => void
+  apiKey: string | null
+  /** Opens the app's order ticket on the same instrument, side and quantity. */
+  onRepeat: () => void
 }) {
   const { symbol, exchange, product } = order
   const named = describe(symbol, exchange)
-  const reason = reasonOf(order.rejection_reason)
+  // B2: Upstox's words for a rejection, without the error code a trader cannot act on.
+  const reason = rejectionWords(order.rejection_reason)
   const pending = figure(order.pending_quantity)
   const average = figure(order.average_price)
   const meaning = PRODUCT_MEANING[product as Product]
@@ -776,15 +798,19 @@ function OrderSheet({
           </p>
         )}
 
-        <SymbolChartLink symbol={symbol} exchange={exchange} className={cn(OUTLINED, 'w-full')}>
-          <CandlestickChart aria-hidden="true" className="size-5" />
-          Chart
-        </SymbolChartLink>
+        <div className="grid grid-cols-2 items-start gap-2">
+          <RepeatButton order={order} apiKey={apiKey} sandbox={sandbox} onRepeat={onRepeat} />
+          <SymbolChartLink symbol={symbol} exchange={exchange} className={cn(OUTLINED, 'w-full')}>
+            <CandlestickChart aria-hidden="true" className="size-5" />
+            Chart
+          </SymbolChartLink>
+        </div>
 
         <Details
           rows={[
             { label: 'Order ID', value: order.orderid },
             { label: 'Placed at', value: clockOf(order.timestamp) || '-' },
+            { label: 'Order type', value: typeText(order.pricetype) },
             { label: 'Quantity', value: filledText(order).text },
             pending !== null && state.working && { label: 'Pending', value: units(pending) },
             { label: 'Price', value: priceText(order) },
