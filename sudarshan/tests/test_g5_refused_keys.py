@@ -203,3 +203,33 @@ def test_in_analyze_mode_a_refusal_for_a_key_reaches_no_screen(api):
     for body in ({}, {"apikey": WRONG}, {"apikey": VALID}):
         assert client.post("/api/v1/cancelorder/", json=body).status_code == 400
     assert settle() == ([("AnalyzerErrorEvent", "cancelorder")], [])
+
+
+def test_in_analyze_mode_a_refused_order_status_or_position_call_reaches_no_screen(
+    monkeypatch, keys, routes
+):
+    """Order status and open position tell the owner's app of an analyze-mode request themselves,
+    not through the bus. Before G5 both refused requests to each wrote an analyzer-log row and
+    reached the open app as an error toast."""
+    import services.openposition_service as position_service
+    import services.orderstatus_service as status_service
+
+    status_endpoint = routes[1]
+    position_endpoint = load("openposition")
+    app = api_app((status_endpoint, "/orderstatus"), (position_endpoint, "/openposition"))
+    shown, written, executors = [], [], []
+    for endpoint, service in ((status_endpoint, status_service), (position_endpoint, position_service)):
+        executor = type(apilog_db.executor)(max_workers=1)
+        executors.append(executor)
+        monkeypatch.setattr(endpoint, "get_analyze_mode", lambda: True)
+        monkeypatch.setattr(service, "log_executor", executor)
+        monkeypatch.setattr(service, "async_log_analyzer", lambda req, resp, kind: written.append(kind))
+        monkeypatch.setattr(service, "emit_from_any_thread",
+                            lambda event, data: shown.append(data["request"]["api_type"]))  # fmt: skip
+    client = app.test_client()
+    for body in ({}, {"apikey": WRONG}, {"apikey": VALID}):  # each lacks the request's own fields
+        assert client.post("/api/v1/orderstatus/", json=body).status_code == 400
+        assert client.post("/api/v1/openposition/", json=body).status_code == 400
+    for executor in executors:
+        executor.shutdown(wait=True)
+    assert (shown, sorted(written)) == (["orderstatus", "openposition"], ["openposition", "orderstatus"])
