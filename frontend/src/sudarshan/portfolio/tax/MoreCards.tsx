@@ -2,7 +2,7 @@
 // service's sentences, Upstox's own charges per segment, what the paper leaves out, the reads of
 // Upstox it rests on, and the CSV of each schedule.
 import { Download, RefreshCw } from 'lucide-react'
-import type { ReactNode } from 'react'
+import { Fragment, type ReactNode } from 'react'
 import { getTaxCsv, portfolioCall, saveDownload } from '../api'
 import { useSend } from '../sheets/useSend'
 import { dayText } from '../tab/format'
@@ -71,20 +71,27 @@ export function LeftOutCard({ pack }: { pack: TaxPack }) {
       {pack.not_computed_sales.length > 0 && (
         <div className={RULE}>
           <h3 className="text-sm font-semibold">Sales outside this paper</h3>
-          {pack.not_computed_sales.map((sale) => (
+          {pack.not_computed_sales.map((sale, index) => (
             // The name with the ISIN under it, as the sales sheet writes a share; the ISIN
             // alone where no record names it (an ISIN by itself does not say what was sold).
-            <Line
-              key={`${sale.instrument}-${sale.day}`}
-              label={sale.name || sale.instrument}
-              sub={
-                sale.name
-                  ? `${sale.instrument} · Sold ${dayText(sale.day)}`
-                  : `Sold ${dayText(sale.day)}`
-              }
-            >
-              {rs(sale.amount_paise)}
-            </Line>
+            // Each fill of a sale is a row, so two rows can share instrument and day: the
+            // index makes the key the row's own (v0.13.0 verify N5).
+            <Fragment key={`${sale.instrument}-${sale.day}-${index}`}>
+              <Line
+                label={sale.name || sale.instrument}
+                sub={
+                  sale.name
+                    ? `${sale.instrument} · Sold ${dayText(sale.day)}`
+                    : `Sold ${dayText(sale.day)}`
+                }
+              >
+                {rs(sale.amount_paise)}
+              </Line>
+              {/* v0.13.0 verify N9: what the owner can do about it, or should know. */}
+              {sale.why && (
+                <p className="pb-1 text-xs text-[color:var(--text-secondary)]">{sale.why}</p>
+              )}
+            </Fragment>
           ))}
         </div>
       )}

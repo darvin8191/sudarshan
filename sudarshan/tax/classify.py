@@ -65,6 +65,37 @@ def head_of(trade: Trade) -> str:
     return NOT_COMPUTED
 
 
+#: Why a sale is not computed, where the owner can be told more than "not computed" (v0.13.0
+#: verify N9). Neither is computed; the words are in ``words.WHY_NOT``.
+NO_ISIN, ETF_UNIT = "no_isin", "etf_unit"
+
+
+def looks_like_isin(instrument: object) -> bool:
+    """Whether a key is an Indian ISIN by its shape (any kind of security), not a name."""
+    return (
+        isinstance(instrument, str)
+        and len(instrument) == 12
+        and instrument.isascii()
+        and instrument.isalnum()
+        and instrument[:2].upper() == "IN"
+    )
+
+
+def why_not(trade: Trade) -> str | None:
+    """Which of the two reasons the owner can act on or should know applies to a trade that is
+    not computed: a share entered by hand in a tab whose asset has no ISIN (its key is its name,
+    so the rule above cannot call it a share), or an ETF's unit (a fund's ISIN, INF, traded in
+    the cash segment; an equity ETF's too). None for anything else, and for a computed trade."""
+    if head_of(trade) != NOT_COMPUTED or trade.segment != "EQ":
+        return None
+    instrument = trade.instrument
+    if looks_like_isin(instrument):
+        return ETF_UNIT if str(instrument)[:3].upper() == "INF" else None
+    if trade.source == "ledger" and trade.asset_class == "equity" and isinstance(instrument, str):
+        return NO_ISIN
+    return None
+
+
 def intraday_qty(bought_u: int, sold_u: int, all_delivery: bool = False) -> int:
     """How much of one day's trading in one share, in one account, was intraday: the lesser of
     what was bought and what was sold (the exchange settles a day net), unless the owner marked

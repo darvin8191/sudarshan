@@ -220,6 +220,31 @@ def test_an_etf_a_reit_and_a_gold_bond_are_printed_as_not_computed_and_every_sal
     assert "..." not in paper, "no name or ISIN is cut short"
 
 
+def test_a_sale_outside_the_paper_prints_what_the_owner_is_told_of_it():
+    """v0.13.0 verify N9: a share entered without its ISIN and an ETF's unit each get their
+    sentence under the table, once for each thing sold; a row with none prints none."""
+    pack = copy.deepcopy(PACK)
+    add, etf = "Add its ISIN in the tab to have it computed.", (
+        "ETF units are not computed in this release."
+    )
+    pack["not_computed_sales"] = [
+        {"instrument": "Acme Industries", "day": 20260810, "amount_paise": 5_000_000, "why": add},
+        {"instrument": "Acme Industries", "day": 20260811, "amount_paise": 1_000_000, "why": add},
+        {"instrument": "INF000D01015", "name": "NIFTY ETF UNITS", "day": 20260812,
+         "amount_paise": 2_000_000, "why": etf},
+        {"instrument": "INE041025011", "day": 20260813, "amount_paise": 3_000_000, "why": None},
+        {"instrument": "IN0020200013", "day": 20260814, "amount_paise": 3_000_000},
+    ]  # fmt: skip
+    lines = [line for b in taxpack.pack_blocks(pack) if isinstance(b, D.Paragraph)
+             for line in b.lines]  # fmt: skip
+    assert lines.count(f"Acme Industries: {add}") == 1
+    assert lines.count(f"NIFTY ETF UNITS (INF000D01015): {etf}") == 1
+    assert not any(line.startswith(("INE041025011:", "IN0020200013:")) for line in lines)
+    span = periods.fy_span(2026, 20270415)
+    text = text_of(periods.fy_pdf(span, "", [], ist_ms(20270415, "07:00:00"), pack))
+    assert add in text and etf in text
+
+
 # ---- the archive keeps the paper it printed ----------------------------------------------------
 def test_an_archived_pack_never_changes_until_it_is_built_again(on):
     """Mutation 15: a rule row or a late trade changes the portfolio's answer; the kept paper

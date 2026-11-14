@@ -91,7 +91,7 @@ def test_what_cannot_be_worked_out_is_listed_in_words_and_in_no_total():
     assert words.unknown_cost(1) in got["notes"] and words.needs_fmv(1) in got["notes"]
     assert got["not_computed"][0] == words.not_computed_sales(1, "Rs 1,234")
     assert got["not_computed_sales"] == [
-        {"instrument": "INF000A01011", "day": 20260507, "amount_paise": 123_400}
+        {"instrument": "INF000A01011", "day": 20260507, "amount_paise": 123_400, "why": None}
     ]
     known = pack.build_pack(replace(base, trades=base.trades + extra, opening=base.opening + (old,),
                                     fmv={"INE000Y01012": 350 * 10**4}))  # fmt: skip
@@ -127,9 +127,11 @@ def test_a_cash_segment_sale_of_what_is_no_share_is_listed_and_changes_no_figure
     for part in ("capital_gains", "business", "dividends"):
         assert got[part] == before[part], part
     assert got["not_computed"][0] == words.not_computed_sales(2, "Rs 15,16,000")
+    # v0.13.0 verify N9: an ETF's unit (a fund's ISIN) is told so; a REIT or a bond has no line.
+    why = "ETF units are not computed in this release." if isin[:3] == "INF" else None
     assert got["not_computed_sales"] == [
-        {"instrument": isin, "day": 20260610, "amount_paise": 150_000_000},
-        {"instrument": isin, "day": 20260611, "amount_paise": 1_600_000},
+        {"instrument": isin, "day": 20260610, "amount_paise": 150_000_000, "why": why},
+        {"instrument": isin, "day": 20260611, "amount_paise": 1_600_000, "why": why},
     ]
     assert any("only a company's equity share is computed" in line for line in got["not_computed"])
 
@@ -217,3 +219,44 @@ def test_a_trade_is_in_the_year_it_closed_in():
     earlier = pack.build_pack(replace(base, fy=2025, trades=base.trades + (bought,)))
     assert earlier["business"]["assumed_zero_count"] == 0
     assert earlier["business"]["non_speculative"]["gross_paise"] == 0
+
+
+# ---- what a sale outside the paper is told (v0.13.0 verify N9) ---------------------------------
+
+
+def test_a_hand_entered_share_without_its_isin_is_told_to_add_it_and_is_not_computed():
+    base = inputs(charges={})
+    before = pack.build_pack(base)
+    hand = dict(source="ledger", asset_class="equity")
+    extra = (
+        share(20240610, "BUY", 100, 1000, "Acme Industries", **hand),
+        share(20260610, "SELL", 100, 1500, "Acme Industries", **hand),
+        share(20260611, "SELL", 5, 900, "INF000D01015", asset_class="equity"),  # an equity ETF
+        share(20260612, "SELL", 5, 900, "INE000R25014"),  # a REIT: listed, with no line of its own
+        share(20260613, "SELL", 1, 900, "Gold coin", source="ledger", asset_class="manual"),
+        share(20260614, "SELL", 1, 900, "No class at all"),  # Upstox's row, keyed by no ISIN
+    )
+    got = pack.build_pack(replace(base, trades=base.trades + extra))
+    assert [(row["instrument"], row["why"]) for row in got["not_computed_sales"]] == [
+        ("Acme Industries", "Add its ISIN in the tab to have it computed."),
+        ("INF000D01015", "ETF units are not computed in this release."),
+        ("INE000R25014", None),
+        ("Gold coin", None),
+        ("No class at all", None),
+    ]
+    # Neither is computed: every figure is as it was without them.
+    for part in ("capital_gains", "business", "dividends"):
+        assert got[part] == before[part], part
+
+
+def test_why_not_has_a_line_only_for_what_is_not_computed():
+    from sudarshan.tax import classify
+
+    hand = dict(source="ledger", asset_class="equity")
+    assert classify.why_not(share(20260610, "SELL", 1, 100, "Acme", **hand)) == classify.NO_ISIN
+    assert classify.why_not(share(20260610, "SELL", 1, 100, "INF000D01015")) == classify.ETF_UNIT
+    # A share with its ISIN is computed, by hand or from Upstox: nothing to say.
+    assert classify.why_not(share(20260610, "SELL", 1, 100, "INE000Z01019", **hand)) is None
+    fund = Trade(1, 1, 20260610, 1, "SELL", "MF", "INF000D01015", 10**6, 10**6, 10_000)
+    assert classify.why_not(fund) is None  # a fund's unit off the exchange is no ETF
+    assert set(words.WHY_NOT) == {classify.NO_ISIN, classify.ETF_UNIT}
