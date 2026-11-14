@@ -139,6 +139,8 @@ export class PhoneChart {
   private ticket = 0
   private subscribed: { mode: 'LTP' | 'Depth'; symbol: string; exchange: string } | null = null
   private fallback: ReturnType<typeof setInterval> | null = null
+  /** The stream is down, so quotes stand in for it while the page is shown. */
+  private streamDown = false
   private loadingOlder = false
   private wsOpened = false
   private hiddenAt: number | null = null
@@ -160,6 +162,12 @@ export class PhoneChart {
   private dayWatch: (() => void) | null = null
   private destroyed = false
   private readonly offs: Array<() => void> = []
+  /** History as the candle clock repairs it: never read while the page is hidden. */
+  private readonly whenShown = {
+    bars: () => this.data.bars(),
+    refresh: () =>
+      document.visibilityState === 'hidden' ? Promise.resolve() : this.data.refresh(),
+  }
 
   constructor(opts: PhoneChartOptions) {
     this.apiKey = opts.apiKey
@@ -195,7 +203,8 @@ export class PhoneChart {
     this.clock = new LiveBarClock({
       builder: () => (this.destroyed ? null : this.builder),
       onBar: (update) => this.applyLiveBar(update),
-      history: () => this.data,
+      // Hidden, nothing is read: the wake reads the whole gap instead (C13).
+      history: () => this.whenShown,
       now: () => this.frames.clock.seconds(),
     })
     this.resync = new HistoryResync({
@@ -354,10 +363,20 @@ export class PhoneChart {
     this.data.setVisible(visible)
     if (!visible) {
       this.hiddenAt ??= Date.now()
+      // The countdown only repaints, and nothing is painted or read while hidden.
+      this.stopCountdownTimer()
+      this.stopFallback()
       return
     }
     const hiddenAt = this.hiddenAt
     this.hiddenAt = null
+    // Android stops the clock timers run on while the phone sleeps, so a timer
+    // set before the sleep still has the rest of its wait to run after it: the
+    // candle clock is aimed again from now, or a candle nobody trades would
+    // open up to a bar late (C13).
+    if (!this.destroyed && this.builder?.hasSession()) this.clock.start()
+    this.syncCountdown()
+    if (this.streamDown && !this.destroyed) this.startFallback()
     if (hiddenAt !== null && Date.now() - hiddenAt > WAKE_RECONNECT_MS)
       void this.checkStream(hiddenAt)
   }
@@ -704,6 +723,7 @@ export class PhoneChart {
     if (state === 'open') {
       // The stream is back: the quotes standing in for it stop now, not at
       // its first tick, which on a quiet instrument may be a while coming.
+      this.streamDown = false
       this.stopFallback()
       this.status.setTransport('live')
       // The server's time, for the clock that opens candles.
@@ -831,7 +851,9 @@ export class PhoneChart {
   }
 
   private startFallback(): void {
-    if (this.fallback) return
+    this.streamDown = true
+    // Nobody reads a hidden page: the wake tests the stream and reads the gap (C13).
+    if (this.fallback || document.visibilityState === 'hidden') return
     this.fallback = setInterval(() => void this.pollQuote(), QUOTE_FALLBACK_MS)
   }
 
