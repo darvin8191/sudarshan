@@ -322,6 +322,12 @@ async def tax_get(ctx, message):
     return await answer(lambda: _paper(store, member, fy, today, now, reading))
 
 
+@op("tax_pack")
+async def tax_pack(ctx, message):
+    """The journal's FY pack asks for the same paper over its own purpose (owner scope)."""
+    return await tax_get(ctx, message)
+
+
 @op("tax_inputs")
 async def tax_inputs(ctx, message):
     store, member = need(ctx), maybe_whole(message, "member")

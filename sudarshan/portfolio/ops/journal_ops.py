@@ -160,11 +160,14 @@ async def pnl_report(ctx, message):
     size = message.get("page_size", PNL_PAGE_SIZE)
     if size.__class__ is not int or not 1 <= size <= PNL_PAGE_SIZE_MAX:
         raise _bad("page_size")
+    span = _span(message, fy) if part == "charges" else {}
     base = {"segment": segment, "financial_year": reports.fy_code(fy)}
     api = {"metadata": "pnl_meta", "data": "pnl", "charges": "charges"}[part]
     params = {**base, "page_number": str(page), "page_size": str(size)} if part == "data" else base
+    if span:  # the charges of some days of the year (M7.7, design p7 4.6): Upstox's dd-mm-yyyy
+        params = {**params, "from_date": _dmy(span["from"]), "to_date": _dmy(span["to"])}
     outcome, payload = await ctx.ensure_reports()._call(api, params, caller().principal)
-    head = {"segment": segment, "fy": fy, "part": part, "page": page}
+    head = {"segment": segment, "fy": fy, "part": part, "page": page, **span}
     if outcome != "ok":
         return _failed(ctx.clock(), outcome, **head)
     data = payload.get("data") or {}
@@ -188,6 +191,21 @@ def _today(ctx) -> int:
     from ..core.days import day_of_instant
 
     return day_of_instant(ctx.clock())
+
+
+def _span(message: Mapping[str, Any], fy: int) -> dict[str, int]:
+    """``from`` and ``to``, both days of the financial year, in order; neither is the whole year."""
+    if message.get("from") is None and message.get("to") is None:
+        return {}
+    start, end = _day(message, "from"), _day(message, "to")
+    first, last = reports.fy_span(fy)
+    if not first <= start <= end <= last:
+        raise _bad("from")
+    return {"from": start, "to": end}
+
+
+def _dmy(day: int) -> str:
+    return f"{day % 100:02d}-{day // 100 % 100:02d}-{day // 10000:04d}"
 
 
 @op("benchmark_closes")
