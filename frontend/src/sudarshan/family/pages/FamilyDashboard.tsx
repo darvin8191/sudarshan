@@ -3,11 +3,18 @@
 // dash when not known (Y24), and the strip says what the feed is doing, never "Live": it is
 // Real-time only while ticks arrive (rule 7).
 import { useQuery } from '@tanstack/react-query'
+import { EyeOff } from 'lucide-react'
 import { useMemo } from 'react'
 import { Link } from 'react-router'
 import { cn } from '@/lib/utils'
 import { ProblemCard, STALE } from '@/sudarshan/books/cards/parts'
-import { Figure, HiddenTotal, ReadStamp, ServiceWords } from '@/sudarshan/books/cards/readOnlyParts'
+import {
+  Figure,
+  HiddenTotal,
+  ReadStamp,
+  ServiceWords,
+  unreadWords,
+} from '@/sudarshan/books/cards/readOnlyParts'
 import { formatPrice } from '@/sudarshan/dashboard/format'
 import { LiveLine } from '@/sudarshan/dashboard/LiveLine'
 import { FamilyError, familyApi, NO_ANSWER } from '../api'
@@ -79,6 +86,12 @@ export default function FamilyDashboard() {
     held.length > 0 &&
     (live.line.kind === 'delayed' || live.line.kind === 'connecting') &&
     live.line.stale
+  const unread = unreadWords(
+    positions.state,
+    positions.words,
+    positions.rows.length,
+    positions.readAt
+  )
   const problem = market.error
     ? market.error instanceof FamilyError
       ? market.error.message
@@ -125,11 +138,21 @@ export default function FamilyDashboard() {
         <h2 id="sd-family-glance" className="text-[0.84375rem] font-semibold text-muted-foreground">
           Positions today
         </h2>
-        <ServiceWords state={positions.state} words={positions.words} />
+        {unread === null && <ServiceWords state={positions.state} words={positions.words} />}
         {positions.rows.length === 0 && positions.loading ? (
           <p className="text-sm text-muted-foreground">Reading the account</p>
         ) : positions.rows.length === 0 && positions.error ? (
           <ProblemCard message={positions.error} onRetry={positions.onRetry} />
+        ) : unread !== null ? (
+          // Review M4: not read is not flat. The sentence stands where the figure would, and
+          // there is no zero and no count.
+          <output data-testid="glance-unread" className="flex items-start gap-2 py-1">
+            <EyeOff
+              aria-hidden="true"
+              className="mt-0.5 size-5 shrink-0 text-[color:var(--text-secondary)]"
+            />
+            <span className="text-base font-bold">{unread}</span>
+          </output>
         ) : (
           <>
             <p data-testid="glance-total" className="flex items-baseline gap-2">

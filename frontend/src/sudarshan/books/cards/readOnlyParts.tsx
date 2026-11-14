@@ -1,6 +1,6 @@
 // SUDARSHAN P6 D4: the pieces the viewer's read-only boards share. Nothing here sends anything:
 // a viewer's cards have no Exit, Add, Buy or Sell, and nothing opens an order ticket.
-import { Clock, Info, X } from 'lucide-react'
+import { Clock, EyeOff, Info, X } from 'lucide-react'
 import { useState } from 'react'
 import { cn } from '@/lib/utils'
 import { istTime } from '@/sudarshan/books/time'
@@ -88,6 +88,48 @@ export function ReadStamp({ part, readAt }: { part: string; readAt: number | nul
 export function ServiceWords({ state, words }: { state: ReadState; words: string | null }) {
   if (state === 'ok' || !words) return null
   return <StaleBookNote text={words} />
+}
+
+const UNREAD_FALLBACK: Partial<Record<ReadState, string>> = {
+  not_shared: 'Not shared with you.',
+  portfolio_off: 'The account cannot be read right now. Ask the account owner.',
+  unreachable: 'The account cannot be read right now. Try again in a minute.',
+  budget: 'The account has not been read yet. Try again in a minute.',
+}
+
+/**
+ * Review M4 (v0.12.0): a part that came with no rows because it was not read (not shared, the
+ * portfolio switched off, the account out of reach, or never read yet) is not an empty account.
+ * The sentence to show in place of "No open positions" and a zero: the service's own, or a plain
+ * one where it sent none. Null when the rows, or their absence, are a real read.
+ */
+export function unreadWords(
+  state: ReadState,
+  words: string | null,
+  rows: number,
+  readAt: number | null
+): string | null {
+  if (rows > 0) return null
+  const unread =
+    state === 'not_shared' ||
+    state === 'portfolio_off' ||
+    state === 'unreachable' ||
+    (state === 'budget' && readAt === null)
+  if (!unread) return null
+  return words?.trim() || UNREAD_FALLBACK[state] || null
+}
+
+/** The card for a part that was not read: the sentence as its title, an icon, and no figure. */
+export function UnreadCard({ text }: { text: string }) {
+  return (
+    <output
+      data-testid="book-unread"
+      className="flex flex-col items-center gap-2 rounded-[1.125rem] border bg-card px-6 py-8 text-center shadow-[var(--shadow-card)]"
+    >
+      <EyeOff aria-hidden="true" className="size-5 text-[color:var(--text-secondary)]" />
+      <span className="text-base font-bold">{text}</span>
+    </output>
+  )
 }
 
 /** A figure that may be hidden: Hidden where the mask removed it, a dash where not known. */

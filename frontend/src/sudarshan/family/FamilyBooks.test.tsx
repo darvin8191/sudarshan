@@ -371,3 +371,73 @@ describe('Dashboard', () => {
     expect(FakeSocket.last().sent.some((sent) => sent.includes('"SHUTX"'))).toBe(false)
   })
 })
+
+// Review M4 (v0.12.0): "not shared", "portfolio off" and "cannot be read" came with no rows, and
+// the screens said "No open positions", "No holdings" and "₹0.00": a zero that is not a zero. Each
+// case fails on the old screens.
+describe('a part that was not read is not an empty account', () => {
+  const market = { feed: 'closed', since: null, indices: [] }
+  const CASES = [
+    ['not_shared', 'Not shared with you.'],
+    ['portfolio_off', 'The portfolio service is switched off on the server.'],
+    ['unreachable', 'The account cannot be read right now; prices still move.'],
+  ] as const
+  const unread = (part: 'positions' | 'holdings', state: string, words: string | null) =>
+    ok(bookOf(part, [], { state: state as never, words, read_at: null }))
+  const noZero = () => {
+    const text = document.body.textContent ?? ''
+    expect(text).not.toContain('No open positions')
+    expect(text).not.toContain('No holdings')
+    expect(text).not.toMatch(/₹\s?0(\.00)?/)
+    expect(text).not.toMatch(/\b0 open/)
+  }
+
+  it.each(CASES)('Positions, %s: the service sentence is the card', async (state, words) => {
+    routeFetch({ '/family/api/books/positions': unread('positions', state, words) })
+    mount('/family/positions', <FamilyPositions />)
+    expect((await screen.findByTestId('book-unread')).textContent).toBe(words)
+    noZero()
+  })
+
+  it.each(CASES)('Holdings, %s: the service sentence is the card', async (state, words) => {
+    routeFetch({ '/family/api/books/holdings': unread('holdings', state, words) })
+    mount('/family/holdings', <FamilyHoldings />, '/family/holdings')
+    expect((await screen.findByTestId('book-unread')).textContent).toBe(words)
+    noZero()
+  })
+
+  it.each(CASES)('Dashboard, %s: no figure and no count, the sentence once', async (state, words) => {
+    routeFetch({
+      '/family/api/market': ok(market),
+      '/family/api/books/positions': unread('positions', state, words),
+    })
+    mount('/family', <FamilyDashboard />, '/family')
+    expect((await screen.findByTestId('glance-unread')).textContent).toBe(words)
+    expect(screen.queryByTestId('glance-total')).toBeNull()
+    expect(screen.getAllByText(words)).toHaveLength(1)
+    noZero()
+  })
+
+  it('has a plain sentence where the service sent none', async () => {
+    routeFetch({ '/family/api/books/positions': unread('positions', 'not_shared', null) })
+    mount('/family/positions', <FamilyPositions />)
+    expect((await screen.findByTestId('book-unread')).textContent).toBe('Not shared with you.')
+  })
+
+  it('still says No open positions for a read that found none', async () => {
+    routeFetch({ '/family/api/books/positions': ok(bookOf('positions', [])) })
+    mount('/family/positions', <FamilyPositions />)
+    expect(await screen.findByText('No open positions')).toBeInTheDocument()
+    expect(screen.queryByTestId('book-unread')).toBeNull()
+  })
+
+  it('still says No open positions when the market is closed and the last read found none', async () => {
+    routeFetch({
+      '/family/api/books/positions': ok(
+        bookOf('positions', [], { state: 'closed', words: 'Market closed · figures from 15:40:12' })
+      ),
+    })
+    mount('/family/positions', <FamilyPositions />)
+    expect(await screen.findByText('No open positions')).toBeInTheDocument()
+  })
+})

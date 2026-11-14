@@ -40,6 +40,8 @@ import {
   type ReadOnlyBookProps,
   ReadStamp,
   ServiceWords,
+  UnreadCard,
+  unreadWords,
   ViewerNote,
 } from './readOnlyParts'
 import { useBookOverlay } from './useBookOverlay'
@@ -101,11 +103,15 @@ export function ReadOnlyHoldings({
     if (orphan) close()
   }, [orphan, close])
 
+  const unread = unreadWords(state, words, rows.length, readAt)
   let content
   if (rows.length === 0 && loading) {
     content = <LoadingCards />
   } else if (rows.length === 0 && error) {
     content = <ProblemCard message={error} onRetry={onRetry} />
+  } else if (unread !== null) {
+    // not an empty account: it was not read (review M4)
+    content = <UnreadCard text={unread} />
   } else if (rows.length === 0) {
     content = (
       <EmptyCard title="No holdings" hint={words ?? 'Shares held in the account show here.'} />
