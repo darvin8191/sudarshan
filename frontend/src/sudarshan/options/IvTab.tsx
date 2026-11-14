@@ -15,6 +15,12 @@ const dash = (
 
 const iv = (value: number | null | undefined) => (value != null && value > 0 ? value : null)
 
+/** "+1.4", "−0.8", and "0.0" with no sign for a skew that rounds to nothing. */
+export function skewWords(skew: number): string {
+  const shown = Number(skew.toFixed(1))
+  return `${shown > 0 ? '+' : shown < 0 ? '−' : ''}${Math.abs(shown).toFixed(1)}`
+}
+
 /** The smile's points: the followed strikes only (a far strike's price is too old to invert). */
 export function smilePoints(model: ChainModel): SmilePoint[] {
   return model.rows
@@ -66,9 +72,7 @@ export function IvTab({ model, dim }: { model: ChainModel; dim: boolean }) {
       >
         <Fact label="ATM IV">{model.atmIv === null ? dash : `${model.atmIv.toFixed(1)}%`}</Fact>
         <Fact label="Skew" hint="put IV 2 below less call IV 2 above">
-          {model.skew === null
-            ? dash
-            : `${model.skew > 0 ? '+' : model.skew < 0 ? '−' : ''}${Math.abs(model.skew).toFixed(1)}`}
+          {model.skew === null ? dash : skewWords(model.skew)}
         </Fact>
         <Fact label="Expected move" hint="the ATM straddle">
           {move === null ? (

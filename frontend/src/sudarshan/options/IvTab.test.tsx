@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { chainOf, NOW, STOPS_AT } from './fixtures'
-import { IvTab, NO_IV_RANK, smilePoints } from './IvTab'
+import { IvTab, NO_IV_RANK, skewWords, smilePoints } from './IvTab'
 import { type ChainModel, chainModel } from './model'
 import { smileScale } from './Smile'
 import { around } from './window'
@@ -80,6 +80,10 @@ describe('the IV tab', () => {
     ).toBeInTheDocument()
     expect(document.querySelector('[data-smile]')).toBeNull()
     expect(document.querySelector('[data-iv-facts]')).toHaveTextContent('ATM IV—not available')
+  })
+
+  it('signs the skew, and shows one that rounds to nothing without a sign', () => {
+    expect([1.44, -0.76, 0.04, -0.04].map(skewWords)).toEqual(['+1.4', '−0.8', '0.0', '0.0'])
   })
 
   it('scales the drawing to the figures, with room for a flat smile', () => {
