@@ -23,7 +23,11 @@ primitive (``string``, ``int``, ``number``, ``bool``), an enum or a record of th
 
 from __future__ import annotations
 
-from typing import NamedTuple
+import json
+import math
+import re
+from dataclasses import dataclass, field
+from typing import Any, NamedTuple
 
 # ---- the service ------------------------------------------------------------------------------
 SERVICE = "sudarshan-signals"
@@ -465,3 +469,445 @@ def module_name(module: str) -> str:
     """What a screen calls a module: its TRINETRA name, or "Other" for one this release does not
     name."""
     return MODULE_NAMES.get(module, OTHER_MODULE_NAME)
+
+
+# ---- reading one document (T1, pure) ----------------------------------------------------------
+_FILE_NAME = re.compile(FILE_NAME)
+_MODULE = re.compile(MODULE_PATTERN)
+_STATE = re.compile(STATE_PATTERN)
+_ALERT_ID = re.compile(ALERT_ID_PATTERN)
+#: Bidirectional overrides, embeddings, isolates and marks, and the byte-order mark: taken out of
+#: every string. The joiners Indian scripts need (U+200C, U+200D) are kept.
+_INVISIBLE = frozenset(
+    {*range(0x202A, 0x202F), *range(0x2066, 0x206A), 0x200E, 0x200F, 0x061C, 0xFEFF}
+)
+_LINE_BREAKS = frozenset({"\n", "\r", "\x85", chr(0x2028), chr(0x2029)})
+
+
+@dataclass(frozen=True)
+class ReadingIn:
+    """One reading of an accepted document, cleaned and checked (times in epoch ms)."""
+
+    module: str
+    instrument: str
+    state: str
+    label: str
+    bias: str
+    as_of_ms: int
+    horizon: str
+    quality: str
+    score: float | None = None
+    confidence: float | None = None
+    since_ms: int | None = None
+    valid_until_ms: int | None = None
+    levels: dict[str, float | None] | None = None
+    inputs: tuple[tuple[str, str], ...] = ()
+    why: dict[str, str | None] = field(default_factory=lambda: dict.fromkeys(LANGS))
+
+    @property
+    def key(self) -> tuple[str, str]:
+        return self.module, self.instrument
+
+    def as_record(self) -> dict[str, Any]:
+        """The fields of the contract's ``Reading`` that a document gives (the rest are the
+        service's: ``lapsed``, ``sessions``, ``published_ms``, ``doc_seq``)."""
+        return {
+            "module": self.module,
+            "instrument": self.instrument,
+            "state": self.state,
+            "label": self.label,
+            "bias": self.bias,
+            "score": self.score,
+            "confidence": self.confidence,
+            "since_ms": self.since_ms,
+            "as_of_ms": self.as_of_ms,
+            "valid_until_ms": self.valid_until_ms,
+            "horizon": self.horizon,
+            "quality": self.quality,
+            "levels": dict(self.levels) if self.levels is not None else None,
+            "inputs": [{"name": n, "value": v} for n, v in self.inputs],
+            "why": dict(self.why),
+        }
+
+
+@dataclass(frozen=True)
+class AlertIn:
+    """One alert of an accepted document."""
+
+    id: str
+    module: str
+    instrument: str | None
+    level: str
+    title: str
+    text: str
+    lang: str | None
+
+
+@dataclass(frozen=True)
+class Snapshot:
+    """An accepted document: every reading and alert checked, and how its clock compares.
+
+    ``clock`` is ``ok``, ``ahead`` or ``behind``: ``at`` against ``written_ms`` (the time the file
+    was written, on the server's clock), or the server's clock now when that is not known.
+    ``skipped`` counts readings of an instrument this release does not read."""
+
+    run: str
+    seq: int
+    at: int
+    next_by: int
+    stopping: bool
+    readings: tuple[ReadingIn, ...]
+    alerts: tuple[AlertIn, ...]
+    clock: str
+    clock_diff_ms: int
+    written_ms: int
+    size: int
+    skipped: int = 0
+
+    @property
+    def clock_ok(self) -> bool:
+        return self.clock == "ok"
+
+    @property
+    def published_ms(self) -> int:
+        """When it was published, as shown: ``at``, or the time it was written when the clocks
+        differ (section 4 of README.md)."""
+        return self.at if self.clock_ok else self.written_ms
+
+    @property
+    def fresh_until_ms(self) -> int:
+        """Until when it keeps the view fresh, on the server's clock."""
+        if self.clock_ok:
+            return self.next_by + FRESH_GRACE_MS
+        return self.written_ms + (self.next_by - self.at) + FRESH_GRACE_MS
+
+
+@dataclass(frozen=True)
+class Refusal:
+    """A document that is not read. ``reason`` names the rule (a word of this module, never text
+    from the document); ``where`` the entry, as ``signals[2]``, when there is one."""
+
+    reason: str
+    where: str = ""
+
+    def __str__(self) -> str:
+        return f"{self.reason} at {self.where}" if self.where else self.reason
+
+
+@dataclass(frozen=True)
+class NewerFormat:
+    """A document of a version above this release's: left unread for a later release."""
+
+    v: int
+
+
+class _Bad(Exception):
+    def __init__(self, reason: str, where: str = ""):
+        super().__init__(reason)
+        self.reason, self.where = reason, where
+
+
+def clean_line(value: str) -> str:
+    """A one-line field as SUDARSHAN keeps it: line breaks and tabs become a space, every other
+    control character and the invisible direction marks are taken out, the ends trimmed."""
+    out = []
+    for ch in value:
+        if ch in _LINE_BREAKS or ch == "\t":
+            out.append(" ")
+        elif ord(ch) < 0x20 or 0x7F <= ord(ch) <= 0x9F or ord(ch) in _INVISIBLE:
+            continue
+        else:
+            out.append(ch)
+    return "".join(out).strip()
+
+
+def clean_text(value: str) -> str:
+    """A text field (``why``, an alert's ``text``): as ``clean_line``, but a line break is kept,
+    as one ``\\n``."""
+    value = value.replace("\r\n", "\n")
+    out = []
+    for ch in value:
+        if ch in _LINE_BREAKS:
+            out.append("\n")
+        elif ch == "\t":
+            out.append(" ")
+        elif ord(ch) < 0x20 or 0x7F <= ord(ch) <= 0x9F or ord(ch) in _INVISIBLE:
+            continue
+        else:
+            out.append(ch)
+    return "".join(out).strip()
+
+
+def _no_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in out:
+            raise _Bad("json")
+        out[key] = value
+    return out
+
+
+def _no_constant(name: str) -> Any:
+    raise _Bad("json")
+
+
+def _whole(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _number(value: Any) -> bool:
+    return isinstance(value, int | float) and not isinstance(value, bool) and math.isfinite(value)
+
+
+def _ms(value: Any) -> bool:
+    return _whole(value) and 10**12 <= value < 10**13
+
+
+def _text(entry: dict, key: str, limit: int, where: str, *, low: int = 1, lines: bool = False):
+    value = entry.get(key)
+    if not isinstance(value, str):
+        raise _Bad(key, where)
+    cleaned = clean_text(value) if lines else clean_line(value)
+    if not low <= len(cleaned) <= limit:
+        raise _Bad(key, where)
+    return cleaned
+
+
+def _optional_number(entry: dict, key: str, low: float, high: float, where: str) -> float | None:
+    value = entry.get(key)
+    if value is None:
+        return None
+    if not _number(value) or not low <= value <= high:
+        raise _Bad(key, where)
+    return value
+
+
+def _optional_ms(entry: dict, key: str, where: str) -> int | None:
+    value = entry.get(key)
+    if value is None:
+        return None
+    if not _ms(value):
+        raise _Bad(key, where)
+    return value
+
+
+def _enum(entry: dict, key: str, values: tuple[str, ...], where: str) -> str:
+    value = entry.get(key)
+    if value not in values or not isinstance(value, str):
+        raise _Bad(key, where)
+    return value
+
+
+def _levels(value: Any, where: str) -> dict[str, float | None] | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise _Bad("levels", where)
+    out: dict[str, float | None] = {}
+    for key in LEVEL_KEYS:
+        price = value.get(key)
+        if price is not None and (not _number(price) or not 0 < price < DOC_LIMITS["price_max"]):
+            raise _Bad("levels", where)
+        out[key] = price
+    return out
+
+
+def _inputs(value: Any, where: str) -> tuple[tuple[str, str], ...]:
+    if value is None:
+        return ()
+    if not isinstance(value, list) or len(value) > DOC_LIMITS["inputs"]:
+        raise _Bad("inputs", where)
+    out = []
+    for item in value:
+        if not isinstance(item, dict):
+            raise _Bad("inputs", where)
+        name = _text(item, "name", DOC_LIMITS["input_name"], where)
+        text = _text(item, "value", DOC_LIMITS["input_value"], where)
+        out.append((name, text))
+    return tuple(out)
+
+
+def _why(value: Any, where: str) -> dict[str, str | None]:
+    out: dict[str, str | None] = dict.fromkeys(LANGS)
+    if value is None:
+        return out
+    if not isinstance(value, dict):
+        raise _Bad("why", where)
+    for lang in LANGS:
+        text = value.get(lang)
+        if text is None:
+            continue
+        if not isinstance(text, str):
+            raise _Bad("why", where)
+        cleaned = clean_text(text)
+        if len(cleaned) > DOC_LIMITS["why"]:
+            raise _Bad("why", where)
+        out[lang] = cleaned or None
+    return out
+
+
+def _reading(entry: Any, where: str) -> ReadingIn | None:
+    """One entry of ``signals``; None when its instrument is not one this release reads."""
+    if not isinstance(entry, dict):
+        raise _Bad("signals", where)
+    module = entry.get("module")
+    if not isinstance(module, str) or not _MODULE.fullmatch(module):
+        raise _Bad("module", where)
+    state = entry.get("state")
+    if not isinstance(state, str) or not _STATE.fullmatch(state):
+        raise _Bad("state", where)
+    as_of = entry.get("as_of")
+    if not _ms(as_of):
+        raise _Bad("as_of", where)
+    reading = ReadingIn(
+        module=module,
+        instrument=entry.get("instrument") if isinstance(entry.get("instrument"), str) else "",
+        state=state,
+        label=_text(entry, "label", DOC_LIMITS["label"], where),
+        bias=_enum(entry, "bias", BIASES, where),
+        as_of_ms=as_of,
+        horizon=_enum(entry, "horizon", HORIZONS, where),
+        quality=_enum(entry, "quality", QUALITIES, where),
+        score=_optional_number(entry, "score", -1.0, 1.0, where),
+        confidence=_optional_number(entry, "confidence", 0.0, 1.0, where),
+        since_ms=_optional_ms(entry, "since", where),
+        valid_until_ms=_optional_ms(entry, "valid_until", where),
+        levels=_levels(entry.get("levels"), where),
+        inputs=_inputs(entry.get("inputs"), where),
+        why=_why(entry.get("why"), where),
+    )
+    if not isinstance(entry.get("instrument"), str):
+        raise _Bad("instrument", where)
+    if reading.instrument not in INSTRUMENTS:
+        return None  # a reading of another instrument: skipped, the rest is read
+    return reading
+
+
+def _alert(entry: Any, where: str) -> AlertIn:
+    if not isinstance(entry, dict):
+        raise _Bad("alerts", where)
+    ident = entry.get("id")
+    if not isinstance(ident, str) or not _ALERT_ID.fullmatch(ident):
+        raise _Bad("id", where)
+    module = entry.get("module")
+    if not isinstance(module, str) or not _MODULE.fullmatch(module):
+        raise _Bad("module", where)
+    instrument = entry.get("instrument")
+    if instrument is not None and instrument not in INSTRUMENTS:
+        raise _Bad("instrument", where)
+    lang = entry.get("lang")
+    if lang is not None and lang not in LANGS:
+        raise _Bad("lang", where)
+    text = entry.get("text", "")
+    if text is None:
+        text = ""
+    return AlertIn(
+        id=ident,
+        module=module,
+        instrument=instrument,
+        level=_enum(entry, "level", ALERT_LEVELS, where),
+        title=_text(entry, "title", DOC_LIMITS["title"], where),
+        text=_text({"text": text}, "text", DOC_LIMITS["text"], where, low=0, lines=True),
+        lang=lang,
+    )
+
+
+def read_document(
+    raw: bytes,
+    *,
+    now_ms: int,
+    written_ms: int | None = None,
+    name: str | None = None,
+) -> Snapshot | Refusal | NewerFormat:
+    """One document from the bytes of one file: a ``Snapshot``, a ``Refusal`` or a
+    ``NewerFormat``. Pure, and it never raises: anything it cannot read is a refusal.
+
+    ``written_ms`` is when the file was written, on the server's clock (its modification time);
+    ``name`` the file's name, which must carry the document's own ``at`` and ``seq``."""
+    try:
+        return _read(raw, now_ms=now_ms, written_ms=written_ms, name=name)
+    except _Bad as bad:
+        return Refusal(bad.reason, bad.where)
+    except (RecursionError, MemoryError, ValueError, TypeError, OverflowError):
+        return Refusal("json")
+
+
+def _read(raw: bytes, *, now_ms: int, written_ms: int | None, name: str | None):
+    if not isinstance(raw, bytes | bytearray) or not raw or len(raw) > DOC_LIMITS["bytes"]:
+        raise _Bad("size")
+    try:
+        text = bytes(raw).decode("utf-8")
+    except UnicodeDecodeError:
+        raise _Bad("utf8") from None
+    doc = json.loads(text, object_pairs_hook=_no_duplicates, parse_constant=_no_constant)
+    if not isinstance(doc, dict):
+        raise _Bad("object")
+    version = doc.get("v")
+    if not _whole(version) or version < DOC_VERSION:
+        raise _Bad("v")
+    if version > DOC_VERSION:
+        return NewerFormat(version)
+    run = doc.get("run")
+    if not isinstance(run, str) or not 1 <= len(run) <= DOC_LIMITS["run"]:
+        raise _Bad("run")
+    if clean_line(run) != run:
+        raise _Bad("run")
+    seq = doc.get("seq")
+    if not _whole(seq) or not 0 <= seq <= DOC_LIMITS["seq_max"]:
+        raise _Bad("seq")
+    at, next_by = doc.get("at"), doc.get("next_by")
+    if not _ms(at):
+        raise _Bad("at")
+    if not _ms(next_by) or not at < next_by <= at + NEXT_BY_MAX_MS:
+        raise _Bad("next_by")
+    if name is not None and (not _FILE_NAME.fullmatch(name) or name != f"{at}-{seq}.json"):
+        raise _Bad("name")
+    stopping = doc.get("stopping", False)
+    if stopping is None:
+        stopping = False
+    if not isinstance(stopping, bool):
+        raise _Bad("stopping")
+    entries = doc.get("signals", [])
+    if entries is None:
+        entries = []
+    if not isinstance(entries, list) or len(entries) > DOC_LIMITS["signals"]:
+        raise _Bad("signals")
+    readings, seen, skipped = [], set(), 0
+    for index, entry in enumerate(entries):
+        reading = _reading(entry, f"signals[{index}]")
+        if reading is None:
+            skipped += 1
+            continue
+        if reading.key in seen:
+            raise _Bad("duplicate", f"signals[{index}]")
+        seen.add(reading.key)
+        readings.append(reading)
+    items = doc.get("alerts", [])
+    if items is None:
+        items = []
+    if not isinstance(items, list) or len(items) > DOC_LIMITS["alerts"]:
+        raise _Bad("alerts")
+    alerts, ids = [], set()
+    for index, item in enumerate(items):
+        alert = _alert(item, f"alerts[{index}]")
+        if alert.id in ids:
+            raise _Bad("duplicate", f"alerts[{index}]")
+        ids.add(alert.id)
+        alerts.append(alert)
+    written = int(written_ms) if written_ms is not None else int(now_ms)
+    diff = at - written
+    clock = "ahead" if diff > CLOCK_AHEAD_MS else "behind" if -diff > CLOCK_BEHIND_MS else "ok"
+    return Snapshot(
+        run=run,
+        seq=seq,
+        at=at,
+        next_by=next_by,
+        stopping=stopping,
+        readings=tuple(readings),
+        alerts=tuple(alerts),
+        clock=clock,
+        clock_diff_ms=diff,
+        written_ms=written,
+        size=len(raw),
+        skipped=skipped,
+    )
