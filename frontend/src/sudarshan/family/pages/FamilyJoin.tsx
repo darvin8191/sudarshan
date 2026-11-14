@@ -23,7 +23,7 @@ import { FamilyError, familyApi } from '../api'
 import { FamilyBadge } from '../FamilyBadge'
 import { Field, OUTLINE, PRIMARY, Problem } from '../forms'
 import { QrCode } from '../QrCode'
-import { ME_KEY } from '../session'
+import { forgetMember, ME_KEY } from '../session'
 import { LIMITS, type Me } from '../types'
 
 export const WELCOME = 'You are invited to the family view of सुदर्शन · SUDARSHAN'
@@ -160,7 +160,9 @@ export default function FamilyJoin() {
         password,
         totp: totp.replace(/\s+/g, ''),
       })
-      // The session is made: the shell reads it from here instead of asking again.
+      // The session is made: the shell reads it from here instead of asking again, and nothing
+      // the page held for another member before shows for this one (review M5).
+      forgetMember(client)
       client.setQueryData(ME_KEY, me)
       setPassword('')
       setTotp('')

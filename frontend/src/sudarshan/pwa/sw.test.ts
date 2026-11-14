@@ -3,7 +3,7 @@
  * scope, a fake cache and a fetch the test controls. Rule 7: a cached answer from the API is an
  * old number shown as current, so the cases that matter most are the ones that cache nothing.
  */
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -23,6 +23,8 @@ interface World {
     openWindow: ReturnType<typeof vi.fn>
     claim: ReturnType<typeof vi.fn>
   }
+  /** What fetch events asked to finish after their answer (event.waitUntil). */
+  behind: Array<Promise<unknown>>
 }
 
 function keyOf(request: RequestInfo | URL): string {
@@ -54,6 +56,12 @@ function boot(): World {
         async add(request: RequestInfo | URL) {
           bucket.set(keyOf(request), await fetchMock(request))
         },
+        async keys() {
+          return [...bucket.keys()].map((url) => new Request(url))
+        },
+        async delete(request: RequestInfo | URL) {
+          return bucket.delete(keyOf(request))
+        },
       }
     },
     async keys() {
@@ -64,7 +72,8 @@ function boot(): World {
     },
   }
   const fetchMock = vi.fn(
-    async (_request: RequestInfo | URL) => new Response('fresh', { status: 200 })
+    async (_request: RequestInfo | URL, _init?: RequestInit) =>
+      new Response('fresh', { status: 200 })
   )
   const self = {
     location: { origin: ORIGIN },
@@ -84,7 +93,7 @@ function boot(): World {
     Response,
     URL
   )
-  return { handlers, store, fetch: fetchMock, self, shown, clients }
+  return { handlers, store, fetch: fetchMock, self, shown, clients, behind: [] }
 }
 
 /** Dispatch a fetch event; resolves to the response the worker gave, or null when it passed. */
@@ -106,9 +115,49 @@ async function dispatch(
     respondWith(promise: Promise<Response>) {
       answer = promise
     },
+    waitUntil(promise: Promise<unknown>) {
+      world.behind.push(promise)
+    },
   })
   return answer ? await answer : null
 }
+
+/** Everything the fetch events asked to finish after their answers. */
+async function behind(world: World) {
+  while (world.behind.length) await world.behind.shift()
+}
+
+/** A built shell: its script, a preload and its styles, as Vite writes them. */
+function shellOf(...assets: string[]) {
+  const tags = assets.map((path) =>
+    path.endsWith('.css')
+      ? `<link rel="stylesheet" crossorigin href="${path}">`
+      : `<script type="module" crossorigin src="${path}"></script>`
+  )
+  return new Response(`<!doctype html><html><head>${tags.join('')}</head></html>`, {
+    status: 200,
+    headers: { 'content-type': 'text/html; charset=utf-8' },
+  })
+}
+
+function kept(world: World): string[] {
+  return [...(world.store.get('sudarshan-shell-v1')?.keys() ?? [])].map((url) =>
+    url.replace(ORIGIN, '')
+  )
+}
+
+async function activate(world: World) {
+  let pending: Promise<unknown> = Promise.resolve()
+  world.handlers.get('activate')?.({
+    waitUntil: (p: Promise<unknown>) => {
+      pending = p
+    },
+  })
+  await pending
+}
+
+const basic = (body: string) =>
+  Object.defineProperty(new Response(body, { status: 200 }), 'type', { value: 'basic' })
 
 async function install(world: World) {
   let pending: Promise<unknown> = Promise.resolve()
@@ -251,6 +300,95 @@ describe('assets and images: cache first', () => {
   })
 })
 
+describe('images: the kept copy at once, a fresh one behind it (review L5)', () => {
+  it('fetches an image the first time and keeps it', async () => {
+    world.fetch.mockResolvedValueOnce(basic('icon v1'))
+    expect(await (await dispatch(world, '/images/badge-96.png'))?.text()).toBe('icon v1')
+    await behind(world)
+    expect(kept(world)).toEqual(['/images/badge-96.png'])
+  })
+
+  it('answers from the cache and keeps the fresh copy for the next time', async () => {
+    world.fetch.mockResolvedValueOnce(basic('icon v1'))
+    await dispatch(world, '/images/family-offline.js')
+    world.fetch.mockResolvedValueOnce(basic('icon v2'))
+    expect(await (await dispatch(world, '/images/family-offline.js'))?.text()).toBe('icon v1')
+    await behind(world)
+    world.fetch.mockRejectedValueOnce(new TypeError('down'))
+    expect(await (await dispatch(world, '/images/family-offline.js'))?.text()).toBe('icon v2')
+    await behind(world) // a refresh that failed keeps the copy it had
+    world.fetch.mockResolvedValueOnce(basic('icon v3'))
+    expect(await (await dispatch(world, '/images/family-offline.js'))?.text()).toBe('icon v2')
+    expect(world.fetch).toHaveBeenCalledTimes(4)
+  })
+
+  it('never keeps an image answer that failed', async () => {
+    world.fetch.mockResolvedValue(new Response('gone', { status: 404 }))
+    await dispatch(world, '/images/none.png')
+    await behind(world)
+    expect(kept(world)).toEqual([])
+  })
+})
+
+describe('the cache does not grow with every release (review L5)', () => {
+  async function fill(...paths: string[]) {
+    for (const path of paths) {
+      world.fetch.mockResolvedValueOnce(basic(path))
+      await dispatch(world, path)
+    }
+  }
+
+  it('on activate, deletes every asset the current shell does not name', async () => {
+    await fill('/assets/index-old1.js', '/assets/index-new1.js', '/assets/style-new1.css')
+    await fill('/images/badge-96.png')
+    await behind(world)
+    world.fetch.mockResolvedValueOnce(shellOf('/assets/index-new1.js', '/assets/style-new1.css'))
+    await activate(world)
+    expect(kept(world).sort()).toEqual([
+      '/assets/index-new1.js',
+      '/assets/style-new1.css',
+      '/images/badge-96.png',
+    ])
+    expect(world.fetch).toHaveBeenLastCalledWith('/family/', expect.anything())
+    expect(world.clients.claim).toHaveBeenCalled()
+  })
+
+  it('deletes nothing when the shell cannot be read, or names no asset', async () => {
+    await fill('/assets/index-old1.js')
+    world.fetch.mockRejectedValueOnce(new TypeError('offline'))
+    await activate(world)
+    world.fetch.mockResolvedValueOnce(new Response('<p>Not a shell</p>', { status: 200 }))
+    await activate(world)
+    world.fetch.mockResolvedValueOnce(new Response('busy', { status: 503 }))
+    await activate(world)
+    expect(kept(world)).toEqual(['/assets/index-old1.js'])
+  })
+
+  it('a navigation that brings a new release trims and fetches the precached files again', async () => {
+    await install(world)
+    await fill('/assets/index-old1.js', '/assets/chunk-old1.js')
+    const precacheFetches = () =>
+      world.fetch.mock.calls.filter(([what]) => what === '/offline.html').length
+    const before = precacheFetches()
+    world.fetch.mockResolvedValueOnce(shellOf('/assets/index-new2.js'))
+    const answer = await dispatch(world, '/family/positions', { mode: 'navigate' })
+    expect(await answer?.text()).toContain('/assets/index-new2.js')
+    await behind(world)
+    expect(kept(world).filter((path) => path.startsWith('/assets/'))).toEqual([])
+    expect(precacheFetches()).toBe(before + 1)
+    await fill('/assets/index-new2.js', '/assets/chunk-new2.js') // the release loads its chunks
+    world.fetch.mockResolvedValueOnce(shellOf('/assets/index-new2.js'))
+    await dispatch(world, '/family', { mode: 'navigate' }) // the same release, opened again
+    await behind(world)
+    expect(
+      kept(world)
+        .filter((path) => path.startsWith('/assets/'))
+        .sort()
+    ).toEqual(['/assets/chunk-new2.js', '/assets/index-new2.js'])
+    expect(precacheFetches()).toBe(before + 1)
+  })
+})
+
 function pushEvent(payload: unknown) {
   let pending: Promise<unknown> = Promise.resolve()
   return {
@@ -349,6 +487,18 @@ describe('notificationclick', () => {
 })
 
 describe('the file itself', () => {
+  it('names only files the build has (a missing one would count toward a ban)', () => {
+    const named = new Set<string>()
+    for (const found of SOURCE.matchAll(/'(\/(?:images\/[^']+|offline\.html))'/g)) {
+      named.add(found[1])
+    }
+    expect([...named]).toContain('/offline.html')
+    expect([...named]).toContain('/images/family-offline.js')
+    for (const path of named) {
+      expect(existsSync(join(process.cwd(), 'public', path)), path).toBe(true)
+    }
+  })
+
   it('lists the prefixes the design names, and no more', () => {
     const line = /const NEVER = (\[[^\]]*\])/.exec(SOURCE)?.[1] ?? ''
     expect(JSON.parse(line.replaceAll("'", '"'))).toEqual([

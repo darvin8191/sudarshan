@@ -589,12 +589,13 @@ def broker_login():
         logger.info(
             f"Broker token invalid for {session.get('user')} - allowing re-authentication"
         )
-    if request.method == "GET":
-        if "user" not in session:
-            return redirect("/login")
+    # SUDARSHAN: G5. A POST gets the GET's answer (nothing posts here since the broker page moved
+    # to React). It returned nothing, which Flask raised as an error, answering the error page.
+    if "user" not in session:
+        return redirect("/login")
 
-        # Redirect to React broker selection page
-        return redirect("/broker")
+    # Redirect to React broker selection page
+    return redirect("/broker")
 
 
 @auth_bp.route("/reset-password", methods=["GET", "POST"])

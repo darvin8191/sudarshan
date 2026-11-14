@@ -287,16 +287,10 @@ export function useSocket() {
           }
         }
 
-        let message = ''
-        if (data.symbol) {
-          message += `${data.symbol}: `
-        }
-        if (data.status) {
-          message += data.status
-        }
-        if (data.message) {
-          message += data.message
-        }
+        // SUDARSHAN: the server's own sentence and nothing in front of it, as Analyze mode shows
+        // the same answers; it read "SBIN: infoPositions Already Matched..." before.
+        const message = data.message || data.status || data.symbol || ''
+        if (!message) return
 
         showCategoryToast(type, message, 'orders')
       }
@@ -341,10 +335,10 @@ export function useSocket() {
       const apiType = data.request.api_type || ''
 
       if (data.response.status === 'error') {
-        // SUDARSHAN: the server's own sentence after the symbol, never "Error:" (it reads as a
-        // fault the trader caused when it is a limit the platform kept).
-        message = data.response.message || ''
-        if (symbol) message = message ? `${symbol}: ${message}` : symbol
+        // SUDARSHAN: the server's own sentence and nothing in front of it, neither "Error:" (it
+        // reads as a fault the trader caused when it is a limit the platform kept) nor the symbol;
+        // the symbol alone only when the server gave no sentence.
+        message = data.response.message || symbol
       } else if (apiType === 'cancelorder') {
         message = orderid ? `Order Cancelled - ID: ${orderid}` : 'Order Cancelled'
       } else if (apiType === 'cancelallorder') {
