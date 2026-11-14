@@ -6,9 +6,10 @@ holds paise and basis points.
 Run: python3 make_goals.py
 """
 
-import json
 from fractions import Fraction as F
 from pathlib import Path
+
+from portfolio_vector_tools import write_all
 
 DIGITS = 30
 
@@ -168,4 +169,15 @@ CARDS = [
 
 OUT = {"note": "synthetic; built by make_goals.py, which states the arithmetic of every case",
        "monthly": MONTHLY, "months": MONTHS, "cards": CARDS}  # fmt: skip
-Path(__file__).with_name("goals.json").write_text(json.dumps(OUT, indent=1) + "\n")
+
+
+def build() -> dict:
+    return {"goals.json": OUT}
+
+
+def main() -> None:
+    write_all(build(), Path(__file__).parent)
+
+
+if __name__ == "__main__":
+    main()

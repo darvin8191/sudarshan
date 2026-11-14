@@ -15,11 +15,12 @@ what is pinned. November 2026: the 2nd is a Monday.
 Run: python3 make_index_stats.py
 """
 
-import json
 from datetime import date, timedelta
 from fractions import Fraction as F
 from math import isqrt
 from pathlib import Path
+
+from portfolio_vector_tools import write_all
 
 R_M, R_P = [1, -2, 3, -1, 4], [2, -3, 5, -2, 3]
 assert F(32, 5) / F(26, 5) == F(16, 13) and round(16 / 13 * 10**4) == 12308
@@ -175,4 +176,15 @@ RETURNS = [
 
 OUT = {"note": "synthetic; built by make_index_stats.py, which states the arithmetic",
        "returns": RETURNS, "stats": STATS}  # fmt: skip
-Path(__file__).with_name("index_stats.json").write_text(json.dumps(OUT, indent=1) + "\n")
+
+
+def build() -> dict:
+    return {"index_stats.json": OUT}
+
+
+def main() -> None:
+    write_all(build(), Path(__file__).parent)
+
+
+if __name__ == "__main__":
+    main()

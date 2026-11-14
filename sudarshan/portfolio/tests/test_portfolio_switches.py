@@ -72,16 +72,14 @@ def test_a_tax_input_has_a_dry_run_and_downloads_are_reads():
         assert spec.download and spec.cls == "read" and spec.method == "GET", name
 
 
-#: The ops of the phase whose lane has landed; every other still answers "not ready" whatever
-#: its switch says. One line per pull request, so that lanes landing side by side merge cleanly.
-BUILT = {
-    "risk", "settings_get", "settings_set",  # R4 (M7.32)
-    "goals_list", "goal_create", "goal_update",  # R6 (M7.34)
-}  # fmt: skip
-
-
-def test_an_op_of_the_phase_not_built_yet_answers_not_ready():
-    assert set(PHASE_OPS) & set(REGISTRY) == BUILT
+@pytest.mark.parametrize("name", PHASE_OPS)
+def test_an_op_of_the_phase_is_not_ready_while_its_switch_is_off_built_or_not(name):
+    """An op a lane has built is registered behind its switch; one not built has no handler."""
+    if name not in REGISTRY:
+        return
+    with pytest.raises(ApiError) as refused:
+        run(REGISTRY[name](Ctx(), {}))
+    assert refused.value.code == "not_ready"
 
 
 # ---- the switches are off in code ---------------------------------------------------------------

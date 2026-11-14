@@ -6,11 +6,12 @@ point is [day, value, in, out, fee] in paise. Square roots are taken here with w
 Run: python3 make_risk.py
 """
 
-import json
 from datetime import date, timedelta
 from fractions import Fraction as F
 from math import isqrt
 from pathlib import Path
+
+from portfolio_vector_tools import write_all
 
 
 def key(d):
@@ -333,4 +334,15 @@ TOGETHER = [
 OUT = {"note": "synthetic; built by make_risk.py, which states the arithmetic of every case",
        "series": SERIES, "falls": [DEPOSIT, WITHDRAW], "concentration": CONCENTRATION,
        "overlap": OVERLAP, "emergency": EMERGENCY, "together": TOGETHER}  # fmt: skip
-Path(__file__).with_name("risk.json").write_text(json.dumps(OUT, indent=1) + "\n")
+
+
+def build() -> dict:
+    return {"risk.json": OUT}
+
+
+def main() -> None:
+    write_all(build(), Path(__file__).parent)
+
+
+if __name__ == "__main__":
+    main()
