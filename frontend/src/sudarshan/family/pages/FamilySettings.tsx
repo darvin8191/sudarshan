@@ -17,7 +17,7 @@ import { getFamilyManager } from '../familyManager'
 import { DANGER, Field, OUTLINE, PRIMARY, Problem, Saved, Section } from '../forms'
 import { DEVICES_KEY, FAILING_WORDS, SETTINGS_KEY } from '../keys'
 import { Notifications } from '../Notifications'
-import { forgetMember } from '../session'
+import { clearSignedIn, forgetMember } from '../session'
 import type { Device, Language } from '../types'
 import { LIMITS } from '../types'
 import { deviceWhen } from '../when'
@@ -35,11 +35,18 @@ function useLeave() {
   const client = useQueryClient()
   const navigate = useNavigate()
   return () => {
+    clearSignedIn() // the member's own tap: the sign-in page has no reason to give
     getFamilyManager().disconnect()
     forgetMember(client)
     navigate('/family/login', { replace: true })
   }
 }
+
+/** What Sign out asks first, for this phone and for another device. */
+export const signOutAsk = (current: boolean) =>
+  current
+    ? 'Sign out of this phone? You will need your password and code to come back.'
+    : 'Sign that device out? It will need your password and code to come back.'
 
 function DeviceRow({
   device,
@@ -56,6 +63,7 @@ function DeviceRow({
   const [label, setLabel] = useState(device.label)
   const [problem, setProblem] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [asking, setAsking] = useState(false)
 
   const save = async (event: FormEvent) => {
     event.preventDefault()
@@ -81,6 +89,7 @@ function DeviceRow({
       else onChanged()
     } catch (error) {
       setProblem(wordsOf(error))
+      setAsking(false)
     } finally {
       setBusy(false)
     }
@@ -154,12 +163,37 @@ function DeviceRow({
               type="button"
               disabled={busy}
               className={OUTLINE}
-              onClick={() => void signOut()}
+              aria-expanded={asking}
+              onClick={() => setAsking(true)}
             >
               <LogOut aria-hidden="true" className="size-4" />
               Sign out
             </button>
           </div>
+          {/* Review L1 (v0.12.0): one tap signed the device out; coming back takes a password
+              and a code, so it asks, as Sign out everywhere does. */}
+          {asking && (
+            <div
+              role="alertdialog"
+              aria-label={signOutAsk(device.current)}
+              className="flex flex-col gap-2 rounded-[0.875rem] bg-[color:var(--down-tint)] p-3"
+            >
+              <p className="text-sm font-semibold">{signOutAsk(device.current)}</p>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  disabled={busy}
+                  className={DANGER}
+                  onClick={() => void signOut()}
+                >
+                  Sign out
+                </button>
+                <button type="button" className={OUTLINE} onClick={() => setAsking(false)}>
+                  Stay signed in
+                </button>
+              </div>
+            </div>
+          )}
         </>
       )}
     </li>

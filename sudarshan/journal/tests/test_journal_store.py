@@ -319,6 +319,48 @@ def test_status_of_an_old_file_lists_the_pending_step_and_leaves_it(path, made, 
     assert raw(path, "PRAGMA user_version") == [(0,)]
 
 
+def test_step_5_adds_the_recounts_to_a_file_that_holds_trades_and_keeps_them(tmp_path, capsys):
+    """A populated file at step 4 (what a v0.11.0 install without this fix would hold): the
+    status names step 5 and changes nothing; opening applies it once; what was kept stays."""
+    import sqlite3
+
+    where = tmp_path / "old" / store.DB_FILENAME
+    where.parent.mkdir()
+    engine = store.engine(where)
+    try:
+        migrations.migrate(engine, migrations.STEPS[:4])
+    finally:
+        engine.dispose()
+    with sqlite3.connect(where) as conn:
+        conn.execute(
+            "INSERT INTO key_opening (principal, mode, exchange, symbol, product_class, qty, "
+            "day, source, read_ms, created_at, updated_at) "
+            "VALUES ('owner', 'live', 'NSE', 'ACME', 'carry', 60, 20261109, 'holdings', 1, 1, 1)"
+        )
+    assert migrate.main(["--status", "--path", str(where)]) == 0
+    assert "pending: [5]" in capsys.readouterr().out
+    assert raw(where, "PRAGMA user_version") == [(4,)]
+    assert not raw(where, "SELECT name FROM sqlite_master WHERE name = 'key_recount'")
+    opened = JournalStore(where, now=NOW)
+    try:
+        assert opened.applied == [5]
+        key = ("NSE", "ACME", "carry")
+        assert opened.read(OWNER, lambda tx: tx.openings_of("live"))[key]["qty"] == 60
+        assert opened.read(OWNER, lambda tx: tx.recounts_of("live")) == {}
+        assert opened.write(OWNER, lambda tx: tx.recount_put(
+            "live", key, 20261120, 0, "holdings", NOW, NOW)) is True  # fmt: skip
+    finally:
+        opened.close()
+    again = JournalStore(where, now=NOW)  # a second opening runs nothing and loses nothing
+    try:
+        assert again.applied == []
+        assert again.read(OWNER, lambda tx: tx.recounts_of("live")) == {
+            ("NSE", "ACME", "carry"): [(20261120, 0)]}  # fmt: skip
+    finally:
+        again.close()
+        store.stop()
+
+
 def test_status_of_a_newer_file_says_so_in_the_owners_words(path, made, capsys):
     made.close()
     store.stop()

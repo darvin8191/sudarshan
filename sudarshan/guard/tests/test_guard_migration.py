@@ -207,3 +207,48 @@ def test_the_app_s_first_use_adds_a_missing_column_before_the_index(tmp_path):
     finally:
         fresh.dispose()
     assert "merge_key" in _audit_columns(path)
+
+
+def test_a_file_from_before_the_assistants_cutoff_gains_the_column_and_keeps_its_rows(tmp_path):
+    """M17.9: a real file forced back to the schema before ``risk_state.mcp_valid_after``: a
+    populated one, with the kill switch on. The column arrives empty (access was never ended by
+    this release), nothing else moves, and a second run changes nothing."""
+    path = tmp_path / "sudarshan_risk.db"
+    assert _run(path).returncode == 0
+    with closing(sqlite3.connect(path)) as db, db:
+        db.execute("UPDATE risk_state SET ks_on = 1, ks_actor = 'owner', ks_surface = 'app'")
+        db.execute("UPDATE risk_settings SET confirm_phrase = 'MINE', max_lots_fo = 7")
+        db.execute("ALTER TABLE risk_state DROP COLUMN mcp_valid_after")
+    before = _row(path, "risk_state")
+    assert "mcp_valid_after" not in before
+    status = _run(path, "--status")
+    assert status.returncode == 0 and "risk_state.mcp_valid_after" in status.stdout
+    assert "MISSING" in status.stdout and "Migration needed." in status.stdout
+    assert _row(path, "risk_state") == before, "--status changes nothing"
+    done = _run(path)
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert "Added risk_state.mcp_valid_after" in done.stdout
+    after = _row(path, "risk_state")
+    assert after.pop("mcp_valid_after") is None
+    assert after == before
+    assert _row(path, "risk_settings")["confirm_phrase"] == "MINE"
+    again = _run(path)
+    assert again.returncode == 0 and "Added" not in again.stdout
+    assert "Up to date" in _run(path, "--status").stdout
+
+
+def test_the_app_s_first_use_adds_the_cutoff_column_to_an_older_file(tmp_path):
+    """A dev checkout that never ran the migration: the store adds the column when it opens the
+    file, and the cutoff can be written and read."""
+    from sudarshan.guard.store import RiskStore
+
+    path = tmp_path / "sudarshan_risk.db"
+    assert _run(path).returncode == 0
+    with closing(sqlite3.connect(path)) as db, db:
+        db.execute("ALTER TABLE risk_state DROP COLUMN mcp_valid_after")
+    store = RiskStore(path)
+    try:
+        assert store.mcp_valid_after() is None
+        assert store.set_mcp_valid_after(5) == 5 == store.mcp_valid_after()
+    finally:
+        store.dispose()

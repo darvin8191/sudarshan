@@ -1,0 +1,36 @@
+Long term
+SUDARSHAN
+Holdings · as of 26 Oct 2026, 13:03 IST
+Long term
+Holdings · as of 26 Oct 2026, 13:03 IST
+ValueCostUnrealised gainOverall gain
+₹4,45,765.00₹3,90,315.00+₹55,450.00+₹50,760.00
+PROFITPROFIT
+Holdings
+HoldingAccountQuantityCostValueGainResult
+PROFIT
+Gold barZerodha2₹2,00,300.00₹2,49,000.00+₹48,700.00
+PROFIT
+Gold barLocker1.5₹1,80,000.00₹1,86,750.00+₹6,750.00
+FLAT
+Reliance IndustriesZerodha10₹10,015.00₹10,015.00₹0.00
+PROFIT
+Total₹3,90,315.00₹4,45,765.00+₹55,450.00
+Gold bar: Value from 23 Oct · 3 days old
+Reliance Industries: No price yet
+Totals
+FigureValueResult
+LOSS
+Realised gain−₹5,350.00
+Income₹1,250.00
+Fees₹590.00
+Absolute return+5.12%
+Loans outstanding₹2,00,000.00
+Value after loans₹2,45,765.00
+Loans
+LoanOutstandingBalance of
+Home loan₹2,00,000.001 Oct 2026
+Notes
+The whole tab, with no filter.
+1 holding has no price yet and is counted at its cost.
+Exported from SUDARSHAN. As of 26 Oct 2026, 13:03 IST.Page 1 of 1

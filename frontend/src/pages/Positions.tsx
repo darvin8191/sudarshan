@@ -55,12 +55,13 @@ import { cn, makeFormatCurrency, sanitizeCSV } from '@/lib/utils'
 import { useAuthStore } from '@/stores/authStore'
 import { onModeChange } from '@/stores/themeStore'
 // SUDARSHAN M6.9: on a phone the positions are cards (src/sudarshan/books/cards).
-import { units } from '@/sudarshan/books/cards/format'
 import { PositionCards, usePositionExits } from '@/sudarshan/books/cards/PositionCards'
 import { WarningLine } from '@/sudarshan/books/cards/parts'
 // SUDARSHAN: the book re-read, status line and tick prices (src/sudarshan/books).
 import { useBookFeed } from '@/sudarshan/books/feed'
 import { TickPrice } from '@/sudarshan/books/LiveFigures'
+// SUDARSHAN M4.7: the close-position call, shared with the phone chart's line sheet.
+import { closePositionSend } from '@/sudarshan/books/orderSends'
 // SUDARSHAN M6.9: what became of an exit: sent, refused, or not confirmed (it may have gone).
 import {
   answerBody,
@@ -69,7 +70,6 @@ import {
   exitAllEach,
   heldText,
   refusalReason,
-  sentOrderIds,
   stillPlacing,
   thrownOutcome,
 } from '@/sudarshan/books/sendOutcome'
@@ -91,7 +91,6 @@ import { BookSymbolLink } from '@/sudarshan/chart/BookSymbolLink'
 import { usePhoneLayout } from '@/sudarshan/chart/usePhoneLayout'
 import { useMarketOpen } from '@/sudarshan/dashboard/hooks'
 import { LiveLine } from '@/sudarshan/dashboard/LiveLine'
-import { spokenContract } from '@/sudarshan/watchlist/rows'
 import type { Position } from '@/types/trading'
 import { showToast } from '@/utils/toast'
 
@@ -459,48 +458,10 @@ export default function Positions() {
   // SUDARSHAN M6.9: each returns what became of the exit, so the phone holds its
   // Exit (src/sudarshan/books/sent.ts). An answer that may have reached the broker is
   // "not confirmed", never "failed": a second exit would reverse the position.
-  const handleClosePosition = async (position: Position): Promise<SendOutcome | SentAnswer> => {
-    try {
-      const response = await tradingApi.closePosition(
-        position.symbol,
-        position.exchange,
-        position.product
-      )
-      if (response.status === 'success') {
-        // SUDARSHAN: says what was sent, from the position, in the confirmation's words; the
-        // server's sentence read "BUY Order Placed ... Qty: 0" for a long being sold.
-        const held = Number(position.quantity) || 0
-        const contract = spokenContract(position.symbol, position.exchange)
-        showToast.success(
-          held === 0
-            ? `Exit sent: ${contract}`
-            : `Exit sent: ${held > 0 ? 'sell' : 'buy'} ${units(Math.abs(held))} ${contract}`,
-          'positions'
-        )
-        fetchPositions(true)
-        // The orders this placed are the exit's own, not any other on its side.
-        return { outcome: 'sent', orderids: sentOrderIds(response) }
-      }
-      const held = answeredHeld(response)
-      if (held) {
-        showToast.warning(heldText('exit', held, response), 'positions')
-        fetchPositions(true)
-        return held
-      }
-      showToast.error(response.message || 'Failed to close position', 'positions')
-    } catch (err) {
-      const outcome = thrownOutcome(err)
-      if (outcome !== 'refused') {
-        showToast.warning(heldText('exit', outcome, answerBody(err)), 'positions')
-        fetchPositions(true)
-        return outcome
-      }
-      showToast.error(refusalReason(err) ?? 'Failed to close position', 'positions')
-      // An earlier exit for it is still being placed (the app's 409): that one holds the row.
-      if (stillPlacing(err)) return 'placing'
-    }
-    return 'refused'
-  }
+  // SUDARSHAN M4.7: the call itself lives in books/orderSends.ts, moved there unchanged, so
+  // the phone chart's line sheet makes the same one.
+  const handleClosePosition = (position: Position): Promise<SendOutcome | SentAnswer> =>
+    closePositionSend(position, () => void fetchPositions(true))
 
   // Its result shares one toast with the close_position_event the server sends for it.
   // SUDARSHAN M6.9: and each position settles by what became of it (the answer's

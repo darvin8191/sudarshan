@@ -1,0 +1,15 @@
+# सुदर्शन / SUDARSHAN watch schedule (M19.5): every 2 minutes, day and night, at 30 seconds past
+# the even minute, so a look never starts on the same second as the auto-login or a backup.
+# A service that stops answering is told after two looks in a row, about 4 minutes. Not
+# Persistent: a look missed while the server was down is simply the next one.
+
+[Unit]
+Description=SUDARSHAN watch schedule (every 2 minutes)
+
+[Timer]
+OnCalendar=*:0/2:30
+AccuracySec=5s
+Unit=sudarshan-watch.service
+
+[Install]
+WantedBy=timers.target

@@ -232,6 +232,7 @@ WORD_KEYS = (
     "store_failed",
     "viewer_unavailable",
     "push_failing",  # F10 (feat/family-t2): a phone's device line after three failures in a row
+    "book_share",  # v0.12.0 review H1: why a share of a part of the books is refused
 )
 
 PRIMITIVES = ("string", "int", "number", "bool", "json")

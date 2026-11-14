@@ -190,11 +190,51 @@ describe('Navigation Config', () => {
       expect(isActiveRoute('/positions', '/holdings')).toBe(false)
     })
 
-    it('does not prefix match', () => {
-      // No nav item owns nested pages, so neither a child path nor a longer
-      // name that merely starts with the href may light the tab up.
+    it('does not prefix match for a leaf entry', () => {
+      // Only the entries named in NAV_WITH_CHILDREN own nested pages: for every other, neither a
+      // child path nor a longer name that merely starts with the href may light the tab up.
       expect(isActiveRoute('/dashboard/sub', '/dashboard')).toBe(false)
       expect(isActiveRoute('/orderbookextra', '/orderbook')).toBe(false)
+      expect(isActiveRoute('/chart/NSE/INFY', '/chart')).toBe(false)
+    })
+
+    it('lights Options on a chain’s own address (SUDARSHAN M11.1)', () => {
+      expect(isActiveRoute('/options', '/options')).toBe(true)
+      expect(isActiveRoute('/options/NFO/NIFTY', '/options')).toBe(true)
+      expect(isActiveRoute('/options/BFO/SENSEX', '/options')).toBe(true)
+      // Whole segments only: a longer name is another page.
+      expect(isActiveRoute('/optionsx', '/options')).toBe(false)
+      expect(isActiveRoute('/optionchain', '/options')).toBe(false)
+      expect(isActiveRoute('/options-old/NFO/NIFTY', '/options')).toBe(false)
+    })
+
+    it('never lights two entries for one address', () => {
+      const hrefs = [
+        ...new Set([...navItems, ...bottomNavItems, ...profileMenuItems].map((item) => item.href)),
+      ]
+      const addresses = [
+        ...hrefs,
+        ...hrefs.map((href) => `${href}/NFO/NIFTY`),
+        ...hrefs.map((href) => `${href}x`),
+        '/options/NFO/NIFTY',
+        '/search/token',
+        '/search',
+      ]
+      for (const address of addresses) {
+        const lit = hrefs.filter((href) => isActiveRoute(address, href))
+        expect(lit.length, `${address} lights ${lit.join(', ')}`).toBeLessThanOrEqual(1)
+      }
+      expect(hrefs.filter((href) => isActiveRoute('/options/NFO/NIFTY', href))).toEqual([
+        '/options',
+      ])
+    })
+
+    it('gives an address to the longer entry when two would own it', () => {
+      // No two entries nest today. Were a page under /options listed on its own, it alone is lit.
+      const known = ['/options', '/options/saved', '/dashboard']
+      expect(isActiveRoute('/options/saved', '/options/saved', known)).toBe(true)
+      expect(isActiveRoute('/options/saved', '/options', known)).toBe(false)
+      expect(isActiveRoute('/options/NFO/NIFTY', '/options', known)).toBe(true)
     })
   })
 })

@@ -4,9 +4,11 @@
  * ticket with the ticket's product rule: this file holds no order code and is a new entry point,
  * not an order-path change.
  *
- * Two things the sheet has that a chain row does not need: its "Edit row" and "Remove row" buttons
- * belong to a watchlist row, so they are not shown here; and its link to the option chain is left
- * out (this is the chain).
+ * A chain row is not a watchlist row, so the sheet is asked for what fits (its four optional props):
+ * no "Edit row" or "Remove row"; the side that was tapped first; a button a leg to that leg's own
+ * sheet (`LegSheets.tsx`); and the same strike's other expiries only when they could be read (they
+ * come from the watchlists' own route, which answers only while that switch is on). Its link to the
+ * option chain is left out: this is the chain.
  */
 import { useEffect } from 'react'
 import type { QuotesData } from '@/api/trading'
@@ -22,7 +24,7 @@ import type { Listing } from './api'
 import type { ChainModel, LegView } from './model'
 import { expiryLabel, strikeWords } from './words'
 
-const contractOf = (leg: LegView, expiry: string): Contract => ({
+export const contractOf = (leg: LegView, expiry: string): Contract => ({
   exchange: leg.exchange,
   symbol: leg.symbol,
   key: leg.key,
@@ -33,7 +35,7 @@ const contractOf = (leg: LegView, expiry: string): Contract => ({
   isin: null,
 })
 
-interface Feed {
+export interface Feed {
   lines: ReadonlyMap<string, SymbolData>
   directions: ReadonlyMap<string, TickDirection>
   feed: FeedState
@@ -42,7 +44,7 @@ interface Feed {
 }
 
 /** One instrument as the sheet's figures read it: the chain's own figure until its tick comes. */
-function liveRow(contract: Contract, seed: LegView | null, at: number, feed: Feed): LiveRow {
+export function liveRow(contract: Contract, seed: LegView | null, at: number, feed: Feed): LiveRow {
   const line = feed.lines.get(contract.key)
   const snapshot: Snapshot | undefined =
     seed?.ltp != null
@@ -65,9 +67,11 @@ export function StrikeEntry({
   model,
   asOf,
   strike,
+  side,
   feed,
   onClose,
   onOrder,
+  onLeg,
   onFollow,
 }: {
   listing: Listing
@@ -76,9 +80,13 @@ export function StrikeEntry({
   /** When the chain's own figures were read. */
   asOf: number
   strike: number
+  /** The side that was tapped: it leads the sheet. */
+  side: 'ce' | 'pe'
   feed: Feed
   onClose: () => void
   onOrder: (order: OrderRequest) => void
+  /** Open a leg's own sheet. */
+  onLeg: (side: 'ce' | 'pe') => void
   /** What the sheet needs followed while it is open (EXCHANGE:SYMBOL): its legs and the other expiries'. */
   onFollow: (keys: string[]) => void
 }) {
@@ -127,30 +135,28 @@ export function StrikeEntry({
         ? 'ATM'
         : `ATM ${steps > 0 ? '+' : '−'}${Math.abs(steps)}`
   return (
-    <>
-      {/* The sheet's last block is a watchlist row's own (Edit row, Remove row): not for a chain row. */}
-      <style>{'[data-strike-sheet="true"] > div:last-child { display: none; }'}</style>
-      <StrikeSheet
-        title={`${listing.underlying} ${strikeWords(strike)}`}
-        detail={`${listing.exchange} · ${expiryLabel(expiry, feed.now)}`}
-        chip={chip}
-        help={row.live ? null : 'A far strike: its prices are followed while this sheet is open.'}
-        words={legs ? null : 'This strike lists one side only, so there is no pair to show.'}
-        moved={null}
-        strike={strike}
-        expiry={expiry}
-        legs={legs}
-        lines={feed.lines}
-        others={{ state: same.state, rows: others, retry: same.retry }}
-        chain={null}
-        feed={feed.feed}
-        now={feed.now}
-        marketOpen={feed.marketOpen}
-        onClose={onClose}
-        onOrder={onOrder}
-        onEdit={onClose}
-        onRemove={onClose}
-      />
-    </>
+    <StrikeSheet
+      title={`${listing.underlying} ${strikeWords(strike)}`}
+      detail={`${listing.exchange} · ${expiryLabel(expiry, feed.now)}`}
+      chip={chip}
+      help={row.live ? null : 'A far strike: its prices are followed while this sheet is open.'}
+      words={legs ? null : 'This strike lists one side only, so there is no pair to show.'}
+      moved={null}
+      strike={strike}
+      expiry={expiry}
+      legs={legs}
+      lines={feed.lines}
+      others={
+        same.state === 'error' ? undefined : { state: same.state, rows: others, retry: same.retry }
+      }
+      chain={null}
+      first={side}
+      onLeg={onLeg}
+      feed={feed.feed}
+      now={feed.now}
+      marketOpen={feed.marketOpen}
+      onClose={onClose}
+      onOrder={onOrder}
+    />
   )
 }

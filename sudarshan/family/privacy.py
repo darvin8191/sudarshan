@@ -20,6 +20,12 @@ and P&L hidden hides the table's ``cost`` list too, whatever quantities say (the
 H1: beside a quantity, an average, an amount invested, a value or a trade's price gives the P&L
 away by one subtraction). A field the table names as never hidden (the live price and its
 anchors) is never removed. No I/O after the file is read once at import.
+
+What "P&L hidden" does not hide (v0.12.0 review M4): with quantities shown, the quantity and the
+never-hidden live price and previous close give a day's change and a holding's value by one
+multiplication. Only the overall P&L, which needs the cost, is out of reach. The table's
+``pnl_hidden_note`` (``PNL_HIDDEN_NOTE``) is the sentence the owner reads under the P&L switch;
+hiding quantities is what hides those two as well.
 """
 
 from __future__ import annotations
@@ -66,6 +72,21 @@ def load(
 
 
 TABLE, COST, NEVER_HIDDEN = load()
+
+
+def load_note(path: Path = FIELDS_FILE) -> str:
+    """The table's ``pnl_hidden_note``: what the owner is told where he hides P&L from a member
+    who is shown quantities (review M4 of v0.12.0). ValueError when it is not one plain line."""
+    note = json.loads(path.read_text(encoding="utf-8")).get("pnl_hidden_note")
+    if not isinstance(note, str) or not 0 < len(note) <= 200 or not note.endswith("."):
+        raise ValueError(
+            f"{path.name}: pnl_hidden_note must be a sentence of at most 200 characters"
+        )
+    return note
+
+
+#: The owner's sentence under the P&L switch while quantities are shown (the Family page's words).
+PNL_HIDDEN_NOTE = load_note()
 
 
 def hidden_categories(privacy: Mapping[str, Any] | None) -> tuple[str, ...]:

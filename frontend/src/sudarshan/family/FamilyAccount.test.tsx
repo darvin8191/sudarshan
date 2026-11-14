@@ -4,7 +4,7 @@ import { cleanup, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { resetFamilyManagerForTests } from './familyManager'
-import FamilyJoin, { keyInGroups, strengthOf } from './pages/FamilyJoin'
+import FamilyJoin, { KEY_COPIED, KEY_NOT_COPIED, keyInGroups, strengthOf } from './pages/FamilyJoin'
 import FamilyLogin from './pages/FamilyLogin'
 import FamilySettings from './pages/FamilySettings'
 import { FakeSocket, fail, meOf, ok, routeFetch } from './testing/fixtures'
@@ -224,8 +224,49 @@ describe('Join', () => {
     const link = await screen.findByRole('link', { name: 'Open Telegram' })
     expect(link.getAttribute('href')).toBe('https://t.me/synthetic_bot?start=code1')
     await user.click(screen.getByRole('button', { name: 'Continue' }))
-    expect(where.path).toBe('/family')
+    expect(where.path).toBe('/family/')
     expect(onlyFamily(router.urls())).toBe(true)
+  })
+  // Review L2 (v0.12.0): the key could only be scanned or retyped. Fails on the old page.
+  it('copies the key without its spaces, and links the code app set-up address', async () => {
+    routeFetch({ '/family/api/join/abc123': ok(INFO) })
+    const user = userEvent.setup()
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+    mountFamily('/family/join/abc123', <FamilyJoin />, '/family/join/:code')
+    await toCodeStep(user)
+    await user.click(screen.getByRole('button', { name: 'Copy key' }))
+    expect(writeText).toHaveBeenCalledWith('JBSWY3DPEHPK3PXP')
+    expect(await screen.findByText(KEY_COPIED)).toBeTruthy()
+    const open = screen.getByRole('link', { name: 'Open in code app' })
+    expect(open.getAttribute('href')).toBe(INFO.otpauth_uri)
+    writeText.mockRejectedValueOnce(new Error('denied'))
+    await user.click(screen.getByRole('button', { name: 'Copy key' }))
+    expect(await screen.findByText(KEY_NOT_COPIED)).toBeTruthy()
+  })
+
+  // Review M5 (v0.12.0): Finish answered that the invite had ended and the page went back to the
+  // welcome step with no words; Continue led round the same loop. Fails on the old page.
+  it('says the invite has ended when it ends during joining, and offers no Continue', async () => {
+    const sentence =
+      'This invite link has expired or was already used. Ask the account owner for a new one.'
+    routeFetch(
+      { '/family/api/join/abc123': ok(INFO), '/family/api/join': fail('invite_gone', sentence) },
+      { '/family/api/join': 410 }
+    )
+    const user = userEvent.setup()
+    mountFamily('/family/join/abc123', <FamilyJoin />, '/family/join/:code')
+    await toCodeStep(user)
+    await user.type(screen.getByLabelText('Enter the 6-digit code it shows'), '123456')
+    await user.click(screen.getByRole('button', { name: 'Finish' }))
+    expect((await screen.findByRole('alert')).textContent).toBe(sentence)
+    expect(screen.queryByRole('button', { name: 'Continue' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Finish' })).toBeNull()
+    expect(screen.queryByText('You are invited to the family view of सुदर्शन · SUDARSHAN')).toBeNull()
+    // the key of an invite that ended is off the screen, and the badge is still there
+    expect(screen.queryByTestId('totp-key')).toBeNull()
+    expect(screen.getByTestId('family-badge')).toBeTruthy()
+    expect(document.body.textContent).not.toMatch(/410|invite_gone/)
   })
 })
 
@@ -294,7 +335,7 @@ describe('Login', () => {
     await user.type(screen.getByLabelText('6-digit code'), '123 456')
     expect(submit.disabled).toBe(false)
     await user.click(submit)
-    await waitFor(() => expect(where.path).toBe('/family'))
+    await waitFor(() => expect(where.path).toBe('/family/'))
     const post = router.calls.find((call) => call.method === 'POST')
     expect(post?.body).toEqual({
       handle: 'member_one',
@@ -308,7 +349,7 @@ describe('Login', () => {
   it('goes straight on when the phone is already signed in', async () => {
     routeFetch({ '/family/api/me': ok(meOf('viewer')) })
     mountFamily('/family/login', <FamilyLogin />)
-    await waitFor(() => expect(where.path).toBe('/family'))
+    await waitFor(() => expect(where.path).toBe('/family/'))
   })
 })
 
@@ -413,7 +454,12 @@ describe('Settings', () => {
     const again = (await screen.findAllByRole('listitem')).find(
       (item) => item.getAttribute('data-device') === 'dev-other'
     ) as HTMLElement
+    // Review L1 (v0.12.0): one tap sent it. It asks now; fails on the old row.
     await user.click(within(again).getByRole('button', { name: /Sign out/ }))
+    expect(router.calls.some((call) => call.method === 'DELETE')).toBe(false)
+    const ask = within(again).getByRole('alertdialog')
+    expect(ask.textContent).toContain('Sign that device out?')
+    await user.click(within(ask).getByRole('button', { name: 'Sign out' }))
     await waitFor(() => expect(router.calls.some((call) => call.method === 'DELETE')).toBe(true))
     expect(router.calls.find((call) => call.method === 'DELETE')?.url).toBe(
       '/family/api/devices/dev-other'
@@ -428,8 +474,29 @@ describe('Settings', () => {
     const mine = (await screen.findAllByRole('listitem')).find(
       (item) => item.getAttribute('data-device') === 'dev-this'
     ) as HTMLElement
+    // review M1: a sign-out by the member's own tap leaves the sign-in page no reason to give
+    window.localStorage.setItem('sd-family-was-in', '1')
     await user.click(within(mine).getByRole('button', { name: /Sign out/ }))
+    const ask = within(mine).getByRole('alertdialog')
+    expect(ask.textContent).toContain('Sign out of this phone?')
+    expect(where.path).toBe('/family/settings')
+    await user.click(within(ask).getByRole('button', { name: 'Sign out' }))
     await waitFor(() => expect(where.path).toBe('/family/login'))
+    expect(window.localStorage.getItem('sd-family-was-in')).toBeNull()
+  })
+
+  it('stays signed in when the member answers Stay signed in', async () => {
+    const router = service()
+    const user = userEvent.setup()
+    mountFamily('/family/settings', <FamilySettings />, '/family/settings')
+    const mine = (await screen.findAllByRole('listitem')).find(
+      (item) => item.getAttribute('data-device') === 'dev-this'
+    ) as HTMLElement
+    await user.click(within(mine).getByRole('button', { name: /Sign out/ }))
+    await user.click(within(mine).getByRole('button', { name: 'Stay signed in' }))
+    expect(within(mine).queryByRole('alertdialog')).toBeNull()
+    expect(router.calls.some((call) => call.method === 'DELETE')).toBe(false)
+    expect(where.path).toBe('/family/settings')
   })
 
   it('asks before Sign out everywhere, then leaves', async () => {

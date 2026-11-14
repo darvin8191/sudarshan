@@ -58,9 +58,14 @@ import httpx
 from flask import Blueprint, Response, jsonify, request, stream_with_context
 
 from limiter import limiter
+from sudarshan.assistant import cutoff as sudarshan_cutoff  # SUDARSHAN M17.9
 from utils import runtime, stream_registry
 from utils.logging import get_logger
 from utils.oauth_tokens import AccessTokenError, claims_have_scope, verify_access_token
+
+# SUDARSHAN M17.9: a token issued before AI access was last ended (the kill switch, a logout, a
+# password change) is refused here, on its next call: sudarshan/assistant/cutoff.py
+verify_access_token = sudarshan_cutoff.checked(verify_access_token, AccessTokenError)
 
 logger = get_logger(__name__)
 
@@ -1028,6 +1033,8 @@ def mcp_sse():
     """
     init_http_transport()
 
+    # SUDARSHAN M17.9: read before the token is checked, so an ending straight after is seen
+    sudarshan_ended = sudarshan_cutoff.ended_count()
     token_str = _bearer_or_none()
     if not token_str:
         return _unauthorized("invalid_token", "Missing Bearer token.")
@@ -1071,6 +1078,8 @@ def mcp_sse():
                     last_keepalive = now
                 if stream_registry.wait_stop(step, poll=step):
                     return
+                if sudarshan_cutoff.ended_count() != sudarshan_ended:  # SUDARSHAN M17.9
+                    return  # AI access was ended: the stream closes with it
         finally:
             ticket.release()
 

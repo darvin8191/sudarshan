@@ -82,6 +82,12 @@ def ist_day(ms: int) -> int:
     return to_day(datetime.fromtimestamp(ms // 1000, tz=IST).date())
 
 
+def day_start_ms(day: int) -> int:
+    """The first instant (epoch ms) of an IST day given as YYYYMMDD."""
+    d = to_date(day)
+    return int(datetime(d.year, d.month, d.day, tzinfo=IST).timestamp()) * 1000
+
+
 def ist_clock(ms: int) -> tuple[int, int, int]:
     """Hour, minute and second of an instant in IST."""
     t = datetime.fromtimestamp(ms // 1000, tz=IST)

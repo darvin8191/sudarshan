@@ -1,5 +1,5 @@
-// SUDARSHAN P6 D2 (M2.7, M4.17): the family shell. White app bar with the compact lockup, the
-// screen's title and the FAMILY · VIEW ONLY badge; its own bottom bar from `navigation.ts`; the
+// SUDARSHAN P6 D2 (M2.7, M4.17): the family shell. White app bar with the lockup, the FAMILY ·
+// VIEW ONLY badge and the member's initial, and the screen's title on its own line under them; its own bottom bar from `navigation.ts`; the
 // session check against the viewer API's `me` on mount, on coming back to the page and on any
 // "signed out" answer; the family market manager through `MarketDataContext`.
 //
@@ -24,14 +24,26 @@ import { BottomSheet } from '@/sudarshan/watchlist/BottomSheet'
 import { FamilyError, familyApi, onSignedOut } from './api'
 import { FamilyBadge } from './FamilyBadge'
 import { getFamilyManager } from './familyManager'
-import { familyMenu, familyTitle } from './navigation'
-import { claimForMember, FamilyMeContext, filledForMember, forgetMember, ME_KEY } from './session'
+import { bare, FAMILY_HOME, familyMenu, familyTitle } from './navigation'
+import {
+  claimForMember,
+  FamilyMeContext,
+  filledForMember,
+  forgetMember,
+  type LoginState,
+  ME_KEY,
+  markSignedIn,
+  wasSignedIn,
+} from './session'
 
 const LOGIN = '/family/login'
 
 function isActive(pathname: string, href: string): boolean {
-  const here = pathname.replace(/\/$/, '') || '/'
-  return href === '/family' ? here === '/family' : here === href || here.startsWith(`${href}/`)
+  const here = bare(pathname)
+  const there = bare(href)
+  return there === bare(FAMILY_HOME)
+    ? here === there
+    : here === there || here.startsWith(`${there}/`)
 }
 
 /** The phone can not reach the service and there is no earlier answer to keep showing. */
@@ -78,7 +90,7 @@ export function FamilyLayout() {
 
   // SUDARSHAN P6 D8: on every open, a granted permission re-posts the subscription the browser
   // holds (Chrome does not always say when it changes).
-  usePushResync(session.data != null)
+  usePushResync(session.data != null, session.data?.member.id)
 
   // Coming back to the page (the phone woke, the app was switched back to) checks the session.
   useEffect(() => {
@@ -115,7 +127,29 @@ export function FamilyLayout() {
     claimed((n) => n + 1)
   }, [client, memberId])
 
-  if (signedOut) return <Navigate to={LOGIN} replace />
+  // A session is open here: remembered, so that when the server ends it the member is told why.
+  useEffect(() => {
+    if (memberId !== null) markSignedIn()
+  }, [memberId])
+
+  // Review M7: `/family` is outside the installed app's scope; the Dashboard lives at `/family/`.
+  if (location.pathname === bare(FAMILY_HOME)) {
+    return (
+      <Navigate
+        to={{ pathname: FAMILY_HOME, search: location.search, hash: location.hash }}
+        replace
+        state={location.state}
+      />
+    )
+  }
+
+  if (signedOut) {
+    // Review M1: the service's own sentence (paused, removed, expired, signed out elsewhere) goes
+    // to the sign-in page. A phone with no session to end gets the bare form.
+    const state: LoginState | undefined =
+      error?.code === 'signed_out' && wasSignedIn() ? { reason: error.message } : undefined
+    return <Navigate to={LOGIN} replace state={state} />
+  }
   if (!me) {
     if (session.isPending) return <PageLoader />
     if (error?.code === 'off') {
@@ -140,13 +174,17 @@ export function FamilyLayout() {
     <MarketDataProvider manager={getFamilyManager()}>
       <FamilyMeContext.Provider value={me}>
         <div className="flex min-h-screen flex-col bg-background" data-family-shell>
+          {/* Review H2 (v0.12.0): at 360 px the lockup, the badge and the initial fill the bar, so
+              the title has a line of its own under it and is never cut; the badge is what gives
+              way (it shrinks, and a child's takes its short form), and the initial stays in. */}
           <header className="sticky top-0 z-40 border-b bg-card">
-            <div className="mx-auto flex h-14 max-w-3xl items-center gap-2 px-3">
-              <BrandLockup />
-              <h1 className="sd-display min-w-0 flex-1 truncate text-[1.125rem] font-bold">
-                {title}
-              </h1>
-              <FamilyBadge limited={me.limited} />
+            <div
+              data-testid="family-bar"
+              className="mx-auto flex h-[3.25rem] max-w-3xl items-center gap-2 px-3 pt-1"
+            >
+              <BrandLockup className="shrink-0" />
+              <span aria-hidden="true" className="min-w-0 flex-1" />
+              <FamilyBadge limited={me.limited} className="min-w-0 shrink" />
               <span
                 role="img"
                 aria-label={`Signed in as ${me.member.handle}`}
@@ -154,6 +192,14 @@ export function FamilyLayout() {
               >
                 <span aria-hidden="true">{initial}</span>
               </span>
+            </div>
+            <div className="mx-auto max-w-3xl px-4 pb-2">
+              <h1
+                data-testid="family-title"
+                className="sd-display text-[1.25rem] leading-tight font-bold break-words"
+              >
+                {title}
+              </h1>
             </div>
           </header>
 
@@ -217,7 +263,14 @@ export function FamilyLayout() {
             </div>
           </nav>
 
-          <BottomSheet open={more} onOpenChange={setMore} title="More">
+          {/* Review L8 (v0.12.0): the sheet's default line is "Details and actions", and this
+              view has no action. */}
+          <BottomSheet
+            open={more}
+            onOpenChange={setMore}
+            title="More"
+            hiddenDescription="More screens of the family view"
+          >
             <ul className="flex flex-col gap-1">
               {rest.map((item) => (
                 <li key={item.href}>

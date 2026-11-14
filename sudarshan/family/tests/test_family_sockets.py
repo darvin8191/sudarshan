@@ -234,6 +234,7 @@ from family_planekit import (  # noqa: E402
     Clock,
     FakeFeed,
     FakePortfolio,
+    Sock,
     book_view,
     frame,
     ist,
@@ -447,6 +448,130 @@ def test_a_symbol_waits_for_the_members_books_then_follows_or_is_refused(tmp_pat
     run(go())
 
 
+class _Answered:
+    """A source (the books, the shared lists) for the M2 tests: ``keys`` are the member's to see,
+    and ``has`` says whether it has an answer for them yet (``ensure`` gives one)."""
+
+    def __init__(self, has: bool, keys: tuple[str, ...] = ()):
+        self.has, self.mine, self.ensured = has, set(keys), 0
+
+    def keys(self, member_id):
+        return set(self.mine) if self.has else set()
+
+    def known(self, member_id):
+        return self.has
+
+    async def ensure(self, member):
+        self.ensured += 1
+        self.has = True
+
+    def screen(self, *args):
+        return 0
+
+    def closed(self, sock):
+        return None
+
+    def book_keys(self):
+        return set()
+
+
+def _m2_dialect(has: bool):
+    """A dialect whose map holds SYNTH1 (the member's own) and SYNTH9 (in the map through another
+    member's books: not this member's), and nothing called NOSUCH."""
+    from types import SimpleNamespace
+
+    from sudarshan.family.symbol_map import SymbolMap
+    from sudarshan.family.viewer_ws import Dialect
+
+    symbols = SymbolMap()
+    symbols.put(Listing(r["symbol"], r["exchange"], r["instrument_key"], r["name"], refreshed_at=1)
+                for r in (position(1), position(9)))  # fmt: skip
+
+    async def judge(hashed):
+        return SimpleNamespace(member={"id": 7, "role": "child", "privacy": dict(CHILD)})
+
+    books = _Answered(has, (position(1)["instrument_key"],))
+    dialect = Dialect(judge=judge, symbols=symbols, books=books)
+    dialect.sources.append(books)
+    return dialect, books
+
+
+M2_ASK = [{"symbol": "SYNTH9", "exchange": "NSE"}, {"symbol": "NOSUCH", "exchange": "NSE"},
+          {"symbol": "SYNTH1", "exchange": "NSE"}]  # fmt: skip
+
+
+def _errors(sock: Sock) -> list[dict]:
+    return [m for m in sock.of("subscribe") if m["status"] == "error"]
+
+
+def test_m2_a_symbol_another_member_holds_is_refused_with_an_unknown_one_in_one_message():
+    """v0.12.0 review M2: the map is one for the whole service, so an answer that told "not in
+    the map" from "in the map, not yours" named the owner's holdings to a member who was not
+    shared them. With the member's books read, both are refused at once, in one message, in the
+    order asked. Fails on the old code: only NOSUCH was refused at once, and SYNTH9 waited."""
+
+    async def go():
+        dialect, _ = _m2_dialect(has=True)
+        sock = Sock()
+        await dialect.on_message(sock, json.dumps({"action": "subscribe", "symbols": M2_ASK}))
+        at_once = list(sock.sent)
+        await asyncio.sleep(0.05)
+        seat = dialect.seats[sock]
+        await dialect.close()
+        return at_once, _errors(sock), seat
+
+    at_once, errors, seat = asyncio.run(go())
+    assert [m for m in at_once if m.get("status") == "error"] == [
+        {"type": "subscribe", "status": "error", "message": NOT_AVAILABLE,
+         "symbols": M2_ASK[:2]}]  # fmt: skip
+    assert errors == [m for m in at_once if m.get("status") == "error"]  # and nothing later
+    assert set(seat.follows) == {("SYNTH1", "NSE")} and not seat.waiting
+
+
+def test_m2_before_the_books_are_read_both_wait_and_are_refused_together():
+    """The same two symbols while the member's books have no answer yet: neither is refused at
+    once (the old code refused NOSUCH here and now, SYNTH9 later), both wait, and the read that
+    lands refuses both in one message while the member's own symbol is followed."""
+
+    async def go():
+        dialect, books = _m2_dialect(has=False)
+        sock = Sock()
+        await dialect.on_message(sock, json.dumps({"action": "subscribe", "symbols": M2_ASK}))
+        at_once, waiting = list(sock.sent), dict(dialect.seats[sock].waiting)
+        await asyncio.sleep(0.05)  # the ensure read lands and rechecks
+        seat = dialect.seats[sock]
+        await dialect.close()
+        return at_once, waiting, _errors(sock), seat, books.ensured
+
+    at_once, waiting, errors, seat, ensured = asyncio.run(go())
+    assert at_once == [] and set(waiting) == {("SYNTH9", "NSE"), ("NOSUCH", "NSE"),
+                                              ("SYNTH1", "NSE")}  # fmt: skip
+    assert ensured == 1
+    assert errors == [{"type": "subscribe", "status": "error", "message": NOT_AVAILABLE,
+                       "symbols": M2_ASK[:2]}]  # fmt: skip
+    assert set(seat.follows) == {("SYNTH1", "NSE")} and not seat.waiting
+
+
+def test_m2_a_symbol_the_map_gains_while_it_waits_is_followed_when_it_is_the_members():
+    """A symbol asked for before the read that brings it to the map (a list's row) is followed
+    once that read lands, as one the map already held would be."""
+
+    async def go():
+        dialect, books = _m2_dialect(has=False)
+        books.mine.add("NSE_EQ|LATER")
+        sock = Sock()
+        await dialect.on_message(sock, json.dumps({"action": "subscribe", "symbols": [
+            {"symbol": "LATER", "exchange": "NSE"}]}))  # fmt: skip
+        dialect.symbols.put([Listing("LATER", "NSE", "NSE_EQ|LATER", "Later", refreshed_at=1)])
+        await asyncio.sleep(0.05)
+        seat = dialect.seats[sock]
+        await dialect.close()
+        return seat, _errors(sock)
+
+    seat, errors = asyncio.run(go())
+    assert seat.follows == {("LATER", "NSE"): "NSE_EQ|LATER"} and not errors
+
+
 def test_the_book_message_reaches_every_socket_of_a_member_who_may_see_the_part(tmp_path):
     """FD2: a member's every open socket is told when a part they may see was read, not only the
     one that follows prices or shows that screen; a child, whose orders are hidden, is not."""
@@ -462,7 +587,9 @@ def test_the_book_message_reaches_every_socket_of_a_member_who_may_see_the_part(
             assert told["part"] == "trades"
             assert (await next_of(idle, "book")) == told
             assert [m for m in await gather(child, 0.5) if m.get("type") == "book"] == []
-            assert [c[0] for c in world.portfolio.calls] == ["upstox_book"]  # the child: no read
+            # the child: no read. M3 (v0.12.0): what the member is shared is asked before it.
+            assert [c[0] for c in world.portfolio.calls] == ["shares_for_viewer", "upstox_book"]
+            assert {c[1] for c in world.portfolio.calls} == {member["id"]}
             for sock in (trades, idle, child):
                 await sock.close()
 

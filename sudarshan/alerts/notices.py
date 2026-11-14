@@ -30,8 +30,9 @@ read when a notice is due and none is loaded.
         messages and at most NOTICES_PER_MINUTE a minute (NoticePace). The slot is taken just
         before the send, after the claim is known to be ours.
   Quiet in market hours. While the market trades (09:15 to the F&O close: 15:40, 15:45 from
-        7 Dec 2026; or a listed day's own window) only a run that holds a failure (FAILURES) goes
-        out; the rest wait for the close, still inside MAX_AGE_S. The owner's phone is for fills
+        7 Dec 2026; or a listed day's own window) only a run that holds a failure (FAILURES, a
+        failing check of the watch or its recovery) goes out; the rest wait for the close, still
+        inside MAX_AGE_S. The owner's phone is for fills
         and rejections then.
 
 Slots. The service builds the desk with ``pace=LanePace(pacer)`` (service.py): a notice takes a
@@ -85,7 +86,9 @@ FAILURES = frozenset({"rolled_back", "unit_refused", "backup_failed"})
 FAMILY_AT_ONCE = frozenset(
     {"lockout", "new_device", "member_removed", "bot_token_rejected", "family_check_failed"}
 )
-AT_ONCE = FAILURES | FAMILY_AT_ONCE
+#: The watch's notices (src watch, M19.5): a failure is told at once, and so is the recovery from
+#: one; a warning and the return from a warning wait for the close (``_at_once``).
+AT_ONCE = FAILURES | FAMILY_AT_ONCE | {"watch_failing"}
 MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 UNIT = re.compile(r"sudarshan-[a-z0-9-]+\.(?:service|timer)")
 #: The order the facts of one run are told in.
@@ -104,6 +107,9 @@ KIND_ORDER = (
     "invite_used",
     "push_failing",
     "store_newer",
+    "watch_failing",
+    "watch_warning",
+    "watch_fine",
 )
 
 #: Why an install was undone, in the owner's words (the cause only; ``rolled_back`` adds the rest).
@@ -406,6 +412,132 @@ def _family_check_failed(event: Event, now: datetime) -> list[str]:
     ]
 
 
+#: The watch (sudarshan/ops/watch, M19.5) tells a check's change of level. What each ring service
+#: is to the owner, and what stops while it does not answer.
+_SERVICES = {
+    "feed": ("price feed", "Prices, market alerts and the screener are stopped."),
+    "alerts": (
+        "alerts service",
+        "Order alerts, market alerts and server notices were not sent while it was silent.",
+    ),
+    "portfolio": ("portfolio service", "The Portfolio page shows no figures."),
+    "screener": ("screener", "Screens are not running and their alerts are stopped."),
+    "family": ("family view", "Family members cannot open the app."),
+    "journal": ("journal", "The Journal and Reports pages are not updating."),
+}
+RESTARTS = (
+    "The server restarts it by itself; if this message comes again, have the server looked at."
+)
+_MINUTES = re.compile(r"[0-9]{1,5}")
+_GB = re.compile(r"[0-9]{1,5}\.[0-9]")
+
+
+def _began(event: Event, now: datetime) -> str:
+    """When the trouble began: the event's time less the minutes the check had counted."""
+    minutes = event.fact("minutes")
+    back = int(minutes) * 60 if _MINUTES.fullmatch(minutes) else 0
+    return _when(event.at - back, now)
+
+
+def _watch_failing(event: Event, now: datetime) -> list[str]:
+    check = event.fact("check")
+    if check.startswith("service_") and check[8:] in _SERVICES:
+        name, stopped = _SERVICES[check[8:]]
+        return [
+            f"SUDARSHAN's {name} stopped answering at {_began(event, now)}. {stopped} {RESTARTS}"
+        ]
+    if check == "login":
+        if event.fact("when") == "before_open":
+            return [
+                "There is no Upstox login for today. Orders, charts and order alerts will not "
+                "work until you connect Upstox in the app."
+            ]
+        return [
+            f"Order updates from Upstox have not been arriving since {_began(event, now)}. A "
+            "fill or a rejection may not show at once. It reconnects by itself; if the app asks "
+            "you to connect Upstox, do that."
+        ]
+    if check == "feed":
+        return [
+            f"The price feed has not been connected to Upstox since {_began(event, now)}. "
+            "Prices on your screens are not Real-time and market alerts are stopped. It "
+            "reconnects by itself; if this message comes again, have the server looked at."
+        ]
+    if check == "instrument_list":
+        return [
+            "Today's instrument list was not refreshed. New weekly contracts may be missing and "
+            "expired ones may still show. Open Master Contract and press Download."
+        ]
+    if check == "disk":
+        if event.fact("cause") == "files":
+            return [
+                "The server's disk has almost no room left for new files. Backups and the "
+                "databases can stop working. Have old files cleared now."
+            ]
+        free = event.fact("free_gb")
+        left = f": {free} GB free" if _GB.fullmatch(free) else ""
+        return [
+            f"The server's disk is almost full{left}. Backups and the databases can stop "
+            "working. Free space on it now."
+        ]
+    if check == "certificate":
+        hours = event.fact("hours")
+        if hours == "0":
+            return [
+                "The server's security certificate has run out and has not renewed. Phones "
+                "refuse the app until it is renewed; have the server looked at now."
+            ]
+        left = f"in {hours} hours" if _MINUTES.fullmatch(hours) else "within two days"
+        return [
+            f"The server's security certificate runs out {left} and has not renewed. Phones "
+            "will refuse the app after that."
+        ]
+    return []
+
+
+def _watch_warning(event: Event, now: datetime) -> list[str]:
+    check = event.fact("check")
+    if check == "disk":
+        if event.fact("cause") == "files":
+            return [
+                "The server's disk is running short of room for new files. Nothing has stopped; "
+                "have old files cleared."
+            ]
+        free = event.fact("free_gb")
+        left = f": {free} GB free" if _GB.fullmatch(free) else ""
+        return [
+            f"The server's disk is getting full{left}. Nothing has stopped; have old files "
+            "cleared before it runs out."
+        ]
+    if check == "memory":
+        return [
+            "The server has been short of memory for several minutes. Nothing has stopped; if "
+            "the app feels slow, have the server looked at."
+        ]
+    return []
+
+
+def _watch_fine(event: Event, now: datetime) -> list[str]:
+    check, at = event.fact("check"), _when(event.at, now)
+    if check.startswith("service_") and check[8:] in _SERVICES:
+        return [f"SUDARSHAN's {_SERVICES[check[8:]][0]} is answering again since {at}."]
+    return {
+        "login": [f"Upstox is connected again since {at}: order updates are arriving."],
+        "feed": [f"The price feed is connected to Upstox again since {at}."],
+        "instrument_list": ["Today's instrument list is now refreshed."],
+        "disk": ["The server's disk has enough free space again."],
+        "memory": ["The server's memory is back to normal."],
+        "certificate": ["The server's security certificate was renewed."],
+    }.get(check, [])
+
+
+def _at_once(event: Event) -> bool:
+    """Whether a notice goes out in market hours too."""
+    if event.kind == "watch_fine":
+        return event.fact("was") == "failing"
+    return event.kind in AT_ONCE
+
+
 #: The words of the kinds that are made one event at a time. ``report`` has none on purpose: a
 #: report is not a notice, it belongs to the report desk.
 _FAMILY_WORDS = {
@@ -417,6 +549,9 @@ _FAMILY_WORDS = {
     "bot_token_rejected": _bot_token_rejected,
     "store_newer": _store_newer,
     "family_check_failed": _family_check_failed,
+    "watch_failing": _watch_failing,
+    "watch_warning": _watch_warning,
+    "watch_fine": _watch_fine,
 }
 
 
@@ -688,7 +823,7 @@ class NoticeDesk:
         if not events or not self._trading():
             self._held.clear()
             return events
-        urgent = {e.run for e in events if e.kind in AT_ONCE}
+        urgent = {e.run for e in events if _at_once(e)}
         due = [e for e in events if e.run in urgent]
         held = {e.id for e in events if e.run not in urgent}
         if held and held != self._held:

@@ -664,4 +664,12 @@ def test_l5_mcp_is_left_out_when_off_and_honest_about_access_tokens_when_on(chat
     monkeypatch.setenv("MCP_HTTP_ENABLED", "True")
     answer = killswitch.activate(owner, exit_all=False, phrase="STOP")
     said = _steps(answer)["mcp"]["words"]
-    assert "revoked" in said and "up to 15 minutes" in said and "access revoked" not in said
+    assert "revoked" in said and "ended at once" in said and "15 minutes" not in said
+    # M17.9: the access already handed out ended with it, and resuming brings nothing back.
+    from sudarshan.assistant import cutoff
+    from sudarshan.guard import store as guard_store
+
+    cutoff._cache.clear()
+    ended = guard_store.STORE.mcp_valid_after()
+    assert ended is not None and cutoff.refuses({"iat": ended // 1000})
+    assert not cutoff.refuses({"iat": ended // 1000 + 1})

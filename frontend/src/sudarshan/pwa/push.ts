@@ -12,7 +12,10 @@
 //  - `disablePush`: tell the service, then drop the browser's subscription.
 //
 // Endpoints and keys are never logged or kept; the only thing stored on the phone is one flag,
-// `on` or absent, which says the member turned notifications on here.
+// absent or `on:<member id>`, which says which member turned notifications on here. Review L5
+// (v0.12.0): on a shared phone the re-sync posted the browser's subscription for whoever signed
+// in, so a second member was subscribed without a tap. It now posts only for the member who
+// turned them on (and, as before, where the phone kept no flag at all).
 import { useEffect } from 'react'
 import { FamilyError, familyApi } from '@/sudarshan/family/api'
 import { registerFamilyWorker } from './register'
@@ -45,6 +48,16 @@ function write(name: string, value: string | null): void {
   } catch {
     // not kept: a resync then only re-posts a subscription the browser still holds
   }
+}
+
+/** The flag's value for a member (`on` alone where the caller does not know the member). */
+const flagFor = (memberId?: number | null) => (memberId == null ? 'on' : `on:${memberId}`)
+
+/** Whether notifications were turned on here by somebody else than this member. */
+function anothers(memberId?: number | null): boolean {
+  const flag = read(FLAG)
+  if (memberId == null || flag === null || flag === 'on') return false
+  return flag !== flagFor(memberId)
 }
 
 export function pushSupported(): boolean {
@@ -127,7 +140,7 @@ export async function pushStatus(): Promise<PushStatus> {
  * Resolves to the status afterwards; throws a `FamilyError` in the viewer's words if the service
  * refused the subscription (the browser's is then dropped, so the toggle never lies).
  */
-export async function enablePush(): Promise<PushStatus> {
+export async function enablePush(memberId?: number | null): Promise<PushStatus> {
   if (!pushSupported()) return 'unsupported'
   if (Notification.permission === 'denied') return 'blocked'
   const asked =
@@ -154,7 +167,7 @@ export async function enablePush(): Promise<PushStatus> {
     if (!sub) await made.unsubscribe().catch(() => false)
     throw error
   }
-  write(FLAG, 'on')
+  write(FLAG, flagFor(memberId))
   return 'on'
 }
 
@@ -175,9 +188,13 @@ export async function disablePush(): Promise<void> {
  * to what it did, for a test; it never throws, because a failed re-sync only means the next
  * open tries again.
  */
-export async function resyncPush(): Promise<'posted' | 'remade' | 'none' | 'failed'> {
+export async function resyncPush(
+  memberId?: number | null
+): Promise<'posted' | 'remade' | 'none' | 'failed'> {
   try {
     if (!pushSupported() || Notification.permission !== 'granted') return 'none'
+    // Another member turned notifications on here: this one has not chosen them (review L5).
+    if (anothers(memberId)) return 'none'
     const reg = await registration()
     if (!reg) return 'none'
     let sub = await reg.pushManager.getSubscription()
@@ -187,7 +204,7 @@ export async function resyncPush(): Promise<'posted' | 'remade' | 'none' | 'fail
     }
     // The browser lost it (the phone was reset, storage cleared by a cleaner): made again, but
     // only where the member had turned notifications on, never for one who turned them off.
-    if (read(FLAG) !== 'on') return 'none'
+    if (!(read(FLAG) ?? '').startsWith('on')) return 'none'
     const { key } = await familyApi.pushKey()
     sub = await reg.pushManager.subscribe({
       userVisibleOnly: true,
@@ -212,7 +229,7 @@ export function resetResyncForTests(): void {
  * `enabled` true once the member is known. A phone that signs out and in again on the same page
  * load posts again.
  */
-export function usePushResync(enabled: boolean): void {
+export function usePushResync(enabled: boolean, memberId?: number | null): void {
   useEffect(() => {
     if (!enabled) {
       resynced = false
@@ -220,6 +237,6 @@ export function usePushResync(enabled: boolean): void {
     }
     if (resynced) return
     resynced = true
-    void resyncPush()
-  }, [enabled])
+    void resyncPush(memberId)
+  }, [enabled, memberId])
 }

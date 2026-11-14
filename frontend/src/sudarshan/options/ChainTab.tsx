@@ -28,6 +28,7 @@ export function ChainTab({
   dim,
   startAt = null,
   onOpen,
+  onStraddle,
 }: {
   model: ChainModel
   /** Changes with the underlying or the expiry: the list starts again around the money. */
@@ -38,6 +39,8 @@ export function ChainTab({
   /** The strike the address named: the list opens around it instead of the money. */
   startAt?: number | null
   onOpen: (strike: number, side: 'ce' | 'pe') => void
+  /** Tapping a strike opens its straddle. */
+  onStraddle?: (strike: number) => void
 }) {
   const [view, setView] = useState<ChainView>('price')
   const [shown, setShown] = useState<{ key: string; stage: 'near' | 'window' | 'all' }>({
@@ -131,6 +134,7 @@ export function ChainTab({
               view={view}
               {...extra}
               onOpen={onOpen}
+              onStraddle={onStraddle}
               signature={rowSignature(row, view, extra)}
             />
           )
