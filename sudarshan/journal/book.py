@@ -323,13 +323,22 @@ async def _rows(read) -> list[Mapping[str, Any]] | None:
     return [r for r in answer["data"] if isinstance(r, Mapping)]
 
 
+#: After a read of what was held that did not happen, the next is not asked for this long, so a
+#: portfolio that is down is not asked at every replay.
+OPENINGS_RETRY_MS = 60_000
+
+
 async def read_openings(service: Any, need: Mapping[tuple[str, str, str], str]) -> Facts:
     """What was held of each carry key at first sight (``need``: key -> instrument key), as of
     the start of today: a derivative from Upstox's overnight quantity in a carry product, a share
     from its holdings (settled and yesterday's). Each read is one call for every key; a key whose
-    read did not happen is left out, so the next replay asks again."""
+    read did not happen is left out, so a later replay asks again (not within
+    OPENINGS_RETRY_MS of a read that did not happen)."""
     now = service.clock()
     facts = Facts(opening_day=ist_day(now), opening_ms=now)
+    failed = service.parts.get("openings_failed_ms")
+    if isinstance(failed, int) and now - failed < OPENINGS_RETRY_MS:
+        return facts
     link = link_for(service)
     shares = {k: ik for k, ik in need.items() if pairing.cash_carry(k[0], k[2])}
     others = {k: ik for k, ik in need.items() if k not in shares}
@@ -349,6 +358,8 @@ async def read_openings(service: Any, need: Mapping[tuple[str, str, str], str]) 
             held[ik] = held.get(ik, 0) + _whole(row.get("qty_u")) + _whole(row.get("t1_qty_u"))
         for key, ik in shares.items():
             facts.openings[key] = (held.get(ik, 0), "holdings")
+    if len(facts.openings) < len(need):
+        service.parts["openings_failed_ms"] = now
     return facts
 
 
