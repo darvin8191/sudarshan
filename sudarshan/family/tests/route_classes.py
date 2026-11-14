@@ -754,6 +754,10 @@ protected     /sudarshan/portfolio/api/assets                                   
 protected     /sudarshan/portfolio/api/assets/<int:id>                                  sudarshan_portfolio.asset_update
 protected     /sudarshan/portfolio/api/assets/<int:id>/prices                           sudarshan_portfolio.price_point_set
 protected     /sudarshan/portfolio/api/assets/<int:id>/tab                              sudarshan_portfolio.loan_move
+protected     /sudarshan/portfolio/api/family/privacy                                   sudarshan_portfolio.member_privacy_set
+protected     /sudarshan/portfolio/api/family/shares                                    sudarshan_portfolio.share_remove
+protected     /sudarshan/portfolio/api/family/shares                                    sudarshan_portfolio.share_set
+protected     /sudarshan/portfolio/api/family/shares                                    sudarshan_portfolio.shares_list
 protected     /sudarshan/portfolio/api/imports/<int:id>                                 sudarshan_portfolio.import_discard
 protected     /sudarshan/portfolio/api/imports/<int:id>/commit                          sudarshan_portfolio.import_commit
 protected     /sudarshan/portfolio/api/members                                          sudarshan_portfolio.member_create

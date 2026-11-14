@@ -27,6 +27,8 @@ from .errors import ApiError
 from .store import Invalid, NotFound, Scope, Tx, VersionConflict
 
 NOT_SHARED = "Not shared with you."
+#: A share or a member's privacy changed on another screen: the item's sentence, not the tab's.
+ITEM = "version_conflict_item"
 ROLE = re.compile(r"role:[a-z0-9_-]{1,30}")
 MEMBER = re.compile(r"[A-Za-z0-9_-]{1,40}")
 MAX_ARG_MASK = 200
@@ -75,10 +77,10 @@ def share_set(
     values = {"level": level, "expires_at": expires_at}
     if not found:
         if version is not None:
-            raise VersionConflict()
+            raise VersionConflict(ITEM)
         return tx.insert("tab_share", {"tab_id": tab_id, "viewer": key, **values}, now)
     if version is None:
-        raise VersionConflict()
+        raise VersionConflict(ITEM)
     return tx.change("tab_share", found[0]["id"], version, values, now)
 
 
@@ -87,7 +89,7 @@ def share_remove(tx: Tx, tab_id: Any, viewer: Any, version: Any) -> bool:
     if not found:
         raise NotFound()
     if found[0]["version"] != version:
-        raise VersionConflict()
+        raise VersionConflict(ITEM)
     return tx.remove("tab_share", found[0]["id"])
 
 
@@ -126,10 +128,10 @@ def privacy_set(
     found = privacy_row(tx, key)
     if found is None:
         if version is not None:
-            raise VersionConflict()
+            raise VersionConflict(ITEM)
         return tx.insert("member_privacy", {"member": key, **values}, now)
     if version is None:
-        raise VersionConflict()
+        raise VersionConflict(ITEM)
     return tx.change("member_privacy", found["id"], version, values, now)
 
 

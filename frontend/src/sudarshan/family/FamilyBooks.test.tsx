@@ -227,6 +227,33 @@ describe('Holdings', () => {
     expect(screen.getByTestId('holdings-value').textContent).toContain('Hidden')
   })
 
+  it('with quantities shown and P&L hidden, shows no value, invested or day change (H1)', async () => {
+    // As an older server would leave it: the average is still in the row.
+    const costly = { ...FULL_HOLDING, symbol: 'COSTX', pnl_paise: undefined }
+    routeFetch({
+      '/family/api/books/holdings': ok(bookOf('holdings', [costly], { hidden: ['pnl'] })),
+    })
+    mount('/family/holdings', <FamilyHoldings />, '/family/holdings')
+    const card = await screen.findByRole('button', { name: /COSTX/ })
+    expect(card.textContent).toContain('Qty 4')
+    expect(card.textContent).toMatch(/Avg\s*Hidden/)
+    expect(card.textContent).toMatch(/Value\s*Hidden/)
+    expect(screen.getByTestId('holdings-value').textContent).toContain('Hidden')
+    const header = screen.getByTestId('holdings-value').closest('section') as HTMLElement
+    for (const label of ['Invested', 'Overall P&L', "Day's change"]) {
+      const term = within(header).getByText(label)
+      expect(term.nextElementSibling?.textContent).toContain('Hidden')
+    }
+    // 4 x 55 = 220 now, 4 x 50 = 200 invested, 4 x (55 - 54) = 4 today: none of them anywhere
+    expect(document.body.textContent).not.toMatch(/220\.00|200\.00|₹4\.00/)
+    await userEvent.click(card)
+    const sheet = await screen.findByRole('dialog')
+    for (const label of ['Average price', 'Invested', 'Current value', 'Day’s change']) {
+      const term = within(sheet).getByText(label)
+      expect(term.parentElement?.textContent).toContain('Hidden')
+    }
+  })
+
   it('shows value, invested and P&L where the mask leaves them', async () => {
     routeFetch({ '/family/api/books/holdings': ok(bookOf('holdings', [FULL_HOLDING])) })
     mount('/family/holdings', <FamilyHoldings />, '/family/holdings')

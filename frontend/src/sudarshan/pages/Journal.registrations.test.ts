@@ -2,7 +2,7 @@
  * The Journal page needs all three registrations (CLAUDE.md, "Adding a page"): a route inside the
  * app shell after the other SUDARSHAN pages, the same path known to Flask (a refresh or a bookmark
  * opened while signed out is not a 404 counted against the visitor's IP), and a menu entry before
- * Holdings, in the order Watchlist, Portfolio, Screener, Journal (Reports follows it, JD6).
+ * Holdings, in the order Watchlist, Screener, Portfolio, Journal, Reports (cross-design Y36).
  */
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -32,14 +32,21 @@ describe('the Journal page registrations', () => {
     expect(flask.indexOf(view)).toBeGreaterThan(flask.indexOf('def react_screener():'))
   })
 
-  it('is in the menu after Screener, before Reports and Holdings, as Journal with a notebook', () => {
+  it('is in the menu after Portfolio, before Reports and Holdings, as Journal with a notebook', () => {
     const hrefs = profileMenuItems.map((item) => item.href)
     const index = hrefs.indexOf('/journal')
     expect(profileMenuItems[index]).toMatchObject({ label: 'Journal' })
     expect(profileMenuItems[index].icon.displayName).toBe('NotebookPen')
-    expect(hrefs.indexOf('/watchlist')).toBeLessThan(hrefs.indexOf('/portfolio'))
-    expect(hrefs.indexOf('/portfolio')).toBeLessThan(hrefs.indexOf('/screener'))
-    expect(hrefs[index - 1]).toBe('/screener')
+    const run = hrefs.indexOf('/watchlist')
+    expect(hrefs.slice(run, run + 6)).toEqual([
+      '/watchlist',
+      '/screener',
+      '/portfolio',
+      '/journal',
+      '/reports',
+      '/holdings',
+    ])
+    expect(hrefs[index - 1]).toBe('/portfolio')
     expect(hrefs[index + 1]).toBe('/reports')
     expect(hrefs.filter((href) => href === '/journal')).toHaveLength(1)
   })

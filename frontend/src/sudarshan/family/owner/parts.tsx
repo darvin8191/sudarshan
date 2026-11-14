@@ -48,20 +48,26 @@ export type Said = { kind: 'ok' | 'problem' | 'unconfirmed'; text: string }
  * has re-rendered the disabled button) still send once; it is let go when the answer comes, or
  * when the send throws. `run` returns undefined for a tap the lock turned away. A write that was
  * not answered says so ("Not confirmed"), never "failed", and the caller reads the page again.
+ * `okText` may return a whole `Said`: a send that did part of what it set out to do resolves
+ * with its data and says what is missing.
  */
 export function useOnce(onSettled?: (said: Said, error: OwnerError | null) => void) {
   const busy = useRef(false)
   const [pending, setPending] = useState(false)
   const [said, setSaid] = useState<Said | null>(null)
   const run = useCallback(
-    async <T,>(send: () => Promise<T>, okText: (data: T) => string): Promise<T | undefined> => {
+    async <T,>(
+      send: () => Promise<T>,
+      okText: (data: T) => string | Said
+    ): Promise<T | undefined> => {
       if (busy.current) return undefined
       busy.current = true
       setPending(true)
       setSaid(null)
       try {
         const data = await send()
-        const next: Said = { kind: 'ok', text: okText(data) }
+        const words = okText(data)
+        const next: Said = typeof words === 'string' ? { kind: 'ok', text: words } : words
         setSaid(next)
         onSettled?.(next, null)
         return data

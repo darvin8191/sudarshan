@@ -1,26 +1,24 @@
 // SUDARSHAN P6 D7b (M8.15, M7.37): what the owner shares with the family. Watchlists (pick lists,
 // for one member or every member), Books (positions, holdings, orders, trades and funds, one
-// member at a time, beside what that member's privacy hides) and Portfolio tabs (read only here:
-// see the note in that section). One share is one switch; a switch sends once however it is
-// tapped (the section holds one write at a time) and shows the service's sentence.
+// member at a time, beside what that member's privacy hides) and Portfolio tabs (one member or
+// every member, View or Restricted, an optional end: PortfolioTabShares.tsx, kept in the
+// portfolio). One share is one switch; a switch sends once however it is tapped (the section
+// holds one write at a time) and shows the service's sentence.
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { EyeOff, FolderOpen, Loader2 } from 'lucide-react'
+import { EyeOff, Loader2 } from 'lucide-react'
 import { useState } from 'react'
 import { watchlistApi } from '@/api/watchlist'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
-import { portfolioCall } from '@/sudarshan/portfolio/api'
 import { ownerApi } from '../ownerApi'
 import type { MemberCard, Share, ShareKind } from '../types'
 import { SHARES_KEY } from './keys'
+import { PortfolioTabShares } from './PortfolioTabShares'
 import { CARD, ROW, SaidLine, useOnce } from './parts'
 import { BOOK_HIDDEN_BY, BOOK_PARTS, coveredByAll, rowFor, type Target } from './shareRules'
 
 const SELECT =
   'h-12 w-full rounded-md border border-[color:var(--input)] bg-card px-3 text-base outline-none focus-visible:ring-2 focus-visible:ring-ring'
-
-export const TABS_NOTE =
-  'Sharing a portfolio tab with a member is not connected to this page yet, so it cannot be shown or changed here.'
 
 function Note({ children }: { children: string }) {
   return <p className="text-[0.8125rem] text-[color:var(--text-tertiary)]">{children}</p>
@@ -231,40 +229,7 @@ function Books({ members, shares }: { members: MemberCard[]; shares: readonly Sh
   )
 }
 
-/** Read only: no route of the owner's bridges reaches a tab's shares (see the report). */
-function PortfolioTabs() {
-  const tabs = useQuery({
-    queryKey: ['sudarshan', 'family-owner', 'portfolio-tabs'],
-    queryFn: async ({ signal }) => {
-      const result = await portfolioCall('state', undefined, signal)
-      return result.enabled ? result.data.tabs.filter((t) => !t.archived) : []
-    },
-    retry: false,
-  })
-  return (
-    <section aria-labelledby="share-tabs" className={`${CARD} flex flex-col gap-3`}>
-      <h2 id="share-tabs" className="text-[1.0625rem] font-bold">
-        Portfolio tabs
-      </h2>
-      <p className="text-[0.9375rem]">{TABS_NOTE}</p>
-      {tabs.data && tabs.data.length > 0 ? (
-        <ul className="flex flex-col gap-1.5">
-          {tabs.data.map((tab) => (
-            <li
-              key={tab.id}
-              className="flex min-h-12 items-center gap-2 text-[0.9375rem] text-[color:var(--text-secondary)]"
-            >
-              <FolderOpen aria-hidden="true" className="size-4 shrink-0" />
-              {tab.name}
-            </li>
-          ))}
-        </ul>
-      ) : null}
-    </section>
-  )
-}
-
-export function Shares({ members }: { members: MemberCard[] }) {
+export function Shares({ members, now = Date.now() }: { members: MemberCard[]; now?: number }) {
   const shares = useQuery({
     queryKey: SHARES_KEY,
     queryFn: ({ signal }) => ownerApi.shareList(signal),
@@ -291,7 +256,7 @@ export function Shares({ members }: { members: MemberCard[] }) {
     <div className="flex flex-col gap-4">
       <Watchlists members={live} shares={shares.data} />
       <Books members={live} shares={shares.data} />
-      <PortfolioTabs />
+      <PortfolioTabShares members={live} now={now} />
     </div>
   )
 }

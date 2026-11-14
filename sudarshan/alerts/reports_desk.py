@@ -34,9 +34,19 @@ This service never holds the bot token or a chat id.
         text after UNCONFIRMED_TRIES: the outcome is told to the journal in words and the report
         is not tried again. A report older than MAX_AGE_S that never went is history.
 
-Only while ``SUDARSHAN_JOURNAL=on`` in /etc/sudarshan/alerts.env (``Settings.nudge_journal``, the
-switch of the journal's nudges too). With sudarshan-alerts stopped nothing delivers reports; the
-Reports page says so (cross-design Y38).
+  Follows the journal. There is one switch, ``SUDARSHAN_JOURNAL`` in OpenAlgo's .env, which a
+        release sets and the journal reads (Y37). The desk asks the journal's unsealed /health
+        whether it is on (``journal_state.enabled``) at most once in ASK_EVERY_S, and delivers
+        only while it says so. Switched off there, nothing is delivered and the desk asks again a
+        minute later. Not answering (not running, a port another user holds, an answer that is not
+        the journal's), nothing is delivered either, one log line says so, and the desk asks again
+        after RETRY_S's growing pauses. ``SUDARSHAN_JOURNAL=off`` in /etc/sudarshan/alerts.env
+        (``Settings.journal``) takes this desk and the journal's nudges away whatever the journal
+        says; any other value there, or none, leaves the journal to decide.
+  Told. ``health()`` is the ``report_desk`` block of the service's /health: on or off and why,
+        how many reports wait, and when the last one went to Telegram. The journal reads it for
+        the Reports page (``alerts_on``). With sudarshan-alerts stopped nothing delivers reports;
+        the Reports page says so (cross-design Y38).
 """
 
 from __future__ import annotations
@@ -80,13 +90,37 @@ GIVE_WAY_S = 1.0  # look again this soon while order or market alerts wait
 SLOT_POLL_S = 0.2
 CONNECT_TIMEOUT_S = 2.0
 JOURNAL_TIMEOUTS_S = {"report_get": 5.0, "report_file": 20.0, "delivery": 5.0}
+#: How long an answer of the journal's /health (on, or switched off) holds before it is asked
+#: again.
+ASK_EVERY_S = 60.0
+HEALTH_TIMEOUT_S = 2.0
 #: OpenAlgo waits up to 30 s for Telegram to take a file, after the upload.
 FILE_TIMEOUT_S = 45.0
 #: Telegram takes at most 4096 characters in a message.
 TEXT_MAX = 4000
 
 JOURNAL_URL = "http://127.0.0.1:5586"
+JOURNAL_SERVICE = "sudarshan-journal"
 PRINCIPAL = "sudarshan-alerts"
+#: The desk's states, as the report_desk block of /health names them. ``on`` delivers; the two
+#: journal ones wait for the journal and will deliver as soon as it says it is on; ``off`` is this
+#: service's own doing (ORDER_ALERTS_OFF, SWITCHED_OFF_HERE, NO_SEAL) and lasts until it is
+#: restarted with other settings.
+STARTING, ON, OFF = "starting", "on", "off"
+JOURNAL_OFF, JOURNAL_DOWN = "journal_off", "journal_down"
+#: Why the desk waits for the journal, in words (the log and the report_desk block).
+JOURNAL_SWITCHED_OFF = "the journal is switched off on the server"
+JOURNAL_NOT_RUNNING = "the journal service is not running"
+JOURNAL_PORT_HELD = "the journal's port is held by another user's program, so it is not asked"
+JOURNAL_SILENT = "the journal service is not answering"
+#: Why there is no desk at all.
+ORDER_ALERTS_OFF = (
+    "order alerts are switched off (SUDARSHAN_ORDER_ALERTS=off), and reports go out with them"
+)
+SWITCHED_OFF_HERE = (
+    "switched off for this service: SUDARSHAN_JOURNAL=off in /etc/sudarshan/alerts.env"
+)
+NO_SEAL = "its requests to the journal cannot be sealed: OpenAlgo's pepper could not be read"
 CHANNEL = "telegram"
 NOTIFY_FILE_PATH = "/api/v1/telegram/notify-file"
 LINK_LINE = "Open the full report: SUDARSHAN > Reports"
@@ -218,6 +252,48 @@ class JournalLink:
         return "down", None  # busy, failing, or a journal that does not have the op yet
 
 
+class JournalWatch:
+    """Whether the journal says it is on: ``journal_state.enabled`` on its /health (127.0.0.1:5586).
+
+    ``ask`` answers ``(ON, None)``, ``(JOURNAL_OFF, why)`` (switched off, or kept off by the
+    journal itself: its own sentence when it gives one) or ``(JOURNAL_DOWN, why)`` (not running, a
+    port another user's program holds, or no answer that reads as the journal's). The document
+    holds nothing secret and the request carries nothing, but a port another user holds is not
+    asked all the same: its answer could not be the journal's.
+    """
+
+    def __init__(self, base_url: str, client: httpx.AsyncClient, *, tables=loopback.TCP_TABLES):
+        self.url = base_url.rstrip("/") + "/health"
+        self.client, self.tables = client, tables
+
+    async def ask(self) -> tuple[str, str | None]:
+        held = loopback.holder(self.url, self.tables)
+        if held == loopback.NOBODY:
+            return JOURNAL_DOWN, JOURNAL_NOT_RUNNING
+        if held == loopback.OTHER:
+            return JOURNAL_DOWN, JOURNAL_PORT_HELD
+        try:
+            answer = await self.client.get(
+                self.url,
+                headers={"Accept": "application/json"},
+                timeout=httpx.Timeout(HEALTH_TIMEOUT_S, connect=CONNECT_TIMEOUT_S),
+            )
+            doc = answer.json()
+        except (httpx.HTTPError, ValueError):
+            return JOURNAL_DOWN, JOURNAL_SILENT
+        if not isinstance(doc, dict) or answer.status_code != 200:
+            return JOURNAL_DOWN, JOURNAL_SILENT
+        state = doc.get("journal_state")
+        if doc.get("service") != JOURNAL_SERVICE or not isinstance(state, dict):
+            return JOURNAL_DOWN, JOURNAL_SILENT
+        if state.get("enabled") is True:
+            return ON, None
+        why = state.get("reason")
+        if isinstance(why, str) and why.strip():
+            return JOURNAL_OFF, why.strip()[:300]
+        return JOURNAL_OFF, JOURNAL_SWITCHED_OFF
+
+
 class OpenAlgoFiles:
     """One report file to the owner's linked chat, through OpenAlgo's /notify-file.
 
@@ -305,6 +381,8 @@ class ReportDesk:
         owner_ready: True when the owner's key is loaded, reading it first if need be.
         clock: The service clock (aware datetimes).
         pacer: The process's one outbox.Pacer; the desk takes the reports lane's slots.
+        watch: Asks the journal whether it is on (JournalWatch); the desk delivers only while it
+            says so. None delivers without asking (a desk driven on its own, as the tests do).
     """
 
     def __init__(
@@ -319,15 +397,38 @@ class ReportDesk:
         pacer: outbox.Pacer,
         *,
         lane: str = outbox.REPORTS,
+        watch: JournalWatch | None = None,
     ):
         self.spool, self.store, self.journal = Path(spool), store, journal
         self.send_text, self.files = send_text, files
         self.owner_ready, self.clock, self.pacer, self.lane = owner_ready, clock, pacer, lane
+        self.watch = watch
         self.stats = {"sent": 0, "text_only": 0, "not_sent": 0, "told": 0}
+        #: What the report_desk block of /health shows (health()).
+        self.state, self.reason = (STARTING if watch is not None else ON), None
+        self.waiting = 0  # reports in the spool not over yet, at the last look
+        self.last_delivery_ms: int | None = None  # when a report last went to Telegram
+        self._asked: float | None = None  # monotonic: when the journal was last asked
+        self._ask_failures = 0  # asks in a row the journal did not answer
         self._failures = 0  # looks in a row that could not finish
         self._tries: dict[tuple[str, str], int] = {}  # (event id, text or file) -> unconfirmed
         self._sending = False
         self._closing = False
+
+    def health(self) -> dict[str, Any]:
+        """The report_desk block of the service's /health: plain facts from memory, nothing secret.
+
+        ``state`` is STARTING, ON, JOURNAL_OFF or JOURNAL_DOWN (``on`` is true for ON only),
+        ``reason`` why nothing is delivered, ``waiting`` the reports in the journal's spool that
+        are not over yet, ``last_delivery_ms`` when a report last went to Telegram (sent, or its
+        text only), since this start."""
+        return {
+            "state": self.state,
+            "on": self.state == ON,
+            "reason": self.reason,
+            "waiting": self.waiting,
+            "last_delivery_ms": self.last_delivery_ms,
+        }
 
     async def run(self) -> None:
         """Look, wait, look again, until closed. A failure costs one look, never the service."""
@@ -349,24 +450,66 @@ class ReportDesk:
             await asyncio.sleep(0.05)
 
     async def sweep(self) -> float:
-        """One look: carries the oldest unfinished report one or more steps. Returns how many
-        seconds to wait before the next look."""
+        """One look: carries the oldest unfinished report one or more steps, while the journal
+        says it is on. Returns how many seconds to wait before the next look."""
         now = self.clock().timestamp()
         events = [e for e in read_events(self.spool) if e.kind == "report" and e.src == "journal"]
-        if not events:
-            self._failures = 0
-            return POLL_S
-        states = self.store.notice_states([KEY_PREFIX + e.id for e in events])
-        for event in sorted(events, key=lambda e: (e.at, e.id)):
+        states = self.store.notice_states([KEY_PREFIX + e.id for e in events]) if events else {}
+
+        def over(event: Event) -> bool:
+            return states.get(KEY_PREFIX + event.id, (None, 0.0))[0] in (TOLD, DROPPED)
+
+        unfinished = sorted((e for e in events if not over(e)), key=lambda e: (e.at, e.id))
+        self.waiting = sum(1 for e in unfinished if now - e.at <= TELL_WITHIN_S)
+        hold = await self._journal_on()
+        if hold is not None:
+            return hold
+        for event in unfinished:
             key = KEY_PREFIX + event.id
             state, at = states.get(key, (None, 0.0))
-            if state in (TOLD, DROPPED):
-                continue
             if state == CLAIMED and now - at < CLAIM_S:
                 continue  # on its way
             return await self._advance(event, key, state, now)
         self._failures = 0
         return POLL_S
+
+    async def _journal_on(self) -> float | None:
+        """None while the journal says it is on; otherwise how long to wait before the next look.
+        It is asked at most once in ASK_EVERY_S while its answer holds, and after RETRY_S's
+        growing pauses while it does not answer; each change is logged once (_become)."""
+        if self.watch is None:
+            return None
+        clock = time.monotonic()
+        if self._asked is None or clock - self._asked >= self._holds_s():
+            state, why = await self.watch.ask()
+            self._asked = clock
+            self._ask_failures = self._ask_failures + 1 if state == JOURNAL_DOWN else 0
+            self._become(state, why)
+        if self.state == ON:
+            return None
+        return max(self._asked + self._holds_s() - clock, 0.05)
+
+    def _holds_s(self) -> float:
+        """How long the journal's last answer holds: ASK_EVERY_S, or while it does not answer
+        the next pause of RETRY_S."""
+        if self._ask_failures == 0:
+            return ASK_EVERY_S
+        return RETRY_S[min(self._ask_failures - 1, len(RETRY_S) - 1)]
+
+    def _become(self, state: str, why: str | None) -> None:
+        """The desk takes the journal's answer as its state; a change is logged once."""
+        if (state, why) == (self.state, self.reason):
+            return
+        self.state, self.reason = state, why
+        if state == ON:
+            log.info("Reports: the journal says it is on, so its reports are delivered")
+            return
+        level = {JOURNAL_PORT_HELD: logging.ERROR, JOURNAL_SILENT: logging.WARNING}.get(
+            why or "", logging.INFO
+        )
+        log.log(level, "Reports: none are delivered: %s. The journal is asked again %s.",
+                (why or JOURNAL_SILENT).rstrip("."),
+                "in a minute" if state == JOURNAL_OFF else "after a pause")  # fmt: skip
 
     # -- the steps -------------------------------------------------------------------------------
 
@@ -464,6 +607,8 @@ class ReportDesk:
         self._tries.pop((event.id, "file"), None)
         status = OUTCOMES[code][0]
         self.stats[status] += 1
+        if status in ("sent", "text_only"):
+            self.last_delivery_ms = int(self.clock().timestamp() * 1000)
         kind = TITLES.get(event.fact("report_kind"), "report").lower()
         if status == "sent":
             log.info("A %s was sent to Telegram", kind)
@@ -535,25 +680,34 @@ def journal_url(environ: Mapping[str, str]) -> str:
 
 
 def report_desk_for(service, telegram, client: httpx.AsyncClient) -> ReportDesk | None:
-    """The desk for a running AlertService, or None unless ``SUDARSHAN_JOURNAL=on`` (alerts.env).
-    Never raises: reports never stop order alerts, so a missing pepper means no desk."""
-    if not service.settings.nudge_journal:
+    """The desk for a running AlertService, which delivers while the journal says it is on; None
+    when alerts.env says ``SUDARSHAN_JOURNAL=off`` (``Settings.journal``) or its requests cannot
+    be sealed (``off_reason`` says which). Never raises: reports never stop order alerts."""
+    if not service.settings.journal:
+        log.info("Reports: %s", SWITCHED_OFF_HERE)
         return None
     from sudarshan.vault import JOURNAL_DELIVERY_INFO, fernet_for, pepper_from
 
     try:
         fernet = fernet_for(pepper_from(os.environ), JOURNAL_DELIVERY_INFO)
     except Exception:
-        log.exception("Reports are on but their requests to the journal cannot be sealed")
+        log.exception("Reports cannot be delivered: their requests to the journal cannot be sealed")
         return None
     spool = Path(os.environ.get("SUDARSHAN_JOURNAL_SPOOL") or JOURNAL_SPOOL)
+    base = journal_url(os.environ)
     return ReportDesk(
         spool,
         service.store,
-        JournalLink(journal_url(os.environ), fernet, client),
+        JournalLink(base, fernet, client),
         telegram.send_with_reason,
         OpenAlgoFiles(service.settings.openalgo_url, client, telegram.owner, telegram.reload_owner),
         service._owner_ready,
         service.clock,
         service.outbox.pacer,
+        watch=JournalWatch(base, client),
     )
+
+
+def off_reason(settings) -> str:
+    """Why ``report_desk_for`` made no desk for these settings: switched off here, or no seal."""
+    return SWITCHED_OFF_HERE if not settings.journal else NO_SEAL
