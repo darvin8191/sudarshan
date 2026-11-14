@@ -74,12 +74,22 @@ class Pdf:
 
 
 def _stream(obj: bytes) -> bytes | None:
+    """An object's stream, taken by its ``/Length`` as the format says. The bytes before
+    ``endstream`` are never stripped of line ends: a compressed stream may itself end in a CR or
+    an LF byte, and cutting it gave ``zlib.error`` by chance (about one page in a hundred)."""
     m = re.search(rb"stream\r?\n", obj)
     if not m:
         return None
-    end = obj.rindex(b"endstream")
-    raw = obj[m.end() : end].rstrip(b"\r\n")
-    if b"/FlateDecode" in obj[: m.start()]:
+    head = obj[: m.start()]
+    length = re.search(rb"/Length (\d+)(?! \d+ R)", head)
+    if length is None:
+        raise ValueError("a stream without a direct /Length")
+    raw = obj[m.end() : m.end() + int(length.group(1))]
+    if len(raw) != int(length.group(1)) or not obj[m.end() + len(raw) :].lstrip(b"\r\n").startswith(
+        b"endstream"
+    ):
+        raise ValueError("a stream whose /Length does not reach its endstream")
+    if b"/FlateDecode" in head:
         return zlib.decompress(raw)
     return raw
 
