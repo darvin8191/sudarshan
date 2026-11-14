@@ -24,10 +24,13 @@ import {
 import { useLiveQuote } from '@/hooks/useLiveQuote'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/authStore'
+import { useThemeStore } from '@/stores/themeStore'
 // SUDARSHAN: where the quote stands (Real-time, Reconnecting, Updated, Market closed).
 import { QuoteStatus } from '@/sudarshan/books/QuoteStatus'
 // SUDARSHAN M20.7: the kill switch's line on the ticket.
 import { KillSwitchNote } from '@/sudarshan/risk/RiskBanner'
+// SUDARSHAN B5 (M5.9): the margin the order needs and the funds available; it holds nothing back.
+import { MarginLine } from '@/sudarshan/ticket/MarginLine'
 // SUDARSHAN B4 (M5.11): size by risk, which fills the quantity box and sends nothing.
 import { SizeByRisk } from '@/sudarshan/ticket/SizeByRisk'
 import { entryOf } from '@/sudarshan/ticket/sizeHelper'
@@ -160,6 +163,8 @@ export function PlaceOrderDialog({
   onError,
 }: PlaceOrderDialogProps) {
   const { apiKey } = useAuthStore()
+  // SUDARSHAN B5: Analyze mode's funds are the sandbox's; the margin line says so.
+  const sandbox = useThemeStore((state) => state.appMode) === 'analyzer'
   // SUDARSHAN M6.9: the second tap of a double tap on the Add, Buy more or Sell
   // that opened the ticket lands on it (on SELL, at 412x915, after "Buy more").
   const guard = useOpenGuard(open)
@@ -667,6 +672,22 @@ export function PlaceOrderDialog({
               </div>
             </div>
           )}
+
+          {/* SUDARSHAN B5 (M5.9): read on open and on change; it never holds the button back. */}
+          <MarginLine
+            apiKey={apiKey}
+            sandbox={sandbox}
+            order={{
+              symbol,
+              exchange: exchange_,
+              action: formAction,
+              quantity: formQuantity,
+              pricetype: formPriceType,
+              product: formProduct,
+              price: formPrice,
+              triggerPrice: formTriggerPrice,
+            }}
+          />
         </div>
 
         <DialogFooter className="gap-2 sm:gap-0">

@@ -503,7 +503,9 @@ describe('Watchlist lists', () => {
       expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Options1'])
     )
     expect(screen.getByRole('tab', { name: /Options/ })).toHaveAttribute('aria-selected', 'true')
-    expect(where()).toHaveTextContent(/^\/watchlist$/)
+    // The sheet's Back lands in a router transition, which can commit a render after the tabs
+    // change: on a loaded machine the address was read before it, and the test failed at random.
+    await waitFor(() => expect(where()).toHaveTextContent(/^\/watchlist$/))
   })
 
   it('adds symbols from the search, marks one already in the list, and removes one', async () => {
