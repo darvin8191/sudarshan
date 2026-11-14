@@ -436,6 +436,54 @@ test.describe('the options screen at 360 x 800', () => {
     expect(seen.orders, 'no order was sent').toBe(0)
   })
 
+  test('a leg\'s own sheet adds the leg to a watchlist through the watchlists\' own add', async ({ page }, info) => {
+    const PUT = symbolOf(25_900, 'PE')
+    const added: Array<{ path: string; body: unknown }> = []
+    const json = (body: unknown) => ({ status: 200, contentType: 'application/json', body: JSON.stringify(body) })
+    const lists = [
+      { id: 1, name: 'Swing', position: 0, items: [{ id: 11, symbol: 'TESTFUT', exchange: 'NFO', position: 0 }] },
+      { id: 2, name: 'Hedges', position: 1, items: [{ id: 21, symbol: PUT, exchange: 'NFO', position: 0 }] },
+    ]
+    await page.route(
+      (url) => url.pathname.startsWith('/watchlist/api/'),
+      (route) => {
+        const request = route.request()
+        const path = new URL(request.url()).pathname
+        if (request.method() === 'GET') return route.fulfill(json({ status: 'success', data: lists }))
+        added.push({ path, body: request.postDataJSON() })
+        return route.fulfill(
+          json({ status: 'success', data: { id: 99, symbol: PUT, exchange: 'NFO', position: 1 } })
+        )
+      }
+    )
+    const { seen } = await serve(page, OPEN)
+    await page.locator('[data-strike="25900"] [data-leg="PE"]').tap()
+    const strike = page.getByRole('dialog', { name: 'NIFTY 25,900' })
+    await page.waitForTimeout(600) // a sheet ignores taps for half a second after it opens
+    await strike.getByRole('button', { name: 'PE: chart, alert, depth' }).tap()
+    const leg = page.getByRole('dialog', { name: 'NIFTY 25900 PE' })
+    await expect(leg.getByRole('button', { name: 'Add to watchlist' })).toBeVisible()
+    const inLeg = await pageChecks(page, '[role="dialog"]')
+    expect(inLeg.small, 'targets under 48 x 48 in the leg sheet').toEqual([])
+    await page.waitForTimeout(600)
+    await leg.getByRole('button', { name: 'Add to watchlist' }).tap()
+
+    const pick = page.getByRole('dialog', { name: 'Add to watchlist' })
+    await expect(pick.getByRole('button', { name: /Swing/ })).toContainText('1 of 250')
+    await expect(pick.getByRole('button', { name: /Hedges/ })).toBeDisabled()
+    await expect(pick.getByRole('button', { name: /Hedges/ })).toContainText('Already in this list')
+    const inPick = await pageChecks(page, '[role="dialog"]')
+    expect(inPick.small, 'targets under 48 x 48 in the list of watchlists').toEqual([])
+    expect(inPick.sideways).toBe(false)
+    await page.screenshot({ path: info.outputPath('add-to-watchlist.png') })
+    await page.waitForTimeout(600)
+    await pick.getByRole('button', { name: /Swing/ }).dblclick() // a double tap adds once
+    await expect(page.getByText('Added NIFTY 25900 PE to Swing')).toBeVisible()
+    await expect(page.getByRole('dialog')).toHaveCount(0)
+    expect(added).toEqual([{ path: '/watchlist/api/lists/1/items', body: { symbol: PUT, exchange: 'NFO' } }])
+    expect(seen.orders, 'no order was sent').toBe(0)
+  })
+
   test('the OI tab: bars with their numbers, the change signed and hatched, the far strikes folded', async ({ page }, info) => {
     await serve(page, OPEN)
     await page.getByRole('tab', { name: 'OI' }).tap()
