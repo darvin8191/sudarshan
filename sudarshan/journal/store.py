@@ -582,6 +582,24 @@ class Tx:
         ).scalar()
         return {"unmatched": int(unmatched or 0), "expired": int(expired or 0)}
 
+    def trips_sold_in(self, mode: str, start_day: int, end_day: int) -> list[dict[str, Any]]:
+        """The carry trades (open or closed) with an exit leg on a day from ``start_day`` to
+        ``end_day``: the tax pack books each such sale in its own year (review H1)."""
+        t, legs, fills = self._t("round_trip"), self._t("fill_leg"), self._t("fill")
+        sold = (
+            select(legs.c.round_trip_id)
+            .select_from(legs.join(fills, fills.c.id == legs.c.fill_id))
+            .where(
+                self._mine(legs), fills.c.principal == self.who, legs.c.role == "exit",
+                fills.c.day >= start_day, fills.c.day <= end_day,
+            )
+        )  # fmt: skip
+        query = select(t).where(
+            self._mine(t), t.c.mode == mode, t.c.product_class == "carry",
+            t.c.status.in_(("open", "closed")), t.c.id.in_(sold),
+        )  # fmt: skip
+        return [self.out(r) for r in self.conn.execute(query.order_by(t.c.id)).mappings()]
+
     # ---- what was held before the journal's first fill of an instrument (review B1) ----
     def openings_of(self, mode: str) -> dict[tuple[str, str, str], dict[str, Any]]:
         """The kept openings of a mode by (exchange, symbol, product class)."""

@@ -279,15 +279,17 @@ def test_a_year_with_no_trade_is_still_a_complete_labelled_paper(rig, book):  # 
 
 
 def test_trades_are_grouped_by_kind_and_holding_period_never_by_a_legal_term():
-    day = 86_400
     base = {"exchange": "NFO", "net_paise": 100, "gross_paise": 150, "charges_paise": 50}
     assert tables.kind_of_trade(base) == "Futures and options (NFO, BFO)"
     assert tables.kind_of_trade({**base, "exchange": "MCX"}) == "Currency and commodity derivatives"
     eq = {**base, "exchange": "NSE", "product_class": "intraday"}
     assert tables.kind_of_trade(eq) == "Equity, bought and sold the same day"
-    carry = {**base, "exchange": "NSE", "product_class": "carry"}
-    assert tables.kind_of_trade({**carry, "hold_s": 365 * day}).endswith("up to 12 months")
-    assert tables.kind_of_trade({**carry, "hold_s": 365 * day + 1}).endswith("over 12 months")
+    carry = {**base, "exchange": "NSE", "product_class": "carry", "open_day": 20261102}
+    assert tables.kind_of_trade({**carry, "close_day": 20271102}).endswith("up to 12 months")
+    assert tables.kind_of_trade({**carry, "close_day": 20271103}).endswith("over 12 months")
+    assert tables.kind_of_trade({**carry, "close_day": 20261102}) == (
+        "Equity, bought and sold the same day"
+    )  # the delivery product, the same day: intraday all the same (review H1)
 
 
 # ---- the archive and the ops -----------------------------------------------------------------
