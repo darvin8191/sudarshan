@@ -105,6 +105,8 @@ async function serve(page: Page, state: State) {
       }),
     '/auth/csrf-token': () => json({ csrf_token: 'test' }),
     '/auth/app-info': () => json({ status: 'success', data: {} }),
+    '/auth/analyzer-toggle': () =>
+      json({ status: 'success', data: { analyze_mode: true, message: 'Analyze mode on' } }),
     '/auth/analyzer-mode': () => json({ status: 'success', data: { analyze_mode: state.analyze === true } }),
     '/api/broker/capabilities': () =>
       json({ status: 'success', data: { broker_type: 'equity', leverage_config: false } }),
@@ -342,6 +344,33 @@ test.describe(`the dashboard at ${WIDTH} x 800`, () => {
       await expect(page.getByTestId('navbar-row').getByText('SUDARSHAN')).toBeVisible()
     })
   }
+
+  // The app shell's toast (SCR-P item 6): its close button was a 20 px circle on the toast's corner
+  // and a success sentence read 3.9:1 on its fill. Switching mode raises a success toast.
+  test('the shell toast: a 48 dp close button and a success sentence that keeps its contrast', async ({ page }, info) => {
+    await serve(page, STATES[0])
+    await expect(page.getByTestId('status-row')).toHaveAttribute('data-ready', 'true')
+    await page.getByRole('button', { name: 'Switch to Analyze mode' }).tap()
+    const toast = page.locator('[data-sonner-toast][data-type="success"]').first()
+    await expect(toast).toContainText('Switched to Analyze mode')
+    await expect(toast).toHaveAttribute('data-mounted', 'true')
+    await page.waitForTimeout(600) // the toast's own slide, so axe reads it at full opacity
+    const close = toast.getByRole('button', { name: 'Close toast' })
+    const box = await close.boundingBox()
+    const around = await toast.boundingBox()
+    expect(box?.width, 'close button width').toBeGreaterThanOrEqual(47.5)
+    expect(box?.height, 'close button height').toBeGreaterThanOrEqual(47.5)
+    // Inside the toast, and clear of the sentence.
+    expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual((around?.x ?? 0) + (around?.width ?? 0) + 0.5)
+    const words = await toast.locator('[data-title]').boundingBox()
+    expect((words?.x ?? 0) + (words?.width ?? 0)).toBeLessThanOrEqual((box?.x ?? 0) + 0.5)
+    const scan = await new AxeBuilder({ page }).include('[data-sonner-toaster]').withRules(['color-contrast']).analyze()
+    expect(scan.violations.map((each) => `${each.id}: ${each.nodes.map((node) => node.failureSummary).join(' ')}`)).toEqual([])
+    expect(scan.passes.some((each) => each.id === 'color-contrast'), 'the toast was read').toBe(true)
+    await page.screenshot({ path: info.outputPath('toast.png') })
+    await close.tap()
+    await expect(toast).toHaveCount(0)
+  })
 
   for (const state of STATES) {
     test(state.name, async ({ page }, info) => {
