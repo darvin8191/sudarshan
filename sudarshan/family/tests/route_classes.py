@@ -891,43 +891,11 @@ class Finding(NamedTuple):
     why: str
 
 
-_WEBSOCKET = (
-    "refuses with 200 and an error body instead of 401: it reads only whether the session names a "
-    "user, not upstream's session check (blueprints/websocket_example.py)"
-)
-
 #: Routes that refuse every caller, but not cleanly, as the walk saw them on 14 Nov 2026 (P6 T1).
 #: Each runs as an expected failure; once its route answers cleanly the suite fails until its line
 #: goes, and a route that starts to answer anything else fails at once. The family view is switched
 #: on only after the G5 suite is green (P6 1), and that includes this list being empty.
 FINDINGS: dict[tuple[str, str, str], Finding] = {
-    ("/api/websocket/health", "websocket.api_websocket_health", "GET"): Finding(
-        200, "Session not found", _WEBSOCKET
-    ),
-    ("/api/websocket/market-data", "websocket.api_websocket_market_data", "GET"): Finding(
-        200, "Session not found", _WEBSOCKET
-    ),
-    ("/api/websocket/metrics", "websocket.api_websocket_metrics", "GET"): Finding(
-        200, "Session not found", _WEBSOCKET
-    ),
-    ("/api/websocket/status", "websocket.api_websocket_status", "GET"): Finding(
-        200, "Session not found", _WEBSOCKET
-    ),
-    ("/api/websocket/subscribe", "websocket.api_websocket_subscribe", "POST"): Finding(
-        200, "Session not found", _WEBSOCKET
-    ),
-    ("/api/websocket/subscriptions", "websocket.api_websocket_subscriptions", "GET"): Finding(
-        200, "Session not found", _WEBSOCKET
-    ),
-    ("/api/websocket/trade-safe", "websocket.api_trade_management_safe", "GET"): Finding(
-        200, "Session not found", _WEBSOCKET
-    ),
-    ("/api/websocket/unsubscribe", "websocket.api_websocket_unsubscribe", "POST"): Finding(
-        200, "Session not found", _WEBSOCKET
-    ),
-    ("/api/websocket/unsubscribe-all", "websocket.api_websocket_unsubscribe_all", "POST"): Finding(
-        200, "Session not found", _WEBSOCKET
-    ),
     ("/auth/broker", "auth.broker_login", "POST"): Finding(
         302,
         "did not return a valid response",
