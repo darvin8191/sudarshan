@@ -179,7 +179,7 @@ def test_step_three_backfills_the_flag_from_each_trips_own_segment(tmp_path):
             )
     opened = JournalStore(path, now=NOW)
     try:
-        assert opened.applied == [3]
+        assert opened.applied == [n for n, _ in migrations.STEPS if n > 2]
         got = opened.read(OWNER, lambda tx: [(t["exchange"], t["symbol"], t["charges_modelled"])
                                              for t in tx.rows("round_trip")])  # fmt: skip
         assert got == [
