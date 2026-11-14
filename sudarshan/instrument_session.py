@@ -186,7 +186,8 @@ def day_facts(
     exchange's hours; the index expiries of today and of the next trading day, each
     with when its contracts stop trading, and how many stock underlyings expire those days
     (``expiries`` and ``stock_expiries``, None while the master is not loaded); and ``next_open``,
-    the cash market's next open at or after now. Every instant is epoch milliseconds."""
+    the cash market's open on the next trading day (today's is in ``exchanges``), so the answer
+    holds all day. Every instant is epoch milliseconds."""
     day = datetime.fromtimestamp(now_ms / 1000, IST).date()
     today, occasion = hours_on(day), occasion_on(day)
     trading = "NSE" in today
@@ -197,11 +198,7 @@ def day_facts(
     else:  # a weekday the calendar gives no hours and no holiday for: closed, cause not claimed
         note = "Weekend" if day.weekday() >= 5 else "Closed"
     following = _next_trading_day(day, hours_on)
-    nse = today.get("NSE")
-    if nse is not None and now_ms < nse[0]:
-        next_open: int | None = nse[0]
-    else:
-        next_open = hours_on(following)["NSE"][0] if following else None
+    next_open = hours_on(following)["NSE"][0] if following else None
 
     listed: list[dict[str, Any]] | None = None if expiries is None else []
     stocks: list[dict[str, Any]] | None = None if expiries is None else []

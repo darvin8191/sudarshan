@@ -116,11 +116,12 @@ def test_a_weekday_the_calendar_gives_nothing_for_is_closed_not_called_a_holiday
     assert found["exchanges"] == {} and found["next_open"] is None  # no trading day ahead either
 
 
-def test_the_next_open_is_today_s_until_the_market_opens_then_the_next_trading_day_s():
-    assert shown(facts_at("2026-11-17 09:05")["next_open"]) == "2026-11-17 09:15"  # pre-open
-    assert shown(facts_at("2026-11-17 09:15")["next_open"]) == "2026-11-18 09:15"
-    assert shown(facts_at("2026-11-17 18:00")["next_open"]) == "2026-11-18 09:15"
-    assert shown(facts_at("2026-11-23 18:00")["next_open"]) == "2026-11-25 09:15"  # over a holiday
+def test_the_answer_holds_all_day_the_next_open_being_the_next_trading_day_s():
+    morning, evening = facts_at("2026-11-17 07:00"), facts_at("2026-11-17 18:00")
+    assert morning == evening  # a phone that read at 07:00 still has the right facts at 18:00
+    assert shown(morning["next_open"]) == "2026-11-18 09:15"
+    assert shown(facts_at("2026-11-23 08:00")["next_open"]) == "2026-11-25 09:15"  # over a holiday
+    assert shown(facts_at("2026-11-07 10:00")["next_open"]) == "2026-11-08 14:20"  # Muhurat
 
 
 @pytest.fixture

@@ -2,11 +2,9 @@ import {
   AlertTriangle,
   BarChart3,
   BookOpen,
-  CheckCircle2,
   ChevronRight,
   ExternalLink,
   FileText,
-  Loader2,
   PlugZap,
   Search,
   Zap,
@@ -14,12 +12,10 @@ import {
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router'
 import { tradingApi } from '@/api/trading'
-import { cn } from '@/lib/utils'
 import { onModeChange } from '@/stores/themeStore'
 import { AccessNotice } from '@/sudarshan/AccessNotice'
 import { usePriceAccess } from '@/sudarshan/access'
 import { useBookSync } from '@/sudarshan/books/useBookSync'
-import { formatAmount } from '@/sudarshan/dashboard/format'
 import { HoldingsCard } from '@/sudarshan/dashboard/HoldingsCard'
 import { useMarketOpen } from '@/sudarshan/dashboard/hooks'
 import { IndexStrip } from '@/sudarshan/dashboard/IndexStrip'
@@ -34,6 +30,7 @@ import { type DashboardFunds, PnlCard } from '@/sudarshan/dashboard/PnlCard'
 import { PortfolioCard } from '@/sudarshan/dashboard/PortfolioCard'
 import { usePortfolioCard } from '@/sudarshan/dashboard/portfolioCard'
 import { ScreenerCard } from '@/sudarshan/dashboard/ScreenerCard'
+import { StatusRow } from '@/sudarshan/dashboard/StatusRow' // SUDARSHAN D2
 
 interface MasterContractStatus {
   status: 'pending' | 'downloading' | 'success' | 'error'
@@ -64,30 +61,6 @@ async function readPositions(apiKey: string | null): Promise<PositionsSnapshot |
     return null
   }
 }
-
-/** The master contract's state as a chip: an icon and words, never a coloured dot alone. */
-const CONTRACT_CHIP = {
-  success: {
-    icon: CheckCircle2,
-    label: 'Master contract ready',
-    tone: 'border-[color:var(--live-border)] bg-[color:var(--live-tint)] text-[color:var(--live-ink)]',
-  },
-  downloading: {
-    icon: Loader2,
-    label: 'Downloading master contract',
-    tone: 'border-[color:var(--gold)] bg-[color:var(--gold-tint)] text-[color:var(--gold-ink)]',
-  },
-  error: {
-    icon: AlertTriangle,
-    label: 'Master contract failed',
-    tone: 'border-[color:var(--down)] bg-[color:var(--down-tint)] text-[color:var(--down)]',
-  },
-  pending: {
-    icon: Loader2,
-    label: 'Checking master contract',
-    tone: 'border-border bg-muted text-muted-foreground',
-  },
-} as const
 
 const QUICK_ACCESS = [
   {
@@ -258,10 +231,6 @@ export default function Dashboard() {
     return () => clearInterval(interval)
   }, [checkMasterContractStatus])
 
-  const contract = CONTRACT_CHIP[masterContract.status] ?? CONTRACT_CHIP.pending
-  const ContractIcon = contract.icon
-  const spinning = masterContract.status === 'downloading' || masterContract.status === 'pending'
-
   // Broker token expired but the app session is fine: send the user to the
   // broker reconnect flow, not /login (which would bounce back) — #1400.
   // SUDARSHAN: also as soon as the session check says so, before the funds
@@ -306,34 +275,10 @@ export default function Dashboard() {
 
   return (
     <div className="flex flex-col gap-2.5 md:gap-4">
-      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
-        <h1 className="sd-display text-[1.75rem] leading-none font-bold md:text-[2rem]">
-          Dashboard
-        </h1>
-        <Link
-          to="/master-contract"
-          className="-my-1.5 inline-flex min-h-12 items-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          title={masterContract.message}
-        >
-          <span
-            className={cn(
-              'flex h-8 items-center gap-1.5 rounded-full border px-3 text-[0.8125rem] font-semibold',
-              contract.tone
-            )}
-          >
-            <ContractIcon
-              aria-hidden="true"
-              className={cn('size-4 shrink-0', spinning && 'animate-spin')}
-            />
-            {contract.label}
-            {masterContract.status === 'success' && masterContract.total_symbols ? (
-              <span className="hidden font-medium sm:inline">
-                · {formatAmount(masterContract.total_symbols, 0)} symbols
-              </span>
-            ) : null}
-          </span>
-        </Link>
-      </div>
+      <h1 className="sd-display text-[1.75rem] leading-none font-bold md:text-[2rem]">Dashboard</h1>
+      {/* SUDARSHAN M3.5, M3.6, M3.2 (D2): the market and expiry chips, and the master contract
+          only while it is not ready. */}
+      <StatusRow day={day} contract={masterContract} />
 
       <MarketCalendarSource key={day} onChange={setMarket} />
       <AccessNotice access={access} />

@@ -75,6 +75,7 @@ const portfolioCalls = () => portfolio.calls
 import { useAuthStore } from '@/stores/authStore'
 import { RESYNC_MS } from '@/sudarshan/dashboard/live'
 import { setPortfolioCard } from '@/sudarshan/dashboard/portfolioCard'
+import { serverFacts } from '@/test/dayFacts'
 import { feed } from '@/test/marketDataHarness'
 import { render, screen, userEvent, waitFor } from '@/test/test-utils'
 import Dashboard from './Dashboard'
@@ -105,6 +106,8 @@ type Answer = { status: number; body: unknown }
 
 /** How long the funds call takes to answer, in fake-clock milliseconds. */
 let latency = 0
+/** What the master contract's state answers: ready unless a test says otherwise. */
+let contractStatus = 'success'
 
 /** Every request in the order it was made: the funds, the book and the contract state. */
 function server(...answers: Answer[]) {
@@ -128,7 +131,14 @@ function server(...answers: Answer[]) {
         return {
           ok: true,
           status: 200,
-          json: async () => ({ status: 'success', total_symbols: 118432 }),
+          json: async () => ({ status: contractStatus, total_symbols: 118432 }),
+        }
+      }
+      if (url === '/sudarshan/session/today') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ status: 'success', data: serverFacts('2026-11-17') }),
         }
       }
       return { ok: false, status: 404, json: async () => ({}) }
@@ -150,6 +160,7 @@ async function pass(ms: number) {
 beforeEach(() => {
   marketOpen = false
   latency = 0
+  contractStatus = 'success'
   feed.reset()
   getPositions.mockReset()
   useAuthStore.setState({ apiKey: 'key' })
@@ -169,11 +180,19 @@ describe('Dashboard', () => {
     expect(await screen.findByTestId('pnl-total')).toHaveTextContent('+₹2,450.75')
     expect(screen.getByRole('heading', { level: 1, name: 'Dashboard' })).toBeInTheDocument()
     expect(screen.getByText('₹48,320.50')).toBeInTheDocument()
-    expect(await screen.findByRole('link', { name: /Master contract ready/ })).toHaveAttribute(
-      'href',
-      '/master-contract'
-    )
+    // SUDARSHAN D2: the status row; a ready master contract needs no chip there.
+    expect(await screen.findByTestId('status-row')).toHaveAttribute('data-ready', 'true')
+    expect(screen.queryByRole('link', { name: /master contract/i })).toBeNull()
     expect(screen.getByRole('region', { name: 'Indices' })).toBeInTheDocument()
+  })
+
+  it('shows the master contract in the status row while it downloads (M3.2)', async () => {
+    contractStatus = 'downloading'
+    server(OK)
+    render(<Dashboard />)
+    expect(
+      await screen.findByRole('link', { name: 'Downloading master contract' })
+    ).toHaveAttribute('href', '/master-contract')
   })
 
   it('shows the Portfolio card only when its switch is on, beside the Holdings card (M3.11)', async () => {
