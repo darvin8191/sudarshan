@@ -2,7 +2,15 @@
 // contract's table names them (types.ts, generated). Every answer but a lost session is read
 // here, refusals included: their sentence is what the page shows.
 import { webClient } from '@/api/client'
-import { AUTOMATION_ROUTES, type ListAnswer, type OthersAnswer } from './types'
+import {
+  AUTOMATION_ROUTES,
+  type CheckAnswer,
+  type CreateAnswer,
+  type ListAnswer,
+  type OneAnswer,
+  type OthersAnswer,
+  type StrategyForm,
+} from './types'
 
 export type Answer<T> = ({ ok: true } & T) | { ok: false; message: string; field?: string }
 
@@ -49,9 +57,20 @@ async function read<T>(route: Route, params?: object): Promise<T> {
 
 export const LIST_KEY = ['sudarshan-automation', 'list'] as const
 export const OTHERS_KEY = ['sudarshan-automation', 'others'] as const
+export const oneKey = (id: number) => ['sudarshan-automation', 'one', id] as const
 export const dayKey = (id: number) => ['sudarshan-automation', 'day', id] as const
 
 export const automationApi = {
   list: () => read<ListAnswer>(AUTOMATION_ROUTES.list),
   others: () => read<OthersAnswer>(AUTOMATION_ROUTES.others),
+  one: (id: number) => read<OneAnswer>(AUTOMATION_ROUTES.one, { id }),
+  create: (form: StrategyForm) => ask<CreateAnswer>(AUTOMATION_ROUTES.create, form),
+  update: (id: number, version: number, changes: Partial<StrategyForm>) =>
+    ask<OneAnswer>(AUTOMATION_ROUTES.update, { id, version, changes }),
+  /** A new link: the old one stops working. The answer is the only place the link is. */
+  newLink: (id: number, version: number) =>
+    ask<CreateAnswer>(AUTOMATION_ROUTES.token, { id, version }),
+  /** What one alert's text would do now. Nothing is sent. */
+  check: (id: number, message: string) =>
+    ask<CheckAnswer>(AUTOMATION_ROUTES.check, { id, message }),
 }

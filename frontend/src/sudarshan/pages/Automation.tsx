@@ -2,19 +2,33 @@
 // into orders: a card each, read once and changed by the server's own event (nothing polls), and
 // the other automation on this server, read only. Server: blueprints/sudarshan_automation.py.
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { ChevronRight, FlaskConical, Loader2, Radio, TriangleAlert, Workflow } from 'lucide-react'
-import { useEffect } from 'react'
+import {
+  ChevronRight,
+  FlaskConical,
+  Link2,
+  Loader2,
+  Pencil,
+  Plus,
+  Radio,
+  TriangleAlert,
+  Workflow,
+} from 'lucide-react'
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router'
 import { useSocketContext } from '@/components/socket/SocketProvider'
 import { Button } from '@/components/ui/button'
 import { automationApi, dayKey, LIST_KEY, OTHERS_KEY } from '@/sudarshan/automation/api'
+import { SetupSheet } from '@/sudarshan/automation/SetupSheet'
 import { StrategyCard } from '@/sudarshan/automation/StrategyCard'
+import { StrategySheet } from '@/sudarshan/automation/StrategySheet'
 import {
   AUTOMATION_EVENT,
   type AutomationEvent,
+  type CreateAnswer,
   type ListAnswer,
   type OtherAutomation,
 } from '@/sudarshan/automation/types'
+import { useAutoSheet } from '@/sudarshan/automation/useAutoSheet'
 import { applied } from '@/sudarshan/automation/words'
 
 const NOTE =
@@ -72,6 +86,13 @@ function Others({ others }: { others: OtherAutomation[] }) {
 export default function Automation() {
   const queryClient = useQueryClient()
   const { socket } = useSocketContext()
+  const { sheet, open: openSheet, close: closeSheet } = useAutoSheet()
+  // The answer that made a link, kept only while its set-up sheet is open: the link is in no
+  // other answer, and is never stored.
+  const [fresh, setFresh] = useState<CreateAnswer | null>(null)
+  useEffect(() => {
+    if (sheet?.kind !== 'setup') setFresh(null)
+  }, [sheet?.kind])
   // Not market data: read once, then again whenever the server says an alert was handled or a
   // strategy changed, and when the page or the connection comes back (what was announced
   // meanwhile reached nobody).
@@ -123,6 +144,14 @@ export default function Automation() {
   }
 
   const data = list.data
+  // A strategy just made is known from its own answer until the list's next read has it.
+  const chosen =
+    data.strategies.find((strategy) => strategy.id === sheet?.id) ??
+    (fresh && fresh.strategy.id === sheet?.id ? fresh.strategy : null)
+  const madeLink = (answer: CreateAnswer) => {
+    setFresh(answer)
+    openSheet('setup', answer.strategy.id)
+  }
   return (
     <div className="flex flex-col gap-4 md:mx-auto md:max-w-2xl">
       <div className="flex flex-col gap-1">
@@ -135,6 +164,15 @@ export default function Automation() {
         </p>
       </div>
       <StageLine list={data} />
+      <Button
+        className="h-12 text-base"
+        aria-haspopup="dialog"
+        disabled={data.stage === 'off'}
+        onClick={() => openSheet('new')}
+      >
+        <Plus aria-hidden="true" className="size-5" />
+        New strategy
+      </Button>
       {data.notes.map((note) => (
         <p key={note} role="alert" className={NOTE}>
           <TriangleAlert aria-hidden="true" className="size-5 shrink-0" />
@@ -152,11 +190,49 @@ export default function Automation() {
       ) : (
         <ul className="flex flex-col gap-3">
           {data.strategies.map((strategy) => (
-            <StrategyCard key={strategy.id} strategy={strategy} />
+            <StrategyCard
+              key={strategy.id}
+              strategy={strategy}
+              actions={
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                  <Button
+                    variant="outline"
+                    className="h-12"
+                    aria-haspopup="dialog"
+                    onClick={() => openSheet('setup', strategy.id)}
+                  >
+                    <Link2 aria-hidden="true" className="size-5" />
+                    Alert set-up
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="h-12"
+                    aria-haspopup="dialog"
+                    onClick={() => openSheet('edit', strategy.id)}
+                  >
+                    <Pencil aria-hidden="true" className="size-5" />
+                    Edit
+                  </Button>
+                </div>
+              }
+            />
           ))}
         </ul>
       )}
       {others.data && <Others others={others.data.others} />}
+      <StrategySheet
+        open={sheet?.kind === 'new' || (sheet?.kind === 'edit' && chosen !== null)}
+        onClose={closeSheet}
+        strategy={sheet?.kind === 'edit' ? chosen : null}
+        onCreated={madeLink}
+      />
+      <SetupSheet
+        open={sheet?.kind === 'setup' && chosen !== null}
+        onClose={closeSheet}
+        strategy={sheet?.kind === 'setup' ? chosen : null}
+        fresh={fresh?.strategy.id === chosen?.id ? fresh : null}
+        onFresh={setFresh}
+      />
     </div>
   )
 }
