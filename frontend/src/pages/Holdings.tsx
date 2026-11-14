@@ -9,10 +9,12 @@ import {
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { tradingApi } from '@/api/trading'
+import { PlaceOrderDialog } from '@/components/trading'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { EmptyState } from '@/components/ui/empty-state'
 import {
   Table,
   TableBody,
@@ -22,7 +24,6 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { PlaceOrderDialog } from '@/components/trading'
 import { calculateLiveStats, useLivePrice } from '@/hooks/useLivePrice'
 import { cn, makeFormatCurrency, sanitizeCSV } from '@/lib/utils'
 import { useAuthStore } from '@/stores/authStore'
@@ -32,6 +33,16 @@ import { HoldingCards } from '@/sudarshan/books/cards/HoldingCards'
 // SUDARSHAN: the book re-read, status line and tick prices (src/sudarshan/books).
 import { useBookFeed } from '@/sudarshan/books/feed'
 import { TickPrice } from '@/sudarshan/books/LiveFigures'
+import {
+  BUY_OUTLINE,
+  DOWN_TEXT,
+  pnlTone,
+  SELL_OUTLINE,
+  signedMoney,
+  UP_TEXT,
+  WARNING_BOX,
+  WARNING_INK,
+} from '@/sudarshan/books/tableColours' // SUDARSHAN B8 (M6.6)
 import { holdingsMayChange, useBookSync, useLatestRead } from '@/sudarshan/books/useBookSync'
 // SUDARSHAN M4.15: on a phone, a symbol opens the phone chart (src/sudarshan/chart).
 import { BookSymbolLink } from '@/sudarshan/chart/BookSymbolLink'
@@ -40,7 +51,6 @@ import { useMarketOpen } from '@/sudarshan/dashboard/hooks'
 import { LiveLine } from '@/sudarshan/dashboard/LiveLine'
 import type { Holding, HoldingsStats } from '@/types/trading'
 import { showToast } from '@/utils/toast'
-import { EmptyState } from '@/components/ui/empty-state'
 
 function formatPercent(value: number): string {
   return `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`
@@ -227,10 +237,10 @@ export default function Holdings() {
     tableStale
       ? 'text-muted-foreground'
       : value !== undefined && isProfit(value)
-        ? 'text-green-600'
-        : 'text-red-600'
+        ? UP_TEXT
+        : DOWN_TEXT
   const rowTone = (value: number, stale: boolean) =>
-    stale ? 'text-muted-foreground' : isProfit(value) ? 'text-green-600' : 'text-red-600'
+    stale ? 'text-muted-foreground' : pnlTone(value)
 
   // Same order dialog the Option Chain uses, prefilled from the holding.
   // Exit defaults to the full held quantity; Add starts from the same
@@ -283,9 +293,9 @@ export default function Holdings() {
     <div className="space-y-6">
       {/* Stale Data Warning */}
       {showStaleWarning && (
-        <Alert variant="default" className="bg-amber-500/10 border-amber-500/30">
-          <AlertTriangle className="h-4 w-4 text-amber-600" />
-          <AlertDescription className="text-amber-700 dark:text-amber-400">
+        <Alert variant="default" className={WARNING_BOX}>
+          <AlertTriangle className={cn('h-4 w-4', WARNING_INK)} />
+          <AlertDescription className={WARNING_INK}>
             Data is being refreshed after tab was inactive...
           </AlertDescription>
         </Alert>
@@ -347,7 +357,7 @@ export default function Holdings() {
                   ) : (
                     <TrendingDown className="h-5 w-5" />
                   )}
-                  {formatCurrency(enhancedStats.totalprofitandloss)}
+                  {signedMoney(enhancedStats.totalprofitandloss, formatCurrency)}
                 </div>
               ) : (
                 '---'
@@ -442,7 +452,7 @@ export default function Holdings() {
                           ) : (
                             <TrendingDown className="h-4 w-4" />
                           )}
-                          {formatCurrency(holding.pnl)}
+                          {signedMoney(holding.pnl, formatCurrency)}
                         </div>
                       </TableCell>
                       <TableCell
@@ -455,7 +465,7 @@ export default function Holdings() {
                           <Button
                             size="sm"
                             variant="outline"
-                            className="h-7 px-3 border-green-600/40 text-green-600 hover:bg-green-600/10"
+                            className={cn('h-7 px-3', BUY_OUTLINE)}
                             onClick={() =>
                               setOrderIntent({
                                 symbol: holding.symbol,
@@ -470,7 +480,7 @@ export default function Holdings() {
                           <Button
                             size="sm"
                             variant="outline"
-                            className="h-7 px-3 border-red-600/40 text-red-600 hover:bg-red-600/10"
+                            className={cn('h-7 px-3', SELL_OUTLINE)}
                             onClick={() =>
                               setOrderIntent({
                                 symbol: holding.symbol,

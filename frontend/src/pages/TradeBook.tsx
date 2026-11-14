@@ -39,6 +39,13 @@ import { onModeChange } from '@/stores/themeStore'
 import { TradeCards } from '@/sudarshan/books/cards/TradeCards'
 // SUDARSHAN: the book re-read (src/sudarshan/books/useBookSync.ts).
 import { useMarketCalendar } from '@/sudarshan/books/market'
+import {
+  BUY_INK,
+  DANGER_OUTLINE,
+  FILTER_DOT,
+  SELL_INK,
+  SIDE_BADGE,
+} from '@/sudarshan/books/tableColours' // SUDARSHAN B8 (M6.6)
 import { useBookSync, useLatestRead } from '@/sudarshan/books/useBookSync'
 // SUDARSHAN M4.15: on a phone, a symbol opens the phone chart (src/sudarshan/chart).
 import { BookSymbolLink } from '@/sudarshan/chart/BookSymbolLink'
@@ -300,7 +307,7 @@ export default function TradeBook() {
       size="sm"
       className={cn(
         'rounded-full',
-        filters[type].includes(value) && 'bg-pink-500 hover:bg-pink-600'
+        filters[type].includes(value) && 'bg-primary text-primary-foreground hover:bg-primary/90'
       )}
       onClick={() => toggleFilter(type, value)}
     >
@@ -342,7 +349,9 @@ export default function TradeBook() {
                 <Settings2 className="h-4 w-4 mr-2" />
                 Filters
                 {hasActiveFilters && (
-                  <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full" />
+                  <span
+                    className={cn('absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full', FILTER_DOT)}
+                  />
                 )}
               </Button>
             </DialogTrigger>
@@ -433,7 +442,7 @@ export default function TradeBook() {
             <Badge
               key={v}
               variant="secondary"
-              className="bg-pink-500/10 text-pink-600 border-pink-500/30"
+              className="bg-[color:var(--brand-tint)] text-[color:var(--brand)] border-transparent"
             >
               {v}
             </Badge>
@@ -442,7 +451,7 @@ export default function TradeBook() {
             <Badge
               key={v}
               variant="secondary"
-              className="bg-pink-500/10 text-pink-600 border-pink-500/30"
+              className="bg-[color:var(--brand-tint)] text-[color:var(--brand)] border-transparent"
             >
               {v}
             </Badge>
@@ -452,7 +461,7 @@ export default function TradeBook() {
               <Badge
                 key={v}
                 variant="secondary"
-                className="bg-pink-500/10 text-pink-600 border-pink-500/30"
+                className="bg-[color:var(--brand-tint)] text-[color:var(--brand)] border-transparent"
               >
                 {v}
               </Badge>
@@ -460,7 +469,7 @@ export default function TradeBook() {
           <Button
             variant="outline"
             size="sm"
-            className="text-red-500 border-red-500/50 hover:bg-red-500/10"
+            className={DANGER_OUTLINE}
             onClick={clearFilters}
             aria-label="Clear active filters"
           >
@@ -480,7 +489,7 @@ export default function TradeBook() {
         <Card>
           <CardHeader className="pb-2">
             <CardDescription>Buy Trades</CardDescription>
-            <CardTitle className="text-2xl text-green-600 flex items-center gap-2">
+            <CardTitle className={cn('text-2xl flex items-center gap-2', BUY_INK)}>
               <TrendingUp className="h-5 w-5" />
               {stats.buyTrades}
             </CardTitle>
@@ -489,7 +498,7 @@ export default function TradeBook() {
         <Card>
           <CardHeader className="pb-2">
             <CardDescription>Sell Trades</CardDescription>
-            <CardTitle className="text-2xl text-red-600 flex items-center gap-2">
+            <CardTitle className={cn('text-2xl flex items-center gap-2', SELL_INK)}>
               <TrendingDown className="h-5 w-5" />
               {stats.sellTrades}
             </CardTitle>
@@ -589,10 +598,7 @@ export default function TradeBook() {
                         </TableCell>
                       )}
                       <TableCell>
-                        <Badge
-                          variant={trade.action === 'BUY' ? 'default' : 'destructive'}
-                          className={cn('gap-1', trade.action === 'BUY' ? 'bg-green-500' : '')}
-                        >
+                        <Badge className={cn('gap-1', SIDE_BADGE[trade.action] ?? SIDE_BADGE.SELL)}>
                           {trade.action === 'BUY' ? (
                             <TrendingUp className="h-3 w-3" />
                           ) : (

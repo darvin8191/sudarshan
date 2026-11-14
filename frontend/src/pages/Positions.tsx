@@ -74,6 +74,17 @@ import {
   thrownOutcome,
 } from '@/sudarshan/books/sendOutcome'
 import type { SendOutcome, SentAnswer } from '@/sudarshan/books/sent'
+import {
+  BUY_INK,
+  DANGER_OUTLINE,
+  FILTER_DOT,
+  pnlTone,
+  QUIET_CHIP,
+  SELL_INK,
+  signedMoney,
+  WARNING_BOX,
+  WARNING_INK,
+} from '@/sudarshan/books/tableColours' // SUDARSHAN B8 (M6.6)
 import { useBookSync, useLatestRead } from '@/sudarshan/books/useBookSync'
 // SUDARSHAN M4.15: on a phone, a symbol opens the phone chart (src/sudarshan/chart).
 import { BookSymbolLink } from '@/sudarshan/chart/BookSymbolLink'
@@ -146,25 +157,6 @@ function calculatePnlPercent(position: Position): number {
   // We cannot reliably calculate P&L% without knowing the original quantity
   // The P&L amount is still shown correctly from the API
   return 0
-}
-
-const EXCHANGE_COLORS: Record<string, string> = {
-  NSE: 'bg-cyan-500/20 text-cyan-600 border-cyan-500/30',
-  BSE: 'bg-slate-500/20 text-slate-600 border-slate-500/30',
-  NFO: 'bg-purple-500/20 text-purple-600 border-purple-500/30',
-  BFO: 'bg-amber-500/20 text-amber-600 border-amber-500/30',
-  MCX: 'bg-blue-500/20 text-blue-600 border-blue-500/30',
-  NCO: 'bg-emerald-500/20 text-emerald-600 border-emerald-500/30',
-  CDS: 'bg-teal-500/20 text-teal-600 border-teal-500/30',
-  NSE_INDEX: 'bg-cyan-500/20 text-cyan-600 border-cyan-500/30',
-  BSE_INDEX: 'bg-slate-500/20 text-slate-600 border-slate-500/30',
-  GLOBAL_INDEX: 'bg-indigo-500/20 text-indigo-600 border-indigo-500/30',
-}
-
-const PRODUCT_COLORS: Record<string, string> = {
-  CNC: 'bg-purple-500/20 text-purple-600 border-purple-500/30',
-  MIS: 'bg-cyan-500/20 text-cyan-600 border-cyan-500/30',
-  NRML: 'bg-slate-500/20 text-slate-600 border-slate-500/30',
 }
 
 export default function Positions() {
@@ -622,7 +614,7 @@ export default function Positions() {
       size="sm"
       className={cn(
         'rounded-full',
-        filters[type].includes(value) && 'bg-pink-500 hover:bg-pink-600'
+        filters[type].includes(value) && 'bg-primary text-primary-foreground hover:bg-primary/90'
       )}
       onClick={() => toggleFilter(type, value)}
     >
@@ -702,9 +694,9 @@ export default function Positions() {
     <div className="space-y-6">
       {/* Stale Data Warning */}
       {showStaleWarning && (
-        <Alert variant="default" className="bg-amber-500/10 border-amber-500/30">
-          <AlertTriangle className="h-4 w-4 text-amber-600" />
-          <AlertDescription className="text-amber-700 dark:text-amber-400">
+        <Alert variant="default" className={WARNING_BOX}>
+          <AlertTriangle className={cn('h-4 w-4', WARNING_INK)} />
+          <AlertDescription className={WARNING_INK}>
             Data is being refreshed after tab was inactive...
           </AlertDescription>
         </Alert>
@@ -732,7 +724,9 @@ export default function Positions() {
                 <Settings2 className="h-4 w-4 mr-2" />
                 Settings
                 {hasActiveFilters && (
-                  <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full" />
+                  <span
+                    className={cn('absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full', FILTER_DOT)}
+                  />
                 )}
               </Button>
             </DialogTrigger>
@@ -758,7 +752,8 @@ export default function Positions() {
                         key={opt.value}
                         className={cn(
                           'flex items-center gap-3 cursor-pointer p-2 rounded hover:bg-muted',
-                          grouping === opt.value && 'bg-pink-500/10 border border-pink-500/30'
+                          grouping === opt.value &&
+                            'bg-[color:var(--brand-tint)] border border-[color:var(--brand)]'
                         )}
                       >
                         <input
@@ -769,10 +764,12 @@ export default function Positions() {
                             setGrouping(opt.value as GroupingType)
                             setCollapsedGroups(new Set())
                           }}
-                          className="accent-pink-500"
+                          className="accent-[color:var(--brand)]"
                         />
                         <span
-                          className={cn(grouping === opt.value && 'text-pink-500 font-semibold')}
+                          className={cn(
+                            grouping === opt.value && 'text-[color:var(--brand)] font-semibold'
+                          )}
                         >
                           {opt.label}
                         </span>
@@ -879,7 +876,10 @@ export default function Positions() {
         <div className="flex flex-wrap items-center gap-3">
           <span className="text-sm text-muted-foreground">Active Filters:</span>
           {grouping !== 'none' && (
-            <Badge variant="secondary" className="bg-pink-500/10 text-pink-600 border-pink-500/30">
+            <Badge
+              variant="secondary"
+              className="bg-[color:var(--brand-tint)] text-[color:var(--brand)] border-transparent"
+            >
               Grouped: {grouping === 'underlying' ? 'Underlying' : 'Underlying & Expiry'}
             </Badge>
           )}
@@ -888,7 +888,7 @@ export default function Positions() {
               <Badge
                 key={v}
                 variant="secondary"
-                className="bg-pink-500/10 text-pink-600 border-pink-500/30"
+                className="bg-[color:var(--brand-tint)] text-[color:var(--brand)] border-transparent"
               >
                 {v}
               </Badge>
@@ -897,7 +897,7 @@ export default function Positions() {
             <Badge
               key={v}
               variant="secondary"
-              className="bg-pink-500/10 text-pink-600 border-pink-500/30"
+              className="bg-[color:var(--brand-tint)] text-[color:var(--brand)] border-transparent"
             >
               {v}
             </Badge>
@@ -906,17 +906,12 @@ export default function Positions() {
             <Badge
               key={v}
               variant="secondary"
-              className="bg-pink-500/10 text-pink-600 border-pink-500/30"
+              className="bg-[color:var(--brand-tint)] text-[color:var(--brand)] border-transparent"
             >
               {v}
             </Badge>
           ))}
-          <Button
-            variant="outline"
-            size="sm"
-            className="text-red-500 border-red-500/50 hover:bg-red-500/10"
-            onClick={clearFilters}
-          >
+          <Button variant="outline" size="sm" className={DANGER_OUTLINE} onClick={clearFilters}>
             Clear All
           </Button>
         </div>
@@ -933,13 +928,13 @@ export default function Positions() {
         <Card>
           <CardHeader className="pb-2">
             <CardDescription>Long</CardDescription>
-            <CardTitle className="text-2xl text-green-600">{stats.long}</CardTitle>
+            <CardTitle className={cn('text-2xl', BUY_INK)}>{stats.long}</CardTitle>
           </CardHeader>
         </Card>
         <Card>
           <CardHeader className="pb-2">
             <CardDescription>Short</CardDescription>
-            <CardTitle className="text-2xl text-red-600">{stats.short}</CardTitle>
+            <CardTitle className={cn('text-2xl', SELL_INK)}>{stats.short}</CardTitle>
           </CardHeader>
         </Card>
         <Card>
@@ -949,11 +944,7 @@ export default function Positions() {
               className={cn(
                 'text-2xl',
                 // SUDARSHAN: greyed while its ticks are stale; the sign stays.
-                tableStale
-                  ? 'text-muted-foreground'
-                  : isProfit(stats.totalPnl)
-                    ? 'text-green-600'
-                    : 'text-red-600'
+                tableStale ? 'text-muted-foreground' : pnlTone(stats.totalPnl)
               )}
             >
               {/* SUDARSHAN: a plus on a gain, so a greyed figure still says which way. */}
@@ -1030,10 +1021,7 @@ export default function Positions() {
                               </div>
                             </TableCell>
                             <TableCell
-                              className={cn(
-                                'text-right font-bold',
-                                isProfit(groupStats.totalPnl) ? 'text-green-600' : 'text-red-600'
-                              )}
+                              className={cn('text-right font-bold', pnlTone(groupStats.totalPnl))}
                             >
                               {groupStats.totalPnl >= 0 ? '+' : ''}
                               {formatCurrency(groupStats.totalPnl)}
@@ -1041,7 +1029,7 @@ export default function Positions() {
                             <TableCell
                               className={cn(
                                 'text-right font-semibold',
-                                isProfit(groupStats.pnlPercent) ? 'text-green-600' : 'text-red-600'
+                                pnlTone(groupStats.pnlPercent)
                               )}
                             >
                               {groupStats.pnlPercent >= 0 ? '+' : ''}
@@ -1080,19 +1068,13 @@ export default function Positions() {
                                   />
                                 </TableCell>
                                 <TableCell className="w-[80px]">
-                                  <Badge
-                                    variant="outline"
-                                    className={EXCHANGE_COLORS[position.exchange] || ''}
-                                  >
+                                  <Badge variant="outline" className={QUIET_CHIP}>
                                     {position.exchange}
                                   </Badge>
                                 </TableCell>
                                 {!isCrypto && (
                                   <TableCell className="w-[80px]">
-                                    <Badge
-                                      variant="outline"
-                                      className={PRODUCT_COLORS[position.product] || ''}
-                                    >
+                                    <Badge variant="outline" className={QUIET_CHIP}>
                                       {position.product}
                                     </Badge>
                                   </TableCell>
@@ -1105,8 +1087,8 @@ export default function Positions() {
                                     !isOpen
                                       ? 'text-muted-foreground'
                                       : quantity > 0
-                                        ? 'text-green-600'
-                                        : 'text-red-600'
+                                        ? BUY_INK
+                                        : SELL_INK
                                   )}
                                 >
                                   {position.quantity}
@@ -1126,11 +1108,7 @@ export default function Positions() {
                                 <TableCell
                                   className={cn(
                                     'w-[120px] text-right font-medium',
-                                    stale
-                                      ? 'text-muted-foreground'
-                                      : isProfit(position.pnl)
-                                        ? 'text-green-600'
-                                        : 'text-red-600'
+                                    stale ? 'text-muted-foreground' : pnlTone(position.pnl)
                                   )}
                                 >
                                   <div className="flex items-center justify-end gap-1">
@@ -1139,7 +1117,7 @@ export default function Positions() {
                                     ) : (
                                       <TrendingDown className="h-4 w-4" />
                                     )}
-                                    {formatCurrency(position.pnl)}
+                                    {signedMoney(position.pnl, formatCurrency)}
                                   </div>
                                 </TableCell>
                                 <TableCell
@@ -1147,9 +1125,7 @@ export default function Positions() {
                                     'w-[100px] text-right',
                                     stale
                                       ? 'text-muted-foreground'
-                                      : isProfit(calculatePnlPercent(position))
-                                        ? 'text-green-600'
-                                        : 'text-red-600'
+                                      : pnlTone(calculatePnlPercent(position))
                                   )}
                                 >
                                   {calculatePnlPercent(position) >= 0 ? '+' : ''}
@@ -1184,11 +1160,7 @@ export default function Positions() {
                       className={cn(
                         'w-[120px] text-right font-bold',
                         // SUDARSHAN: greyed while its ticks are stale; the sign stays.
-                        tableStale
-                          ? 'text-muted-foreground'
-                          : isProfit(stats.totalPnl)
-                            ? 'text-green-600'
-                            : 'text-red-600'
+                        tableStale ? 'text-muted-foreground' : pnlTone(stats.totalPnl)
                       )}
                     >
                       {stats.totalPnl >= 0 ? '+' : ''}

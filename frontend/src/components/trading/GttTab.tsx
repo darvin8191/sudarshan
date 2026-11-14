@@ -46,6 +46,7 @@ import {
   withoutCode,
 } from '@/sudarshan/books/sendOutcome'
 import type { SendOutcome } from '@/sudarshan/books/sent'
+import { GTT_STATUS, GTT_STATUS_OTHER, SIDE_BADGE } from '@/sudarshan/books/tableColours' // SUDARSHAN B8 (M6.6)
 import { useOpenGuard } from '@/sudarshan/watchlist/openGuard'
 import type { GttOrder } from '@/types/trading'
 import { showToast } from '@/utils/toast'
@@ -71,15 +72,8 @@ interface ModifyForm {
   target: number
 }
 
-const gttStatusColor: Record<string, string> = {
-  active: 'bg-blue-500',
-  triggered: 'bg-green-500',
-  cancelled: 'bg-gray-500',
-  expired: 'bg-gray-500',
-  rejected: 'bg-red-500',
-  disabled: 'bg-amber-500',
-  deleted: 'bg-gray-500',
-}
+// SUDARSHAN B8 (M6.6): a tint and the same hue's ink, with the status word.
+const gttStatusColor = GTT_STATUS
 
 function formatPrices(prices: number[], formatCurrency: (n: number) => string): string {
   if (!prices || prices.length === 0) return '-'
@@ -437,7 +431,7 @@ export default function GttTab({ refuse, cards = false }: GttTabProps = {}) {
                 <TableBody>
                   {gtts.map((g) => {
                     const statusClass =
-                      gttStatusColor[(g.status || '').toLowerCase()] || 'bg-slate-500'
+                      gttStatusColor[(g.status || '').toLowerCase()] || GTT_STATUS_OTHER
                     return (
                       <TableRow key={g.trigger_id}>
                         <TableCell className="font-mono text-xs">{g.trigger_id}</TableCell>
@@ -464,12 +458,9 @@ export default function GttTab({ refuse, cards = false }: GttTabProps = {}) {
                                 className="flex items-center gap-2"
                               >
                                 <Badge
-                                  variant={
-                                    leg.action.toUpperCase() === 'BUY' ? 'default' : 'destructive'
-                                  }
                                   className={cn(
                                     'h-5 px-1.5 text-[10px]',
-                                    leg.action.toUpperCase() === 'BUY' && 'bg-green-500'
+                                    SIDE_BADGE[leg.action.toUpperCase()] ?? SIDE_BADGE.SELL
                                   )}
                                 >
                                   {leg.action.toUpperCase()}
@@ -490,7 +481,7 @@ export default function GttTab({ refuse, cards = false }: GttTabProps = {}) {
                           </div>
                         </TableCell>
                         <TableCell>
-                          <Badge className={cn('capitalize text-white', statusClass)}>
+                          <Badge className={cn('capitalize', statusClass)}>
                             {g.status}
                           </Badge>
                         </TableCell>
@@ -505,7 +496,7 @@ export default function GttTab({ refuse, cards = false }: GttTabProps = {}) {
                             <Button
                               variant="ghost"
                               size="icon"
-                              className="h-8 w-8 text-blue-500 hover:text-blue-600"
+                              className="h-8 w-8 text-[color:var(--brand)] hover:text-[color:var(--brand-hover)]"
                               onClick={() => openModify(g)}
                               aria-label={`Modify GTT ${g.trigger_id}`}
                             >
@@ -600,7 +591,7 @@ export default function GttTab({ refuse, cards = false }: GttTabProps = {}) {
                   <div className="flex items-center gap-2">
                     <Badge
                       variant={modifyForm.action === 'BUY' ? 'default' : 'destructive'}
-                      className={modifyForm.action === 'BUY' ? 'bg-green-500' : ''}
+                      className={SIDE_BADGE[modifyForm.action] ?? ''}
                     >
                       {modifyForm.action}
                     </Badge>
