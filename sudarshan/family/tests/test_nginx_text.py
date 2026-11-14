@@ -185,7 +185,9 @@ def blocked(path: str, viewer: str = "1") -> bool:
 
 # ---- the text: the files and where they go ---------------------------------------------------------
 def test_three_files_each_naming_where_it_is_installed():
-    assert sorted(p.name for p in NGINX_DIR.iterdir()) == sorted(p.name for p in INSTALLED)
+    # The folder is shared: the automation's webhook fence ships its own two files beside these.
+    family = sorted(p.name for p in NGINX_DIR.iterdir() if p.name.startswith("sudarshan-family"))
+    assert family == sorted(p.name for p in INSTALLED)
     for path, target in INSTALLED.items():
         head = path.read_text(encoding="utf-8").split("\n\n", 1)[0]
         assert target in head, path.name
