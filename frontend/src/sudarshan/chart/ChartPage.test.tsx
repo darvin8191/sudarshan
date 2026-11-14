@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { useState } from 'react'
 import {
   type InitialEntry,
   MemoryRouter,
@@ -212,6 +213,8 @@ vi.mock('@/utils/toast', async (importOriginal) => ({
 
 import { QueryClientProvider } from '@tanstack/react-query'
 import { createQueryClient } from '@/app/providers'
+import MarketDataContext from '@/contexts/MarketDataContext'
+import { MarketDataManager } from '@/lib/MarketDataManager'
 import ChartPage from './ChartPage'
 
 function Where() {
@@ -575,26 +578,27 @@ describe('the phone chart page at 390 px', () => {
     expect(screen.getByTestId('study-legend')).toHaveTextContent('EMA1.00')
   })
 
-  it('refuses a sixth indicator and a third pane, each with a sentence, and removes one', async () => {
+  it('refuses a fourth indicator and a third pane, each with a sentence, and removes one', async () => {
     localStorage.setItem(
       'sudarshan-chart-studies',
-      JSON.stringify(['ema', 'rsi', 'macd', 'sma', 'vwap'].map((id) => ({ id, settings: {} })))
+      JSON.stringify(['ema', 'rsi', 'macd'].map((id) => ({ id, settings: {} })))
     )
     await opened()
-    await userEvent.click(screen.getByRole('button', { name: 'Indicators 5 on the chart' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Indicators 3 on the chart' }))
     const sheet = await screen.findByRole('dialog', { name: 'Indicators' })
+    expect(sheet).toHaveAccessibleDescription('For every instrument on this phone · 3 of 3')
     await userEvent.click(within(sheet).getByRole('button', { name: 'Add Supertrend' }))
     expect(within(sheet).getByRole('status')).toHaveTextContent(
-      'Five indicators at most on the phone chart. Remove one, or open the full terminal.'
+      'Three indicators at most on the phone chart. Remove one, or open the full terminal.'
     )
-    await userEvent.click(within(sheet).getByRole('button', { name: 'Remove SMA' }))
+    await userEvent.click(within(sheet).getByRole('button', { name: 'Remove EMA' }))
     expect(within(sheet).queryByRole('status')).toBeNull()
     await userEvent.click(within(sheet).getByRole('button', { name: 'Add ATR' }))
     expect(within(sheet).getByRole('status')).toHaveTextContent(
       'Two indicators with a pane of their own at most on the phone chart.'
     )
     expect(chart().setStudies).toHaveBeenLastCalledWith(
-      ['ema', 'rsi', 'macd', 'vwap'].map((id) => ({ id, settings: {} }))
+      ['rsi', 'macd'].map((id) => ({ id, settings: {} }))
     )
   })
 
@@ -1100,6 +1104,39 @@ describe('the phone chart page at 390 px', () => {
     expect(screen.getByRole('status', { name: 'Location' })).toHaveTextContent(
       '/chart/NSE_INDEX/BANKNIFTY'
     )
+  })
+
+  it("draws the screen again for what it shows, not for the app's market data clock (C14)", async () => {
+    // The app's provider makes a new value every second around the same pages,
+    // which only its readers hear; the screen, sheets and all, must not follow it.
+    const value = () => ({ manager: MarketDataManager.getInstance() }) as never
+    let tickClock: () => void = () => {}
+    const pages = (
+      <MemoryRouter initialEntries={['/chart/NSE/SBIN']}>
+        <Routes>
+          <Route path="/chart/:exchange/:symbol" element={<ChartPage />} />
+        </Routes>
+      </MemoryRouter>
+    )
+    function Provider() {
+      const [context, setContext] = useState(value)
+      tickClock = () => setContext(value())
+      return <MarketDataContext.Provider value={context}>{pages}</MarketDataContext.Provider>
+    }
+    render(
+      <QueryClientProvider client={createQueryClient()}>
+        <Provider />
+      </QueryClientProvider>
+    )
+    await waitFor(() => expect(chart().load).toHaveBeenCalled())
+    await waitFor(() => expect(screen.getByRole('button', { name: 'BUY' })).toBeEnabled())
+    // Each drawing of the screen reads the indicator rows once.
+    const drawn = chart().legendRows.mock.calls.length
+    for (let second = 0; second < 3; second++) act(() => tickClock())
+    expect(chart().legendRows.mock.calls.length).toBe(drawn)
+    // What it shows still draws it: a sheet opening.
+    await userEvent.click(screen.getByRole('button', { name: 'Chart style: Candles' }))
+    expect(chart().legendRows.mock.calls.length).toBeGreaterThan(drawn)
   })
 
   it('lets the chart go when the page closes', async () => {

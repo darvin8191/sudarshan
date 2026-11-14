@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 /** The part of the Screen Wake Lock API this uses. */
 interface Sentinel {
@@ -101,5 +101,6 @@ export function useWakeLock(): WakeLockState {
     }
   }, [supported, acquire, release])
 
-  return { supported, on, refused, setOn }
+  // One value while nothing in it changes, so the chart screen it is handed to need not draw again.
+  return useMemo(() => ({ supported, on, refused, setOn }), [supported, on, refused, setOn])
 }

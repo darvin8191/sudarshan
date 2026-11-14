@@ -216,7 +216,7 @@ function isStudyEntry(value: unknown): value is StudyEntry {
   )
 }
 
-/** The indicator set on this device (C3), one for every instrument, five at most, in order. */
+/** The indicator set on this device (C3), one for every instrument, `MAX_STUDIES` at most, in order. */
 export function readStudies(storage: Store | null = store()): StudyEntry[] {
   try {
     const saved: unknown = JSON.parse(storage?.getItem(STUDIES_KEY) ?? '[]')

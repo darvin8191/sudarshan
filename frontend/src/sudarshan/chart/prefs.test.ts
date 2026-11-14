@@ -169,7 +169,7 @@ describe('the indicator set', () => {
     expect(readStudies()).toEqual(set)
   })
 
-  it('keeps five at most and drops what is not a study, or a damaged entry', () => {
+  it('keeps three at most and drops what is not a study, or a damaged entry', () => {
     localStorage.setItem(
       'sudarshan-chart-studies',
       JSON.stringify([
@@ -181,7 +181,7 @@ describe('the indicator set', () => {
         ...['a', 'b', 'c', 'd', 'e'].map((id) => ({ id, settings: {} })),
       ])
     )
-    expect(readStudies().map((entry) => entry.id)).toEqual(['ema', 'a', 'b', 'c', 'd'])
+    expect(readStudies().map((entry) => entry.id)).toEqual(['ema', 'a', 'b'])
     localStorage.setItem('sudarshan-chart-studies', 'not json')
     expect(readStudies()).toEqual([])
     expect(readStudies(refusing)).toEqual([])

@@ -2,7 +2,7 @@
  * Indicators on the phone chart (M4.2, C3, C4), in a sheet: what is on the
  * chart, each with its settings and Remove; the common studies; the owner's
  * own scripts; and a search over every built-in. One set for every
- * instrument; five at most, two in a pane of their own, and a refusal past
+ * instrument; three at most (`MAX_STUDIES`), two in a pane of their own, and a refusal past
  * either says why in a sentence.
  */
 import { Plus, Search, SlidersHorizontal, Trash2 } from 'lucide-react'

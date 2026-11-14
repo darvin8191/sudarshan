@@ -88,7 +88,6 @@ export function DepthSheet({
   decimals: number
   quiet: string | null
 }) {
-  const { depth } = useSyncExternalStore(prices.subscribe, prices.get)
   return (
     <BottomSheet
       open={open}
@@ -99,12 +98,26 @@ export function DepthSheet({
       {quiet && (
         <p className="pb-2 text-sm font-medium text-[color:var(--warning-text)]">{quiet}</p>
       )}
-      {depth ? (
-        <Levels depth={depth} decimals={decimals} quiet={quiet !== null} />
-      ) : (
-        <p className="py-2 text-sm text-muted-foreground">The book shows with the next tick.</p>
-      )}
+      <LiveLevels prices={prices} decimals={decimals} quiet={quiet !== null} />
     </BottomSheet>
+  )
+}
+
+/** The levels as each tick leaves them: mounted with the open sheet, so a closed one hears no tick. */
+function LiveLevels({
+  prices,
+  decimals,
+  quiet,
+}: {
+  prices: PriceStore
+  decimals: number
+  quiet: boolean
+}) {
+  const { depth } = useSyncExternalStore(prices.subscribe, prices.get)
+  return depth ? (
+    <Levels depth={depth} decimals={decimals} quiet={quiet} />
+  ) : (
+    <p className="py-2 text-sm text-muted-foreground">The book shows with the next tick.</p>
   )
 }
 

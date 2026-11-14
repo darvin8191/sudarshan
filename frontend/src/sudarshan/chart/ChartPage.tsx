@@ -30,7 +30,15 @@ import {
   X,
 } from 'lucide-react'
 import type { Bar } from 'openalgo-charts'
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react'
 import { Link, Navigate, useLocation, useNavigate, useParams } from 'react-router'
 import { PlaceOrderDialog } from '@/components/trading/PlaceOrderDialog'
 import { SymbolSearchDialog } from '@/components/trading/SymbolSearchDialog'
@@ -44,7 +52,7 @@ import type { LiveStatus } from '@/lib/trading/liveStatus'
 import { cn } from '@/lib/utils'
 import { useThemeStore } from '@/stores/themeStore'
 import { AccessNotice } from '@/sudarshan/AccessNotice'
-import { usePriceAccess } from '@/sudarshan/access'
+import { type PriceAccess, usePriceAccess } from '@/sudarshan/access'
 import { AlertFormSheet, toastAlertSet } from '@/sudarshan/alerts/AlertForm' // SUDARSHAN M10.2
 import { isCovered } from '@/sudarshan/alerts/words'
 import { formatPercent, formatPrice, formatRupees } from '@/sudarshan/dashboard/format'
@@ -200,20 +208,34 @@ function firstInHistory(key: string): boolean {
   return state?.idx === 0
 }
 
-function PhoneChartScreen({
-  symbol,
-  exchange,
-  wake,
-}: {
+interface ScreenProps {
   symbol: string
   exchange: string
   wake: WakeLock
-}) {
+}
+
+/**
+ * The chart reads with the API key and today's Upstox login
+ * (src/sudarshan/access.ts), asked here, in a frame of its own: what that
+ * asks through, the app's market data context, is a new value every second
+ * (its page-visibility clock), and the screen below, sheets and all, would
+ * otherwise draw itself again with it every second, frames a phone with five
+ * studies cannot spare (C14). The screen draws again when the access changes.
+ */
+function PhoneChartScreen(props: ScreenProps) {
+  const access = usePriceAccess()
+  return <ChartScreen {...props} access={access} />
+}
+
+const ChartScreen = memo(function ChartScreen({
+  symbol,
+  exchange,
+  wake,
+  access,
+}: ScreenProps & { access: PriceAccess }) {
   const navigate = useNavigate()
   const location = useLocation()
   const appMode = useThemeStore((s) => s.appMode)
-  // The chart reads with the API key and today's Upstox login (src/sudarshan/access.ts).
-  const access = usePriceAccess()
   const ready = access.state === 'ready'
   /** Counts Try again after the stream settings could not be read. */
   const [attempt, setAttempt] = useState(0)
@@ -772,13 +794,15 @@ function PhoneChartScreen({
         </footer>
       )}
 
-      {info && (
+      {/* Mounted while open only: closed, it would still draw with every change
+          to the app's market data context. */}
+      {info && side !== null && (
         <PlaceOrderDialog
-          open={side !== null}
+          open
           onOpenChange={(open) => !open && closeSheet()}
           symbol={symbol}
           exchange={exchange}
-          action={side ?? 'BUY'}
+          action={side}
           lotSize={info.lotSize}
           tickSize={info.tickSize}
           // The product picked for this segment on this phone (M8.2), MIS
@@ -886,7 +910,7 @@ function PhoneChartScreen({
       />
     </Screen>
   )
-}
+})
 
 /**
  * The pinned timeframes and, last, More: every timeframe the broker offers,

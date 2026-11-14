@@ -40,14 +40,14 @@ describe('the common list', () => {
 })
 
 describe('the limits', () => {
-  it('takes five, and refuses the sixth in a sentence', () => {
-    const four = ['ema', 'sma', 'vwap', 'supertrend'].map(entry)
-    expect(refusal(four, 'onchart', placementOf)).toBeNull()
-    const five = [...four, entry('cpr')]
-    expect(five).toHaveLength(MAX_STUDIES)
-    expect(refusal(five, 'onchart', placementOf)).toBe('count')
+  it('takes three, and refuses the fourth in a sentence (C14: the cost run failed at five)', () => {
+    const two = ['ema', 'sma'].map(entry)
+    expect(refusal(two, 'onchart', placementOf)).toBeNull()
+    const three = [...two, entry('vwap')]
+    expect(three).toHaveLength(MAX_STUDIES)
+    expect(refusal(three, 'onchart', placementOf)).toBe('count')
     expect(REFUSED.count).toBe(
-      'Five indicators at most on the phone chart. Remove one, or open the full terminal.'
+      'Three indicators at most on the phone chart. Remove one, or open the full terminal.'
     )
   })
 

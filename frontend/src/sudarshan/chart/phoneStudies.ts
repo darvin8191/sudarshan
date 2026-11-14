@@ -1,7 +1,9 @@
 /**
  * Indicators on the phone chart (M4.2, C3): one saved set for every
- * instrument, as broker apps keep it, five studies at most and two of them in
+ * instrument, as broker apps keep it, three studies at most and two of them in
  * a pane of their own, so a mid-range phone still opens every candle on time.
+ * The design allowed five; the throttled cost run (C14, `e2e/sd-chart.spec.ts`)
+ * failed there, so the cap is three until the owner's phone says otherwise.
  *
  * The set is a list of the engine's own study ids with their settings, kept
  * on the phone (`prefs.ts`). It is applied to each chart as it is built: the
@@ -20,8 +22,10 @@ export interface StudyEntry {
   settings: Record<string, unknown>
 }
 
-export const MAX_STUDIES = 5
+export const MAX_STUDIES = 3
 export const MAX_STUDY_PANES = 2
+
+const COUNT_WORDS = ['No', 'One', 'Two', 'Three', 'Four', 'Five', 'Six']
 
 /**
  * The volume pane's moving average. Drawn by the host on the volume pane the
@@ -67,7 +71,7 @@ export interface StudyFacts {
 export type Refusal = 'count' | 'panes'
 
 export const REFUSED: Record<Refusal, string> = {
-  count: 'Five indicators at most on the phone chart. Remove one, or open the full terminal.',
+  count: `${COUNT_WORDS[MAX_STUDIES]} indicators at most on the phone chart. Remove one, or open the full terminal.`,
   panes:
     'Two indicators with a pane of their own at most on the phone chart. Remove one of those, or open the full terminal.',
 }
@@ -114,6 +118,20 @@ export function skipReason(
   return null
 }
 
+/** One formatter per number of decimals: the legend writes its values on every tick. */
+const formats = new Map<number, Intl.NumberFormat>()
+function formatOf(decimals: number): Intl.NumberFormat {
+  let format = formats.get(decimals)
+  if (!format) {
+    format = new Intl.NumberFormat('en-IN', {
+      minimumFractionDigits: decimals,
+      maximumFractionDigits: decimals,
+    })
+    formats.set(decimals, format)
+  }
+  return format
+}
+
 /** A study's values at a bar, for the legend line: a price at the instrument's decimals, else two. */
 export function legendValues(
   columns: Readonly<Record<string, readonly (number | null)[]>>,
@@ -124,10 +142,7 @@ export function legendValues(
   return plotKeys.map((key) => {
     const value = columns[key]?.[index]
     return typeof value === 'number' && Number.isFinite(value)
-      ? value.toLocaleString('en-IN', {
-          minimumFractionDigits: decimals,
-          maximumFractionDigits: decimals,
-        })
+      ? formatOf(decimals).format(value)
       : '—'
   })
 }
