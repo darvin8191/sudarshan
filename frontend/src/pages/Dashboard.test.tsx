@@ -215,7 +215,9 @@ describe('Dashboard', () => {
     const calls = server(OK)
     render(<Dashboard />)
 
-    expect(await screen.findByText('1 open position')).toBeInTheDocument()
+    expect(
+      await screen.findByRole('link', { name: /NIFTY 25,900 CE,\s*28 Oct · \+65 · NRML,\s*Buy/ })
+    ).toBeVisible()
     const book = calls.indexOf('positionbook')
     expect(book).toBeGreaterThanOrEqual(0)
     expect(book).toBeLessThan(calls.indexOf('/auth/dashboard-data'))

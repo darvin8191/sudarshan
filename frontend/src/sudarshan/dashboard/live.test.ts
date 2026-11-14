@@ -19,6 +19,7 @@ import {
   latest,
   liveMove,
   openPositions,
+  positionRows,
   priceOf,
   STALE_MS,
   sameFeedState,
@@ -161,6 +162,47 @@ describe('liveMove', () => {
     expect(liveMove({ positions: [position({ average_price: 0 })], at: READ }, tick).delta).toBe(0)
     expect(liveMove({ positions: [position({ ltp: 0 })], at: READ }, tick).delta).toBe(0)
     expect(liveMove(null, tick)).toEqual({ delta: 0, open: 0, lastTickAt: null })
+  })
+})
+
+// SUDARSHAN M3.3 (D4): the P&L card's position rows.
+describe('positionRows', () => {
+  const book = (...positions: Position[]) => ({ positions, at: READ })
+
+  it("moves each row's broker figure by the ticks after the read, as the total moves", () => {
+    const [row] = positionRows(book(position()), prices({ ltp: 134, at: READ + 500 }))
+    expect(row).toMatchObject({ symbol: CALL, quantity: 65, pnl: 650 + 4 * 65, ticking: true })
+    const short = position({ symbol: PUT, quantity: -30, average_price: 300, ltp: 290, pnl: 300 })
+    const [moved] = positionRows(book(short), prices({ symbol: PUT, ltp: 295, at: READ + 1 }))
+    expect(moved.pnl).toBe(300 - 5 * 30) // a short loses as the price rises
+  })
+
+  it("keeps the broker's figure, not ticking, before a tick newer than the read", () => {
+    const old = positionRows(book(position()), prices({ ltp: 140, at: READ - 1 }))
+    expect(old[0]).toMatchObject({ pnl: 650, ticking: false })
+    expect(positionRows(book(position()), new Map())[0]).toMatchObject({ pnl: 650, ticking: false })
+    // A quote the fallback read moves the figure (as the total) but is no tick.
+    const polled = positionRows(
+      book(position()),
+      prices({ ltp: 134, at: READ + 1, source: 'rest' })
+    )
+    expect(polled[0]).toMatchObject({ pnl: 910, ticking: false })
+  })
+
+  it('lists the largest P&L either way first, then by symbol, a position with no figure last', () => {
+    const rows = positionRows(
+      book(
+        position({ symbol: 'B', pnl: 120 }),
+        position({ symbol: 'A', pnl: -900 }),
+        position({ symbol: 'C', pnl: Number.NaN }),
+        position({ symbol: 'D', pnl: 120 }),
+        position({ symbol: 'E', pnl: 50, quantity: 0 })
+      ),
+      new Map()
+    )
+    expect(rows.map((row) => row.symbol)).toEqual(['A', 'B', 'D', 'C'])
+    expect(rows[3].pnl).toBe(null)
+    expect(positionRows(null, new Map())).toEqual([])
   })
 })
 

@@ -15,7 +15,9 @@ import {
   type MarketOpen,
   openPositions,
   type PositionsSnapshot,
+  positionRows,
 } from './live'
+import { PositionRows, type RowMask } from './PositionRows'
 import { TREND_TEXT, TrendArrow } from './Trend'
 
 /** The funds summary /auth/dashboard-data returns, figures as strings. */
@@ -67,15 +69,12 @@ interface PnlCardProps {
   syncFailed?: boolean
   /** Read the broker again now (SUDARSHAN D3: the failed read's Try again). */
   onRetry?: () => void
+  /** What a family member's mask hides in the position rows (design 7). */
+  mask?: RowMask
   marketOpen?: MarketOpen
 }
 
 const NOT_KNOWN: MarketOpen = () => null
-
-function openCount(count: number): string {
-  if (count === 0) return 'No open positions'
-  return count === 1 ? '1 open position' : `${count} open positions`
-}
 
 /**
  * Today's P&L, live, then the funds available and the share of margin in use.
@@ -95,6 +94,7 @@ export function PnlCard({
   syncedAt = null,
   syncFailed = false,
   onRetry,
+  mask,
   marketOpen = NOT_KNOWN,
 }: PnlCardProps) {
   const held = useMemo(() => openPositions(positions?.positions ?? []), [positions])
@@ -185,10 +185,14 @@ export function PnlCard({
         </p>
       )}
 
-      {showFigures && positions && (
+      {showFigures && positions && held.length === 0 && (
         <p className="text-[0.78125rem] font-medium text-[color:var(--text-tertiary)]">
-          {openCount(held.length)}
+          No open positions
         </p>
+      )}
+      {/* SUDARSHAN M3.3 (D4): the open positions, live from the same ticks; no actions here. */}
+      {showFigures && positions && (
+        <PositionRows rows={positionRows(positions, prices)} readAt={syncedAt} mask={mask} />
       )}
 
       {/* SUDARSHAN D3 (M3.1): a failed re-read keeps the last figures and says when they were read. */}

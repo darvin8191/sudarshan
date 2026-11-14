@@ -1,10 +1,11 @@
-import { act, render, screen } from '@testing-library/react'
+import { act, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('@/lib/MarketDataManager', () => import('@/test/marketDataHarness'))
 
 import { feed } from '@/test/marketDataHarness'
+import { render } from '@/test/test-utils'
 import type { Position } from '@/types/trading'
 import { STALE_MS } from './live'
 import { type DashboardFunds, marginUse, PnlCard } from './PnlCard'
@@ -159,7 +160,7 @@ describe('PnlCard, live', () => {
     const { container } = render(card([position()]))
     expect(feed.live()).toEqual([`NFO:${CALL}:LTP`])
     expect(total()).toHaveTextContent('+₹2,450.00')
-    expect(screen.getByText('1 open position')).toBeInTheDocument()
+    expect(screen.getByRole('list', { name: 'Open positions' }).children).toHaveLength(1)
 
     tick(134)
     expect(unrealised()).toHaveTextContent('+₹910.00')
