@@ -109,53 +109,172 @@ def test_disk_and_memory(tmp_path):
     assert readers.mem_available_mb(tmp_path / "missing") is None
 
 
-@pytest.fixture
-def tls(tmp_path):
-    """A TLS listener on loopback with a certificate that runs out 31 hours after NOW."""
+OWN, OTHER = "sudarshan.example.invalid", "other-site.example.invalid"
+OWN_ADDRESS = "203.0.113.7"  # a documentation address: the app reached by a number, not a name
+
+
+def _site_context(tmp_path, common: str, hours: float, names=(), addresses=()):
+    """A server-side TLS context whose certificate runs out ``hours`` after NOW."""
+    import ipaddress
+
     from cryptography import x509
     from cryptography.hazmat.primitives import hashes, serialization
     from cryptography.hazmat.primitives.asymmetric import ec
 
     key = ec.generate_private_key(ec.SECP256R1())
-    name = x509.Name([x509.NameAttribute(x509.NameOID.COMMON_NAME, "watch-test")])
+    name = x509.Name([x509.NameAttribute(x509.NameOID.COMMON_NAME, common)])
     start = datetime.fromtimestamp(NOW, UTC)
-    cert = (
+    builder = (
         x509.CertificateBuilder()
         .subject_name(name)
         .issuer_name(name)
         .public_key(key.public_key())
         .serial_number(x509.random_serial_number())
         .not_valid_before(start - timedelta(days=1))
-        .not_valid_after(start + timedelta(hours=31))
-        .sign(key, hashes.SHA256())
+        .not_valid_after(start + timedelta(hours=hours))
     )
-    pem = tmp_path / "test.pem"
+    covered = [x509.DNSName(n) for n in names]
+    covered += [x509.IPAddress(ipaddress.ip_address(a)) for a in addresses]
+    if covered:
+        builder = builder.add_extension(x509.SubjectAlternativeName(covered), critical=False)
+    pem = tmp_path / f"{common}.pem"
     pem.write_bytes(
         key.private_bytes(
             serialization.Encoding.PEM,
             serialization.PrivateFormat.PKCS8,
             serialization.NoEncryption(),
         )
-        + cert.public_bytes(serialization.Encoding.PEM)
+        + builder.sign(key, hashes.SHA256()).public_bytes(serialization.Encoding.PEM)
     )
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     context.load_cert_chain(pem)
+    return context
+
+
+def _listener(first: ssl.SSLContext, by_name: dict[str, ssl.SSLContext]):
+    """A TLS listener on loopback that, as nginx does, gives the site asked for by name its own
+    certificate and anyone else the first site's."""
+
+    def choose(sock, asked, _context):
+        if asked in by_name:
+            sock.context = by_name[asked]
+
+    first.sni_callback = choose
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Page)
     server.pages = {}
-    server.socket = context.wrap_socket(server.socket, server_side=True)
+    server.socket = first.wrap_socket(server.socket, server_side=True)
     server.handle_error = lambda *args: None  # the reader hangs up after the handshake
     thread = threading.Thread(target=server.serve_forever, name="watch-test-tls", daemon=True)
     thread.start()
+    return server, thread
+
+
+@pytest.fixture
+def tls(tmp_path):
+    """A server with two sites, as the owner's has. The first, another system's, has a
+    certificate with 5 hours left; SUDARSHAN's own, asked for by name, has 31."""
+    other = _site_context(tmp_path, OTHER, 5, names=[OTHER])
+    own = _site_context(tmp_path, OWN, 31, names=[OWN, "*.apps.example.invalid"])
+    server, thread = _listener(other, {OWN: own})
     yield server.server_address
     server.shutdown()
     server.server_close()
     thread.join(timeout=10)
 
 
+@pytest.fixture
+def no_site_env(monkeypatch):
+    monkeypatch.delenv(readers.CERT_HOST_ENV, raising=False)
+
+
 def test_the_certificates_hours_are_read_and_an_expired_one_too(tls):
-    assert readers.cert_hours_left(NOW, tls) == pytest.approx(31.0, abs=0.01)
-    assert readers.cert_hours_left(NOW + 40 * 3600, tls) == pytest.approx(-9.0, abs=0.01)
-    assert readers.cert_hours_left(NOW, ("127.0.0.1", 1)) is None
+    assert readers.cert_hours_left(NOW, tls, name=OWN) == pytest.approx(31.0, abs=0.01)
+    assert readers.cert_hours_left(NOW + 40 * 3600, tls, name=OWN) == pytest.approx(-9, abs=0.01)
+    assert readers.cert_hours_left(NOW, ("127.0.0.1", 1), name=OWN) is None
+
+
+def test_the_certificate_read_is_sudarshans_own_and_never_the_first_one_offered(
+    tls, tmp_path, monkeypatch, no_site_env
+):
+    """L5. nginx serves another system's site first on this server. With no name known nothing is
+    asked and the reading says so; it is never the first site's 5 hours."""
+    env = tmp_path / ".env"
+    env.write_text("HOST_SERVER = 'http://127.0.0.1:5000'\n")  # OpenAlgo's own default
+    assert readers.site_name(env) is None
+    assert readers.cert_hours_left(NOW, tls, env_file=env) == readers.CERT_NO_NAME
+    assert readers.cert_hours_left(NOW, tls) == readers.CERT_NO_NAME
+    assert readers.cert_hours_left(NOW, tls, env_file=tmp_path / "missing") == readers.CERT_NO_NAME
+
+    env.write_text(f"HOST_SERVER = 'https://{OWN}'\n")  # the address the owner opens the app at
+    assert readers.site_name(env) == OWN
+    assert readers.cert_hours_left(NOW, tls, env_file=env) == pytest.approx(31.0, abs=0.01)
+
+    monkeypatch.setenv(readers.CERT_HOST_ENV, f" {OWN.upper()} ")  # the watch's own setting wins
+    env.write_text(f"HOST_SERVER = 'https://{OTHER}'\n")
+    assert readers.site_name(env) == OWN
+    assert readers.cert_hours_left(NOW, tls, env_file=env) == pytest.approx(31.0, abs=0.01)
+
+
+def test_another_sites_certificate_is_said_and_never_judged(tls, tmp_path, no_site_env):
+    """nginx has no site of the name asked for on this address, so it gives its first site's
+    certificate: the reading says it is another site's."""
+    gone = "moved.example.invalid"
+    assert readers.cert_hours_left(NOW, tls, name=gone) == readers.CERT_OTHER_SITE
+    reading = {"cert_hours_left": readers.cert_hours_left(NOW, tls, name=gone)}
+    (result,) = [r for r in checks.run_checks(reading, {}) if r.name == "certificate"]
+    assert (result.level, dict(result.facts)) == (checks.UNREAD, {"cause": "other_site"})
+    assert set(checks.CERT_CAUSES) == {readers.CERT_NO_NAME, readers.CERT_OTHER_SITE}
+
+
+def test_an_app_reached_by_a_number_is_judged_only_on_a_certificate_for_that_number(tmp_path):
+    """An address cannot be sent as a name, so nginx gives its first certificate: it is judged
+    when it is issued for the app's address, and said to be another site's when it is not."""
+    own = _site_context(tmp_path, "by-number", 31, addresses=[OWN_ADDRESS])
+    other = _site_context(tmp_path, OTHER, 5, names=[OTHER])
+    for first, expected in ((own, pytest.approx(31.0, abs=0.01)), (other, readers.CERT_OTHER_SITE)):
+        server, thread = _listener(first, {})
+        try:
+            assert readers.cert_hours_left(NOW, server.server_address, name=OWN_ADDRESS) == expected
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=10)
+
+
+@pytest.mark.parametrize(
+    ("written", "name"),
+    [
+        (f"https://{OWN}", OWN),
+        (f"https://{OWN}:8443/", OWN),
+        (f"HTTPS://{OWN.upper()}.", OWN),
+        (f"https://{OWN_ADDRESS}", OWN_ADDRESS),
+        ("http://127.0.0.1:5000", None),
+        ("http://localhost:5000", None),
+        ("https://[::1]", None),
+        ("http://0.0.0.0:5000", None),
+        ("", None),
+        ("not an address", None),
+    ],
+)
+def test_the_apps_own_address_is_taken_from_openalgos_settings(
+    tmp_path, no_site_env, written, name
+):
+    env = tmp_path / ".env"
+    env.write_text(f"HOST_SERVER = '{written}'\n")
+    assert readers.site_name(env) == name
+
+
+def test_a_wildcard_covers_one_label_only(tmp_path):
+    from cryptography import x509
+
+    context = _site_context(tmp_path, "w", 1, names=["*.apps.example.invalid"])
+    del context
+    cert = x509.load_pem_x509_certificate(
+        (tmp_path / "w.pem").read_bytes().split(b"-----END PRIVATE KEY-----\n")[1]
+    )
+    assert readers._covers(cert, "trade.apps.example.invalid")
+    assert not readers._covers(cert, "apps.example.invalid")
+    assert not readers._covers(cert, "a.b.apps.example.invalid")
 
 
 def _openalgo(tmp_path: Path, rows: list | None) -> tuple[Path, Path]:
@@ -224,7 +343,7 @@ def test_the_instrument_list_is_asked_only_when_it_matters(tmp_path, monkeypatch
     feed = {"state": "connected", "market_window": {"open": True}}
     monkeypatch.setattr(readers, "health", lambda port: feed if port == 5580 else None)
     monkeypatch.setattr(readers, "openalgo", lambda: True)
-    monkeypatch.setattr(readers, "cert_hours_left", lambda now: 100.0)
+    monkeypatch.setattr(readers, "cert_hours_left", lambda now, **named: 100.0)
     monkeypatch.setattr(readers, "master_date", lambda *a: asked.append(1) or "2026-11-16")
     assert readers.gather(NOW, tmp_path, tmp_path)["master_date"] == "2026-11-16"
     assert readers.gather(NOW, tmp_path, tmp_path, "2026-11-16")["master_date"] == "2026-11-16"
@@ -350,17 +469,24 @@ def test_a_second_run_at_the_same_time_does_nothing(tmp_path):
         os.close(held)
 
 
-def test_the_check_option_prints_and_writes_nothing(tmp_path, monkeypatch, capsys):
+def test_the_check_option_prints_and_writes_nothing(tmp_path, monkeypatch, capsys, no_site_env):
     monkeypatch.setenv("SUDARSHAN_WATCH_STATE_DIR", str(tmp_path / "state"))
     monkeypatch.setenv("SUDARSHAN_OPENALGO_DIR", str(tmp_path))
     monkeypatch.setattr(readers, "gather", lambda *a, **k: dict(FINE))
     assert main(["--check"]) == 0
     printed = capsys.readouterr().out.splitlines()
-    assert len(printed) == len(checks.SERVICES) + 19 and printed[0].split()[:2] == [
+    assert len(printed) == len(checks.SERVICES) + 20 and printed[0].split()[:2] == [
         "service_feed",
         "fine",
     ]
     assert printed[-1].split()[:2] == ["heartbeat", "not_set"]
+    # L5: which name the certificate is asked for by, or that none is known and none is checked
+    assert printed[-2].split()[:3] == ["certificate", "site", "unknown"]
+    assert "no certificate is checked" in printed[-2] and readers.CERT_HOST_ENV in printed[-2]
+    (tmp_path / ".env").write_text(f"HOST_SERVER = 'https://{OWN}'\n")
+    assert main(["--check"]) == 0
+    named = capsys.readouterr().out.splitlines()[-2]
+    assert named.split()[:3] == ["certificate", "site", "set"] and named.endswith(OWN)
     monkeypatch.setenv("SUDARSHAN_WATCH_PING_URL", "https://beat.example.invalid/ping/abc123")
     assert main(["--check"]) == 0
     last = capsys.readouterr().out.splitlines()[-1]
@@ -382,11 +508,12 @@ def test_runs_and_readers_leave_no_descriptor_open(tmp_path, local, tls):
     settings = _settings(tmp_path)
     down = {**FINE, "health": {**FINE["health"], "journal": None}}
     _runs(settings, [FINE])  # the folder and its files exist before the window
-    readers.health(port), readers.cert_hours_left(NOW, tls), readers.master_date(app, env)
+    readers.health(port), readers.cert_hours_left(NOW, tls, name=OWN), readers.master_date(app, env)
     watch = FdWatch()
     for _ in range(40):
         assert readers.health(port) and readers.health(1) is None
-        assert readers.cert_hours_left(NOW, tls) and readers.master_date(app, env)
+        assert readers.cert_hours_left(NOW, tls, name=OWN) > 30 and readers.master_date(app, env)
+        assert readers.cert_hours_left(NOW, tls, name="gone.invalid") == readers.CERT_OTHER_SITE
         readers.disk(tmp_path), readers.mem_available_mb(), readers.enabled("feed")
     assert _runs(settings, [FINE, down, down, FINE] * 10) == [0] * 40
     watch.assert_clean()

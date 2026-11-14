@@ -4,7 +4,7 @@
  */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { MemoryRouter, Route, Routes, useLocation } from 'react-router'
+import { type InitialEntry, MemoryRouter, Route, Routes, useLocation } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('@/lib/MarketDataManager', () => import('@/test/marketDataHarness'))
@@ -97,11 +97,11 @@ function Where() {
   return <output data-testid="where">{location.pathname + location.search}</output>
 }
 
-async function open(path = '/options/NFO/NIFTY') {
+async function open(path: InitialEntry = '/options/NFO/NIFTY', before: InitialEntry[] = []) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const view = render(
     <QueryClientProvider client={client}>
-      <MemoryRouter initialEntries={[path]}>
+      <MemoryRouter initialEntries={[...before, path]}>
         <Routes>
           <Route path="/options" element={<OptionsPage />} />
           <Route path="/options/:exchange/:underlying" element={<OptionsPage />} />
@@ -383,6 +383,21 @@ describe('the options page', () => {
     fireEvent.click(within(sheet).getByRole('button', { name: 'Close' }))
     await settle()
     expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('does not reopen an order ticket with the page: a ticket opens only from a tap (review M1)', async () => {
+    const order = {
+      item: { symbol: symbolOf(25_950, 'CE'), exchange: 'NFO' },
+      action: 'SELL',
+      contract: { lotSize: 65, tickSize: 0.05 },
+      product: 'NRML',
+    }
+    await open({ pathname: '/options/NFO/NIFTY', state: { sheet: 'ticket', order } }, [
+      '/options/NFO/NIFTY',
+    ])
+    await settle()
+    expect(screen.queryByRole('dialog', { name: 'Order ticket' })).toBeNull()
+    expect(screen.getByTestId('where')).toHaveTextContent('/options/NFO/NIFTY')
   })
 
   it('opens the app’s own ticket from the sheet’s Buy and Sell, with the ticket’s product rule', async () => {

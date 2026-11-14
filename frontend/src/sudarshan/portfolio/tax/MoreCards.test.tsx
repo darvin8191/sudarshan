@@ -89,6 +89,33 @@ describe('the cards', () => {
     expect(screen.getByText('₹1,23,45,67,890.00')).toBeTruthy()
     expect(screen.getByText('Sold 2 Jul 2026')).toBeTruthy()
   })
+
+  it('names a sale outside the paper, with its ISIN under the name; the ISIN alone when unnamed', () => {
+    const kinds =
+      "ETF units (equity ones too), REIT and InvIT units, gold bonds, government securities, debentures and preference shares: of what trades on the exchange, only a company's equity share is computed. A sale of any other is listed with its value."
+    const p = pack((x) => {
+      x.not_computed_sales = [
+        {
+          instrument: 'INF000A01011',
+          name: 'Example Nifty ETF',
+          day: 20260702,
+          amount_paise: 5_00_000,
+        },
+        { instrument: 'INE000B01022', name: null, day: 20260703, amount_paise: 7_00_000 },
+        { instrument: 'Gold coin', day: 20260704, amount_paise: 9_00_000 },
+      ]
+    })
+    render(<LeftOutCard pack={p} />)
+    // The paper's sentence naming the kinds it does not compute is shown with its others.
+    expect(p.not_computed).toContain(kinds)
+    expect(screen.getByText(kinds)).toBeTruthy()
+    expect(screen.getByText('Example Nifty ETF')).toBeTruthy()
+    expect(screen.getByText('INF000A01011 · Sold 2 Jul 2026')).toBeTruthy()
+    expect(screen.getByText('INE000B01022')).toBeTruthy()
+    expect(screen.getByText('Sold 3 Jul 2026')).toBeTruthy()
+    expect(screen.getByText('Gold coin')).toBeTruthy()
+    expect(screen.getByText('Sold 4 Jul 2026')).toBeTruthy()
+  })
 })
 
 describe('the reads the year rests on', () => {

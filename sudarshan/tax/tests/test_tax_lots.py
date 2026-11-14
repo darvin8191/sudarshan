@@ -57,11 +57,14 @@ def test_an_alias_map_joins_lots_and_survives_a_loop():
     assert lots.canonical("A", {"A": "B", "B": "A"}) == "B"
     assert lots.canonical("A", {}) == "A"
     trades = [
-        Trade(1, 1, 20250602, 1, "BUY", "EQ", "OLD", 10**7, 10**6, 100_000),
-        Trade(1, 1, 20260812, 2, "SELL", "EQ", "NEW", 10**7, 10**6, 120_000),
+        Trade(1, 1, 20250602, 1, "BUY", "EQ", "INE000A01010", 10**7, 10**6, 100_000),
+        Trade(1, 1, 20260812, 2, "SELL", "EQ", "INE000A01028", 10**7, 10**6, 120_000),
     ]
     assert lots.replay(trades).disposals[0].cost_paise is None
-    assert lots.replay(trades, aliases={"OLD": "NEW"}).disposals[0].cost_paise == 100_000
+    assert (
+        lots.replay(trades, aliases={"INE000A01010": "INE000A01028"}).disposals[0].cost_paise
+        == 100_000
+    )
 
 
 def test_an_unconfirmed_action_says_so_in_words():

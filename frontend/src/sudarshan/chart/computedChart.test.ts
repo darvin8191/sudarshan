@@ -206,6 +206,28 @@ describe('ComputedChart after the phone sleeps', () => {
     expect(times).toContain(ist(10, 5))
   })
 
+  it('reads each leg once on a return from sleep, however many things say "come back" (review L1)', async () => {
+    const { chart } = mount()
+    await chart.loadComputed(spec, '5m')
+    setVisibility('hidden')
+    await vi.advanceTimersByTimeAsync(12 * 60_000)
+    const before = historyCalls().length
+    // The page is shown, then the socket signs in again and the screen says so, twice.
+    setVisibility('visible')
+    await vi.advanceTimersByTimeAsync(200)
+    chart.resync()
+    await vi.advanceTimersByTimeAsync(300)
+    chart.resync()
+    await vi.advanceTimersByTimeAsync(500)
+    expect(historyCalls().length - before).toBe(2)
+    // A reconnect later on is its own return and reads again.
+    await vi.advanceTimersByTimeAsync(10_000)
+    const later = historyCalls().length
+    chart.resync()
+    await vi.advanceTimersByTimeAsync(500)
+    expect(historyCalls().length - later).toBe(2)
+  })
+
   it("reads the tail again when the screen's connection comes back", async () => {
     const { chart } = mount()
     await chart.loadComputed(spec, '5m')

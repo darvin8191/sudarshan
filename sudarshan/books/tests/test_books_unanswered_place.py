@@ -161,6 +161,53 @@ def test_the_upstox_module_s_own_not_confirmed_sentence_is_kept_with_the_502(wir
     assert body == {"status": "error", "message": upstox._SMART_NOT_CONFIRMED["message"]}
 
 
+def test_a_plain_order_keeps_the_upstox_module_s_not_confirmed_sentence_too(wire, monkeypatch):
+    """The same for a plain order: where the Upstox module answers a lost reply in its own "not
+    confirmed" words, those words reach the caller with the 502, and nothing else of the
+    module's answer does (no flag, no code)."""
+    import broker.upstox.api.order_api as upstox
+
+    real = upstox.place_order_api
+
+    def says_not_confirmed(data, auth):
+        real(data, auth)  # the order is really sent, and its reply really lost
+        return upstox._ErrorResponse(500), {**upstox._SMART_NOT_CONFIRMED, "not_confirmed": True,
+                                            "error_code": "UDAPI100500"}, None  # fmt: skip
+
+    wire.post = "read_error"
+    monkeypatch.setattr(upstox, "place_order_api", says_not_confirmed)
+    ok, body, status = _place()
+    assert (ok, status) == (False, 502)
+    assert body == {"status": "error", "message": upstox._SMART_NOT_CONFIRMED["message"]}
+    assert wire.posts() == 1
+
+
+def test_a_lost_answer_from_a_service_on_this_server_is_not_said_as_a_broker_order(caplog):
+    """The portfolio, screener, journal and family bridges post to 127.0.0.1 through the shared
+    client. A ring service that restarts is no order "sent but not answered": a warning in its
+    own words. A lost answer from a broker's host keeps upstream's error line. Both are still
+    recorded for an open watch, as before."""
+    from utils.httpx_client import watch_for_unanswered_writes
+
+    def lost(url):
+        request = httpx.Request("POST", url)
+        caplog.clear()
+        with caplog.at_level("WARNING", logger="utils.httpx_client"):
+            with watch_for_unanswered_writes() as seen:
+                _BrokerTransport._record_unanswered(request, httpx.ReadError("reset"))
+        (record,) = caplog.records
+        return record.levelname, record.getMessage(), seen
+
+    for local in ("http://127.0.0.1:5583/op", "http://localhost:5586/op", "http://[::1]:5584/op"):
+        level, said, seen = lost(local)
+        assert level == "WARNING" and "a service on this server" in said, said
+        assert "not a broker order" in said and "sent but not answered" not in said
+        assert len(seen) == 1
+    level, said, seen = lost("https://api-hft.upstox.com/v3/order/place")
+    assert level == "ERROR" and "sent but not answered" in said and len(seen) == 1
+    assert "this server" not in said
+
+
 # -- the readers ----------------------------------------------------------------------------------
 
 

@@ -5,6 +5,177 @@ publish. The owner publishes each release on GitHub. The server's deploy timer t
 outside 08:30-16:00 IST on trading days (09:00-15:45 until v0.3.1), keeps backups, and rolls
 back if the app does not come up healthy.
 
+## v0.12.0 (15 Nov 2026)
+
+The family layer: a view-only family app for the phone, a family Telegram bot, notifications on the
+family's phones, and a Family page where you add members and decide what each one sees. **All of it
+ships switched off** (`SUDARSHAN_FAMILY` is off): installing this release shows no family member
+anything, and nothing you trade with changes. It stays off until you do the switch-on steps below
+yourself, on the server. It includes everything in v0.11.0. **Publish it only after v0.11.0 has
+installed and run one trading day.**
+
+### What changes for you from the day you install it
+- **Nothing a family member can see.** There are no members, no invites and no shares, and the
+  family address (`/family`) only says that the view is not set up or is switched off.
+- **A new menu entry, Family, after Risk.** It opens and says the family view is not set up (or is
+  switched off). You can look at it; nothing on it works until the steps below are done.
+- **A new service, `sudarshan-family`, is installed.** It does not start until the one-time family
+  set-up has passed its check. If you ran that set-up after v0.10.0, it starts with this install,
+  switched off: it opens no data of its own, runs no job and answers every family request "switched
+  off". It runs as its own account, which can read none of your secrets, and nothing in it can
+  place, change or cancel an order.
+- **Risk page:** the confirm phrase shows as dots, with a Show button; a wrong phrase appears in
+  History at once; the daily limit's lock warning goes when its save is answered; and the page is
+  right the moment you come back to its tab or the phone wakes.
+- **A refused order's message is the server's own sentence,** with the symbol on a second line when
+  the sentence does not name it (so a refused TradingView alert says which order it was). A refused
+  basket says its sentence too, and a basket that may have gone says "not confirmed" and to check
+  Orders first.
+- **An order request with a missing or wrong API key** (an alert still carrying an old key, say) is
+  refused as before, and now leaves no row in your order log and shows nothing in Analyze mode.
+  Requests with your key, and every order made inside the app, are logged as before.
+- **The deploy tool can check the family view's nginx lines.** It says nothing until those files are
+  installed. After that it asks nginx to test its configuration only when one of SUDARSHAN's own
+  nginx files has changed, not at every ten-minute run; `sudo sudarshan-deploy --nginx-check` tests
+  whenever you run it.
+
+### What the family view does, once you switch it on
+- **A member's app:** its own address (`/family/`), installable from Chrome, with a "FAMILY · VIEW
+  ONLY" badge and lock on every screen. Dashboard, Positions, Holdings and Watchlist, and behind
+  More: Orders, Trades, Portfolio and Settings. There is no order button anywhere. Prices and P&L
+  move tick by tick, and each screen says "Real-time", "Reconnecting" with the age of the figures,
+  or "Market closed". A figure you hide reads "Hidden", never a blank or 0. A book you did not share
+  reads "Not shared with you", and one that could not be read says so, on Orders and Trades too:
+  neither is ever shown as an empty account.
+- **Signing in:** a sign-in name, a password of 12 characters or more and a 6-digit code from a code
+  app. A phone stays signed in for 30 days (14 without use); a member can use 3 phones. If you pause
+  or remove a member, or their sign-in runs out, their phone says why on its sign-in screen.
+- **Your Family page:** up to 4 members, as a viewer or a child (a child starts with everything
+  hidden). An invite link you send yourself, which works once, for two hours, and shows when it was
+  first opened. Pause, resume, unlock a locked sign-in, reset a sign-in, remove, sign a phone out.
+  Shared watchlists and portfolio tabs, the record of everything done, and the state of the service
+  and the bot.
+- **What decides what a member sees** (four switches per member, and two kinds of share):
+  - positions and holdings: sharing the Upstox tab with them, on the Family page, Shares, "Portfolio
+    tabs" (view or restricted, with an end date if you want one). The Portfolio page itself has no
+    share control;
+  - orders and trades, and funds: that share, and the member's Orders and Funds switches;
+  - the figures inside them: the member's P&L and Quantities switches (P&L can be shown only with
+    quantities);
+  - watchlists: each list's share, on the Family page, Shares. You choose who first; the switches
+    appear after that. Sharing with every member is a deliberate step: choose "Every member", then
+    tap the switch itself;
+  - your other portfolio tabs: each tab's share, in the same "Portfolio tabs" section.
+- **Book shares are gone.** An earlier build had a separate share for each book (positions,
+  holdings and so on). It decided nothing, so the Family page no longer offers it and the server
+  refuses one. The Shares tab says what does decide it, as above, and leads to both places.
+- **P&L hidden, quantities shown:** the overall P&L, every rupee figure and every cost price are
+  hidden. A member can still work out a day's change and a holding's value from the quantity and the
+  price, by one multiplication. Hide quantities to hide those too; the member's sheet says so under
+  the switch.
+- **A share you remove, let end or change to restricted stops showing within about a minute,** at
+  any hour, on the member's phone, in the family bot and in the daily summary. A member's own
+  switches act at once.
+- **While the server cannot confirm what a member is shared** (the portfolio service is restarting,
+  say), their screen answers within a few seconds and says "What is shared with you could not be
+  checked just now" over the last figures, with their time; they are never shown as current. After
+  ten minutes without an answer the figures are put away, the screen says so, and they come back
+  when the server answers again. A member sees less in that time, never more.
+- **How old a price is, is never hidden.** In a shared portfolio tab each holding says so ("Value
+  from 1 Oct · 45 days old"), and an old price is marked, also for a member who is shown no
+  figures. This settles the point v0.10.0 left open: the age line no longer travels with quantities.
+- **The family bot** (optional, a second Telegram bot of its own): the market, positions, holdings,
+  orders and shared portfolios, each under the member's privacy, in English or Gujarati. Any other
+  message is answered "This bot only shows information. It cannot place, change or cancel an order."
+  A member links their chat from Settings; groups are never answered.
+- **Notifications on a member's phone,** turned on by the member, phone by phone (on a phone two
+  members use, each has their own switch): a notice of a sign-in from a new phone or a locked
+  sign-in, and a short summary of the day 25 minutes after the last close (16:05; 16:10 from 7 Dec).
+  Quiet hours are 21:00 to 08:00 unless the member changes them.
+- **Signing in and joining are limited to 12 tries a minute for everyone together,** and 5 a minute
+  from one connection, so that nobody outside can make the server do password work without end. The
+  price: heavy outside traffic can make sign-in and join answer "Too many tries" for as long as it
+  lasts. A member already signed in is not affected.
+
+### What you must do
+- **Nothing when you publish.** The install changes no setting of the app.
+- **To switch the family view on, when you want it.** Do the steps in order, outside market hours,
+  and stop at the first one that does not show what it should. The lines to paste and the detail are
+  in `sudarshan/family/README.md`, under "Switching the family view on".
+  1. **The one-time family set-up, as root** (one pasted line; skip it if you ran it after v0.10.0).
+     You should see `PASS.` It makes the family's settings file with the switch off, whether you run
+     it before or after this install; if it could not, the deploy's next run does, within ten
+     minutes. The Family page then says the view is switched off.
+  2. **The nginx lines:** copy the three files (one pasted line), add the one include line to the
+     SUDARSHAN site, record which site file that is, test and reload nginx, then run
+     `sudo sudarshan-deploy --nginx-check`. You should see, last, `nginx: PASS. The family view's
+     nginx lines are installed, loaded and this release's.`
+  3. **The family bot's token** (optional; the view works without it): make the bot with BotFather
+     and save its token with the small file in the README. The Family bot card reads "Polling"
+     within a minute.
+  4. **The switch:** paste the one switch line (it starts `v=on`). You should see `The family view
+     is switched on.`; the last word is read back from what it wrote. It restarts the family and
+     alerts services and nothing else, and a later release never moves the switch back.
+  5. **On the Family page,** which now shows the service on and its check passed: add a member and
+     choose what their privacy hides. Then on its Shares tab, under "Portfolio tabs", share the
+     Upstox tab with them, and under Watchlists choose who and share any lists.
+  6. **Send the invite link yourself.** It works once, for two hours.
+  7. **Check on a test member's phone:** the member joins and sees only what you shared; the
+     server's address without `/family` shows a page saying that part is for the account owner; a
+     fill appears on the family positions within a few seconds; orders and trades match your own
+     Orders page; a list you stop sharing leaves the screen; the Upstox tab's share, once removed,
+     reads "Not shared with you" within about a minute.
+- **Run it for a few days with test members before you invite the family.** Make one viewer and one
+  child, use them on a spare phone or in a second browser on your own, and try each switch and each
+  share both ways. The checks under "Still to check" below are best done in those days.
+- **If you try it in the same browser you trade in:** both work while you are signed in to both.
+  Your own sign-in ends at 03:30 and the family one does not, so next morning your own pages show
+  the "for the account owner" page: in the family view open Settings, sign this phone out, then
+  sign in as usual. A second browser avoids this.
+- **To switch it off again:** the same switch line with `v=off` in place of `v=on`. You should see
+  `The family view is switched off.` Every family screen then says so, and members, shares and
+  privacy are kept.
+
+### What is refused now that used to be accepted
+- **A book share,** as said above, with a sentence saying where the real controls are.
+- **A request, without your sign-in, to the app's own addresses that hand its screens the API key
+  and the WebSocket settings.** Your screens are signed in, so they see no change.
+- **A call to the Telegram webhook that cannot be checked.** Your bot does not use the webhook.
+- **The old `/test_chart` address** is removed; it led to no page.
+
+### Still to check, or not modelled
+- **Nothing of the family view has been seen on a real phone.** The installed app's look (whether an
+  address bar shows on the Dashboard), notifications arriving on a locked phone, the app working
+  under a real Chrome, the screen reader's reading order and the "Open in code app" button on the
+  join screen were checked in tests or by reading only. A small phone's top bar was measured at 320,
+  360 and 412 px in a test browser. The Risk page's changes were not run in a browser either.
+- **A removed share takes up to a minute to stop showing,** not seconds. If the portfolio service is
+  not answering at that moment, the member's screen keeps its last figures, marked as not checked,
+  for up to ten minutes, as said above.
+- **A shared portfolio tab's own page can wait about 24 seconds** if the portfolio service accepts
+  the request and then does not answer. The book screens answer within a few seconds.
+- **With large text on a small phone** the badge is shown whole on a second row and the top bar
+  grows tall. That was measured in a test browser, not on a phone.
+- **When the server restarts,** an installed family app can show the web server's bare error page
+  instead of its own "try again" page.
+- **Removing a member leaves their tab shares and privacy choice in the portfolio's records.** The
+  member has no sign-in and a member's number is never given again, so only a break-in into the
+  family service could ask with them.
+- **A family phone that once opened your own sign-in page** sees that sign-in page, not the "for
+  the account owner" page, when it strays outside `/family`. It gets no further; clearing the site's
+  data in Chrome on that phone puts it right.
+- **If the family service is down at the moment an invite link is opened,** the web server's error
+  log can name the link. A link works once, for two hours.
+- **If nginx's own test failed when SUDARSHAN's nginx files last changed,** the deploy log says so
+  once and keeps that note until one of those files changes, even after you repair the cause
+  elsewhere. `sudo sudarshan-deploy --nginx-check` says what holds now.
+- **If the family service itself were broken into,** it could see what members may see and no more,
+  and could reach the app's sign-in page as any stranger on the internet can; never an order, your
+  API key, your Upstox token or your saved secrets. The README's "What this does not cover" says the
+  rest.
+- **Not in this release:** members' own watchlists, a chart for members, notifications on your own
+  phone, and the tools.
+
 ## v0.11.0 (14 Nov 2026)
 
 The trade journal and its reports: a Journal page with every trade paired from your fills, its

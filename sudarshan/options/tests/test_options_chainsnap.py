@@ -104,3 +104,27 @@ def test_the_token_is_never_in_a_log_line(upstox, caplog):
         read()
     assert caplog.records, "the failures are logged"
     assert TOKEN not in caplog.text
+
+
+def test_a_read_whose_answer_breaks_is_sent_once_through_the_shared_client(monkeypatch):
+    """The shared client's own transport sends a GET whose answer broke once more. The chain read
+    promises one call, so it says so to that transport. The real client class is used here, with
+    its sockets replaced: the fake client above would never show a second send."""
+    import broker.upstox.api.rate_limiter as limiter
+    from utils import httpx_client
+
+    sent = []
+
+    def broken(self, request):
+        sent.append(request.url.path)
+        raise httpx.RemoteProtocolError("peer closed", request=request)
+
+    monkeypatch.setattr(httpx.HTTPTransport, "handle_request", broken)
+    monkeypatch.setattr(limiter, "apply_rate_limit", lambda category: None)
+    client = httpx_client._BrokerClient()
+    monkeypatch.setattr(chainsnap, "get_httpx_client", lambda: client)
+    try:
+        assert read() == chainsnap.Outcome("failed")
+    finally:
+        client.close()
+    assert sent == [chainsnap.PATH]

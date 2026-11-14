@@ -34,11 +34,17 @@ def hidden(key: str, mask: frozenset[str]) -> bool:
 
 
 def masked(data: Any, mask: frozenset[str]) -> Any:
-    """``data`` without the fields the mask names, at any depth."""
+    """``data`` without the fields the mask names, at any depth. ``fresh`` (how old a holding's
+    price is) is in no mask and is passed on with its sentence, while it is the state and the
+    sentence ``core.freshness`` makes and nothing else (``privacy.kept_whole``)."""
     if not mask:
         return data
     if isinstance(data, Mapping):
-        return {k: masked(v, mask) for k, v in data.items() if not hidden(k, mask)}
+        return {
+            k: v if privacy.kept_whole(k, v) else masked(v, mask)
+            for k, v in data.items()
+            if not hidden(k, mask)
+        }
     if isinstance(data, (list, tuple)):
         return [masked(item, mask) for item in data]
     return data

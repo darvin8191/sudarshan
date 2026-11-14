@@ -2,11 +2,13 @@
 // Reusable order placement dialog with real-time quotes and market depth
 // Uses WebSocket for real-time data with REST API fallback (like Holdings/Positions)
 
+import { X } from 'lucide-react'
 import { useCallback, useEffect, useId, useState } from 'react'
 import { tradingApi } from '@/api/trading'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
+  DialogClose,
   DialogContent,
   DialogFooter,
   DialogHeader,
@@ -144,6 +146,51 @@ function isFnOExchange(exchange: string): boolean {
   return ['NFO', 'BFO', 'MCX', 'CDS', 'BCD', 'NCDEX', 'NCO', 'CRYPTO'].includes(exchange)
 }
 
+// SUDARSHAN (v0.13.0 review M2): the ticket at phone size and in the D tokens. Presentation
+// only: nothing here changes what the ticket sends.
+const SIDE_FILL = {
+  BUY: 'bg-[color:var(--buy-solid)] text-white hover:bg-[color:var(--buy-solid)] hover:opacity-90',
+  SELL: 'bg-[color:var(--sell-solid)] text-white hover:bg-[color:var(--sell-solid)] hover:opacity-90',
+} as const
+const SIDE_INK = {
+  BUY: 'text-[color:var(--buy-solid)]',
+  SELL: 'text-[color:var(--sell-solid)]',
+} as const
+/** A control a thumb can hit: 48 dp. */
+const TOUCH = 'h-12 min-w-12'
+const STEP = 'size-12 shrink-0 px-0 text-lg'
+const UNITS = new Intl.NumberFormat('en-IN')
+
+/**
+ * The order as one line, shown beside the Place button (v0.13.0 review H1): on a phone the body
+ * scrolls, so the price can be off screen when the button is pressed. The line never is.
+ * "SELL 1 SBIN · LIMIT 803.00 · CNC"; a stop adds its trigger; lots are said with the units.
+ */
+export function orderLine(order: {
+  action: 'BUY' | 'SELL'
+  quantity: number
+  lots?: number
+  symbol: string
+  priceType: 'MARKET' | 'LIMIT' | 'SL' | 'SL-M'
+  price: number
+  trigger: number
+  product: string
+}): { side: string; rest: string } {
+  const type = PRICE_TYPES.find((entry) => entry.value === order.priceType)?.label ?? ''
+  const lots =
+    order.lots === undefined ? '' : ` (${order.lots} ${order.lots === 1 ? 'lot' : 'lots'})`
+  const price =
+    order.priceType === 'LIMIT' || order.priceType === 'SL' ? ` ${order.price.toFixed(2)}` : ''
+  const trigger =
+    order.priceType === 'SL' || order.priceType === 'SL-M'
+      ? `, trigger ${order.trigger.toFixed(2)}`
+      : ''
+  return {
+    side: order.action,
+    rest: `${UNITS.format(order.quantity)}${lots} ${order.symbol} · ${type.toUpperCase()}${price}${trigger} · ${order.product}`,
+  }
+}
+
 export function PlaceOrderDialog({
   open,
   onOpenChange,
@@ -273,7 +320,12 @@ export function PlaceOrderDialog({
   // Set price to LTP when switching to LIMIT and LTP is available
   useEffect(() => {
     if (formPriceType !== 'MARKET' && mergedData.ltp && formPrice === 0) {
-      setFormPrice(roundToTick(mergedData.ltp, tickSize))
+      // SUDARSHAN (v0.13.0 phone fix): decided on the price as it stands, not as this render saw
+      // it. A ticket that opens with a price ("Buy at 803.00") while the last price is already
+      // known ran this in the same pass as the reset above, and the last price replaced the
+      // price that was asked for.
+      const ltp = mergedData.ltp
+      setFormPrice((current) => (current === 0 ? roundToTick(ltp, tickSize) : current))
     }
   }, [formPriceType, mergedData.ltp, formPrice, tickSize])
 
@@ -400,6 +452,17 @@ export function PlaceOrderDialog({
   // Determine if we're still loading initial data
   const isLoading = isLoadingQuotes && !mergedData.ltp && !isConnected
 
+  const line = orderLine({
+    action: formAction,
+    quantity: formQuantity,
+    lots: usesLots ? lotMultiplier : undefined,
+    symbol,
+    priceType: formPriceType,
+    price: formPrice,
+    trigger: formTriggerPrice,
+    product: formProduct,
+  })
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
@@ -407,21 +470,27 @@ export function PlaceOrderDialog({
         data-settling={guard.settling || undefined}
         // SUDARSHAN: on a short window the body scrolls inside the viewport and the title and
         // the Place / Cancel buttons stay in reach (the dialog is a three-row grid).
-        className="sm:max-w-[420px] max-h-[calc(100dvh-1rem)] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden"
+        className="sm:max-w-[420px] max-h-[calc(100dvh-1rem)] grid-rows-[auto_minmax(0,1fr)_auto] gap-3 overflow-hidden p-4"
         aria-describedby={undefined}
         container={container}
+        showCloseButton={false}
       >
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
+          <DialogTitle className="flex items-center gap-2 pr-10 text-left">
             <span>Place Order -</span>
-            <span className={formAction === 'BUY' ? 'text-green-500' : 'text-red-500'}>
-              {formAction}
-            </span>
+            <span className={SIDE_INK[formAction]}>{formAction}</span>
             <span className="text-muted-foreground font-normal text-sm truncate">{symbol}</span>
           </DialogTitle>
         </DialogHeader>
+        {/* SUDARSHAN (review M2): the close button at 48 dp, over the title row's corner. */}
+        <DialogClose
+          aria-label="Close"
+          className="absolute top-0 right-0 flex size-12 items-center justify-center rounded-md text-[color:var(--text-secondary)] outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <X className="size-5" aria-hidden="true" />
+        </DialogClose>
 
-        <div data-testid="ticket-body" className="space-y-4 py-2 min-h-0 overflow-y-auto">
+        <div data-testid="ticket-body" className="space-y-3 py-1 min-h-0 overflow-y-auto">
           {/* SUDARSHAN M20.7: the kill switch's line; it disables nothing (a Buy can close a short). */}
           <KillSwitchNote />
           {/* Quote Header - merged WebSocket + REST data */}
@@ -448,91 +517,222 @@ export function PlaceOrderDialog({
             />
           )}
 
-          {/* Market Depth Panel - only from WebSocket */}
-          <MarketDepthPanel
-            depth={mergedData.depth}
-            isExpanded={isDepthExpanded}
-            onToggle={() => setIsDepthExpanded(!isDepthExpanded)}
-            maxLevels={5}
-          />
-
+          {/* SUDARSHAN (review H1): side, quantity, price type, product, price and trigger come
+              first, in that order, so a phone held upright shows them without scrolling. Size by
+              risk, the exchange and the depth follow. */}
           {/* Action Toggle */}
-          <div className="space-y-2">
-            <Label className="text-xs">Action</Label>
-            <div className="flex gap-2">
-              <Button
-                type="button"
-                variant={formAction === 'BUY' ? 'default' : 'outline'}
-                className={cn('flex-1', formAction === 'BUY' && 'bg-green-600 hover:bg-green-700')}
-                onClick={() => setFormAction('BUY')}
-              >
-                BUY
-              </Button>
-              <Button
-                type="button"
-                variant={formAction === 'SELL' ? 'default' : 'outline'}
-                className={cn('flex-1', formAction === 'SELL' && 'bg-red-600 hover:bg-red-700')}
-                onClick={() => setFormAction('SELL')}
-              >
-                SELL
-              </Button>
+          <div className="space-y-1">
+            <Label id={`${fieldId}-action`} className="text-xs">
+              Action
+            </Label>
+            {/* biome-ignore lint/a11y/useSemanticElements: a pressed pair under its label, not a fieldset */}
+            <div role="group" aria-labelledby={`${fieldId}-action`} className="flex gap-2">
+              {(['BUY', 'SELL'] as const).map((side) => (
+                <Button
+                  key={side}
+                  type="button"
+                  variant={formAction === side ? 'default' : 'outline'}
+                  aria-pressed={formAction === side}
+                  className={cn(
+                    'flex-1 font-bold tracking-wide',
+                    TOUCH,
+                    formAction === side && SIDE_FILL[side]
+                  )}
+                  onClick={() => setFormAction(side)}
+                >
+                  {side}
+                </Button>
+              ))}
             </div>
           </div>
 
           {/* Quantity with Mode Toggle */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
+          <div className="space-y-1">
+            <div className="flex items-center justify-between gap-2">
               <Label htmlFor={`${fieldId}-quantity`} className="text-xs">
                 Quantity
               </Label>
+              {usesLots && (
+                <div className="flex gap-3 text-xs text-muted-foreground">
+                  <span>Lot size: {lotSize}</span>
+                  <span>Total qty: {formQuantity}</span>
+                </div>
+              )}
+            </div>
+            <div className="flex gap-2">
+              <Input
+                id={`${fieldId}-quantity`}
+                type="number"
+                inputMode="numeric"
+                value={displayQuantity}
+                onChange={(e) => handleQuantityChange(e.target.value)}
+                min={1}
+                className="h-12 flex-1"
+              />
               {/* Cash equity trades in shares - there is no lot. Showing a
                   Lots/Shares toggle and "Lot size: 1" on NSE/BSE is noise that
                   implies a concept the segment does not have. */}
               {usesLots && (
-                <div className="flex gap-1">
-                  <button
-                    type="button"
-                    onClick={() => setQuantityMode('lots')}
-                    className={cn(
-                      'px-2 py-0.5 text-[10px] rounded',
-                      quantityMode === 'lots'
-                        ? 'bg-primary text-primary-foreground'
-                        : 'bg-muted text-muted-foreground hover:bg-muted/80'
-                    )}
-                  >
-                    Lots
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setQuantityMode('shares')}
-                    className={cn(
-                      'px-2 py-0.5 text-[10px] rounded',
-                      quantityMode === 'shares'
-                        ? 'bg-primary text-primary-foreground'
-                        : 'bg-muted text-muted-foreground hover:bg-muted/80'
-                    )}
-                  >
-                    Shares
-                  </button>
+                // biome-ignore lint/a11y/useSemanticElements: a pressed pair, not a form fieldset
+                <div role="group" aria-label="Quantity in" className="flex gap-1">
+                  {(['lots', 'shares'] as const).map((mode) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      aria-pressed={quantityMode === mode}
+                      onClick={() => setQuantityMode(mode)}
+                      className={cn(
+                        'rounded-md border px-3 text-sm font-medium',
+                        TOUCH,
+                        quantityMode === mode
+                          ? 'border-primary bg-primary text-primary-foreground'
+                          : 'border-input bg-transparent text-[color:var(--text-secondary)]'
+                      )}
+                    >
+                      {mode === 'lots' ? 'Lots' : 'Shares'}
+                    </button>
+                  ))}
                 </div>
               )}
             </div>
-            <Input
-              id={`${fieldId}-quantity`}
-              type="number"
-              value={displayQuantity}
-              onChange={(e) => handleQuantityChange(e.target.value)}
-              min={1}
-            />
-            {usesLots && (
-              <div className="flex justify-between text-[10px] text-muted-foreground">
-                <span>Lot size: {lotSize}</span>
-                <span>Total qty: {formQuantity}</span>
-              </div>
-            )}
           </div>
 
-          {/* SUDARSHAN B4 (M5.11): a risk and a stop give whole lots for the box above. */}
+          {/* Price Type and Product in row */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <Label id={`${fieldId}-pricetype`} className="text-xs">
+                Price Type
+              </Label>
+              <Select
+                value={formPriceType}
+                onValueChange={(v) => setFormPriceType(v as typeof formPriceType)}
+              >
+                <SelectTrigger
+                  aria-labelledby={`${fieldId}-pricetype`}
+                  className="data-[size=default]:h-12"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {PRICE_TYPES.map((pt) => (
+                    <SelectItem key={pt.value} value={pt.value} className="min-h-12">
+                      {pt.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <Label id={`${fieldId}-product`} className="text-xs">
+                Product
+              </Label>
+              <Select
+                value={formProduct}
+                onValueChange={(v) => setFormProduct(v as typeof formProduct)}
+              >
+                <SelectTrigger
+                  aria-labelledby={`${fieldId}-product`}
+                  className="data-[size=default]:h-12"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {productTypes.map((pt) => (
+                    <SelectItem key={pt.value} value={pt.value} className="min-h-12">
+                      {pt.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          {/* Price Input (conditional) */}
+          {needsPrice && (
+            <div className="space-y-1">
+              <div className="flex items-center justify-between gap-2">
+                <Label htmlFor={`${fieldId}-price`} className="text-xs">
+                  Price
+                </Label>
+                <span className="text-xs text-muted-foreground">Tick size: {tickSize}</span>
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className={STEP}
+                  aria-label="Lower the price by one tick"
+                  onClick={() => setFormPrice(adjustPrice(formPrice, tickSize, 'down'))}
+                >
+                  -
+                </Button>
+                <Input
+                  id={`${fieldId}-price`}
+                  type="number"
+                  inputMode="decimal"
+                  value={formPrice}
+                  onChange={(e) => setFormPrice(parseFloat(e.target.value) || 0)}
+                  onBlur={() => setFormPrice(roundToTick(formPrice, tickSize))}
+                  className="h-12 flex-1 text-center"
+                  step={tickSize}
+                  min={0}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  className={STEP}
+                  aria-label="Raise the price by one tick"
+                  onClick={() => setFormPrice(adjustPrice(formPrice, tickSize, 'up'))}
+                >
+                  +
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* Trigger Price Input (conditional) */}
+          {needsTrigger && (
+            <div className="space-y-1">
+              <Label htmlFor={`${fieldId}-trigger`} className="text-xs">
+                Trigger Price
+              </Label>
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className={STEP}
+                  aria-label="Lower the trigger price by one tick"
+                  onClick={() =>
+                    setFormTriggerPrice(adjustPrice(formTriggerPrice, tickSize, 'down'))
+                  }
+                >
+                  -
+                </Button>
+                <Input
+                  id={`${fieldId}-trigger`}
+                  type="number"
+                  inputMode="decimal"
+                  value={formTriggerPrice}
+                  onChange={(e) => setFormTriggerPrice(parseFloat(e.target.value) || 0)}
+                  onBlur={() => setFormTriggerPrice(roundToTick(formTriggerPrice, tickSize))}
+                  className="h-12 flex-1 text-center"
+                  step={tickSize}
+                  min={0}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  className={STEP}
+                  aria-label="Raise the trigger price by one tick"
+                  onClick={() => setFormTriggerPrice(adjustPrice(formTriggerPrice, tickSize, 'up'))}
+                >
+                  +
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* SUDARSHAN B4 (M5.11): a risk and a stop give whole lots for the quantity box. */}
           <SizeByRisk
             exchange={exchange_}
             side={formAction}
@@ -550,140 +750,36 @@ export function PlaceOrderDialog({
               NSE and BSE, so the user picks where to route. Derivatives are
               contract-specific and stay on the exchange they came from. */}
           {isEquityExchange && (
-            <div className="space-y-2">
-              <Label className="text-xs">Exchange</Label>
+            <div className="space-y-1">
+              <Label id={`${fieldId}-exchange`} className="text-xs">
+                Exchange
+              </Label>
               <Select value={exchange_} onValueChange={setFormExchange}>
-                <SelectTrigger>
+                <SelectTrigger
+                  aria-labelledby={`${fieldId}-exchange`}
+                  className="data-[size=default]:h-12"
+                >
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="NSE">NSE</SelectItem>
-                  <SelectItem value="BSE">BSE</SelectItem>
+                  <SelectItem value="NSE" className="min-h-12">
+                    NSE
+                  </SelectItem>
+                  <SelectItem value="BSE" className="min-h-12">
+                    BSE
+                  </SelectItem>
                 </SelectContent>
               </Select>
             </div>
           )}
 
-          {/* Price Type and Product in row */}
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-2">
-              <Label className="text-xs">Price Type</Label>
-              <Select
-                value={formPriceType}
-                onValueChange={(v) => setFormPriceType(v as typeof formPriceType)}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {PRICE_TYPES.map((pt) => (
-                    <SelectItem key={pt.value} value={pt.value}>
-                      {pt.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label className="text-xs">Product</Label>
-              <Select
-                value={formProduct}
-                onValueChange={(v) => setFormProduct(v as typeof formProduct)}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {productTypes.map((pt) => (
-                    <SelectItem key={pt.value} value={pt.value}>
-                      {pt.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-
-          {/* Price Input (conditional) */}
-          {needsPrice && (
-            <div className="space-y-2">
-              <Label htmlFor={`${fieldId}-price`} className="text-xs">
-                Price
-              </Label>
-              <div className="flex gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="px-2"
-                  onClick={() => setFormPrice(adjustPrice(formPrice, tickSize, 'down'))}
-                >
-                  -
-                </Button>
-                <Input
-                  id={`${fieldId}-price`}
-                  type="number"
-                  value={formPrice}
-                  onChange={(e) => setFormPrice(parseFloat(e.target.value) || 0)}
-                  onBlur={() => setFormPrice(roundToTick(formPrice, tickSize))}
-                  className="flex-1 text-center"
-                  step={tickSize}
-                  min={0}
-                />
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="px-2"
-                  onClick={() => setFormPrice(adjustPrice(formPrice, tickSize, 'up'))}
-                >
-                  +
-                </Button>
-              </div>
-              <p className="text-[10px] text-muted-foreground">Tick size: {tickSize}</p>
-            </div>
-          )}
-
-          {/* Trigger Price Input (conditional) */}
-          {needsTrigger && (
-            <div className="space-y-2">
-              <Label htmlFor={`${fieldId}-trigger`} className="text-xs">
-                Trigger Price
-              </Label>
-              <div className="flex gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="px-2"
-                  onClick={() =>
-                    setFormTriggerPrice(adjustPrice(formTriggerPrice, tickSize, 'down'))
-                  }
-                >
-                  -
-                </Button>
-                <Input
-                  id={`${fieldId}-trigger`}
-                  type="number"
-                  value={formTriggerPrice}
-                  onChange={(e) => setFormTriggerPrice(parseFloat(e.target.value) || 0)}
-                  onBlur={() => setFormTriggerPrice(roundToTick(formTriggerPrice, tickSize))}
-                  className="flex-1 text-center"
-                  step={tickSize}
-                  min={0}
-                />
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="px-2"
-                  onClick={() => setFormTriggerPrice(adjustPrice(formTriggerPrice, tickSize, 'up'))}
-                >
-                  +
-                </Button>
-              </div>
-            </div>
-          )}
+          {/* Market Depth Panel - only from WebSocket */}
+          <MarketDepthPanel
+            depth={mergedData.depth}
+            isExpanded={isDepthExpanded}
+            onToggle={() => setIsDepthExpanded(!isDepthExpanded)}
+            maxLevels={5}
+          />
 
           {/* SUDARSHAN B7 (M5.21): a stock contract in its expiry week is settled by delivery. */}
           <SettlementLine symbol={symbol} exchange={exchange_} />
@@ -705,21 +801,33 @@ export function PlaceOrderDialog({
           />
         </div>
 
-        <DialogFooter className="gap-2 sm:gap-0">
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isSubmitting}>
-            Cancel
-          </Button>
-          <Button
-            onClick={handleSubmit}
-            disabled={!isValid() || isSubmitting || guard.settling}
-            className={cn(
-              formAction === 'BUY'
-                ? 'bg-green-600 hover:bg-green-700'
-                : 'bg-red-600 hover:bg-red-700'
-            )}
+        {/* SUDARSHAN (review H1): the order in one line beside its button, always on screen. */}
+        <DialogFooter className="flex-col gap-2 sm:flex-row sm:items-center sm:gap-2">
+          <p
+            id={`${fieldId}-summary`}
+            data-testid="ticket-summary"
+            className="min-w-0 flex-1 text-left text-sm leading-snug font-medium text-[color:var(--text-primary)] [overflow-wrap:anywhere]"
           >
-            {isSubmitting ? 'Placing...' : `Place ${formAction} Order`}
-          </Button>
+            <span className={cn('font-bold', SIDE_INK[formAction])}>{line.side}</span> {line.rest}
+          </p>
+          <div className="grid grid-cols-2 gap-2 sm:flex sm:shrink-0">
+            <Button
+              variant="outline"
+              className={TOUCH}
+              onClick={() => onOpenChange(false)}
+              disabled={isSubmitting}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleSubmit}
+              disabled={!isValid() || isSubmitting || guard.settling}
+              aria-describedby={`${fieldId}-summary`}
+              className={cn(TOUCH, 'font-bold', SIDE_FILL[formAction])}
+            >
+              {isSubmitting ? 'Placing...' : `Place ${formAction} Order`}
+            </Button>
+          </div>
         </DialogFooter>
       </DialogContent>
     </Dialog>

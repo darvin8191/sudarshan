@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from sudarshan.portfolio import layout, serialize
+from sudarshan.portfolio import layout, privacy, serialize
 from sudarshan.portfolio import store as store_module
 from sudarshan.portfolio.book import Book
 from sudarshan.portfolio.core import history, kinds
@@ -241,6 +241,8 @@ def _walk(data, found):
     if isinstance(data, dict):
         for key, value in data.items():
             found.add(key)
+            if privacy.kept_whole(key, value):
+                continue  # how old a price is: a state and a sentence, hidden by no category
             _walk(value, found)
     elif isinstance(data, list):
         for item in data:
@@ -259,6 +261,9 @@ def test_a_viewer_sees_symbols_and_direction_but_no_money(w):
     keys = _walk(shown, set())
     secret = [k for k in keys if serialize.hidden(k, serialize.VIEWER_MASK)]
     assert secret == []
+    # and the age of each price reaches a viewer who is shown no money (v0.12.0)
+    assert [row["fresh"] for row in shown["view"]["rows"]] == [row["fresh"] for row in full["rows"]]
+    assert all(set(row["fresh"]) == {"state", "words"} for row in full["rows"])
     symbols = [r["asset"]["symbol"] for r in shown["view"]["rows"]]
     assert "RELIANCE" in symbols
     assert {a["kind"] for a in shown["activities"]} == {"BUY"}

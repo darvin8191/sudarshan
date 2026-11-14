@@ -75,7 +75,7 @@ function TargetPicker({
 }: {
   id: string
   members: MemberCard[]
-  value: Target
+  value: Target | null
   onChange: (next: Target) => void
   every: boolean
 }) {
@@ -85,22 +85,49 @@ function TargetPicker({
       <select
         id={id}
         className={SELECT}
-        value={String(value)}
-        onChange={(e) => onChange(e.target.value === 'all' ? 'all' : Number(e.target.value))}
+        value={value === null ? '' : String(value)}
+        onChange={(e) => {
+          if (e.target.value === '') return
+          onChange(e.target.value === 'all' ? 'all' : Number(e.target.value))
+        }}
       >
-        {every ? <option value="all">Every member</option> : null}
+        {value === null ? (
+          <option value="" disabled>
+            {CHOOSE_TARGET}
+          </option>
+        ) : null}
         {members.map((m) => (
           <option key={m.id} value={m.id}>
             {m.display_name}
           </option>
         ))}
+        {every ? <option value="all">Every member</option> : null}
       </select>
     </div>
   )
 }
 
+export const CHOOSE_TARGET = 'Choose who to share with'
+export const CHOOSE_FIRST = 'Choose who to share with above. The switches appear after that.'
+export const EVERY_NOTE =
+  'Every member is chosen: a switch here shares the list with everyone. Tap the switch itself; the rest of the row does nothing.'
+
+/** What a list's row says before anyone is chosen: who has it now. */
+function sharedWith(shares: readonly Share[], ref: string): string {
+  if (coveredByAll(shares, 'watchlist', ref)) return 'Shared with every member'
+  const count = shares.filter(
+    (s) => s.kind === 'watchlist' && s.ref === ref && s.member_id !== null
+  ).length
+  if (count === 0) return 'Not shared'
+  return count === 1 ? 'Shared with 1 member' : `Shared with ${count} members`
+}
+
 function Watchlists({ members, shares }: { members: MemberCard[]; shares: readonly Share[] }) {
-  const [target, setTarget] = useState<Target>('all')
+  // Verification N8 (v0.12.0): the picker stood at "Every member" and each row was its switch's
+  // label, so one stray tap on a list's name shared it with everyone. Nobody is chosen at first
+  // (the one member, where there is only one); "Every member" has to be picked, and then only the
+  // switch itself takes a tap. A single member's rows still take a tap anywhere.
+  const [target, setTarget] = useState<Target | null>(members.length === 1 ? members[0].id : null)
   const lists = useQuery({
     queryKey: ['sudarshan', 'family-owner', 'owner-lists'],
     queryFn: () => watchlistApi.list(),
@@ -121,6 +148,8 @@ function Watchlists({ members, shares }: { members: MemberCard[]; shares: readon
         onChange={setTarget}
         every
       />
+      {target === null ? <Note>{CHOOSE_FIRST}</Note> : null}
+      {target === 'all' ? <Note>{EVERY_NOTE}</Note> : null}
       <SaidLine said={swap.said} />
       {lists.isPending ? (
         <p className="flex items-center gap-2 text-[0.9375rem]">
@@ -137,6 +166,18 @@ function Watchlists({ members, shares }: { members: MemberCard[]; shares: readon
         <ul className="flex flex-col divide-y divide-[color:var(--divider)]">
           {lists.data.map((list) => {
             const ref = String(list.id)
+            const count = `${list.items.length} ${list.items.length === 1 ? 'symbol' : 'symbols'}`
+            if (target === null) {
+              // nobody chosen yet: who has the list now, and no switch to flip by mistake
+              return (
+                <li key={list.id} className="flex min-h-12 flex-col justify-center gap-1 py-1.5">
+                  <span className="truncate text-sm leading-none font-medium">{list.name}</span>
+                  <span className="text-[0.8125rem] text-[color:var(--text-tertiary)]">
+                    {`${count} · ${sharedWith(shares, ref)}`}
+                  </span>
+                </li>
+              )
+            }
             const own = rowFor(shares, 'watchlist', ref, target) !== undefined
             const viaAll = target !== 'all' && coveredByAll(shares, 'watchlist', ref)
             const on = own || viaAll
@@ -148,11 +189,14 @@ function Watchlists({ members, shares }: { members: MemberCard[]; shares: readon
                   line={
                     viaAll && !own
                       ? 'Shared with every member'
-                      : `${list.items.length} ${list.items.length === 1 ? 'symbol' : 'symbols'} · ${on ? 'Shared' : 'Not shared'}`
+                      : `${count} · ${on ? 'Shared' : 'Not shared'}${target === 'all' ? ' with every member' : ''}`
                   }
-                  label={`Share ${list.name}`}
+                  label={
+                    target === 'all' ? `Share ${list.name} with every member` : `Share ${list.name}`
+                  }
                   checked={on}
                   disabled={swap.pending || (viaAll && !own)}
+                  switchOnly={target === 'all'}
                   onCheckedChange={(next) => swap.flip('watchlist', ref, target, next, list.name)}
                 />
               </li>

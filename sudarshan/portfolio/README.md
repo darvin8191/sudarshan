@@ -362,6 +362,10 @@ two exists in this release. Each purpose has its own principal and its own list 
   belong to `qty`. While P&L is hidden, the table's `cost` list goes with it whatever quantities
   say: every rupee figure and every price a P&L is worked out from beside a quantity (review H1).
   `serialize.VIEWER_MASK` is built from it.
+  `fresh` (how old a holding's price is: a state and a sentence of dates and ages) is hidden by
+  no category and is passed on with its sentence (`kept_whole`), because it carries no amount and
+  an old number is never shown as current; a `fresh` of any other shape is looked inside like
+  every other field.
 * **Orders and trades** are two more parts of the Upstox reader (`UPSTOX_PARTS`); the owner's
   `upstox_book` still reads the four of `UPSTOX_PAGE_PARTS` and the page shows neither.
 * **Budget** (`budget.py`): a principal other than `owner` takes a token only while the API's
@@ -403,6 +407,7 @@ edits `kinds.py`, `ops/__init__.py` or `timers.py`.
 | `SUDARSHAN_PORTFOLIO_GOALS` | `goals` | `goals_list`, `goal_create`, `goal_update`, `export_pdf` |
 
 Each is off in code and set by the release that ships its part (`ops/deploy/openalgo-env.conf`).
+v0.13.0 sets `SUDARSHAN_TAX` to on; the list names neither of the other two, so they stay off.
 Off, its ops answer `not_ready` whatever their module does (`ops.switched`, put on at
 registration), its jobs end at once (`timers.gate_switched`) and nothing is read from Upstox for
 it. The owner's `state` answer carries `switches`, so the page offers a view only while its

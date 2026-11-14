@@ -393,6 +393,58 @@ describe('Trades', () => {
   })
 })
 
+// Verification N10 (v0.12.0): the review's M4 fix covered Positions, Holdings and the Dashboard.
+// Orders and Trades with the portfolio switched off or out of reach, and no rows, still read "No
+// orders today": an order book that was not read shown as a day without orders. Each case fails
+// on the old screens.
+describe('a part that was not read is not a day without orders or trades', () => {
+  const OFF = 'The portfolio service is switched off on the server.'
+  const DOWN = 'The account cannot be read right now; prices still move.'
+  const PUT_AWAY =
+    'What is shared with you could not be checked for ten minutes, so the figures were put away. They come back when the server answers.'
+  const cases = [
+    ['portfolio_off', OFF],
+    ['unreachable', DOWN],
+    ['unreachable', PUT_AWAY],
+    ['budget', 'No figures yet. They refresh in a minute.'],
+  ] as const
+
+  it.each(cases)('Orders, %s: the sentence is the card', async (state, words) => {
+    routeFetch({ [BOOK_ORDERS]: ok(bookOf('orders', [], { state, words, read_at: null })) })
+    mountFamily('/family/orders', <FamilyOrders />)
+    const card = await screen.findByTestId('book-unread')
+    expect(card.textContent).toBe(words)
+    expect(screen.queryByText('No orders today')).toBeNull()
+    expect(screen.queryByText(/No .* orders/)).toBeNull()
+    // no filter chips with a count of 0 either: nothing was counted
+    expect(screen.queryByRole('button', { name: /^All/ })).toBeNull()
+  })
+
+  it.each(cases)('Trades, %s: the sentence is the card', async (state, words) => {
+    routeFetch({ [BOOK_TRADES]: ok(bookOf('trades', [], { state, words, read_at: null })) })
+    mountFamily('/family/trades', <FamilyTrades />)
+    const card = await screen.findByTestId('book-unread')
+    expect(card.textContent).toBe(words)
+    expect(screen.queryByText('No trades today')).toBeNull()
+  })
+
+  it('a day that was read and has none still says so', async () => {
+    routeFetch({
+      [BOOK_ORDERS]: ok(bookOf('orders', [], { state: 'ok', read_at: AT })),
+      [BOOK_TRADES]: ok(
+        bookOf('trades', [], { state: 'closed', words: 'Market closed', read_at: AT })
+      ),
+    })
+    mountFamily('/family/orders', <FamilyOrders />)
+    expect(await screen.findByText('No orders today')).toBeTruthy()
+    expect(screen.queryByTestId('book-unread')).toBeNull()
+    cleanup()
+    mountFamily('/family/trades', <FamilyTrades />)
+    expect(await screen.findByText('No trades today')).toBeTruthy()
+    expect(screen.queryByTestId('book-unread')).toBeNull()
+  })
+})
+
 describe('ORDER_FIELD_CATEGORY against the one privacy table', () => {
   const table = JSON.parse(
     readFileSync(resolve(__dirname, '../../../../sudarshan/family/privacy_fields.json'), 'utf8')

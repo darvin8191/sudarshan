@@ -119,6 +119,8 @@ def keys(data, found=None):
     if isinstance(data, dict):
         for key, value in data.items():
             found.add(key)
+            if privacy.kept_whole(key, value):
+                continue  # how old a price is: a state and a sentence, hidden by no category
             keys(value, found)
     elif isinstance(data, list):
         for item in data:
@@ -256,7 +258,7 @@ async def test_member_privacy_is_kept_by_member_and_refuses_pnl_without_quantiti
         shown={"pnl": True, "qty": False, "funds": False, "orders": True},
     )  # fmt: skip
     assert status == 400 and body["message"] == (
-        "Live P&L is worked out from quantities. Show quantities to show P&L."
+        "P&L that moves with prices is worked out from quantities. Show quantities to show P&L."
     )
     again = await rig.owner("member_privacy_set", member="7", role=None, version=1, shown=ALL)
     assert again["version"] == 2 and again["shown"] == ALL and again["role"] is None

@@ -4,7 +4,8 @@ One call: ``GET <Upstox host>/v2/option/chain?instrument_key=&expiry_date=`` wit
 access token for the owner's session (never the Analytics Token). It goes through the shared httpx
 client with an explicit timeout (connect 1 s, read 8 s), after the Upstox plugin's standard rate
 limiter has given its turn, and is never retried: a caller that gets ``token`` or ``wait`` back
-must not call again for it. The token is only ever placed in the request's header; it is not
+must not call again for it. The shared client sends a GET whose answer broke once more by itself
+(a second request that takes no turn of the limiter), so the read says ``NO_READ_RETRY``. The token is only ever placed in the request's header; it is not
 logged here, not in a message and not kept. Request-driven; no thread, timer or loop.
 
 Upstox's page says the chain is not offered for MCX; the bridge never asks for one.
@@ -16,7 +17,7 @@ from typing import Any, NamedTuple
 
 import httpx
 
-from utils.httpx_client import get_httpx_client
+from utils.httpx_client import NO_READ_RETRY, get_httpx_client
 from utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -53,6 +54,7 @@ def fetch(token: str, instrument_key: str, expiry: str) -> Outcome:
             headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
             timeout=TIMEOUT,
             follow_redirects=False,
+            extensions={NO_READ_RETRY: True},
         )
     except httpx.HTTPError as exc:
         logger.warning("Options: Upstox did not answer for a chain (%s)", type(exc).__name__)

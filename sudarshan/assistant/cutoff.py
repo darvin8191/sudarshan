@@ -7,6 +7,9 @@ access token, but the one it holds stays good until it expires, up to 15 minutes
 it through ``checked``: a token issued at or before that moment is refused at its next call, with
 the answer that sends the client back to sign in.
 
+A consent code not yet exchanged is held to the same moment (``checked_code``, put around the
+token route's read of the code in ``blueprints/mcp_oauth.py``).
+
 Who calls ``end_all_access``: the kill switch (``sudarshan/guard/killswitch.py``), the "revoke
 every token" button of the remote MCP admin page, and every ending of the owner's sessions (a
 logout, a password change or reset: ``utils/session.end_every_session``), because the consent was
@@ -80,6 +83,24 @@ def checked(verify: Callable[[str], dict], error: type[Exception]) -> Callable[[
         return claims
 
     return verify_then_cutoff
+
+
+def checked_code(consume: Callable[[str], object]) -> Callable[[str], object]:
+    """``consume`` (upstream's one-time read of a consent code, ``utils.oauth_codes.consume``)
+    followed by the cutoff: a code issued at or before the moment access was ended is answered
+    as an unknown one. Without this a consent given in the minute before the kill switch, a
+    logout or a password change could still be exchanged afterwards for a token with a later
+    issue time. The code is spent either way. The moment is the risk store's, so the ending may
+    have happened in another process than the one that holds the code."""
+
+    def consume_then_cutoff(code: str):
+        entry = consume(code)
+        if entry is not None and refuses({"iat": getattr(entry, "issued_at", None)}):
+            logger.info("A consent code from before the assistant's access was ended is refused")
+            return None
+        return entry
+
+    return consume_then_cutoff
 
 
 def ended_count() -> int:

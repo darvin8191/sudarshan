@@ -195,6 +195,31 @@ def test_one_summary_goes_out_on_sunday_evening_with_the_weeks_figures(tmp_path)
     assert [json.loads(line)["kind"] for line in diary_lines] == ["watch_summary"]
 
 
+def test_the_summary_says_a_years_archive_has_no_offsite_copy_yet(tmp_path):
+    """Review L4: until the year's archive has gone offsite, the weekly summary says so."""
+    results = checks.run_checks(
+        {"backup": {"age_h": 2.0, "offsite": "ok", "fy": "2026-27", "fy_owed": "2026-27"}}, {}
+    )
+    by_name = {r.name: r for r in results}
+    assert by_name["backup"].level == checks.WARNING
+    facts = summary.facts(results, {}, {})
+    assert facts["backup_fy_owed"] == "2026-27" and "backup" in facts["warning"].split(",")
+    told = events.Event("s", "watch_summary", SUNDAY_1755, "s", "watch", facts)
+    lines = compose([told], datetime.fromtimestamp(SUNDAY_1755, UTC)).splitlines()
+    assert any("nightly backup (to look at)" in line for line in lines), lines
+    assert (
+        "Newest backup: 2 hours old. The 2026-27 year's archive has no offsite copy yet; it is "
+        "sent again at the next backup." in " ".join(lines)
+    )
+    # Sent: the line goes, and the backup is fine again.
+    fine = checks.run_checks({"backup": {"age_h": 2.0, "offsite": "ok", "fy": "2026-27"}}, {})
+    assert {r.name: r for r in fine}["backup"].level == checks.FINE
+    assert "backup_fy_owed" not in summary.facts(fine, {}, {})
+    odd = events.Event("s", "watch_summary", SUNDAY_1755, "s", "watch",
+                       {**facts, "backup_fy_owed": "<b>"})  # fmt: skip
+    assert "<b>" not in compose([odd], datetime.fromtimestamp(SUNDAY_1755, UTC))
+
+
 def test_a_quiet_week_says_nothing_needs_you():
     quiet = events.Event("s", "watch_summary", SUNDAY_1755, "s", "watch",
                          {"failing": "", "warning": "", "fine": "25", "unread": "0"})  # fmt: skip

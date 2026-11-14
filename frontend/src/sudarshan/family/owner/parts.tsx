@@ -168,6 +168,10 @@ export const ROW = 'flex min-h-12 items-center justify-between gap-3'
  * family member sees. The row is the switch's `<label>`, so a tap anywhere on its 48 dp flips it
  * once; the switch keeps its own short name (the row's name, or `label`), and the line under it
  * is its description.
+ *
+ * `switchOnly` (verification N8): for a switch whose one tap reaches every member, the row's text
+ * is not a target. Only the switch takes the tap, inside a 48 dp square of its own, so a thumb
+ * scrolling the list over a name cannot flip it.
  */
 export function SwitchRow({
   id,
@@ -176,6 +180,7 @@ export function SwitchRow({
   label,
   checked,
   disabled,
+  switchOnly = false,
   onCheckedChange,
 }: {
   id: string
@@ -185,33 +190,52 @@ export function SwitchRow({
   label?: string
   checked: boolean
   disabled?: boolean
+  /** Only the switch takes a tap, not the row's text (a switch that reaches every member). */
+  switchOnly?: boolean
   onCheckedChange: (next: boolean) => void
 }) {
-  return (
-    <label
-      htmlFor={id}
-      data-switch-row=""
-      className={cn(ROW, 'w-full', disabled ? 'cursor-not-allowed' : 'cursor-pointer')}
-    >
-      <span className="flex min-w-0 flex-col gap-1 py-1.5">
-        <span id={`${id}-name`} className="truncate text-sm leading-none font-medium">
-          {name}
-        </span>
-        {line ? (
-          <span id={`${id}-line`} className="text-[0.8125rem] text-[color:var(--text-tertiary)]">
-            {line}
-          </span>
-        ) : null}
+  const text = (
+    <span className="flex min-w-0 flex-col gap-1 py-1.5">
+      <span id={`${id}-name`} className="truncate text-sm leading-none font-medium">
+        {name}
       </span>
-      <Switch
-        id={id}
-        checked={checked}
-        disabled={disabled}
-        aria-label={label}
-        aria-labelledby={label ? undefined : `${id}-name`}
-        aria-describedby={line ? `${id}-line` : undefined}
-        onCheckedChange={onCheckedChange}
-      />
+      {line ? (
+        <span id={`${id}-line`} className="text-[0.8125rem] text-[color:var(--text-tertiary)]">
+          {line}
+        </span>
+      ) : null}
+    </span>
+  )
+  const control = (
+    <Switch
+      id={id}
+      checked={checked}
+      disabled={disabled}
+      aria-label={label}
+      aria-labelledby={label ? undefined : `${id}-name`}
+      aria-describedby={line ? `${id}-line` : undefined}
+      onCheckedChange={onCheckedChange}
+    />
+  )
+  const cursor = disabled ? 'cursor-not-allowed' : 'cursor-pointer'
+  if (switchOnly) {
+    return (
+      <div data-switch-row="switch-only" className={cn(ROW, 'w-full')}>
+        {text}
+        <label
+          htmlFor={id}
+          data-switch-target=""
+          className={cn('flex min-h-12 min-w-12 shrink-0 items-center justify-end', cursor)}
+        >
+          {control}
+        </label>
+      </div>
+    )
+  }
+  return (
+    <label htmlFor={id} data-switch-row="" className={cn(ROW, 'w-full', cursor)}>
+      {text}
+      {control}
     </label>
   )
 }

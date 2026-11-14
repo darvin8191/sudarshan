@@ -87,6 +87,12 @@ def request_may_have_been_sent(error: httpx.TransportError) -> bool:
     return not isinstance(error, _NOT_SENT_ERRORS)
 
 
+def _is_this_server(host: str | None) -> bool:
+    """SUDARSHAN: whether a request's host is this server's own loopback address."""
+    host = (host or "").strip("[]").lower()
+    return host in ("localhost", "::1") or host.startswith("127.")
+
+
 class _BrokerTransport(httpx.HTTPTransport):
     """Retries a broken read once, and records a broken write instead."""
 
@@ -110,7 +116,17 @@ class _BrokerTransport(httpx.HTTPTransport):
     def _record_unanswered(request: httpx.Request, error: Exception) -> None:
         if isinstance(error, httpx.TransportError) and not request_may_have_been_sent(error):
             return
-        logger.error(f"{request.method} to {request.url.host} sent but not answered: {error}")
+        if _is_this_server(request.url.host):
+            # SUDARSHAN: a sealed request to one of SUDARSHAN's own services on this server (the
+            # portfolio, screener, journal and family bridges use this client). It is no order
+            # and nothing reached a broker, so it is said in its own words, as a warning.
+            logger.warning(
+                f"{request.method} to a service on this server "
+                f"({request.url.host}:{request.url.port}) got no answer: {error}. "
+                "The service may be restarting; this was not a broker order."
+            )
+        else:
+            logger.error(f"{request.method} to {request.url.host} sent but not answered: {error}")
         lost = getattr(_watch, "lost", None)
         if lost is not None:
             lost.append(f"{request.method} {request.url.host}")

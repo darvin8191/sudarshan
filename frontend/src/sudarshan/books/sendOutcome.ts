@@ -16,10 +16,20 @@ import type { EachAnswer } from './sent'
  *   read timeout or a dropped connection after Upstox took it is the app's
  *   JSON 500; Upstox taking it without naming an order is its 502; a close-all
  *   that sent some exits before the rest were refused is marked.
- * - Refused: any other 4xx, which the app gives only before anything was
- *   sent (a missing field, the login or the security token, no position to
+ * - Refused: any other 4xx that is the app's own answer, which it gives only
+ *   before anything was sent (a missing field, the login, no position to
  *   exit, an exit for it still being placed, the rate limit), and a request
  *   that never left.
+ * - A 400, 401 or 403 that is not the app's own answer is a gate in front of
+ *   the view saying no before the request reached it (the security token
+ *   step, the login check, the web server refusing the request): refused.
+ * - Any other 4xx that is not the app's own answer (a page, or anything that is not
+ *   its JSON with a status word) says nothing about the order: `unanswered`,
+ *   like a page under a 5xx. Something in between wrote it, and it may have
+ *   written it over an answer that was lost: a web server whose error page
+ *   is missing answers "404 Not Found" for the app's "bad gateway" while the
+ *   app restarts (review M2). Read as a refusal, that released the hold of an
+ *   exit that may have gone. The cost of holding is one wait before a retry.
  */
 
 /** A send that is not a refusal: the app could not confirm it, or no answer came at all. */
@@ -43,17 +53,29 @@ export function notConfirmed(body: unknown): boolean {
 }
 
 /**
- * What a send that threw says: `refused` when the app answered no before
- * anything was sent, or when the request never left (the security token step
- * before it failed); `unconfirmed` when the app answered and could not
- * confirm it; `unanswered` when no answer of the app's own came back.
+ * What a send that threw says: `refused` when the app itself answered no
+ * before anything was sent, or when the request never left (the security
+ * token step before it failed); `unconfirmed` when the app answered and could
+ * not confirm it; `unanswered` when no answer of the app's own came back,
+ * under any status.
  */
+/** Codes a gate in front of the order view answers with before anything is sent. */
+const GATE_REFUSALS = new Set([400, 401, 403])
+
 export function thrownOutcome(error: unknown): 'refused' | HeldOutcome {
   if (!axios.isAxiosError(error)) return 'refused'
   const response = error.response
   if (!response) return 'unanswered'
-  if (response.status >= 500) return appAnswered(response.data) ? 'unconfirmed' : 'unanswered'
-  if (notConfirmed(response.data)) return 'unconfirmed'
+  if (!appAnswered(response.data)) {
+    // A gate in front of the order view said no before the request reached it: the security
+    // token step (Flask's own 400 page), the login check (401) or the web server refusing the
+    // request itself (400, 403). Nothing was sent, and a hold would only delay a retry of an exit
+    // that never left. No web server here writes these codes over a lost answer.
+    if (GATE_REFUSALS.has(response.status)) return 'refused'
+    // Any other code with a body that is not the app's own is no answer about the order.
+    return 'unanswered'
+  }
+  if (response.status >= 500 || notConfirmed(response.data)) return 'unconfirmed'
   return 'refused'
 }
 

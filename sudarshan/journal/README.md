@@ -54,13 +54,19 @@ One switch, the portfolio's too, read from OpenAlgo's `.env`; off in code.
   5 earlier days a night to the journal's first fill; at most 20 reads a night. An answer that is
   all zero or empty while the journal holds fills is "not ready" and asked again, 7 nights in
   all; after that the month's row, less the days that did answer, answers for the day.
+  Upstox's month is the whole account's, so it answers only in a month the journal covers
+  whole: every trading day of it, from the first, checked against Upstox's list by the close
+  check or rebuilt from the history (`actual.covers`). In any other month (the journal's
+  first, or one with a day it was down) the trades keep the estimate and the trade sheet says
+  "Upstox gave only the month's total, and the journal does not cover the whole month".
 - **Into orders and trades** (`actual.py`, pure rule in `core/spread.py`). A day's row is shared
   among that day's orders (`charges_order`, schema step 6) and each order among the trades that
   hold its fills, so a day's trades add up to Upstox's total to the paisa. A trade carries the
   actual, and its net is gross less the actual, only once every order of it has a share. A
   replay keeps it; a late fill is shared again from the kept row. Live journal only.
 - **Estimate against actual** (`charges_reconcile(fy)`, `core/reconcile.py`): per month and
-  Upstox segment, flagged above 5%, with the part that is off most named in a sentence.
+  Upstox segment, flagged above 5%, with the part that is off most named in a sentence. A
+  month the journal does not cover whole is not compared and never marked "Check".
 - **The Tax pack** asks the portfolio for the tax working paper (`tax_pack`) and prints it
   (`taxpack.py`). The journal works out no tax figure and holds no lot matching of its own; the
   paper printed is kept whole in the archive row, so an archived pack never changes until it is

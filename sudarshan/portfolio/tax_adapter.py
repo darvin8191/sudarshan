@@ -32,6 +32,7 @@ from collections.abc import Mapping
 from dataclasses import replace
 from typing import Any
 
+from sudarshan.tax.classify import is_equity_share
 from sudarshan.tax.model import Action, Carry, OpeningLot, Settings, Trade, build
 from sudarshan.tax.pack import PackInputs
 from sudarshan.tax.units import day_text, fy_first, fy_label, fy_last, fy_of, value_paise
@@ -243,11 +244,13 @@ def _amount(entry: Mapping[str, Any]) -> int:
 
 def pair_lots(pairs, before: int, taxpayer: int, account: int, owned: set[str], actions=()):
     """Purchases from before ``before`` that Upstox's P&L pairs name for shares sold since, for
-    each share the owner entered none of his own for, in the units of their purchase day."""
+    each share the owner entered none of his own for, in the units of their purchase day. A pair
+    of anything the core does not compute as a share (an ETF, a REIT, a bond: the core's own
+    ``is_equity_share``) opens no lot, since its sale would never close one."""
     kept = [
         row
         for row in pairs
-        if row.get("isin")
+        if is_equity_share(row.get("isin"))
         and row["isin"] not in owned
         and row.get("buy_date")
         and row["buy_date"] < before

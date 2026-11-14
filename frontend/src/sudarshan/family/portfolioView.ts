@@ -86,6 +86,23 @@ export interface TabHolding {
   key: string
   name: string
   symbol: string | null
+  /**
+   * How old the holding's price is, in the service's words ("Value from 1 Oct · 45 days old",
+   * "NAV of 21 Oct"); null where it has nothing to say (a price moving with ticks). It is hidden
+   * by no privacy category (`fresh` in privacy_fields.json: it carries no amount), so a member
+   * who is shown no figures still reads it: an old number is never passed off as current.
+   */
+  age: string | null
+  /** The service calls the price old: the line carries a clock icon and says so. */
+  old: boolean
+}
+
+/** A row's `fresh` as the service sent it: a state and a sentence, anything else left out. */
+function ageOf(row: Record<string, unknown>): Pick<TabHolding, 'age' | 'old'> {
+  const fresh = row.fresh
+  if (!isObject(fresh)) return { age: null, old: false }
+  const words = typeof fresh.words === 'string' && fresh.words.trim() ? fresh.words.trim() : null
+  return { age: words, old: fresh.state === 'old' }
 }
 
 export function holdingsOf(view: unknown): TabHolding[] {
@@ -99,6 +116,7 @@ export function holdingsOf(view: unknown): TabHolding[] {
       key: String(id ?? name),
       name,
       symbol: typeof symbol === 'string' ? symbol : null,
+      ...ageOf(row),
     })
   }
   return out

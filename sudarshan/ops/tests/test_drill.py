@@ -98,6 +98,50 @@ def test_an_archive_the_real_backup_made_passes(server):
     assert result["at"] == "2026-11-01T11:00:00+05:30" and result["words"] == ""
     (told,) = [e for e in read_events(server.settings().spool) if e.kind.startswith("drill")]
     assert (told.kind, told.src, told.fact("archive")) == ("drill_passed", "backup", archive.name)
+    assert (found.vault, result["vault"], told.fact("vault")) == ("opened",) * 3
+
+
+def _vault_rows(data: bytes, tmp_path: Path, sql: str) -> bytes:
+    """The vault's file after one statement on its sealed records."""
+    path = tmp_path / "vault-edit.db"
+    path.write_bytes(data)
+    with closing(sqlite3.connect(path)) as db:
+        db.execute(sql)
+        db.commit()
+        db.execute("VACUUM")
+    return path.read_bytes()
+
+
+def test_an_empty_vault_passes_and_is_said_as_empty_never_as_opened(server, tmp_path, capsys,
+                                                                    monkeypatch):  # fmt: skip
+    """Review L3: with no sealed record the drill opened nothing, and still said "the vault
+    opens with the backup's own keys" on the terminal and on Telegram."""
+    emptied = lambda name, data: (  # noqa: E731
+        _vault_rows(data, tmp_path, "DELETE FROM secrets") if name == drill.VAULT_DB else data
+    )
+    archive = _repacked(_archive(server), emptied)
+    found = _go(server, archive)
+    assert (found.outcome, found.vault) == (drill.PASSED, "empty")
+    assert _result(server)["vault"] == "empty"
+    told = [e for e in read_events(server.settings().spool) if e.kind == "drill_passed"][-1]
+    assert told.fact("vault") == "empty"
+
+    monkeypatch.setattr(drill, "run", lambda settings, target: found)
+    assert drill.main([str(archive)], env=server.env()) == 0
+    said = capsys.readouterr().out
+    assert "the vault holds nothing sealed yet, so no record was opened" in said
+    assert "opens with" not in said
+
+
+def test_one_record_of_every_key_is_tried(server, tmp_path):
+    """A second record sealed with another key would not open on the restored server; the
+    drill tried the first row only."""
+    sql = ("INSERT INTO secrets (name, ciphertext, key_id, updated_at) "
+           "SELECT 'zz_older', ciphertext, 'another-key-id', updated_at FROM secrets LIMIT 1")  # fmt: skip
+    added = lambda name, data: (  # noqa: E731
+        _vault_rows(data, tmp_path, sql) if name == drill.VAULT_DB else data
+    )
+    _fails(server, _repacked(_archive(server), added), "vault_key")
 
 
 def _repacked(archive: Path, change) -> Path:

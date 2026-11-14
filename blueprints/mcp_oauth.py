@@ -32,6 +32,7 @@ from database.oauth_db import (
 )
 from database.user_db import User, find_user_by_exact_username
 from limiter import limiter
+from sudarshan.assistant import cutoff as sudarshan_cutoff  # SUDARSHAN M17.9
 from utils.logging import get_logger
 from utils.oauth_codes import consume as consume_code
 from utils.oauth_codes import discard as discard_code
@@ -43,6 +44,10 @@ from utils.oauth_tokens import (
     revoke_presented_refresh,
     rotate_refresh_token,
 )
+
+# SUDARSHAN M17.9: a consent code issued before AI access was last ended (the kill switch, a
+# logout, a password change) is refused at the token route: sudarshan/assistant/cutoff.py
+consume_code = sudarshan_cutoff.checked_code(consume_code)
 from utils.session import check_session_validity
 
 logger = get_logger(__name__)

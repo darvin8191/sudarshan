@@ -184,6 +184,8 @@ def test_a_token_that_worked_is_refused_once_access_is_ended(starts):
     assert "resource_metadata" in seen["after_challenge"], "so the client signs in again"
     assert seen["stream_after"] == 401
     assert seen["new_token"] == 200, "a sign-in after the cutoff works"
+    assert seen["code_from_before"] is False, "a consent from before the ending yields no token"
+    assert seen["code_from_after"] is True
 
 
 @pytest.mark.timeout(300)

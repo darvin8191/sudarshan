@@ -1301,6 +1301,31 @@ describe('a market alert from the phone chart (M10.2)', () => {
     expect(screen.getByRole('status', { name: 'Location' })).toHaveTextContent('/chart/NSE/SBIN')
   })
 
+  it('does not reopen an order ticket with the page: a ticket opens only from a tap (review M1)', async () => {
+    // What a reload, or the phone bringing the app back, finds in history: yesterday's "Buy at".
+    await opened(
+      { pathname: '/chart/NSE/SBIN', state: { sheet: 'ticket', side: 'BUY', price: 803 } },
+      ['/chart/NSE/SBIN']
+    )
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Order ticket' })).toBeNull())
+    expect(screen.getByRole('status', { name: 'Location' })).toHaveTextContent('/chart/NSE/SBIN')
+    // A tap still opens one, at the market, not at the price that was restored.
+    const buy = screen.getByRole('button', { name: 'BUY' })
+    await waitFor(() => expect(buy).toBeEnabled())
+    await userEvent.click(buy)
+    expect(screen.getByRole('dialog', { name: 'Order ticket' })).toHaveTextContent(
+      'MARKET no price'
+    )
+  })
+
+  it('does not reopen a ticket that adds to a position either (its product may be gone)', async () => {
+    await opened(
+      { pathname: '/chart/NSE/SBIN', state: { sheet: 'ticket', side: 'SELL', product: 'NRML' } },
+      ['/chart/NSE/SBIN']
+    )
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Order ticket' })).toBeNull())
+  })
+
   it('offers no bell where market alerts do not reach', async () => {
     await opened('/chart/MCX/GOLDM')
     expect(screen.queryByRole('button', { name: 'Set alert' })).toBeNull()

@@ -263,6 +263,11 @@ def _named(pack: dict, names: dict[str, str]) -> dict:
     for key in SALE_LISTS:
         for row in pack["capital_gains"][key]:
             row["name"] = names.get(row["isin"])
+    # A sale the paper does not compute (an ETF, a REIT, a bond) is named too: an ISIN alone
+    # does not say what was sold. A derivative's instrument is its contract and names itself.
+    for row in pack.get("not_computed_sales") or ():
+        if isinstance(row.get("instrument"), str):
+            row["name"] = names.get(row["instrument"])
     return pack
 
 
@@ -297,9 +302,11 @@ def _settings(tx, taxpayer: int) -> dict:
 ACCOUNT_SHOWN = ("id", "name", "kind", "tax_mode", "version")
 
 
-def _account_mode(tx, values: dict, version, now: int) -> dict:
+def _account_mode(tx, values: dict, version, now: int, changed: list | None = None) -> dict:
     """Set how one of the taxpayer's own accounts counts, from the version it was read at. The
-    Upstox account is not the owner's to set. The change is logged by ids, never by a name."""
+    Upstox account is not the owner's to set. A change is noted in ``changed`` (ids and modes,
+    never a name) for the caller to log once it is saved: nothing is logged from here, because
+    this also runs inside a dry run that is undone and before a commit that may fail."""
     account = tx.get("account", values["account_id"])
     if account is None or account["member_id"] != values["member_id"]:
         raise Invalid(NOT_THEIRS)
@@ -310,10 +317,8 @@ def _account_mode(tx, values: dict, version, now: int) -> dict:
     was, mode = tax_mode_of(account), values["tax_mode"]
     if was != mode:
         account = tx.change("account", account["id"], version, {"tax_mode": mode}, now)
-        log.info(
-            "account %s of member %s now counts for tax as %s (was %s)",
-            account["id"], account["member_id"], mode, was,
-        )  # fmt: skip
+        if changed is not None:
+            changed.append((account["id"], account["member_id"], mode, was))
     return {**{k: account[k] for k in ACCOUNT_SHOWN if k != "tax_mode"}, "tax_mode": mode}
 
 
@@ -346,7 +351,7 @@ def _read_row(kind: str, row: dict, today: int) -> dict:
     return {**values, **FIXED.get(kind, {})}
 
 
-def _save(tx, kind: str, values: dict, row_id, version, request_id, now: int) -> dict:
+def _save(tx, kind: str, values: dict, row_id, version, request_id, now: int, changed=None):
     """Write one input: a new row, or an existing one from the version it was read at."""
     table = INPUTS[kind][0]
     if "member_id" in values:
@@ -356,7 +361,7 @@ def _save(tx, kind: str, values: dict, row_id, version, request_id, now: int) ->
         tx.setting_put(f"tax:{member}", value, version or 0, now)
         return _settings(tx, member)
     if kind == "account_mode":
-        return _account_mode(tx, values, version, now)
+        return _account_mode(tx, values, version, now, changed)
     if "account_id" in values:
         account = tx.get("account", values["account_id"])
         if account is None or account["member_id"] != values["member_id"]:
@@ -449,11 +454,22 @@ async def tax_input_set(ctx, message):
         fy = _year(message, today)
         return await answer(lambda: _dry(store, kind, values, row_id, version, fy, today, now))
 
-    def save(tx):
-        return {"kind": kind, "row": _save(tx, kind, values, row_id, version, request_id, now),
-                "effect": []}  # fmt: skip
+    changed: list = []
 
-    return await answer(lambda: store.write(OWNER, save))
+    def save(tx):
+        changed.clear()
+        saved = _save(tx, kind, values, row_id, version, request_id, now, changed)
+        return {"kind": kind, "row": saved, "effect": []}
+
+    return await answer(lambda: _logged(store.write(OWNER, save), changed))
+
+
+def _logged(done: dict, changed: list) -> dict:
+    """The audit line of a saved "counts for tax" change. It is called with the answer of
+    ``store.write``, so it runs only after the commit; a save that raised never reaches it."""
+    for line in changed:
+        log.info("account %s of member %s now counts for tax as %s (was %s)", *line)
+    return done
 
 
 @op("tax_input_delete")

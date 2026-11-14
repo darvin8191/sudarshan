@@ -882,6 +882,40 @@
    "level": "unread"
   },
   {
+   "name": "no name for SUDARSHAN's site is known: nothing is judged",
+   "check": "certificate",
+   "readings": {
+    "cert_hours_left": "no_name"
+   },
+   "memory": {},
+   "level": "unread",
+   "facts": {
+    "cause": "no_name"
+   }
+  },
+  {
+   "name": "nginx gave another site's certificate: it is not judged",
+   "check": "certificate",
+   "readings": {
+    "cert_hours_left": "other_site"
+   },
+   "memory": {},
+   "level": "unread",
+   "facts": {
+    "cause": "other_site"
+   }
+  },
+  {
+   "name": "any other word is no reading",
+   "check": "certificate",
+   "readings": {
+    "cert_hours_left": "12"
+   },
+   "memory": {},
+   "level": "unread",
+   "facts": {}
+  },
+  {
    "name": "true is not a number of hours",
    "check": "certificate",
    "readings": {
@@ -1367,6 +1401,30 @@
     "offsite": "ok",
     "fy": "2026-27",
     "fy_mb": "398"
+   }
+  },
+  {
+   "name": "a year's archive with no offsite copy yet is something to look at",
+   "check": "backup",
+   "readings": {
+    "backup": {
+     "age_h": 17.6,
+     "size_mb": 412,
+     "offsite": "ok",
+     "fy": "2026-27",
+     "fy_mb": 398,
+     "fy_owed": "2026-27"
+    }
+   },
+   "memory": {},
+   "level": "warning",
+   "facts": {
+    "age_h": "17",
+    "size_mb": "412",
+    "offsite": "ok",
+    "fy": "2026-27",
+    "fy_mb": "398",
+    "fy_owed": "2026-27"
    }
   },
   {

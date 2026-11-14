@@ -15,8 +15,10 @@ backup's own state folder, looks, and removes the folder again.
      a store this release migrates is at a schema version this release knows.
   4. ``openalgo.db`` holds exactly one admin user, an API key and a broker login.
   5. The archive's ``.env`` has the keys the app cannot start without (never printed).
-  6. The vault opens with the key derived from that same ``.env``: one sealed record is
-     decrypted (never printed). This is the step that proves the pair restores together.
+  6. The vault opens with the key derived from that same ``.env``: one sealed record of each
+     key the vault names is decrypted (never printed). This is the step that proves the pair
+     restores together. A vault that holds no sealed record proves nothing of the kind: the
+     drill then says "the vault holds nothing sealed yet", never that it opened (review L3).
   7. The scratch folder is removed and seen gone.
 
 The result is ``drill.json`` in the backup's state folder (the watch reads it for the System
@@ -100,6 +102,15 @@ WORDS = {
 }
 
 
+VAULT_OPENED, VAULT_EMPTY = "opened", "empty"
+#: What a passed drill says of the vault: only what it tried.
+VAULT_SAID = {
+    VAULT_OPENED: "the vault opens with the archive's own keys",
+    VAULT_EMPTY: "the vault holds nothing sealed yet, so no record was opened",
+    "": "the vault was not checked",
+}
+
+
 @dataclass(frozen=True)
 class Outcome:
     outcome: str  # passed, failed, skipped
@@ -107,6 +118,10 @@ class Outcome:
     name: str = ""  # the database or the key the item is about: a name, never a value
     archive: str = ""
     databases: int = 0
+    #: What the vault step did on a pass: ``opened`` (a sealed record of every key was
+    #: decrypted with the archive's own keys) or ``empty`` (the vault holds no sealed record,
+    #: so nothing was opened). "" when the drill did not get that far.
+    vault: str = ""
 
     @property
     def exit_code(self) -> int:
@@ -206,8 +221,9 @@ def check_env(path: Path) -> Mapping[str, str]:
 
 
 def check_vault(path: Path, env: Mapping[str, str]) -> bool:
-    """One sealed record opens with the key derived from the archive's own .env. True when a
-    record was opened, False when the vault holds none (nothing was ever sealed)."""
+    """One sealed record of each key the vault names opens with the key derived from the
+    archive's own .env. True when records were opened, False when the vault holds none (nothing
+    was ever sealed, so nothing was tried)."""
     from cryptography.fernet import InvalidToken
 
     from sudarshan.vault.keys import (
@@ -222,16 +238,21 @@ def check_vault(path: Path, env: Mapping[str, str]) -> bool:
         raise _Fail("vault")
     try:
         with contextlib.closing(_open_ro(path)) as db:
-            row = db.execute("SELECT ciphertext, key_id FROM secrets LIMIT 1").fetchone()
+            rows = db.execute(
+                "SELECT ciphertext, key_id FROM secrets GROUP BY key_id ORDER BY key_id"
+            ).fetchall()
     except sqlite3.Error as exc:
         raise _Fail("vault") from exc
-    if row is None:
+    if not rows:
         return False
     try:
         pepper = pepper_from(env)
-        if row[1] != key_fingerprint(pepper, VAULT_INFO):
-            raise _Fail("vault_key")
-        fernet_for(pepper, VAULT_INFO).decrypt(str(row[0]).encode("ascii"))
+        mine, fernet = key_fingerprint(pepper, VAULT_INFO), fernet_for(pepper, VAULT_INFO)
+        for ciphertext, key_id in rows:
+            # A record sealed with any other key would not open on the restored server.
+            if key_id != mine:
+                raise _Fail("vault_key")
+            fernet.decrypt(str(ciphertext).encode("ascii"))
     except (VaultKeyError, InvalidToken, ValueError) as exc:
         raise _Fail("vault_key") from exc
     return True
@@ -268,8 +289,9 @@ def drill(archive: Path, state_dir: Path, free_bytes: Callable[[Path], int]) -> 
         if not (scratch / ENV_MEMBER).is_file():
             raise _Fail("env")
         env = check_env(scratch / ENV_MEMBER)
-        check_vault(scratch / VAULT_DB, env)
-        found = Outcome(PASSED, archive=archive.name, databases=len(databases))
+        opened = check_vault(scratch / VAULT_DB, env)
+        found = Outcome(PASSED, archive=archive.name, databases=len(databases),
+                        vault=VAULT_OPENED if opened else VAULT_EMPTY)  # fmt: skip
     except _Fail as failed:
         found = Outcome(FAILED, failed.item, failed.name, archive.name)
     except Exception:
@@ -290,6 +312,7 @@ def write_result(state_dir: Path, at: datetime, found: Outcome, release: str | N
         "words": WORDS.get(found.item, "") if found.outcome == FAILED else "",
         "archive": found.archive,
         "databases": found.databases,
+        "vault": found.vault,
         "release": release,
     }
     target = state_dir / RESULT_FILE
@@ -319,6 +342,7 @@ def tell(settings: backup.Settings, at: datetime, found: Outcome) -> bool:
         name=PurePosixPath(found.name).name,
         archive=found.archive,
         databases=str(found.databases),
+        vault=found.vault,
     )
 
 
@@ -381,8 +405,8 @@ def main(argv: list[str] | None = None, env: Mapping[str, str] | None = None) ->
         sys.stdout.write(f"restore drill: nothing done ({why})\n")
     elif found.outcome == PASSED:
         sys.stdout.write(
-            f"restore drill: passed ({found.archive}, {found.databases} databases, the vault "
-            "opens with the archive's own keys)\n"
+            f"restore drill: passed ({found.archive}, {found.databases} databases, "
+            f"{VAULT_SAID[found.vault]})\n"
         )
     else:
         about = f" ({PurePosixPath(found.name).name})" if found.name else ""

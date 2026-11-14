@@ -17,11 +17,14 @@ Rules, in this order:
            complete archive, or its newest if every one of them is partial.
   Monthly  The same for each of the ``monthly`` most recent months that have one, so a month is
            represented for a year after its dailies are gone.
-  Yearly   A financial year ends on 31 March, and its books are whole once that day's market
-           has closed. The first complete archive made from 31 March 16:00 on is that financial
-           year's archive (one made on 31 March before 16:00 does not belong to the year that
-           is ending; a partial one never counts; nor does one made more than 92 days later). The archives of the ``yearly`` most recent financial
-           years that have one are kept (M18.11, M19.10: 8 years, for the tax records).
+  Yearly   A financial year ends on 31 March, but its papers are not whole that evening: the
+           journal builds the year's Tax pack on 1 April at 07:00, Upstox's charges for a day
+           are read two nights later, and March's own charges row from 3 April. The first
+           complete archive made from 4 April 00:00 on is that financial year's archive (one
+           made earlier holds no Tax pack and no March charges, and does not belong to the
+           year that has ended; a partial one never counts; nor does one made more than 92 days
+           later). The archives of the ``yearly`` most recent financial years that have one
+           are kept (M18.11, M19.10: 8 years, for the tax records).
   Latest   The newest complete archive is always kept, whatever else is true: a run of partial
            archives must never push the last good one out.
   Cap      When what is kept (plus ``reserve``, the archive about to be written) is over the cap,
@@ -40,9 +43,14 @@ NAME = re.compile(r"sudarshan-backup-(\d{8})-(\d{6})(-partial)?\.tar\.gz")
 STAMP = "%Y%m%d-%H%M%S"
 #: The newest archives the cap may not touch: last night's, the one before, and one more.
 PROTECT_NEWEST = 3
-#: A financial year's books are whole from this moment of its last day, 31 March (IST).
-FY_CLOSE = (3, 31, 16)
-#: How long after that an archive can still become the year's (to the end of June).
+#: The moment (month, day, hour, IST) from which an archive holds a financial year's papers
+#: whole: 4 April 00:00. By then the journal has built the year's Tax pack (1 April 07:00,
+#: ``journal/schedule.py`` ``FY_AT``), the charges of the year's last trading days have been
+#: read (two nights after each) and March's own charges row has been asked for (from 3 April,
+#: ``journal/jobs/charges.py`` ``MONTH_FROM_DAY``). An archive made on the evening of 31 March
+#: held none of them (review M3).
+FY_FROM = (4, 4, 0)
+#: How long after that an archive can still become the year's (to 4 July).
 FY_WINDOW_DAYS = 92
 
 
@@ -88,10 +96,11 @@ def parse(name: str, size: int) -> Backup | None:
 
 def fy_label(at: datetime) -> str | None:
     """The financial year an archive made at ``at`` (naive IST) can be the archive of: the one
-    whose books became whole in the ``FY_WINDOW_DAYS`` before it, else None. ``2026-27`` ends on
-    31 March 2027. The window keeps an archive made months later (a server first installed in
-    November) from being taken for a year's archive."""
-    month, day, hour = FY_CLOSE
+    whose papers became whole (``FY_FROM``) in the ``FY_WINDOW_DAYS`` before it, else None.
+    ``2026-27`` ends on 31 March 2027 and is whole from 4 April 2027. The window keeps an
+    archive made months later (a server first installed in November) from being taken for a
+    year's archive."""
+    month, day, hour = FY_FROM
     end = at.year if at >= datetime(at.year, month, day, hour) else at.year - 1
     if (at - datetime(end, month, day, hour)).days >= FY_WINDOW_DAYS:
         return None
@@ -100,7 +109,7 @@ def fy_label(at: datetime) -> str | None:
 
 def yearlies(backups: list[Backup]) -> dict[str, Backup]:
     """Each financial year's archive among ``backups``: the first complete one made after that
-    year's books were whole. By label, ``2026-27``."""
+    year's papers were whole. By label, ``2026-27``."""
     chosen: dict[str, Backup] = {}
     for backup in sorted(backups, key=lambda b: (b.at, b.name)):
         label = None if backup.partial else fy_label(backup.at)

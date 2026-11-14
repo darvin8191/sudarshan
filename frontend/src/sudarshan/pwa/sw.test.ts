@@ -251,6 +251,80 @@ describe('navigations: network first', () => {
     expect(shown).not.toContain('You are offline')
   })
 
+  // Review L6 (v0.13.0): the web server's own 503 is its "too many requests" answer (an app
+  // that is down is its 502). Shown as "restarting" it was untrue, and the page's own retry
+  // every 15 seconds asked into the same limit.
+  const nginxPage = (title: string, version = '') =>
+    `<html>\r\n<head><title>${title}</title></head>\r\n<body>\r\n<center><h1>${title}</h1></center>\r\n<hr><center>nginx${version}</center>\r\n</body>\r\n</html>\r\n`
+
+  it.each([
+    [503, nginxPage('503 Service Temporarily Unavailable')],
+    [503, nginxPage('503 Service Temporarily Unavailable', '/1.24.0 (Ubuntu)')],
+    [429, nginxPage('429 Too Many Requests')],
+  ])('says a rate limit as a rate limit for the web server’s own %i page', async (status, body) => {
+    await install(world, { '/images/restarting.html': RESTART_PAGE })
+    world.fetch.mockResolvedValueOnce(new Response(body, { status }))
+    const answer = await dispatch(world, '/family/holdings', { mode: 'navigate' })
+    expect(answer?.status).toBe(status)
+    const shown = (await answer?.text()) ?? ''
+    expect(shown).toContain('Too many tries from this connection. Wait a minute, then try again.')
+    expect(shown).toContain('सुदर्शन')
+    expect(shown).toContain('SUDARSHAN')
+    expect(shown).not.toContain('restarting')
+    expect(shown).not.toContain('nginx')
+    expect(shown).not.toMatch(/\b(429|503)\b/)
+    // It asks for nothing and does not try again by itself, into the same limit.
+    expect(shown).not.toContain('http-equiv')
+    expect(shown).not.toMatch(/<script|<link|<img|url\(|src=/)
+    expect(shown).toContain('min-height:48px')
+    expect(shown).toContain('only light')
+    expect(answer?.headers.get('cache-control')).toBe('no-store')
+  })
+
+  it('says the rate limit on a phone that has not kept the restart page too', async () => {
+    await install(world, { '/images/restarting.html': null })
+    world.fetch.mockResolvedValueOnce(
+      new Response(nginxPage('503 Service Temporarily Unavailable'), { status: 503 })
+    )
+    const answer = await dispatch(world, '/family/', { mode: 'navigate' })
+    expect(answer?.status).toBe(503)
+    expect(await answer?.text()).toContain('Too many tries')
+  })
+
+  it('still shows the restart page for a 503 that is not the web server’s limit page', async () => {
+    await install(world, { '/images/restarting.html': RESTART_PAGE })
+    for (const body of [
+      'Service Unavailable',
+      '{"status":"error"}',
+      '<h1>nginx is mentioned</h1>',
+    ]) {
+      world.fetch.mockResolvedValueOnce(new Response(body, { status: 503 }))
+      const answer = await dispatch(world, '/family/', { mode: 'navigate' })
+      expect(answer?.status).toBe(503)
+      expect(await answer?.text()).toBe(RESTART_PAGE)
+    }
+  })
+
+  it('reads the web server’s bare 502 and 504 pages as a restart, never as a limit', async () => {
+    await install(world, { '/images/restarting.html': RESTART_PAGE })
+    for (const [status, title] of [
+      [502, '502 Bad Gateway'],
+      [504, '504 Gateway Time-out'],
+    ] as const) {
+      world.fetch.mockResolvedValueOnce(new Response(nginxPage(title), { status }))
+      const answer = await dispatch(world, '/family/', { mode: 'navigate' })
+      expect(answer?.status).toBe(status)
+      expect(await answer?.text()).toBe(RESTART_PAGE)
+    }
+  })
+
+  it('leaves the app’s own 429 page as the server wrote it', async () => {
+    await install(world, { '/images/restarting.html': RESTART_PAGE })
+    world.fetch.mockResolvedValueOnce(new Response('the server says', { status: 429 }))
+    const answer = await dispatch(world, '/family/', { mode: 'navigate' })
+    expect(await answer?.text()).toBe('the server says')
+  })
+
   it('shows the restart page again on the next try, and the app once the server answers', async () => {
     await install(world, { '/images/restarting.html': RESTART_PAGE })
     world.fetch.mockResolvedValueOnce(new Response('bad gateway', { status: 502 }))

@@ -4,16 +4,16 @@ import { PlaceOrderDialog } from '@/components/trading/PlaceOrderDialog'
 import { cn } from '@/lib/utils'
 import { type BookOrder, reasonOf } from '@/sudarshan/books/orderFold'
 import { withoutCode } from '@/sudarshan/books/sendOutcome'
-import { ticketProduct } from '@/sudarshan/ticket/productPref'
+import { type Product, productsFor, ticketProduct } from '@/sudarshan/ticket/productPref'
 import { contractOf } from '@/sudarshan/watchlist/api'
 import { ActionWords, OUTLINED } from './parts'
 
 /**
  * What an order's sheet gained in B2 (M6.1): the order type in words, the broker's reason for a
  * rejection without its error code, and Repeat, which opens the app's order ticket for the same
- * instrument, side and quantity. The product is the one every ticket opens with
- * (`productPref.ticketProduct`); the price type is the ticket's own, and nothing is sent until
- * the owner presses the ticket's button. The sheet itself is OrderCards'.
+ * instrument, side and quantity, in the order's own product ("repeat" promises the same order;
+ * v0.13.0 review M3). The price type is the ticket's own, and nothing is sent until the owner
+ * presses the ticket's button. The sheet itself is OrderCards'.
  */
 
 /** "Stop-loss limit (SL)": an order's price type in words. */
@@ -98,8 +98,19 @@ export function RepeatButton({
 }
 
 /**
- * Repeat's ticket: the app's order ticket on the order's instrument, side and quantity, with the
- * product every ticket opens with. It opens once the lot size is known (RepeatButton waits for
+ * The product Repeat opens the ticket with: the repeated order's own, the rule Add and Exit follow
+ * on a position. An NRML order repeated on a phone whose pick is MIS would otherwise open as an
+ * intraday order and be squared off the same day. One the segment does not take (or a book row
+ * with none) falls back to the product every ticket opens with.
+ */
+export function repeatProduct(order: BookOrder): Product | undefined {
+  const product = String(order.product ?? '').toUpperCase() as Product
+  return productsFor(order.exchange).includes(product) ? product : ticketProduct(order.exchange)
+}
+
+/**
+ * Repeat's ticket: the app's order ticket on the order's instrument, side and quantity, in the
+ * order's own product. It opens once the lot size is known (RepeatButton waits for
  * the same read, so this one is already there).
  */
 export function RepeatTicket({
@@ -125,7 +136,7 @@ export function RepeatTicket({
       quantity={Number(order.quantity) || undefined}
       lotSize={contract.data.lotSize}
       tickSize={contract.data.tickSize}
-      product={ticketProduct(order.exchange)}
+      product={repeatProduct(order)}
       strategy="Orders"
     />
   )

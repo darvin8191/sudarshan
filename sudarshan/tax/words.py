@@ -116,6 +116,9 @@ NOT_COMPUTED = (
     "Other business expenses (data, software, internet, an office).",
     "Rules against wash sales and bonus or dividend stripping.",
     "The extra tax on a promoter in a buyback.",
+    "ETF units (equity ones too), REIT and InvIT units, gold bonds, government securities, "
+    "debentures and preference shares: of what trades on the exchange, only a company's "
+    "equity share is computed. A sale of any other is listed with its value.",
     "Debt funds, unlisted shares, property, gold, crypto and foreign assets.",
 )
 CESS_LABEL = "cess at 4%, before surcharge"
@@ -175,6 +178,10 @@ EXPENSES_ALLOCATED = (
 )
 EXPENSES_LEFT_OUT = (
     "Charges are not taken off share gains here, so the gains shown are slightly larger."
+)
+CHARGES_OF_OTHERS = (
+    "Upstox's share-market charges also cover the sales and purchases this paper does not "
+    "compute. Their part, by traded value, is taken off nothing here."
 )
 CHARGES_UNKNOWN = "Upstox's charges for {segment} are not read yet; none are taken off."
 BUYBACK_NOTE = (

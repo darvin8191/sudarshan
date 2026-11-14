@@ -72,10 +72,16 @@ export function LeftOutCard({ pack }: { pack: TaxPack }) {
         <div className={RULE}>
           <h3 className="text-sm font-semibold">Sales outside this paper</h3>
           {pack.not_computed_sales.map((sale) => (
+            // The name with the ISIN under it, as the sales sheet writes a share; the ISIN
+            // alone where no record names it (an ISIN by itself does not say what was sold).
             <Line
               key={`${sale.instrument}-${sale.day}`}
-              label={sale.instrument}
-              sub={`Sold ${dayText(sale.day)}`}
+              label={sale.name || sale.instrument}
+              sub={
+                sale.name
+                  ? `${sale.instrument} · Sold ${dayText(sale.day)}`
+                  : `Sold ${dayText(sale.day)}`
+              }
             >
               {rs(sale.amount_paise)}
             </Line>
