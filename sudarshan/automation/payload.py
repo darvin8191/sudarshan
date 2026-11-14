@@ -190,7 +190,11 @@ def parse(body: str | bytes) -> Alert:
     )
 
 
-_SECRET = re.compile(r"sdt_[A-Za-z0-9_-]{8,}|(?i:apikey|api_key|token|password|secret)")
+#: What is never kept: a link's token, a word that names a secret, or any unbroken run of 32 or
+#: more letters and digits (an API key, a hash, a token of another service).
+_SECRET = re.compile(
+    r"sdt_[A-Za-z0-9_-]{8,}|(?i:apikey|api_key|token|password|secret)|[A-Za-z0-9_+/=-]{32,}"
+)
 
 
 def redact(body: str | bytes, keep: int = 600) -> str:
@@ -207,8 +211,8 @@ def redact(body: str | bytes, keep: int = 600) -> str:
     kept = {}
     for key, value in data.items():
         if key in USED or key in IGNORED:
-            text = str(value)[:MAX_VALUE]
-            kept[key] = "(removed)" if _SECRET.search(text) else text
+            text = str(value)
+            kept[key] = "(removed)" if _SECRET.search(text) else text[:MAX_VALUE]
     dropped = len(data) - len(kept)
     if dropped:
         kept["_other_keys"] = dropped

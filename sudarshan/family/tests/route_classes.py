@@ -297,6 +297,7 @@ webhook       /oauth/token                    mcp_oauth_bp.token_endpoint       
 webhook       /postback/<broker>              postback_bp.broker_postback                   # broker order postbacks: matched to the live broker session
 webhook       /strategy/webhook/<token>       strategy_module_bp.webhook                    # strategy alerts (TradingView): the token in the path
 webhook       /sudarshan/risk/api/killswitch  sudarshan_risk_bp.api_turn_on                 # kill switch for outside platforms: the API key in the body (M5.13)
+webhook       /sudarshan/tv/<token>           sudarshan_automation_bp.alert                 # Automation alerts (TradingView): the token in the path; off by default, when it answers as a link nobody made (M12.1)
 
 # --- internal: ring services' sealed hand-offs, called on 127.0.0.1 ---
 internal      /sudarshan/alerts/internal/push          sudarshan_alerts.internal_push                  # sudarshan-alerts pushes events: sealed, 404 through nginx

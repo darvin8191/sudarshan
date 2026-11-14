@@ -10,7 +10,8 @@ from typing import Any
 # as one expression makes the same rule usable for a bare Flask path, a full
 # URL, a Werkzeug request line, and arbitrary application-log text.
 _URL_CREDENTIAL = re.compile(
-    r"(?P<prefix>/(?:strategy|flow|chartink)/webhook/)[^/\s?#'\"<>]+",
+    # SUDARSHAN M12.2: the Automation alert link, /sudarshan/tv/<token>, is one more.
+    r"(?P<prefix>/(?:(?:strategy|flow|chartink)/webhook|sudarshan/tv)/)[^/\s?#'\"<>]+",
     flags=re.IGNORECASE,
 )
 

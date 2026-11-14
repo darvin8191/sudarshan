@@ -268,6 +268,7 @@ class AutomationStore:
         strategy_id: int,
         decide: Callable[[m.Strategy, m.State], dict[str, Any] | None],
         day: str,
+        token: str | None = None,
     ) -> tuple[m.Strategy, m.State, int | None, dict[str, Any] | None] | None:
         """Read the strategy and its state, let ``decide`` judge them, and write the alert's row,
         all in one transaction. Call it holding the strategy's lock.
@@ -277,11 +278,11 @@ class AutomationStore:
         ``state_values`` and ``strategy_values`` (taken out) are written with the row. Returns
         the strategy and state as read, the new row's id and its columns; the id is ``None`` when
         the claim was already there (a repeat: nothing was written). ``None`` when the strategy is
-        gone.
+        gone, or when ``token`` is given and is no longer its link's.
         """
         with self._session() as session:
             row = session.get(StrategyRow, strategy_id)
-            if row is None:
+            if row is None or (token is not None and row.token_sha256 != token_hash(token)):
                 return None
             state_row = session.get(StateRow, strategy_id)
             if state_row is None:
@@ -351,7 +352,8 @@ class AutomationStore:
 
     def note_alert(self, strategy_id: int, **columns: Any) -> int | None:
         """A line that is no claim: a repeat, or a message that could not be read."""
-        columns.setdefault("claim", f"note|{now_ms()}|{secrets.token_hex(4)}")
+        if not columns.get("claim"):
+            columns["claim"] = f"note|{now_ms()}|{secrets.token_hex(4)}"
         with self._session() as session:
             alert = AlertRow(strategy_id=strategy_id, **_kept(columns))
             session.add(alert)
