@@ -82,10 +82,11 @@ export function AccountControls({ variant = 'navbar' }: { variant?: 'navbar' | '
 
   // The toolbar's quiet button: its glyph on the toolbar surface, a fill on hover.
   // The app bar's buttons are 48px tap targets on a phone (owner rule: 48 dp),
-  // 40px where a mouse points.
+  // 40px where a mouse points. SUDARSHAN (v0.13.0 review L3): "where a mouse points" is asked
+  // of the pointer, not only of the width, so a phone on its side (800 px wide) keeps 48.
   const iconButton = toolbar
     ? 'h-7 w-7 rounded-md text-foreground/80 hover:bg-accent hover:text-foreground dark:hover:bg-accent'
-    : 'size-12 rounded-full md:size-10'
+    : 'size-12 rounded-full md:pointer-fine:size-10'
   const glyph = toolbar ? 'h-4 w-4' : 'size-5'
   const modeLabel = appMode === 'live' ? 'Live' : 'Analyze'
 
@@ -174,10 +175,10 @@ export function AccountControls({ variant = 'navbar' }: { variant?: 'navbar' | '
             <Button
               variant="ghost"
               size="icon"
-              className="group size-12 rounded-full p-0 hover:bg-transparent md:size-10"
+              className="group size-12 rounded-full p-0 hover:bg-transparent md:pointer-fine:size-10"
               aria-label="Open user menu"
             >
-              <span className="flex size-9 items-center justify-center rounded-full bg-primary text-base font-semibold text-primary-foreground transition-colors group-hover:bg-primary/90 md:size-8 md:text-sm">
+              <span className="flex size-9 items-center justify-center rounded-full bg-primary text-base font-semibold text-primary-foreground transition-colors group-hover:bg-primary/90 md:pointer-fine:size-8 md:pointer-fine:text-sm">
                 {user?.username?.[0]?.toUpperCase() || 'O'}
               </span>
             </Button>
