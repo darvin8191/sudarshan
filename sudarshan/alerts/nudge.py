@@ -14,10 +14,13 @@ needs from the books itself.
   family   127.0.0.1:5585/v1/nudge, sealed under FAMILY_NUDGE_INFO, switched by
            ``SUDARSHAN_FAMILY=on`` in alerts.env. The listener belongs to the account
            ``sudarshan-family``; when that account does not exist the receiver counts as absent.
-  journal  127.0.0.1:5586/v1/nudge, sealed under JOURNAL_NUDGE_INFO, switched by
-           ``SUDARSHAN_JOURNAL=on``. The journal runs as the same user as this service.
+  journal  127.0.0.1:5586/v1/nudge, sealed under JOURNAL_NUDGE_INFO. The journal's own switch
+           decides (``SUDARSHAN_JOURNAL`` in OpenAlgo's .env: switched off, it answers a nudge
+           as off and reads nothing), so this one is on unless alerts.env says
+           ``SUDARSHAN_JOURNAL=off`` (``Settings.journal``, which takes the report desk away
+           too). The journal runs as the same user as this service.
 
-Both are off by default, so a release that ships this posts nothing.
+The family's is off by default, so a release that ships this posts nothing to it.
 
 A nudge is a hint, never a message that must arrive: the receiver also re-reads on its own timer.
 So the posts are coalesced to one a second for each receiver (what arrived in that second is one

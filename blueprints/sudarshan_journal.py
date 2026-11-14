@@ -44,6 +44,9 @@ How it forwards:
   "file_sha256", "file_b64"}``; the bytes are checked against the sha256 and sent with
   ``Content-Disposition: attachment`` and the stored ASCII name, ``X-Content-Type-Options:
   nosniff`` and only the stored MIME type, one of PDF, CSV or PNG (cross-design Y32).
+  ``?format=csv`` asks for a monthly statement's trades as its CSV instead (JB9); that is the one
+  value it takes (any other is refused in words and nothing is sent), and the answer must be a
+  CSV, ``text/csv`` under a ``.csv`` name, or it is not sent either.
 """
 
 import base64
@@ -125,7 +128,7 @@ OPS = (
     OpSpec("analytics", "GET", "/analytics", "read", _ANALYTICS_QUERY),
     OpSpec("reports_list", "GET", "/reports", "read", (("kind", "str"), ("limit", "int"))),
     OpSpec("report_get", "GET", "/reports/<id>", "read"),
-    OpSpec("report_file", "GET", "/reports/<id>/file", "download"),
+    OpSpec("report_file", "GET", "/reports/<id>/file", "download", (("format", "format"),)),
     OpSpec("report_build", "POST", "/reports/build", "write"),
     OpSpec("settings_get", "GET", "/settings", "read"),
     OpSpec("settings_set", "PUT", "/settings", "write"),
@@ -163,6 +166,9 @@ WORDS = {
     "unreadable": "That request could not be read. Open the page again, then repeat it.",
     "too_big": "That is too large for the journal. Send less at a time.",
     "no_file": "This report has no file to download. Open it to read its text.",
+    "no_csv": "This report has no CSV to download. Open it to read its text.",
+    "format": "That download is not one the Reports page offers. Open the Reports page again, "
+    "then choose Download or Download CSV.",
     "bad_file": "This report's file could not be read. Its text is still on the Reports page; "
     "try the download again later.",
     "forbidden": "Only the account owner can use the journal.",
@@ -308,7 +314,11 @@ def _failed(error):
 
 
 class _Unreadable(Exception):
-    pass
+    """A request the bridge does not send on; ``words`` when the usual sentence would not say why."""
+
+    def __init__(self, words: str | None = None):
+        super().__init__(words)
+        self.words = words
 
 
 def _text(raw: str) -> str:
@@ -323,7 +333,14 @@ def _int(raw: str) -> int:
     return int(raw)
 
 
-QUERY_READERS = {"int": _int, "str": _text}
+def _format(raw: str) -> str:
+    """The one other form of a report's file the page may ask for: a monthly statement's CSV."""
+    if raw != "csv":
+        raise _Unreadable(WORDS["format"])
+    return raw
+
+
+QUERY_READERS = {"int": _int, "str": _text, "format": _format}
 
 
 def _json_body() -> dict:
@@ -443,15 +460,22 @@ def _send(spec: OpSpec, args: dict):
     return _Reply(answer.status_code, body)
 
 
-def _file(data):
-    """The stored file as a download, or the envelope saying why it cannot be one."""
+def _file(data, csv: bool = False):
+    """The stored file as a download, or the envelope saying why it cannot be one. ``csv``: the
+    page asked for the CSV, so only a CSV may go."""
     if not isinstance(data, dict):
         return _error("unavailable", WORDS["bad_file"])
     name, mime, encoded = data.get("file_name"), data.get("file_mime"), data.get("file_b64")
     if name is None and not encoded:
-        return _error("not_found", WORDS["no_file"])
+        return _error("not_found", WORDS["no_csv" if csv else "no_file"])
     kind = report_files.kind_of(name)
-    if kind is None or mime != kind.mime or not isinstance(encoded, str) or not encoded:
+    if (
+        kind is None
+        or mime != kind.mime
+        or (csv and kind.extension != "csv")
+        or not isinstance(encoded, str)
+        or not encoded
+    ):
         logger.error("The journal: a report's file came back in a form it cannot be sent in")
         return _error("unavailable", WORDS["bad_file"])
     try:
@@ -479,7 +503,7 @@ def _call(spec: OpSpec, args: dict):
         data = reply.body.get("data")
         if isinstance(data, dict) and data.get("enabled") is False:
             return _off(data.get("message"))
-        return _file(data)
+        return _file(data, csv=args.get("format") == "csv")
     return _answer(reply.status, reply.body)
 
 
@@ -487,8 +511,8 @@ def _register(spec: OpSpec) -> None:
     def view(**kwargs):
         try:
             args = _args(spec, kwargs.get("id"))
-        except _Unreadable:
-            return _error("bad_request", WORDS["unreadable"])
+        except _Unreadable as unreadable:
+            return _error("bad_request", unreadable.words or WORDS["unreadable"])
         return _call(spec, args)
 
     view.__name__ = spec.name

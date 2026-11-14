@@ -26,7 +26,10 @@ export interface TripDetail extends Trip {
   note?: TripNote | null
   excursion?: Excursion | null
   charges?: ChargeEstimate | null
-  /** "order answered in 412 ms": the order's own latency, when the platform recorded one. */
+  /**
+   * "First entry order: answered in 412 ms": the round trip of the trade's first entry order, when
+   * the platform recorded one (the service's `latency_ms`); never a later order's.
+   */
   latency_ms?: number | null
 }
 
@@ -192,10 +195,15 @@ function bodyOf(args: Record<string, unknown>): Record<string, unknown> {
   return rest
 }
 
-/** The address a download is opened from (the bridge's file route); the session is the key. */
-export function reportFileUrl(id: number): string {
+/**
+ * The address a download is opened from (the bridge's file route); the session is the key.
+ * `csv` asks for a monthly statement's trades as its CSV instead of the report's own file.
+ */
+export function reportFileUrl(id: number, format?: 'csv'): string {
   const spec = SPECS.get('report_file')
-  return spec ? pathOf(spec, { id }) : ''
+  if (!spec) return ''
+  const path = pathOf(spec, { id })
+  return format === 'csv' ? `${path}?format=csv` : path
 }
 
 /** One op at the bridge. Throws a `JournalError` in the owner's words. */

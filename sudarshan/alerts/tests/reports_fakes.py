@@ -136,12 +136,15 @@ class FakeOpenAlgo(_Server):
 
 
 class FakeJournalApi(_Server):
-    """The journal's local API as the report desk meets it: the delivery purpose's three ops.
+    """The journal's local API as the report desk meets it: the delivery purpose's three ops, and
+    the unsealed /health the desk asks whether the journal is on.
 
     ``reports`` maps a report id to ``report_record(...)``; ``deliveries`` keeps each delivery
     call's args; ``calls`` every op in turn; ``answers[op]`` overrides an op with a
     ``(status, body)`` pair. A request that does not open under the delivery key, names another
-    principal or another op answers 403, as the service does.
+    principal or another op answers 403, as the service does. /health says ``journal_state``
+    ``enabled`` as ``enabled`` says (``health`` overrides the whole answer); ``health_asks``
+    counts the asks.
     """
 
     def __init__(self):
@@ -153,8 +156,17 @@ class FakeJournalApi(_Server):
         self.principals: list[str] = []
         self.answers: dict[str, tuple[int, dict]] = {}
         self.refused: list[str] = []
+        self.enabled = True
+        self.health: tuple[int, object] | None = None
+        self.health_asks = 0
 
     async def answer(self, path: str, headers: dict, body: bytes):
+        if path == "/health":
+            self.health_asks += 1
+            if self.health is not None:
+                return self.health
+            state = {"enabled": self.enabled, "state": "running" if self.enabled else "off"}
+            return 200, {"service": "sudarshan-journal", "journal_state": state}
         op = path.removeprefix("/v1/")
         if op not in ("report_get", "report_file", "delivery"):
             return 403, {"status": "error", "code": "forbidden", "message": "Forbidden."}

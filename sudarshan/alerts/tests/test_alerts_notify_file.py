@@ -293,6 +293,102 @@ def test_each_kind_goes_to_its_method_with_its_bytes(
     assert sent["files"] == {field: (name, mime, data)}
 
 
+def _week_in_review_png() -> bytes:
+    """The week in review's file as the journal renders it (JB9: its equity curve, as a PNG)."""
+    from sudarshan.journal.core import equity
+    from sudarshan.journal.render.png import render_equity_png
+
+    curve = equity.equity_curve([], [20261109, 20261110, 20261111, 20261112, 20261113], None)
+    return render_equity_png(curve, "Week in review", "Mon 9 Nov - Fri 13 Nov 2026")
+
+
+@pytest.mark.parametrize(
+    ("kind", "period", "ext", "method", "field", "mime"),
+    [
+        ("weekly", "2026W46", "png", "sendPhoto", "photo", "image/png"),
+        ("monthly", "202611", "pdf", "sendDocument", "document", "application/pdf"),
+    ],
+)  # fmt: skip
+def test_the_report_desk_sends_the_weeks_chart_as_a_photo_and_a_pdf_as_a_document(
+    client, telegram, monkeypatch, tmp_path, kind, period, ext, method, field, mime
+):
+    """The journal's report as JB9 keeps it, through the report desk itself (its sender, the
+    multipart it builds) and this route: the week's equity-curve PNG reaches Telegram by
+    sendPhoto and the month's PDF by sendDocument, each under the journal's own name and type."""
+    import asyncio
+    import base64
+    import hashlib
+    from datetime import datetime
+
+    from sudarshan.alerts import outbox, reports_desk
+    from sudarshan.alerts.owner import Owner
+    from sudarshan.alerts.store import Store
+    from sudarshan.autologin.messages import BRAND
+    from sudarshan.autologin.schedule import IST
+    from sudarshan.journal.render.doc import pdf_file_name
+    from sudarshan.ops.events import record
+
+    data = _week_in_review_png() if ext == "png" else PDF
+    name = pdf_file_name(kind, period, ext)
+    sha = hashlib.sha256(data).hexdigest()
+    spool = tmp_path / "journal-events.jsonl"
+    assert record(
+        spool,
+        kind="report",
+        event_id="journal-report-9",
+        at=time.time(),
+        run="journal-report-9",
+        src="journal",
+        report="9",
+        report_kind=kind,
+        sha256=sha,
+    )
+    told: list[dict] = []
+
+    class Journal:  # the journal's three delivery ops, answering as JB9's rows do
+        async def call(self, op, args):
+            if op == "report_get":
+                return "ok", {"id": 9, "kind": kind, "text": f"The {kind} report."}
+            if op == "report_file":
+                return "ok", {"file_name": name, "file_mime": mime, "file_sha256": sha,
+                              "file_b64": base64.b64encode(data).decode()}  # fmt: skip
+            told.append(args)
+            return "ok", {"id": 9, "version": 2}
+
+    async def text_sent(text):
+        return outbox.SENT, ""
+
+    def through_the_route(request: httpx.Request) -> httpx.Response:
+        answer = client.post(request.url.path, data=request.read(),
+                             content_type=request.headers["content-type"])  # fmt: skip
+        return httpx.Response(answer.status_code, content=answer.get_data(),
+                              headers={"content-type": "application/json"})  # fmt: skip
+
+    monkeypatch.setattr(reports_desk.loopback, "refusal", lambda url, tables=None: None)
+    monkeypatch.setattr(outbox, "MIN_GAP_S", 0.01)
+
+    async def deliver():
+        store = Store(tmp_path / "alerts.db")
+        owner = Owner(OWNER, API_KEY)
+        async with httpx.AsyncClient(transport=httpx.MockTransport(through_the_route)) as http:
+            files = reports_desk.OpenAlgoFiles("http://127.0.0.1:5000", http, lambda: owner,
+                                               lambda: owner)  # fmt: skip
+            desk = reports_desk.ReportDesk(spool, store, Journal(), text_sent, files, lambda: True,
+                                           lambda: datetime.now(IST), outbox.Pacer())  # fmt: skip
+            await desk.sweep()
+        store.close()
+
+    asyncio.run(deliver())
+    (sent,) = telegram.requests
+    assert sent["path"] == f"/bot{TOKEN}/{method}"
+    assert sent["files"] == {field: (name, mime, data)}
+    assert sent["form"] == {
+        "chat_id": str(CHAT),
+        "caption": f"{BRAND}: {reports_desk.TITLES[kind]}",
+    }
+    assert told == [{"report_id": 9, "channel": "telegram", "status": "sent", "reason": None}]
+
+
 def test_send_file_sync_alone_posts_multipart_and_answers_true(telegram, monkeypatch):
     service = alert_service.TelegramAlertService()
     monkeypatch.setattr(service, "_get_bot_token", lambda: TOKEN)

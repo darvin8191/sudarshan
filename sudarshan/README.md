@@ -12,11 +12,12 @@ read-only Analytics Token (market data, portfolio reads) — never with an order
 | `alerts/` | `sudarshan-alerts` | **Today (M6.8): order alerts.** Fills, part fills, rejections (with the broker's reason), cancellations and stop-order triggers from OpenAlgo's order stream (`ws://127.0.0.1:8765`, `subscribe_orders`) to the owner's Telegram through OpenAlgo `/api/v1/telegram/notify`; once only (claims in `/var/lib/sudarshan-alerts/alerts.db`), the order book read again after any pause, bursts merged, trading days 08:45-16:00 IST (16:05 from 7 Dec 2026); `SUDARSHAN_ORDER_ALERTS=off` turns it off (the service exits only when market alerts are off too); `127.0.0.1:5582/health` names the installed release and what the service is doing. **Also (M10, off until `SUDARSHAN_MARKET_ALERTS=on`):** the market alert engine, which judges price, % move, day high or low, VWAP, bid/ask and candle-close alerts on the feed's ticks, not in a browser tab, with the Alerts page, history and delivery on Telegram and in the app; it stays off unless switched on, and `alerts/README.md` says how. **Planned:** volume, OI change/build-up, IV, indicator cross, Greeks, time, P&L, screener hit, feed health and rollover alerts; the family bot separately, Web Push later. |
 | `screener/` | `sudarshan-screener` | Scheduled scans (1/5/15 min, EOD) over universes (NIFTY 50/100/200/500, F&O list, custom watchlists, option chains) with a rule builder (price action, indicators via TA-Lib, OI build-up classes, IV rank/percentile, PCR, basis, bhavcopy fields). Results feed **membership-table watchlists** (first_seen / last_seen / hits / exited / pinned / score) in OpenAlgo's watchlist DB and raise digest alerts; every run is stored for rewind and forward-return backtests. |
 | `portfolio/` | `sudarshan-portfolio` | Upstox tab (holdings, positions, MTF, funds tree, trade history, trade-wise P&L + charges, GTT, MF, portfolio stream) on the Analytics Token + daily snapshots, dividends from corporate actions, sector tags; and the **custom manual portfolio engine**: activity model (BUY/SELL/DIVIDEND/FEE/INTEREST/TRANSFER/SPLIT/BONUS), any asset, tags, imports (CSV/tradebook), FIFO lots, STCG/LTCG (ITA 2025 sections, "verify with CA"), XIRR/TWR, allocation, goals, custom tab layouts. |
+| `journal/` | `sudarshan-journal` | **The trade journal and reports (M14, M15).** Every fill Upstox reports, paired into trades (long, short, flips split, carried across days), with the journal's figures (win rate, profit factor, expectancy, R, drawdown, calendar, heat map, expiry split, how far each trade went for and against) on the Journal page; and the reports (day report, morning brief, week in review, monthly statement with its CSV, tax pack) built on the journal's own schedule, kept in its archive on the Reports page and delivered on Telegram by `sudarshan-alerts`' report desk. It reads the account only through `sudarshan-portfolio`, prices from `sudarshan-feed` and OpenAlgo's own records read-only; it places no order and reaches nothing off this server. Off until `SUDARSHAN_JOURNAL` is on in OpenAlgo's `.env`, which the release sets (below); `127.0.0.1:5586/health` names the installed release and what it is doing. `journal/README.md` has the rest. |
 | `family/` | `sudarshan-family` | View-only layer for family members: own users/sessions/TOTP, privacy mode, invitations, per-user watchlists/alerts, audit log, viewer UI variants, family Telegram bot. Backed by the Analytics-Token data plane only; every OpenAlgo write/admin/bot route must answer 401/403 to a viewer. |
 | `autologin/` | `sudarshan-autologin` (oneshot + timer) | The daily Upstox login with TOTP + PIN (Upstox's TOTP token API) at 08:35/08:45/08:55 IST on trading days, and "Test now" from the Auto login page. Fetches the token, then hands it to OpenAlgo, which stores it exactly as a manual login does (its in-memory caches only refresh in its own process); never ends a login Upstox still accepts, and pauses after any refusal until the key or PIN is saved again. The one ring process that receives an order-capable token: it passes it to OpenAlgo and never uses it. Result on the page and in Telegram. |
 | `vault/` | (library) | Owner vault `db/sudarshan-vault/sudarshan_vault.db` (directory 700, file 600; the auto-login unit may write only there): small secrets entered on the phone, Fernet under a key derived (HKDF) from OpenAlgo's pepper; write-only over HTTP. Also holds the auto-login status. |
 | `ops/deploy/` | `sudarshan-deploy` (root, timer) | The server's deploy tool: installs the latest release outside market hours (backup, checksum, migrations, the `.env` settings below, health check, rollback), keeps the NSE day files in step with the release's calendar lines (below), records what it did for the owner's Telegram (below) and updates itself from each release. |
-| `ops/` | `sudarshan-ops` (timers) | Daily-rollover guard (03:35 / 08:45 checks, TOTP token sidecar), backups to OCI Object Storage, health checks (healthchecks.io), EOD file jobs (bhavcopy, index constituents — once a day, outside the trading core), reports/digests (08:45 brief, 15:45 EOD, weekly, FY), kill switch. |
+| `ops/` | `sudarshan-ops` (timers) | Daily-rollover guard (03:35 / 08:45 checks, TOTP token sidecar), backups to OCI Object Storage, health checks (healthchecks.io), EOD file jobs (bhavcopy, index constituents — once a day, outside the trading core), kill switch. The reports are not timers here: `sudarshan-journal` builds them on its own schedule and `sudarshan-alerts` delivers them. |
 
 ## The ring: sockets, ports, feed keys and REST (cross-design X2, X10, G1-G8)
 
@@ -44,7 +45,7 @@ never a move to another port.
 | 5583 | `sudarshan-portfolio`: its sealed local API, and `GET /health` (the release installed and what the service is doing; the one listener, no other port; a taken port is tried again every minute) |
 | 5584 | `sudarshan-screener`: its sealed local API |
 | 5585 | `sudarshan-family` (P6, not built yet): the family view's one listener: the viewer API and its WebSocket that nginx forwards (`/family/api/`, `/family/ws`), the sealed admin and nudge routes, and `GET /health`. It runs as its own account, `sudarshan-family` |
-| 5586 | `sudarshan-journal` (P7, not built yet): its sealed local API and `GET /health` |
+| 5586 | `sudarshan-journal`: its sealed local API (OpenAlgo's bridge for the Journal and Reports pages, the alerts' report desk and their nudges), and `GET /health` (the release installed and what the journal is doing, `journal_state`; the one listener, no other port; a taken port is tried again every minute while its jobs carry on) |
 | 5587 | reserved for `sudarshan-protect` (later) |
 
 **Sealed routes.** Each has its own key purpose in `sudarshan/vault/keys.py` (HKDF from OpenAlgo's
@@ -62,6 +63,11 @@ nonce that could still be replayed.
 | OpenAlgo to the portfolio API | `sudarshan/portfolio/api/v1` | 64 KiB (an import 2 MiB: a 1.2 MB file seals to 1.5 to 1.9 MiB, see `portfolio/core/kinds.py`) |
 | OpenAlgo to the screener API | `sudarshan/screener/api/v1` | 64 KiB |
 | the screener to OpenAlgo | `sudarshan/screener/internal/v1` | 16 KiB |
+| OpenAlgo to the journal API | `sudarshan/journal/api/v1` | 64 KiB (a report's file comes back in the answer, at most 8 MiB) |
+| the alerts' report desk to the journal (`report_get`, `report_file`, `delivery` only) | `sudarshan/journal/delivery/v1` | 16 KiB |
+| the alerts' "orders changed" nudge to the journal | `sudarshan/journal/nudge/v1` | 4 KiB |
+| the family service to the journal (P6, counts only) | `sudarshan/journal/family/v1` | 4 KiB |
+| the journal to the portfolio API (account reads only) | `sudarshan/portfolio/api/journal/v1` | 64 KiB |
 
 **Keys on the one feed socket (U9).** Upstox allows ltpc 5,000, full 2,000 and option_greeks
 3,000 keys per connection; once more than one mode is in use the feed reads "combined" as 1,500
@@ -77,10 +83,10 @@ the base file subscribes.
 | `sudarshan-portfolio` | 200 (ltpc) | - | 200 |
 | `sudarshan-screener` | 320 (full, option_greeks) | 700 | 700 |
 | `sudarshan-family` (P6) | - | 100 | 100 |
-| `sudarshan-journal` (P7) | - | 50 | 50 |
+| `sudarshan-journal` | 50 (ltpc, its open trades) | - | 50 |
 | `sudarshan-protect` (P7, later) | - | 50 | 50 |
 | any other client (one slot) | - | - | 50 |
-| the ring in all | 732 at worst | 1,412 | 1,450 |
+| the ring in all | 782 at worst | 1,412 | 1,450 |
 
 U9 is the open Upstox report of drops near 600 s with 500 or more keys. It is judged on the
 socket's total (`/health` `subscribed.total`), never on one client's count, and the first session
@@ -101,6 +107,11 @@ SUDARSHAN to these shares; the other 60% stays for OpenAlgo's daily-token calls 
 | `sudarshan-screener` | 30% | 15 | 150 | 600 |
 | `sudarshan-portfolio` | 5% | 2 | 25 | 100 |
 | `sudarshan-alerts` | 5% | 2 | 25 | 100 |
+| `sudarshan-journal` | 2.5% to 6.25% | 1 | 10 | 50 |
+
+The clients' own ceilings may add up to more than SUDARSHAN's 40% (with the journal's they do,
+at the minute and the 30-minute windows); the 40% then binds first come within a priority, and a
+client's own ceiling still stops it taking the others' room (G3b, `feed/rest.py`).
 
 Until it is switched on and `/health` shows it (`rest`), no ring service makes bulk or warm-start REST calls
 to Upstox: prices come from the feed's snapshot or the last closing record, with their time.
@@ -139,6 +150,11 @@ Upstox allows. Under the gthread worker only, an order call waits at most 10 s f
 order calls before refusing, where it held 80 at upstream's default of 8. A cancel or an Exit all sent behind a burst
 waits its turn the same way. The eventlet worker (the default) has no such ceiling: its calls wait
 however long the queue is.
+
+`SUDARSHAN_JOURNAL  on` (M14, M15) turns the trade journal on: `sudarshan-journal` answers every
+request as switched off until it is, and the alerts' report desk delivers reports only while the
+journal says it is on (the desk reads it from the journal's `/health`). The line has no old value,
+so an owner who sets it to `off` keeps it off through later deploys.
 
 ## NSE calendar lines that ship with a release (M0.1)
 
@@ -183,7 +199,7 @@ would change. Tests: `sudarshan/ops/tests/test_deploy_calendar.py`.
 ## The ring's databases in a deploy's backup (M18.11)
 
 Each ring service keeps its state in `/var/lib/sudarshan-<service>/` (`alerts.db`, `market.db`,
-later `portfolio.db` and `screener.db`), not in OpenAlgo's `db/` folder, so the deploy tool treats
+`portfolio.db`, `screener.db`, `journal.db`), not in OpenAlgo's `db/` folder, so the deploy tool treats
 them apart from the databases it has always backed up:
 
 - the ring is stopped before an install; then every `*.db` in every `/var/lib/sudarshan-*/` folder

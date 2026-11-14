@@ -5,6 +5,7 @@ import {
   CheckCheck,
   CircleSlash,
   Download,
+  FileSpreadsheet,
   FileText,
   FileType2,
   LoaderCircle,
@@ -21,6 +22,8 @@ import {
   builtWords,
   deliveryOf,
   downloadName,
+  emptyWords,
+  hasCsv,
   kindTitle,
   periodWords,
   type ReportRow,
@@ -44,9 +47,6 @@ const DELIVERY_ICON = {
 
 const BUTTON =
   'inline-flex min-h-12 items-center justify-center gap-2 rounded-[0.875rem] border border-input bg-card px-4 text-[0.9375rem] font-semibold outline-none hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-60'
-
-export const EMPTY_WORDS =
-  'No reports yet. The first Day report is built at 15:45 on the next trading day, or build one below.'
 
 function Row({
   report,
@@ -109,6 +109,17 @@ function Row({
           >
             No file
           </span>
+        )}
+        {hasCsv(report) && (
+          <a
+            className={`${BUTTON} col-span-2`}
+            href={reportFileUrl(report.id, 'csv')}
+            download={downloadName(report, 'csv')}
+            aria-label={`Download CSV of ${kindTitle(report.kind)} ${periodWords(report.period_key)}`}
+          >
+            <FileSpreadsheet aria-hidden="true" className="size-4" />
+            Download CSV
+          </a>
         )}
       </div>
     </li>
@@ -208,7 +219,7 @@ export function Archive({ onOpen }: { onOpen: (id: number) => void }) {
         </div>
       ) : rows && rows.length === 0 ? (
         <p className="rounded-[1.125rem] border bg-card px-4 py-6 text-center text-base shadow-[var(--shadow-card)]">
-          {EMPTY_WORDS}
+          {emptyWords(settings.data?.times)}
         </p>
       ) : (
         <ul className="flex flex-col gap-2" aria-label="Reports, newest first">

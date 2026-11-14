@@ -15,11 +15,18 @@ export const PERIODS = [
 ] as const
 export type Period = (typeof PERIODS)[number]['id']
 
+/**
+ * The service's meaning (analytics `expiry`): a trade opened on an index's expiry day or on its
+ * own contract's expiry day, or (`non_expiry`) on neither. The day it opened counts, never the
+ * day it closed.
+ */
 export const EXPIRY_CHOICES = [
   { id: '', label: 'Every day' },
-  { id: 'expiry', label: 'Expiry day only' },
-  { id: 'non_expiry', label: 'Non-expiry days only' },
+  { id: 'expiry', label: 'Opened on an expiry day' },
+  { id: 'non_expiry', label: 'Opened on any other day' },
 ] as const
+export const EXPIRY_WORDS =
+  'An expiry day here is an index’s expiry day or the contract’s own, by the day the trade opened.'
 export type ExpiryChoice = (typeof EXPIRY_CHOICES)[number]['id']
 
 export interface AnalyticsFilter {

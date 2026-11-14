@@ -1,7 +1,8 @@
 /**
  * The Portfolio page needs all three registrations (CLAUDE.md, "Adding a page"): a route that
  * replaces the old redirect to the backtester, the same path known to Flask, and a menu entry
- * right after Watchlist, never between API Key and Action Center.
+ * right after Screener (Watchlist, Screener, Portfolio: cross-design Y36), never between API Key
+ * and Action Center.
  */
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -35,10 +36,10 @@ describe('the Portfolio page registrations', () => {
     expect(before.slice(before.lastIndexOf('\n\n'))).toContain('SUDARSHAN M7.18')
   })
 
-  it('is in the menu right after Watchlist, as Portfolio with a briefcase', () => {
+  it('is in the menu right after Screener, as Portfolio with a briefcase', () => {
     const index = profileMenuItems.findIndex((item) => item.href === '/portfolio')
     expect(profileMenuItems[index]).toMatchObject({ label: 'Portfolio' })
-    expect(profileMenuItems[index - 1]?.href).toBe('/watchlist')
+    expect(profileMenuItems[index - 1]?.href).toBe('/screener')
     expect(profileMenuItems[index].icon.displayName).toBe('Briefcase')
   })
 

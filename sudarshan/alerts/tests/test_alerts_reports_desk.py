@@ -12,6 +12,7 @@ import asyncio
 import base64
 import contextlib
 import functools
+import logging
 import os
 import re
 import time
@@ -34,15 +35,27 @@ from reports_fakes import (
 )
 
 from sudarshan.alerts import outbox, reports_desk
+from sudarshan.alerts.health import health_document
 from sudarshan.alerts.notices import LanePace, NoticeDesk
 from sudarshan.alerts.outbox import DROP, DROP_REASONS, RETRY, SENT, UNCONFIRMED
 from sudarshan.alerts.owner import Owner
 from sudarshan.alerts.reports_desk import (
+    JOURNAL_DOWN,
+    JOURNAL_NOT_RUNNING,
+    JOURNAL_OFF,
+    JOURNAL_PORT_HELD,
+    JOURNAL_SILENT,
+    JOURNAL_SWITCHED_OFF,
     LINK_LINE,
+    NO_SEAL,
+    ON,
     OUTCOMES,
+    SWITCHED_OFF_HERE,
     JournalLink,
+    JournalWatch,
     OpenAlgoFiles,
     ReportDesk,
+    off_reason,
     report_desk_for,
 )
 from sudarshan.alerts.service import AlertService
@@ -151,10 +164,22 @@ class Files:
         return self.answers.pop(0) if self.answers else "sent"
 
 
+class Watch:
+    """JournalWatch.ask in memory: the answers in turn, the last one for good; ``asks`` counts."""
+
+    def __init__(self, *answers: tuple[str, str | None]):
+        self.answers = list(answers) or [(ON, None)]
+        self.asks = 0
+
+    async def ask(self):
+        self.asks += 1
+        return self.answers.pop(0) if len(self.answers) > 1 else self.answers[0]
+
+
 class Rig:
     """A desk with its stand-ins, its spool and its store, and the order of what it sent."""
 
-    def __init__(self, tmp_path, *, pacer=None, store=None):
+    def __init__(self, tmp_path, *, pacer=None, store=None, watch=None):
         self.spool = tmp_path / "journal-events.jsonl"
         self.store = store or Store(tmp_path / "alerts.db")
         self.order: list[str] = []
@@ -163,7 +188,7 @@ class Rig:
         self.owner_ok = True
         self.desk = ReportDesk(
             self.spool, self.store, self.journal, self.text, self.files,
-            lambda: self.owner_ok, lambda: datetime.now(IST), self.pacer,
+            lambda: self.owner_ok, lambda: datetime.now(IST), self.pacer, watch=watch,
         )  # fmt: skip
 
     def lane_starts(self) -> int:
@@ -523,35 +548,161 @@ def test_a_long_text_is_cut_on_a_line_and_keeps_the_link():
     assert reports_desk._text_of({"text": DAY_TEXT}, has_file=True) == DAY_TEXT
 
 
-# -- the service builds it only with the journal's switch on -----------------------------------
+# -- it follows the journal: one switch, read from the journal's /health -----------------------
 
 
-def test_the_desk_is_built_only_with_sudarshan_journal_on(tmp_path, monkeypatch):
+def test_the_desk_is_built_unless_alerts_env_says_off_and_it_asks_the_journal(
+    tmp_path, monkeypatch, caplog
+):
     monkeypatch.setenv("SUDARSHAN_JOURNAL_SPOOL", str(tmp_path / "spool.jsonl"))
+    monkeypatch.delenv("SUDARSHAN_JOURNAL_API_URL")
     telegram = types.SimpleNamespace(send_with_reason=None, owner=lambda: None,
                                      reload_owner=lambda: None)  # fmt: skip
     service = types.SimpleNamespace(
-        settings=types.SimpleNamespace(nudge_journal=False, openalgo_url="http://127.0.0.1:5000"),
+        settings=types.SimpleNamespace(journal=False, openalgo_url="http://127.0.0.1:5000"),
         store=None, _owner_ready=lambda: True, clock=lambda: datetime.now(IST),
         outbox=types.SimpleNamespace(pacer=outbox.Pacer()),
     )  # fmt: skip
     assert report_desk_for(service, telegram, client=None) is None
-    service.settings.nudge_journal = True
+    assert off_reason(service.settings) == SWITCHED_OFF_HERE
+    service.settings.journal = True
     desk = report_desk_for(service, telegram, client=None)
     assert isinstance(desk, ReportDesk) and desk.lane == outbox.REPORTS
     assert desk.spool == tmp_path / "spool.jsonl"
     assert desk.journal.base_url == "http://127.0.0.1:5586"
+    assert isinstance(desk.watch, JournalWatch)
+    assert desk.watch.url == "http://127.0.0.1:5586/health"
+    assert desk.health() == {"state": "starting", "on": False, "reason": None, "waiting": 0,
+                             "last_delivery_ms": None}  # fmt: skip
     token = desk.journal.fernet.encrypt(b"x")
     fernet_for(os.environ["API_KEY_PEPPER"], JOURNAL_DELIVERY_INFO).decrypt(token)
     monkeypatch.setenv("SUDARSHAN_JOURNAL_API_URL", "http://example.invalid:5586")
-    assert report_desk_for(service, telegram, None).journal.base_url == "http://127.0.0.1:5586"
+    elsewhere = report_desk_for(service, telegram, None)
+    assert elsewhere.journal.base_url == "http://127.0.0.1:5586"
+    assert elsewhere.watch.url == "http://127.0.0.1:5586/health"
+    monkeypatch.delenv("API_KEY_PEPPER")  # no key to seal with: no desk, and /health says why
+    with caplog.at_level(logging.ERROR, logger="sudarshan.alerts"):
+        assert report_desk_for(service, telegram, None) is None
+    assert off_reason(service.settings) == NO_SEAL and "cannot be sealed" in caplog.text
+
+
+@sync
+async def test_nothing_goes_while_the_journal_is_switched_off_and_it_goes_once_it_is_on(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(reports_desk, "ASK_EVERY_S", 0.0)
+    rig = Rig(tmp_path, watch=Watch((JOURNAL_OFF, JOURNAL_SWITCHED_OFF), (ON, None)))
+    rig.journal.add(7)
+    event_id = write_report(rig.spool, 7)
+    await rig.sweeps()
+    assert rig.order == [] and rig.journal.calls == []  # not even asked for the text
+    assert rig.store.notice_states([f"report:{event_id}"]) == {}  # and nothing claimed
+    assert rig.desk.health() == {"state": "journal_off", "on": False,
+                                 "reason": JOURNAL_SWITCHED_OFF, "waiting": 1,
+                                 "last_delivery_ms": None}  # fmt: skip
+    before = int(time.time() * 1000)
+    await rig.sweeps()
+    assert rig.order == ["text", "file"]
+    assert rig.journal.deliveries == [delivered(rig, "sent")]
+    await rig.sweeps()
+    block = rig.desk.health()
+    assert (block["state"], block["on"], block["reason"], block["waiting"]) == ("on", True, None, 0)
+    assert before <= block["last_delivery_ms"] <= int(time.time() * 1000)
+    rig.store.close()
+
+
+@sync
+async def test_a_journal_that_does_not_answer_holds_every_report_says_so_once_and_is_asked_again(
+    tmp_path, caplog
+):
+    silent = (JOURNAL_DOWN, JOURNAL_SILENT)
+    watch = Watch(silent, silent, silent, (ON, None))
+    rig = Rig(tmp_path, watch=watch)
+    rig.journal.add(7)
+    write_report(rig.spool, 7)
+    with caplog.at_level(logging.INFO, logger="sudarshan.alerts"):
+        for _ in range(3):
+            wait = await rig.desk.sweep()
+            assert rig.order == [] and rig.journal.calls == []
+            assert 0 < wait <= 0.06 and rig.desk.health()["state"] == "journal_down"
+            await asyncio.sleep(wait)
+        await rig.desk.sweep()  # asked again after the pause: it answers, and the report goes
+    assert rig.order == ["text", "file"] and watch.asks == 4
+    said = [(r.levelname, r.getMessage()) for r in caplog.records
+            if r.getMessage().startswith("Reports:")]  # fmt: skip
+    assert said == [
+        ("WARNING", "Reports: none are delivered: the journal service is not answering. The "
+                    "journal is asked again after a pause."),
+        ("INFO", "Reports: the journal says it is on, so its reports are delivered"),
+    ]  # fmt: skip
+    rig.store.close()
+
+
+@sync
+async def test_the_journal_is_asked_once_a_minute_at_most_while_its_answer_holds(
+    tmp_path, monkeypatch
+):
+    watch = Watch((ON, None))
+    rig = Rig(tmp_path, watch=watch)
+    for report_id in (7, 8, 9):  # text only: three of the lane's four slots a minute
+        rig.journal.add(report_id, data=None)
+        write_report(rig.spool, report_id, data=None, at=time.time() + report_id)
+    await rig.sweeps(5)
+    assert len(rig.journal.deliveries) == 3 and watch.asks == 1
+    monkeypatch.setattr(reports_desk, "ASK_EVERY_S", 0.0)
+    await rig.sweeps(2)
+    assert watch.asks == 3
+    rig.store.close()
+
+
+@pytest.mark.parametrize(
+    ("health", "said"),
+    [
+        ((200, {"service": "sudarshan-journal", "journal_state": {"enabled": True}}), (ON, None)),
+        ((200, {"service": "sudarshan-journal", "journal_state": {"enabled": False}}),
+         (JOURNAL_OFF, JOURNAL_SWITCHED_OFF)),
+        ((200, {"service": "sudarshan-journal", "journal_state": {
+            "enabled": False, "reason": "Your trade journal was written by a newer release."}}),
+         (JOURNAL_OFF, "Your trade journal was written by a newer release.")),
+        ((200, {"service": "sudarshan-portfolio", "journal_state": {"enabled": True}}),
+         (JOURNAL_DOWN, JOURNAL_SILENT)),
+        ((200, {"service": "sudarshan-journal"}), (JOURNAL_DOWN, JOURNAL_SILENT)),
+        ((200, {"service": "sudarshan-journal", "journal_state": {"enabled": "yes"}}),
+         (JOURNAL_OFF, JOURNAL_SWITCHED_OFF)),
+        ((503, {"service": "sudarshan-journal", "journal_state": {"enabled": True}}),
+         (JOURNAL_DOWN, JOURNAL_SILENT)),
+        ((200, ["not", "a", "document"]), (JOURNAL_DOWN, JOURNAL_SILENT)),
+    ],
+    ids=["on", "off", "kept-off", "not-the-journal", "no-state", "not-true", "busy", "odd"],
+)  # fmt: skip
+@sync
+async def test_each_answer_of_the_journals_health_is_read(health, said):
+    async with FakeJournalApi() as journal_api, httpx.AsyncClient(trust_env=False) as client:
+        journal_api.health = health
+        assert await JournalWatch(journal_api.url, client).ask() == said
+        assert journal_api.health_asks == 1
+
+
+@sync
+async def test_a_journal_port_nobody_or_another_user_holds_is_not_asked(monkeypatch):
+    async with FakeJournalApi() as journal_api, httpx.AsyncClient(trust_env=False) as client:
+        watch = JournalWatch(journal_api.url, client)
+        for held, said in (
+            (reports_desk.loopback.NOBODY, (JOURNAL_DOWN, JOURNAL_NOT_RUNNING)),
+            (reports_desk.loopback.OTHER, (JOURNAL_DOWN, JOURNAL_PORT_HELD)),
+        ):
+            monkeypatch.setattr(reports_desk.loopback, "holder", lambda url, tables=None, h=held: h)
+            assert await watch.ask() == said
+        assert journal_api.health_asks == 0
 
 
 # -- over HTTP: the real links against OpenAlgo's routes and the journal's API -----------------
 
 
 @contextlib.asynccontextmanager
-async def wired(tmp_path):
+async def wired(tmp_path, *, watch: bool = False):
+    """The desk with the real links over HTTP; ``watch`` asks the journal's /health as well, on
+    the same client, as the running service's desk does."""
     async with FakeOpenAlgo() as openalgo, FakeJournalApi() as journal_api, httpx.AsyncClient(
         trust_env=False, follow_redirects=False
     ) as client:  # fmt: skip
@@ -565,6 +716,7 @@ async def wired(tmp_path):
             telegram.send_with_reason,
             OpenAlgoFiles(openalgo.url, client, lambda: owner, lambda: owner),
             lambda: True, lambda: datetime.now(IST), outbox.Pacer(),
+            watch=JournalWatch(journal_api.url, client) if watch else None,
         )  # fmt: skip
         yield types.SimpleNamespace(openalgo=openalgo, journal=journal_api, desk=desk,
                                     spool=desk.spool)  # fmt: skip
@@ -689,9 +841,13 @@ async def test_the_journal_not_running_is_down_without_a_request(monkeypatch):
 # -- inside the running service ------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("switch", ["on", "off"])
-def test_the_running_service_delivers_reports_only_with_the_switch_on(
-    settings_for, tmp_path, monkeypatch, switch
+@pytest.mark.parametrize(
+    ("alerts_env", "journal_on"),
+    [(None, True), (None, False), ("off", True)],
+    ids=["the-journal-on", "the-journal-off", "off-in-alerts-env"],
+)
+def test_the_running_service_delivers_reports_while_the_journal_says_it_is_on(
+    settings_for, tmp_path, monkeypatch, alerts_env, journal_on
 ):
     spool = tmp_path / "journal-events.jsonl"
     monkeypatch.setenv("SUDARSHAN_JOURNAL_SPOOL", str(spool))
@@ -699,19 +855,39 @@ def test_the_running_service_delivers_reports_only_with_the_switch_on(
     async def scenario():
         async with FakeProxy() as proxy, FakeOpenAlgo() as openalgo, FakeJournalApi() as journal:
             monkeypatch.setenv("SUDARSHAN_JOURNAL_API_URL", journal.url)
+            journal.enabled = journal_on
             journal.reports[7] = report_record(7)
             write_report(spool, 7)
-            settings = settings_for(proxy, openalgo, SUDARSHAN_JOURNAL=switch)
+            overrides = {} if alerts_env is None else {"SUDARSHAN_JOURNAL": alerts_env}
+            settings = settings_for(proxy, openalgo, **overrides)
             svc = AlertService(settings, owner_reader=lambda: Owner(OWNER, OWNER_KEY))
             task = asyncio.create_task(svc.run())
-            if switch == "on":
+            if alerts_env is None and journal_on:
                 await wait_until(lambda: journal.deliveries, timeout=10)
                 assert openalgo.order == ["text", "file"]
                 assert journal.deliveries[0]["status"] == "sent"
+                block = health_document(svc)["report_desk"]
+                assert block["state"] == "on" and block["on"] and block["reason"] is None
+                assert isinstance(block["last_delivery_ms"], int)
+            elif alerts_env is None:
+                await wait_until(
+                    lambda: svc.reports is not None and svc.reports.state != "starting"
+                )
+                await asyncio.sleep(0.3)
+                assert journal.calls == [] and openalgo.order == [] and journal.health_asks >= 1
+                assert health_document(svc)["report_desk"] == {
+                    "state": "journal_off", "on": False, "reason": JOURNAL_SWITCHED_OFF,
+                    "waiting": 1, "last_delivery_ms": None,
+                }  # fmt: skip
             else:
                 await wait_until(lambda: proxy.subscribed)
                 await asyncio.sleep(0.5)
                 assert svc.reports is None and journal.calls == [] and openalgo.order == []
+                assert journal.health_asks == 0  # not even asked
+                assert health_document(svc)["report_desk"] == {
+                    "state": "off", "on": False, "reason": SWITCHED_OFF_HERE,
+                    "waiting": None, "last_delivery_ms": None,
+                }  # fmt: skip
             svc.stop("test")
             await asyncio.wait_for(task, 10)
             assert svc.state == "stopped"
@@ -724,9 +900,11 @@ def test_the_running_service_delivers_reports_only_with_the_switch_on(
 
 @sync
 async def test_deliveries_leave_no_descriptor_behind(tmp_path, monkeypatch):
-    """Spool reads, alerts.db rows, the journal's and OpenAlgo's sockets: all closed again."""
+    """Spool reads, alerts.db rows, the journal's and OpenAlgo's sockets, and the journal's
+    /health asked before every look (M15.7): all closed again."""
     monkeypatch.setattr(outbox, "MINUTE_S", 0.2)
-    async with wired(tmp_path) as wire:
+    monkeypatch.setattr(reports_desk, "ASK_EVERY_S", 0.0)
+    async with wired(tmp_path, watch=True) as wire:
         for report_id in range(1, 8):
             wire.journal.reports[report_id] = report_record(report_id)
         write_report(wire.spool, 1)
@@ -737,4 +915,5 @@ async def test_deliveries_leave_no_descriptor_behind(tmp_path, monkeypatch):
         for _ in range(6):
             await wire.desk.sweep()
         assert len(wire.journal.deliveries) == 7 and len(wire.openalgo.files) == 7
+        assert wire.journal.health_asks == 7  # one before each look
         await watch.aassert_clean()

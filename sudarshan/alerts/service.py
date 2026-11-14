@@ -55,7 +55,12 @@ from .nudge import NudgeSender, is_sandbox, nudge_kind, receivers_for
 from .orders import Alert, OrderTracker
 from .outbox import OpenAlgoTelegram, Outbox, Pacer, Throttle
 from .owner import Owner, OwnerError, load_openalgo_modules, prepare_openalgo_env, read_owner
-from .reports_desk import ReportDesk, report_desk_for  # M15.7: the journal's reports
+from .reports_desk import (  # M15.7: the journal's reports
+    ORDER_ALERTS_OFF,
+    ReportDesk,
+    off_reason,
+    report_desk_for,
+)
 from .resync import Books, BookUnavailable, read_books
 from .store import DB_FILENAME, Store
 from .window import AlertWindow
@@ -133,7 +138,8 @@ class AlertService:
         self.outbox: Outbox | None = None
         self.notices: NoticeDesk | None = None  # M18.x
         self.nudges: NudgeSender | None = None  # Y17: "orders changed" to the family and journal
-        self.reports: ReportDesk | None = None  # M15.7: the journal's reports (SUDARSHAN_JOURNAL)
+        self.reports: ReportDesk | None = None  # M15.7: the journal's reports, as the journal says
+        self.reports_off: str | None = None  # M15.7: why no report desk runs (health.py)
         self.client: httpx.AsyncClient | None = None
         self._stop = asyncio.Event()
         self._state, self._detail = "starting", ""
@@ -149,6 +155,7 @@ class AlertService:
     async def run(self) -> None:
         if not self.settings.enabled:
             log.info("Order alerts are off (SUDARSHAN_ORDER_ALERTS=off): nothing is sent")
+            self.reports_off = ORDER_ALERTS_OFF  # M15.7: reports take the same Telegram path
             self._set_state("off")
             return
         self.store = Store(self.settings.state_dir / DB_FILENAME)
@@ -184,13 +191,15 @@ class AlertService:
                 pace=LanePace(self.outbox.pacer),
             )
             notices = asyncio.create_task(self.notices.run(), name="order alerts: server notices")
-            self.reports = report_desk_for(self, telegram, client)  # M15.7: None unless switched on
+            # M15.7: delivers while the journal says it is on; None when switched off in
+            # alerts.env or unsealable (off_reason says which, on /health)
+            self.reports = report_desk_for(self, telegram, client)
+            self.reports_off = off_reason(self.settings) if self.reports is None else None
             reports = self.reports and asyncio.create_task(self.reports.run(), name="reports")
-            # Y17: after each order update, one sealed nudge to each receiver switched on (both
-            # off by default). Beside the Telegram path, never in front of it (nudge.py).
-            receivers = receivers_for(
-                self.settings.nudge_family, self.settings.nudge_journal, os.environ
-            )
+            # Y17: after each order update, one sealed nudge to each receiver switched on (the
+            # family's off by default, the journal's on unless alerts.env says off). Beside the
+            # Telegram path, never in front of it (nudge.py).
+            receivers = receivers_for(self.settings.nudge_family, self.settings.journal, os.environ)
             self.nudges = NudgeSender(receivers, client)
             nudger = (
                 asyncio.create_task(self.nudges.run(), name="order alerts: nudges")

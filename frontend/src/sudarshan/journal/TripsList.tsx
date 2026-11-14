@@ -38,7 +38,7 @@ export const CLOSED_PAGE = 100
 
 export const EMPTY_WORDS = 'No trades yet. Fills are recorded here as they happen at Upstox.'
 export const NO_TOKEN_WORDS =
-  'Fills are recorded when Upstox reports them; sign in to Upstox for today’s to show at once. The close check at 15:50 records them in any case.'
+  'Fills are recorded when Upstox reports them; sign in to Upstox for today’s to show at once. The day’s close check, after the market closes, records them in any case.'
 
 /** A trade as the list reads it: the contract's row, and the tags the service may name on it. */
 export type TripRow = Trip & { mistakes?: number[] }
@@ -228,21 +228,23 @@ export function useTrips(mode: Mode) {
   })
   const data = query.data
   const loadOlder = useCallback(async () => {
-    const last = [...(data?.closed ?? []), ...older].at(-1)
+    const shown = [...(data?.closed ?? []), ...older]
+    const last = shown.at(-1)
     if (!last || last.closed_ms === null) return
     setPaging(null)
     try {
-      const page = await journalData('trips', {
+      // The service pages closed trades by their close time, strictly before `before`, and
+      // several can close in the same second: asking up to and including the last one's time,
+      // and leaving out what is already shown, loses none that share it.
+      const page = (await journalData('trips', {
         mode,
         status: 'closed',
         limit: CLOSED_PAGE,
-        before: last.closed_ms,
-      })
-      setOlder((now) => [
-        ...now,
-        ...(page as TripRow[]).filter((t) => !now.some((n) => n.id === t.id)),
-      ])
-      setMore(page.length >= CLOSED_PAGE)
+        before: last.closed_ms + 1,
+      })) as TripRow[]
+      const fresh = page.filter((t) => !shown.some((n) => n.id === t.id))
+      setOlder((now) => [...now, ...fresh.filter((t) => !now.some((n) => n.id === t.id))])
+      setMore(page.length >= CLOSED_PAGE && fresh.length > 0)
     } catch (error) {
       setPaging(problemOf(error).message)
     }

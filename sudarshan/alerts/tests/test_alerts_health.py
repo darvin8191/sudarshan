@@ -38,8 +38,9 @@ from sudarshan.ops.release import DEPLOYED_TAG_FILE
 
 KEYS = {
     "service", "release", "version", "state", "detail", "window", "owner_ready", "owner_problem",
-    "stats", "telegram",
+    "stats", "telegram", "report_desk",
 }  # fmt: skip
+DESK_KEYS = {"state", "on", "reason", "waiting", "last_delivery_ms"}
 
 
 NAME = "a-user-name-nobody-would-guess"  # a fake
@@ -72,7 +73,37 @@ def test_the_document_before_the_service_has_run(settings_for):
     assert (page["owner_ready"], page["owner_problem"]) == (False, None)
     assert page["stats"] == {"connects": 0, "updates": 0, "alerts": 0}
     assert page["telegram"] is None  # no outbox yet
+    assert page["report_desk"] == {
+        "state": "starting", "on": False, "reason": None, "waiting": None, "last_delivery_ms": None,
+    }  # fmt: skip
     json.dumps(page)  # plain data all the way down
+
+
+def test_the_report_desk_block_says_why_there_is_no_desk(settings_for):
+    """M15.7: with order alerts off the reports have no Telegram path either; switched off in
+    alerts.env, or with no key to seal with, the block says that too. The journal reads it."""
+    from sudarshan.alerts import reports_desk
+
+    svc = _service(settings_for, SUDARSHAN_ORDER_ALERTS="off")
+    asyncio.run(svc.run())  # returns at once: order alerts are off
+    block = health_document(svc)["report_desk"]
+    assert set(block) == DESK_KEYS
+    assert (block["state"], block["on"]) == ("off", False)
+    assert block["reason"] == reports_desk.ORDER_ALERTS_OFF
+    for why in (reports_desk.SWITCHED_OFF_HERE, reports_desk.NO_SEAL):
+        svc.reports_off = why
+        assert health_document(svc)["report_desk"]["reason"] == why
+    page = str(health_document(svc))
+    assert "pepper" in page.lower() and "f" * 64 not in page  # it names the setting, never a value
+
+
+def test_the_report_desk_block_is_the_desks_own_and_a_copy(settings_for):
+    svc = _service(settings_for)
+    svc.reports = type("Desk", (), {"health": lambda self: {"state": "on", "on": True,
+                                                            "reason": None, "waiting": 2,
+                                                            "last_delivery_ms": 5}})()  # fmt: skip
+    block = health_document(svc)["report_desk"]
+    assert block == {"state": "on", "on": True, "reason": None, "waiting": 2, "last_delivery_ms": 5}
 
 
 def test_the_release_is_the_recorded_tag_and_not_the_services_version(settings_for, tmp_path):
@@ -195,6 +226,7 @@ def test_the_one_health_answer_carries_the_service_and_the_market_fields(setting
         assert body["market_alerts"] == "off"
         assert {"market_state", "alerts_active", "instruments"} <= set(body)
         assert KEYS <= set(body)
+        assert set(body["report_desk"]) == DESK_KEYS  # M15.7: what the journal reads
 
     asyncio.run(scenario())
 
