@@ -114,6 +114,12 @@ def _int(value: Any) -> int | None:
     return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
+def _priced(quote: Any) -> bool:
+    """A Quote of the market view that has a price (the feed may have none for it yet)."""
+    ltp = quote.get("ltp") if isinstance(quote, Mapping) else None
+    return isinstance(ltp, int | float) and not isinstance(ltp, bool)
+
+
 def parse(text: Any, username: str | None = None) -> tuple[str | None, str]:
     """A message's command (lower case, without ``@<this bot>``) and the rest of it. A message that
     is not a command, or names another bot, gives ``(None, "")``."""
@@ -482,7 +488,7 @@ class Bot:
         else:
             lines.append(words.say("market_open" if is_open and feed is None else "market_closed",
                                    language))  # fmt: skip
-        quotes = [q for q in (market or {}).get("indices") or () if isinstance(q, Mapping)]
+        quotes = [q for q in (market or {}).get("indices") or () if _priced(q)]  # as the summary
         for quote in quotes[:3]:
             lines.append(self._quote_line(quote, feed == "realtime"))
         if not quotes:

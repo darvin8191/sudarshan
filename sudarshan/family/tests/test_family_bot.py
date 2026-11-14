@@ -803,3 +803,69 @@ def test_cost_figures_follow_pnl_not_quantities(tmp_path):
             close(opened)
 
     run(go())
+
+
+def test_status_and_the_summary_read_the_family_views_own_market_route(tmp_path):
+    """/status and the summary's index line through F6's market route (``viewer_ws.Dialect``),
+    not a stand-in: the feed's state in words, only the indices that have a price, a price's time
+    whenever ticks are not arriving, and the next trading day once the market has closed."""
+    from datetime import timedelta
+
+    from sudarshan.family import digest
+    from sudarshan.family.symbol_map import SymbolMap
+    from sudarshan.family.viewer_ws import Dialect
+
+    class Feed:
+        def __init__(self, state, frames):
+            self.state, self.since, self.frames = state, 1, frames
+
+        async def snapshot(self, keys):
+            return {key: self.frames[key] for key in keys if key in self.frames}
+
+    async def judge(hashed):
+        return None
+
+    async def go():
+        opened = open_store(tmp_path)
+        try:
+            clock = Clock(ist(MONDAY, 11))
+            member = add_member(opened, status="active")
+            dialect = Dialect(judge=judge, symbols=SymbolMap(), books=None)
+            routes = SimpleNamespace(_market=dialect.route_market)
+            fake = FakeTelegram(new_token())
+            made, _ = make_bot(fake_service(opened, clock, tmp_path / "etc", routes), fake,
+                               tmp_path / "etc")  # fmt: skip
+            await ready(made)
+            made.chats[member["id"]] = CHAT_A
+            at = ist(MONDAY, 10)
+            frames = {"NSE_INDEX|Nifty 50": {"ltp": 24310.55, "cp": 24209.0, "ltt": at},
+                      "NSE_INDEX|Nifty Bank": {"ltp": 52100.2, "cp": 52152.3, "ltt": at}}  # fmt: skip
+
+            async def status():
+                await made.handle(update("/status", CHAT_A, date=clock() // 1000))
+                return fake.sent[-1]["text"].split("\n")
+
+            dialect.feed = Feed("realtime", frames)
+            assert await status() == [words.HEADER, words.say("realtime"),
+                                      "NIFTY 50 24,310.55 +0.42%",
+                                      "NIFTY BANK 52,100.20 −0.10%"]  # fmt: skip
+            lines = digest.lines_for(member, MONDAY, market=await made.ask("market", member),
+                                     summary=None, holdings=None, counts=None, next_day=None)  # fmt: skip
+            assert lines[1] == "NIFTY 50 24,310.55 +0.42% · NIFTY BANK 52,100.20 −0.10%"
+            dialect.feed = Feed("reconnecting", frames)
+            assert (await status())[1:3] == [words.say("reconnecting"),
+                                             "NIFTY 50 24,310.55 +0.42% (10:00:00)"]  # fmt: skip
+            dialect.feed = Feed("reconnecting", {})
+            assert (await status())[2] == words.say("indices_unavailable")
+            clock.at = ist(MONDAY, 17)
+            dialect.feed = Feed("closed", frames)
+            closed = await status()
+            assert closed[1] == words.say("market_closed")
+            assert closed[2] == "NIFTY 50 24,310.55 +0.42% (10:00:00)"
+            tuesday = words.day_words(MONDAY + timedelta(days=1))
+            assert closed[-1] == words.say("next_day", day=tuesday)
+            await settle(made)
+        finally:
+            close(opened)
+
+    run(go())
