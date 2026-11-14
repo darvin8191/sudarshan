@@ -48,7 +48,18 @@ const calendar = {
   isLoading: false,
   error: null,
 }
-vi.mock('@/hooks/useMarketStatus', () => ({ useMarketStatus: () => calendar }))
+/** Whether each mount reads the calendar first (loading, then read), as the real hook does. */
+let calendarLoads = false
+vi.mock('@/hooks/useMarketStatus', async () => {
+  const { useEffect, useState } = await import('react')
+  return {
+    useMarketStatus: () => {
+      const [isLoading, setLoading] = useState(calendarLoads)
+      useEffect(() => setLoading(false), [])
+      return isLoading ? { ...calendar, isLoading } : calendar
+    },
+  }
+})
 const portfolio = vi.hoisted(() => ({ calls: 0 }))
 vi.mock('@/sudarshan/portfolio/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/sudarshan/portfolio/api')>()),
@@ -147,6 +158,20 @@ async function pass(ms: number) {
   })
 }
 
+/** Tue 17 Nov 2026, 11:00 in India: hours from midnight on either side. */
+const MID_SESSION = Date.UTC(2026, 10, 17, 5, 30)
+
+/**
+ * The fake clock every timed test here runs on, set to a moment the test names. A bare
+ * `vi.useFakeTimers()` starts on the real time, and the page reads the date in India from it: a
+ * calendar read on one day says nothing about the next (`useMarketOpen`), so "every market is
+ * shut" stops holding the 45 second read once the fake clock passes midnight. Started from the
+ * real time, these tests counted one read too many on a run in the 90 seconds before 00:00 IST.
+ */
+function fakeClock(at: number = MID_SESSION) {
+  vi.useFakeTimers({ now: at })
+}
+
 beforeEach(() => {
   marketOpen = false
   latency = 0
@@ -157,6 +182,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers()
+  calendarLoads = false
   vi.unstubAllGlobals()
   useAuthStore.setState({ apiKey: null })
 })
@@ -210,7 +236,7 @@ describe('Dashboard', () => {
   })
 
   it('reads the broker again every 45 seconds while a market is open, never while all are shut', async () => {
-    vi.useFakeTimers()
+    fakeClock()
     const calls = server(OK)
     render(<Dashboard />)
     await pass(0)
@@ -225,8 +251,27 @@ describe('Dashboard', () => {
     expect(calls.filter((url) => url === 'positionbook')).toHaveLength(2)
   })
 
+  it("across midnight in India: one read while yesterday's calendar says nothing, none once today's says shut", async () => {
+    // Sat 14 Nov 2026, 23:58:54 IST, where the test above, on the real clock, once counted a
+    // second read. That read is the rule, not a fault: shut was said by yesterday's calendar.
+    calendarLoads = true
+    fakeClock(Date.UTC(2026, 10, 14, 18, 28, 54))
+    const calls = server(OK)
+    render(<Dashboard />)
+    await pass(0)
+    expect(reads(calls)).toBe(1)
+
+    await pass(RESYNC_MS) // 23:59:39, every market shut: held
+    expect(reads(calls)).toBe(1)
+    await pass(RESYNC_MS) // 00:00:24, shut not known for the new day: read
+    expect(reads(calls)).toBe(2)
+    await pass(30_000) // 00:00:54, the page's once a minute look at the date: the calendar is read again
+    await pass(RESYNC_MS * 2) // 00:02:24, shut is known for the new day: held again
+    expect(reads(calls)).toBe(2)
+  })
+
   it('reads the broker again when it reports a fill, a rejection or a square-off', async () => {
-    vi.useFakeTimers()
+    fakeClock()
     const calls = server(OK)
     render(<Dashboard />)
     await pass(0)
@@ -242,7 +287,7 @@ describe('Dashboard', () => {
   })
 
   it('answers a burst of order updates with one read, and one more once the broker has caught up', async () => {
-    vi.useFakeTimers()
+    fakeClock()
     latency = 300
     const calls = server(OK)
     render(<Dashboard />)
@@ -265,7 +310,7 @@ describe('Dashboard', () => {
   })
 
   it('reads nothing while the page is hidden, and once when it is seen again', async () => {
-    vi.useFakeTimers()
+    fakeClock()
     marketOpen = true
     const calls = server(OK)
     render(<Dashboard />)
@@ -285,7 +330,7 @@ describe('Dashboard', () => {
   })
 
   it('keeps the last figures and says so when a later read fails', async () => {
-    vi.useFakeTimers()
+    fakeClock()
     marketOpen = true
     server(OK, { status: 200, body: { status: 'error', message: 'Failed to get funds' } })
     render(<Dashboard />)
