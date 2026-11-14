@@ -417,7 +417,7 @@ describe('the options page', () => {
   it('switches between the Chain and the OI tab, kept in the address beside the expiry', async () => {
     await open('/options/NFO/NIFTY?expiry=2026-11-24')
     const tabs = within(screen.getByRole('tablist')).getAllByRole('tab')
-    expect(tabs.map((tab) => tab.textContent)).toEqual(['Chain', 'OI'])
+    expect(tabs.map((tab) => tab.textContent)).toEqual(['Chain', 'OI', 'IV'])
     expect(tabs[0]).toHaveAttribute('aria-selected', 'true')
     fireEvent.click(tabs[1])
     await settle()

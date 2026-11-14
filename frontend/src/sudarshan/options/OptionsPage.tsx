@@ -27,6 +27,7 @@ import {
 import { readListing } from './api'
 import { ChainTab } from './ChainTab'
 import { Header } from './Header'
+import { IvTab } from './IvTab'
 import { OiTab } from './OiTab'
 import { readLastChain, saveLastChain } from './prefs'
 import { StrikeEntry } from './StrikeEntry'
@@ -42,10 +43,11 @@ const QUIET =
   'inline-flex min-h-12 items-center rounded-sm text-sm font-semibold text-[color:var(--brand)] underline underline-offset-2 outline-none focus-visible:ring-2 focus-visible:ring-ring'
 const NOTE = 'text-sm font-semibold text-[color:var(--text-secondary)]'
 
-type Tab = 'chain' | 'oi'
+type Tab = 'chain' | 'oi' | 'iv'
 const TABS: Array<{ tab: Tab; label: string }> = [
   { tab: 'chain', label: 'Chain' },
   { tab: 'oi', label: 'OI' },
+  { tab: 'iv', label: 'IV' },
 ]
 const tabOf = (text: string | null): Tab => TABS.find((each) => each.tab === text)?.tab ?? 'chain'
 
@@ -275,6 +277,7 @@ export default function OptionsPage() {
           {model && (
             <div role="tabpanel" id="sd-options-panel" aria-labelledby={`sd-options-tab-${tab}`}>
               {tab === 'oi' && <OiTab model={model} dim={dim} />}
+              {tab === 'iv' && <IvTab model={model} dim={dim} />}
               {tab === 'chain' && (
                 <ChainTab
                   model={model}
