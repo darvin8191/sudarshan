@@ -15,6 +15,7 @@ import { onModeChange } from '@/stores/themeStore'
 import { AccessNotice } from '@/sudarshan/AccessNotice'
 import { usePriceAccess } from '@/sudarshan/access'
 import { useBookSync } from '@/sudarshan/books/useBookSync'
+import { AlertsCard } from '@/sudarshan/dashboard/AlertsCard' // SUDARSHAN D5
 import { HoldingsCard } from '@/sudarshan/dashboard/HoldingsCard'
 import { useMarketOpen } from '@/sudarshan/dashboard/hooks'
 import { IndexStrip } from '@/sudarshan/dashboard/IndexStrip'
@@ -321,6 +322,8 @@ export default function Dashboard() {
               switch (Display settings) is on; it replaces it a release after his check (P5). */}
           {portfolioCard && <PortfolioCard marketOpen={marketOpen} />}
           <HoldingsCard apiKey={apiKey} marketOpen={marketOpen} />
+          {/* SUDARSHAN M3.8 (D5): the market alerts fired today, live from the alerts push. */}
+          <AlertsCard />
           {/* SUDARSHAN M9 UI8: the screener's day, live from its run pushes. */}
           <ScreenerCard marketOpen={marketOpen} />
         </div>
