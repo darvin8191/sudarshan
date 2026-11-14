@@ -846,7 +846,6 @@ protected     /telegram/config                                                  
 protected     /telegram/send-message                                                    telegram_bp.send_message
 protected     /telegram/test-message                                                    telegram_bp.send_test_message
 protected     /telegram/user/<int:telegram_id>/unlink                                   telegram_bp.unlink_user
-protected     /test_chart                                                               pnltracker_bp.test_chart
 protected     /tradebook                                                                orders_bp.tradebook
 protected     /tradebook/export                                                         orders_bp.export_tradebook
 protected     /tradingview/                                                             tv_json_bp.tradingview_json
@@ -894,15 +893,11 @@ class Finding(NamedTuple):
 #: Routes that refuse every caller, but not cleanly, as the walk saw them on 14 Nov 2026 (P6 T1).
 #: Each runs as an expected failure; once its route answers cleanly the suite fails until its line
 #: goes, and a route that starts to answer anything else fails at once. The family view is switched
-#: on only after the G5 suite is green (P6 1), and that includes this list being empty.
-FINDINGS: dict[tuple[str, str, str], Finding] = {
-    ("/test_chart", "pnltracker_bp.test_chart", "GET"): Finding(
-        302,
-        "TemplateNotFound",
-        "no session check at all: it refuses only because its template is gone and the error "
-        "page's redirect answers (blueprints/pnltracker.py)",
-    ),
-}
+#: on only after the G5 suite is green (P6 1), and that includes this list being empty. The eleven
+#: seen on 14 Nov 2026 were fixed in OpenAlgo's code (branch fix/g5-findings): nine /api/websocket/*
+#: routes answer a valid session only, POST /auth/broker answers as GET does, and /test_chart is
+#: gone; sudarshan/tests/test_g5_*.py hold each fix.
+FINDINGS: dict[tuple[str, str, str], Finding] = {}
 
 #: ``/sudarshan/*`` rules the forged session of a user who is not the owner is not held to: they
 #: are not owner bridges, and read the session with upstream's own check, as upstream's routes do
