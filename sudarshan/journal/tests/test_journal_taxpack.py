@@ -245,3 +245,91 @@ def test_small_formats():
     assert taxpack.rs(None) == "not given" and taxpack.rs(0) == "₹0.00"
     assert not taxpack.usable({"fy": 2026}) and not taxpack.usable(None)
     assert taxpack.usable(PACK)
+
+
+# ---- dividends and buybacks in the pack (J6) ---------------------------------------------------
+def with_dividends():
+    """PK1 with the year's dividends as the portfolio's ``dividends.for_pack`` gives them: two
+    payers (one above the line where tax is deducted, one still expected), and what a buyback
+    paid that counts as a dividend."""
+    pack = copy.deepcopy(PACK)
+    pack["dividends"] = {
+        "by_payer": [
+            {"isin": "INE000A01010", "name": "Acme Industries", "expected_paise": 165_000,
+             "confirmed_paise": 900_000, "total_paise": 1_065_000, "tds_likely": True},
+            {"isin": "INE000B01018", "name": None, "expected_paise": 42_000,
+             "confirmed_paise": 0, "total_paise": 42_000, "tds_likely": False},
+        ],
+        "buyback_paise": 6_000_000,
+        "total_paise": 7_107_000,
+        "tds_expected_paise": 106_500,
+        "unconfirmed_count": 2,
+    }  # fmt: skip
+    return pack
+
+
+def test_dividends_by_payer_and_a_buybacks_receipt_are_in_the_paper(on):
+    pack = with_dividends()
+    on.portfolio.answers["tax_pack"] = pack
+    build(on, "fy", period="FY2627")
+    row = kept(on, "fy")
+    text = text_of(file_of(on, row))
+    part = text[text.index("Dividends") : text.index("Charges as Upstox reports them")]
+    for expected in (
+        "Acme Industries", "₹1,650.00", "₹9,000.00", "₹10,650.00", "Likely",
+        "INE000B01018", "₹420.00", "Not expected",  # a payer with no name is shown by its ISIN
+        "Received in a buyback, counted as a dividend", "₹60,000.00",
+        "Dividends in all", "₹71,070.00",
+        "Tax likely deducted at source, about", "₹1,065.00",
+        "2 dividends here are expected, not yet confirmed by you",
+    ):  # fmt: skip
+        assert expected in part, expected
+    assert "Dividends: ₹71,070.00" in row["text"]
+    assert row["rows"]["tax_pack"]["dividends"] == pack["dividends"]
+    assert not SECTION.search(text)
+
+
+def test_a_year_with_no_dividend_says_so_and_one_dividend_is_one():
+    blocks = taxpack.dividend_blocks(PACK["dividends"])
+    assert [type(b) for b in blocks] == [D.Heading, D.Paragraph]
+    assert blocks[1].lines == ("No dividend is recorded for this financial year.",)
+    assert "Dividends:" not in "\n".join(taxpack.pack_lines(PACK))
+    one = with_dividends()["dividends"] | {"unconfirmed_count": 1, "buyback_paise": 0,
+                                           "tds_expected_paise": None}  # fmt: skip
+    said = [ln for b in taxpack.dividend_blocks(one) if isinstance(b, D.Paragraph)
+            for ln in b.lines]  # fmt: skip
+    assert said[0].startswith("1 dividend here is expected, not yet confirmed by you")
+    labels = [r[0] for b in taxpack.dividend_blocks(one) if isinstance(b, D.Table)
+              for r in b.rows]  # fmt: skip
+    assert "Received in a buyback, counted as a dividend" not in labels
+    assert "Tax likely deducted at source, about" not in labels
+    # A pack from before dividends were read (no such block at all) prints no Dividends heading.
+    assert taxpack.dividend_blocks(None) == ()
+
+
+def test_each_buyback_is_listed_by_the_rule_of_its_date():
+    """K1's three regimes as the pack hands them over: an exempt tender is listed and in no
+    total, one taxed as a dividend shows its nil sale value and its loss, and one from 1 April
+    2026 is an ordinary sale marked as a buyback. The journal prints what the pack says."""
+    pack = copy.deepcopy(PACK)
+    sale = pack["capital_gains"]["schedule"][2]
+    assert sale["buyback"]  # PK1's own buyback of 20 Jul 2026: an ordinary sale
+    middle = {**sale, "isin": "INE000M01019", "sale_day": 20260210, "sale_paise": 0,
+              "receipt_paise": 6_000_000, "gain_paise": -4_000_000, "buyback": "dividend",
+              "dividend_paise": 6_000_000}  # fmt: skip
+    exempt = {**sale, "isin": "INE000E01015", "sale_day": 20240915, "status": "exempt_buyback",
+              "buyback": "exempt"}  # fmt: skip
+    pack["capital_gains"]["schedule"].append(middle)
+    pack["capital_gains"]["exempt_buybacks"] = [exempt]
+    blocks = taxpack.capital_blocks(pack["capital_gains"])
+    tables_ = [b for b in blocks if isinstance(b, D.Table)]
+    sales = next(t for t in tables_ if t.columns[-1].title == "Term")
+    by_isin = {r[0]: r for r in sales.rows}
+    assert by_isin["INE000C01016"][-1] == "Long, buyback"
+    assert by_isin["INE000M01019"][5] == "₹0.00"  # the sale value used is nil
+    assert by_isin["INE000M01019"][6] == D.Money(-4_000_000)
+    aside = next(t for t in tables_ if t.columns[-1].title == "Why")
+    assert [(r[0], r[-1]) for r in aside.rows] == [
+        ("INE000E01015", "Buyback, exempt in your hands")
+    ]
+    assert "INE000E01015" not in by_isin

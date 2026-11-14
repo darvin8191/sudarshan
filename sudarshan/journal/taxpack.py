@@ -1,4 +1,4 @@
-"""The tax working paper as the Tax pack prints it (P7 J5, M15.5; design p7 4.9).
+"""The tax working paper as the Tax pack prints it (P7 J5 and J6, M15.5; design p7 4.9).
 
 The portfolio computes the working paper with ``sudarshan/tax`` and hands it over as one plain
 answer, the pack (``PortfolioLink.tax_pack``). This module only lays it out: blocks for the PDF
@@ -263,6 +263,43 @@ def business_blocks(b: Mapping[str, Any]) -> tuple[D.Block, ...]:
     return (*out, *_lines(said))
 
 
+def dividend_blocks(d: Mapping[str, Any] | None) -> tuple[D.Block, ...]:
+    """Dividends by payer and what a buyback paid that counts as a dividend (J6). A year with
+    neither prints one sentence, so its absence is never read as "not looked at"."""
+    if not isinstance(d, Mapping):
+        return ()
+    payers = d.get("by_payer") or ()
+    buyback = int(d.get("buyback_paise") or 0)
+    out: list[D.Block] = [D.Heading("Dividends")]
+    if not payers and not buyback:
+        return (*out, D.Paragraph(("No dividend is recorded for this financial year.",)))
+    if payers:
+        out.append(D.Table(
+            (D.Column("Company", 3.0), D.Column("Expected", 1.7, "r"),
+             D.Column("Confirmed by you", 1.9, "r"), D.Column("Counted", 1.7, "r"),
+             D.Column("Tax deducted at source", 2.2)),
+            tuple((str(p.get("name") or p.get("isin") or ""), rs(p.get("expected_paise")),
+                   rs(p.get("confirmed_paise")), rs(p.get("total_paise")),
+                   "Likely" if p.get("tds_likely") else "Not expected")
+                  for p in payers),
+        ))  # fmt: skip
+    rows: list[tuple[str, D.Cell]] = []
+    if buyback:
+        rows.append(("Received in a buyback, counted as a dividend", rs(buyback)))
+    rows.append(("Dividends in all", D.Ink(rs(d.get("total_paise")), True)))
+    if d.get("tds_expected_paise") is not None:
+        rows.append(("Tax likely deducted at source, about", rs(d["tds_expected_paise"])))
+    out.append(_amounts(rows))
+    unconfirmed = int(d.get("unconfirmed_count") or 0)
+    if unconfirmed:
+        out.append(D.Paragraph((
+            f"{words.plural(unconfirmed, 'dividend')} here "
+            f"{'is' if unconfirmed == 1 else 'are'} expected, not yet confirmed by you: counted "
+            "at the expected amount. Confirm what reached your bank under Portfolio > Dividends.",
+        )))  # fmt: skip
+    return tuple(out)
+
+
 def charges_blocks(charges: Mapping[str, Any]) -> tuple[D.Block, ...]:
     by_segment = charges.get("by_segment") or {}
     head = D.Heading("Charges as Upstox reports them")
@@ -295,6 +332,7 @@ def pack_blocks(pack: Mapping[str, Any]) -> tuple[D.Block, ...]:
           if missing else ()),
         *capital_blocks(pack["capital_gains"]),
         *business_blocks(pack["business"]),
+        *dividend_blocks(pack.get("dividends")),
         *charges_blocks(pack["charges"]),
         D.Heading("Not computed here"),
         *_lines(pack.get("not_computed")),
@@ -325,4 +363,7 @@ def pack_lines(pack: Mapping[str, Any]) -> list[str]:
         f"{words.SEP}intraday shares: "
         f"{words.rupees(b['speculative']['net_paise'], signed=True)}",
     ]
+    dividends = pack.get("dividends")
+    if isinstance(dividends, Mapping) and dividends.get("total_paise"):
+        lines.append(f"Dividends: {rs(dividends['total_paise'])}")
     return lines
