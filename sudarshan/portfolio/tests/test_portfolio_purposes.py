@@ -178,7 +178,7 @@ async def test_the_family_purpose_opens_only_read_ops_and_a_write_is_403_and_log
 async def test_the_journal_purpose_opens_only_its_reads_and_a_write_is_403_and_logged(rig, caplog):
     assert set(kinds.JOURNAL_OPS) == {
         "trades_day", "order_history", "historical_trades", "pnl_report", "positions", "funds",
-        "benchmark_closes",
+        "benchmark_closes", "tax_pack",
     }  # fmt: skip
     with caplog.at_level(logging.WARNING, logger="sudarshan.portfolio"):
         for name in (n for n in kinds.SERVICE_OP_NAMES if n not in kinds.JOURNAL_OPS):

@@ -1,6 +1,6 @@
 {
-  "version": 1,
-  "note": "The one table of what each privacy category hides (cross-design Y24). An entry is a field name, or a pattern that starts with * for every field that ends so. A category's fields are removed from an answer at any depth. P&L is offered only together with quantities: while qty is hidden, pnl is hidden too, and everything qty hides is hidden with it. Never hidden: symbol, exchange, direction, product, the live price and its change, the market status, and today (the trading date; the P&L of the day is the paise, base_paise and pct inside a Today figure).",
+  "version": 2,
+  "note": "The one table of what each privacy category hides (cross-design Y24). An entry is a field name, or a pattern that starts with * for every field that ends so. A category's fields are removed from an answer at any depth. P&L is offered only together with quantities: while qty is hidden, pnl is hidden too, and everything qty hides is hidden with it. Never hidden: symbol, exchange, direction, product, the live price and its change, the market status, and today (the trading date; the P&L of the day is the paise, base_paise and pct inside a Today figure). Version 2 (phase P7): the fields of tax, risk, goals, dividends, the calendar, the benchmark statistics and exported files are hidden too, though no op of that phase is a family op (a family member sees none of them), so a field cannot reach a viewer by being forgotten; a closed-world test fails on any answer key no category, never_hidden or its reviewed structural list names.",
   "categories": {
     "pnl": [
       "pnl",
@@ -25,7 +25,24 @@
       "by_fy",
       "benchmarks",
       "effect",
-      "base_paise"
+      "base_paise",
+      "beta",
+      "correlation",
+      "stat_days",
+      "stat_note",
+      "risk",
+      "sharpe",
+      "sortino",
+      "calmar",
+      "volatility",
+      "drawdown",
+      "tax",
+      "capital_gains",
+      "business",
+      "carried",
+      "goals",
+      "progress",
+      "required_monthly"
     ],
     "qty": [
       "qty",
@@ -53,7 +70,15 @@
       "note",
       "ratio_num",
       "ratio_den",
-      "charges_detail"
+      "charges_detail",
+      "dividends",
+      "expected",
+      "calendar",
+      "turnover",
+      "charges",
+      "fmv_u",
+      "text",
+      "base64"
     ],
     "funds": [
       "funds"
@@ -70,6 +95,7 @@
     "now_u",
     "tick_size_u",
     "strike_price_u",
-    "today"
+    "today",
+    "amount_u"
   ]
 }

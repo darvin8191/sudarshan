@@ -158,7 +158,7 @@ two types, and a test holds this table, that map and `kinds.py` to each other.
 
 | op | method | route | limiter | query | request | answer | notes |
 |---|---|---|---|---|---|---|---|
-| `state` | GET | `/state` | read | | `NoArgs` | `PortfolioState` | tabs, members, accounts, job states |
+| `state` | GET | `/state` | read | | `NoArgs` | `PortfolioState` | tabs, members, accounts, job states, the P7 switches |
 | `summary` | GET | `/summary` | read | | `NoArgs` | `PortfolioSummary` | the dashboard card's live-math inputs |
 | `tab_create` | POST | `/tabs` | write | | `TabCreateArgs` | `TabInfo` | |
 | `tab_get` | GET | `/tabs/<id>` | read | `as_of:day, view:int, accounts:ints, classes:strs, tags:strs, held:str` | `TabGetArgs` | `TabView` | |
@@ -180,7 +180,7 @@ two types, and a test holds this table, that map and `kinds.py` to each other.
 | `import_preview` | POST | `/tabs/<id>/imports` | import | | `ImportPreviewArgs` | `ImportPreview` | upload |
 | `import_commit` | POST | `/imports/<id>/commit` | write | | `ImportCommitArgs` | `ImportCommitted` | |
 | `import_discard` | DELETE | `/imports/<id>` | write | | `ImportDiscardArgs` | `ImportDiscarded` | drops a preview or undoes an import |
-| `export_csv` | GET | `/tabs/<id>/export.csv` | read | | `Targets` | `ExportFile` | download |
+| `export_csv` | GET | `/tabs/<id>/export.csv` | read | `view:str` | `ExportArgs` | `ExportFile` | download; `view` from P7 X1 |
 | `performance` | GET | `/tabs/<id>/performance` | read | | `Targets` | `PerformanceReport` | |
 | `layout_get` | GET | `/tabs/<id>/layout` | read | | `Targets` | `LayoutState` | |
 | `layout_set` | PUT | `/tabs/<id>/layout` | write | | `LayoutSetArgs` | `LayoutState` | `spec: null` resets |
@@ -193,11 +193,29 @@ two types, and a test holds this table, that map and `kinds.py` to each other.
 | `report_years` | GET | `/reports/years` | upstox | | `NoArgs` | `ReportYears` | |
 | `report_trades` | GET | `/reports/trades` | upstox | `fy:int, segment:str, force:bool` | `ReportArgs` | `TradesReport` | reads Upstox, cached per year |
 | `report_pnl` | GET | `/reports/pnl` | upstox | `fy:int, segment:str, force:bool` | `ReportArgs` | `PnlReport` | reads Upstox, cached per year |
+| `tax_get` | GET | `/tax` | read | `fy:int, member:int` | `TaxGetArgs` | `TaxPack` | P7 `tax`: the working paper of one year and taxpayer |
+| `tax_inputs` | GET | `/tax/inputs` | read | `member:int` | `TaxInputsArgs` | `TaxInputs` | P7 `tax`: the owner's figures and what the paper lacks |
+| `tax_input_set` | POST | `/tax/inputs` | write | | `TaxInputSetArgs` | `TaxInputSaved` | P7 `tax`: `kind` from a closed list; `dry_run` tells the effect first |
+| `tax_input_delete` | DELETE | `/tax/inputs/<id>` | write | | `TaxInputDeleteArgs` | `Deleted` | P7 `tax` |
+| `tax_csv` | GET | `/tax/export.csv` | read | `fy:int, member:int, schedule:str` | `TaxCsvArgs` | `ExportFile` | P7 `tax`, download |
+| `report_csv` | GET | `/reports/export.csv` | read | `kind:str, fy:int, segment:str` | `ReportCsvArgs` | `ExportFile` | P7 `tax`, download: Upstox's rows as read |
+| `ca_list` | GET | `/corporate-actions` | read | `scope:str, from:day, to:day` | `CaListArgs` | `CaList` | P7 `insights` |
+| `ca_decide` | POST | `/corporate-actions/<id>` | write | | `CaDecideArgs` | `CaDecisionRow` | P7 `insights`: nothing changes a lot without it |
+| `dividends` | GET | `/dividends` | read | `fy:int, member:int` | `DividendsArgs` | `DividendsReport` | P7 `insights` |
+| `dividend_set` | POST | `/dividends/<id>` | write | | `DividendSetArgs` | `DividendLine` | P7 `insights` |
+| `calendar` | GET | `/calendar` | read | `from:day, to:day` | `CalendarArgs` | `CalendarReport` | P7 `insights` |
+| `risk` | GET | `/risk` | read | `tab:int` | `RiskArgs` | `RiskReport` | P7 `insights` |
+| `settings_get` | GET | `/settings` | read | | `NoArgs` | `OwnerSettings` | P7 `insights` |
+| `settings_set` | PUT | `/settings` | write | | `SettingsSetArgs` | `OwnerSettings` | P7 `insights` |
+| `goals_list` | GET | `/goals` | read | | `NoArgs` | `GoalsList` | P7 `goals` |
+| `goal_create` | POST | `/goals` | write | | `GoalCreateArgs` | `GoalsList` | P7 `goals` |
+| `goal_update` | PATCH | `/goals/<id>` | write | | `GoalUpdateArgs` | `GoalsList` | P7 `goals` |
+| `export_pdf` | GET | `/tabs/<id>/export.pdf` | read | `view:str` | `ExportArgs` | `ExportPdf` | P7 `goals`, download |
 
 The bridge builds all of these routes from one table (`OPS` in `kinds.py`), so a later op never
 means editing it. An op the service does not have yet answers `not_ready` ("This part of the
-portfolio is not ready yet."). A `dry_run` on `activity_create` and `activity_update` counts
-against the dry-run limiter, not the write limiter.
+portfolio is not ready yet."). A `dry_run` on `activity_create`, `activity_update` and
+`tax_input_set` counts against the dry-run limiter, not the write limiter.
 
 ### Sentences said word for word
 
@@ -347,6 +365,33 @@ two exists in this release. Each purpose has its own principal and its own list 
   got from retrieve-all, get-trades-for-day and order history. Read it with
   `journalctl -u sudarshan-portfolio | grep "Analytics Token probe"`.
 * **Schema step 4** adds `tab_share` and `member_privacy`.
+
+### Phase P7: tax, insights and goals behind three switches
+
+The money features of phase P7 (design p7) register their whole contract at once: every op above
+marked P7, the journal purpose's `tax_pack`, the job `corporate_actions`, the closed lists
+(`TAX_INPUT_KINDS`, `CARRY_BUCKETS`, `CA_KINDS`, `EXPORT_VIEWS`, `SWITCH_NAMES` and the rest) and
+the answer shapes in `types.ts`. Each op answers "not ready" until its lane lands, so no later lane
+edits `kinds.py`, `ops/__init__.py` or `timers.py`.
+
+| switch (`.env`) | name | covers |
+|---|---|---|
+| `SUDARSHAN_TAX` | `tax` | `tax_get`, `tax_inputs`, `tax_input_set`, `tax_input_delete`, `tax_csv`, `report_csv`, `tax_pack` |
+| `SUDARSHAN_PORTFOLIO_INSIGHTS` | `insights` | `ca_list`, `ca_decide`, `dividends`, `dividend_set`, `calendar`, `risk`, `settings_get`, `settings_set`; the job `corporate_actions` |
+| `SUDARSHAN_PORTFOLIO_GOALS` | `goals` | `goals_list`, `goal_create`, `goal_update`, `export_pdf` |
+
+Each is off in code and set by the release that ships its part (`ops/deploy/openalgo-env.conf`).
+Off, its ops answer `not_ready` whatever their module does (`ops.switched`, put on at
+registration), its jobs end at once (`timers.gate_switched`) and nothing is read from Upstox for
+it. The owner's `state` answer carries `switches`, so the page offers a view only while its
+switch is on.
+
+A family member sees nothing of this phase: none of its ops is a family op (a test holds
+`FAMILY_OPS` to that), and the mask table (version 2) hides its fields defensively anyway. A
+closed-world test walks every key of every answer a viewer can be given and of every answer of the
+phase, in `types.ts` and in the service's real answers, and fails on a key that no category
+hides, that is not in `never_hidden` and that is not in its reviewed list of structural keys: a
+new field cannot reach a viewer by being forgotten.
 
 ### Import and export
 
