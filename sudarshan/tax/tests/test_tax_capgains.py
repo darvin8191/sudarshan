@@ -9,6 +9,7 @@ from sudarshan.portfolio.core.days import held_over_year
 from sudarshan.tax import capgains, lots
 from sudarshan.tax.model import Disposal, Settings, Trade, build
 
+SHARE = "INE000A01010"
 ALL = cases("capgains.json", "gain") + cases("capgains.json", "term") + cases("buyback.json")
 
 
@@ -47,8 +48,8 @@ def test_the_default_line_is_the_portfolio_screen_s_line(case):
 
 def test_stt_never_enters_a_cost_or_an_expense():
     trades = [
-        Trade(1, 1, 20250602, 1, "BUY", "EQ", "X", 10**7, 10**6, 100_000, "ledger", 500, 999),
-        Trade(1, 1, 20260812, 2, "SELL", "EQ", "X", 10**7, 10**6, 120_000, "ledger", 300, 777),
+        Trade(1, 1, 20250602, 1, "BUY", "EQ", SHARE, 10**7, 10**6, 100_000, "ledger", 500, 999),
+        Trade(1, 1, 20260812, 2, "SELL", "EQ", SHARE, 10**7, 10**6, 120_000, "ledger", 300, 777),
     ]
     gain = capgains.gain_of(lots.replay(trades).disposals[0], {})
     assert (gain.cost_paise, gain.expenses_paise, gain.gain_paise) == (100_500, 300, 19_200)

@@ -173,6 +173,53 @@ def test_a_pack_with_every_list_filled_prints_each_under_its_own_heading():
     assert len(read_pdf(blob).pages) >= 2
 
 
+def test_an_etf_a_reit_and_a_gold_bond_are_printed_as_not_computed_and_every_sale_is_named():
+    """Delta review H1. The portfolio's paper now leaves these out of the gains and lists each
+    sale with its value and name; the printed pack shows them under "Not computed here", never
+    in the table of share sales, and a share's row has its name with its ISIN."""
+    pack = copy.deepcopy(PACK)
+    schedule = pack["capital_gains"]["schedule"]
+    schedule[0]["name"] = "ACME INDUSTRIES"
+    for other in schedule[1:]:
+        other["name"] = None  # no record names it: the ISIN alone, as before
+    units = [
+        ("INF204KB17I5", "GOLD ETF UNITS", 5_000_000),
+        ("INF732E01037", "LIQUID ETF UNITS", 6_100_000),
+        ("INE041025011", "OFFICE PARKS REIT", 7_200_000),
+        ("IN0020200013", "SOVEREIGN GOLD BOND 2028", 8_300_000),
+        ("INF000D01015", None, 9_400_000),
+    ]
+    pack["not_computed_sales"] = [
+        {"instrument": isin, "name": name, "day": 20260810 + n, "amount_paise": paise}
+        for n, (isin, name, paise) in enumerate(units)
+    ]
+    pack["not_computed"] = ["5 sales of assets outside this working paper (sale value "
+                            "Rs 3,60,000) are not computed.", *pack["not_computed"]]  # fmt: skip
+    blocks = taxpack.pack_blocks(pack)
+    tables_ = [b for b in blocks if isinstance(b, D.Table)]
+    (outside,) = [t for t in tables_ if t.columns[0].title == "Sold, outside this paper"]
+    assert [row[0] for row in outside.rows] == [
+        "GOLD ETF UNITS (INF204KB17I5)", "LIQUID ETF UNITS (INF732E01037)",
+        "OFFICE PARKS REIT (INE041025011)", "SOVEREIGN GOLD BOND 2028 (IN0020200013)",
+        "INF000D01015",
+    ]  # fmt: skip
+    assert [row[2] for row in outside.rows] == [words.rupees(p) for _, _, p in units]
+    (sales,) = [t for t in tables_ if t.columns[0].title == "ISIN" and len(t.columns) == 8]
+    assert [row[0] for row in sales.rows] == [g["isin"] for g in schedule]  # shares only
+    span = periods.fy_span(2026, 20270415)
+    text = text_of(periods.fy_pdf(span, "", [], ist_ms(20270415, "07:00:00"), pack))
+    paper = text.split("Trading activity recorded")[0]
+    head, left_out = paper.split("Not computed here")
+    for isin, name, paise in units:
+        assert isin in left_out and isin not in head, isin
+        assert words.rupees(paise) in left_out
+        assert name is None or name in left_out, name
+    assert "5 sales of assets outside this working paper" in left_out
+    assert "Names of the shares and funds sold" in head
+    assert f"{schedule[0]['isin']}: ACME INDUSTRIES" in head
+    assert "..." not in paper, "no name or ISIN is cut short"
+
+
 # ---- the archive keeps the paper it printed ----------------------------------------------------
 def test_an_archived_pack_never_changes_until_it_is_built_again(on):
     """Mutation 15: a rule row or a late trade changes the portfolio's answer; the kept paper

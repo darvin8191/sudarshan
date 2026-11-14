@@ -284,6 +284,45 @@ def test_an_own_account_is_set_as_not_for_tax_from_its_version_and_back(ctx, cap
     assert same["row"]["version"] == 3  # nothing changed: nothing written
 
 
+def test_the_not_for_tax_line_is_logged_once_and_only_for_a_change_that_was_saved(
+    ctx, caplog, monkeypatch
+):
+    """The Inputs sheet asks what a change would do (a dry run, undone) before every save. The
+    line is the record of a change made: none from the dry run, none from a save whose commit
+    failed, one from the save."""
+    account = demat(ctx)
+    change = {"kind": "account_mode", "row": mode(account), "version": 1}
+
+    def said():
+        return [r.getMessage() for r in caplog.records if r.name.endswith("ops.tax_ops")]
+
+    with caplog.at_level("INFO", logger="sudarshan.portfolio.ops.tax_ops"):
+        shown = call(ctx, "tax_input_set", **change, dry_run=True)
+        assert shown["row"] is None and listed(ctx)[account["id"]] == ("ledger", 1)
+        assert said() == []
+
+        real = ctx.store.write
+
+        def fails_at_the_end(scope, fn):
+            def run(tx):
+                fn(tx)
+                raise OSError("no space left")
+
+            return real(scope, run)
+
+        monkeypatch.setattr(ctx.store, "write", fails_at_the_end)
+        assert refused(ctx, "tax_input_set", **change).status >= 500
+        monkeypatch.undo()
+        assert listed(ctx)[account["id"]] == ("ledger", 1)
+        assert said() == []
+
+        call(ctx, "tax_input_set", **change)
+        assert listed(ctx)[account["id"]] == ("none", 2)
+        assert said() == [
+            f"account {account['id']} of member 1 now counts for tax as none (was ledger)"
+        ]
+
+
 def test_the_upstox_account_a_wrong_mode_and_a_missing_version_are_refused_in_words(ctx):
     upstox = {"id": ctx.upstox_id}
     fixed = refused(ctx, "tax_input_set", kind="account_mode", row=mode(upstox), version=1)
@@ -391,3 +430,21 @@ def test_every_list_of_sales_is_named_and_a_share_no_record_names_has_none():
     assert [row["name"] for row in rows] == ["First Ltd", None, None, None]
     assert [row["isin"] for row in rows] == [f"INE00{n}X01010" for n in range(4)]
     assert set(tax_ops.SALE_LISTS) == {"schedule", "needs_fmv", "unknown_cost", "exempt_buybacks"}
+
+
+def test_a_sale_the_paper_does_not_compute_is_named_too():
+    """An ETF, a REIT or a bond sold is listed by ISIN and value; the ISIN alone does not say
+    what it was, so it carries the same name a share's sale does. A contract names itself."""
+    from sudarshan.portfolio.ops import tax_ops
+
+    contract = ["NFO", "ACME", 20260924, 0, "FUT"]
+    outside = [{"instrument": "INF204KB17I5"}, {"instrument": "INF000D01015"},
+               {"instrument": contract}]  # fmt: skip
+    pack = {"capital_gains": {key: [] for key in tax_ops.SALE_LISTS},
+            "not_computed_sales": outside}  # fmt: skip
+    named = tax_ops._named(pack, {"INF204KB17I5": "GOLD ETF UNITS"})["not_computed_sales"]
+    assert named == [
+        {"instrument": "INF204KB17I5", "name": "GOLD ETF UNITS"},
+        {"instrument": "INF000D01015", "name": None},
+        {"instrument": contract},
+    ]

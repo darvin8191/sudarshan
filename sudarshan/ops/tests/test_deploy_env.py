@@ -319,6 +319,9 @@ def test_the_shipped_list_on_a_fresh_install(tmp_path):
     assert after["SUDARSHAN_PORTFOLIO"] == "on"  # M7: the portfolio is switched on by the release
     assert after["SUDARSHAN_WATCHLISTS_V2"] == "off"  # M8.4: Watchlists v2 ships off
     assert after["SUDARSHAN_JOURNAL"] == "on"  # M14, M15: the journal is switched on by the release
+    assert after["SUDARSHAN_TAX"] == "on"  # M7.27: the tax working paper is switched on
+    for later in LATER_SWITCHES:  # insights and goals stay off in code: no line, no key
+        assert later not in after
     assert after["OPENALGO_MCP_READ_ONLY"] == "1"  # M17.9: the assistant's three settings
     assert after["MCP_OAUTH_WRITE_SCOPE_ENABLED"] == "False"
     assert after["MCP_OAUTH_REQUIRE_APPROVAL"] == "True"
@@ -330,6 +333,7 @@ def test_the_shipped_list_on_a_fresh_install(tmp_path):
         "SUDARSHAN_PORTFOLIO",
         "SUDARSHAN_WATCHLISTS_V2",
         "SUDARSHAN_JOURNAL",
+        "SUDARSHAN_TAX",
         "MAX_WEBSOCKET_CONNECTIONS",
         "WEBSOCKET_BROKER_LINGER_SECONDS",
         "SUDARSHAN_RISK_GUARD",
@@ -356,6 +360,51 @@ def test_the_journal_switch_has_no_old_value_so_an_owners_off_stays(tmp_path, ow
     assert env.startswith(original), "the owner's line stays byte for byte"
     assert _read_by_openalgo(env)["SUDARSHAN_JOURNAL"] == owners.decode().strip("'")
     assert "SUDARSHAN_JOURNAL left alone: the owner chose its value" in out
+
+
+#: The switches of the same phase that this release leaves off (design p7 2.4: one a release).
+LATER_SWITCHES = ("SUDARSHAN_PORTFOLIO_INSIGHTS", "SUDARSHAN_PORTFOLIO_GOALS")
+
+
+def _shipped_words() -> list[list[str]]:
+    return [
+        line.split("#", 1)[0].split()
+        for line in SHIPPED_LIST.read_text().splitlines()
+        if line.split("#", 1)[0].strip()
+    ]
+
+
+def test_the_release_switches_the_tax_paper_on_and_leaves_the_later_two_alone(tmp_path):
+    """A server on the release before this one: its .env holds what that release's list wrote and
+    names none of the three switches. After the deploy the tax paper is on and nothing names
+    insights or goals, so they stay off in code. An owner's own value for either stays too."""
+    words = _shipped_words()
+    assert [w for w in words if w[0] == "SUDARSHAN_TAX"] == [["SUDARSHAN_TAX", "on"]]
+    assert not [w for w in words if w[0] in LATER_SWITCHES]
+    earlier = b"".join(
+        line + b"\n"
+        for line in SHIPPED_LIST.read_bytes().split(b"\n")
+        if not line.startswith(b"SUDARSHAN_TAX")
+    )
+    before, _ = _applied(tmp_path / "earlier", (REPO / ".sample.env").read_bytes(), earlier)
+    assert "SUDARSHAN_TAX" not in _read_by_openalgo(before)
+    env, out = _applied(tmp_path / "now", before, SHIPPED_LIST.read_bytes())
+    after = _read_by_openalgo(env)
+    assert env.startswith(before), "every earlier line stays byte for byte"
+    assert env[len(before) :] == b"SUDARSHAN_TAX='on'\n"
+    assert after["SUDARSHAN_TAX"] == "on" and not set(LATER_SWITCHES) & set(after)
+    chosen = before + b"SUDARSHAN_PORTFOLIO_GOALS='on'\n"
+    kept, _ = _applied(tmp_path / "chosen", chosen, SHIPPED_LIST.read_bytes())
+    assert _read_by_openalgo(kept)["SUDARSHAN_PORTFOLIO_GOALS"] == "on"
+
+
+@pytest.mark.parametrize("owners", [b"off", b"'off'", b"0"])
+def test_the_tax_switch_has_no_old_value_so_an_owners_off_stays(tmp_path, owners):
+    original = b"APP_KEY='k'\nSUDARSHAN_TAX=" + owners + b"\n"
+    env, out = _applied(tmp_path, original, SHIPPED_LIST.read_bytes())
+    assert env.startswith(original), "the owner's line stays byte for byte"
+    assert _read_by_openalgo(env)["SUDARSHAN_TAX"] == owners.decode().strip("'")
+    assert "SUDARSHAN_TAX left alone: the owner chose its value" in out
 
 
 def test_the_shipped_list_is_whole_and_reads(tmp_path):

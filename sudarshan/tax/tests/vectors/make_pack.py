@@ -190,7 +190,7 @@ OUT = {
     "fy": 2026, "fy_label": "FY 2026-27", "taxpayer": 1, "as_of_ms": 1794673800000,
     "as_of_day": 20261114, "running": True,
     "note": "A working paper: verify with your CA. The broker's own report is the filing source.",
-    "rules_version": "2026.11.14-1",
+    "rules_version": "2026.11.15-1",
     "inputs": {"sources": IN["sources"], "missing": []},
     "capital_gains": CAPITAL,
     "business": BUSINESS,
@@ -205,6 +205,9 @@ OUT = {
         "Other business expenses (data, software, internet, an office).",
         "Rules against wash sales and bonus or dividend stripping.",
         "The extra tax on a promoter in a buyback.",
+        "ETF units (equity ones too), REIT and InvIT units, gold bonds, government securities, "
+        "debentures and preference shares: of what trades on the exchange, only a company's "
+        "equity share is computed. A sale of any other is listed with its value.",
         "Debt funds, unlisted shares, property, gold, crypto and foreign assets.",
     ],
     "not_computed_sales": [],

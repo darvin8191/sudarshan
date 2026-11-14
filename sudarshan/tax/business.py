@@ -83,9 +83,15 @@ def turnover_of(realised: Realised, method: str) -> int:
     return abs(realised.pnl_paise) + (realised.sell_paise if extra else 0)
 
 
-def split_share_charges(total_paise: int, intraday_value: int, delivery_value: int) -> list[int]:
-    """A year's share-market charges split between intraday and delivery by traded value."""
-    return allocate(total_paise, [intraday_value, delivery_value])
+def split_share_charges(
+    total_paise: int, intraday_value: int, delivery_value: int, other_value: int = 0
+) -> list[int]:
+    """A year's share-market charges split between intraday and delivery by traded value. The
+    part that falls to cash-segment trades the core does not compute (``other_value``) is the
+    third figure and goes to neither, so a share's gain is never made smaller by it."""
+    return allocate(total_paise, [intraday_value, delivery_value, other_value])[
+        : 3 if other_value else 2
+    ]
 
 
 def income(

@@ -403,6 +403,7 @@ edits `kinds.py`, `ops/__init__.py` or `timers.py`.
 | `SUDARSHAN_PORTFOLIO_GOALS` | `goals` | `goals_list`, `goal_create`, `goal_update`, `export_pdf` |
 
 Each is off in code and set by the release that ships its part (`ops/deploy/openalgo-env.conf`).
+v0.13.0 sets `SUDARSHAN_TAX` to on; the list names neither of the other two, so they stay off.
 Off, its ops answer `not_ready` whatever their module does (`ops.switched`, put on at
 registration), its jobs end at once (`timers.gate_switched`) and nothing is read from Upstox for
 it. The owner's `state` answer carries `switches`, so the page offers a view only while its
