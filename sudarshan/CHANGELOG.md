@@ -5,7 +5,7 @@ publish. The owner publishes each release on GitHub. The server's deploy timer t
 outside 08:30-16:00 IST on trading days (09:00-15:45 until v0.3.1), keeps backups, and rolls
 back if the app does not come up healthy.
 
-## v0.12.0 (14 Nov 2026)
+## v0.12.0 (15 Nov 2026)
 
 The family layer: a view-only family app for the phone, a family Telegram bot, notifications on the
 family's phones, and a Family page where you add members and decide what each one sees. **All of it
@@ -34,14 +34,19 @@ installed and run one trading day.**
 - **An order request with a missing or wrong API key** (an alert still carrying an old key, say) is
   refused as before, and now leaves no row in your order log and shows nothing in Analyze mode.
   Requests with your key, and every order made inside the app, are logged as before.
+- **The deploy tool can check the family view's nginx lines.** It says nothing until those files are
+  installed. After that it asks nginx to test its configuration only when one of SUDARSHAN's own
+  nginx files has changed, not at every ten-minute run; `sudo sudarshan-deploy --nginx-check` tests
+  whenever you run it.
 
 ### What the family view does, once you switch it on
 - **A member's app:** its own address (`/family/`), installable from Chrome, with a "FAMILY · VIEW
   ONLY" badge and lock on every screen. Dashboard, Positions, Holdings and Watchlist, and behind
   More: Orders, Trades, Portfolio and Settings. There is no order button anywhere. Prices and P&L
   move tick by tick, and each screen says "Real-time", "Reconnecting" with the age of the figures,
-  or "Market closed". A figure you hide reads "Hidden", never a blank or 0, and a book you did not
-  share reads "Not shared with you", never an empty account.
+  or "Market closed". A figure you hide reads "Hidden", never a blank or 0. A book you did not share
+  reads "Not shared with you", and one that could not be read says so, on Orders and Trades too:
+  neither is ever shown as an empty account.
 - **Signing in:** a sign-in name, a password of 12 characters or more and a 6-digit code from a code
   app. A phone stays signed in for 30 days (14 without use); a member can use 3 phones. If you pause
   or remove a member, or their sign-in runs out, their phone says why on its sign-in screen.
@@ -51,12 +56,16 @@ installed and run one trading day.**
   Shared watchlists and portfolio tabs, the record of everything done, and the state of the service
   and the bot.
 - **What decides what a member sees** (four switches per member, and two kinds of share):
-  - positions and holdings: sharing the Upstox tab with them, in Portfolio (view or restricted, with
-    an end date if you want one);
+  - positions and holdings: sharing the Upstox tab with them, on the Family page, Shares, "Portfolio
+    tabs" (view or restricted, with an end date if you want one). The Portfolio page itself has no
+    share control;
   - orders and trades, and funds: that share, and the member's Orders and Funds switches;
   - the figures inside them: the member's P&L and Quantities switches (P&L can be shown only with
     quantities);
-  - watchlists: each list's share, on the Family page; your other portfolio tabs: each tab's share.
+  - watchlists: each list's share, on the Family page, Shares. You choose who first; the switches
+    appear after that. Sharing with every member is a deliberate step: choose "Every member", then
+    tap the switch itself;
+  - your other portfolio tabs: each tab's share, in the same "Portfolio tabs" section.
 - **Book shares are gone.** An earlier build had a separate share for each book (positions,
   holdings and so on). It decided nothing, so the Family page no longer offers it and the server
   refuses one. The Shares tab says what does decide it, as above, and leads to both places.
@@ -67,14 +76,22 @@ installed and run one trading day.**
 - **A share you remove, let end or change to restricted stops showing within about a minute,** at
   any hour, on the member's phone, in the family bot and in the daily summary. A member's own
   switches act at once.
+- **While the server cannot confirm what a member is shared** (the portfolio service is restarting,
+  say), their screen answers within a few seconds and says "What is shared with you could not be
+  checked just now" over the last figures, with their time; they are never shown as current. After
+  ten minutes without an answer the figures are put away, the screen says so, and they come back
+  when the server answers again. A member sees less in that time, never more.
+- **How old a price is, is never hidden.** In a shared portfolio tab each holding says so ("Value
+  from 1 Oct · 45 days old"), and an old price is marked, also for a member who is shown no
+  figures. This settles the point v0.10.0 left open: the age line no longer travels with quantities.
 - **The family bot** (optional, a second Telegram bot of its own): the market, positions, holdings,
   orders and shared portfolios, each under the member's privacy, in English or Gujarati. Any other
   message is answered "This bot only shows information. It cannot place, change or cancel an order."
   A member links their chat from Settings; groups are never answered.
-- **Notifications on a member's phone,** turned on by the member, phone by phone: a notice of a
-  sign-in from a new phone or a locked sign-in, and a short summary of the day 25 minutes after the
-  last close (16:05; 16:10 from 7 Dec). Quiet hours are 21:00 to 08:00 unless the member changes
-  them.
+- **Notifications on a member's phone,** turned on by the member, phone by phone (on a phone two
+  members use, each has their own switch): a notice of a sign-in from a new phone or a locked
+  sign-in, and a short summary of the day 25 minutes after the last close (16:05; 16:10 from 7 Dec).
+  Quiet hours are 21:00 to 08:00 unless the member changes them.
 - **Signing in and joining are limited to 12 tries a minute for everyone together,** and 5 a minute
   from one connection, so that nobody outside can make the server do password work without end. The
   price: heavy outside traffic can make sign-in and join answer "Too many tries" for as long as it
@@ -86,8 +103,9 @@ installed and run one trading day.**
   and stop at the first one that does not show what it should. The lines to paste and the detail are
   in `sudarshan/family/README.md`, under "Switching the family view on".
   1. **The one-time family set-up, as root** (one pasted line; skip it if you ran it after v0.10.0).
-     You should see `PASS.` Within ten minutes the deploy makes the family's settings file with the
-     switch off, and the Family page says the view is switched off.
+     You should see `PASS.` It makes the family's settings file with the switch off, whether you run
+     it before or after this install; if it could not, the deploy's next run does, within ten
+     minutes. The Family page then says the view is switched off.
   2. **The nginx lines:** copy the three files (one pasted line), add the one include line to the
      SUDARSHAN site, record which site file that is, test and reload nginx, then run
      `sudo sudarshan-deploy --nginx-check`. You should see, last, `nginx: PASS. The family view's
@@ -95,12 +113,12 @@ installed and run one trading day.**
   3. **The family bot's token** (optional; the view works without it): make the bot with BotFather
      and save its token with the small file in the README. The Family bot card reads "Polling"
      within a minute.
-  4. **The switch:** paste the one switch line. You should see `The family view is switched on.` It
-     restarts the family and alerts services and nothing else, and a later release never moves the
-     switch back.
-  5. **On the Family page,** which now shows the service on and its check passed: add a member,
-     choose what their privacy hides, share the Upstox tab with them in Portfolio and any
-     watchlists on the Family page.
+  4. **The switch:** paste the one switch line (it starts `v=on`). You should see `The family view
+     is switched on.`; the last word is read back from what it wrote. It restarts the family and
+     alerts services and nothing else, and a later release never moves the switch back.
+  5. **On the Family page,** which now shows the service on and its check passed: add a member and
+     choose what their privacy hides. Then on its Shares tab, under "Portfolio tabs", share the
+     Upstox tab with them, and under Watchlists choose who and share any lists.
   6. **Send the invite link yourself.** It works once, for two hours.
   7. **Check on a test member's phone:** the member joins and sees only what you shared; the
      server's address without `/family` shows a page saying that part is for the account owner; a
@@ -114,8 +132,9 @@ installed and run one trading day.**
   Your own sign-in ends at 03:30 and the family one does not, so next morning your own pages show
   the "for the account owner" page: in the family view open Settings, sign this phone out, then
   sign in as usual. A second browser avoids this.
-- **To switch it off again:** the same switch line with `off` in place of `on`. Every family screen
-  then says the view is switched off, and members, shares and privacy are kept.
+- **To switch it off again:** the same switch line with `v=off` in place of `v=on`. You should see
+  `The family view is switched off.` Every family screen then says so, and members, shares and
+  privacy are kept.
 
 ### What is refused now that used to be accepted
 - **A book share,** as said above, with a sentence saying where the real controls are.
@@ -130,18 +149,15 @@ installed and run one trading day.**
   under a real Chrome, the screen reader's reading order and the "Open in code app" button on the
   join screen were checked in tests or by reading only. A small phone's top bar was measured at 320,
   360 and 412 px in a test browser. The Risk page's changes were not run in a browser either.
-- **A removed share takes up to a minute to stop showing,** not seconds. While the portfolio service
-  is not answering, the family view cannot learn that a share changed, and keeps showing what it had
-  with its own age until the portfolio answers again.
+- **A removed share takes up to a minute to stop showing,** not seconds. If the portfolio service is
+  not answering at that moment, the member's screen keeps its last figures, marked as not checked,
+  for up to ten minutes, as said above.
+- **A shared portfolio tab's own page can wait about 24 seconds** if the portfolio service accepts
+  the request and then does not answer. The book screens answer within a few seconds.
+- **With large text on a small phone** the badge is shown whole on a second row and the top bar
+  grows tall. That was measured in a test browser, not on a phone.
 - **When the server restarts,** an installed family app can show the web server's bare error page
   instead of its own "try again" page.
-- **Orders and Trades on a member's phone say "Not shared with you" when they are not shared.** How
-  they read while the portfolio service is off or cannot be reached was not reviewed.
-- **In a shared portfolio tab, the line saying how old a price is still travels with quantities:** a
-  member not shown quantities does not get it there. The book screens say "Real-time" or
-  "Reconnecting" for every member.
-- **When you try to show P&L with quantities hidden,** the server's refusal still begins "Live P&L";
-  the page's own line says "P&L that moves with prices".
 - **Removing a member leaves their tab shares and privacy choice in the portfolio's records.** The
   member has no sign-in and a member's number is never given again, so only a break-in into the
   family service could ask with them.
@@ -150,14 +166,164 @@ installed and run one trading day.**
   data in Chrome on that phone puts it right.
 - **If the family service is down at the moment an invite link is opened,** the web server's error
   log can name the link. A link works once, for two hours.
-- **Once the nginx files are in, every deploy run asks nginx to test its whole configuration** and
-  reads only whether it passed. Running that less often is left for a later release.
+- **If nginx's own test failed when SUDARSHAN's nginx files last changed,** the deploy log says so
+  once and keeps that note until one of those files changes, even after you repair the cause
+  elsewhere. `sudo sudarshan-deploy --nginx-check` says what holds now.
 - **If the family service itself were broken into,** it could see what members may see and no more,
   and could reach the app's sign-in page as any stranger on the internet can; never an order, your
   API key, your Upstox token or your saved secrets. The README's "What this does not cover" says the
   rest.
 - **Not in this release:** members' own watchlists, a chart for members, notifications on your own
   phone, and the tools.
+
+## v0.11.0 (14 Nov 2026)
+
+The trade journal and its reports: a Journal page with every trade paired from your fills, its
+analytics and your playbooks, and a Reports page with the Morning brief, Day report, Week in review,
+Monthly statement and Tax pack, each also sent to your Telegram. **This release switches the journal
+on** (`SUDARSHAN_JOURNAL` is set to `on`). It ships on because it only reads: it cannot place, change
+or cancel an order, and nothing you trade with changes. It includes everything in v0.10.0. **Publish
+it only after v0.10.0 has installed and run one trading day.**
+
+### What changes for you from the day you install it
+- **A new service, `sudarshan-journal`, starts with the install and is on.** It reads your fills
+  through the portfolio service, prices from the price feed and OpenAlgo's own records, and reaches
+  nothing off the server. It keeps its own file, `journal.db`, in `/var/lib/sudarshan-journal/`;
+  from the next install on, the deploy backs it up and puts it back on a rollback.
+- **Two new menu entries, Journal and Reports.** The menu now reads Watchlist, Screener, Portfolio,
+  Journal, Reports, then Holdings.
+- **A fill becomes a trade in the Journal a few seconds after its Telegram alert.** A check after
+  the close (16:05) adds any fill that was missed. Every night at 22:00 the journal reads the day
+  once more, and rebuilds from Upstox's trade history any of the last 3 trading days it did not
+  check itself. On the first night that is the 3 trading days before the install: their trades
+  appear under the strategy "Trade history", without times.
+- **New Telegram messages:** a Morning brief 30 minutes before the open (08:45), a Day report 5
+  minutes after the F&O close (15:45; 15:50 from 7 Dec), a Week in review on Sunday at 18:00 with
+  its chart as a picture, a Monthly statement on the 1st at 07:00 with a PDF, and a Tax pack on 1
+  April and whenever you ask for one. They take turns with order and market alerts: a report never
+  goes while one of those waits. If the install runs after a report's time on a trading day, that
+  day's report can arrive late, the same evening.
+- **Positions the journal did not see from start to end are listed apart, never guessed.** Shares
+  or F&O positions you held before it started read "Opened before the journal"; a contract you let
+  expire reads "Ended at expiry"; a share trade you no longer hold reads "Closing not seen". They
+  sit under "Not in the figures" on the Trades list (one line with its count; tap to open), carry no
+  P&L, and are left out of every figure. Each report says how many it left out. Upstox's own report
+  has them. A sale of shares you hold is never shown as a short.
+- **Charges and net figures are estimates,** marked "est.": Rs 30 an order plus the statutory
+  charges. An order shared by two trades (a reversal) pays its brokerage once, split between them.
+- **A chart, an order ticket or the scalping page left open overnight picks up the new day by
+  itself** when the date changes in India, or when the phone wakes after midnight: an expiring
+  contract's chart stops at its own time instead of drawing flat candles, and the scalping page
+  reads the day's expiry list again.
+- **Screener:** while a screen's 15:30 check waits for closing prices (from 7 Dec), its "next
+  check" shows when it will really run. A screen no longer waits for the closing price of an auction
+  stock the screener cannot follow (past its 320-instrument limit).
+
+### What the journal and the reports do
+- **Trades:** open trades first, their P&L moving with every tick ("Real-time" only while ticks
+  arrive), then closed trades by whole days. The Sandbox switch shows Analyze-mode trades, never
+  mixed with real ones.
+- **A trade's sheet:** its fills, averages, gross, charges, net, how long it was held, its worst
+  and best point, and how fast its first entry order was answered. A reversal's fill reads "65 of
+  130" and says where the rest went. Below that, your own part: strategy, playbook and its
+  checklist, risk in rupees, mistake tags, mood and notes. The sheet asks before it closes with
+  changes you have not saved, and keeps them in that browser tab for up to a week.
+- **Analytics:** net, win rate, profit factor, expectancy, average R, max drawdown, the equity
+  curve, a calendar, best hours, hold times, results by strategy and by tag, expiry days against
+  other days, and what charges took.
+- **Playbooks:** your setups, each with its checks and how it has done.
+- **Reports, Archive:** every report, whether it reached Telegram (and why not, if it did not),
+  Open to read it, Download for its file, Download CSV on a Monthly statement, "Build the FY pack
+  now" and "Build this month's statement now". A statement you build early is sent again, whole,
+  on its day. A Week in review, Monthly statement or Tax pack missed because the journal was down
+  is built at its next start, within 3 days.
+- **Reports, Settings:** a switch for each report, the times as the server says them, and your
+  trading capital.
+- **The Tax pack is a working paper for your CA,** not a filing. Shares bought and sold the same
+  day are listed as that; the 12-month line goes by calendar dates; a position sold in parts is
+  booked sale by sale, each in its own year; and it has a block, "What this paper leaves out".
+
+### What you must do
+- **Nothing when you publish.** The deploy installs the service and adds `SUDARSHAN_JOURNAL='on'`
+  to the app's settings. No other setting changes.
+- **Under Reports, Settings, type your trading capital and save.** Until then the percentage
+  figures ask you to set it.
+- **To switch the journal off:** set `SUDARSHAN_JOURNAL` to `off` in the app's settings file and
+  restart `sudarshan-journal`. It then stays off through later releases, and no report is sent.
+  Deleting the line instead brings `on` back at the next install.
+- **On the first trading day after it installs.** Do not place a real order for these checks; look
+  at them when you next trade. The two that need an order are done in Analyze mode.
+  - The Journal page opens. After your first real fill, the trade appears within a few seconds with
+    Upstox's time and price, and the line beside "Open" says "Real-time".
+  - In Analyze mode, one small round trip: it appears as one trade under the Sandbox switch, and
+    not among your real trades.
+  - In Analyze mode, one reversal (for example SELL 130 against a long of 65): the first trade's
+    sheet reads "65 of 130" on the shared fill.
+  - When you next sell part of a share you already hold: it reads "Opened before the journal",
+    never SHORT under Open. Note the holding's quantity in the Upstox app just before and just after
+    the sale, and tell the next work session (Upstox's holdings on the day of a sale are not yet
+    checked).
+  - Type a note on a trade and tap outside the sheet: it asks before closing.
+  - Analytics, "By strategy": the Net column shows each rupee figure whole.
+  - At 15:45 the Day report arrives; its realised figure matches the Upstox app (delivery sales are
+    not in it). Its row under Reports says Sent, and Open shows its text.
+  - After 16:05, an option that expired that day reads "Ended at expiry".
+- **On the first night, after 22:00, and the next morning:**
+  - each trade of the 3 trading days before the install appears once under "Trade history", never
+    twice;
+  - a share you shorted and covered on one of those days is one closed SHORT, not an open LONG;
+  - no share you still hold has moved to "Closing not seen". If one has, and the shares are pledged
+    or held under MTF, tell the next work session;
+  - "Not in the figures" is one line with a count, and a tap opens it.
+- **Later:** on Sunday at 18:00 the Week in review arrives with its picture; on 1 Dec, Download and
+  Download CSV on the Monthly statement each give a file that opens.
+
+### What is refused now that used to be accepted
+- Nothing that was accepted before. Of the new parts: a report file goes to Telegram only as a PDF,
+  CSV or PNG of at most 10 MB, and a download that cannot be the file shows a sentence and saves
+  nothing.
+
+### Still to check, or not modelled
+- **Results of positions opened before the journal, and of contracts that ended at expiry, are not
+  worked out.** They stay out of the figures; settlement values come in a later release.
+- **A rebuilt day that mixes an intraday short and a delivery purchase of the same share, in unequal
+  quantities,** is taken as delivery whole and can show a long larger than you hold. Check that
+  share against the Upstox app; the nightly count ends it if you hold fewer.
+- **"Closing not seen" covers shares only and runs at 22:00.** After the journal has been off for
+  more than 3 trading days, a share trade whose sale it missed reads as open until the first 22:00
+  after it is back; a share you trade every day is never counted; a reverse split or a transfer out
+  ends the trade the same way. An F&O trade whose closing was missed ends at its expiry, and one
+  closed in part meanwhile can pair a later order wrongly. How Upstox's holdings count pledged or
+  MTF shares is not verified.
+- **Upstox's trade history may name a trade differently from its trades of the day.** If it does, a
+  day partly recorded live is doubled by the nightly rebuild; that is the first-night check above.
+- **If the portfolio service does not answer when an F&O position is first seen,** a sale against
+  an overnight long can read as a short until the journal asks again.
+- **Charges:** every rate is still to be verified against Upstox's page. Upstox's lower brokerage
+  on small share orders and the DP charge on delivery sales are not modelled; BSE, currency and
+  commodity trades say "not estimated". The comparison with Upstox's own charges is the next release.
+- **Tax pack:** it matches purchases to sales inside one journal trade, so shares sold out and
+  bought back the same day are listed as a delivery sale and a new holding, where a broker's
+  statement nets the day first; totals agree over time, the heading and year of a part can differ.
+  Dividends and the list of trades are not in it (the Monthly statements list the trades).
+- **For your CA:** shares bought on 29 February and sold on 1 March of the next year are listed as
+  held over 12 months. Whether that one day counts is for the CA (the next such date is in 2028).
+- **If the journal is stopped in the instant between marking a report as announced and writing its
+  line for Telegram,** that report's message is not sent; the report is still on the Reports page. In
+  three other narrow moments a report can arrive twice.
+- **The Day report's realised figure leaves delivery sales out,** as the daily loss limit does.
+- **Notes are saved only by Save.** Unsaved changes are kept in that browser tab only; an app the
+  phone closed and started afresh has lost them. Back from a sheet opened by a link leaves the page
+  without asking (the changes come back when the trade is opened again).
+- **An open trade's sheet shows no moving P&L** (its card does), and past 100 open trades the rest
+  read "Not priced".
+- **Reports are in English;** a name typed in Gujarati prints as question marks in a PDF. A report
+  you build yourself goes to Telegram at once, also in market hours. Report files are kept with no
+  limit. With an empty holidays file, a holiday still gets a Morning brief and a Day report.
+- **A list of more than a few hundred closed trades is slow to scroll back through.** The
+  best-hours table in Analytics scrolls sideways when trades fall outside 9:00 to 15:00.
+- **The new pages have no test under the opt-in worker** (the default worker's tests cover them),
+  and the family's view of the journal is not in this release.
 
 ## v0.10.0 (14 Nov 2026)
 

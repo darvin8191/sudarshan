@@ -19,7 +19,10 @@ P&L that moves with ticks is worked out from the quantity, so it would give the 
 and P&L hidden hides the table's ``cost`` list too, whatever quantities say (the family review's
 H1: beside a quantity, an average, an amount invested, a value or a trade's price gives the P&L
 away by one subtraction). A field the table names as never hidden (the live price and its
-anchors) is never removed. No I/O after the file is read once at import.
+anchors, and ``fresh``, how old a holding's price is) is never removed; what is inside it is
+masked like anything else, except a ``kept_whole`` field of the shape its maker gives it
+(``fresh``: a state and a sentence of dates and ages, no amount). No I/O after the file is read
+once at import.
 
 What "P&L hidden" does not hide (v0.12.0 review M4): with quantities shown, the quantity and the
 never-hidden live price and previous close give a day's change and a holding's value by one
@@ -72,6 +75,40 @@ def load(
 
 
 TABLE, COST, NEVER_HIDDEN = load()
+
+
+def load_whole(path: Path = FIELDS_FILE) -> frozenset[str]:
+    """The table's ``kept_whole`` list: never-hidden fields passed on with what is inside them
+    (``fresh``, how old a holding's price is). ValueError when one is not also never hidden, or is
+    one this module does not know the shape of: a name added to the table alone opens nothing."""
+    table = json.loads(path.read_text(encoding="utf-8"))
+    found = table.get("kept_whole", [])
+    if not isinstance(found, list) or not all(isinstance(e, str) and e for e in found):
+        raise ValueError(f"{path.name}: kept_whole must be a list of field names")
+    if not set(found) <= set(table.get("never_hidden", [])) or not set(found) <= set(WHOLE_SHAPES):
+        raise ValueError(f"{path.name}: kept_whole names a field that is not never hidden")
+    return frozenset(found)
+
+
+def _is_freshness(value: Any) -> bool:
+    """``Freshness.as_dict()`` of the portfolio: a state and a sentence, and nothing else."""
+    return (
+        isinstance(value, Mapping)
+        and set(value) <= {"state", "words"}
+        and isinstance(value.get("state"), str)
+        and (value.get("words") is None or isinstance(value.get("words"), str))
+    )
+
+
+#: The shape each kept-whole field must have to be passed on whole; any other shape is looked
+#: inside like every other field, so a figure put there by mistake is still removed.
+WHOLE_SHAPES = {"fresh": _is_freshness}
+KEPT_WHOLE = load_whole()
+
+
+def kept_whole(key: Any, value: Any) -> bool:
+    """Whether the field ``key`` is passed on with everything inside it (the age of a price)."""
+    return key in KEPT_WHOLE and WHOLE_SHAPES[key](value)
 
 
 def load_note(path: Path = FIELDS_FILE) -> str:
@@ -134,7 +171,11 @@ def masked(data: Any, mask: frozenset[str]) -> Any:
     if not mask:
         return data
     if isinstance(data, Mapping):
-        return {k: masked(v, mask) for k, v in data.items() if not is_hidden(k, mask)}
+        return {
+            k: v if kept_whole(k, v) else masked(v, mask)
+            for k, v in data.items()
+            if not is_hidden(k, mask)
+        }
     if isinstance(data, (list, tuple)):
         return [masked(item, mask) for item in data]
     return data

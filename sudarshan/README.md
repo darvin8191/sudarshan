@@ -710,8 +710,9 @@ only new files a server without the family set-up gets, and making them is not l
 5. Running it again is safe at any time: a second run changes nothing and says so (`PASS. Nothing
    was changed`).
 
-From then on the deploy tool keeps the keys and copies in place at every run (every ten minutes)
-and runs the check again; a check that fails stops the family view until it passes again and is
+From then on the deploy tool keeps the keys and copies in place at every run (every ten minutes),
+makes the family view's settings file `family.env` if it is missing (with the view switched off;
+a value you chose in it is never changed), and runs the check again; a check that fails stops the family view until it passes again and is
 told on Telegram once. The install backup keeps a copy of `/etc/sudarshan-family` (a rollback never
 puts it back, as for the vault). The family view itself, its bot and its nginx lines come in a later
 release, switched off; nothing more is needed until then.

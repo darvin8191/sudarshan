@@ -66,7 +66,10 @@ WORDS: dict[str, str] = {
     ),
     "member_gone": "This member is no longer there. Reload the Family page.",
     "already_joined": "This member has already joined. Use Reset sign-in to send a new invite.",
-    "privacy_rule": "Live P&L is worked out from quantities. Show quantities to show P&L.",
+    # "Live" is the trading-mode chip's word and never the feed's (review L7 of v0.12.0)
+    "privacy_rule": (
+        "P&L that moves with prices is worked out from quantities. Show quantities to show P&L."
+    ),
     "ws_signed_out": "Signed out on this device.",
     "password_changed": "Your password was changed. Your other devices are signed out.",
     "signed_out_everywhere": "You were signed out on every device.",
@@ -82,10 +85,12 @@ WORDS: dict[str, str] = {
         "Notifications may not arrive on this phone. Turn them off and on again in Settings."
     ),
     # v0.12.0 review H1: a share of a part of the books was kept and never read, so it is refused.
-    # The Family page shows this sentence as it is (``BOOK_SHARE_REFUSED`` below).
+    # The Family page shows this sentence as it is (``BOOK_SHARE_REFUSED`` below). It names where the
+    # control is (verification N4): the Family page's Shares tab, "Portfolio tabs"; the Portfolio
+    # page has no share control.
     "book_share": (
-        "Which books a member can open is set by sharing the Upstox tab in Portfolio, and by "
-        "that member's Orders and Funds switches."
+        "Which books a member can open is set by sharing the Upstox tab under Portfolio tabs "
+        "on the Family page, and by that member's Orders and Funds switches."
     ),
 }
 

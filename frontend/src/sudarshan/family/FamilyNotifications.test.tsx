@@ -11,6 +11,7 @@ import { resetFamilyManagerForTests } from './familyManager'
 import { Notifications } from './Notifications'
 import FamilyJoin from './pages/FamilyJoin'
 import FamilySettings from './pages/FamilySettings'
+import { FamilyMeContext } from './session'
 import { FakeSocket, fail, meOf, ok, routeFetch } from './testing/fixtures'
 import { mountFamily, stubCookies, where } from './testing/harness'
 
@@ -160,6 +161,40 @@ describe('Notifications on this phone', () => {
     expect(router.calls.find((call) => call.url.endsWith('/remove'))?.body).toEqual({
       endpoint: 'https://push.example.invalid/one',
     })
+  })
+
+  // Verification N5 (v0.12.0): on a phone two members share, the switch of the member who did
+  // not turn notifications on read On, from the browser's subscription alone. Fails on the old
+  // card: aria-checked was true.
+  it('reads Off for a member when another member turned notifications on here', async () => {
+    permission = 'granted'
+    held = {
+      endpoint: 'https://push.example.invalid/one',
+      toJSON: () => ({ endpoint: 'x', keys: {} }),
+      unsubscribe: vi.fn(async () => true),
+    }
+    const me = meOf('viewer')
+    window.localStorage.setItem('sd-family-push', `on:${me.member.id + 1}`)
+    service()
+    mountFamily(
+      '/family/settings',
+      <FamilyMeContext.Provider value={me}>
+        <Notifications />
+      </FamilyMeContext.Provider>
+    )
+    const toggle = await screen.findByRole('switch', { name: 'Notifications on this phone' })
+    await waitFor(() => expect(toggle.textContent).toContain('Off'))
+    expect(toggle.getAttribute('aria-checked')).toBe('false')
+    cleanup()
+    window.localStorage.setItem('sd-family-push', `on:${me.member.id}`)
+    mountFamily(
+      '/family/settings',
+      <FamilyMeContext.Provider value={me}>
+        <Notifications />
+      </FamilyMeContext.Provider>
+    )
+    const mine = await screen.findByRole('switch', { name: 'Notifications on this phone' })
+    await waitFor(() => expect(mine.getAttribute('aria-checked')).toBe('true'))
   })
 
   it('says how to unblock when Chrome has them blocked, and cannot be switched on', async () => {

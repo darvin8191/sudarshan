@@ -527,7 +527,10 @@ def test_members_take_their_roles_defaults_and_y24_is_refused(rig):
     y24 = {"pnl": True, "qty": False, "funds": False, "orders": False}
     refused = rig.refused(rig.acc.member_create({"display_name": "C", "role": "viewer",
                                                  "privacy": y24}))  # fmt: skip
-    assert str(refused) == "Live P&L is worked out from quantities. Show quantities to show P&L."
+    assert (
+        str(refused)
+        == "P&L that moves with prices is worked out from quantities. Show quantities to show P&L."
+    )
     assert rig.refused(rig.acc.member_create({"display_name": "", "role": "viewer"})).field == (
         "display_name"
     )
