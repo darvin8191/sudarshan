@@ -5,9 +5,14 @@
 //
 // What it never mounts: the owner's `Layout`, the Analyze banner, the kill-switch chip, the
 // order ticket, Socket.IO. The owner's session checks stay out too (AuthSync skips /family/*).
+//
+// Review M5: a session that ended, here or on the server, forgets every member figure the page
+// holds before the sign-in page shows; and no screen renders while the cache holds another
+// member's figures (a session changed in another tab), so a shared phone never shows one member
+// what was read for the one before.
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Ellipsis, WifiOff } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useState } from 'react'
 import { Link, Navigate, Outlet, useLocation } from 'react-router'
 import { PageLoader } from '@/components/ui/page-loader'
 import { MarketDataProvider } from '@/contexts/MarketDataContext'
@@ -20,7 +25,7 @@ import { FamilyError, familyApi, onSignedOut } from './api'
 import { FamilyBadge } from './FamilyBadge'
 import { getFamilyManager } from './familyManager'
 import { familyMenu, familyTitle } from './navigation'
-import { FamilyMeContext, ME_KEY } from './session'
+import { claimForMember, FamilyMeContext, filledForMember, forgetMember, ME_KEY } from './session'
 
 const LOGIN = '/family/login'
 
@@ -92,14 +97,25 @@ export function FamilyLayout() {
   const error = session.error instanceof FamilyError ? session.error : null
   const signedOut = error?.code === 'signed_out' || error?.code === 'signin_failed'
   useEffect(() => {
-    if (signedOut) getFamilyManager().disconnect()
-  }, [signedOut])
+    if (!signedOut) return
+    getFamilyManager().disconnect()
+    forgetMember(client, true) // the session's own query is the sign-in page's to clear
+  }, [signedOut, client])
   // Close the sheet on every move.
   // biome-ignore lint/correctness/useExhaustiveDependencies: the path is the trigger
   useEffect(() => setMore(false), [location.pathname])
 
-  if (signedOut) return <Navigate to={LOGIN} replace />
+  // The cache is this member's before any screen of theirs renders (review M5).
   const me = session.data ?? null
+  const memberId = signedOut ? null : (me?.member.id ?? null)
+  const [, claimed] = useState(0)
+  useLayoutEffect(() => {
+    if (memberId === null || filledForMember(client, memberId)) return
+    claimForMember(client, memberId)
+    claimed((n) => n + 1)
+  }, [client, memberId])
+
+  if (signedOut) return <Navigate to={LOGIN} replace />
   if (!me) {
     if (session.isPending) return <PageLoader />
     if (error?.code === 'off') {
@@ -112,6 +128,8 @@ export function FamilyLayout() {
       />
     )
   }
+
+  if (!filledForMember(client, me.member.id)) return <PageLoader />
 
   const { bar, more: rest } = familyMenu(me)
   const title = familyTitle(location.pathname)

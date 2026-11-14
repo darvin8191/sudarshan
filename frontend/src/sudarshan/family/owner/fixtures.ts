@@ -16,6 +16,7 @@ export function cardOf(over: Partial<MemberCard> = {}): MemberCard {
     devices: 2,
     last_seen_at: NOW - 3_600_000,
     invite_expires_at: null,
+    invite_opened_at: null,
     locked_until: null,
     telegram_linked: true,
     created_at: NOW - 86_400_000 * 9,

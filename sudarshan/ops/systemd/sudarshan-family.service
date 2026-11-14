@@ -50,6 +50,12 @@ TimeoutStopSec=20
 MemoryHigh=192M
 MemoryMax=256M
 CPUWeight=40
+# A ceiling that holds when the box is idle too (CPUWeight only orders a busy one): a burst of
+# sign-ins from strangers costs at most 60% of one core of the two the owner's trading shares.
+# The service itself takes at most 8 password checks at a time and 200 connections (review H2).
+CPUQuota=60%
+TasksMax=64
+LimitNOFILE=1024
 UMask=0077
 LimitCORE=0
 NoNewPrivileges=yes

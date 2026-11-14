@@ -123,6 +123,11 @@ class EventBus:
         instead would push the stall back into the order path that published
         the event.
         """
+        # SUDARSHAN: G5. An order event raised while refusing an /api/v1 request for its API key
+        # reaches no subscriber (events/base.py): a refused key is not an order, so it writes no
+        # order-log row and reaches no screen.
+        if getattr(event, "key_refused", False):
+            return
         with self._lock:
             subscriptions = list(self._subscribers.get(event.topic, []))
 
