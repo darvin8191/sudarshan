@@ -152,6 +152,11 @@ export function report(extra: Partial<PerformanceReport> = {}): PerformanceRepor
         twr_pct: '12.0000',
         flagged: false,
         words: ['Dividends not included'],
+        beta: '0.8500',
+        correlation: '0.7200',
+        excess_pct: '6.5000',
+        stat_days: 60,
+        stat_note: 'On 60 trading days to 13 Nov 2026',
       },
       {
         benchmark: 'nifty500',
@@ -164,6 +169,11 @@ export function report(extra: Partial<PerformanceReport> = {}): PerformanceRepor
           'Dividends not included',
           'NIFTY 500 prices are not available yet; the comparison appears when they are.',
         ],
+        beta: null,
+        correlation: null,
+        excess_pct: null,
+        stat_days: 0,
+        stat_note: 'Shown after 20 trading days (from 11 Dec 2026)',
       },
     ],
     series: [

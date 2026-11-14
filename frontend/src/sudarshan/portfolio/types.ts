@@ -1030,6 +1030,17 @@ export interface BenchmarkFigure {
   flagged: boolean
   /** "Dividends not included", and the flagged sentence. */
   words: string[]
+  /** Of the tab's daily returns against the index's, over the last 60 trading days both have;
+   * null under 20 days, or when the index did not move. Four decimals, like a Pct. */
+  beta: string | null
+  /** null as beta is, and when the tab's own value did not move. */
+  correlation: string | null
+  /** The tab's time-weighted return less the index's over the same days: above 0 is ahead. */
+  excess_pct: Pct | null
+  /** How many trading days beta and correlation rest on (at most 60). */
+  stat_days: number
+  /** "On 60 trading days to 13 Nov 2026", or why they are not shown yet. */
+  stat_note: string | null
 }
 
 export interface SeriesPoint {
