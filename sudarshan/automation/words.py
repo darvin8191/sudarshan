@@ -268,6 +268,12 @@ def sent(name: str, target: int, quantity: int, symbol: str) -> str:
     return f"{name}: order sent to be {side(target)} {quantity} {contract_name(symbol)}."
 
 
+def cut_to_exit(name: str, symbol: str, said: str) -> str:
+    """The risk gate cut a reversal to its exit; its own sentence says what went and why."""
+    passed_on = _service(said)
+    return f"{name}: {passed_on or f'only the exit of {contract_name(symbol)} was sent.'}"
+
+
 def no_action(name: str, target: int, quantity: int, symbol: str, flat_found: bool) -> str:
     if target == 0 or flat_found:
         return f"{name}: no open position in {contract_name(symbol)}. Nothing to send."

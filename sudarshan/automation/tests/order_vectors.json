@@ -1,0 +1,572 @@
+{
+ "about": "Alert to order: the alert, the strategy's form and its state in; the exact smart order(s) out, in the order they are sent (the second only if the first answered clearly). fired is now plus fired_offset_s. The master is automation_world.FakeDesk's.",
+ "cases": [
+  {
+   "name": "long from flat: one order to +65, the strategy's size",
+   "form": {
+    "name": "ORB",
+    "kind": "future",
+    "underlying": "NIFTY",
+    "product": "MIS",
+    "lots": 1
+   },
+   "state": {},
+   "now": "2026-11-16 10:15:02",
+   "alert": {
+    "v": 1,
+    "position": "long",
+    "fired_offset_s": -1,
+    "id": "L",
+    "size": "1",
+    "before": "flat",
+    "before_size": "0",
+    "contracts": "1"
+   },
+   "analyze": true,
+   "orders": [
+    {
+     "strategy": "ORB",
+     "exchange": "NFO",
+     "symbol": "NIFTY24NOV26FUT",
+     "product": "MIS",
+     "action": "BUY",
+     "pricetype": "MARKET",
+     "quantity": "65",
+     "position_size": "65",
+     "price": "0",
+     "trigger_price": "0",
+     "disclosed_quantity": "0"
+    }
+   ]
+  },
+  {
+   "name": "TradingView's contracts and size are not the quantity: 7 contracts is still 1 lot",
+   "form": {
+    "name": "ORB",
+    "kind": "future",
+    "underlying": "NIFTY",
+    "product": "MIS",
+    "lots": 1
+   },
+   "state": {},
+   "now": "2026-11-16 10:15:02",
+   "alert": {
+    "v": 1,
+    "position": "long",
+    "fired_offset_s": -1,
+    "id": "L",
+    "size": "7",
+    "contracts": "7"
+   },
+   "analyze": true,
+   "orders": [
+    {
+     "strategy": "ORB",
+     "exchange": "NFO",
+     "symbol": "NIFTY24NOV26FUT",
+     "product": "MIS",
+     "action": "BUY",
+     "pricetype": "MARKET",
+     "quantity": "65",
+     "position_size": "65",
+     "price": "0",
+     "trigger_price": "0",
+     "disclosed_quantity": "0"
+    }
+   ]
+  },
+  {
+   "name": "2 lots of BANKNIFTY at the master's lot size",
+   "form": {
+    "name": "ORB",
+    "kind": "future",
+    "underlying": "BANKNIFTY",
+    "product": "MIS",
+    "lots": 2
+   },
+   "state": {},
+   "now": "2026-11-16 10:15:02",
+   "alert": {
+    "v": 1,
+    "position": "short",
+    "fired_offset_s": -1
+   },
+   "analyze": true,
+   "orders": [
+    {
+     "strategy": "ORB",
+     "exchange": "NFO",
+     "symbol": "BANKNIFTY24NOV26FUT",
+     "product": "MIS",
+     "action": "SELL",
+     "pricetype": "MARKET",
+     "quantity": "60",
+     "position_size": "-60",
+     "price": "0",
+     "trigger_price": "0",
+     "disclosed_quantity": "0"
+    }
+   ]
+  },
+  {
+   "name": "short from flat",
+   "form": {
+    "name": "ORB",
+    "kind": "future",
+    "underlying": "NIFTY",
+    "product": "MIS",
+    "lots": 1
+   },
+   "state": {},
+   "now": "2026-11-16 10:15:02",
+   "alert": {
+    "v": 1,
+    "position": "short",
+    "fired_offset_s": -1,
+    "id": "S",
+    "size": "1"
+   },
+   "analyze": true,
+   "orders": [
+    {
+     "strategy": "ORB",
+     "exchange": "NFO",
+     "symbol": "NIFTY24NOV26FUT",
+     "product": "MIS",
+     "action": "SELL",
+     "pricetype": "MARKET",
+     "quantity": "65",
+     "position_size": "-65",
+     "price": "0",
+     "trigger_price": "0",
+     "disclosed_quantity": "0"
+    }
+   ]
+  },
+  {
+   "name": "reversal in the same contract: one smart order with the signed target",
+   "form": {
+    "name": "ORB",
+    "kind": "future",
+    "underlying": "NIFTY",
+    "product": "MIS",
+    "lots": 1
+   },
+   "state": {
+    "last_target": 1,
+    "held_exchange": "NFO",
+    "held_symbol": "NIFTY24NOV26FUT",
+    "held_side": "long"
+   },
+   "now": "2026-11-16 10:15:02",
+   "alert": {
+    "v": 1,
+    "position": "short",
+    "fired_offset_s": -1,
+    "id": "S",
+    "size": "1",
+    "before": "long",
+    "before_size": "1",
+    "contracts": "2"
+   },
+   "analyze": true,
+   "orders": [
+    {
+     "strategy": "ORB",
+     "exchange": "NFO",
+     "symbol": "NIFTY24NOV26FUT",
+     "product": "MIS",
+     "action": "SELL",
+     "pricetype": "MARKET",
+     "quantity": "65",
+     "position_size": "-65",
+     "price": "0",
+     "trigger_price": "0",
+     "disclosed_quantity": "0"
+    }
+   ]
+  },
+  {
+   "name": "flat while long: an exit of the held contract, to 0, on the closing side",
+   "form": {
+    "name": "ORB",
+    "kind": "future",
+    "underlying": "NIFTY",
+    "product": "MIS",
+    "lots": 1
+   },
+   "state": {
+    "last_target": 1,
+    "held_exchange": "NFO",
+    "held_symbol": "NIFTY24NOV26FUT",
+    "held_side": "long"
+   },
+   "now": "2026-11-16 10:15:02",
+   "alert": {
+    "v": 1,
+    "position": "flat",
+    "fired_offset_s": -1,
+    "id": "X",
+    "size": "0",
+    "before": "long",
+    "before_size": "1",
+    "contracts": "1"
+   },
+   "analyze": true,
+   "orders": [
+    {
+     "strategy": "ORB",
+     "exchange": "NFO",
+     "symbol": "NIFTY24NOV26FUT",
+     "product": "MIS",
+     "action": "SELL",
+     "pricetype": "MARKET",
+     "quantity": "65",
+     "position_size": "0",
+     "price": "0",
+     "trigger_price": "0",
+     "disclosed_quantity": "0"
+    }
+   ]
+  },
+  {
+   "name": "flat while short: the closing side is a buy",
+   "form": {
+    "name": "ORB",
+    "kind": "future",
+    "underlying": "NIFTY",
+    "product": "MIS",
+    "lots": 1
+   },
+   "state": {
+    "last_target": -1,
+    "held_exchange": "NFO",
+    "held_symbol": "NIFTY24NOV26FUT",
+    "held_side": "short"
+   },
+   "now": "2026-11-16 10:15:02",
+   "alert": {
+    "v": 1,
+    "position": "flat",
+    "fired_offset_s": -1
+   },
+   "analyze": true,
+   "orders": [
+    {
+     "strategy": "ORB",
+     "exchange": "NFO",
+     "symbol": "NIFTY24NOV26FUT",
+     "product": "MIS",
+     "action": "BUY",
+     "pricetype": "MARKET",
+     "quantity": "65",
+     "position_size": "0",
+     "price": "0",
+     "trigger_price": "0",
+     "disclosed_quantity": "0"
+    }
+   ]
+  },
+  {
+   "name": "flat with nothing held: the rule's contract, which answers no open position",
+   "form": {
+    "name": "ORB",
+    "kind": "future",
+    "underlying": "NIFTY",
+    "product": "MIS",
+    "lots": 1
+   },
+   "state": {},
+   "now": "2026-11-16 10:15:02",
+   "alert": {
+    "v": 1,
+    "position": "flat",
+    "fired_offset_s": -1
+   },
+   "analyze": true,
+   "orders": [
+    {
+     "strategy": "ORB",
+     "exchange": "NFO",
+     "symbol": "NIFTY24NOV26FUT",
+     "product": "MIS",
+     "action": "SELL",
+     "pricetype": "MARKET",
+     "quantity": "65",
+     "position_size": "0",
+     "price": "0",
+     "trigger_price": "0",
+     "disclosed_quantity": "0"
+    }
+   ]
+  },
+  {
+   "name": "flat after the roll goes to the contract that was entered, not to the rule's",
+   "form": {
+    "name": "ORB",
+    "kind": "future",
+    "underlying": "NIFTY",
+    "product": "MIS",
+    "lots": 1
+   },
+   "state": {
+    "last_target": 1,
+    "held_exchange": "NFO",
+    "held_symbol": "NIFTY24NOV26FUT",
+    "held_side": "long"
+   },
+   "now": "2026-11-24 15:39:00",
+   "alert": {
+    "v": 1,
+    "position": "flat",
+    "fired_offset_s": -1
+   },
+   "analyze": true,
+   "orders": [
+    {
+     "strategy": "ORB",
+     "exchange": "NFO",
+     "symbol": "NIFTY24NOV26FUT",
+     "product": "MIS",
+     "action": "SELL",
+     "pricetype": "MARKET",
+     "quantity": "65",
+     "position_size": "0",
+     "price": "0",
+     "trigger_price": "0",
+     "disclosed_quantity": "0"
+    }
+   ]
+  },
+  {
+   "name": "carry: long held in November, long again on expiry day asks the held contract (never a roll)",
+   "form": {
+    "name": "ORB",
+    "kind": "future",
+    "underlying": "NIFTY",
+    "product": "NRML",
+    "lots": 1
+   },
+   "state": {
+    "last_target": 1,
+    "held_exchange": "NFO",
+    "held_symbol": "NIFTY24NOV26FUT",
+    "held_side": "long"
+   },
+   "now": "2026-11-24 10:00:00",
+   "alert": {
+    "v": 1,
+    "position": "long",
+    "fired_offset_s": -1
+   },
+   "analyze": true,
+   "orders": [
+    {
+     "strategy": "ORB",
+     "exchange": "NFO",
+     "symbol": "NIFTY24NOV26FUT",
+     "product": "NRML",
+     "action": "BUY",
+     "pricetype": "MARKET",
+     "quantity": "65",
+     "position_size": "65",
+     "price": "0",
+     "trigger_price": "0",
+     "disclosed_quantity": "0"
+    }
+   ]
+  },
+  {
+   "name": "carry: short on expiry day with November held long: the exit of November first, then December",
+   "form": {
+    "name": "ORB",
+    "kind": "future",
+    "underlying": "NIFTY",
+    "product": "NRML",
+    "lots": 1
+   },
+   "state": {
+    "last_target": 1,
+    "held_exchange": "NFO",
+    "held_symbol": "NIFTY24NOV26FUT",
+    "held_side": "long"
+   },
+   "now": "2026-11-24 10:00:00",
+   "alert": {
+    "v": 1,
+    "position": "short",
+    "fired_offset_s": -1
+   },
+   "analyze": true,
+   "orders": [
+    {
+     "strategy": "ORB",
+     "exchange": "NFO",
+     "symbol": "NIFTY24NOV26FUT",
+     "product": "NRML",
+     "action": "SELL",
+     "pricetype": "MARKET",
+     "quantity": "65",
+     "position_size": "0",
+     "price": "0",
+     "trigger_price": "0",
+     "disclosed_quantity": "0"
+    },
+    {
+     "strategy": "ORB",
+     "exchange": "NFO",
+     "symbol": "NIFTY29DEC26FUT",
+     "product": "NRML",
+     "action": "SELL",
+     "pricetype": "MARKET",
+     "quantity": "65",
+     "position_size": "-65",
+     "price": "0",
+     "trigger_price": "0",
+     "disclosed_quantity": "0"
+    }
+   ]
+  },
+  {
+   "name": "a share strategy: its own number of shares",
+   "form": {
+    "name": "REL",
+    "kind": "same",
+    "chart": "NSE:RELIANCE",
+    "product": "MIS",
+    "quantity": 10
+   },
+   "state": {},
+   "now": "2026-11-16 10:15:02",
+   "alert": {
+    "v": 1,
+    "position": "long",
+    "fired_offset_s": -1,
+    "ticker": "NSE:RELIANCE"
+   },
+   "analyze": true,
+   "orders": [
+    {
+     "strategy": "REL",
+     "exchange": "NSE",
+     "symbol": "RELIANCE",
+     "product": "MIS",
+     "action": "BUY",
+     "pricetype": "MARKET",
+     "quantity": "10",
+     "position_size": "10",
+     "price": "0",
+     "trigger_price": "0",
+     "disclosed_quantity": "0"
+    }
+   ]
+  },
+  {
+   "name": "M_M on the chart is M&M in the order",
+   "form": {
+    "name": "MM",
+    "kind": "same",
+    "chart": "NSE:M_M",
+    "product": "MIS",
+    "quantity": 3
+   },
+   "state": {},
+   "now": "2026-11-16 10:15:02",
+   "alert": {
+    "v": 1,
+    "position": "short",
+    "fired_offset_s": -1,
+    "ticker": "NSE:M_M"
+   },
+   "analyze": true,
+   "orders": [
+    {
+     "strategy": "MM",
+     "exchange": "NSE",
+     "symbol": "M&M",
+     "product": "MIS",
+     "action": "SELL",
+     "pricetype": "MARKET",
+     "quantity": "3",
+     "position_size": "-3",
+     "price": "0",
+     "trigger_price": "0",
+     "disclosed_quantity": "0"
+    }
+   ]
+  },
+  {
+   "name": "a chart future: NIFTY1! trades this month's future",
+   "form": {
+    "name": "C",
+    "kind": "same",
+    "chart": "NSE:NIFTY1!",
+    "product": "MIS",
+    "lots": 1
+   },
+   "state": {},
+   "now": "2026-11-16 10:15:02",
+   "alert": {
+    "v": 1,
+    "position": "long",
+    "fired_offset_s": -1,
+    "ticker": "NSE:NIFTY1!"
+   },
+   "analyze": true,
+   "orders": [
+    {
+     "strategy": "C",
+     "exchange": "NFO",
+     "symbol": "NIFTY24NOV26FUT",
+     "product": "MIS",
+     "action": "BUY",
+     "pricetype": "MARKET",
+     "quantity": "65",
+     "position_size": "65",
+     "price": "0",
+     "trigger_price": "0",
+     "disclosed_quantity": "0"
+    }
+   ]
+  },
+  {
+   "name": "a long-only strategy reads short as an exit",
+   "form": {
+    "name": "ORB",
+    "kind": "future",
+    "underlying": "NIFTY",
+    "product": "MIS",
+    "lots": 1,
+    "direction": "long"
+   },
+   "state": {
+    "last_target": 1,
+    "held_exchange": "NFO",
+    "held_symbol": "NIFTY24NOV26FUT",
+    "held_side": "long"
+   },
+   "now": "2026-11-16 10:15:02",
+   "alert": {
+    "v": 1,
+    "position": "short",
+    "fired_offset_s": -1
+   },
+   "analyze": true,
+   "orders": [
+    {
+     "strategy": "ORB",
+     "exchange": "NFO",
+     "symbol": "NIFTY24NOV26FUT",
+     "product": "MIS",
+     "action": "SELL",
+     "pricetype": "MARKET",
+     "quantity": "65",
+     "position_size": "0",
+     "price": "0",
+     "trigger_price": "0",
+     "disclosed_quantity": "0"
+    }
+   ]
+  }
+ ]
+}

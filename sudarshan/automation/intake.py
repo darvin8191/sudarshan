@@ -1,4 +1,4 @@
-"""One alert, step by step (M12.1, M12.2). Callable without a request context.
+"""One alert, step by step (M12.1, M12.2). ORDER PATH. Callable without a request context.
 
 ``handle`` is what the public route calls. Its order is the contract:
 
@@ -84,6 +84,7 @@ class Plan:
     analyze: bool | None = None
     notes: tuple[str, ...] = ()  # said beside the order's own sentence
     tell: str | None = None  # the reason key for the owner's Telegram, when it should hear
+    tells: tuple[tuple[str, str], ...] = ()  # (reason, sentence) the owner hears beside an order
     state_values: dict[str, Any] = field(default_factory=dict)
     strategy_values: dict[str, Any] = field(default_factory=dict)
     counts: bool = True
@@ -218,12 +219,15 @@ def plan(
     if decision.verdict == "late":
         said = words.late(name, target, decision.late_s or 0, state.last_target)
         return _refuse("late", said, target, **common)
+    tells: list[tuple[str, str]] = [("expired", note) for note in notes]
     if decision.capped_now:
         notes.append(words.capped(name, strategy.max_alerts_day))
+        tells.append(("capped", notes[-1]))
     if decision.late_s is not None:
         notes.append(words.late_note(decision.late_s))
     if decision.gap:
         notes.append(words.gap(name, target))
+        tells.append(("gap", notes[-1]))
     # where the order goes
     api_key = desk.api_key()
     analyze, why = rules.pipe(
@@ -250,7 +254,7 @@ def plan(
         steps=steps,
         analyze=analyze,
         notes=tuple(notes),
-        tell="gap" if decision.gap else ("capped" if decision.capped_now else None),
+        tells=tuple(tells),
         **common,
     )
 
@@ -506,18 +510,85 @@ def _claim_and_send(strategy_id, token, alert, row, desk, store, stage) -> Outco
 
 
 def _send(strategy, state, alert, alert_id, chosen: Plan, row, desk, store) -> Outcome:
-    """A4: the order is not sent yet. The row says what would be sent, and the state stays."""
-    said = " ".join(
-        [_would(strategy, chosen), "Orders from alerts are not switched on yet.", *chosen.notes]
+    """The order, holding the strategy's lock, with the alert's row already written.
+
+    One smart order to the target; or two when the held contract and the one to enter differ: the
+    held contract's exit to 0 first, and the entry only if that exit answered clearly (an order
+    went, or there was nothing to close). On anything else the entry is not sent: a refusal costs
+    nothing, and both sides are never opened from one alert. Nothing is ever retried.
+
+    Whatever happens here, the claim stays: an alert whose order failed is not handled again.
+    """
+    name = strategy.name
+    api_key = desk.api_key()
+    state_values: dict[str, Any] = {}
+    verdict, sentence, order_id, done = (
+        "order_refused",
+        words.order_refused(name, _NO_KEY),
+        None,
+        None,
     )
+    tells = list(chosen.tells)
+    now_state = state
+    for index, step in enumerate(chosen.steps if api_key else ()):
+        done = step
+        try:
+            success, response, status = desk.place(step.order, api_key, chosen.analyze)
+        except Exception:
+            # It may have reached the broker: never a refusal, never the failure's own words.
+            logger.exception("Automation: the smart order call did not return an answer")
+            success, response, status = False, {}, 500
+        verdict, flat_found, cut = rules.read_answer(success, response, status)
+        body = response if isinstance(response, dict) else {}
+        said = body.get("risk_note") or body.get("message") or ""
+        # A reversal the risk gate cut to its exit left the position flat: the state says flat.
+        reached = 0 if cut else step.target
+        moved = rules.state_after(
+            verdict, flat_found, reached, alert, step.exchange, step.symbol,
+            int(desk.now() * 1000), now_state,
+        )  # fmt: skip
+        state_values.update(moved)
+        now_state = replace(now_state, **moved)
+        if verdict == rules.SENT:
+            order_id = str(body.get("orderid"))
+            sentence = words.sent(name, step.target, step.quantity, step.symbol)
+            if cut:
+                sentence = words.cut_to_exit(name, step.symbol, said)
+        elif verdict == rules.NO_ACTION:
+            sentence = words.no_action(name, step.target, step.quantity, step.symbol, flat_found)
+        elif verdict == rules.ORDER_REFUSED:
+            sentence = words.order_refused(name, said)
+        else:
+            sentence = words.not_confirmed(name, said)
+        if index < len(chosen.steps) - 1 and verdict not in (rules.SENT, rules.NO_ACTION):
+            wanted = chosen.steps[-1].symbol
+            sentence = words.exit_first_refused(
+                name, step.symbol, wanted, verdict == rules.ORDER_REFUSED
+            )
+            tells.append(("two_step", sentence))
+            break
+    sentence = " ".join([sentence, *chosen.notes])
+    columns = {}
+    if done is not None:
+        columns = {
+            "exchange": done.exchange,
+            "symbol": done.symbol,
+            "action": done.order["action"],
+            "quantity": done.quantity,
+        }
     store.finish_alert(
         alert_id,
-        verdict="no_action",
-        sentence=said,
+        verdict=verdict,
+        sentence=sentence,
+        order_id=order_id,
         answer_ms=int(desk.now() * 1000) - row["received_ms"],
+        state_values=state_values,
+        **columns,
     )
-    _after(desk, strategy, "no_action", said, None)
-    return _out(HANDLED, verdict="no_action", sentence=said, alert_id=alert_id)
+    _after(desk, strategy, verdict, sentence, None)
+    for reason, said in tells:
+        _tell(desk, strategy, reason, said)
+    return _out(HANDLED, verdict=verdict, sentence=sentence, alert_id=alert_id)
 
 
 def _after(desk: Desk, strategy: m.Strategy, verdict: str, sentence: str, tell: str | None) -> None:
@@ -534,7 +605,11 @@ def _after(desk: Desk, strategy: m.Strategy, verdict: str, sentence: str, tell: 
         }
     )
     if tell:
-        try:
-            desk.tell(strategy.id, tell, sentence)
-        except Exception:
-            logger.exception("Automation: a notice could not be queued")
+        _tell(desk, strategy, tell, sentence)
+
+
+def _tell(desk: Desk, strategy: m.Strategy, reason: str, sentence: str) -> None:
+    try:
+        desk.tell(strategy.id, reason, sentence)
+    except Exception:
+        logger.exception("Automation: a notice could not be queued")

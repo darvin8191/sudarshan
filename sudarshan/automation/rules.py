@@ -146,26 +146,30 @@ SENT, NO_ACTION, ORDER_REFUSED, NOT_CONFIRMED = (
 )
 
 
-def read_answer(success: bool, response: object, status: int) -> tuple[str, bool]:
-    """What the smart order's answer means: (verdict, flat_found).
+def read_answer(success: bool, response: object, status: int) -> tuple[str, bool, bool]:
+    """What the smart order's answer means: (verdict, flat_found, cut).
 
-    ``flat_found`` is True when the answer says there was no position to close. Anything that is
-    not a clear refusal (a 4xx before the send) and not a clear success reads as not confirmed:
-    it may have reached the broker.
+    ``flat_found`` is True when the answer says there was no position to close. ``cut`` is True
+    when an order went but the risk gate cut a reversal to its exit (the kill switch is on, or
+    the day's loss limit is reached): the position is flat, not on the other side, and the
+    answer's own sentence says so. Anything that is not a clear refusal (a 4xx before the send)
+    and not a clear success reads as not confirmed: it may have reached the broker.
     """
     body = response if isinstance(response, dict) else {}
     message = str(body.get("message") or "").lower()
     if success:
         if body.get("orderid"):
-            return SENT, False
+            # The sandbox passes the gate's note on as ``risk_note``; the Live service puts it in
+            # ``message``, which a placed order carries for no other reason.
+            return SENT, False, bool(body.get("risk_note") or body.get("message"))
         if "no open position" in message or "no openposition" in message:
-            return NO_ACTION, True
+            return NO_ACTION, True, False
         if "no action" in message or "already matched" in message:
-            return NO_ACTION, False
-        return NOT_CONFIRMED, False
+            return NO_ACTION, False, False
+        return NOT_CONFIRMED, False, False
     if isinstance(status, int) and 400 <= status < 500 and not body.get("not_confirmed"):
-        return ORDER_REFUSED, False
-    return NOT_CONFIRMED, False
+        return ORDER_REFUSED, False, False
+    return NOT_CONFIRMED, False, False
 
 
 def state_after(
