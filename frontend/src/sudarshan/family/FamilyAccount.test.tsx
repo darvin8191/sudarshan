@@ -4,7 +4,12 @@ import { cleanup, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { resetFamilyManagerForTests } from './familyManager'
-import FamilyJoin, { keyInGroups, strengthOf } from './pages/FamilyJoin'
+import FamilyJoin, {
+  KEY_COPIED,
+  KEY_NOT_COPIED,
+  keyInGroups,
+  strengthOf,
+} from './pages/FamilyJoin'
 import FamilyLogin from './pages/FamilyLogin'
 import FamilySettings from './pages/FamilySettings'
 import { FakeSocket, fail, meOf, ok, routeFetch } from './testing/fixtures'
@@ -227,6 +232,24 @@ describe('Join', () => {
     expect(where.path).toBe('/family/')
     expect(onlyFamily(router.urls())).toBe(true)
   })
+  // Review L2 (v0.12.0): the key could only be scanned or retyped. Fails on the old page.
+  it('copies the key without its spaces, and links the code app set-up address', async () => {
+    routeFetch({ '/family/api/join/abc123': ok(INFO) })
+    const user = userEvent.setup()
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+    mountFamily('/family/join/abc123', <FamilyJoin />, '/family/join/:code')
+    await toCodeStep(user)
+    await user.click(screen.getByRole('button', { name: 'Copy key' }))
+    expect(writeText).toHaveBeenCalledWith('JBSWY3DPEHPK3PXP')
+    expect(await screen.findByText(KEY_COPIED)).toBeTruthy()
+    const open = screen.getByRole('link', { name: 'Open in code app' })
+    expect(open.getAttribute('href')).toBe(INFO.otpauth_uri)
+    writeText.mockRejectedValueOnce(new Error('denied'))
+    await user.click(screen.getByRole('button', { name: 'Copy key' }))
+    expect(await screen.findByText(KEY_NOT_COPIED)).toBeTruthy()
+  })
+
   // Review M5 (v0.12.0): Finish answered that the invite had ended and the page went back to the
   // welcome step with no words; Continue led round the same loop. Fails on the old page.
   it('says the invite has ended when it ends during joining, and offers no Continue', async () => {

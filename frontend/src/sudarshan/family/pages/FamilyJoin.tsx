@@ -7,7 +7,7 @@
 // The password and the code are only ever sent to the service in the one `join` call. Neither is
 // kept in the address, in storage or in a log. A wrong code keeps the other answers on screen.
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Bell, Check, ExternalLink, Smartphone } from 'lucide-react'
+import { Bell, Check, Copy, ExternalLink, Smartphone } from 'lucide-react'
 import { type FormEvent, useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router'
 import { BrandLockup } from '@/sudarshan/BrandLockup'
@@ -64,6 +64,9 @@ export function keyInGroups(key: string): string {
     .trim()
 }
 
+export const KEY_COPIED = 'Key copied. Paste it into your code app as a new account.'
+export const KEY_NOT_COPIED = 'This phone did not allow copying. Type the key into your code app.'
+
 type Step = 'welcome' | 'sign-in' | 'code' | 'after'
 
 function Frame({ children }: { children: React.ReactNode }) {
@@ -99,6 +102,7 @@ export default function FamilyJoin() {
   // Review M5 (v0.12.0): the invite ended while the member was joining (it ran out, or was used
   // or replaced meanwhile). The service's sentence, shown on the invite-ended screen.
   const [gone, setGone] = useState<string | null>(null)
+  const [copied, setCopied] = useState<string | null>(null)
 
   // The family worker is what lets Chrome offer the install at the end of joining; the shell that
   // normally registers it is not mounted on this public page.
@@ -157,6 +161,15 @@ export default function FamilyJoin() {
     }
     setProblem(null)
     setStep('code')
+  }
+
+  const copyKey = async () => {
+    try {
+      await navigator.clipboard.writeText(invite.totp_key.replace(/\s+/g, ''))
+      setCopied(KEY_COPIED)
+    } catch {
+      setCopied(KEY_NOT_COPIED)
+    }
   }
 
   const finish = async (event: FormEvent) => {
@@ -273,6 +286,22 @@ export default function FamilyJoin() {
               {keyInGroups(invite.totp_key)}
             </code>
           </p>
+          {/* Review L2 (v0.12.0): a member joining on one phone cannot scan their own screen. */}
+          <div className="grid w-full grid-cols-2 gap-2">
+            <button type="button" className={OUTLINE} onClick={() => void copyKey()}>
+              <Copy aria-hidden="true" className="size-4" />
+              Copy key
+            </button>
+            <a href={invite.otpauth_uri} className={`${OUTLINE} no-underline`}>
+              <ExternalLink aria-hidden="true" className="size-4" />
+              Open in code app
+            </a>
+          </div>
+          {copied && (
+            <output className="block text-[0.8125rem] font-semibold text-[color:var(--text-secondary)]">
+              {copied}
+            </output>
+          )}
           <Field
             label="Enter the 6-digit code it shows"
             value={totp}
