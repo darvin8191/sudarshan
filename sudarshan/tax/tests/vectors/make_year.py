@@ -140,6 +140,13 @@ CASES = [
          2026, [g(*S26, 60_000)], 10_000, 0, 2_000, 80, 0,
          carries=[carry(2024, "stcl", 80_000, "computed"), carry(2024, "stcl", 50_000)],
          out_own_figures=[carried(2024, "stcl", 80_000, 2032, "computed")]),
+    case("Y16-short-before-long-of-one-year", "VERIFY WITH CA. Long gain 60,000; from FY 2022-23 "
+         "a short-term loss of 50,000 and a long-term loss of 50,000: within one loss year the "
+         "short-term one goes first (50,000), then 10,000 of the long-term one; 40,000 "
+         "long-term loss stays (to FY 2030-31). The other order would keep 40,000 of the "
+         "short-term loss, which can meet more kinds of gain", 2026, [g(*L26, 60_000)],
+         0, 0, 0, 0, 0, [carried(2022, "ltcl", 40_000, 2030, "owner")],
+         carries=[carry(2022, "ltcl", 50_000), carry(2022, "stcl", 50_000)]),
 ]  # fmt: skip
 assert 123_456 * 5 // 10 == 61_728 and 123_456 * 3 // 10 == 37_036 and 123_456 * 2 // 10 == 24_691
 ALLOCATE = [{
