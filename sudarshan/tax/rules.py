@@ -89,9 +89,12 @@ LT_BOUNDARY = (
 #: Cost of a share or unit bought before ``before``: the higher of the cost and the lower of the
 #: fair market value on ``fmv_day`` (the highest quoted price that day) and the sale value.
 GRANDFATHER = (
-    Row(20180401, {"before": 20180201, "fmv_day": 20180131},
-        "1961 Act s.55(2)(ac); 2025 Act s.90(7), s.90(8)"),
-)  # fmt: skip
+    Row(
+        0,
+        {"before": 20180201, "fmv_day": 20180131},
+        "1961 Act s.55(2)(ac), for transfers from 1 Apr 2018; 2025 Act s.90(7), s.90(8)",
+    ),
+)
 #: A buyback by the day of the buyback: exempt for the holder (the company paid); the whole
 #: receipt a dividend and the cost a capital loss; an ordinary capital gain (promoters' extra tax
 #: is not modelled).
