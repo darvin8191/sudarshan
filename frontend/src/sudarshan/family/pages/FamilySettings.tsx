@@ -17,7 +17,7 @@ import { getFamilyManager } from '../familyManager'
 import { DANGER, Field, OUTLINE, PRIMARY, Problem, Saved, Section } from '../forms'
 import { DEVICES_KEY, FAILING_WORDS, SETTINGS_KEY } from '../keys'
 import { Notifications } from '../Notifications'
-import { forgetMember } from '../session'
+import { clearSignedIn, forgetMember } from '../session'
 import type { Device, Language } from '../types'
 import { LIMITS } from '../types'
 import { deviceWhen } from '../when'
@@ -35,6 +35,7 @@ function useLeave() {
   const client = useQueryClient()
   const navigate = useNavigate()
   return () => {
+    clearSignedIn() // the member's own tap: the sign-in page has no reason to give
     getFamilyManager().disconnect()
     forgetMember(client)
     navigate('/family/login', { replace: true })

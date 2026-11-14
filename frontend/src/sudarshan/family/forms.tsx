@@ -1,6 +1,6 @@
 // SUDARSHAN P6 D3: the small form pieces the family's public pages and Settings share. Plain
 // elements at the platform's 48 dp target, with the service's own sentence under a field.
-import { AlertCircle } from 'lucide-react'
+import { AlertCircle, Info } from 'lucide-react'
 import { type ReactNode, useId } from 'react'
 import { cn } from '@/lib/utils'
 
@@ -68,6 +68,19 @@ export function Problem({ text, id }: { text: string; id?: string }) {
       <AlertCircle aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
       <span>{text}</span>
     </p>
+  )
+}
+
+/** Something the member should know that is not their mistake: an icon and the words. */
+export function Notice({ text }: { text: string }) {
+  return (
+    <output
+      data-testid="family-notice"
+      className="flex w-full items-start gap-2 rounded-xl bg-[color:var(--gold-tint)] px-3 py-2.5 text-[0.9375rem] leading-snug font-semibold text-[color:var(--warning-text)]"
+    >
+      <Info aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+      <span>{text}</span>
+    </output>
   )
 }
 

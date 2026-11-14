@@ -25,7 +25,16 @@ import { FamilyError, familyApi, onSignedOut } from './api'
 import { FamilyBadge } from './FamilyBadge'
 import { getFamilyManager } from './familyManager'
 import { familyMenu, familyTitle } from './navigation'
-import { claimForMember, FamilyMeContext, filledForMember, forgetMember, ME_KEY } from './session'
+import {
+  claimForMember,
+  FamilyMeContext,
+  filledForMember,
+  forgetMember,
+  type LoginState,
+  ME_KEY,
+  markSignedIn,
+  wasSignedIn,
+} from './session'
 
 const LOGIN = '/family/login'
 
@@ -115,7 +124,18 @@ export function FamilyLayout() {
     claimed((n) => n + 1)
   }, [client, memberId])
 
-  if (signedOut) return <Navigate to={LOGIN} replace />
+  // A session is open here: remembered, so that when the server ends it the member is told why.
+  useEffect(() => {
+    if (memberId !== null) markSignedIn()
+  }, [memberId])
+
+  if (signedOut) {
+    // Review M1: the service's own sentence (paused, removed, expired, signed out elsewhere) goes
+    // to the sign-in page. A phone with no session to end gets the bare form.
+    const state: LoginState | undefined =
+      error?.code === 'signed_out' && wasSignedIn() ? { reason: error.message } : undefined
+    return <Navigate to={LOGIN} replace state={state} />
+  }
   if (!me) {
     if (session.isPending) return <PageLoader />
     if (error?.code === 'off') {

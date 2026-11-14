@@ -1,11 +1,13 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import type { ReactNode } from 'react'
 import { MemoryRouter, Route, Routes } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { FamilyBadge, WIDE_ONLY } from './FamilyBadge'
 import { FamilyLayout } from './FamilyLayout'
 import { resetFamilyManagerForTests } from './familyManager'
+import FamilyLogin from './pages/FamilyLogin'
 import { useFamilyMe } from './session'
 import { FakeSocket, fail, meOf, ok, routeFetch } from './testing/fixtures'
 
@@ -25,13 +27,13 @@ const PATHS = [
   '/family/settings',
 ]
 
-function mount(path: string) {
+function mount(path: string, login: ReactNode = <p>The sign-in page</p>) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={[path]}>
         <Routes>
-          <Route path="/family/login" element={<p>The sign-in page</p>} />
+          <Route path="/family/login" element={login} />
           <Route path="/family" element={<FamilyLayout />}>
             <Route index element={<Probe label="Dashboard" />} />
             {PATHS.slice(1).map((p) => (
@@ -45,6 +47,7 @@ function mount(path: string) {
 }
 
 beforeEach(() => {
+  window.localStorage.clear()
   FakeSocket.reset()
   vi.stubGlobal('WebSocket', FakeSocket)
 })
@@ -184,6 +187,69 @@ describe('the session', () => {
     expect(
       await screen.findByText('The family view is switched off on the server.')
     ).toBeInTheDocument()
+  })
+})
+
+// Review M1 (v0.12.0): a session the server ended landed on the bare sign-in form, and the
+// service's sentence was thrown away. The first and third fail on the old shell.
+describe('a session the server ended', () => {
+  const PAUSED = 'The account owner has paused this sign-in. Ask them to resume it.'
+  const EXPIRED = 'Your sign-in has expired. Sign in again.'
+  const WAS_IN = 'sd-family-was-in'
+
+  it('shows the service sentence above the sign-in form, on a phone that was signed in', async () => {
+    window.localStorage.setItem(WAS_IN, '1')
+    routeFetch({ '/family/api/me': fail('signed_out', PAUSED) }, { '/family/api/me': 401 })
+    mount('/family/positions', <FamilyLogin />)
+    expect(await screen.findByRole('heading', { name: 'Sign in' })).toBeInTheDocument()
+    const notice = await screen.findByTestId('family-notice')
+    expect(notice.textContent).toBe(PAUSED)
+    expect(notice.querySelector('svg')).not.toBeNull() // never colour alone
+    expect(document.body.textContent).not.toMatch(/signed_out|401/)
+    // said once: the next visit to the form is the bare one
+    expect(window.localStorage.getItem(WAS_IN)).toBeNull()
+  })
+
+  it('shows the bare form on a phone that never had a session', async () => {
+    routeFetch(
+      { '/family/api/me': fail('signed_out', 'You were signed out on this device.') },
+      { '/family/api/me': 401 }
+    )
+    mount('/family', <FamilyLogin />)
+    expect(await screen.findByRole('heading', { name: 'Sign in' })).toBeInTheDocument()
+    expect(screen.queryByTestId('family-notice')).toBeNull()
+    expect(screen.queryByText('You were signed out on this device.')).toBeNull()
+  })
+
+  it('says why when the session ends while the member is using the app', async () => {
+    routeFetch({ '/family/api/me': ok(meOf('viewer')) })
+    mount('/family', <FamilyLogin />)
+    await screen.findByText('Dashboard for member_one')
+    routeFetch({ '/family/api/me': fail('signed_out', EXPIRED) }, { '/family/api/me': 401 })
+    Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true })
+    document.dispatchEvent(new Event('visibilitychange'))
+    expect((await screen.findByTestId('family-notice')).textContent).toBe(EXPIRED)
+    expect(screen.queryByText(/Dashboard for/)).toBeNull()
+  })
+
+  it('gives way to the sentence about a sign-in that did not match', async () => {
+    window.localStorage.setItem(WAS_IN, '1')
+    const wrong = 'That sign-in name, password or code did not match.'
+    routeFetch(
+      {
+        '/family/api/me': fail('signed_out', PAUSED),
+        '/family/api/login': fail('signin_failed', wrong),
+      },
+      { '/family/api/me': 401, '/family/api/login': 401 }
+    )
+    mount('/family', <FamilyLogin />)
+    await screen.findByTestId('family-notice')
+    await userEvent.type(screen.getByLabelText('Sign-in name'), 'member_one')
+    await userEvent.type(screen.getByLabelText('Password'), 'a sentence that is wrong')
+    await userEvent.type(screen.getByLabelText('6-digit code'), '000000')
+    await userEvent.click(screen.getByRole('button', { name: 'Sign in' }))
+    expect((await screen.findByRole('alert')).textContent).toBe(wrong)
+    expect(screen.queryByTestId('family-notice')).toBeNull()
   })
 })
 

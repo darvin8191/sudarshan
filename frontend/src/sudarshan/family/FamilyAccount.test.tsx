@@ -428,8 +428,11 @@ describe('Settings', () => {
     const mine = (await screen.findAllByRole('listitem')).find(
       (item) => item.getAttribute('data-device') === 'dev-this'
     ) as HTMLElement
+    // review M1: a sign-out by the member's own tap leaves the sign-in page no reason to give
+    window.localStorage.setItem('sd-family-was-in', '1')
     await user.click(within(mine).getByRole('button', { name: /Sign out/ }))
     await waitFor(() => expect(where.path).toBe('/family/login'))
+    expect(window.localStorage.getItem('sd-family-was-in')).toBeNull()
   })
 
   it('asks before Sign out everywhere, then leaves', async () => {
