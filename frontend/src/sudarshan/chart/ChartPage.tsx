@@ -55,6 +55,7 @@ import { AccessNotice } from '@/sudarshan/AccessNotice'
 import { type PriceAccess, usePriceAccess } from '@/sudarshan/access'
 import { AlertFormSheet, toastAlertSet } from '@/sudarshan/alerts/AlertForm' // SUDARSHAN M10.2
 import { isCovered } from '@/sudarshan/alerts/words'
+import { addProduct } from '@/sudarshan/books/cards/PositionCards'
 import { formatPercent, formatPrice, formatRupees } from '@/sudarshan/dashboard/format'
 import { useNow } from '@/sudarshan/dashboard/hooks'
 import { LiveLine } from '@/sudarshan/dashboard/LiveLine'
@@ -75,6 +76,7 @@ import { DepthSheet, DepthStrip } from './DepthStrip'
 import { IndicatorSettingsSheet } from './IndicatorSettingsSheet'
 import { IndicatorSheet } from './IndicatorSheet'
 import { LineLabels } from './LineLabels'
+import { LineSheet } from './LineSheet'
 import { LongPress } from './longPress'
 import { isQuoteOnly, PhoneChart } from './phoneChart'
 import {
@@ -141,6 +143,9 @@ const closesStamp = new Intl.DateTimeFormat('en-IN', {
   hourCycle: 'h23',
 })
 
+type Product = 'MIS' | 'NRML' | 'CNC'
+const PRODUCTS: readonly Product[] = ['MIS', 'NRML', 'CNC']
+
 /** A bare /chart: the instrument last opened on this phone, or NIFTY. */
 export function ChartIndex() {
   const last = readLastInstrument()
@@ -172,12 +177,15 @@ type Inspect = { bar: Bar; x: number | null; y: number; price: number | null }
 
 /**
  * A sheet over the chart, as the browser history entry it is; `alert` is a
- * market alert's form (M10.2). A ticket opened at a held price (C10) carries it.
+ * market alert's form (M10.2), on the alert of `id` when a line opened it. A
+ * ticket opened at a held price (C10) carries it, and one opened to add to a
+ * position carries the position's product (C6). `line` is a chart line's sheet.
  */
 type Sheet =
-  | { sheet: 'ticket'; side: 'BUY' | 'SELL'; price?: number }
+  | { sheet: 'ticket'; side: 'BUY' | 'SELL'; price?: number; product?: Product }
   | { sheet: 'search' }
-  | { sheet: 'alert' }
+  | { sheet: 'alert'; id?: number }
+  | { sheet: 'line'; ids: string[] }
   | { sheet: 'timeframe' }
   | { sheet: 'style' }
   | { sheet: 'indicators' }
@@ -186,9 +194,24 @@ type Sheet =
 
 function readSheet(state: unknown): Sheet | null {
   if (!state || typeof state !== 'object') return null
-  const value = state as { sheet?: unknown; side?: unknown; price?: unknown }
+  const value = state as {
+    sheet?: unknown
+    side?: unknown
+    price?: unknown
+    product?: unknown
+    id?: unknown
+    ids?: unknown
+  }
   if (value.sheet === 'search') return { sheet: 'search' }
-  if (value.sheet === 'alert') return { sheet: 'alert' }
+  if (value.sheet === 'alert')
+    return typeof value.id === 'number' ? { sheet: 'alert', id: value.id } : { sheet: 'alert' }
+  if (
+    value.sheet === 'line' &&
+    Array.isArray(value.ids) &&
+    value.ids.length > 0 &&
+    value.ids.every((id) => typeof id === 'string')
+  )
+    return { sheet: 'line', ids: value.ids as string[] }
   if (value.sheet === 'timeframe') return { sheet: 'timeframe' }
   if (value.sheet === 'style') return { sheet: 'style' }
   if (value.sheet === 'indicators') return { sheet: 'indicators' }
@@ -196,10 +219,17 @@ function readSheet(state: unknown): Sheet | null {
   const index = (value as { index?: unknown }).index
   if (value.sheet === 'study' && typeof index === 'number' && Number.isInteger(index) && index >= 0)
     return { sheet: 'study', index }
-  if (value.sheet === 'ticket' && (value.side === 'BUY' || value.side === 'SELL'))
-    return typeof value.price === 'number' && Number.isFinite(value.price) && value.price > 0
-      ? { sheet: 'ticket', side: value.side, price: value.price }
-      : { sheet: 'ticket', side: value.side }
+  if (value.sheet === 'ticket' && (value.side === 'BUY' || value.side === 'SELL')) {
+    const product = PRODUCTS.find((one) => one === value.product)
+    return {
+      sheet: 'ticket',
+      side: value.side,
+      ...(typeof value.price === 'number' && Number.isFinite(value.price) && value.price > 0
+        ? { price: value.price }
+        : {}),
+      ...(product ? { product } : {}),
+    }
+  }
   return null
 }
 
@@ -281,6 +311,8 @@ const ChartScreen = memo(function ChartScreen({
   const side = sheet?.sheet === 'ticket' ? sheet.side : null
   /** The price a ticket opened from a candle reading starts at, as a limit (C10). */
   const heldPrice = sheet?.sheet === 'ticket' ? sheet.price : undefined
+  /** The product of the position a ticket adds to (C6): its own, so the order adds to it. */
+  const addTo = sheet?.sheet === 'ticket' ? sheet.product : undefined
   const searching = sheet?.sheet === 'search'
   const sideways = usePhoneSideways()
 
@@ -737,6 +769,7 @@ const ChartScreen = memo(function ChartScreen({
             bookAt={books.bookAt}
             prices={prices}
             quiet={priceQuiet(status)}
+            onOpen={(ids) => openSheet({ sheet: 'line', ids })}
           />
         )}
         {inspect && (
@@ -839,15 +872,43 @@ const ChartScreen = memo(function ChartScreen({
           tickSize={info.tickSize}
           // The product picked for this segment on this phone (M8.2), MIS
           // until one is: the owner trades intraday.
-          product={ticketProduct(exchange) ?? 'MIS'}
+          product={addTo ?? ticketProduct(exchange) ?? 'MIS'}
           // From a candle reading: a limit at the price held (C10); the product rule is the same.
           priceType={heldPrice === undefined ? undefined : 'LIMIT'}
           price={heldPrice}
           strategy={STRATEGY}
         />
       )}
+      <LineSheet
+        ids={sheet?.sheet === 'line' ? sheet.ids : null}
+        lines={drawn.lines}
+        books={books}
+        apiKey={config?.apiKey ?? null}
+        tick={info?.tickSize ?? null}
+        canAdd={!ordersOff}
+        prices={prices}
+        quiet={priceQuiet(status)}
+        onClose={closeSheet}
+        onAdd={(position) =>
+          openSheet({
+            sheet: 'ticket',
+            side: Number(position.quantity) < 0 ? 'SELL' : 'BUY',
+            product: addProduct(position) ?? 'MIS',
+          })
+        }
+        onEditAlert={(id) => openSheet({ sheet: 'alert', id })}
+      />
       {sheet?.sheet === 'alert' && (
         <AlertFormSheet
+          row={
+            sheet.id === undefined
+              ? null
+              : (drawn.lines.flatMap((line) =>
+                  line.ref.kind === 'alert' && line.ref.alert.id === sheet.id
+                    ? [line.ref.alert]
+                    : []
+                )[0] ?? null)
+          }
           prefill={{
             symbol,
             exchange,
@@ -855,9 +916,9 @@ const ChartScreen = memo(function ChartScreen({
             price: prices.get().tick?.ltp ?? null,
           }}
           onClose={closeSheet}
-          onSaved={(saved) => {
+          onSaved={(saved, created) => {
             closeSheet()
-            toastAlertSet(saved, navigate)
+            toastAlertSet(saved, navigate, created)
           }}
         />
       )}

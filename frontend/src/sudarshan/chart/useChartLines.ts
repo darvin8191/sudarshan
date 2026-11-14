@@ -46,6 +46,8 @@ export interface ChartBooks {
   orders: Order[]
   /** When the shown positions were asked for; null until a read has answered. */
   bookAt: number | null
+  /** Whether the shown books are the sandbox's: the mode they were asked for in. */
+  sandbox: boolean
   /** No read has answered yet. */
   loading: boolean
   /** The last read failed: the books are as of `bookAt`. */
@@ -69,6 +71,7 @@ export function useChartBooks({
   const [positions, setPositions] = useState<Position[]>([])
   const [orders, setOrders] = useState<Order[]>([])
   const [bookAt, setBookAt] = useState<number | null>(null)
+  const [sandbox, setSandbox] = useState(false)
   const [failed, setFailed] = useState(false)
   const beginRead = useLatestRead()
   const on = enabled && apiKey !== null
@@ -77,6 +80,7 @@ export function useChartBooks({
     if (!on || apiKey === null) return
     const isLatest = beginRead()
     const askedAt = Date.now()
+    const askedIn = useThemeStore.getState().appMode
     const [held, book] = await Promise.allSettled([
       tradingApi.getPositions(apiKey),
       tradingApi.getOrders(apiKey),
@@ -92,7 +96,10 @@ export function useChartBooks({
       noteOrderBook(read, askedAt)
       setOrders(holdPushed(read, pushedStatuses(), Date.now()))
     }
-    if (heldOk && bookOk) setBookAt(askedAt)
+    if (heldOk && bookOk) {
+      setBookAt(askedAt)
+      setSandbox(askedIn === 'analyzer')
+    }
     setFailed(!(heldOk && bookOk))
   }, [on, apiKey, beginRead])
 
@@ -120,7 +127,7 @@ export function useChartBooks({
     [beginRead]
   )
 
-  return { positions, orders, bookAt, loading: bookAt === null, failed, refresh }
+  return { positions, orders, bookAt, sandbox, loading: bookAt === null, failed, refresh }
 }
 
 /** The charted instrument's lines, from its books and its active price alerts. */

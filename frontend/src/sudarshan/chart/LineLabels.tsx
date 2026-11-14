@@ -114,7 +114,8 @@ function Pill({
   return (
     <span
       className={cn(
-        'left-1.5 flex max-w-[calc(100%-0.75rem)] items-center gap-1 rounded-full border bg-card/90 px-1.5 text-[0.6875rem] leading-none font-semibold whitespace-nowrap',
+        // Never cut short: the price is the last thing in it.
+        'left-1.5 flex shrink-0 items-center gap-1 rounded-full border bg-card/90 px-1.5 text-[0.6875rem] leading-none font-semibold whitespace-nowrap',
         top === null ? 'relative' : 'absolute',
         INK[line.stale ? 'stale' : (line.side ?? 'none')]
       )}
@@ -123,7 +124,7 @@ function Pill({
       data-stale={line.stale || undefined}
     >
       <Icon line={line} />
-      <span className="truncate text-[color:var(--text-primary)]">{line.label}</span>
+      <span className="text-[color:var(--text-primary)]">{line.label}</span>
       {line.ref.kind === 'position' && (
         <LivePnl
           position={line.ref.position}
@@ -203,7 +204,7 @@ export function LineLabels({
             // As wide as its one label, so the chart beside it still pans; a shared one is wider.
             className={cn(
               'pointer-events-auto absolute left-0 min-w-12 rounded-lg text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-              alone ? 'flex max-w-full items-center pr-1.5' : 'w-[min(100%,17rem)]'
+              alone ? 'flex items-center pr-1.5' : 'w-[min(100%,17rem)]'
             )}
             style={style}
             {...{ [OVER_CHART]: '' }}

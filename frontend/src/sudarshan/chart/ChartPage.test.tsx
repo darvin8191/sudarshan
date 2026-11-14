@@ -1426,6 +1426,89 @@ describe('the lines of the charted instrument (C5)', () => {
     await waitFor(() => expect(label).toHaveTextContent('+₹50.00'))
   })
 
+  async function withLines() {
+    fakes.positions = [HELD]
+    fakes.orders = [STOP]
+    fakes.alerts = [
+      {
+        id: 7,
+        version: 2,
+        status: 'active',
+        kind: 'price',
+        symbol: 'SBIN',
+        exchange: 'NSE',
+        tick_size: '0.05',
+        params: { op: 'at_or_above', level: '830' },
+        frequency: 'once',
+        cooldown_s: 0,
+        ends_at: null,
+        candle_min: null,
+        note: '',
+        channels: null,
+        words: { condition: 'SBIN is at or above 830', meta: '', checks_at: null },
+      },
+    ]
+    await opened('/chart/NSE/SBIN', ['/dashboard'])
+    await waitFor(() => expect(chart().setOverlays.mock.lastCall?.[0].lines).toHaveLength(3))
+    act(() =>
+      chart().moveLines([
+        { id: 'position:MIS', y: 200 },
+        { id: 'order:A1:trigger', y: 300 },
+        { id: 'alert:7', y: 80 },
+      ])
+    )
+  }
+
+  it("opens a line's sheet from its label, as an entry the phone's Back closes first (C6)", async () => {
+    await withLines()
+    await userEvent.click(
+      screen.getByRole('button', { name: /Buy 10 @ 810\.00.*Open its actions/ })
+    )
+    const sheet = screen.getByRole('dialog', { name: 'SBIN' })
+    expect(within(sheet).getByRole('button', { name: /^Exit/ })).toHaveTextContent(
+      'Sell 10 at market'
+    )
+    fireEvent.click(screen.getByText('Phone back'))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'SBIN' })).toBeNull())
+    expect(screen.getByLabelText('Location')).toHaveTextContent('/chart/NSE/SBIN')
+  })
+
+  it("opens the app's order ticket from Add, on the position's side and in its product", async () => {
+    await withLines()
+    await userEvent.click(
+      screen.getByRole('button', { name: /Buy 10 @ 810\.00.*Open its actions/ })
+    )
+    await userEvent.click(
+      within(screen.getByRole('dialog', { name: 'SBIN' })).getByRole('button', { name: /^Add/ })
+    )
+    expect(screen.getByRole('dialog', { name: 'Order ticket' })).toHaveTextContent(
+      'BUY SBIN NSE MIS 1 chart-trading MARKET no price'
+    )
+    expect(screen.queryByRole('dialog', { name: 'SBIN' })).toBeNull()
+    // The ticket took the sheet's entry: one Back is the chart again.
+    fireEvent.click(screen.getByText('Phone back'))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(screen.getByLabelText('Location')).toHaveTextContent('/chart/NSE/SBIN')
+  })
+
+  it("offers Modify and Cancel on an order's line, and the alert's own form on an alert's", async () => {
+    await withLines()
+    await userEvent.click(
+      screen.getByRole('button', { name: /SELL 10 SL-M 800\.00.*Open its actions/ })
+    )
+    const order = within(screen.getByRole('dialog', { name: 'SBIN' }))
+    expect(order.getByRole('button', { name: 'Modify' })).toBeEnabled()
+    expect(order.getByRole('button', { name: 'Cancel order' })).toBeEnabled()
+    fireEvent.click(screen.getByText('Phone back'))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    await userEvent.click(screen.getByRole('button', { name: /Alert ≥ 830\.00.*Open its actions/ }))
+    await userEvent.click(
+      within(screen.getByRole('dialog', { name: 'SBIN' })).getByRole('button', { name: 'Edit' })
+    )
+    const form = await screen.findByRole('dialog', { name: /alert/i })
+    expect(within(form).getByLabelText('Price level')).toHaveValue('830')
+  })
+
   it('reads no book for an index, and draws no line on it', async () => {
     const { tradingApi } = await import('@/api/trading')
     vi.mocked(tradingApi.getPositions).mockClear()
