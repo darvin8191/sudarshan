@@ -427,12 +427,17 @@ when the entry names none). An Upstox pair lot sold after an accepted split, lik
 after a tab's split, is put back into the units of its purchase day, so no split is applied twice.
 The paper's `dividends` block is the year's dividend lines of the accounts that count
 (`dividends.for_pack`), with the core's buyback receipt beside them and in the total.
+Each sale in `capital_gains` (`schedule`, `needs_fmv`, `unknown_cost`, `exempt_buybacks`) carries
+`name` beside its `isin`: the holding's own name (under each ISIN it has had), else the scrip name
+of Upstox's trade history, else null. The tax core knows a share by its ISIN only.
 
 `tax_input_set` keeps one input of a closed kind (`TAX_INPUT_KINDS`): a 31 Jan 2018 price (one
 per share), a purchase from before the records (it wins over Upstox's pair for that share), a loss
-brought forward (one per year, kind and source), a day of delivery, a buyback tender, or the
+brought forward (one per year, kind and source), a day of delivery, a buyback tender, the
 readings of the open rules (`owner_setting` `tax:<member id>`, saved from the version it was read
-at, 0 before the first save). Every field is checked and refused in a sentence naming it; a new
+at, 0 before the first save), or how an account counts (`account_mode`: row `member_id`,
+`account_id`, `tax_mode` of `ledger` or `none`, saved from the account's version; the Upstox
+account is refused, the change is logged by ids, and `tax_input_delete` refuses the kind). Every field is checked and refused in a sentence naming it; a new
 row is made once per `request_id`; an existing one changes from its version. With `dry_run` it
 writes nothing and answers `effect`, the year's headline figures that would change, as sentences.
 

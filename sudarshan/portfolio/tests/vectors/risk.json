@@ -3209,6 +3209,401 @@
    }
   }
  ],
+ "rows": [
+  {
+   "id": "RW1",
+   "note": "the same asset in two tabs is one holding (Alpha 5,000 of 9,500); a fund with no price counts at its cost; two accounts of one row add up; a loan and a row of no units are left out",
+   "rows": [
+    {
+     "asset": {
+      "id": 1,
+      "name": "Alpha Ltd",
+      "kind": "listed",
+      "sector": "Banks",
+      "exchange": "NSE",
+      "symbol": "ALPHA"
+     },
+     "price": {
+      "price_u": 2500000,
+      "prev_close_u": null
+     },
+     "lines": [
+      {
+       "qty_u": 12000000,
+       "cost_paise": 240000
+      }
+     ]
+    },
+    {
+     "asset": {
+      "id": 2,
+      "name": "Beta Fund",
+      "kind": "mf",
+      "sector": null,
+      "exchange": null,
+      "symbol": null
+     },
+     "price": {
+      "price_u": null,
+      "prev_close_u": null
+     },
+     "lines": [
+      {
+       "qty_u": 100000000,
+       "cost_paise": 300000
+      }
+     ]
+    },
+    {
+     "asset": {
+      "id": 3,
+      "name": "Gamma Ltd",
+      "kind": "listed",
+      "sector": "IT",
+      "exchange": "NSE",
+      "symbol": "GAMMA"
+     },
+     "price": {
+      "price_u": 1500000,
+      "prev_close_u": null
+     },
+     "lines": [
+      {
+       "qty_u": 4000000,
+       "cost_paise": 50000
+      },
+      {
+       "qty_u": 6000000,
+       "cost_paise": 80000
+      }
+     ]
+    },
+    {
+     "asset": {
+      "id": 9,
+      "name": "Home loan",
+      "kind": "liability",
+      "sector": null,
+      "exchange": null,
+      "symbol": null
+     },
+     "price": {
+      "price_u": null,
+      "prev_close_u": null
+     },
+     "lines": [
+      {
+       "qty_u": 1000000,
+       "cost_paise": 50000000
+      }
+     ]
+    },
+    {
+     "asset": {
+      "id": 4,
+      "name": "Sold Ltd",
+      "kind": "listed",
+      "sector": "IT",
+      "exchange": "NSE",
+      "symbol": "SOLD"
+     },
+     "price": {
+      "price_u": 900000,
+      "prev_close_u": null
+     },
+     "lines": [
+      {
+       "qty_u": 0,
+       "cost_paise": 0
+      }
+     ]
+    },
+    {
+     "asset": {
+      "id": 1,
+      "name": "Alpha Ltd",
+      "kind": "listed",
+      "sector": "Banks",
+      "exchange": "NSE",
+      "symbol": "ALPHA"
+     },
+     "price": {
+      "price_u": 2500000,
+      "prev_close_u": null
+     },
+     "lines": [
+      {
+       "qty_u": 8000000,
+       "cost_paise": 170000
+      }
+     ]
+    }
+   ],
+   "max_holding_pct": "15.0000",
+   "max_sector_pct": "35.0000",
+   "holdings": [
+    [
+     "1",
+     "Alpha Ltd",
+     300000,
+     "Banks"
+    ],
+    [
+     "2",
+     "Beta Fund",
+     300000,
+     null
+    ],
+    [
+     "3",
+     "Gamma Ltd",
+     150000,
+     "IT"
+    ],
+    [
+     "1",
+     "Alpha Ltd",
+     200000,
+     "Banks"
+    ]
+   ],
+   "expect": {
+    "holdings": [
+     {
+      "label": "Alpha Ltd",
+      "weight_pct": "52.6316",
+      "over_limit": true
+     },
+     {
+      "label": "Beta Fund",
+      "weight_pct": "31.5789",
+      "over_limit": true
+     },
+     {
+      "label": "Gamma Ltd",
+      "weight_pct": "15.7895",
+      "over_limit": true
+     }
+    ],
+    "sectors": [
+     {
+      "label": "Banks",
+      "weight_pct": "52.6316",
+      "over_limit": true
+     },
+     {
+      "label": "IT",
+      "weight_pct": "15.7895",
+      "over_limit": false
+     }
+    ],
+    "untagged_pct": "31.5789",
+    "flags": [
+     "Alpha Ltd is 52.63% of what is held here, above your 15% limit.",
+     "Beta Fund is 31.58% of what is held here, above your 15% limit.",
+     "Gamma Ltd is 15.79% of what is held here, above your 15% limit.",
+     "The sector Banks is 52.63% of what is held here, above your 35% limit.",
+     "Untagged: 31.58%; tag them to check sectors."
+    ]
+   }
+  },
+  {
+   "id": "RW2",
+   "note": "a tick takes Alpha to 500.00: 10,000 of 14,500; every weight moves, and Gamma (10.34%) is no longer above 15%",
+   "rows": [
+    {
+     "asset": {
+      "id": 1,
+      "name": "Alpha Ltd",
+      "kind": "listed",
+      "sector": "Banks",
+      "exchange": "NSE",
+      "symbol": "ALPHA"
+     },
+     "price": {
+      "price_u": 5000000,
+      "prev_close_u": null
+     },
+     "lines": [
+      {
+       "qty_u": 12000000,
+       "cost_paise": 240000
+      }
+     ]
+    },
+    {
+     "asset": {
+      "id": 2,
+      "name": "Beta Fund",
+      "kind": "mf",
+      "sector": null,
+      "exchange": null,
+      "symbol": null
+     },
+     "price": {
+      "price_u": null,
+      "prev_close_u": null
+     },
+     "lines": [
+      {
+       "qty_u": 100000000,
+       "cost_paise": 300000
+      }
+     ]
+    },
+    {
+     "asset": {
+      "id": 3,
+      "name": "Gamma Ltd",
+      "kind": "listed",
+      "sector": "IT",
+      "exchange": "NSE",
+      "symbol": "GAMMA"
+     },
+     "price": {
+      "price_u": 1500000,
+      "prev_close_u": null
+     },
+     "lines": [
+      {
+       "qty_u": 4000000,
+       "cost_paise": 50000
+      },
+      {
+       "qty_u": 6000000,
+       "cost_paise": 80000
+      }
+     ]
+    },
+    {
+     "asset": {
+      "id": 9,
+      "name": "Home loan",
+      "kind": "liability",
+      "sector": null,
+      "exchange": null,
+      "symbol": null
+     },
+     "price": {
+      "price_u": null,
+      "prev_close_u": null
+     },
+     "lines": [
+      {
+       "qty_u": 1000000,
+       "cost_paise": 50000000
+      }
+     ]
+    },
+    {
+     "asset": {
+      "id": 4,
+      "name": "Sold Ltd",
+      "kind": "listed",
+      "sector": "IT",
+      "exchange": "NSE",
+      "symbol": "SOLD"
+     },
+     "price": {
+      "price_u": 900000,
+      "prev_close_u": null
+     },
+     "lines": [
+      {
+       "qty_u": 0,
+       "cost_paise": 0
+      }
+     ]
+    },
+    {
+     "asset": {
+      "id": 1,
+      "name": "Alpha Ltd",
+      "kind": "listed",
+      "sector": "Banks",
+      "exchange": "NSE",
+      "symbol": "ALPHA"
+     },
+     "price": {
+      "price_u": 5000000,
+      "prev_close_u": null
+     },
+     "lines": [
+      {
+       "qty_u": 8000000,
+       "cost_paise": 170000
+      }
+     ]
+    }
+   ],
+   "max_holding_pct": "15.0000",
+   "max_sector_pct": "35.0000",
+   "holdings": [
+    [
+     "1",
+     "Alpha Ltd",
+     600000,
+     "Banks"
+    ],
+    [
+     "2",
+     "Beta Fund",
+     300000,
+     null
+    ],
+    [
+     "3",
+     "Gamma Ltd",
+     150000,
+     "IT"
+    ],
+    [
+     "1",
+     "Alpha Ltd",
+     400000,
+     "Banks"
+    ]
+   ],
+   "expect": {
+    "holdings": [
+     {
+      "label": "Alpha Ltd",
+      "weight_pct": "68.9655",
+      "over_limit": true
+     },
+     {
+      "label": "Beta Fund",
+      "weight_pct": "20.6897",
+      "over_limit": true
+     },
+     {
+      "label": "Gamma Ltd",
+      "weight_pct": "10.3448",
+      "over_limit": false
+     }
+    ],
+    "sectors": [
+     {
+      "label": "Banks",
+      "weight_pct": "68.9655",
+      "over_limit": true
+     },
+     {
+      "label": "IT",
+      "weight_pct": "10.3448",
+      "over_limit": false
+     }
+    ],
+    "untagged_pct": "20.6897",
+    "flags": [
+     "Alpha Ltd is 68.97% of what is held here, above your 15% limit.",
+     "Beta Fund is 20.69% of what is held here, above your 15% limit.",
+     "The sector Banks is 68.97% of what is held here, above your 35% limit.",
+     "Untagged: 20.69%; tag them to check sectors."
+    ]
+   }
+  }
+ ],
  "overlap": [
   {
    "id": "O1",

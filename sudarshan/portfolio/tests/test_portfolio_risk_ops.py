@@ -6,6 +6,7 @@ import dataclasses
 from datetime import date, timedelta
 
 from test_portfolio_import_ops import NOW, OWNER, Rig, scenario_of  # noqa: F401  (the rig)
+from test_portfolio_risk import holdings_of_rows
 from test_portfolio_service import settings_for
 from test_portfolio_tab_ops import clean
 
@@ -139,7 +140,8 @@ async def test_a_new_tab_has_no_figure_yet_and_every_tile_says_why(rig):
     assert figures["emergency"] == {
         "months": None, "target_months": 6, "note": "Set your monthly expenses to check this"
     }  # fmt: skip
-    assert list(data) == ["tab_id", "as_of_day", "basis", "risk"]
+    assert list(data) == ["tab_id", "as_of_day", "basis", "risk", "live"]
+    assert data["live"]["rows"] == []
     assert list(figures) == ["days", "drawdown", "volatility", "sharpe", "sortino", "calmar",
                              "concentration", "overlap", "emergency"]  # fmt: skip
     gone = clean(await rig.call("risk", tab=999))
@@ -151,6 +153,14 @@ async def test_the_upstox_tab_has_no_risk_report(rig):
     on(rig)
     upstox = next(t for t in rig.book.tabs(OWNER) if t["kind"] == "upstox")
     assert clean(await rig.call("risk", tab=upstox["id"]))["code"] == "not_found"
+
+
+def snapshot_again(live) -> dict:
+    """The concentration worked out again from the rows the answer carries, by the rule the phone
+    copies (``holdings_of_rows``; vectors ``rows`` of risk.json)."""
+    return risk.concentration(
+        holdings_of_rows(live["rows"]), live["max_holding_pct"], live["max_sector_pct"]
+    )
 
 
 def swing(count):
@@ -194,11 +204,21 @@ async def test_sixty_one_closing_values_give_the_figures_of_the_core(rig):
         "Gold bar is 100% of what is held here, above your 15% limit.",
         "The sector Metals is 100% of what is held here, above your 35% limit.",
     ]
+    # What the bars were worked out from comes with them, for the phone to move with ticks.
+    live = data["live"]
+    assert list(live) == ["read_at", "max_holding_pct", "max_sector_pct", "rows"]
+    assert (live["read_at"], live["max_holding_pct"], live["max_sector_pct"]) == (
+        NOW, "15.0000", "35.0000",
+    )  # fmt: skip
+    assert [row["asset"]["name"] for row in live["rows"]] == ["Gold bar"]
+    assert snapshot_again(live) == got["concentration"]
     # One day fewer, and nothing of the series is shown.
     await rig.call(
         "settings_set", version=0, values={"max_holding_pct": 100, "max_sector_pct": 100}
     )
-    eased = (await rig.call("risk", tab=rig.tab["id"]))["data"]["risk"]["concentration"]
+    eased = (await rig.call("risk", tab=rig.tab["id"]))["data"]
+    assert eased["live"]["max_holding_pct"] == eased["live"]["max_sector_pct"] == "100.0000"
+    eased = eased["risk"]["concentration"]
     assert eased["flags"] == [] and not eased["holdings"][0]["over_limit"]
 
 
@@ -263,6 +283,14 @@ async def test_overlap_the_emergency_fund_and_every_tab_together(rig):
         ("Savings account", "9.5238"),
     ]  # fmt: skip
     assert [bar["over_limit"] for bar in bars] == [True, True, False, False]
+    # The rows of every tab asked for come with it: gold twice (one holding), the archived
+    # tab's nothing; worked out again from them, the bars are the same.
+    names = sorted(row["asset"]["name"] for row in both["live"]["rows"])
+    assert names == ["Bank deposit", "Gold bar", "Gold bar", "Plot", "Savings account"]
+    assert snapshot_again(both["live"]) == both["risk"]["concentration"]
+    one = (await rig.call("risk", tab=rig.tab["id"]))["data"]
+    assert sorted(row["asset"]["name"] for row in one["live"]["rows"]) == ["Gold bar", "Plot"]
+    assert snapshot_again(one["live"]) == one["risk"]["concentration"]
 
 
 @scenario_of

@@ -1,5 +1,6 @@
 // SUDARSHAN P7 F1 (M7.27): the year's schedule of sales as a sheet (design p7 9.1): one row per
-// sale, or per part of one taken from one purchase, as the tax core worked it out. A sale left out
+// sale, or per part of one taken from one purchase, as the tax core worked it out, under the share's
+// name with its ISIN below (the ISIN alone where no record names the share). A sale left out
 // of the totals is listed with the reason in words. Long or short is a chip with a clock and the
 // word; a gain or a loss carries its sign and the word.
 import { Clock, Info } from 'lucide-react'
@@ -21,7 +22,12 @@ function Sale({ row }: { row: TaxGain }) {
   return (
     <li className="flex flex-col gap-1 py-2.5">
       <div className="flex items-baseline justify-between gap-3">
-        <span className="min-w-0 text-[0.9375rem] font-semibold break-all">{row.isin}</span>
+        <span className="flex min-w-0 flex-col">
+          <span className="text-[0.9375rem] font-semibold break-words">{row.name || row.isin}</span>
+          {row.name && (
+            <span className="text-xs break-all text-[color:var(--text-tertiary)]">{row.isin}</span>
+          )}
+        </span>
         <span className="shrink-0 whitespace-nowrap">
           {row.gain_paise === null ? 'Not worked out' : <Result paise={row.gain_paise} />}
         </span>

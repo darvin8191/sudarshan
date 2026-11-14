@@ -265,6 +265,7 @@ export const TAX_INPUT_KINDS = [
   'day_override',
   'trade_mark',
   'settings',
+  'account_mode',
 ] as const
 export type TaxInputKind = (typeof TAX_INPUT_KINDS)[number]
 export const TAX_MODES = ['reports', 'ledger', 'none'] as const
@@ -1822,6 +1823,9 @@ export interface TaxGain {
   taxpayer: number
   account: number
   isin: string
+  /** The share's name: the holding's own, else the scrip name of Upstox's trade history; null
+   * where no record names it. Added by the portfolio's op; the tax core's pack has no such key. */
+  name: string | null
   /** null: no purchase record; such a sale is listed apart and never costed at zero. */
   acquired_day: Day | null
   sale_day: Day
@@ -2106,12 +2110,15 @@ export interface TaxSettings {
   version: number
 }
 
-/** An account of the taxpayer and how it counts: by Upstox's reports, by its ledger, or not. */
+/** An account of the taxpayer and how it counts: by Upstox's reports, by its ledger, or not.
+ * `tax_input_set` with kind `account_mode` (row `member_id`, `account_id`, `tax_mode`) sets an
+ * account of the owner's own to `ledger` or `none`, from this version; never the Upstox account. */
 export interface TaxAccount {
   id: number
   name: string
   kind: AccountKind
   tax_mode: TaxMode
+  version: number
 }
 
 export interface TaxInputs {
@@ -2132,13 +2139,15 @@ export type TaxInputRecord =
   | TaxDayOverride
   | TaxTradeMark
   | TaxSettings
+  | TaxAccount
 
 export interface TaxInputSetArgs {
   kind: TaxInputKind
   /** The row's own fields, as the matching record holds them (no id, source or version). */
   row: Record<string, unknown>
   /** An existing row and the version it was read at; none for a new one. The readings always
-   * send the version they were read at (0 before the first save). */
+   * send the version they were read at (0 before the first save), and `account_mode` the
+   * account's. */
   id?: number
   version?: number
   request_id?: string
@@ -2418,12 +2427,23 @@ export interface RiskFigures {
   emergency: RiskEmergency
 }
 
+/** What `concentration` was worked out from, read with it: the phone prices the rows from ticks
+ * newer than `read_at` and applies the same rule (vectors/risk.json), so the bars move. One row
+ * per holding of each tab asked for; the same asset in two tabs is two rows and one holding. */
+export interface RiskLive {
+  read_at: EpochMs
+  max_holding_pct: Pct
+  max_sector_pct: Pct
+  rows: HoldingRow[]
+}
+
 export interface RiskReport {
   tab_id: number | null
   as_of_day: Day
   /** "On closing values up to 13 Nov 2026." */
   basis: string
   risk: RiskFigures
+  live: RiskLive
 }
 
 export interface OwnerSettings {

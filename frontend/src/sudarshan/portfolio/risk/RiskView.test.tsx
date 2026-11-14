@@ -16,6 +16,10 @@ vi.mock('../api', async (importOriginal) => ({
   getSettings: api.get,
   saveSettings: api.save,
 }))
+vi.mock('@/sudarshan/dashboard/MarketCalendar', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/sudarshan/dashboard/MarketCalendar')>()),
+  MarketCalendarSource: () => null,
+}))
 vi.mock('@/sudarshan/watchlist/openGuard', () => ({
   useOpenGuard: () => ({ settling: false, handlers: {} }),
 }))
@@ -30,7 +34,9 @@ const TABS = [
   { id: 4, name: 'Long term', version: 1 },
   { id: 5, name: 'Gold', version: 1 },
 ] as TabInfo[]
-const REPORT: RiskReport = {
+// The answer of a service from before lane G: no `live` rows, so the bars are the service's own
+// and say when they were read. `Concentration.test.tsx` holds the bars that move with ticks.
+const REPORT = {
   tab_id: 4,
   as_of_day: 20261113,
   basis: 'On closing values up to 13 Nov 2026.',
@@ -63,7 +69,7 @@ const REPORT: RiskReport = {
       note: 'Your liquid holdings cover 4.5 of the 6 months you aim for.',
     },
   },
-}
+} as unknown as RiskReport
 const SETTINGS: OwnerSettings = {
   risk_free_bp: 650,
   max_holding_pct: '15.0000',
@@ -147,7 +153,7 @@ describe('the view', () => {
     expect(document.body.textContent).not.toMatch(/Real-time|Live/)
   })
 
-  it('tells a crossed limit in words beside the bar, and says the weights are a snapshot', async () => {
+  it('tells a crossed limit in words beside the bar, and says when a snapshot was read', async () => {
     show()
     const card = within(await screen.findByRole('region', { name: 'Concentration' }))
     expect(card.getByText('41.2%')).toBeTruthy()
@@ -157,8 +163,45 @@ describe('the view', () => {
     ).toBeTruthy()
     expect(card.getByText(/4\.0% has no sector tag/)).toBeTruthy()
     expect(
-      card.getByText(/It does not move with ticks; read again for newer values\./)
+      card.getByText(
+        /^As of \d\d:\d\d:\d\d on \d+ \w+ \d{4}, when this view was read\. These bars do not move with prices; read again for newer values\.$/
+      )
     ).toBeTruthy()
+    expect(card.queryByText('Real-time')).toBeNull()
+  })
+
+  it('works the bars out from the rows the answer carries, and says the second they were read', async () => {
+    const row = {
+      asset: {
+        id: 8,
+        name: 'Gold bar',
+        kind: 'manual',
+        sector: 'Metals',
+        exchange: null,
+        symbol: null,
+      },
+      today_mode: 'none',
+      price: { price_u: 60_000_000, prev_close_u: null },
+      lines: [{ account_id: 1, qty_u: 2_000_000, cost_paise: 1_000_000 }],
+    }
+    const live = {
+      read_at: Date.UTC(2026, 10, 13, 8, 35, 9),
+      max_holding_pct: '15.0000',
+      max_sector_pct: '100.0000',
+      rows: [row],
+    }
+    api.risk.mockResolvedValue({ enabled: true, data: { ...REPORT, live } })
+    show()
+    const card = within(await screen.findByRole('region', { name: 'Concentration' }))
+    expect(card.getByText('Gold bar')).toBeTruthy()
+    expect(card.queryByText('Alpha Industries')).toBeNull() // not the snapshot's bars
+    expect(
+      card.getByText('Gold bar is 100% of what is held here, above your 15% limit.')
+    ).toBeTruthy()
+    expect(card.getByText(/are as read at 14:05:09 on 13 Nov 2026\./)).toBeTruthy()
+    expect(card.queryByText('Real-time')).toBeNull() // nothing here has a price that ticks
+    const fund = within(screen.getByRole('region', { name: 'Emergency fund' }))
+    expect(fund.getByText(/As of 14:05:09 on 13 Nov 2026, when this view was read\./)).toBeTruthy()
   })
 
   it('shows the overlap with the other tab and the emergency fund against its target', async () => {

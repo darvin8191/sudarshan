@@ -1,20 +1,29 @@
 // SUDARSHAN P7 F7 (M7.32): the Risk view, `/portfolio?view=risk` (design p7 9.3): every custom tab
 // together or one of them. Largest fall, volatility and the three ratios are statistics on closing
 // values and say which day they reach; each has one plain line on what it means, and where the
-// service gives no figure its sentence stands in the figure's place, never a zero. Concentration
-// and the emergency fund are worked out by the service on the values at the moment the view was
-// read, and the card says so: they are not drawn as if they moved with ticks. Owner's page only.
+// service gives no figure its sentence stands in the figure's place, never a zero. The
+// concentration bars move with ticks (`Concentration.tsx`, lane G). The emergency fund is worked
+// out by the service on the values at the moment the view was read, and says when. Owner's page
+// only.
 import { useQuery } from '@tanstack/react-query'
-import { CircleAlert, RefreshCw, Settings2 } from 'lucide-react'
+import { RefreshCw, Settings2 } from 'lucide-react'
 import { useState } from 'react'
 import { cn } from '@/lib/utils'
 import { formatAmount, formatPercent } from '@/sudarshan/dashboard/format'
+import { useMarketOpen } from '@/sudarshan/dashboard/hooks'
+import type { MarketOpen } from '@/sudarshan/dashboard/live'
+import {
+  CALENDAR_LOADING,
+  type MarketCalendar,
+  MarketCalendarSource,
+  useIstDay,
+} from '@/sudarshan/dashboard/MarketCalendar'
 import { getRisk, PortfolioError, problemOf } from '../api'
-import { clockOfInstant } from '../days'
 import { pctNumber } from '../Signed'
 import { PORTFOLIO_KEY } from '../tab/ActivityTab'
 import { dayText } from '../tab/format'
-import type { RiskDrawdown, RiskReport, RiskStat, RiskWeight, TabInfo } from '../types'
+import type { RiskDrawdown, RiskReport, RiskStat, TabInfo } from '../types'
+import { Concentration, readWords } from './Concentration'
 import { SettingsSheet } from './SettingsSheet'
 
 export const RISK_KEY = [...PORTFOLIO_KEY, 'risk'] as const
@@ -80,58 +89,22 @@ function Stat({
   )
 }
 
-function Bars({ title, rows }: { title: string; rows: readonly RiskWeight[] }) {
-  if (rows.length === 0) return null
-  return (
-    <div className="flex flex-col gap-1.5">
-      <h3 className="text-sm font-semibold">{title}</h3>
-      {rows.map((row) => {
-        const weight = pctNumber(row.weight_pct) ?? 0
-        return (
-          <div key={row.label} className="flex flex-col gap-0.5">
-            <div className="flex items-baseline justify-between gap-3 text-sm">
-              <span className="min-w-0 break-words">{row.label}</span>
-              <span className="shrink-0 font-semibold whitespace-nowrap">
-                {formatAmount(weight, 1)}%
-              </span>
-            </div>
-            <div className="h-2 rounded-full bg-[color:var(--divider)]">
-              <div
-                className={cn(
-                  'h-2 rounded-full',
-                  row.over_limit ? 'bg-[color:var(--warning-text)]' : 'bg-[color:var(--brand)]'
-                )}
-                style={{ width: `${Math.min(100, Math.max(0, weight))}%` }}
-              />
-            </div>
-            {row.over_limit && (
-              <span className="inline-flex items-center gap-1 text-xs font-semibold text-[color:var(--warning-text)]">
-                <CircleAlert aria-hidden="true" className="size-3.5" />
-                Above your limit
-              </span>
-            )}
-          </div>
-        )
-      })}
-    </div>
-  )
-}
-
 function Figures({
   report,
   tabs,
   readAt,
+  marketOpen,
 }: {
   report: RiskReport
   tabs: readonly TabInfo[]
   readAt: number
+  marketOpen: MarketOpen
 }) {
   const { risk } = report
   const [other, setOther] = useState<number | null>(null)
   const fall = statText(risk.drawdown.pct, true)
   const shared = risk.overlap.find((o) => o.tab_id === other) ?? risk.overlap[0]
   const months = pctNumber(risk.emergency.months)
-  const snapshot = `Worked out on the values at ${clockOfInstant(readAt).slice(0, 5)}, when this view was read. It does not move with ticks; read again for newer values.`
   return (
     <>
       <section aria-label="Largest fall" className={cn(CARD, 'flex flex-col gap-1')}>
@@ -157,30 +130,7 @@ function Figures({
           {report.basis} {risk.days > 0 && `Rests on ${risk.days} trading days.`}
         </p>
       </section>
-      <section aria-label="Concentration" className={cn(CARD, 'flex flex-col gap-3')}>
-        <h3 className={LABEL}>Concentration</h3>
-        {risk.concentration.holdings.length === 0 && risk.concentration.sectors.length === 0 && (
-          <p className="text-sm text-[color:var(--text-secondary)]">Nothing is held here yet.</p>
-        )}
-        <Bars title="Largest holdings" rows={risk.concentration.holdings} />
-        <Bars title="Largest sectors" rows={risk.concentration.sectors} />
-        {risk.concentration.flags.map((flag) => (
-          <p
-            key={flag}
-            className="flex gap-2 text-sm font-semibold text-[color:var(--warning-text)]"
-          >
-            <CircleAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
-            <span>{flag}</span>
-          </p>
-        ))}
-        {pctNumber(risk.concentration.untagged_pct) !== null && (
-          <p className={MEANING}>
-            {formatAmount(pctNumber(risk.concentration.untagged_pct) ?? 0, 1)}% has no sector tag
-            and is in no sector bar.
-          </p>
-        )}
-        <p className={MEANING}>{snapshot}</p>
-      </section>
+      <Concentration report={report} readAt={readAt} marketOpen={marketOpen} />
       {risk.overlap.length > 0 && shared && (
         <section aria-label="Overlap" className={cn(CARD, 'flex flex-col gap-2')}>
           <h3 className={LABEL}>Overlap with another tab</h3>
@@ -227,7 +177,8 @@ function Figures({
               />
             </div>
             <span className={MEANING}>
-              Of your expenses covered; your target is {risk.emergency.target_months} months.
+              Of your expenses covered; your target is {risk.emergency.target_months} months. As of{' '}
+              {readWords(report.live?.read_at ?? readAt)}, when this view was read.
             </span>
           </>
         )}
@@ -242,6 +193,9 @@ function Figures({
 export function RiskView({ tabs }: { tabs: readonly TabInfo[] }) {
   const [tab, setTab] = useState<number | null>(null)
   const [settings, setSettings] = useState(false)
+  const [market, setMarket] = useState<MarketCalendar>(CALENDAR_LOADING)
+  const day = useIstDay()
+  const { isOpen } = useMarketOpen(market)
   const chosen = tab !== null && tabs.some((t) => t.id === tab) ? tab : null
   const query = useQuery({
     queryKey: [...RISK_KEY, 'report', chosen] as const,
@@ -258,6 +212,7 @@ export function RiskView({ tabs }: { tabs: readonly TabInfo[] }) {
   const problem = query.error ? problemOf(query.error) : null
   return (
     <div className="flex flex-col gap-3">
+      <MarketCalendarSource key={day} onChange={setMarket} />
       <div className="flex items-center justify-between gap-3">
         <h2 className="sd-display text-[1.375rem] leading-tight font-bold">Risk</h2>
         <span className="flex gap-2">
@@ -301,7 +256,7 @@ export function RiskView({ tabs }: { tabs: readonly TabInfo[] }) {
           Working out the risk figures.
         </p>
       ) : (
-        <Figures report={query.data} tabs={tabs} readAt={query.dataUpdatedAt} />
+        <Figures report={query.data} tabs={tabs} readAt={query.dataUpdatedAt} marketOpen={isOpen} />
       )}
       <SettingsSheet
         open={settings}
