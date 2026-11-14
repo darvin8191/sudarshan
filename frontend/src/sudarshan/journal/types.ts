@@ -57,6 +57,14 @@ export const HOLD_BUCKET_LABELS = {
 export const INTRADAY_PRODUCTS = ['MIS', 'I'] as const
 export const CARRY_PRODUCTS = ['NRML', 'CNC', 'D'] as const
 export const HOLD_BUCKETS = ['under_5m', '5_30m', '30m_2h', 'over_2h', '1_5d', 'over_5d'] as const
+export const DESK_STATES = [
+  'on',
+  'starting',
+  'journal_off',
+  'journal_down',
+  'off',
+  'unknown',
+] as const
 export const OP_NAMES = [
   'state',
   'trips',
@@ -116,6 +124,7 @@ export type ChargeSegment =
   | 'equity_intraday'
   | 'not_modelled'
 export type ChargePlan = 'plus' | 'standard'
+export type DeskState = 'on' | 'starting' | 'journal_off' | 'journal_down' | 'off' | 'unknown'
 export type HoldBucket = 'under_5m' | '5_30m' | '30m_2h' | 'over_2h' | '1_5d' | 'over_5d'
 export type RatioState =
   | 'ok'
@@ -428,6 +437,7 @@ export interface Settings {
   charges_plan: ChargePlan
   version: number
   alerts_on: boolean
+  desk_state: DeskState
   rate_card: RateCard
   times: ReportTimes
 }

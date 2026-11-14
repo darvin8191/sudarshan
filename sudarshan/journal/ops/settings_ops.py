@@ -13,7 +13,7 @@ exists). The answer adds what the Reports page shows beside them:
   ``starting``, ``journal_off``, ``journal_down`` or ``off`` as the block says it, else
   ``unknown`` (the alerts service does not answer as itself, has no block, or names a state this
   release does not know), so the page never says "switched off" for an alerts service that is
-  only not answering. Not in the contract's ``Settings`` yet; the page reads it as optional.
+  only not answering. Every answer carries it: the contract's ``DeskState``.
 * ``rate_card``: the charges card in use, its version and the day its newest rate applies from.
 * ``times``: when each report is built, as the page prints them: the day ones for today, or for
   the next trading day when today has no session.
@@ -43,8 +43,9 @@ CAPITAL_MAX_PAISE = 10**13
 #: The report desk's states (``report_desk.state`` on the alerts' /health) in which it delivers
 #: the reports, or will as soon as it next asks this journal; ``off`` is the one that does not.
 DESK_DELIVERS = frozenset({"on", "starting", "journal_off", "journal_down"})
-#: Every state the desk names; anything else, or no block at all, is ``unknown`` to the page.
-DESK_STATES = DESK_DELIVERS | {"off"}
+#: Every state the desk names (the contract's ``DeskState`` but ``unknown``); anything else, or no
+#: block at all, is ``unknown`` to the page.
+DESK_STATES = frozenset(kinds.DESK_STATES) - {"unknown"}
 WEEKDAY_NAMES = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
 MONTH_NAMES = ("January", "February", "March", "April", "May", "June", "July", "August",
                "September", "October", "November", "December")  # fmt: skip

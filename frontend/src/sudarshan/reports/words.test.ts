@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { Report } from '../journal/types'
+import { DESK_STATES, type Report } from '../journal/types'
 import {
   ALERTS_OFF,
   checkWords,
@@ -66,15 +66,13 @@ describe('delivery in words', () => {
     })
   })
 
-  it('reads the desk’s state from the settings, and an older answer without guessing', () => {
+  it('reads the desk’s state from the settings, and a state it does not know as unknown', () => {
     expect(deskOf(undefined)).toBeUndefined()
-    for (const state of ['on', 'starting', 'journal_off', 'journal_down', 'off'] as const) {
+    for (const state of DESK_STATES) {
       expect(deskOf({ desk_state: state })).toBe(state)
     }
-    expect(deskOf({ desk_state: 'new_state', alerts_on: true })).toBe('unknown')
-    expect(deskOf({ alerts_on: true })).toBe('on')
-    expect(deskOf({ alerts_on: false })).toBe('unknown')
-    expect(deskOf({})).toBeUndefined()
+    // a state a later journal names is not guessed at
+    expect(deskOf({ desk_state: 'new_state' })).toBe('unknown')
     // a sentence of its own for every state but on
     expect(DESK_WORDS.on).toBeNull()
     const words = Object.entries(DESK_WORDS).filter(([state]) => state !== 'on')

@@ -1,5 +1,5 @@
-import type { Report, ReportKind, ReportTimes, Settings } from '../journal/types'
-import { REPORT_TITLES } from '../journal/types'
+import type { DeskState, Report, ReportKind, ReportTimes, Settings } from '../journal/types'
+import { DESK_STATES, REPORT_TITLES } from '../journal/types'
 
 /**
  * What a service older than this page may leave out of its answers, read when the bridge sends
@@ -11,8 +11,6 @@ export interface ReportExtra {
 }
 export interface SettingsExtra {
   alerts_on?: boolean
-  /** The report desk's own state (review M5); a value this page does not know reads as unknown. */
-  desk_state?: string | null
   rate_card?: { version?: string | null; from_day?: number | null } | null
   times?: Partial<ReportTimes> | null
 }
@@ -23,24 +21,23 @@ export type SettingsRead = Omit<Settings, keyof SettingsExtra> & SettingsExtra
 export const ALERTS_OFF = 'the alerts service is switched off on the server'
 
 /**
- * Where the alerts' report desk stands, as the journal says (review M5): `unknown` when the alerts
- * service did not answer as itself, is too old to say, or names a state this page does not know.
+ * Where the alerts' report desk stands, as the journal says (review M5): every settings answer
+ * carries it (the contract's `DeskState`), `unknown` when the alerts service did not answer as
+ * itself, is too old to say, or names a state the journal does not know.
  */
-export type DeskState = 'on' | 'starting' | 'journal_off' | 'journal_down' | 'off' | 'unknown'
-const DESK_STATES: readonly string[] = ['on', 'starting', 'journal_off', 'journal_down', 'off']
+export type { DeskState }
+const KNOWN_DESK_STATES: readonly string[] = DESK_STATES
 
-/** The desk's state from the settings answer; undefined until it is read. */
-export function deskOf(settings: SettingsExtra | undefined): DeskState | undefined {
+/**
+ * The desk's state from the settings answer; undefined until it is read. A state this page does
+ * not know (one a later journal names) reads as unknown, never as on or off.
+ */
+export function deskOf(settings: { desk_state: string } | undefined): DeskState | undefined {
   if (!settings) return undefined
-  const state = settings.desk_state
-  if (typeof state === 'string') {
-    return DESK_STATES.includes(state) ? (state as DeskState) : 'unknown'
-  }
-  // A journal before this release says only whether the desk delivers: "no" was either the desk
-  // switched off or the alerts service not answering, and the page cannot tell which.
-  if (settings.alerts_on === true) return 'on'
-  if (settings.alerts_on === false) return 'unknown'
-  return undefined
+  const state: unknown = settings.desk_state
+  return typeof state === 'string' && KNOWN_DESK_STATES.includes(state)
+    ? (state as DeskState)
+    : 'unknown'
 }
 
 /** One sentence over the archive for each state; none while reports go out. */

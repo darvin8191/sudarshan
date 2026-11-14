@@ -119,6 +119,10 @@ REPORT_KINDS = ("brief", "eod", "weekly", "monthly", "fy")
 REPORT_STATUSES = ("ready", "sent", "text_only", "not_sent")
 CHARGE_SEGMENTS = ("options", "futures", "equity_delivery", "equity_intraday", "not_modelled")
 CHARGE_PLANS = ("plus", "standard")
+#: The alerts' report desk as the settings answer names it (``settings_ops.desk_state``): the
+#: state its block on the alerts' /health says, or ``unknown`` when the alerts service does not
+#: answer as itself, has no such block, or names a state this release does not know (review M5).
+DESK_STATES = ("on", "starting", "journal_off", "journal_down", "off", "unknown")
 #: What the owner's reports are called on a screen (design 6.4).
 REPORT_TITLES = {
     "brief": "Morning brief",
@@ -185,6 +189,7 @@ ENUMS = {
     "ReportStatus": REPORT_STATUSES,
     "ChargeSegment": CHARGE_SEGMENTS,
     "ChargePlan": CHARGE_PLANS,
+    "DeskState": DESK_STATES,
     "HoldBucket": HOLD_BUCKETS,
     "RatioState": RATIO_STATES,
     "DurationState": DURATION_STATES,
@@ -260,11 +265,12 @@ RECORDS = {
     "ReportEvent": "id:string, src:string, kind:string, report:int, report_kind:ReportKind, "
     "sha256:string|null",
     # ``alerts_on``: false while nothing delivers reports (the alerts service, or its report
-    # desk, switched off: cross-design Y38); ``times``: when each report is built, as the page
-    # prints them (the day ones for today, or the next trading day).
+    # desk, switched off: cross-design Y38), derived from ``desk_state``, the desk's own state
+    # for the page to word; ``times``: when each report is built, as the page prints them (the
+    # day ones for today, or the next trading day).
     "Settings": "capital_base_paise:int|null, eod_on:bool, brief_on:bool, weekly_on:bool, "
     "monthly_on:bool, fy_on:bool, report_language:string, charges_plan:ChargePlan, version:int, "
-    "alerts_on:bool, rate_card:RateCard, times:ReportTimes",
+    "alerts_on:bool, desk_state:DeskState, rate_card:RateCard, times:ReportTimes",
     "RateCard": "version:string, from_day:int",
     "ReportTimes": "brief:string|null, eod:string|null, check:string|null, weekly:string, "
     "monthly:string, fy:string",

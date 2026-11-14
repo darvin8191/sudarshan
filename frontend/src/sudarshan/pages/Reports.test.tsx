@@ -44,6 +44,7 @@ const SETTINGS = {
   charges_plan: 'plus',
   version: 3,
   alerts_on: true,
+  desk_state: 'on',
   rate_card: { version: 'Card 2026-04', from_day: 20260401 },
   times: {
     brief: '08:45',

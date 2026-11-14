@@ -20,9 +20,10 @@ from test_journal_capture import rig as rig  # noqa: F401  (a fixture)
 from test_journal_jobs import answer_positions, live_rows, position, record
 
 from sudarshan.journal import reports
+from sudarshan.journal.core import kinds
 from sudarshan.journal.errors import ApiError
 from sudarshan.journal.jobs import check, day
-from sudarshan.journal.ops import REGISTRY
+from sudarshan.journal.ops import REGISTRY, settings_ops
 from sudarshan.journal.ops import common as ops_common
 from sudarshan.journal.store import Scope
 from sudarshan.ops.events import read_events
@@ -340,6 +341,19 @@ def test_an_alerts_service_that_does_not_answer_is_unknown_not_off(rig, alerts):
     alerts.up = False
     got = settings_of(rig)
     assert got["desk_state"] == "unknown" and got["alerts_on"] is False
+
+
+def test_every_settings_answer_is_the_contracts_record_whole(rig, alerts):
+    """The phone reads ``desk_state`` as always there (the contract's ``DeskState``): the answer
+    is the record field for field, with the alerts service up, naming a state, or not answering."""
+    fields = {f.name for f in kinds.record("Settings")}
+    assert "desk_state" in fields and set(settings_of(rig)) == fields
+    alerts.desk = {"state": "a state from later"}
+    assert set(settings_of(rig)) == fields
+    alerts.up = False
+    got = settings_of(rig)
+    assert set(got) == fields and got["desk_state"] in kinds.DESK_STATES
+    assert settings_ops.DESK_DELIVERS < settings_ops.DESK_STATES < set(kinds.DESK_STATES)
 
 
 def test_an_alerts_health_without_the_block_is_not_read_as_delivering(rig, alerts, a_report):
