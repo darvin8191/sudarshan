@@ -338,12 +338,12 @@ def test_step_5_adds_the_recounts_to_a_file_that_holds_trades_and_keeps_them(tmp
             "VALUES ('owner', 'live', 'NSE', 'ACME', 'carry', 60, 20261109, 'holdings', 1, 1, 1)"
         )
     assert migrate.main(["--status", "--path", str(where)]) == 0
-    assert "pending: [5]" in capsys.readouterr().out
+    assert "pending: [5, 6]" in capsys.readouterr().out
     assert raw(where, "PRAGMA user_version") == [(4,)]
     assert not raw(where, "SELECT name FROM sqlite_master WHERE name = 'key_recount'")
     opened = JournalStore(where, now=NOW)
     try:
-        assert opened.applied == [5]
+        assert opened.applied == [5, 6]
         key = ("NSE", "ACME", "carry")
         assert opened.read(OWNER, lambda tx: tx.openings_of("live"))[key]["qty"] == 60
         assert opened.read(OWNER, lambda tx: tx.recounts_of("live")) == {}
@@ -359,6 +359,132 @@ def test_step_5_adds_the_recounts_to_a_file_that_holds_trades_and_keeps_them(tmp
     finally:
         again.close()
         store.stop()
+
+
+def _at_step(where: Path, upto: int) -> None:
+    where.parent.mkdir(parents=True)
+    engine = store.engine(where)
+    try:
+        migrations.migrate(engine, migrations.STEPS[:upto])
+    finally:
+        engine.dispose()
+
+
+CHARGES_ROWS = (
+    # segment, from, to, total, what step 6 must call it
+    ("FO", 20260401, 20270331, 123456, "ytd"),  # the year-so-far row the catch-up kept
+    ("EQ", 20260401, 20270331, 2222, "ytd"),
+    ("FO", 20261109, 20261109, 15320, "day"),
+    ("FO", 20261001, 20261031, 99900, "month"),
+    ("EQ", 20240201, 20240229, 100, "month"),  # a leap February, whole
+    ("EQ", 20250201, 20250228, 100, "month"),
+    ("EQ", 20240201, 20240228, 100, "ytd"),  # not the whole of it
+    ("EQ", 20261002, 20261031, 100, "ytd"),
+)
+
+
+def _populate_step_5(where: Path) -> None:
+    """What a v0.11.0 install holds: a closed trade, its fills, and charges rows of each kind."""
+    with contextlib.closing(sqlite3.connect(where)) as conn, conn:
+        for segment, start, end, total, _ in CHARGES_ROWS:
+            conn.execute(
+                "INSERT INTO upstox_charges (principal, segment, financial_year, period_from, "
+                "period_to, total_paise, brokerage_paise, read_at, created_at, updated_at) "
+                "VALUES ('owner', ?, 2026, ?, ?, ?, 6000, 5, 5, 5)",
+                (segment, start, end, total),
+            )
+        conn.execute(
+            "INSERT INTO round_trip (principal, mode, exchange, symbol, product, product_class, "
+            "side, qty_max, entry_qty, exit_qty, entry_value_u, exit_value_u, entry_avg_u, "
+            "opened_ms, open_day, status, gross_paise, charges_est_paise, net_paise, created_at, "
+            "updated_at) VALUES ('owner', 'live', 'NFO', 'NIFTY25NOV2625000CE', 'MIS', "
+            "'intraday', 'long', 65, 65, 65, 65000000, 73125000, 1000000, 1, 20261109, 'closed', "
+            "81250, 8779, 72471, 1, 1)"
+        )
+
+
+def test_step_6_on_a_populated_step_5_file(tmp_path, capsys):
+    """journal.db step 6 (P7 J1) on what a v0.11.0 install holds: ``--status`` names the step
+    and changes nothing; opening applies it once; each charges row is called by what it says
+    itself, never one default; the trade and every figure of it stay; a second run does nothing."""
+    where = tmp_path / "old" / store.DB_FILENAME
+    _at_step(where, 5)
+    _populate_step_5(where)
+    before = snapshot(where.parent)
+    assert migrate.main(["--status", "--path", str(where)]) == 0
+    said = capsys.readouterr().out
+    assert "version: file 5, code" in said and "pending: [6" in said
+    assert snapshot(where.parent) == before and raw(where, "PRAGMA user_version") == [(5,)]
+    assert "basis" not in {r[1] for r in raw(where, "PRAGMA table_info(upstox_charges)")}
+
+    opened = JournalStore(where, now=NOW)
+    try:
+        assert opened.applied[0] == 6
+        got = raw(where, "SELECT segment, period_from, period_to, total_paise, basis, "
+                         "sebi_paise, dp_paise, brokerage_paise FROM upstox_charges")  # fmt: skip
+        assert sorted(got) == sorted(
+            (seg, a, b, total, basis, None, None, 6000) for seg, a, b, total, basis in CHARGES_ROWS
+        )
+        assert len({basis for *_, basis in CHARGES_ROWS}) == 3  # mutation: one default for all
+        trip = opened.read(OWNER, lambda tx: tx.rows("round_trip"))[0]
+        assert (trip["net_paise"], trip["charges_est_paise"], trip["version"]) == (72471, 8779, 1)
+        assert trip["charges_actual_paise"] is None and trip["charges_actual_basis"] is None
+        assert trip["charges_actual_parts"] is None
+        assert raw(where, "SELECT count(*) FROM charges_order") == [(0,)]
+        cols = {r[1] for r in raw(where, "PRAGMA table_info(charges_order)")}
+        assert {"principal", "created_at", "updated_at"} <= cols
+    finally:
+        opened.close()
+    again = JournalStore(where, now=NOW)
+    try:
+        assert again.applied == []
+    finally:
+        again.close()
+        store.stop()
+    # Forced back and run again on the migrated file: nothing is added twice, nothing rewritten.
+    raw(where, "UPDATE upstox_charges SET basis = 'month' WHERE period_from = 20261109")
+    raw(where, "PRAGMA user_version = 5")
+    third = JournalStore(where, now=NOW)
+    try:
+        assert third.applied[0] == 6
+        assert raw(where, "SELECT basis FROM upstox_charges WHERE period_from = 20261109") == [
+            ("month",)
+        ]
+        assert raw(where, "SELECT count(*) FROM upstox_charges") == [(len(CHARGES_ROWS),)]
+    finally:
+        third.close()
+        store.stop()
+
+
+def test_step_6_that_fails_part_way_leaves_the_file_at_step_5(tmp_path):
+    where = tmp_path / "old" / store.DB_FILENAME
+    _at_step(where, 5)
+    _populate_step_5(where)
+
+    def broken(conn):
+        migrations._v6(conn)
+        raise RuntimeError("stopped after the step's last statement")
+
+    engine = store.engine(where)
+    try:
+        with pytest.raises(RuntimeError):
+            migrations.migrate(engine, (*migrations.STEPS[:5], (6, broken)))
+    finally:
+        engine.dispose()
+    assert raw(where, "PRAGMA user_version") == [(5,)]
+    assert not raw(where, "SELECT name FROM sqlite_master WHERE name = 'charges_order'")
+    assert "basis" not in {r[1] for r in raw(where, "PRAGMA table_info(upstox_charges)")}
+    assert "charges_actual_basis" not in {r[1] for r in raw(where, "PRAGMA table_info(round_trip)")}
+
+
+def test_a_charges_row_written_after_step_6_says_its_own_basis(made):
+    row = {"segment": "FO", "financial_year": 2026, "period_from": 20261109,
+           "period_to": 20261109, "total_paise": 100, "read_at": NOW}  # fmt: skip
+    made.write(OWNER, lambda tx: tx.upstox_charges_put(row, NOW))
+    made.write(OWNER, lambda tx: tx.upstox_charges_put(
+        {**row, "period_from": 20260401, "period_to": 20270331}, NOW))  # fmt: skip
+    got = made.read(OWNER, lambda tx: tx.rows("upstox_charges", order="period_from"))
+    assert [r["basis"] for r in got] == ["ytd", "day"]
 
 
 def test_status_of_a_newer_file_says_so_in_the_owners_words(path, made, capsys):

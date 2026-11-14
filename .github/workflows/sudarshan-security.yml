@@ -1,0 +1,67 @@
+# सुदर्शन / SUDARSHAN monthly security audit (M19): the repository's own audit script, run on
+# GitHub's machines once a month and by hand.
+#
+# This repository is public. The audit's findings name files, lines and settings, so nothing of
+# them is published here: the script's own output goes to a file that is never uploaded, the
+# xlsx report is never an artifact, and the log shows only whether the audit passed and the
+# counts per sheet (sudarshan/ops/audit_counts.py prints fixed names and numbers only).
+# A failed run opens no issue and posts nothing: the owner sees a red run and asks a session to
+# reproduce it on a private machine with the security-audit skill.
+#
+# A scheduled workflow runs from the repository's default branch only.
+name: SUDARSHAN security audit
+
+on:
+  schedule:
+    - cron: "40 21 2 * *" # 03:10 IST on the 3rd of each month
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sudarshan-security-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0 # the audit also looks through the history for committed secrets
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          python-version: "3.12"
+      - run: uv sync --dev
+      - name: Run the audit (its output is kept out of this log)
+        id: audit
+        run: |
+          set +e
+          uv run --with openpyxl python .claude/skills/security-audit/audit.py \
+            > "$RUNNER_TEMP/audit-output.txt" 2>&1
+          echo "code=$?" >> "$GITHUB_OUTPUT"
+          exit 0
+      - name: Counts only
+        run: |
+          report=$(find tmp/security-audits -name 'security_audit_*.xlsx' 2>/dev/null | sort | tail -n 1)
+          if [ -z "$report" ]; then
+            echo "The audit wrote no report."
+            exit 1
+          fi
+          uv run --with openpyxl python -m sudarshan.ops.audit_counts "$report"
+      - name: Remove the report and the output
+        if: always()
+        run: rm -rf tmp/security-audits "$RUNNER_TEMP/audit-output.txt"
+      - name: Pass or fail
+        run: |
+          if [ "${{ steps.audit.outputs.code }}" = "0" ]; then
+            echo "The audit passed: no CRITICAL or HIGH check is failing."
+          else
+            echo "The audit FAILED: at least one CRITICAL or HIGH check is failing, or it could not finish."
+            echo "Nothing of what it found is shown here. Reproduce it privately with the security-audit skill."
+            exit 1
+          fi

@@ -71,6 +71,36 @@ def test_the_stt_row_boundary_is_1_april_2026():
     assert charges._statutory("futures", "SELL", "stt", 20260401) == Fraction(5, 10000)
 
 
+def test_the_stt_rows_before_1_october_2024():
+    """The card reaches back to 1 Apr 2024: a fill of April to September 2024 takes the lower
+    F&O STT of that time, and the row changes on 1 Oct, not a day either side."""
+    assert charges.CARD_START == 20240401
+    assert charges._statutory("options", "SELL", "stt", 20240401) == Fraction(625, 1_000_000)
+    assert charges._statutory("options", "SELL", "stt", 20240930) == Fraction(625, 1_000_000)
+    assert charges._statutory("options", "SELL", "stt", 20241001) == Fraction(1, 1000)
+    assert charges._statutory("futures", "SELL", "stt", 20240930) == Fraction(125, 1_000_000)
+    assert charges._statutory("futures", "SELL", "stt", 20241001) == Fraction(2, 10000)
+    # A fill older than the card takes its first row, as before.
+    assert charges._statutory("options", "SELL", "stt", 20230105) == Fraction(625, 1_000_000)
+
+
+def test_an_exercise_is_its_own_segment_only_when_the_fill_says_so():
+    """Mutation: the exercise rate applied to every option sale, or to the writer's side."""
+    plain = dict(VEC["C9"]["fills"][0])
+    del plain["exercise"]
+    assert charges.estimate([plain])["parts"]["stt_paise"] == 1463  # 0.15% either way in Nov 2026
+    early = {**VEC["C10"]["fills"][0]}
+    assert charges.estimate([early])["parts"]["stt_paise"] == 1219
+    del early["exercise"]  # an ordinary sale of March 2026 pays 0.1%, and exchange charges
+    got = charges.estimate([early])["parts"]
+    assert got["stt_paise"] == 975 and got["exchange_paise"] > 0
+    assert charges._statutory("options_exercise", "BUY", "stt", 20261126) == 0
+    assert charges._statutory("options_exercise", "SELL", "stt", 20260331) == Fraction(125, 100000)
+    assert charges._statutory("options_exercise", "SELL", "stt", 20260401) == Fraction(15, 10000)
+    share = {**plain, "exchange": "NSE", "symbol": "ACME", "product": "CNC", "exercise": True}
+    assert charges.estimate([share])["parts"]["exchange_paise"] > 0  # never for a share
+
+
 def test_options_buy_pays_no_stt_and_sell_pays_no_stamp():
     assert charges._statutory("options", "BUY", "stt", 20261109) == 0
     assert charges._statutory("options", "SELL", "stamp", 20261109) == 0

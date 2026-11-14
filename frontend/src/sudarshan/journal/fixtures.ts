@@ -39,6 +39,7 @@ export function trip(over: Partial<Trip> & { id: number }): Trip {
     excursion_note: null,
     version: 1,
     charges_modelled: true,
+    charges_actual_basis: null,
     ...over,
   }
 }

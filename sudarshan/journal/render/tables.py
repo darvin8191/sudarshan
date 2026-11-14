@@ -19,23 +19,14 @@ from collections.abc import Iterable, Mapping, Sequence
 from decimal import Decimal
 from typing import Any
 
-from sudarshan.journal.core import lots, words
+from sudarshan.journal.core import words
 from sudarshan.journal.core.metrics import strategy_of
 from sudarshan.journal.core.money import to_date
 from sudarshan.journal.render import doc as D
+from sudarshan.tax import classify
 
 PRICE_SCALE = 10_000
 DAY = 86_400
-#: Exchanges whose contracts are derivatives; the rest are equity.
-DERIVATIVE_EXCHANGES = frozenset({"NFO", "BFO", "CDS", "BCD", "MCX", "NCDEX", "NCO"})
-DERIVATIVE_GROUPS = (
-    ("Futures and options (NFO, BFO)", frozenset({"NFO", "BFO"})),
-    ("Currency and commodity derivatives", frozenset({"CDS", "BCD", "MCX", "NCDEX", "NCO"})),
-)
-SAME_DAY = "Equity, bought and sold the same day"
-UP_TO_12 = "Equity delivery, held up to 12 months"
-OVER_12 = "Equity delivery, held over 12 months"
-SEGMENTS = {"EQ": "Equity", "FO": "Futures and options", "COM": "Commodity", "CD": "Currency"}
 CSV_HEADER = (
     "Close day", "Open day", "Exchange", "Symbol", "Product", "Side", "Quantity",
     "Entry average", "Exit average", "Gross", "Charges", "Net", "Strategy", "Hold seconds",
@@ -207,63 +198,36 @@ def trades_table(trips: Sequence[Mapping[str, Any]]) -> D.Table:
     )
 
 
-def kind_of(exchange: str, product_class: str | None, open_day: int | None,
-            close_day: int | None) -> str:  # fmt: skip
-    """The group a trade or a matched sale is listed under in the tax pack, by kind and holding
-    period, never by a legal term (review H1): shares bought and sold the same day are that
-    whatever the product; "over 12 months" goes by the two dates, never by seconds."""
-    for name, exchanges in DERIVATIVE_GROUPS:
-        if exchange in exchanges:
-            return name
-    if product_class == "intraday" or open_day is None or close_day is None:
-        return SAME_DAY
-    if open_day == close_day:
-        return SAME_DAY
-    return OVER_12 if lots.held_over_12_months(open_day, close_day) else UP_TO_12
+#: A closed trade's kind in the journal's own activity table: the head ``sudarshan.tax``'s
+#: classifier names for it (the one rule for it), in the words of the phone's Tax view. No
+#: holding period: how long shares were held, and what that means, is the working paper's.
+HEAD_LABELS = {
+    classify.DERIVATIVE: "F&O and other derivatives",
+    classify.INTRADAY: "Shares, bought and sold the same day",
+    classify.DELIVERY: "Shares, taken or given in delivery",
+    classify.NOT_COMPUTED: "Other",
+}
+KIND_ORDER = tuple(HEAD_LABELS.values())
 
 
 def kind_of_trade(trip: Mapping[str, Any]) -> str:
-    """The group a closed trade is listed under in the tax pack (by kind, never by a legal term)."""
-    return kind_of(str(trip["exchange"]), trip.get("product_class"), trip.get("open_day"),
-                   trip.get("close_day"))  # fmt: skip
+    """The row a closed trade is counted in (see ``HEAD_LABELS``). The journal keeps Upstox's
+    product codes too (I, D), so the product goes to the classifier by its class."""
+    product = "MIS" if trip.get("product_class") == "intraday" else "CNC"
+    same_day = trip.get("open_day") is not None and trip.get("open_day") == trip.get("close_day")
+    head = classify.head_of_product(str(trip["exchange"]), str(trip.get("symbol") or ""),
+                                    product, same_day=same_day)  # fmt: skip
+    return HEAD_LABELS[head]
 
 
-KIND_ORDER = (*(name for name, _ in DERIVATIVE_GROUPS), SAME_DAY, UP_TO_12, OVER_12)
-#: Under the kinds table: how its rows are made, and why its total can differ from the trades'.
-KINDS_NOTE = (
-    "Each sale is listed in the year it was made: a purchase and a sale of the same instrument on "
-    "one day are matched with each other first, and the rest of a sale with the earliest "
-    "purchases still held (first in, first out). So this table's total can differ from the "
-    "figures above, which count a trade in the year it closed."
-)
-
-
-def tax_entry(kind: str, gross_paise: int, charges_paise: int) -> dict[str, Any]:
-    """One row's worth of the kinds table: a trade, or one sale matched to its purchase."""
-    return {"kind": kind, "gross_paise": int(gross_paise), "charges_paise": int(charges_paise),
-            "net_paise": int(gross_paise) - int(charges_paise)}  # fmt: skip
-
-
-def lot_entries(exchange: str, lots_found: Sequence[lots.Lot], start: int,
-                end: int) -> list[dict[str, Any]]:  # fmt: skip
-    """The kinds table's rows of a carry trade: each lot sold in ``start`` to ``end``, under its
-    own kind and holding period."""
-    return [
-        tax_entry(kind_of(exchange, "carry", lot.open_day, lot.close_day),
-                  lots.u_paise(lot.gross_u), lots.paise(lot.charges_paise))
-        for lot in lots_found
-        if start <= lot.close_day <= end
-    ]  # fmt: skip
-
-
-def kinds_table(entries: Sequence[Mapping[str, Any]]) -> D.Table:
-    """The year's trades by kind: count, gross, charges and net. ``entries`` are ``tax_entry``
-    rows (a closed trade, or a sale of a carried position matched to its purchases)."""
+def kinds_table(trips: Sequence[Mapping[str, Any]]) -> D.Table:
+    """The trades the journal saw close in the period, by kind: count, gross, charges, net."""
     acc: dict[str, list[int]] = {}
-    for t in entries:
-        row = acc.setdefault(str(t["kind"]), [0, 0, 0, 0])
+    for t in trips:
+        gross = t["gross_paise"] if t.get("gross_paise") is not None else t["net_paise"]
+        row = acc.setdefault(kind_of_trade(t), [0, 0, 0, 0])
         row[0] += 1
-        row[1] += int(t["gross_paise"])
+        row[1] += int(gross)
         row[2] += int(t.get("charges_paise") or 0)
         row[3] += int(t["net_paise"])
     rows = [
@@ -290,46 +254,6 @@ def kinds_table(entries: Sequence[Mapping[str, Any]]) -> D.Table:
         if rows
         else None,
         empty="No trades closed in this financial year.",
-    )
-
-
-def _cost(value: int | None) -> D.Cell:
-    return D.Money(-int(value)) if value is not None else D.Ink("not given")
-
-
-def broker_charges_table(rows: Sequence[Mapping[str, Any]]) -> D.Table:
-    """Charges as the broker reports them, per segment (Upstox's own figures, as read)."""
-    body = []
-    for r in sorted(rows, key=lambda r: r["segment"]):
-        other = [
-            r.get(k) for k in ("transaction_paise", "clearing_paise", "ipft_paise", "others_paise")
-        ]
-        body.append(
-            (
-                SEGMENTS.get(r["segment"], str(r["segment"])),
-                _cost(r.get("total_paise")),
-                _cost(r.get("brokerage_paise")),
-                _cost(r.get("stt_paise")),
-                _cost(r.get("gst_paise")),
-                _cost(r.get("stamp_paise")),
-                _cost(
-                    sum(int(v) for v in other if v is not None)
-                    if any(v is not None for v in other)
-                    else None
-                ),
-            )
-        )
-    return D.Table(
-        (
-            D.Column("Segment", 2.2),
-            D.Column("Total", 1.7, "r"),
-            D.Column("Brokerage", 1.7, "r"),
-            D.Column("STT", 1.5, "r"),
-            D.Column("GST", 1.5, "r"),
-            D.Column("Stamp", 1.4, "r"),
-            D.Column("Exchange, other", 1.8, "r"),
-        ),
-        tuple(body),
     )
 
 

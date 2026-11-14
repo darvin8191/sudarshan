@@ -22,6 +22,7 @@ from pathlib import Path
 
 from sudarshan.ops.files import read_regular
 
+from . import posture
 from .checks import SERVICES
 
 IST = timezone(timedelta(hours=5, minutes=30), "IST")  # India keeps no daylight saving
@@ -31,6 +32,7 @@ OPENALGO_URL = "http://127.0.0.1:5000/"
 #: Where systemd links a unit that is enabled (each SUDARSHAN service is WantedBy multi-user).
 WANTS_DIR = Path("/etc/systemd/system/multi-user.target.wants")
 MEMINFO = Path("/proc/meminfo")
+CPU_STAT = Path("/proc/stat")
 #: The deploy tool holds this for the whole of an install (sudarshan/ops/deploy/sudarshan-deploy).
 DEPLOY_LOCK = Path("/var/lib/sudarshan/deploy.lock")
 CERT_ADDRESS = ("127.0.0.1", 443)
@@ -115,6 +117,28 @@ def mem_available_mb(path: Path = MEMINFO) -> int | None:
     return None
 
 
+def mem_total_mb(path: Path = MEMINFO) -> int | None:
+    raw = read_regular(path, 8192)
+    for line in (raw or b"").decode("ascii", errors="replace").splitlines():
+        words = line.split()
+        if len(words) >= 2 and words[0] == "MemTotal:" and words[1].isdigit():
+            return int(words[1]) // 1024
+    return None
+
+
+def cpu(path: Path = CPU_STAT) -> list[int] | None:
+    """The kernel's processor counters since boot as [busy, total] ticks, all processors
+    together. Two runs' difference is the share of time the server was not idle."""
+    raw = read_regular(path, 8192)
+    for line in (raw or b"").decode("ascii", errors="replace").splitlines():
+        words = line.split()
+        if len(words) >= 6 and words[0] == "cpu" and all(w.isdigit() for w in words[1:]):
+            ticks = [int(w) for w in words[1:]]
+            total = sum(ticks[:8])
+            return [total - ticks[3] - ticks[4], total]  # less idle and waiting on the disk
+    return None
+
+
 def cert_hours_left(
     now: float, address=CERT_ADDRESS, timeout: float = TIMEOUT_S, name: str | None = None
 ) -> float | None:
@@ -182,11 +206,18 @@ def _or_none(read, *args):
         return None
 
 
-def gather(now: float, app_dir: Path, env_file: Path, known_master_date: str | None = None) -> dict:
+def gather(
+    now: float,
+    app_dir: Path,
+    env_file: Path,
+    known_master_date: str | None = None,
+    known_posture: Mapping | None = None,
+) -> dict:
     """One run's readings, in the shape ``checks.py`` documents. Never raises.
 
     ``known_master_date`` is the instrument list's date an earlier run today already read: when it
-    is today's, OpenAlgo's database is not opened again.
+    is today's, OpenAlgo's database is not opened again for it. ``known_posture`` is the last
+    posture reading: it is read afresh once an hour.
     """
     moment = datetime.fromtimestamp(now, UTC).astimezone(IST)
     today = moment.date().isoformat()
@@ -211,5 +242,12 @@ def gather(now: float, app_dir: Path, env_file: Path, known_master_date: str | N
         "master_date": master,
         "disk": _or_none(disk, app_dir),
         "mem_available_mb": _or_none(mem_available_mb),
+        "mem_total_mb": _or_none(mem_total_mb),
+        "cpu": _or_none(cpu),
         "cert_hours_left": _or_none(cert_hours_left, now),
+        "posture": _or_none(posture.read, now, app_dir, env_file, known_posture),
+        "counts": _or_none(posture.counts, app_dir, env_file),
+        "backup": _or_none(posture.backup, now),
+        "drill": _or_none(posture.drill),
+        "historify_gb": _or_none(posture.historify_gb, app_dir),
     }

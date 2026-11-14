@@ -44,6 +44,29 @@ the week in review, the monthly statement and the tax pack) and listed apart:
   the trade comes back. If the history later brings the missed sale, the trade closes with its
   result.
 
+## Actual charges and the tax working paper (`SUDARSHAN_TAX`)
+
+One switch, the portfolio's too, read from OpenAlgo's `.env`; off in code.
+
+- **Charges, night by night** (`jobs/charges.py`, a step of the 22:00 catch-up). Upstox's own
+  charges are read through the portfolio (`pnl_report`, part `charges`, with `from` and `to`) for
+  the last 3 trading days, for each ended month from the 3rd of the next, and then walking back
+  5 earlier days a night to the journal's first fill; at most 20 reads a night. An answer that is
+  all zero or empty while the journal holds fills is "not ready" and asked again, 7 nights in
+  all; after that the month's row, less the days that did answer, answers for the day.
+- **Into orders and trades** (`actual.py`, pure rule in `core/spread.py`). A day's row is shared
+  among that day's orders (`charges_order`, schema step 6) and each order among the trades that
+  hold its fills, so a day's trades add up to Upstox's total to the paisa. A trade carries the
+  actual, and its net is gross less the actual, only once every order of it has a share. A
+  replay keeps it; a late fill is shared again from the kept row. Live journal only.
+- **Estimate against actual** (`charges_reconcile(fy)`, `core/reconcile.py`): per month and
+  Upstox segment, flagged above 5%, with the part that is off most named in a sentence.
+- **The Tax pack** asks the portfolio for the tax working paper (`tax_pack`) and prints it
+  (`taxpack.py`). The journal works out no tax figure and holds no lot matching of its own; the
+  paper printed is kept whole in the archive row, so an archived pack never changes until it is
+  built again. Without the paper (switch off, portfolio not answering) the pack says why and
+  holds the journal's own blocks.
+
 Every period report and the tax pack carry one line when the period has any: "Not in these
 figures: N positions opened before the journal started, M contracts that ended at expiry, K
 trades the journal did not see closed. Upstox's own report has them." The Day report says the

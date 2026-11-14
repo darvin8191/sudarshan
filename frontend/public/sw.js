@@ -11,6 +11,10 @@
  *
  *   navigations   network first. The offline page is shown only when the network itself fails,
  *                 never for a 4xx or 5xx answer: the server's own words are the right ones.
+ *                 One exception (review L3, M1.17): 502, 503 and 504 are the web server speaking
+ *                 while the app behind it restarts, and its bare error page says nothing a
+ *                 family member can act on. Those three show the restart page, which says the
+ *                 server is restarting and tries again by itself. The status is kept.
  *   /assets/*     cache first (content-hashed, so a hit is never stale).
  *   /images/*     stale-while-revalidate: the kept copy at once, a fresh one fetched behind it,
  *                 so a changed icon or offline script reaches the phone; .webmanifest files are
@@ -26,7 +30,11 @@
  */
 const CACHE = 'sudarshan-shell-v1'
 const OFFLINE = '/offline.html'
+/** Shown for a navigation the web server answered while the app restarts (M1.17). */
+const RESTARTING = '/images/restarting.html'
+const RESTART_STATUSES = [502, 503, 504]
 const PRECACHE = [
+  RESTARTING,
   '/images/android-chrome-192x192.png',
   '/images/android-chrome-512x512.png',
   '/images/badge-96.png',
@@ -103,6 +111,20 @@ async function settleRelease(shell) {
   await refreshPrecache()
 }
 
+/**
+ * The restart page under the status the server gave, or null when this phone has not kept it
+ * (then the server's own answer is shown, as before). Never a 200: the page is not the app.
+ */
+async function restartPage(status) {
+  const cache = await caches.open(CACHE)
+  const page = await cache.match(RESTARTING)
+  if (!page) return null
+  return new Response(await page.text(), {
+    status,
+    headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' },
+  })
+}
+
 async function networkFirstOffline(event) {
   try {
     const fresh = await fetch(event.request)
@@ -110,6 +132,7 @@ async function networkFirstOffline(event) {
     if (fresh.ok && type.includes('text/html')) {
       event.waitUntil(settleRelease(fresh.clone()).catch(() => undefined))
     }
+    if (RESTART_STATUSES.includes(fresh.status)) return (await restartPage(fresh.status)) || fresh
     return fresh
   } catch (_failure) {
     const cache = await caches.open(CACHE)

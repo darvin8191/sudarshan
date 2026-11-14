@@ -117,8 +117,20 @@ TAG_KINDS = ("mistake", "label")
 TAG_COLOURS = ("brand", "gold", "info", "neutral", "loss")
 REPORT_KINDS = ("brief", "eod", "weekly", "monthly", "fy")
 REPORT_STATUSES = ("ready", "sent", "text_only", "not_sent")
-CHARGE_SEGMENTS = ("options", "futures", "equity_delivery", "equity_intraday", "not_modelled")
+#: ``options_exercise``: an option exercised or assigned (its own STT rate; last, so the first
+#: four stay the traded segments every statutory row covers).
+CHARGE_SEGMENTS = (
+    "options",
+    "futures",
+    "equity_delivery",
+    "equity_intraday",
+    "not_modelled",
+    "options_exercise",
+)
 CHARGE_PLANS = ("plus", "standard")
+#: Which of Upstox's rows a trade's actual charges came from: the day's own, or the month's
+#: (for a day Upstox never answered by itself).
+CHARGE_BASES = ("day", "month")
 #: The alerts' report desk as the settings answer names it (``settings_ops.desk_state``): the
 #: state its block on the alerts' /health says, or ``unknown`` when the alerts service does not
 #: answer as itself, has no such block, or names a state this release does not know (review M5).
@@ -164,6 +176,7 @@ OP_NAMES = (
     "settings_get",
     "settings_set",
     "reconcile_now",
+    "charges_reconcile",
     "delivery",
     "family_day",
     "nudge",
@@ -189,6 +202,7 @@ ENUMS = {
     "ReportStatus": REPORT_STATUSES,
     "ChargeSegment": CHARGE_SEGMENTS,
     "ChargePlan": CHARGE_PLANS,
+    "ChargeBasis": CHARGE_BASES,
     "DeskState": DESK_STATES,
     "HoldBucket": HOLD_BUCKETS,
     "RatioState": RATIO_STATES,
@@ -210,7 +224,8 @@ RECORDS = {
     "hold_s:int|null, strategy:string, strategy_override:string|null, setup_id:int|null, "
     "own_expiry_day:bool, index_expiry_day:bool, risk_paise:int|null, mae_paise:int|null, "
     "mfe_paise:int|null, mae_ms:int|null, mfe_ms:int|null, excursion_source:ExcursionSource, "
-    "excursion_note:string|null, version:int, charges_modelled:bool",
+    "excursion_note:string|null, version:int, charges_modelled:bool, "
+    "charges_actual_basis:ChargeBasis|null",
     "TripNote": "round_trip_id:int, notes:string, mistakes:int[], checklist:string, "
     "mood:Mood|null, version:int",
     "Tag": "id:int, kind:TagKind, name:string, colour:TagColour, archived:bool, version:int",
@@ -250,6 +265,32 @@ RECORDS = {
     "ChargeParts": "brokerage_paise:int, stt_paise:int, exchange_paise:int, sebi_paise:int, "
     "stamp_paise:int, gst_paise:int, total_paise:int",
     "ChargeEstimate": "parts:ChargeParts, modelled:bool, plan:ChargePlan, orders:int",
+    # Upstox's own charges as this trade carries them (M14.2): each part Upstox names, in its
+    # order, the trade's share of it; ``partial`` when Upstox left one of the usual parts empty
+    # (``missing`` names them, as labels); ``basis``: from the day's own figures or the month's.
+    "ChargeActualPart": "part:string, label:string, paise:int",
+    "ChargeActual": "parts:ChargeActualPart[], total_paise:int, basis:ChargeBasis, "
+    "partial:bool, missing:string[]",
+    # Estimate against actual (M7.42). A difference is the actual less the estimate: above zero,
+    # Upstox charged more than the journal estimated; ``diff_pct`` is that as a percentage of
+    # the actual; ``flagged`` above 5%, with ``words`` naming the part that is off most.
+    # ``unestimated_paise``: what Upstox charged in parts the estimate has no figure for.
+    "ReconcilePart": "part:string, label:string, estimate_paise:int, actual_paise:int, "
+    "diff_paise:int",
+    "ReconcileSegment": "segment:string, label:string, orders:int, estimate_paise:int, "
+    "modelled:bool, actual_paise:int|null, diff_paise:int|null, diff_pct:string|null, "
+    "flagged:bool, unestimated_paise:int, parts:ReconcilePart[], words:string|null, "
+    "read_at:int|null",
+    # ``month``: 202610; a month has an actual only when each of its segments with orders has.
+    "ReconcileMonth": "month:int, label:string, orders:int, estimate_paise:int, "
+    "actual_paise:int|null, diff_paise:int|null, diff_pct:string|null, flagged:bool, "
+    "words:string|null, segments:ReconcileSegment[]",
+    "ReconcileYear": "months:int, estimate_paise:int, actual_paise:int|null, "
+    "diff_paise:int|null, diff_pct:string|null, flagged:bool",
+    # ``running``: the year is not over, so the later months are not there yet; ``note``: what
+    # the owner should know of the whole answer (the journal's first fill, nothing traded).
+    "ChargesReconcile": "fy:int, fy_label:string, running:bool, months:ReconcileMonth[], "
+    "year:ReconcileYear, note:string|null, rate_card:RateCard",
     "Analytics": "metrics:Metrics, hold:HoldBucketRow[], calendar:Calendar, equity:Equity, "
     "heat:HeatCell[], by_strategy:BlockRow[], by_tag:BlockRow[], by_playbook:BlockRow[], "
     "expiry:ExpirySplit, beta:Beta|null",
@@ -301,12 +342,14 @@ RECORDS["TripRow"] = RECORDS["Trip"] + ", mistakes:int[]"
 RECORDS["TripFill"] = RECORDS["Fill"] + ", trip_qty:int"
 # The trade sheet: the trip, its fills (each as executed, with this trip's part of it), the owner's
 # note (its ``checklist`` is JSON text, ``[{"rule": ..., "yes": ...}]``, or empty), the excursion,
-# the charges estimate of its orders (each order priced whole, this trip's share by quantity), the
+# the charges estimate of its orders (each order priced whole, this trip's share by quantity),
+# Upstox's actual charges once every order of it has them (``charges_actual``), the
 # first entry order's round trip as OpenAlgo's latency record has it (``latency_ms``), and each
 # order's label.
 RECORDS["TripDetail"] = RECORDS["Trip"] + (
     ", legs:TripLeg[], fills:TripFill[], note:TripNote|null, excursion:Excursion|null, "
-    "charges:ChargeEstimate|null, latency_ms:int|null, orders:OrderRef[]"
+    "charges:ChargeEstimate|null, latency_ms:int|null, orders:OrderRef[], "
+    "charges_actual:ChargeActual|null"
 )
 
 
@@ -419,6 +462,9 @@ OPS = (
            "weekly_on?:bool, monthly_on?:bool, fy_on?:bool, charges_plan?:ChargePlan, "
            "report_language?:string", "Done"),
     OpSpec("reconcile_now", "POST", "/reconcile", "reconcile", "", "Done"),
+    # ``fy``: the year the financial year starts in (2026 for FY 2026-27); this year when absent.
+    OpSpec("charges_reconcile", "GET", "/charges/reconcile", "read", "fy?:int",
+           "ChargesReconcile"),
 )  # fmt: skip
 #: Ops that no route of the bridge carries: the alerts desk, the family service and the alerts'
 #: nudge call them. A nudge's three fields sit in the seal itself, beside ``op`` (alerts/nudge.py).

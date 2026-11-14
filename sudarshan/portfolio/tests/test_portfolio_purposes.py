@@ -187,6 +187,19 @@ async def test_the_journal_purpose_opens_only_its_reads_and_a_write_is_403_and_l
     assert len(rig.book.tabs(OWNER)) == 3
 
 
+@scenario
+async def test_how_an_account_counts_for_tax_is_never_a_members_or_the_journals_to_set(rig):
+    """Owner decision 9 ("not for tax") is written through ``tax_input_set``: owner purpose only."""
+    await rig.grant("7", [rig.tab["id"]])
+    row = {"member_id": 1, "account_id": rig.account["id"], "tax_mode": "none"}
+    args = {"kind": "account_mode", "row": row, "version": rig.account["version"]}
+    for status, body in (await rig.family("7", "tax_input_set", **args),
+                         await rig.journal("tax_input_set", **args)):  # fmt: skip
+        assert status == 403 and body["status"] == "error"
+    kept = rig.svc.store.read(OWNER, lambda tx: tx.get("account", rig.account["id"]))
+    assert (kept["tax_mode"], kept["version"]) == (rig.account["tax_mode"], rig.account["version"])
+
+
 # ---- P1: shares and privacy ----------------------------------------------------------------------
 @scenario
 async def test_a_share_is_made_changed_listed_and_removed_from_its_version(rig):

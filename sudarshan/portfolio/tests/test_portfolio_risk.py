@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from sudarshan.portfolio.core import kinds, risk, words
+from sudarshan.portfolio.core.money import value_paise
 from sudarshan.portfolio.core.performance import Period, Point, periods
 from sudarshan.portfolio.core.risk import Holding
 
@@ -98,6 +99,37 @@ def test_concentration_is_the_vectors(case):
     got = risk.concentration(
         held(case["holdings"]), case["max_holding_pct"], case["max_sector_pct"]
     )
+    assert got == case["expect"]
+
+
+def holdings_of_rows(rows) -> list[Holding]:
+    """The holdings of a list of a tab view's rows (``HoldingRow``), by the rule the risk op
+    follows and the phone copies (``risk/concentration.ts``): the asset is the instrument, its
+    name the label, each line's units at the price or its cost while there is no price."""
+    return [
+        Holding(
+            str(row["asset"]["id"]),
+            row["asset"]["name"],
+            sum(
+                line["cost_paise"]
+                if row["price"]["price_u"] is None
+                else value_paise(line["qty_u"], row["price"]["price_u"])
+                for line in row["lines"]
+            ),
+            row["asset"]["sector"],
+        )
+        for row in rows
+        if row["asset"]["kind"] in kinds.HOLDING_KINDS
+    ]
+
+
+@by_id("rows")
+def test_concentration_from_a_tabs_rows_is_the_vectors(case):
+    """The phone runs these cases too (``risk/concentration.test.ts``), so the bars it moves with
+    ticks and the service's own cannot drift."""
+    found = holdings_of_rows(case["rows"])
+    assert [list(each) for each in found if each.value_paise > 0] == case["holdings"]
+    got = risk.concentration(found, case["max_holding_pct"], case["max_sector_pct"])
     assert got == case["expect"]
 
 

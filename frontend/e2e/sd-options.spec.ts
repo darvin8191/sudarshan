@@ -13,7 +13,9 @@
  * thread's own CPU time for every task from a trace and scales it by four, so it gives the same
  * answer on a busy machine, where a slowed clock and wall time do not. It measures a production
  * build (`vite build`, then `vite preview`) and is skipped on the dev server, whose React is
- * several times slower.
+ * several times slower. It asserts on each task (none over 50 ms, the 95th percentile under 34 ms)
+ * and only reports the share of time the main thread is busy: sustained load is for the owner's
+ * phone to judge.
  *
  * Each state asserts: no sideways scroll; every link, button and switch at least 48 x 48 CSS px;
  * the freshness words for the state, and no "Real-time" without ticks; every up or down figure
@@ -369,7 +371,7 @@ async function costRun(
     over50: tasks.filter((ms) => ms > 50).map((ms) => Math.round(ms)),
     largest: Math.round(tasks[tasks.length - 1] ?? 0),
     p95: Math.round((busy[Math.floor(busy.length * 0.95)] ?? 0) * 10) / 10,
-    /** The share of each second the main thread would be busy on such a phone. */
+    /** The share of each second the main thread would be busy on such a phone. Reported only. */
     busyShare: Math.round((tasks.reduce((sum, ms) => sum + ms, 0) / (seconds * 1000)) * 100) / 100,
     ticked,
   }
@@ -378,7 +380,10 @@ async function costRun(
   expect(cost.tasks, 'tasks measured').toBeGreaterThan(500)
   expect(cost.over50, 'tasks over 50 ms on a phone four times slower').toEqual([])
   expect(cost.p95, 'a busy task at the 95th percentile, well inside two frames (34 ms)').toBeLessThan(34)
-  expect(cost.busyShare, 'the main thread keeps up with the tape').toBeLessThan(0.75)
+  // The busy share is written down, not asserted (coordinator's decision, SCR-P item 1). It divides
+  // CPU time by the tape's wall time, so the same build read 0.67 to 0.94 run to run on the build
+  // machine. Sustained load is judged on the owner's phone (15 minutes on the Chain tab: does it
+  // warm or lag); the per-task limits above are what this run decides.
   return cost
 }
 
@@ -428,6 +433,54 @@ test.describe('the options screen at 360 x 800', () => {
     await page.goBack()
     await expect(page.getByRole('dialog')).toHaveCount(0)
     await expect(page.locator('[data-strike]')).toHaveCount(21)
+    expect(seen.orders, 'no order was sent').toBe(0)
+  })
+
+  test('a leg\'s own sheet adds the leg to a watchlist through the watchlists\' own add', async ({ page }, info) => {
+    const PUT = symbolOf(25_900, 'PE')
+    const added: Array<{ path: string; body: unknown }> = []
+    const json = (body: unknown) => ({ status: 200, contentType: 'application/json', body: JSON.stringify(body) })
+    const lists = [
+      { id: 1, name: 'Swing', position: 0, items: [{ id: 11, symbol: 'TESTFUT', exchange: 'NFO', position: 0 }] },
+      { id: 2, name: 'Hedges', position: 1, items: [{ id: 21, symbol: PUT, exchange: 'NFO', position: 0 }] },
+    ]
+    await page.route(
+      (url) => url.pathname.startsWith('/watchlist/api/'),
+      (route) => {
+        const request = route.request()
+        const path = new URL(request.url()).pathname
+        if (request.method() === 'GET') return route.fulfill(json({ status: 'success', data: lists }))
+        added.push({ path, body: request.postDataJSON() })
+        return route.fulfill(
+          json({ status: 'success', data: { id: 99, symbol: PUT, exchange: 'NFO', position: 1 } })
+        )
+      }
+    )
+    const { seen } = await serve(page, OPEN)
+    await page.locator('[data-strike="25900"] [data-leg="PE"]').tap()
+    const strike = page.getByRole('dialog', { name: 'NIFTY 25,900' })
+    await page.waitForTimeout(600) // a sheet ignores taps for half a second after it opens
+    await strike.getByRole('button', { name: 'PE: chart, alert, depth' }).tap()
+    const leg = page.getByRole('dialog', { name: 'NIFTY 25900 PE' })
+    await expect(leg.getByRole('button', { name: 'Add to watchlist' })).toBeVisible()
+    const inLeg = await pageChecks(page, '[role="dialog"]')
+    expect(inLeg.small, 'targets under 48 x 48 in the leg sheet').toEqual([])
+    await page.waitForTimeout(600)
+    await leg.getByRole('button', { name: 'Add to watchlist' }).tap()
+
+    const pick = page.getByRole('dialog', { name: 'Add to watchlist' })
+    await expect(pick.getByRole('button', { name: /Swing/ })).toContainText('1 of 250')
+    await expect(pick.getByRole('button', { name: /Hedges/ })).toBeDisabled()
+    await expect(pick.getByRole('button', { name: /Hedges/ })).toContainText('Already in this list')
+    const inPick = await pageChecks(page, '[role="dialog"]')
+    expect(inPick.small, 'targets under 48 x 48 in the list of watchlists').toEqual([])
+    expect(inPick.sideways).toBe(false)
+    await page.screenshot({ path: info.outputPath('add-to-watchlist.png') })
+    await page.waitForTimeout(600)
+    await pick.getByRole('button', { name: /Swing/ }).dblclick() // a double tap adds once
+    await expect(page.getByText('Added NIFTY 25900 PE to Swing')).toBeVisible()
+    await expect(page.getByRole('dialog')).toHaveCount(0)
+    expect(added).toEqual([{ path: '/watchlist/api/lists/1/items', body: { symbol: PUT, exchange: 'NFO' } }])
     expect(seen.orders, 'no order was sent').toBe(0)
   })
 

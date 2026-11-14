@@ -86,9 +86,10 @@ FAILURES = frozenset({"rolled_back", "unit_refused", "backup_failed"})
 FAMILY_AT_ONCE = frozenset(
     {"lockout", "new_device", "member_removed", "bot_token_rejected", "family_check_failed"}
 )
-#: The watch's notices (src watch, M19.5): a failure is told at once, and so is the recovery from
-#: one; a warning and the return from a warning wait for the close (``_at_once``).
-AT_ONCE = FAILURES | FAMILY_AT_ONCE | {"watch_failing"}
+#: The watch's notices (src watch, M19.5): a failure is told at once, and so are the recovery from
+#: one and its news (a new AI connection, a Telegram account linked or unlinked); a warning and
+#: the return from a warning wait for the close (``_at_once``).
+AT_ONCE = FAILURES | FAMILY_AT_ONCE | {"watch_failing", "watch_new"}
 MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 UNIT = re.compile(r"sudarshan-[a-z0-9-]+\.(?:service|timer)")
 #: The order the facts of one run are told in.
@@ -110,6 +111,10 @@ KIND_ORDER = (
     "watch_failing",
     "watch_warning",
     "watch_fine",
+    "watch_new",
+    "drill_failed",
+    "drill_passed",
+    "watch_summary",
 )
 
 #: Why an install was undone, in the owner's words (the cause only; ``rolled_back`` adds the rest).
@@ -425,11 +430,12 @@ _SERVICES = {
     "family": ("family view", "Family members cannot open the app."),
     "journal": ("journal", "The Journal and Reports pages are not updating."),
 }
-RESTARTS = (
-    "The server restarts it by itself; if this message comes again, have the server looked at."
-)
+#: Where the owner looks (M20.8): the System page shows every check the watch makes.
+LOOK = "open the System page and have the server looked at"
+RESTARTS = f"The server restarts it by itself; if this message comes again, {LOOK}."
 _MINUTES = re.compile(r"[0-9]{1,5}")
 _GB = re.compile(r"[0-9]{1,5}\.[0-9]")
+_DRILL_NAME = re.compile(r"[A-Za-z0-9._-]{1,60}")
 
 
 def _began(event: Event, now: datetime) -> str:
@@ -461,7 +467,7 @@ def _watch_failing(event: Event, now: datetime) -> list[str]:
         return [
             f"The price feed has not been connected to Upstox since {_began(event, now)}. "
             "Prices on your screens are not Real-time and market alerts are stopped. It "
-            "reconnects by itself; if this message comes again, have the server looked at."
+            f"reconnects by itself; if this message comes again, {LOOK}."
         ]
     if check == "instrument_list":
         return [
@@ -485,7 +491,8 @@ def _watch_failing(event: Event, now: datetime) -> list[str]:
         if hours == "0":
             return [
                 "The server's security certificate has run out and has not renewed. Phones "
-                "refuse the app until it is renewed; have the server looked at now."
+                "refuse the app until it is renewed; have the server looked at now (the "
+                "System page shows it)."
             ]
         left = f"in {hours} hours" if _MINUTES.fullmatch(hours) else "within two days"
         return [
@@ -512,8 +519,75 @@ def _watch_warning(event: Event, now: datetime) -> list[str]:
     if check == "memory":
         return [
             "The server has been short of memory for several minutes. Nothing has stopped; if "
-            "the app feels slow, have the server looked at."
+            f"the app feels slow, {LOOK}."
         ]
+    if check == "posture_locks":
+        if event.fact("cause") == "approval":
+            return [
+                "The AI assistant is switched on, but a new AI client would be approved without "
+                "asking you. Set MCP_OAUTH_REQUIRE_APPROVAL=True in OpenAlgo's settings and "
+                "restart OpenAlgo."
+            ]
+        return [
+            "The AI assistant's safety settings are not as SUDARSHAN ships them, so the "
+            "assistant stays switched off. Set OPENALGO_MCP_READ_ONLY=1 and "
+            "MCP_OAUTH_WRITE_SCOPE_ENABLED=False in OpenAlgo's settings and restart OpenAlgo."
+        ]
+    if check == "posture_debug":
+        return [
+            "OpenAlgo is running with its debug setting on, which is not safe on a server "
+            "that is on the internet. Set FLASK_DEBUG=False in OpenAlgo's settings and restart "
+            "OpenAlgo."
+        ]
+    if check == "posture_modes":
+        place = {
+            "settings": "SUDARSHAN's settings folder",
+            "vault": "The folder that holds your sealed Upstox sign-in details",
+            "env": "OpenAlgo's settings file",
+        }.get(event.fact("what"), "One of SUDARSHAN's private folders")
+        return [
+            f"{place} can be read by other accounts on the server. Nothing has stopped; have "
+            "its permissions set right (the System page names it)."
+        ]
+    if check == "posture_ports":
+        return [
+            "One of SUDARSHAN's services is listening on the network, not only inside the "
+            f"server. Nothing has stopped; {LOOK}."
+        ]
+    if check == "drill":
+        days = event.fact("days")
+        age = f"{days} days" if _MINUTES.fullmatch(days) else "over 100 days"
+        return [
+            f"The last restore test of the backups was {age} ago. It runs by itself on the "
+            "first Sunday of each month; the System page shows why it has not, and the README "
+            "has the line to run it by hand."
+        ]
+    if check == "historify":
+        size = event.fact("gb")
+        grown = f" to {size} GB" if _GB.fullmatch(size) else ""
+        return [
+            f"Historify's downloaded history has grown{grown}. Nothing has stopped; delete "
+            "what you no longer need on the Historify page."
+        ]
+    return []
+
+
+def _watch_new(event: Event, now: datetime) -> list[str]:
+    """Something the watch counted one more (or one fewer) of since its last look."""
+    check, what, at = event.fact("check"), event.fact("what"), _when(event.at, now)
+    if check == "assistant" and what == "connection":
+        return [
+            f"A new AI connection to SUDARSHAN was approved shortly before {at}. If this was "
+            "not you, press Disconnect the assistant on the System page."
+        ]
+    if check == "telegram_links" and what == "linked":
+        return [
+            f"A Telegram account was linked to your bot shortly before {at}. Linking needs "
+            "your API key. If this was not you, make a new API key on the API Key page and "
+            "link your own Telegram again."
+        ]
+    if check == "telegram_links" and what == "unlinked":
+        return [f"A Telegram account was unlinked from your bot shortly before {at}."]
     return []
 
 
@@ -528,7 +602,129 @@ def _watch_fine(event: Event, now: datetime) -> list[str]:
         "disk": ["The server's disk has enough free space again."],
         "memory": ["The server's memory is back to normal."],
         "certificate": ["The server's security certificate was renewed."],
+        "posture_locks": ["The AI assistant's safety settings are as they should be again."],
+        "posture_debug": ["OpenAlgo's debug setting is off again."],
+        "posture_modes": ["SUDARSHAN's private folders are closed to other accounts again."],
+        "posture_ports": ["SUDARSHAN's services listen only inside the server again."],
+        "historify": ["Historify's downloaded history is back under 3 GB."],
     }.get(check, [])
+
+
+#: A check's name in the owner's words, for the weekly summary's "needs you" line.
+_CHECK_WORDS = {
+    **{f"service_{name}": words[0] for name, words in _SERVICES.items()},
+    "openalgo": "OpenAlgo",
+    "login": "Upstox login",
+    "feed": "price feed's connection",
+    "instrument_list": "instrument list",
+    "disk": "disk space",
+    "memory": "memory",
+    "certificate": "security certificate",
+    "posture_locks": "AI assistant's safety settings",
+    "posture_debug": "OpenAlgo's debug setting",
+    "posture_modes": "private folders' permissions",
+    "posture_ports": "a service listening on the network",
+    "posture_reboot": "a restart the system asks for",
+    "posture_updates": "security updates waiting",
+    "backup": "nightly backup is late",
+    "drill": "restore test of the backups",
+    "historify": "Historify's size",
+}
+_SIZE_WORDS = (
+    ("db", "OpenAlgo's databases"),
+    ("log", "its logs"),
+    ("hist", "Historify"),
+    ("ring", "SUDARSHAN's own stores"),
+    ("bak", "the backups"),
+)
+_SIZES = re.compile(r"[a-z]{2,6}=[0-9]{1,8}(?:,[a-z]{2,6}=[0-9]{1,8}){0,9}")
+_NAMES = re.compile(r"[a-z_]{2,40}(?:,[a-z_]{2,40}){0,20}")
+
+
+def _size(megabytes: int) -> str:
+    return f"{megabytes / 1024:.1f} GB" if megabytes >= 1024 else f"{megabytes} MB"
+
+
+def _watch_summary(event: Event, now: datetime) -> list[str]:
+    """The Sunday summary: what needs the owner first, then the week in figures."""
+    number = lambda name: event.fact(name) if _MINUTES.fullmatch(event.fact(name)) else ""  # noqa: E731
+    needs = []
+    for level, word in (("failing", "not working"), ("warning", "to look at")):
+        names = event.fact(level)
+        if _NAMES.fullmatch(names):
+            needs += [
+                f"{_CHECK_WORDS.get(name, 'a server check')} ({word})" for name in names.split(",")
+            ]
+    lines = ["Weekly server summary."]
+    if needs:
+        lines.append(
+            "Needs you: " + ", ".join(dict.fromkeys(needs)) + ". The System page has each."
+        )
+    else:
+        lines.append("Nothing needs you.")
+    fine, unread = number("fine"), number("unread")
+    if fine:
+        could_not = f", {unread} could not be read" if unread not in ("", "0") else ""
+        lines.append(f"Checks fine: {fine}{could_not}.")
+    free = event.fact("disk_free_gb")
+    parts = []
+    if _SIZES.fullmatch(event.fact("sizes")):
+        measured = dict(pair.split("=") for pair in event.fact("sizes").split(","))
+        parts = [
+            f"{words} {_size(int(measured[key]))}" for key, words in _SIZE_WORDS if key in measured
+        ]
+    if _GB.fullmatch(free) or parts:
+        lead = f"Disk: {free} GB free. " if _GB.fullmatch(free) else "Disk: "
+        lines.append((lead + (", ".join(parts) + "." if parts else "")).strip())
+    age, cause, days = number("backup_age_h"), event.fact("drill_cause"), number("drill_days")
+    proof = [f"Newest backup: {age} hours old." if age else ""]
+    proof.append(
+        {
+            "passed": f"Restore test: passed {days} days ago." if days else "Restore test: passed.",
+            "failed": "Restore test: FAILED.",
+            "late": f"Restore test: last done {days} days ago."
+            if days
+            else "Restore test: overdue.",
+            "never": "Restore test: never done yet.",
+        }.get(cause, "")
+    )
+    if any(proof):
+        lines.append(" ".join(part for part in proof if part))
+    waiting, security = number("updates_all"), number("updates_security")
+    if waiting:
+        asks = " The system asks for a restart." if event.fact("reboot") == "yes" else ""
+        lines.append(
+            f"System updates waiting: {waiting}, {security or '0'} of them security. They are "
+            f"yours to apply by hand on a non-trading day.{asks}"
+        )
+    cpu, mem = number("cpu95"), number("mem95")
+    if cpu and mem:
+        lines.append(
+            f"This week the server's processor stayed under {cpu}% and its memory under {mem}% "
+            "for 95% of the time."
+        )
+    return lines
+
+
+def _drill_passed(event: Event, now: datetime) -> list[str]:
+    count = event.fact("databases")
+    opened = f"its {count} databases open" if _MINUTES.fullmatch(count) else "its databases open"
+    return [
+        f"The restore test of the backups passed: the newest backup reads back whole, {opened}, "
+        "and the vault opens with the backup's own keys."
+    ]
+
+
+def _drill_failed(event: Event, now: datetime) -> list[str]:
+    from sudarshan.ops.drill import WORDS  # the same sentences the System page shows
+
+    cause = WORDS.get(event.fact("item"), WORDS["other"])
+    name = event.fact("name")
+    about = f" ({name})" if _DRILL_NAME.fullmatch(name) else ""
+    return [
+        f"The restore test of the backups FAILED. {cause}{about} Until this is put right the "
+        "backups may not restore: open the System page and have the server looked at."
+    ]
 
 
 def _at_once(event: Event) -> bool:
@@ -552,6 +748,10 @@ _FAMILY_WORDS = {
     "watch_failing": _watch_failing,
     "watch_warning": _watch_warning,
     "watch_fine": _watch_fine,
+    "watch_new": _watch_new,
+    "drill_passed": _drill_passed,
+    "drill_failed": _drill_failed,
+    "watch_summary": _watch_summary,
 }
 
 

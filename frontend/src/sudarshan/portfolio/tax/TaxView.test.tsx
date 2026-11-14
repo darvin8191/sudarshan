@@ -19,6 +19,13 @@ vi.mock('../api', async (importOriginal) => ({
   getDividends: (args: object) => api.call('dividends', args),
 }))
 
+// The journal's two parts of the view have their own tests (JournalCards.test.tsx); here the
+// journal is switched off, so nothing of this file goes to the network for them.
+vi.mock('@/sudarshan/journal/api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/sudarshan/journal/api')>()),
+  journalCall: async () => ({ enabled: false, data: null, message: 'off' }),
+}))
+
 import { createQueryClient } from '@/app/providers'
 import { PortfolioError } from '../api'
 import { DIVIDENDS_OFF } from '../dividends/DividendsCard'
@@ -147,6 +154,25 @@ describe('the view', () => {
     expect(within(sheet).getAllByText('Long-term')).toHaveLength(2)
     expect(within(sheet).getByText('Buyback')).toBeTruthy()
     expect(within(sheet).getAllByText(/\(allocated\)/)).toHaveLength(2)
+  })
+
+  it('names each sale by its share with the ISIN under it, and by the ISIN alone when unnamed', async () => {
+    show(
+      pack((x) => {
+        x.capital_gains.schedule[0].name = 'Invented Industries Ltd'
+        x.capital_gains.schedule[2].name = null
+      })
+    )
+    await userEvent.click(
+      await screen.findByRole('button', { name: /Every sale of the year \(3\)/ })
+    )
+    const [first, , third] = within(await screen.findByRole('dialog')).getAllByRole('listitem')
+    const name = within(first).getByText('Invented Industries Ltd')
+    expect(name.className).toContain('font-semibold')
+    expect(within(first).getByText('INE000A01010').className).toContain('text-xs')
+    // No record names the third: its ISIN stands in the name's place, once.
+    expect(within(third).getAllByText(/^INE/)).toHaveLength(1)
+    expect(within(third).getByText(/^INE/).className).toContain('font-semibold')
   })
 
   it('lists a sale left out of the totals with its reason', async () => {

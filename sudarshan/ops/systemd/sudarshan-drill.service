@@ -1,0 +1,65 @@
+# सुदर्शन / SUDARSHAN restore drill (M19.8): proof that the newest nightly backup can be read
+# back whole. Started by sudarshan-drill.timer on the first Sunday of each month at 11:00 IST.
+# It unpacks the newest complete archive into a private scratch folder inside the backup's own
+# state folder (/var/lib/sudarshan-backup/drill, mode 700), opens every database read-only,
+# checks OpenAlgo's has the owner's account, key and Upstox login, checks the archive's .env has
+# the keys the app needs, opens the vault with the key derived from that same .env, and removes
+# the folder again. It restores nothing over live files, stops no service and uses no network.
+# The result is drill.json beside the archives (the System page shows it) and one notice on
+# Telegram, sent by sudarshan-alerts from events.jsonl in the same folder.
+# The program decides for itself: the timer's run does nothing on a trading day, and no run
+# starts in or just before market hours, so the deploy tool restarting this unit after an
+# install is harmless (on a day without trading it simply runs one more drill).
+# Docs: sudarshan/README.md ("The restore drill").
+# Type=exec, not oneshot: the deploy tool restarts every service it installs and waits for the
+# restart to return; a oneshot would hold it for the whole of a drill.
+
+[Unit]
+Description=SUDARSHAN restore drill (reads the newest backup back)
+
+[Service]
+Type=exec
+User=sudarshan
+Group=sudarshan
+Slice=sudarshan.slice
+WorkingDirectory=/opt/sudarshan/apps/openalgo
+ExecStart=/opt/sudarshan/apps/openalgo/.venv/bin/python -m sudarshan.ops.drill
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+EnvironmentFile=-/etc/sudarshan/backup.env
+# The backup's own state folder: the archives it reads, its scratch folder, drill.json, the
+# notice file and its lock.
+StateDirectory=sudarshan-backup
+StateDirectoryMode=0700
+# A drill is a minute or two. Stopped after an hour whatever it is waiting for.
+RuntimeMaxSec=3600
+TimeoutStopSec=30
+# Behind everything else on the server: it reads and unpacks.
+Nice=19
+CPUWeight=10
+IOWeight=10
+MemoryHigh=384M
+MemoryMax=512M
+UMask=0077
+LimitCORE=0
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectProc=invisible
+ProtectSystem=strict
+ProtectHome=yes
+ReadOnlyPaths=-/etc/sudarshan
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+RestrictNamespaces=yes
+# No network at all: nothing is fetched and nothing is sent.
+RestrictAddressFamilies=AF_UNIX
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+LockPersonality=yes
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+SystemCallArchitectures=native

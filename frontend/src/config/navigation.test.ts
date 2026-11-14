@@ -6,6 +6,7 @@ import {
   menuGroups,
   mobileSheetItems,
   NAV_GROUPS,
+  NAV_WITH_CHILDREN,
   navItems,
   profileMenuItems,
 } from './navigation'
@@ -195,7 +196,17 @@ describe('Navigation Config', () => {
       // child path nor a longer name that merely starts with the href may light the tab up.
       expect(isActiveRoute('/dashboard/sub', '/dashboard')).toBe(false)
       expect(isActiveRoute('/orderbookextra', '/orderbook')).toBe(false)
-      expect(isActiveRoute('/chart/NSE/INFY', '/chart')).toBe(false)
+      expect(isActiveRoute('/trading/NSE/INFY', '/trading')).toBe(false)
+    })
+
+    it('lights Chart on an instrument’s own address (SUDARSHAN M4.15)', () => {
+      expect(isActiveRoute('/chart', '/chart')).toBe(true)
+      expect(isActiveRoute('/chart/NSE/INFY', '/chart')).toBe(true)
+      expect(isActiveRoute('/chart/NFO/NIFTY17NOV2625900CE', '/chart')).toBe(true)
+      // Whole segments only: a longer name is another page.
+      expect(isActiveRoute('/chartink', '/chart')).toBe(false)
+      expect(isActiveRoute('/charts/NSE/INFY', '/chart')).toBe(false)
+      expect(NAV_WITH_CHILDREN.has('/chart')).toBe(true)
     })
 
     it('lights Options on a chain’s own address (SUDARSHAN M11.1)', () => {
@@ -217,6 +228,8 @@ describe('Navigation Config', () => {
         ...hrefs.map((href) => `${href}/NFO/NIFTY`),
         ...hrefs.map((href) => `${href}x`),
         '/options/NFO/NIFTY',
+        '/chart/NSE/INFY',
+        '/chartink',
         '/search/token',
         '/search',
       ]
@@ -227,6 +240,7 @@ describe('Navigation Config', () => {
       expect(hrefs.filter((href) => isActiveRoute('/options/NFO/NIFTY', href))).toEqual([
         '/options',
       ])
+      expect(hrefs.filter((href) => isActiveRoute('/chart/NSE/INFY', href))).toEqual(['/chart'])
     })
 
     it('gives an address to the longer entry when two would own it', () => {

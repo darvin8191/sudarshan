@@ -259,6 +259,67 @@ CONCENTRATION = [
 ]
 assert 225_650 + 774_350 == 1_000_000
 
+# ---- concentration from a tab's rows (the phone's live bars) -------------------------------------
+# The risk op sends the rows its concentration was worked out from; the phone prices them from
+# ticks and applies the rule above. A row is a holding as the tab's view gives it (HoldingRow, the
+# keys the rule reads): the instrument is the asset id, the label its name, the value each line's
+# units at the price (qty_u x price_u / 10^8, in paise) or its cost while there is no price.
+#   Alpha Ltd (asset 1, Banks) is in two tabs: 12 and 8 shares at 250.00 = 3,000 + 2,000 = 5,000
+#   Beta Fund (asset 2, no sector) has no price: its cost, 3,000
+#   Gamma Ltd (asset 3, IT) in two accounts: 4 + 6 shares at 150.00 = 1,500
+#   a loan and a row of no units are no holdings.               total 9,500
+# "holdings" is what the rows map to, one per row in their order (those worth something).
+def row(asset_id, name, kind, sector, price, lines, symbol=None):
+    return {"asset": {"id": asset_id, "name": name, "kind": kind, "sector": sector,
+                      "exchange": "NSE" if symbol else None, "symbol": symbol},
+            "price": {"price_u": None if price is None else price * 10_000, "prev_close_u": None},
+            "lines": [{"qty_u": qty * 1_000_000, "cost_paise": cost * 100} for qty, cost in lines]}  # fmt: skip
+
+
+def rows_at(alpha):
+    return [row(1, "Alpha Ltd", "listed", "Banks", alpha, [(12, 2400)], "ALPHA"),
+            row(2, "Beta Fund", "mf", None, None, [(100, 3000)]),
+            row(3, "Gamma Ltd", "listed", "IT", 150, [(4, 500), (6, 800)], "GAMMA"),
+            row(9, "Home loan", "liability", None, None, [(1, 500_000)]),
+            row(4, "Sold Ltd", "listed", "IT", 90, [(0, 0)], "SOLD"),
+            row(1, "Alpha Ltd", "listed", "Banks", alpha, [(8, 1700)], "ALPHA")]  # fmt: skip
+
+
+assert 12 * 250 + 8 * 250 == 5000 and 4 * 150 + 6 * 150 == 1500 and 5000 + 3000 + 1500 == 9500
+assert [text(F(v * 100, 9500)) for v in (5000, 3000, 1500)] == ["52.6316", "31.5789", "15.7895"]
+assert 20 * 500 + 3000 + 1500 == 14_500
+assert [text(F(v * 100, 14_500)) for v in (10_000, 3000, 1500)] == ["68.9655", "20.6897", "10.3448"]
+ROWS = [
+    {"id": "RW1", "note": "the same asset in two tabs is one holding (Alpha 5,000 of 9,500); a "
+     "fund with no price counts at its cost; two accounts of one row add up; a loan and a row of "
+     "no units are left out",
+     "rows": rows_at(250), "max_holding_pct": "15.0000", "max_sector_pct": "35.0000",
+     "holdings": [["1", "Alpha Ltd", 300_000, "Banks"], ["2", "Beta Fund", 300_000, None],
+                  ["3", "Gamma Ltd", 150_000, "IT"], ["1", "Alpha Ltd", 200_000, "Banks"]],
+     "expect": {"holdings": [bar("Alpha Ltd", "52.6316", True), bar("Beta Fund", "31.5789", True),
+                             bar("Gamma Ltd", "15.7895", True)],
+                "sectors": [bar("Banks", "52.6316", True), bar("IT", "15.7895")],
+                "untagged_pct": "31.5789",
+                "flags": ["Alpha Ltd is 52.63% of what is held here, above your 15% limit.",
+                          "Beta Fund is 31.58% of what is held here, above your 15% limit.",
+                          "Gamma Ltd is 15.79% of what is held here, above your 15% limit.",
+                          "The sector Banks is 52.63% of what is held here, above your 35% limit.",
+                          "Untagged: 31.58%; tag them to check sectors."]}},
+    {"id": "RW2", "note": "a tick takes Alpha to 500.00: 10,000 of 14,500; every weight moves, "
+     "and Gamma (10.34%) is no longer above 15%",
+     "rows": rows_at(500), "max_holding_pct": "15.0000", "max_sector_pct": "35.0000",
+     "holdings": [["1", "Alpha Ltd", 600_000, "Banks"], ["2", "Beta Fund", 300_000, None],
+                  ["3", "Gamma Ltd", 150_000, "IT"], ["1", "Alpha Ltd", 400_000, "Banks"]],
+     "expect": {"holdings": [bar("Alpha Ltd", "68.9655", True), bar("Beta Fund", "20.6897", True),
+                             bar("Gamma Ltd", "10.3448")],
+                "sectors": [bar("Banks", "68.9655", True), bar("IT", "10.3448")],
+                "untagged_pct": "20.6897",
+                "flags": ["Alpha Ltd is 68.97% of what is held here, above your 15% limit.",
+                          "Beta Fund is 20.69% of what is held here, above your 15% limit.",
+                          "The sector Banks is 68.97% of what is held here, above your 35% limit.",
+                          "Untagged: 20.69%; tag them to check sectors."]}},
+]  # fmt: skip
+
 # ---- overlap -----------------------------------------------------------------------------------
 # Tab 1: A 50%, B 30%, C 20%.   Tab 2: A 20%, B 40%, D 40%.
 #   min(50, 20) + min(30, 40) = 20 + 30 = 50%; B (30) before A (20). C and D are in one tab only.
@@ -333,7 +394,7 @@ TOGETHER = [
 
 OUT = {"note": "synthetic; built by make_risk.py, which states the arithmetic of every case",
        "series": SERIES, "falls": [DEPOSIT, WITHDRAW], "concentration": CONCENTRATION,
-       "overlap": OVERLAP, "emergency": EMERGENCY, "together": TOGETHER}  # fmt: skip
+       "rows": ROWS, "overlap": OVERLAP, "emergency": EMERGENCY, "together": TOGETHER}  # fmt: skip
 
 
 def build() -> dict:

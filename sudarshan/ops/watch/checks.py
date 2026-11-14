@@ -15,9 +15,21 @@ The readings (a dict; a value of None, or a key that is missing, means "could no
     disk              {"free_gb": ..., "inodes_free_pct": ...} for the app's disk
     mem_available_mb  the kernel's MemAvailable
     cert_hours_left   hours until the certificate nginx serves runs out
+    posture           what ``posture.read`` found, read once an hour: {"mcp": {...}, "debug": bool,
+                      "loose": [names], "open_ports": [ports], "reboot": bool,
+                      "updates": {"all": n, "security": n} or None}
+    counts            {"clients": approved AI clients, "families": live AI sign-ins,
+                      "links": Telegram accounts linked to the bot}, from OpenAlgo's own tables
+    backup            {"age_h": hours since the newest complete archive or None when there is
+                      none, "size_mb": its size, "offsite": the last run's offsite word,
+                      "fy": the newest financial-year archive's label, "fy_mb": its size}
+    drill             the restore drill's last result: {"at": seconds, "ok": bool}, {} when never
+    historify_gb      the size of Historify's file, 0 when there is none
 
-A check returns ``Result(name, level, facts, keep)``: ``facts`` are short plain values for the
-words (``alerts/notices.py``), ``keep`` is what the check wants back as ``memory`` next run.
+A check returns ``Result(name, level, facts, keep, news)``: ``facts`` are short plain values for
+the words (``alerts/notices.py``), ``keep`` is what the check wants back as ``memory`` next run,
+and ``news`` is something that happened since the last run and is told once whatever the level
+(a new AI connection, a Telegram account linked).
 A reading that could not be read is never "fine": it is UNREAD, which tells nobody and leaves
 what was last told as it stands.
 """
@@ -49,6 +61,13 @@ DISK_WARN_GB, DISK_FAIL_GB = 15.0, 5.0
 INODES_WARN_PCT, INODES_FAIL_PCT = 10.0, 3.0
 MEM_LOW_MB, MEM_LOW_RUNS = 1024, 3
 CERT_FAIL_HOURS = 48.0
+BACKUP_LATE_HOURS = 30.0  # the backup job's own "overdue" line (backup.OVERDUE_S)
+DRILL_LATE_DAYS = 100  # one drill a month by its timer; a quarter without one is told
+HISTORIFY_WARN_GB = 3.0
+#: Checks that only show (the System page, the weekly summary) and are never a notice: OpenAlgo
+#: carries the notices, so its own silence is the outside heartbeat's; the backup job tells its
+#: own late night; updates and a reboot are the owner's weekly reading, applied by hand.
+SHOWN_ONLY = frozenset({"openalgo", "backup", "posture_reboot", "posture_updates"})
 
 
 @dataclass(frozen=True)
@@ -57,6 +76,7 @@ class Result:
     level: str
     facts: Mapping[str, str] = field(default_factory=dict)
     keep: Mapping[str, int] = field(default_factory=dict)
+    news: Mapping[str, str] = field(default_factory=dict)
 
 
 def _misses(memory: Mapping, missed: bool) -> int:
@@ -172,6 +192,186 @@ def certificate(readings: Mapping, memory: Mapping) -> Result:
     return Result("certificate", level, {"hours": str(max(0, int(hours)))})
 
 
+def _posture(readings: Mapping) -> Mapping | None:
+    found = readings.get("posture")
+    return found if isinstance(found, Mapping) else None
+
+
+def posture_locks(readings: Mapping, memory: Mapping) -> Result:
+    """The assistant's locks in OpenAlgo's settings: read-only tools, no write scope, and, once
+    it is switched on, the owner's approval for every new client."""
+    mcp = (_posture(readings) or {}).get("mcp")
+    if not isinstance(mcp, Mapping) or not all(
+        isinstance(mcp.get(key), bool) for key in ("switched_on", "locked", "approval")
+    ):
+        return Result("posture_locks", UNREAD)
+    if not mcp["locked"]:
+        return Result("posture_locks", WARNING, {"cause": "locks"})
+    if mcp["switched_on"] and not mcp["approval"]:
+        return Result("posture_locks", WARNING, {"cause": "approval"})
+    return Result("posture_locks", FINE)
+
+
+def posture_debug(readings: Mapping, memory: Mapping) -> Result:
+    debug = (_posture(readings) or {}).get("debug")
+    if not isinstance(debug, bool):
+        return Result("posture_debug", UNREAD)
+    return Result("posture_debug", WARNING if debug else FINE)
+
+
+def _named(readings: Mapping, key: str) -> list[str] | None:
+    found = (_posture(readings) or {}).get(key)
+    if not isinstance(found, list):
+        return None
+    return sorted(str(item) for item in found)
+
+
+def posture_modes(readings: Mapping, memory: Mapping) -> Result:
+    """The settings folder, the vault and OpenAlgo's .env are closed to other accounts."""
+    loose = _named(readings, "loose")
+    if loose is None:
+        return Result("posture_modes", UNREAD)
+    return (
+        Result("posture_modes", WARNING, {"what": loose[0]})
+        if loose
+        else Result("posture_modes", FINE)
+    )
+
+
+def posture_ports(readings: Mapping, memory: Mapping) -> Result:
+    """Every port of the ring listens on this machine only."""
+    wide = _named(readings, "open_ports")
+    if wide is None:
+        return Result("posture_ports", UNREAD)
+    return (
+        Result("posture_ports", WARNING, {"port": wide[0]})
+        if wide
+        else Result("posture_ports", FINE)
+    )
+
+
+def posture_reboot(readings: Mapping, memory: Mapping) -> Result:
+    reboot = (_posture(readings) or {}).get("reboot")
+    if not isinstance(reboot, bool):
+        return Result("posture_reboot", UNREAD)
+    return Result("posture_reboot", WARNING if reboot else FINE)
+
+
+def posture_updates(readings: Mapping, memory: Mapping) -> Result:
+    """Operating-system updates waiting: a warning while a security update is among them."""
+    updates = (_posture(readings) or {}).get("updates")
+    try:
+        waiting, security = int(updates["all"]), int(updates["security"])
+    except (TypeError, KeyError, ValueError):
+        return Result("posture_updates", UNREAD)
+    facts = {"all": str(waiting), "security": str(security)}
+    return Result("posture_updates", WARNING if security > 0 else FINE, facts)
+
+
+def _count(readings: Mapping, key: str) -> int | None:
+    found = (
+        (readings.get("counts") or {}).get(key)
+        if isinstance(readings.get("counts"), Mapping)
+        else None
+    )
+    return found if isinstance(found, int) and not isinstance(found, bool) and found >= 0 else None
+
+
+def _known(memory: Mapping, key: str) -> int | None:
+    found = memory.get(key)
+    return found if isinstance(found, int) and not isinstance(found, bool) else None
+
+
+def assistant(readings: Mapping, memory: Mapping) -> Result:
+    """AI connections: approved clients and live sign-ins. One more of either than at the last
+    run is news, told at once. The first reading tells nothing: it is where counting starts."""
+    clients, families = _count(readings, "clients"), _count(readings, "families")
+    if clients is None or families is None:
+        return Result("assistant", UNREAD, keep={**memory})
+    was_clients, was_families = _known(memory, "clients"), _known(memory, "families")
+    more = (was_clients is not None and clients > was_clients) or (
+        was_families is not None and families > was_families
+    )
+    facts = {"clients": str(clients), "families": str(families)}
+    keep = {"clients": clients, "families": families}
+    level = FINE if clients or families else OFF
+    return Result("assistant", level, facts, keep, {"what": "connection"} if more else {})
+
+
+def telegram_links(readings: Mapping, memory: Mapping) -> Result:
+    """Telegram accounts linked to the owner's bot: any change in their number is news."""
+    links = _count(readings, "links")
+    if links is None:
+        return Result("telegram_links", UNREAD, keep={**memory})
+    was = _known(memory, "links")
+    news = {}
+    if was is not None and links != was:
+        news = {"what": "linked" if links > was else "unlinked"}
+    return Result("telegram_links", FINE, {"links": str(links)}, {"links": links}, news)
+
+
+def backup(readings: Mapping, memory: Mapping) -> Result:
+    """The newest complete nightly archive's age. Shown only: the backup job tells a late night."""
+    reading = readings.get("backup")
+    if not isinstance(reading, Mapping):
+        return Result("backup", UNREAD)
+    facts = {
+        key: str(reading[key])
+        for key in ("size_mb", "offsite", "fy", "fy_mb")
+        if isinstance(reading.get(key), int | str) and not isinstance(reading.get(key), bool)
+    }
+    age = reading.get("age_h")
+    if age is None:
+        return Result("backup", OFF, facts)
+    if isinstance(age, bool) or not isinstance(age, int | float):
+        return Result("backup", UNREAD)
+    facts["age_h"] = str(max(0, int(age)))
+    return Result("backup", WARNING if age > BACKUP_LATE_HOURS else FINE, facts)
+
+
+def drill(readings: Mapping, memory: Mapping) -> Result:
+    """The restore drill: a warning when the last one failed, when none was ever done, or when
+    the last is over 100 days old. Only "over 100 days" is the watch's to tell (``told_by``):
+    the drill tells its own result, and "never" is on the System page from the first day."""
+    reading, now = readings.get("drill"), readings.get("now")
+    if not isinstance(reading, Mapping) or not isinstance(now, int | float):
+        return Result("drill", UNREAD)
+    if not reading:
+        return Result("drill", WARNING, {"cause": "never"})
+    at, ok = reading.get("at"), reading.get("ok")
+    if isinstance(at, bool) or not isinstance(at, int | float) or not isinstance(ok, bool):
+        return Result("drill", UNREAD)
+    days = max(0, int((now - at) // 86400))
+    facts = {"days": str(days), "when": str(int(at))}
+    if not ok:
+        return Result("drill", WARNING, {**facts, "cause": "failed"})
+    if days > DRILL_LATE_DAYS:
+        return Result("drill", WARNING, {**facts, "cause": "late"})
+    return Result("drill", FINE, facts)
+
+
+def historify(readings: Mapping, memory: Mapping) -> Result:
+    """Historify's file has no keep rule of its own: a warning from 3 GB."""
+    size = readings.get("historify_gb")
+    if isinstance(size, bool) or not isinstance(size, int | float):
+        return Result("historify", UNREAD)
+    if size <= 0:
+        return Result("historify", OFF)
+    return Result(
+        "historify", WARNING if size >= HISTORIFY_WARN_GB else FINE, {"gb": f"{size:.1f}"}
+    )
+
+
+def told_by(change: Mapping) -> bool:
+    """Whether a change of level is the watch's to tell. Not for a check that is shown only, and
+    for the drill only its growing old: its own result, pass or fail, it tells itself."""
+    if change["check"] in SHOWN_ONLY:
+        return False
+    if change["check"] == "drill":
+        return (change.get("facts") or {}).get("cause") == "late"
+    return True
+
+
 def run_checks(readings: Mapping, memories: Mapping[str, Mapping]) -> list[Result]:
     """Every check over one run's readings. ``memories`` is each check's ``keep`` from the run
     before, by check name. A check that raises is UNREAD: never a crash, never "fine"."""
@@ -184,6 +384,17 @@ def run_checks(readings: Mapping, memories: Mapping[str, Mapping]) -> list[Resul
         ("disk", disk),
         ("memory", memory_free),
         ("certificate", certificate),
+        ("posture_locks", posture_locks),
+        ("posture_debug", posture_debug),
+        ("posture_modes", posture_modes),
+        ("posture_ports", posture_ports),
+        ("posture_reboot", posture_reboot),
+        ("posture_updates", posture_updates),
+        ("assistant", assistant),
+        ("telegram_links", telegram_links),
+        ("backup", backup),
+        ("drill", drill),
+        ("historify", historify),
     ]
     results = []
     for name, check in checks:

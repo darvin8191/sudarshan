@@ -1,15 +1,18 @@
 """The tax working paper (phase P7, lane P: M7.27; design p7 8, 9.1).
 
 ``tax_get`` is one taxpayer's financial year: the adapter (``tax_adapter``) gathers the inputs and
-the tax core (``sudarshan/tax``) works out every figure; nothing here computes tax. A loss carried
+the tax core (``sudarshan/tax``) works out every figure; nothing here computes tax. Each sale is
+given its share's name beside the ISIN (``_named``), the same name the CSV writes. A loss carried
 from an earlier year comes from that year's own paper, worked out from the oldest year Upstox
 keeps up to the year asked, and a loss the owner entered for a year wins over the computed one.
 The view starts no read of Upstox: it works on what the reader keeps and says what is not read.
 
 ``tax_inputs``, ``tax_input_set`` and ``tax_input_delete`` keep what the reports cannot say: the
 31 Jan 2018 prices, purchases from before the records, losses brought forward, days of delivery,
-buyback tenders and the readings of the open rules. A dry run of a save says what it would change
-in the year's figures and writes nothing. Every op waits for ``SUDARSHAN_TAX`` (``ops.switched``).
+buyback tenders and the readings of the open rules, and how an account of the owner's own counts
+(``account_mode``: from its entries, or "not for tax"; owner decision 9). A dry run of a save says
+what it would change in the year's figures and writes nothing. Every op waits for ``SUDARSHAN_TAX``
+(``ops.switched``).
 
 ``tax_csv`` writes one schedule of the paper for the CA, under the working-paper sentence;
 ``report_csv`` writes Upstox's report rows as the reader kept them. A number is written plain and
@@ -20,6 +23,7 @@ from __future__ import annotations
 
 import csv
 import io
+import logging
 import re
 from collections.abc import Callable
 from dataclasses import replace
@@ -39,20 +43,30 @@ from ..core.kinds import (
     REPORT_SEGMENTS,
     REPORT_YEARS,
     TAX_INPUT_KINDS,
+    TAX_MODES,
     TAX_SCHEDULES,
     TURNOVER_METHODS,
     WORDS,
 )
 from ..errors import ApiError
 from ..imports.csvutil import guard
+from ..migrations import tax_mode_of
 from ..store import Invalid, NotFound, Refused, VersionConflict
 from . import op
 from .common import OWNER, answer, maybe_whole, need, whole
+
+log = logging.getLogger(__name__)
 
 ASK = "The request was incomplete. Reload the page."
 CHOOSE = "Choose one of the readings offered."
 NO_MEMBER = "That family member is not in your portfolio. Reload the page."
 NOT_THEIRS = "That account is not one of this member's. Choose another."
+UPSTOX_COUNTS = (
+    "The Upstox account always counts from Upstox's reports. Only an account of your own tabs "
+    "can be set as not for tax."
+)
+#: How an account of the owner's own can count: every mode but the Upstox account's.
+OWN_MODES = tuple(mode for mode in TAX_MODES if mode != "reports")
 ISIN = re.compile(r"[A-Z]{2}[A-Z0-9]{9}[0-9]")
 TRADE_ID = re.compile(r"[A-Za-z0-9_-]{1,40}")
 MAX = 10**15
@@ -70,7 +84,11 @@ INPUTS: dict[str, tuple[str | None, tuple[str, ...]]] = {
                                       "trade_id")),
     "settings": (None, ("member_id", "turnover_method", "exempt_order", "lt_boundary",
                         "allocate_expenses")),
+    "account_mode": ("account", ("member_id", "account_id", "tax_mode")),
 }  # fmt: skip
+#: The kinds that change a row that is always there: saved from the version it was read at, and
+#: never deleted here (deleting ``account_mode`` would be deleting the account).
+STANDING = frozenset({"settings", "account_mode"})
 #: What an entry of the owner's always says; rows of another source are not his to write.
 FIXED = {"opening_lot": {"source": "owner"}, "fmv": {"source": "owner"},
          "carry": {"source": "owner"}, "day_override": {"treat": "delivery"},
@@ -119,6 +137,8 @@ CHECKS: dict[str, tuple[Callable[[Any, int], bool], str]] = {
     "exempt_order": (_one_of(EXEMPT_ORDERS), CHOOSE),
     "lt_boundary": (_one_of(LT_BOUNDARIES), CHOOSE),
     "allocate_expenses": (lambda v, t: isinstance(v, bool), CHOOSE),
+    "tax_mode": (lambda v, t: v in OWN_MODES,
+                 "Choose how this account counts: from its entries, or not for tax."),
 }  # fmt: skip
 #: The figures a dry run compares, each named as a sentence names it (True: an amount).
 HEADLINES: tuple[tuple[str, Callable[[dict], int], bool], ...] = (
@@ -216,9 +236,41 @@ def _with_dividends(store, pack: dict) -> dict:
     return pack
 
 
+#: The lists of the pack whose rows are sales of a share or a fund, each named by its ISIN.
+SALE_LISTS = ("schedule", "needs_fmv", "unknown_cost", "exempt_buybacks")
+
+
+def _share_names(tx) -> dict[str, str]:
+    """A name for each ISIN: the holding's own (under each ISIN it has had), else the scrip name
+    of Upstox's trade history."""
+    names = {
+        r["isin"]: r["scrip_name"]
+        for record in tx.report_list("trades")
+        for r in (record.get("payload") or {}).get("rows") or []
+        if r.get("isin") and r.get("scrip_name")
+    }
+    assets = {a["id"]: a["name"] for a in tx.rows("asset") if a.get("name")}
+    for alias in tx.rows("asset_alias", "id", kind="isin"):
+        if alias["asset_id"] in assets:
+            names[alias["value"]] = assets[alias["asset_id"]]
+    names.update({a["isin"]: a["name"] for a in tx.rows("asset") if a.get("isin") and a["name"]})
+    return names
+
+
+def _named(pack: dict, names: dict[str, str]) -> dict:
+    """Each sale of the pack with its share's name beside the ISIN (None where no record names
+    it; the ISIN is always kept). The core knows a share by its ISIN only."""
+    for key in SALE_LISTS:
+        for row in pack["capital_gains"][key]:
+            row["name"] = names.get(row["isin"])
+    return pack
+
+
 def _paper(store, member: int | None, fy: int, today: int, now: int, reading: bool) -> dict:
-    years = store.read(OWNER, lambda tx: _gather(tx, member, fy, today, now))
-    return _with_dividends(store, _chain(years, reading))
+    years, names = store.read(
+        OWNER, lambda tx: (_gather(tx, member, fy, today, now), _share_names(tx))
+    )
+    return _with_dividends(store, _named(_chain(years, reading), names))
 
 
 def _reading(ctx, fy: int) -> bool:
@@ -242,14 +294,35 @@ def _settings(tx, taxpayer: int) -> dict:
     }
 
 
+ACCOUNT_SHOWN = ("id", "name", "kind", "tax_mode", "version")
+
+
+def _account_mode(tx, values: dict, version, now: int) -> dict:
+    """Set how one of the taxpayer's own accounts counts, from the version it was read at. The
+    Upstox account is not the owner's to set. The change is logged by ids, never by a name."""
+    account = tx.get("account", values["account_id"])
+    if account is None or account["member_id"] != values["member_id"]:
+        raise Invalid(NOT_THEIRS)
+    if account["system"] or account["kind"] == "upstox":
+        raise Refused(UPSTOX_COUNTS)
+    if account["version"] != version:
+        raise VersionConflict("version_conflict_item")
+    was, mode = tax_mode_of(account), values["tax_mode"]
+    if was != mode:
+        account = tx.change("account", account["id"], version, {"tax_mode": mode}, now)
+        log.info(
+            "account %s of member %s now counts for tax as %s (was %s)",
+            account["id"], account["member_id"], mode, was,
+        )  # fmt: skip
+    return {**{k: account[k] for k in ACCOUNT_SHOWN if k != "tax_mode"}, "tax_mode": mode}
+
+
 def _inputs(tx, member: int | None) -> dict:
     taxpayer = _taxpayer(tx, member)
     own = tx.tax_inputs(taxpayer)
     return {
         "member_id": taxpayer,
-        "accounts": [
-            {k: a[k] for k in ("id", "name", "kind", "tax_mode")} for a in tx.tax_accounts(taxpayer)
-        ],
+        "accounts": [{k: a[k] for k in ACCOUNT_SHOWN} for a in tx.tax_accounts(taxpayer)],
         "opening_lots": [_shown(r) for r in own["tax_opening_lot"]],
         "fmvs": [_shown(r) for r in tx.rows("tax_fmv")],
         "carries": [_shown(r) for r in own["tax_carry"]],
@@ -282,6 +355,8 @@ def _save(tx, kind: str, values: dict, row_id, version, request_id, now: int) ->
         member, value = values["member_id"], {k: v for k, v in values.items() if k != "member_id"}
         tx.setting_put(f"tax:{member}", value, version or 0, now)
         return _settings(tx, member)
+    if kind == "account_mode":
+        return _account_mode(tx, values, version, now)
     if "account_id" in values:
         account = tx.get("account", values["account_id"])
         if account is None or account["member_id"] != values["member_id"]:
@@ -365,7 +440,7 @@ async def tax_input_set(ctx, message):
         raise _bad("row")
     values = _read_row(kind, row, today)
     row_id, version = maybe_whole(message, "id"), maybe_whole(message, "version")
-    if (row_id is not None or kind == "settings") and version is None:
+    if (row_id is not None or kind in STANDING) and version is None:
         raise _bad("version")
     request_id = message.get("request_id")
     if request_id is not None and not (isinstance(request_id, str) and 0 < len(request_id) <= 64):
@@ -384,7 +459,7 @@ async def tax_input_set(ctx, message):
 @op("tax_input_delete")
 async def tax_input_delete(ctx, message):
     store, kind = need(ctx), message.get("kind")
-    if kind not in TAX_INPUT_KINDS or INPUTS[kind][0] is None:
+    if kind not in TAX_INPUT_KINDS or kind in STANDING:
         raise _bad("kind")
     row_id, version = whole(message, "id"), whole(message, "version")
     return await answer(lambda: store.write(OWNER, lambda tx: _remove(tx, kind, row_id, version)))
@@ -549,15 +624,9 @@ SCHEDULES = {"capital_gains": _gains, "business": _business, "losses": _losses,
 def _labels(tx, taxpayer: int) -> tuple[str, dict, dict]:
     """The taxpayer's name, a name for each ISIN (the holding's own, else Upstox's scrip name)
     and each account's name."""
-    names = {
-        r["isin"]: r["scrip_name"]
-        for record in tx.report_list("trades")
-        for r in (record.get("payload") or {}).get("rows") or []
-        if r.get("isin") and r.get("scrip_name")
-    }
-    names.update({a["isin"]: a["name"] for a in tx.rows("asset") if a.get("isin")})
     member = tx.get("member", taxpayer) or {}
-    return member.get("name") or "", names, {a["id"]: a["name"] for a in tx.rows("account")}
+    accounts = {a["id"]: a["name"] for a in tx.rows("account")}
+    return member.get("name") or "", _share_names(tx), accounts
 
 
 def _paper_file(store, member, fy: int, schedule: str, today: int, now: int) -> dict:

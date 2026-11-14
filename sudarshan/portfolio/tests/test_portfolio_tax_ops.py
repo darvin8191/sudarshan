@@ -146,7 +146,13 @@ def test_the_inputs_name_each_account_with_its_mode_and_the_default_readings(ctx
     found = call(ctx, "tax_inputs")
     assert found["member_id"] == 1
     assert found["accounts"] == [
-        {"id": ctx.upstox_id, "name": "Upstox", "kind": "upstox", "tax_mode": "reports"}
+        {
+            "id": ctx.upstox_id,
+            "name": "Upstox",
+            "kind": "upstox",
+            "tax_mode": "reports",
+            "version": 1,
+        }
     ]
     unset = dict.fromkeys(("turnover_method", "exempt_order", "lt_boundary"))
     assert found["settings"] == {"member_id": 1, **unset, "allocate_expenses": True, "version": 0}
@@ -241,3 +247,147 @@ def test_the_lists_the_phone_offers_are_the_cores_own():
                          (kinds.EXEMPT_ORDERS, rules.EXEMPT_ORDER),
                          (kinds.LT_BOUNDARIES, rules.LT_BOUNDARY)):  # fmt: skip
         assert names == (table[-1].value, *table[-1].alternatives)
+
+
+# ---- how an account counts (owner decision 9: "not for tax") ------------------------------------
+def demat(ctx, member: int = 1) -> dict:
+    values = {"member_id": member, "name": "Old demat", "kind": "demat"}
+    return ctx.store.write(OWNER, lambda tx: tx.insert("account", values, NOW))
+
+
+def mode(account: dict, tax_mode: str = "none", member: int = 1) -> dict:
+    return {"member_id": member, "account_id": account["id"], "tax_mode": tax_mode}
+
+
+def listed(ctx) -> dict:
+    return {a["id"]: (a["tax_mode"], a["version"]) for a in call(ctx, "tax_inputs")["accounts"]}
+
+
+def test_an_own_account_is_set_as_not_for_tax_from_its_version_and_back(ctx, caplog):
+    account = demat(ctx)
+    assert listed(ctx)[account["id"]] == ("ledger", 1)
+    with caplog.at_level("INFO", logger="sudarshan.portfolio.ops.tax_ops"):
+        saved = call(ctx, "tax_input_set", kind="account_mode", row=mode(account), version=1)
+    assert saved == {"kind": "account_mode", "effect": [], "row": {
+        "id": account["id"], "name": "Old demat", "kind": "demat", "tax_mode": "none",
+        "version": 2}}  # fmt: skip
+    assert listed(ctx)[account["id"]] == ("none", 2)
+    (line,) = [r.getMessage() for r in caplog.records]
+    assert line == f"account {account['id']} of member 1 now counts for tax as none (was ledger)"
+    assert "Old demat" not in line  # the log names ids only
+    stale = refused(ctx, "tax_input_set", kind="account_mode", row=mode(account, "ledger"),
+                    version=1)  # fmt: skip
+    assert stale.code == "version_conflict"
+    back = call(ctx, "tax_input_set", kind="account_mode", row=mode(account, "ledger"), version=2)
+    assert (back["row"]["tax_mode"], back["row"]["version"]) == ("ledger", 3)
+    same = call(ctx, "tax_input_set", kind="account_mode", row=mode(account, "ledger"), version=3)
+    assert same["row"]["version"] == 3  # nothing changed: nothing written
+
+
+def test_the_upstox_account_a_wrong_mode_and_a_missing_version_are_refused_in_words(ctx):
+    upstox = {"id": ctx.upstox_id}
+    fixed = refused(ctx, "tax_input_set", kind="account_mode", row=mode(upstox), version=1)
+    assert (fixed.code, fixed.message) == (
+        "refused",
+        "The Upstox account always counts from Upstox's reports. Only an account of your own "
+        "tabs can be set as not for tax.",
+    )
+    account = demat(ctx)
+    for wrong in ("reports", "off", None):
+        bad = refused(ctx, "tax_input_set", kind="account_mode", row=mode(account, wrong),
+                      version=1)  # fmt: skip
+        assert (bad.code, bad.field) == ("bad_request", "tax_mode")
+        assert bad.message == "Choose how this account counts: from its entries, or not for tax."
+    assert refused(ctx, "tax_input_set", kind="account_mode", row=mode(account)).field == "version"
+    other = ctx.store.write(OWNER, lambda tx: tx.insert("member", {"name": "B"}, NOW))["id"]
+    theirs = refused(ctx, "tax_input_set", kind="account_mode", row=mode(account, member=other),
+                     version=1)  # fmt: skip
+    assert theirs.message == "That account is not one of this member's. Choose another."
+    assert listed(ctx)[account["id"]] == ("ledger", 1)
+
+
+def test_the_kind_is_never_deleted_which_would_delete_the_account(ctx):
+    account = demat(ctx)
+    gone = refused(ctx, "tax_input_delete", kind="account_mode", id=account["id"], version=1)
+    assert (gone.code, gone.field) == ("bad_request", "kind")
+    assert account["id"] in listed(ctx)
+
+
+def test_a_dry_run_says_what_leaving_an_account_out_changes_and_writes_nothing(ctx):
+    """The tab's account sold 10 shares at a gain; marked not for tax, the gain leaves the paper."""
+    account = demat(ctx)
+
+    def setup(tx):
+        tab = tx.insert("tab", {"name": "Own", "kind": "stocks", "icon": "chart",
+                                "colour": "brand"}, NOW)  # fmt: skip
+        asset = tx.insert("asset", {"kind": "listed", "name": "Own Ltd", "isin": "INE000W01016",
+                                    "asset_class": "equity"}, NOW)  # fmt: skip
+        for seq, (kind, day, rupees) in enumerate((("BUY", 20260406, 1_000),
+                                                   ("SELL", 20260601, 1_500)), start=1):  # fmt: skip
+            tx.insert("activity", {
+                "tab_id": tab["id"], "seq": seq, "kind": kind, "trade_date": day,
+                "account_id": account["id"], "asset_id": asset["id"], "qty_u": 10 * U,
+                "amount_paise": 10 * rupees * 100,
+            }, NOW)  # fmt: skip
+
+    ctx.store.write(OWNER, setup)
+    before = call(ctx, "tax_get")["capital_gains"]["st_gain_paise"]
+    shown = call(ctx, "tax_input_set", kind="account_mode", row=mode(account), version=1,
+                 dry_run=True)  # fmt: skip
+    assert shown["row"] is None
+    # 5,000 less its share of the year's charges
+    assert before == 499_488
+    assert shown["effect"][0] == (
+        "In FY 2026-27 this changes short-term gain from Rs 4,994.88 to Rs 0."
+    )
+    assert listed(ctx)[account["id"]] == ("ledger", 1)
+    assert call(ctx, "tax_get")["capital_gains"]["st_gain_paise"] == before
+    call(ctx, "tax_input_set", kind="account_mode", row=mode(account), version=1)
+    assert call(ctx, "tax_get")["capital_gains"]["st_gain_paise"] == 0
+
+
+# ---- the dry runs the Inputs sheet asks for (lane G: every kind is checked before its save) ------
+def test_a_dry_run_of_the_readings_and_of_a_tender_says_its_effect_and_writes_nothing(ctx):
+    row = {"member_id": 1, "turnover_method": "abs_pnl_plus_sale_premium",
+           "exempt_order": None, "lt_boundary": None, "allocate_expenses": False}  # fmt: skip
+    shown = call(ctx, "tax_input_set", kind="settings", row=row, version=0, dry_run=True)
+    assert shown["row"] is None
+    assert shown["effect"] == [
+        "In FY 2026-27 this changes long-term gain from Rs 5,986 to Rs 6,000."
+    ]
+    assert call(ctx, "tax_inputs")["settings"]["version"] == 0
+    tender = {"member_id": 1, "account_id": ctx.upstox_id, "isin": ISIN, "day": 20260715,
+              "qty_u": 5 * U, "price_u": 30_000_000, "trade_id": None}  # fmt: skip
+    shown = call(ctx, "tax_input_set", kind="trade_mark", row=tender, dry_run=True)
+    assert shown["row"] is None and shown["effect"][0].startswith("In FY 2026-27 this changes ")
+    assert call(ctx, "tax_inputs")["trade_marks"] == []
+
+
+# ---- each sale carries its share's name beside the ISIN (lane G) ---------------------------------
+def test_a_sale_is_named_by_the_holding_else_by_upstoxs_history_and_keeps_its_isin(ctx):
+    loss_last_year(ctx)
+    (sale,) = call(ctx, "tax_get", fy=2025)["capital_gains"]["schedule"]
+    assert (sale["isin"], sale["name"]) == (LOSS_ISIN, "LOSS LTD")  # Upstox's scrip name
+
+    def hold(tx):
+        asset = tx.insert("asset", {"kind": "listed", "name": "Loss Makers Ltd",
+                                    "isin": "INE000N01017", "asset_class": "equity"}, NOW)  # fmt: skip
+        tx.insert("asset_alias", {"asset_id": asset["id"], "kind": "isin", "value": LOSS_ISIN}, NOW)
+
+    ctx.store.write(OWNER, hold)  # the holding, which had this ISIN before a change of ISIN
+    (sale,) = call(ctx, "tax_get", fy=2025)["capital_gains"]["schedule"]
+    assert (sale["isin"], sale["name"]) == (LOSS_ISIN, "Loss Makers Ltd")
+    assert call(ctx, "tax_pack", fy=2025)["capital_gains"]["schedule"] == [sale]
+    text = call(ctx, "tax_csv", fy=2025, schedule="capital_gains")["text"]
+    assert f"{LOSS_ISIN},Loss Makers Ltd," in text  # the CSV writes the same name
+
+
+def test_every_list_of_sales_is_named_and_a_share_no_record_names_has_none():
+    from sudarshan.portfolio.ops import tax_ops
+
+    lists = {key: [{"isin": f"INE00{n}X01010"}] for n, key in enumerate(tax_ops.SALE_LISTS)}
+    pack = tax_ops._named({"capital_gains": lists}, {"INE000X01010": "First Ltd"})
+    rows = [row for key in tax_ops.SALE_LISTS for row in pack["capital_gains"][key]]
+    assert [row["name"] for row in rows] == ["First Ltd", None, None, None]
+    assert [row["isin"] for row in rows] == [f"INE00{n}X01010" for n in range(4)]
+    assert set(tax_ops.SALE_LISTS) == {"schedule", "needs_fmv", "unknown_cost", "exempt_buybacks"}
