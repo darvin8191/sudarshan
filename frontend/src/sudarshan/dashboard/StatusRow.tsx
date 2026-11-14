@@ -1,10 +1,20 @@
 import { useQuery } from '@tanstack/react-query'
-import { AlertTriangle, CalendarClock, Clock, Hourglass, Moon, RotateCw } from 'lucide-react'
+import {
+  AlertTriangle,
+  CalendarClock,
+  Clock,
+  Hourglass,
+  KeyRound,
+  Moon,
+  RotateCw,
+  Unplug,
+} from 'lucide-react'
 import { type ReactNode, useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router'
 import { cn } from '@/lib/utils'
 import { useOnReturn } from '@/sudarshan/books/useReturn'
 import { HoursSheet } from './HoursSheet'
+import type { NoPrices } from './Lapsed'
 import {
   type Chip,
   type DayFacts,
@@ -122,12 +132,21 @@ export interface MasterContractState {
 }
 
 /**
- * The dashboard's status row (design 3.3): what needs attention first (a master contract not
- * ready), then the market chip and, on an expiry day or after the close before one, the expiry
+ * The dashboard's status row (design 3.3): what needs attention first (no Upstox login today or
+ * no API key, a master contract not ready), then the market chip and, on an expiry day or after the close before one, the expiry
  * chip. Each chip is its own statement in words with an icon, never colour alone; a tap on the
  * market or expiry chip opens the day's hours for every exchange.
  */
-export function StatusRow({ day, contract }: { day: string; contract: MasterContractState }) {
+export function StatusRow({
+  day,
+  contract,
+  noPrices = null,
+}: {
+  day: string
+  contract: MasterContractState
+  /** SUDARSHAN M3.4 (D3): why prices cannot be read now, which leads the row. */
+  noPrices?: NoPrices | null
+}) {
   const { facts, failed, retry } = useDayFacts(day)
   const now = useEdgeClock(nextEdge(facts, Date.now()))
   const [open, setOpen] = useState(false)
@@ -141,6 +160,22 @@ export function StatusRow({ day, contract }: { day: string; contract: MasterCont
       data-ready={facts ? 'true' : 'false'}
       className="flex flex-wrap items-center gap-x-2 gap-y-2"
     >
+      {noPrices && (
+        <Link to={noPrices === 'no-api-key' ? '/apikey' : '/broker'} className={TARGET}>
+          <Pill
+            tone="gold"
+            icon={
+              noPrices === 'no-api-key' ? (
+                <KeyRound aria-hidden="true" className={ICON} />
+              ) : (
+                <Unplug aria-hidden="true" className={ICON} />
+              )
+            }
+          >
+            {noPrices === 'no-api-key' ? 'No API key' : 'Upstox login needed'}
+          </Pill>
+        </Link>
+      )}
       {(contract.status === 'downloading' || contract.status === 'error') && (
         <Link to="/master-contract" className={TARGET} title={contract.message}>
           <Pill

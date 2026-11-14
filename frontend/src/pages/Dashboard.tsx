@@ -5,7 +5,6 @@ import {
   ChevronRight,
   ExternalLink,
   FileText,
-  PlugZap,
   Search,
   Zap,
 } from 'lucide-react'
@@ -19,6 +18,7 @@ import { useBookSync } from '@/sudarshan/books/useBookSync'
 import { HoldingsCard } from '@/sudarshan/dashboard/HoldingsCard'
 import { useMarketOpen } from '@/sudarshan/dashboard/hooks'
 import { IndexStrip } from '@/sudarshan/dashboard/IndexStrip'
+import { Lapsed, type NoPrices } from '@/sudarshan/dashboard/Lapsed' // SUDARSHAN D3
 import type { PositionsSnapshot } from '@/sudarshan/dashboard/live'
 import {
   CALENDAR_LOADING,
@@ -125,6 +125,17 @@ export default function Dashboard() {
   useEffect(() => {
     anyMarketOpen.current = anyOpen
   }, [anyOpen])
+  // SUDARSHAN M3.4 (D3, decision 3): no dead end while prices cannot be read. Today's Upstox
+  // login has lapsed (the server's session check, or the funds read refused for it) or there
+  // is no API key: the status row says so first, one card stands where the indices and the
+  // P&L are, and the rest of the page stays. Upstream's broker-expired page is gone (#1400's
+  // reconnect is the card's Reconnect).
+  const noPrices: NoPrices | null =
+    brokerExpired || access.state === 'upstox-logged-out'
+      ? 'upstox-logged-out'
+      : access.state === 'no-api-key'
+        ? 'no-api-key'
+        : null
 
   // Fetch dashboard funds data
   const fetchFundsData = useCallback(async () => {
@@ -157,6 +168,7 @@ export default function Dashboard() {
       if (read !== readCount.current) return
 
       if (data.status === 'success' && data.data) {
+        setBrokerExpired(false) // SUDARSHAN D3: logged in again
         setMarginData(data.data)
         setPositions(book)
         setSyncedAt(Date.now())
@@ -184,7 +196,10 @@ export default function Dashboard() {
   // drifts far. One read at a time, and none while the page is hidden. Three
   // broker reads each time.
   const marketOpenNow = useCallback(() => anyMarketOpen.current(), [])
-  useBookSync(fetchFundsData, { marketOpen: marketOpenNow })
+  // SUDARSHAN D3: not while the session check says prices cannot be read. A login made elsewhere
+  // (auto-login, another phone) brings the key back, and the read above runs again for it; a
+  // lapse only the funds read noticed is read again here, so the figures come back by themselves.
+  useBookSync(fetchFundsData, { marketOpen: marketOpenNow, enabled: access.state === 'ready' })
 
   // Listen for mode changes and refresh data
   useEffect(() => {
@@ -231,32 +246,6 @@ export default function Dashboard() {
     return () => clearInterval(interval)
   }, [checkMasterContractStatus])
 
-  // Broker token expired but the app session is fine: send the user to the
-  // broker reconnect flow, not /login (which would bounce back) — #1400.
-  // SUDARSHAN: also as soon as the session check says so, before the funds
-  // read comes back, so the cards never show first.
-  if (brokerExpired || access.state === 'upstox-logged-out') {
-    return (
-      <div className="mx-auto flex min-h-[50vh] max-w-md flex-col items-center justify-center gap-4 text-center">
-        <span className="flex size-14 items-center justify-center rounded-2xl bg-[color:var(--gold-tint)] text-[color:var(--gold-ink)]">
-          <PlugZap aria-hidden="true" className="size-7" />
-        </span>
-        <h1 className="sd-display text-[1.75rem] leading-tight font-bold">
-          Broker Session Expired
-        </h1>
-        <p className="text-muted-foreground">
-          Your broker token has expired (brokers roll tokens daily). Reconnect to continue trading.
-        </p>
-        <Link
-          to="/broker"
-          className="inline-flex min-h-12 items-center justify-center rounded-[0.875rem] bg-primary px-6 text-base font-semibold text-primary-foreground outline-none hover:bg-primary/90 focus-visible:ring-[3px] focus-visible:ring-ring/50"
-        >
-          Reconnect Broker
-        </Link>
-      </div>
-    )
-  }
-
   // If not authenticated, show login prompt
   if (!isAuthenticated) {
     return (
@@ -278,15 +267,21 @@ export default function Dashboard() {
       <h1 className="sd-display text-[1.75rem] leading-none font-bold md:text-[2rem]">Dashboard</h1>
       {/* SUDARSHAN M3.5, M3.6, M3.2 (D2): the market and expiry chips, and the master contract
           only while it is not ready. */}
-      <StatusRow day={day} contract={masterContract} />
+      <StatusRow day={day} contract={masterContract} noPrices={noPrices} />
 
       <MarketCalendarSource key={day} onChange={setMarket} />
-      <AccessNotice access={access} />
-      <IndexStrip apiKey={apiKey} marketOpen={marketOpen} />
+      {noPrices ? (
+        <Lapsed reason={noPrices} />
+      ) : (
+        <>
+          <AccessNotice access={access} />
+          <IndexStrip apiKey={apiKey} marketOpen={marketOpen} />
+        </>
+      )}
 
       <div className="grid items-start gap-2.5 md:gap-4 lg:grid-cols-2">
         <div className="flex min-w-0 flex-col gap-2.5 md:gap-4">
-          {error && !marginData ? (
+          {noPrices ? null : error && !marginData ? (
             <section
               role="alert"
               className="flex flex-col items-start gap-3 rounded-[1.125rem] border border-[color:var(--down)] bg-card px-4 py-3.5 shadow-[var(--shadow-card)]"
@@ -318,6 +313,7 @@ export default function Dashboard() {
               positions={positions}
               syncedAt={syncedAt}
               syncFailed={error !== null}
+              onRetry={fetchFundsData}
               marketOpen={marketOpen}
             />
           )}

@@ -1,4 +1,5 @@
 import { act, render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('@/lib/MarketDataManager', () => import('@/test/marketDataHarness'))
@@ -124,7 +125,7 @@ describe('PnlCard, live', () => {
   function card(
     positions: Position[],
     overrides: Partial<DashboardFunds> = {},
-    extra: { marketOpen?: () => boolean | null; syncFailed?: boolean } = {}
+    extra: { marketOpen?: () => boolean | null; syncFailed?: boolean; onRetry?: () => void } = {}
   ) {
     const at = Date.now() - 1000
     return (
@@ -135,6 +136,7 @@ describe('PnlCard, live', () => {
         syncedAt={at + 300}
         marketOpen={extra.marketOpen ?? OPEN}
         syncFailed={extra.syncFailed}
+        onRetry={extra.onRetry}
       />
     )
   }
@@ -296,12 +298,21 @@ describe('PnlCard, live', () => {
     expect(unrealised()).toHaveTextContent('+₹977.00')
   })
 
-  it('keeps the figures and says so when the last refresh failed', () => {
-    render(card([position()], {}, { syncFailed: true }))
+  it('keeps the figures and says when they were read when the last read failed, with Try again', async () => {
+    const onRetry = vi.fn()
+    render(card([position()], {}, { syncFailed: true, onRetry }))
     expect(total()).toHaveTextContent('+₹2,450.00')
     expect(screen.getByRole('status')).toHaveTextContent(
-      'Could not refresh just now. Showing the last figures.'
+      /^Could not read the broker · last read \d{2}:\d{2}:\d{2}$/
     )
+    expect(screen.queryByText(/^Broker read/)).toBeNull()
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Try again' }))
+    expect(onRetry).toHaveBeenCalledTimes(1)
+  })
+
+  it('says when the funds and the realised P&L were read from the broker (SUDARSHAN D3)', () => {
+    render(card([position()]))
+    expect(screen.getByText(/^Broker read \d{2}:\d{2}:\d{2}$/)).toBeVisible()
   })
 
   it('closes its subscriptions when it goes away', () => {
