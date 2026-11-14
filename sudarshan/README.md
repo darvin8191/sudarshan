@@ -726,6 +726,67 @@ network namespace of its own), `test_deploy_family.py` (the deploy tool's side, 
 without the set-up gets nothing but the tokens), `test_backup_family.py`, and
 `sudarshan/family/tests/`.
 
+## The fence around the alert links (M12.2)
+
+OpenAlgo has three addresses that take an alert without a login: the strategy module's
+(`/strategy/webhook/`), Flow's (`/flow/webhook/`) and Chartink's (`/chartink/webhook/`). Until the
+lines below are installed, all three can be reached from any address on the internet. SUDARSHAN's
+own alert links (`/sudarshan/tv/`, the Automation page) are fenced by the same lines.
+
+Two files in `ops/nginx/` do it. nginx then:
+
+- lets only TradingView's four sender addresses reach the alert links, and answers everyone else
+  "not found" before the app sees the request. This is a filter, not proof of who sent an alert:
+  every TradingView customer's alerts come from the same four addresses, so the token in a link is
+  still the secret. Keep a link as private as a password;
+- tells the app the sender's address itself and clears the headers a sender could use to name
+  another address;
+- keeps the links, and so their tokens, out of its logs;
+- finishes an alert even when TradingView has stopped waiting (it hangs up after 3 seconds);
+- holds one address to 2 alerts a second (10 at once), and refuses an alert larger than 8 KiB;
+- refuses Chartink's webhook for everyone, because Chartink is not used on this server.
+
+The deploy tool never edits nginx. Install the lines once, as root, from the app folder the deploy
+tool installs into:
+
+```
+cd /opt/sudarshan/apps/openalgo/sudarshan/ops/nginx
+sudo install -m 644 sudarshan-webhooks-zones.conf /etc/nginx/conf.d/sudarshan-webhooks-zones.conf
+sudo install -m 644 sudarshan-webhooks.conf /etc/nginx/snippets/sudarshan-webhooks.conf
+```
+
+Then open the site's file (the one in `/etc/nginx/sites-available/` with `listen 443 ssl`) and add
+one line inside that `server { ... }` block, before its first `location`:
+
+```
+    include snippets/sudarshan-webhooks.conf;
+```
+
+Check and load it. `nginx -t` must say "test is successful"; if it does not, take the line out
+again and nothing has changed:
+
+```
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+After that:
+
+- From a phone browser, open `https://<your address>/strategy/webhook/x`. It must say "404 Not
+  Found" in nginx's plain page.
+- A TradingView alert must still arrive. Its sender address in the app's record must be one of
+  TradingView's four, never 127.0.0.1.
+- If a file in `ops/nginx/` changes in a later release, its release notes say so; copy the two
+  files again and reload.
+
+After each install the deploy tool looks for these lines in `/etc/nginx`. While they are missing it
+writes a warning in its log and you get one notice on Telegram per release. It is only a reminder:
+it never stops or undoes an install.
+
+To use Chartink after all, replace the last block of `snippets/sudarshan-webhooks.conf` as the
+comment above it says, with Chartink's own sender addresses.
+
+Tests: `sudarshan/ops/tests/test_nginx_webhooks.py`.
+
 ## The risk layer's confirm phrase, if it is forgotten (M5.13)
 
 The kill switch cannot be turned off, and no limit can be loosened, without the confirm phrase,

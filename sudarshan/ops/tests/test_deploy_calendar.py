@@ -1167,6 +1167,7 @@ class Box:
             .replace("/usr/local/bin/uv", str(self.bin / "uv"))
             .replace('UNIT_DIR="/etc/systemd/system"', f'UNIT_DIR="{self.units}"')
             .replace('RING_VAR="/var/lib"', f'RING_VAR="{self.ringvar}"')
+            .replace('NGINX_ETC="/etc/nginx"', f'NGINX_ETC="{self.root / "nginx"}"')
         )
         (self.web / "later").unlink(missing_ok=True)
         return subprocess.run(

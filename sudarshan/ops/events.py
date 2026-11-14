@@ -56,6 +56,7 @@ KINDS = frozenset(
         "installed",
         "rolled_back",
         "unit_refused",
+        "webhooks_open",
         "waiting",
         "backup_failed",
         "report",

@@ -1508,6 +1508,29 @@ ring_health() {   # $1 = sudarshan-<service>.service
         log "WARNING: ring: $1 did not answer on 127.0.0.1:${port}/health within 30 s; see journalctl -u $1"
     ) || true
 }
+# ---- the fence around the alert links (M12.2): sudarshan/ops/nginx/sudarshan-webhooks*.conf, which the
+# owner installs once as root (sudarshan/README.md, "The fence around the alert links"). This tool never
+# edits nginx and never runs it. After an install it reads nginx's folder and, when the lines are not
+# there, says so in the log and in one notice per release. A warning only: never a failure, never a
+# rollback. A server with no nginx folder is not checked.
+NGINX_ETC="/etc/nginx"
+webhooks_fence() {   # 0 = both parts are in place (or there is no nginx here), 1 = something is missing
+    [[ -d "${NGINX_ETC}" ]] || return 0
+    # the http part: the list of TradingView's addresses; the server part: an include line that is not a comment
+    grep -RqsE '^[[:space:]]*geo[[:space:]]+\$sud_tv_sender[[:space:]]*\{' -- "${NGINX_ETC}" || return 1
+    grep -RqsE '^[[:space:]]*include[[:space:]]+[^#;]*sudarshan-webhooks\.conf[[:space:]]*;' -- "${NGINX_ETC}" || return 1
+    return 0
+}
+webhooks_fence_check() {
+    (
+        set +eEu; trap - ERR
+        if ! webhooks_fence; then
+            log "WARNING: the nginx lines that fence the alert links are not installed; see sudarshan/README.md, The fence around the alert links"
+            notice webhooks_open "deploy-webhooks-${tag}" tag="${tag}"
+        fi
+    ) || true
+}
+webhooks_fence_check
 fam_provision run || true   # with the release just installed, before the ring starts: its own check decides
 ring_deploy || log "WARNING: ring service step failed - OpenAlgo itself is deployed"
 # keep the 10 newest backups: the folders this tool makes (<date>-<time>-<tag>), by their names, which

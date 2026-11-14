@@ -94,6 +94,7 @@ KIND_ORDER = (
     "rolled_back",
     "unit_refused",
     "backup_failed",
+    "webhooks_open",
     "waiting",
     "lockout",
     "new_device",
@@ -302,6 +303,15 @@ def _waiting(event: Event, now: datetime) -> list[str]:
     ]
 
 
+def _webhooks_open(event: Event, now: datetime) -> list[str]:
+    """The nginx lines that fence the alert links are not on the server (M12.2)."""
+    return [
+        "The alert links on this server can still be reached from any address, not only from "
+        "TradingView. Nothing stopped working. To close them, install the nginx lines once: the "
+        'steps are in sudarshan/README.md under "The fence around the alert links".'
+    ]
+
+
 #: Facts of the family kinds come from another account's file, so a value goes into a sentence
 #: only when it matches one of these narrow patterns; anything else is left out of the sentence.
 #: A device label has no slash (Telegram makes "/word" a command the owner can tap) and is left out
@@ -426,7 +436,12 @@ def run_lines(events: list[Event], now: datetime) -> list[str]:
         if kind in _FAMILY_WORDS:
             lines += [line for event in of_kind for line in _FAMILY_WORDS[kind](event, now)]
             continue
-        make = {"installed": _installed, "rolled_back": _rolled_back, "waiting": _waiting}[kind]
+        make = {
+            "installed": _installed,
+            "rolled_back": _rolled_back,
+            "waiting": _waiting,
+            "webhooks_open": _webhooks_open,
+        }[kind]
         for event in of_kind:
             lines += make(event, now)
     return lines
