@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { setMarketSoundMuted, setOrderSoundMuted } from './books/chime'
@@ -114,5 +114,31 @@ describe('Display settings', () => {
     await user.click(screen.getByRole('switch', { name: 'Colour-blind mode' }))
 
     expect(html.getAttribute('data-cvd')).toBe('1')
+  })
+
+  it('offers the dashboard indices, four on to start with, six at most, one at least (D8)', async () => {
+    localStorage.removeItem('sudarshan-dashboard-indices')
+    const { resetDashboardIndicesForTests } = await import('./dashboard/indexChoice')
+    resetDashboardIndicesForTests()
+    render(<DisplaySettings />)
+    const group = within(screen.getByRole('group', { name: 'Indices on the dashboard' }))
+    const on = () =>
+      group
+        .getAllByRole('switch')
+        .filter((one) => one.getAttribute('aria-checked') === 'true')
+        .map((one) => one.getAttribute('aria-labelledby'))
+    expect(on()).toHaveLength(4)
+    expect(group.getByText(/4 of 6 shown/)).toBeVisible()
+    await userEvent.click(group.getByRole('switch', { name: 'NIFTY FIN SERVICE' }))
+    await userEvent.click(group.getByRole('switch', { name: 'NIFTY NEXT 50' }))
+    expect(on()).toHaveLength(6)
+    await userEvent.click(group.getByRole('switch', { name: 'BANKEX' }))
+    expect(group.getByRole('alert')).toHaveTextContent(
+      'Six indices at most. Turn one off to show another.'
+    )
+    expect(group.getByRole('switch', { name: 'BANKEX' })).toHaveAttribute('aria-checked', 'false')
+    // Each row is a 48 dp target, the switch's label.
+    for (const one of group.getAllByRole('switch'))
+      expect(one.closest('label')?.className).toContain('min-h-12')
   })
 })

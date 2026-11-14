@@ -73,6 +73,8 @@ import {
   pushedStatuses,
   useOrderUpdates,
 } from '@/sudarshan/books/orderFold'
+// SUDARSHAN M4.7: the cancel and modify calls, shared with the phone chart's line sheet.
+import { cancelOrderSend, modifyOrderSend } from '@/sudarshan/books/orderSends'
 import { QuoteStatus } from '@/sudarshan/books/QuoteStatus'
 // SUDARSHAN M6.9: what became of a cancel: sent, refused, or not confirmed (it may have gone).
 import {
@@ -371,32 +373,10 @@ export default function OrderBook() {
   // SUDARSHAN M6.9: each returns what became of the cancel, so the phone holds its
   // Cancel (src/sudarshan/books/sent.ts). One that may have reached the broker is
   // "not confirmed", never "failed".
-  const handleCancelOrder = async (orderid: string): Promise<SendOutcome> => {
-    try {
-      const response = await tradingApi.cancelOrder(orderid)
-      if (response.status === 'success') {
-        showToast.success(`Order cancelled: ${orderid}`, 'orders')
-        setTimeout(() => fetchOrders(true), 1000)
-        return 'sent'
-      }
-      const held = answeredHeld(response)
-      if (held) {
-        showToast.warning(heldText('cancel', held, response), 'orders')
-        setTimeout(() => fetchOrders(true), 1000)
-        return held
-      }
-      showToast.error(response.message || 'Failed to cancel order', 'orders')
-    } catch (error) {
-      const outcome = thrownOutcome(error)
-      if (outcome !== 'refused') {
-        showToast.warning(heldText('cancel', outcome, answerBody(error)), 'orders')
-        setTimeout(() => fetchOrders(true), 1000)
-        return outcome
-      }
-      showToast.error(refusalReason(error) ?? 'Failed to cancel order', 'orders')
-    }
-    return 'refused'
-  }
+  // SUDARSHAN M4.7: the call itself lives in books/orderSends.ts, moved there unchanged, so
+  // the phone chart's line sheet makes the same one.
+  const handleCancelOrder = (orderid: string): Promise<SendOutcome> =>
+    cancelOrderSend(orderid, () => void fetchOrders(true))
 
   const handleCancelAllOrders = async (): Promise<SendOutcome> => {
     // SUDARSHAN: the orders working now are the ones this cancels; their cancels are not alerts.
@@ -444,36 +424,11 @@ export default function OrderBook() {
     setModifyDialogOpen(true)
   }
 
+  // SUDARSHAN M4.7: the call itself lives in books/orderSends.ts, as the cancel above.
   const handleModifyOrder = async () => {
     if (!modifyingOrder) return
-
-    const pt = modifyForm.pricetype
-    const sendsPrice = pt === 'LIMIT' || pt === 'SL'
-    const sendsTrigger = pt === 'SL' || pt === 'SL-M'
-
-    try {
-      const response = await tradingApi.modifyOrder(modifyingOrder.orderid, {
-        symbol: modifyingOrder.symbol,
-        exchange: modifyingOrder.exchange,
-        action: modifyingOrder.action,
-        product: modifyingOrder.product,
-        pricetype: pt,
-        quantity: modifyForm.quantity,
-        ...(sendsPrice && { price: modifyForm.price }),
-        ...(sendsTrigger && { trigger_price: modifyForm.trigger_price }),
-      })
-      if (response.status === 'success') {
-        showToast.success(`Order modified: ${modifyingOrder.orderid}`, 'orders')
-        setModifyDialogOpen(false)
-        setTimeout(() => fetchOrders(true), 1000)
-      } else {
-        showToast.error(response.message || 'Failed to modify order', 'orders')
-      }
-    } catch (error) {
-      const axiosError = error as { response?: { data?: { message?: string } } }
-      const message = axiosError.response?.data?.message || 'Failed to modify order'
-      showToast.error(message, 'orders')
-    }
+    const accepted = await modifyOrderSend(modifyingOrder, modifyForm, () => void fetchOrders(true))
+    if (accepted) setModifyDialogOpen(false)
   }
 
   const exportToCSV = () => {
