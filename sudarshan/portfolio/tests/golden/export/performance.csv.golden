@@ -19,12 +19,12 @@ Total gain,50760.00,
 Absolute return %,5.1218,
 XIRR %,9.0861,
 TWR %,1.9974,TWR since 1 Sep 2025
-TWR a year %,,
+TWR a year %,,Shown once the history is longer than a year.
 
 Against the index
 Index,"Same money, value",XIRR %,TWR %,Ahead by %,Beta,Correlation,Note
-NIFTY 50,,,,,,,Dividends not included; NIFTY 50 prices are not available yet; the comparison appears when they are.; Shown after 20 trading days (from 23 Nov 2026)
-NIFTY 500,,,,,,,Dividends not included; NIFTY 500 prices are not available yet; the comparison appears when they are.; Shown after 20 trading days (from 23 Nov 2026)
+NIFTY 50,,,,,,,Dividends not included. NIFTY 50 prices are not available yet; the comparison appears when they are. Shown after 20 trading days (from 23 Nov 2026).
+NIFTY 500,,,,,,,Dividends not included. NIFTY 500 prices are not available yet; the comparison appears when they are. Shown after 20 trading days (from 23 Nov 2026).
 
 By financial year
 Year,Realised gain,Income,Fees
@@ -336,7 +336,3 @@ Day,Value,Net put in
 2026-06-28,950000.00,979250.00
 2026-06-29,950000.00,979250.00
 2026-06-30,1031000.00,979250.00
-
-Notes
-NIFTY 50: Dividends not included; NIFTY 50 prices are not available yet; the comparison appears when they are.; Shown after 20 trading days (from 23 Nov 2026)
-NIFTY 500: Dividends not included; NIFTY 500 prices are not available yet; the comparison appears when they are.; Shown after 20 trading days (from 23 Nov 2026)

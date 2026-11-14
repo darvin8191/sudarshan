@@ -234,7 +234,8 @@ async def test_performance_is_the_performance_views_figures_and_every_day_of_its
     assert facts["Absolute return %"][0] == report["absolute_return_pct"]
     assert facts["XIRR %"] == (report["xirr"]["pct"] or "", report["xirr"]["words"] or "")
     assert facts["TWR %"] == (report["twr"]["pct"] or "", report["twr"]["words"] or "")
-    assert facts["TWR a year %"][0] == (report["twr"]["annualised_pct"] or "")
+    assert facts["TWR a year %"] == ("", "Shown once the history is longer than a year.")
+    assert report["twr"]["annualised_pct"] is None
     assert report["xirr"]["pct"] and report["twr"]["pct"]  # both are shown for this tab
     index = block(rows, "Against the index")
     assert [r["Index"] for r in index] == [b["label"] for b in report["benchmarks"]]

@@ -31,7 +31,9 @@ from typing import Any, NamedTuple
 from .core import money, valuation
 from .core import words as W
 from .core.days import clock_of_instant, day_of_instant
-from .core.kinds import ALLOCATION_BY, EXPORT_VIEWS
+from .core.kinds import ACTIVITY_KIND_LABELS, ALLOCATION_BY, EXPORT_VIEWS
+from .core.ledger import ordered
+from .core.model import Entry
 from .imports.csvutil import BOM, guard
 
 BRAND = "SUDARSHAN / सुदर्शन"
@@ -60,7 +62,11 @@ WORDS = {
     "unpriced": "{count} holdings have no price yet and are counted at their cost.",
     "whole_tab": "The whole tab, with no filter.",
     "not_yet": "Not shown yet",
+    "twr_year": "Shown once the history is longer than a year.",
+    "newest": "The {shown} newest of {count} entries. The CSV file has every entry.",
 }
+#: The most entries a PDF lists (about twelve pages); the CSV has them all.
+PAPER_ENTRIES = 400
 SLUG_MAX = 24
 _NOT_SLUG = re.compile(r"[^A-Za-z0-9]+")
 
@@ -103,7 +109,8 @@ Cell = str | Amount | Gain | Qty | Price | Pct | Day | None
 @dataclass(frozen=True)
 class Col:
     """A column: its title, its share of a page's width, its alignment, and whether paper has
-    room for it (the CSV always does)."""
+    room for it (the CSV always does). A column called Note is never a column on paper: its
+    sentences are printed whole under the table."""
 
     title: str
     share: float = 1.0
@@ -191,10 +198,10 @@ def holdings(tab_view: Mapping[str, Any], accounts: Mapping[int, str]) -> Sheet:
     lines.sort(key=lambda r: (-r[11].paise, r[0], r[5]))
     cols = (
         Col("Holding", 2.6, "l"), Col("Symbol", paper=False), Col("Exchange", paper=False),
-        Col("ISIN", paper=False), Col("Class", paper=False), Col("Account", 1.4, "l"),
-        Col("Quantity", 1.1), Col("Average cost", paper=False), Col("Cost", 1.5),
-        Col("Price", 1.3), Col("Price date", paper=False), Col("Value", 1.5), Col("Gain", 1.5),
-        Col("Gain %", paper=False), Col("Weight %", paper=False), Col("Note", paper=False),
+        Col("ISIN", paper=False), Col("Class", paper=False), Col("Account", 1.2, "l"),
+        Col("Quantity", 1.3), Col("Average cost", paper=False), Col("Cost", 1.7),
+        Col("Price", paper=False), Col("Price date", paper=False), Col("Value", 1.7), Col("Gain", 1.8),
+        Col("Gain %", paper=False), Col("Weight %", paper=False), Col("Note", align="l"),
     )  # fmt: skip
     total = ("Total", "", "", "", "", "", None, None, Amount(totals["cost_paise"]), None, None,
              Amount(totals["value_paise"]), Gain(totals["unrealised_paise"]), None, None, "")  # fmt: skip
@@ -269,12 +276,16 @@ def performance(tab: Mapping[str, Any], report: Mapping[str, Any], at: int) -> S
         ("Absolute return %", Pct(report["absolute_return_pct"], True), ""),
         ("XIRR %", *_rate(xirr["pct"], xirr["words"])),
         ("TWR %", *_rate(twr["pct"], twr["words"])),
-        ("TWR a year %", Pct(twr["annualised_pct"], True), ""),
+        (
+            "TWR a year %",
+            Pct(twr["annualised_pct"], True),
+            "" if twr["annualised_pct"] is not None else WORDS["twr_year"],
+        ),
     )
     index = tuple(
         (b["label"], Amount(b["value_paise"]), Pct(b["xirr_pct"], True), Pct(b["twr_pct"], True),
          Pct(b["excess_pct"], True), b["beta"] or "", b["correlation"] or "",
-         "; ".join([*b["words"], *([b["stat_note"]] if b["stat_note"] else [])]))
+         " ".join(f"{w.rstrip('.')}." for w in (*b["words"], b["stat_note"]) if w))
         for b in report["benchmarks"]
     )  # fmt: skip
     years = tuple(
@@ -294,7 +305,7 @@ def performance(tab: Mapping[str, Any], report: Mapping[str, Any], at: int) -> S
         Section(
             "Against the index",
             (Col("Index", 1.6, "l"), Col("Same money, value", 1.6), Col("XIRR %"), Col("TWR %"),
-             Col("Ahead by %"), Col("Beta"), Col("Correlation", 1.1), Col("Note", paper=False)),
+             Col("Ahead by %"), Col("Beta"), Col("Correlation", 1.1), Col("Note", align="l")),
             index,
         ),
         Section("By financial year",
@@ -303,16 +314,14 @@ def performance(tab: Mapping[str, Any], report: Mapping[str, Any], at: int) -> S
         Section("Daily values", daily, days, on="csv", empty=none_yet),
         Section("Month-end values", daily, ends, on="paper", empty=none_yet),
     )  # fmt: skip
-    notes = [f"{b[0]}: {b[7]}" for b in index if b[7]]
-    if report["series_words"]:
-        notes.append(report["series_words"])
+    notes = (report["series_words"],) if report["series_words"] else ()
     figures = (
         ("Value", Amount(report["value_paise"])),
         ("Net put in", Amount(report["net_put_in_paise"])),
         ("Total gain", Gain(report["total_gain_paise"])),
         ("XIRR %", Pct(xirr["pct"], True) if xirr["pct"] is not None else WORDS["not_yet"]),
     )
-    return Sheet("performance", tab, at, figures, sections, tuple(notes))
+    return Sheet("performance", tab, at, figures, sections, notes)
 
 
 def income(tab: Mapping[str, Any], report: Mapping[str, Any], at: int) -> Sheet:
@@ -344,6 +353,45 @@ def income(tab: Mapping[str, Any], report: Mapping[str, Any], at: int) -> Sheet:
         ("Yield on cost %", Pct(yield_pct) if yield_pct is not None else WORDS["not_yet"]),
     )
     return Sheet("income", tab, at, figures, sections)
+
+
+def entries(
+    tab: Mapping[str, Any],
+    rows: Sequence[Mapping[str, Any]],
+    accounts: Mapping[int, str],
+    assets: Mapping[int, str],
+    at: int,
+) -> Sheet:
+    """The posted entries in the order the ledger applies them, for paper (the CSV of this view
+    is the import format, ``entries_file``). ``rows`` are the tab's activity rows."""
+    notes = {row["id"]: row.get("note") or "" for row in rows}
+    listed = ordered(Entry.of(row) for row in rows)
+    lines = []
+    for e in listed[-PAPER_ENTRIES:]:
+        kind, first, second = ACTIVITY_KIND_LABELS[e.kind], e.account_id, e.to_account_id
+        if e.kind == "TRANSFER" and (first is None or second is None):
+            kind = "Transfer in" if first is None else "Transfer out"
+        names = [accounts.get(a, "") for a in (first, second) if a is not None]
+        ratio = f"{e.ratio_num}:{e.ratio_den}" if e.ratio_num else ""
+        lines.append((
+            Day(e.trade_date), kind, assets.get(e.asset_id, "") if e.asset_id else "",
+            " to ".join(names), ratio or Qty(e.qty_u), Price(e.price_u), Amount(e.amount),
+            Amount(e.charges_paise or None), notes[e.id],
+        ))  # fmt: skip
+    cols = (
+        Col("Date", 1.2, "l"), Col("Type", 1.1, "l"), Col("Holding", 1.8, "l"),
+        Col("Account", 1.3, "l"), Col("Quantity", 1.2), Col("Price", 1.5), Col("Amount", 1.7),
+        Col("Charges", 1.2), Col("Entry note", paper=False),
+    )  # fmt: skip
+    cut = len(listed) > len(lines)
+    said = (WORDS["newest"].format(shown=len(lines), count=len(listed)),) if cut else ()
+    figures = (
+        ("Entries", str(len(listed))),
+        ("First entry", Day(listed[0].trade_date) if listed else WORDS["not_yet"]),
+        ("Latest entry", Day(listed[-1].trade_date) if listed else WORDS["not_yet"]),
+    )
+    section = Section("Entries", cols, tuple(lines), empty="No entries in this tab yet.")
+    return Sheet("activity", tab, at, figures, (section,), said)
 
 
 # ---- CSV ------------------------------------------------------------------------------------------
