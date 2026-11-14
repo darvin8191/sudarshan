@@ -7,7 +7,6 @@
 // `holdingFigures`).
 import { useEffect, useMemo } from 'react'
 import { cn } from '@/lib/utils'
-import { formatRupees } from '@/sudarshan/dashboard/format'
 import { LiveLine } from '@/sudarshan/dashboard/LiveLine'
 import {
   type HoldingFigures,
@@ -36,9 +35,12 @@ import {
 import {
   Figure,
   NotRealTime,
+  Plain,
   type ReadOnlyBookProps,
   ReadStamp,
   ServiceWords,
+  UnreadCard,
+  unreadWords,
   ViewerNote,
 } from './readOnlyParts'
 import { useBookOverlay } from './useBookOverlay'
@@ -51,21 +53,6 @@ const idOf = (row: MaskedHolding) => `${row.exchange}:${row.symbol ?? row.name}`
 const keyOf = (row: MaskedHolding) => {
   const instrument = instrumentOf(row)
   return instrument ? `${instrument.exchange.toUpperCase()}:${instrument.symbol.toUpperCase()}` : ''
-}
-
-/** Money without an arrow, where a figure is a size and not a gain: a value, an amount invested. */
-function Plain({
-  value,
-  stale = false,
-  className,
-}: {
-  value: number | null | undefined
-  stale?: boolean
-  className?: string
-}) {
-  if (value === undefined) return <Hidden className={className} />
-  if (value === null) return <span className={cn('text-muted-foreground', className)}>-</span>
-  return <span className={cn(stale && STALE, className)}>{formatRupees(value)}</span>
 }
 
 export function ReadOnlyHoldings({
@@ -115,11 +102,15 @@ export function ReadOnlyHoldings({
     if (orphan) close()
   }, [orphan, close])
 
+  const unread = unreadWords(state, words, rows.length, readAt)
   let content
   if (rows.length === 0 && loading) {
     content = <LoadingCards />
   } else if (rows.length === 0 && error) {
     content = <ProblemCard message={error} onRetry={onRetry} />
+  } else if (unread !== null) {
+    // not an empty account: it was not read (review M4)
+    content = <UnreadCard text={unread} />
   } else if (rows.length === 0) {
     content = (
       <EmptyCard title="No holdings" hint={words ?? 'Shares held in the account show here.'} />
@@ -206,7 +197,11 @@ export function ReadOnlyHoldings({
     <div className="flex flex-col gap-3">
       <ViewerNote name="holdings" text={NOTE} />
       {content}
-      <ReadStamp part="Holdings" readAt={readAt} />
+      <ReadStamp
+        part="Holdings"
+        readAt={readAt}
+        closed={state === 'closed' || marketOpen('') === false}
+      />
       {overlay?.act === 'sheet' && target && (
         <HoldingSheet
           row={target.row}

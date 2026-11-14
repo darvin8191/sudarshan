@@ -19,6 +19,7 @@ vi.mock('@/api/trading', () => ({
 
 import { feed } from '@/test/marketDataHarness'
 import { IndexStrip, SNAPSHOT_MAX_AGE_MS } from './IndexStrip'
+import { resetDashboardIndicesForTests, setDashboardIndex } from './indexChoice'
 import { STALE_MS } from './live'
 
 const MINUS = '−'
@@ -68,10 +69,18 @@ function tick(symbol: string, ltp: number, source: 'websocket' | 'rest' = 'webso
 const tiles = () => screen.getAllByRole('listitem')
 const line = (container: HTMLElement) => container.querySelector('[data-feed]')
 
+/** The three the strip always showed, which these tests were written on: chosen, as in Display. */
+const THREE = ['NIFTY', 'BANKNIFTY', 'INDIAVIX']
+const choose = (symbols: string[]) => {
+  localStorage.setItem('sudarshan-dashboard-indices', JSON.stringify(symbols))
+  resetDashboardIndicesForTests()
+}
+
 beforeEach(() => {
   feed.reset()
   getMultiQuotes.mockReset()
   getMultiQuotes.mockResolvedValue(ANSWER)
+  choose(THREE)
 })
 
 afterEach(() => {
@@ -302,5 +311,110 @@ describe('IndexStrip', () => {
     act(() => feed.setState({ connectionEpoch: 3 }))
     await settle()
     expect(getMultiQuotes).toHaveBeenCalledTimes(3)
+  })
+
+  it('shows NIFTY 50, NIFTY BANK, INDIA VIX and SENSEX until the owner chooses (D8)', async () => {
+    localStorage.clear()
+    resetDashboardIndicesForTests()
+    render(<IndexStrip apiKey="key" marketOpen={CLOSED} />)
+    await settle()
+    expect(screen.getAllByRole('link').map((link) => link.textContent)).toEqual([
+      'NIFTY 50',
+      'NIFTY BANK',
+      'INDIA VIX',
+      'SENSEX',
+    ])
+    expect(getMultiQuotes).toHaveBeenCalledWith('key', [
+      { symbol: 'NIFTY', exchange: 'NSE_INDEX' },
+      { symbol: 'BANKNIFTY', exchange: 'NSE_INDEX' },
+      { symbol: 'INDIAVIX', exchange: 'NSE_INDEX' },
+      { symbol: 'SENSEX', exchange: 'BSE_INDEX' },
+    ])
+    // More than three: the strip scrolls inside itself, three and a part to a phone's width.
+    expect(screen.getByTestId('index-strip').className).toContain('overflow-x-auto')
+    expect(screen.getAllByRole('link')[3].getAttribute('href')).toContain('BSE_INDEX/SENSEX')
+  })
+
+  it('follows the choice as it changes, reading and subscribing the new set once', async () => {
+    render(<IndexStrip apiKey="key" marketOpen={CLOSED} />)
+    await settle()
+    expect(tiles()).toHaveLength(3)
+    expect(screen.getByTestId('index-strip').className).toContain('grid-cols-3')
+    getMultiQuotes.mockClear()
+    act(() => void setDashboardIndex('BANKEX', true))
+    await settle()
+    expect(screen.getAllByRole('link').map((link) => link.textContent)).toEqual([
+      'NIFTY 50',
+      'NIFTY BANK',
+      'INDIA VIX',
+      'BANKEX',
+    ])
+    expect(getMultiQuotes).toHaveBeenCalledTimes(1)
+    act(() => feed.push('BANKEX', 'BSE_INDEX', { ltp: 61_250.4 }, 'websocket'))
+    expect(tiles()[3]).toHaveTextContent('61,250.40')
+  })
+
+  it('reads nothing while the page is hidden, and reads once when it is shown (SCR-F)', async () => {
+    vi.useFakeTimers()
+    let visibility: DocumentVisibilityState = 'visible'
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      get: () => visibility,
+    })
+    const page = (state: DocumentVisibilityState) => {
+      visibility = state
+      act(() => {
+        document.dispatchEvent(new Event('visibilitychange'))
+      })
+    }
+    try {
+      const { rerender } = render(<IndexStrip apiKey="key" marketOpen={CLOSED} />)
+      await settle()
+      expect(getMultiQuotes).toHaveBeenCalledTimes(1)
+
+      page('hidden')
+      // Left open overnight in a hidden tab: NSE opens, and the feed signs in again later.
+      rerender(<IndexStrip apiKey="key" marketOpen={OPEN} />)
+      await settle()
+      await pass(SNAPSHOT_MAX_AGE_MS + 1000)
+      act(() => feed.setState({ connectionEpoch: 2 }))
+      await settle()
+      expect(getMultiQuotes).toHaveBeenCalledTimes(1)
+
+      page('visible')
+      await settle()
+      expect(getMultiQuotes).toHaveBeenCalledTimes(2)
+    } finally {
+      Reflect.deleteProperty(document, 'visibilityState')
+    }
+  })
+
+  it('reads the open it missed while hidden on a quick return, though the last read is young (SCR-F)', async () => {
+    vi.useFakeTimers()
+    let visibility: DocumentVisibilityState = 'visible'
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      get: () => visibility,
+    })
+    const page = (state: DocumentVisibilityState) => {
+      visibility = state
+      act(() => {
+        document.dispatchEvent(new Event('visibilitychange'))
+      })
+    }
+    try {
+      const { rerender } = render(<IndexStrip apiKey="key" marketOpen={CLOSED} />)
+      await settle()
+      page('hidden')
+      rerender(<IndexStrip apiKey="key" marketOpen={OPEN} />)
+      await pass(10_000)
+      expect(getMultiQuotes).toHaveBeenCalledTimes(1)
+      page('visible')
+      await settle()
+      // The previous close moved on at the open: that read is owed, however young the last.
+      expect(getMultiQuotes).toHaveBeenCalledTimes(2)
+    } finally {
+      Reflect.deleteProperty(document, 'visibilityState')
+    }
   })
 })

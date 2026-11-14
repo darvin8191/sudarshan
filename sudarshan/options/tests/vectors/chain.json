@@ -1,0 +1,612 @@
+{
+ "about": "Synthetic: every symbol, key and figure is made up. Upstox's option chain answer in the shape its page documents, and what the mapping makes of it.",
+ "master": [
+  [
+   "NIFTY",
+   "NSE_INDEX",
+   "INDEX",
+   null,
+   null,
+   null,
+   1,
+   "NSE_INDEX|Nifty 50"
+  ],
+  [
+   "SENSEX",
+   "BSE_INDEX",
+   "INDEX",
+   null,
+   null,
+   null,
+   1,
+   "BSE_INDEX|SENSEX"
+  ],
+  [
+   "ACME",
+   "NSE",
+   "EQ",
+   null,
+   null,
+   null,
+   1,
+   "NSE_EQ|INE000A01018"
+  ],
+  [
+   "MCXONLY",
+   "MCX",
+   "FUT",
+   "MCXONLY",
+   "17-NOV-26",
+   null,
+   1,
+   "MCX_FO|1"
+  ],
+  [
+   "NIFTY17NOV2625800CE",
+   "NFO",
+   "CE",
+   "NIFTY",
+   "17-NOV-26",
+   25800.0,
+   65,
+   "NSE_FO|41001"
+  ],
+  [
+   "NIFTY17NOV2625800PE",
+   "NFO",
+   "PE",
+   "NIFTY",
+   "17-NOV-26",
+   25800.0,
+   65,
+   "NSE_FO|41002"
+  ],
+  [
+   "NIFTY17NOV2625850CE",
+   "NFO",
+   "CE",
+   "NIFTY",
+   "17-NOV-26",
+   25850.0,
+   65,
+   "NSE_FO|41003"
+  ],
+  [
+   "NIFTY17NOV2625850PE",
+   "NFO",
+   "PE",
+   "NIFTY",
+   "17-NOV-26",
+   25850.0,
+   65,
+   "NSE_FO|41004"
+  ],
+  [
+   "NIFTY17NOV2625900CE",
+   "NFO",
+   "CE",
+   "NIFTY",
+   "17-NOV-26",
+   25900.0,
+   65,
+   "NSE_FO|41005"
+  ],
+  [
+   "NIFTY17NOV2625900PE",
+   "NFO",
+   "PE",
+   "NIFTY",
+   "17-NOV-26",
+   25900.0,
+   65,
+   "NSE_FO|41006"
+  ],
+  [
+   "NIFTY17NOV2625950CE",
+   "NFO",
+   "CE",
+   "NIFTY",
+   "17-NOV-26",
+   25950.0,
+   65,
+   "NSE_FO|41007"
+  ],
+  [
+   "NIFTY17NOV2625950PE",
+   "NFO",
+   "PE",
+   "NIFTY",
+   "17-NOV-26",
+   25950.0,
+   65,
+   "NSE_FO|41008"
+  ],
+  [
+   "NIFTY17NOV2626000CE",
+   "NFO",
+   "CE",
+   "NIFTY",
+   "17-NOV-26",
+   26000.0,
+   65,
+   "NSE_FO|41009"
+  ],
+  [
+   "NIFTY17NOV2626000PE",
+   "NFO",
+   "PE",
+   "NIFTY",
+   "17-NOV-26",
+   26000.0,
+   65,
+   "NSE_FO|41010"
+  ],
+  [
+   "NIFTY24NOV2625900CE",
+   "NFO",
+   "CE",
+   "NIFTY",
+   "24-NOV-26",
+   25900.0,
+   65,
+   "NSE_FO|41011"
+  ],
+  [
+   "SENSEX19NOV2684500CE",
+   "BFO",
+   "CE",
+   "SENSEX",
+   "19-NOV-26",
+   84500.0,
+   20,
+   "BSE_FO|41012"
+  ],
+  [
+   "ACME24NOV26102.5CE",
+   "NFO",
+   "CE",
+   "ACME",
+   "24-NOV-26",
+   102.5,
+   500,
+   "NSE_FO|41013"
+  ],
+  [
+   "NIFTY24NOV2625900PE",
+   "NFO",
+   "PE",
+   "NIFTY",
+   "24-NOV-26",
+   25900.0,
+   65,
+   "NSE_FO|41014"
+  ],
+  [
+   "SENSEX19NOV2684500PE",
+   "BFO",
+   "PE",
+   "SENSEX",
+   "19-NOV-26",
+   84500.0,
+   20,
+   "BSE_FO|41015"
+  ],
+  [
+   "ACME24NOV26102.5PE",
+   "NFO",
+   "PE",
+   "ACME",
+   "24-NOV-26",
+   102.5,
+   500,
+   "NSE_FO|41016"
+  ],
+  [
+   "NIFTY24NOV26FUT",
+   "NFO",
+   "FUT",
+   "NIFTY",
+   "24-NOV-26",
+   null,
+   65,
+   "NSE_FO|49001"
+  ],
+  [
+   "NIFTY29DEC26FUT",
+   "NFO",
+   "FUT",
+   "NIFTY",
+   "29-DEC-26",
+   null,
+   65,
+   "NSE_FO|49002"
+  ]
+ ],
+ "answer": {
+  "status": "success",
+  "data": [
+   {
+    "expiry": "2026-11-17",
+    "pcr": 1.0,
+    "strike_price": 25900,
+    "underlying_key": "NSE_INDEX|Nifty 50",
+    "underlying_spot_price": 25912.35,
+    "call_options": {
+     "instrument_key": "NSE_FO|41005",
+     "market_data": {
+      "ltp": 142.35,
+      "volume": 1000,
+      "oi": 4000,
+      "close_price": 137.35,
+      "bid_price": 142.3,
+      "bid_qty": 65,
+      "ask_price": 142.4,
+      "ask_qty": 130,
+      "prev_oi": 3000
+     },
+     "option_greeks": {
+      "vega": 9.1,
+      "theta": -11.2,
+      "gamma": 0.0009,
+      "delta": 0.52,
+      "iv": 11.8,
+      "pop": 48.0
+     }
+    },
+    "put_options": {
+     "instrument_key": "NSE_FO|41006",
+     "market_data": {
+      "ltp": 88.1,
+      "volume": 1000,
+      "oi": 6000,
+      "close_price": 83.1,
+      "bid_price": 88.05,
+      "bid_qty": 65,
+      "ask_price": 88.15,
+      "ask_qty": 130,
+      "prev_oi": 0
+     },
+     "option_greeks": {
+      "vega": 9.1,
+      "theta": -11.2,
+      "gamma": 0.0009,
+      "delta": 0.52,
+      "iv": 11.8,
+      "pop": 48.0
+     }
+    }
+   },
+   {
+    "expiry": "2026-11-17",
+    "pcr": 1.0,
+    "strike_price": 25800,
+    "underlying_key": "NSE_INDEX|Nifty 50",
+    "underlying_spot_price": 25912.35,
+    "call_options": {
+     "instrument_key": "NSE_FO|41001",
+     "market_data": {
+      "ltp": 214.5,
+      "volume": 1000,
+      "oi": 1000,
+      "close_price": 209.5,
+      "bid_price": 214.45,
+      "bid_qty": 65,
+      "ask_price": 214.55,
+      "ask_qty": 130,
+      "prev_oi": 1500
+     },
+     "option_greeks": {
+      "vega": 9.1,
+      "theta": -11.2,
+      "gamma": 0.0009,
+      "delta": 0.52,
+      "iv": 11.8,
+      "pop": 48.0
+     }
+    }
+   },
+   {
+    "expiry": "2026-11-17",
+    "pcr": 1.0,
+    "strike_price": 25850,
+    "underlying_key": "NSE_INDEX|Nifty 50",
+    "underlying_spot_price": 25912.35,
+    "call_options": {
+     "instrument_key": "NSE_FO|999999",
+     "market_data": {
+      "ltp": 180.0,
+      "volume": 1000,
+      "oi": 500,
+      "close_price": 175.0,
+      "bid_price": 179.95,
+      "bid_qty": 65,
+      "ask_price": 180.05,
+      "ask_qty": 130,
+      "prev_oi": 500
+     },
+     "option_greeks": {
+      "vega": 9.1,
+      "theta": -11.2,
+      "gamma": 0.0009,
+      "delta": 0.52,
+      "iv": 11.8,
+      "pop": 48.0
+     }
+    },
+    "put_options": {
+     "instrument_key": "NSE_FO|41006",
+     "market_data": {
+      "ltp": 70.0,
+      "volume": 1000,
+      "oi": 2000,
+      "close_price": 65.0,
+      "bid_price": 69.95,
+      "bid_qty": 65,
+      "ask_price": 70.05,
+      "ask_qty": 130,
+      "prev_oi": 1000
+     },
+     "option_greeks": {
+      "vega": 9.1,
+      "theta": -11.2,
+      "gamma": 0.0009,
+      "delta": 0.52,
+      "iv": 11.8,
+      "pop": 48.0
+     }
+    }
+   },
+   {
+    "expiry": "2026-11-17",
+    "pcr": 1.0,
+    "strike_price": 25950,
+    "underlying_key": "NSE_INDEX|Nifty 50",
+    "underlying_spot_price": 25912.35,
+    "call_options": {
+     "instrument_key": "NSE_FO|41007",
+     "market_data": {
+      "ltp": null,
+      "volume": 1000,
+      "oi": "800",
+      "close_price": 105.0,
+      "bid_price": "abc",
+      "bid_qty": 65,
+      "ask_price": 110.05,
+      "ask_qty": 130,
+      "prev_oi": "NaN"
+     },
+     "option_greeks": {
+      "vega": 9.1,
+      "theta": -11.2,
+      "gamma": 0.0009,
+      "delta": true,
+      "iv": null,
+      "pop": 48.0
+     }
+    },
+    "put_options": {
+     "instrument_key": "NSE_FO|41008",
+     "market_data": {
+      "ltp": 0,
+      "volume": 1000,
+      "oi": 0,
+      "close_price": -5,
+      "bid_price": -0.05,
+      "bid_qty": 65,
+      "ask_price": 0.05,
+      "ask_qty": 130,
+      "prev_oi": 0
+     },
+     "option_greeks": {
+      "vega": 9.1,
+      "theta": -11.2,
+      "gamma": 0.0009,
+      "delta": 0.52,
+      "iv": 11.8,
+      "pop": 48.0
+     }
+    }
+   },
+   {
+    "expiry": "2026-11-17",
+    "pcr": 1.0,
+    "strike_price": 26050,
+    "underlying_key": "NSE_INDEX|Nifty 50",
+    "underlying_spot_price": 25912.35,
+    "call_options": {
+     "instrument_key": "NSE_FO|424242",
+     "market_data": {
+      "ltp": 60.0,
+      "volume": 1000,
+      "oi": 100,
+      "close_price": 55.0,
+      "bid_price": 59.95,
+      "bid_qty": 65,
+      "ask_price": 60.05,
+      "ask_qty": 130,
+      "prev_oi": 100
+     },
+     "option_greeks": {
+      "vega": 9.1,
+      "theta": -11.2,
+      "gamma": 0.0009,
+      "delta": 0.52,
+      "iv": 11.8,
+      "pop": 48.0
+     }
+    }
+   },
+   {
+    "expiry": "2026-11-24",
+    "pcr": 1.0,
+    "strike_price": 25900,
+    "underlying_key": "NSE_INDEX|Nifty 50",
+    "underlying_spot_price": 25912.35,
+    "call_options": {
+     "instrument_key": "NSE_FO|41011",
+     "market_data": {
+      "ltp": 300.0,
+      "volume": 1000,
+      "oi": 9999,
+      "close_price": 295.0,
+      "bid_price": 299.95,
+      "bid_qty": 65,
+      "ask_price": 300.05,
+      "ask_qty": 130,
+      "prev_oi": 9999
+     },
+     "option_greeks": {
+      "vega": 9.1,
+      "theta": -11.2,
+      "gamma": 0.0009,
+      "delta": 0.52,
+      "iv": 11.8,
+      "pop": 48.0
+     }
+    }
+   },
+   "not a row"
+  ]
+ },
+ "expected": {
+  "spot": 25912.35,
+  "left_out": 2,
+  "by_strike": 2,
+  "pcr": 1.2698412698412698,
+  "strikes": [
+   {
+    "strike": 25800.0,
+    "ce": {
+     "symbol": "NIFTY17NOV2625800CE",
+     "exchange": "NFO",
+     "lot": 65,
+     "tick": 0.05,
+     "ltp": 214.5,
+     "bid": 214.45,
+     "ask": 214.55,
+     "oi": 1000.0,
+     "prev_oi": 1500.0,
+     "volume": 1000.0,
+     "close": 209.5,
+     "iv": 11.8,
+     "delta": 0.52,
+     "gamma": 0.0009,
+     "theta": -11.2,
+     "vega": 9.1
+    }
+   },
+   {
+    "strike": 25850.0,
+    "ce": {
+     "symbol": "NIFTY17NOV2625850CE",
+     "exchange": "NFO",
+     "lot": 65,
+     "tick": 0.05,
+     "ltp": 180.0,
+     "bid": 179.95,
+     "ask": 180.05,
+     "oi": 500.0,
+     "prev_oi": 500.0,
+     "volume": 1000.0,
+     "close": 175.0,
+     "iv": 11.8,
+     "delta": 0.52,
+     "gamma": 0.0009,
+     "theta": -11.2,
+     "vega": 9.1
+    },
+    "pe": {
+     "symbol": "NIFTY17NOV2625850PE",
+     "exchange": "NFO",
+     "lot": 65,
+     "tick": 0.05,
+     "ltp": 70.0,
+     "bid": 69.95,
+     "ask": 70.05,
+     "oi": 2000.0,
+     "prev_oi": 1000.0,
+     "volume": 1000.0,
+     "close": 65.0,
+     "iv": 11.8,
+     "delta": 0.52,
+     "gamma": 0.0009,
+     "theta": -11.2,
+     "vega": 9.1
+    }
+   },
+   {
+    "strike": 25900.0,
+    "ce": {
+     "symbol": "NIFTY17NOV2625900CE",
+     "exchange": "NFO",
+     "lot": 65,
+     "tick": 0.05,
+     "ltp": 142.35,
+     "bid": 142.3,
+     "ask": 142.4,
+     "oi": 4000.0,
+     "prev_oi": 3000.0,
+     "volume": 1000.0,
+     "close": 137.35,
+     "iv": 11.8,
+     "delta": 0.52,
+     "gamma": 0.0009,
+     "theta": -11.2,
+     "vega": 9.1
+    },
+    "pe": {
+     "symbol": "NIFTY17NOV2625900PE",
+     "exchange": "NFO",
+     "lot": 65,
+     "tick": 0.05,
+     "ltp": 88.1,
+     "bid": 88.05,
+     "ask": 88.15,
+     "oi": 6000.0,
+     "prev_oi": 0.0,
+     "volume": 1000.0,
+     "close": 83.1,
+     "iv": 11.8,
+     "delta": 0.52,
+     "gamma": 0.0009,
+     "theta": -11.2,
+     "vega": 9.1
+    }
+   },
+   {
+    "strike": 25950.0,
+    "ce": {
+     "symbol": "NIFTY17NOV2625950CE",
+     "exchange": "NFO",
+     "lot": 65,
+     "tick": 0.05,
+     "ask": 110.05,
+     "oi": 800.0,
+     "volume": 1000.0,
+     "close": 105.0,
+     "gamma": 0.0009,
+     "theta": -11.2,
+     "vega": 9.1
+    },
+    "pe": {
+     "symbol": "NIFTY17NOV2625950PE",
+     "exchange": "NFO",
+     "lot": 65,
+     "tick": 0.05,
+     "ltp": 0.0,
+     "bid": -0.05,
+     "ask": 0.05,
+     "oi": 0.0,
+     "prev_oi": 0.0,
+     "volume": 1000.0,
+     "close": -5.0,
+     "iv": 11.8,
+     "delta": 0.52,
+     "gamma": 0.0009,
+     "theta": -11.2,
+     "vega": 9.1
+    }
+   }
+  ]
+ }
+}

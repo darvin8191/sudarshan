@@ -20,6 +20,15 @@ The journal pairs only the fills it has seen, so two cases are kept out of every
   never closes by itself. ``past_expiry`` says when its status becomes ``expired`` (the replay
   and the close check apply it); its result waits for a settlement value.
 
+* **Counted again.** A share trade left open whose sale the journal never saw (it was off for
+  longer than its catch-up reaches) would stay an open LONG for ever (verification N2).
+  ``recounts`` give, for a key, what the account held at the start of a day, read again later.
+  At that day the replay compares: where the account holds fewer shares than the position the
+  fills make, the trip is ended there as ``unmatched`` (its closing was not seen, ``unclosed``)
+  and the pairing goes on from the quantity counted, as from an opening. More shares than the
+  fills make change nothing (a sale past what was seen bought is already listed apart). Outside
+  the cash market's carry class a recount of any other quantity ends the trip the same way.
+
 Rules that each pin a defect:
 
 * The order is (``exch_ts_ms``, ``trade_id``), never the order the fills arrived in; a trade id
@@ -119,6 +128,17 @@ def held_before(opening: Mapping[str, Any] | None, fills: Iterable[Mapping[str, 
         before += int(fill["qty"]) if str(fill["action"]).upper() == "BUY" else -int(fill["qty"])
     start = qty - before
     return max(start, 0) if cash else start
+
+
+def unclosed(trip: Mapping[str, Any]) -> bool:
+    """Whether an unmatched trip is one the journal saw opened and did not see closed (ended by
+    a recount): it ended holding more than its fills took off. A position opened before the
+    journal ends with at least as much sold as it saw bought."""
+    return (
+        trip.get("status") == UNMATCHED
+        and trip.get("closed_ms") is not None
+        and int(trip.get("entry_qty") or 0) > int(trip.get("exit_qty") or 0)
+    )
 
 
 def fill_order(fill: Mapping[str, Any]) -> tuple[int, int, int, str]:
@@ -248,15 +268,36 @@ def _finish(trip: dict[str, Any]) -> dict[str, Any]:
     return trip
 
 
-def _pair_key(group: list[dict[str, Any]], opening: int, cash: bool) -> list[dict[str, Any]]:
-    """The trips of one key's fills (in order), starting from ``opening`` held before them."""
+def _pair_key(group: list[dict[str, Any]], opening: int, cash: bool,
+              recounts: Iterable[tuple[int, int]] = ()) -> list[dict[str, Any]]:  # fmt: skip
+    """The trips of one key's fills (in order), starting from ``opening`` held before them;
+    ``recounts`` are (day, quantity the account held at the start of that day)."""
     out: list[dict[str, Any]] = []
     q = max(opening, 0) if cash else opening
     trip: dict[str, Any] | None = None
-    if q:
-        trip = _new_trip(group[0], "long" if q > 0 else "short", UNMATCHED)
-        trip["qty_max"] = abs(q)
+    counted = sorted((int(day), int(qty)) for day, qty in recounts)
+
+    def recount(day: int, qty: int) -> None:
+        nonlocal q, trip
+        held = max(qty, 0) if cash else qty
+        if held == q or (cash and held > q):
+            return
+        if trip is not None:
+            # Ended at the start of the day it was counted on, its closing not seen.
+            trip["status"] = UNMATCHED
+            trip["closed_ms"] = money.day_start_ms(day)
+            trip["close_day"] = day
+            out.append(trip)
+            trip = None
+        q = held
+
     for fill in group:
+        while counted and counted[0][0] <= fill["day"]:
+            recount(*counted.pop(0))
+        if trip is None and q:
+            # Held before this fill (an opening, or a recount): the run-off of it is unmatched.
+            trip = _new_trip(fill, "long" if q > 0 else "short", UNMATCHED)
+            trip["qty_max"] = abs(q)
         step = 1 if fill["action"] == "BUY" else -1
         remaining = fill["qty"]
         ended: dict[str, Any] | None = None
@@ -286,6 +327,8 @@ def _pair_key(group: list[dict[str, Any]], opening: int, cash: bool) -> list[dic
         _add_leg(trip, fill, "entry", remaining)
         q += step * remaining
         trip["qty_max"] = max(trip["qty_max"], abs(q))
+    for day, qty in counted:  # counted after the last fill: a trip still open may end there
+        recount(day, qty)
     if trip is not None:
         out.append(trip)
     return [_finish(t) for t in out]
@@ -294,12 +337,14 @@ def _pair_key(group: list[dict[str, Any]], opening: int, cash: bool) -> list[dic
 def pair_fills(
     fills: Iterable[Mapping[str, Any]],
     openings: Mapping[tuple[str, str, str, str], int] | None = None,
+    recounts: Mapping[tuple[str, str, str, str], Iterable[tuple[int, int]]] | None = None,
 ) -> list[dict[str, Any]]:
     """Round trips from fills, closed, open and unmatched, ordered by (opened_ms, key).
 
     ``openings`` maps a key (mode, exchange, symbol, product class) to the quantity held before
     the first of its fills given here (see the module's words); a key it does not name starts at
-    0. Each trip is a dict with the key fields, ``side``, quantities, ``entry_avg_u``,
+    0. ``recounts`` maps a key to (day, quantity held at the start of that day) pairs read
+    again later (see the module's words). Each trip is a dict with the key fields, ``side``, quantities, ``entry_avg_u``,
     ``exit_avg_u`` (None until a fill exits), the exact ``entry_value_u`` and ``exit_value_u``,
     ``gross_paise`` and ``hold_s`` (None unless closed), ``status`` and its ``legs``.
     """
@@ -311,7 +356,8 @@ def pair_fills(
     trips: list[dict[str, Any]] = []
     for key, group in groups.items():
         group.sort(key=fill_order)
-        trips += _pair_key(group, int(known.get(key) or 0), cash_carry(key[1], key[3]))
+        trips += _pair_key(group, int(known.get(key) or 0), cash_carry(key[1], key[3]),
+                           (recounts or {}).get(key) or ())  # fmt: skip
     trips.sort(
         key=lambda t: (
             t["opened_ms"],

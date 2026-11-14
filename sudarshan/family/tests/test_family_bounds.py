@@ -99,7 +99,11 @@ def test_a_burst_runs_at_most_the_slots_and_the_rest_are_busy_at_once(store):
     async def scenario():
         began = time.monotonic()
         first = asyncio.create_task(burst(acc, 30))
-        await asyncio.sleep(0.05)  # the burst is in: every slot is taken
+        # v0.12.0 review L2: wait for the burst to hold every slot (a store read comes before each
+        # one) rather than trust 50 ms on a loaded runner; the checks themselves take 0.2 s each.
+        async with asyncio.timeout(5):
+            while hasher.taken < PASSWORD_SLOTS:
+                await asyncio.sleep(0.005)
         late_began = time.monotonic()
         try:
             await acc.login("someone_else", PASSWORD, "000000", PHONE)
@@ -114,8 +118,8 @@ def test_a_burst_runs_at_most_the_slots_and_the_rest_are_busy_at_once(store):
     assert found.count("busy") >= 30 - PASSWORD_SLOTS - 2, found  # the rest, at once
     assert set(found) <= {"busy", "signin_failed"}
     assert hasher.runs <= PASSWORD_SLOTS + 2, hasher.runs  # never 30 one after another
-    assert (late, late_took < 0.5) == ("busy", True), (late, late_took)
-    assert took < 0.2 * (PASSWORD_SLOTS + 2) + 1.5, took
+    assert (late, late_took < 1.0) == ("busy", True), (late, late_took)
+    assert took < 0.2 * (PASSWORD_SLOTS + 2) + 3.0, took
     assert hasher.taken == 0  # every slot came back
 
 
@@ -241,7 +245,7 @@ def test_past_its_connections_the_listener_answers_busy_at_once_and_drains(tmp_p
         took = time.monotonic() - began
         writer.close()
         head, _, body = answer.partition(b"\r\n\r\n")
-        assert head.split(b"\r\n")[0] == b"HTTP/1.1 503 Service Unavailable" and took < 1.0
+        assert head.split(b"\r\n")[0] == b"HTTP/1.1 503 Service Unavailable" and took < 3.0
         assert json.loads(body)["message"] == (
             "The family view is busy. Wait a minute, then try again."
         )

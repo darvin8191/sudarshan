@@ -1,4 +1,5 @@
 import { ArrowDown, ArrowUp } from 'lucide-react'
+import { useState } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
@@ -8,6 +9,13 @@ import {
   useMarketSoundMuted,
   useOrderSoundMuted,
 } from './books/chime'
+import {
+  INDEX_CHOICES,
+  INDEX_REFUSED,
+  MAX_INDICES,
+  setDashboardIndex,
+  useDashboardIndices,
+} from './dashboard/indexChoice'
 import { setPortfolioCard, usePortfolioCard } from './dashboard/portfolioCard'
 import { setCvdMode, useCvdMode } from './display'
 
@@ -96,8 +104,59 @@ export function DisplaySettings() {
           on={portfolioCard}
           onChange={setPortfolioCard}
         />
+
+        <IndexChoices />
       </CardContent>
     </Card>
+  )
+}
+
+/**
+ * The Dashboard's indices (M3.3, D8): one to six of the ones offered, each a 48 dp row. The
+ * seventh is refused with a sentence, and so is turning off the last.
+ */
+function IndexChoices() {
+  const chosen = useDashboardIndices()
+  const [refused, setRefused] = useState<string | null>(null)
+  return (
+    <fieldset id="dashboard-indices" className="rounded-lg border p-4">
+      <legend className="px-1 text-sm font-medium">Indices on the dashboard</legend>
+      <p className="text-sm text-muted-foreground">
+        {chosen.length} of {MAX_INDICES} shown, each moving with the ticks. Three fit a phone's
+        width; the rest are reached by sliding the strip. This device only.
+      </p>
+      <ul className="mt-2 grid gap-x-4 sm:grid-cols-2">
+        {INDEX_CHOICES.map((choice) => {
+          const id = `sd-index-${choice.symbol}`
+          return (
+            <li key={choice.symbol}>
+              <label
+                htmlFor={id}
+                className="flex min-h-12 cursor-pointer items-center justify-between gap-3"
+              >
+                <span id={`${id}-title`} className="text-sm font-medium">
+                  {choice.label}
+                </span>
+                <Switch
+                  id={id}
+                  aria-labelledby={`${id}-title`}
+                  checked={chosen.includes(choice.symbol)}
+                  onCheckedChange={(on) => {
+                    const why = setDashboardIndex(choice.symbol, on)
+                    setRefused(why ? INDEX_REFUSED[why] : null)
+                  }}
+                />
+              </label>
+            </li>
+          )
+        })}
+      </ul>
+      {refused && (
+        <p role="alert" className="pt-1 text-sm font-medium text-[color:var(--warning-text)]">
+          {refused}
+        </p>
+      )}
+    </fieldset>
   )
 }
 

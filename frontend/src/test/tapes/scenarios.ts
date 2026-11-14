@@ -122,7 +122,31 @@ function wakeSilent(): Tape {
   )
 }
 
+/** A phone asleep across thirteen minutes, and then a minute's boundary nobody trades on. */
+function sleepBoundary(): Tape {
+  const frame = (at: number, tradeAt: number, ltp: number, volume: number) => ({
+    at,
+    frame: depthFrame(...SBIN, { ltp, at, tradeAt, volume, prevClose: 98.5 }),
+  })
+  return tape(
+    'sleep-boundary-1m',
+    'SBIN on 1m: a trade at 10:00:01, then the phone sleeps from 10:00:02 to 10:13:30 with its ' +
+      'socket alive. One trade at 10:13:30.8 after the wake, nothing at all across 10:14:00, and ' +
+      'the first trade of the 10:14 bar at 10:14:39.8. The 10:14 candle opens at 10:14:00, flat, ' +
+      'though a timer set before the sleep still had most of a minute to run.',
+    ist(10, 0, 0),
+    [
+      frame(ist(10, 0, 1), ist(10, 0, 1), 120.5, 9_000),
+      { at: ist(10, 0, 2), page: 'hidden' },
+      { at: ist(10, 0, 2), sleep: 13 * 60_000 + 28_000 },
+      { at: ist(10, 13, 30), page: 'visible' },
+      frame(ist(10, 13, 31), ist(10, 13, 30.8), 120.6, 9_500),
+      frame(ist(10, 14, 40), ist(10, 14, 39.8), 120.7, 9_650),
+    ]
+  )
+}
+
 /** Every committed tape, by name. */
 export function buildTapes(): Tape[] {
-  return [boundaryNoTrade(), lateTrade(), wakeGap(), wakeSilent()]
+  return [boundaryNoTrade(), lateTrade(), wakeGap(), wakeSilent(), sleepBoundary()]
 }

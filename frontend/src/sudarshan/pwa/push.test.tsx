@@ -241,6 +241,29 @@ describe('the re-sync on every open', () => {
     expect(await resyncPush()).toBe('failed')
   })
 
+  // Review L5 (v0.12.0): on a shared phone the second member was subscribed without a tap,
+  // because the re-sync posted the browser's subscription for whoever signed in. The second
+  // expectation fails on the old re-sync.
+  it('posts for the member who turned notifications on, and not for another on the same phone', async () => {
+    const router = service()
+    const posts = () => router.urls().filter((url) => url === SUBSCRIBE).length
+    permission = 'default'
+    expect(await enablePush(1)).toBe('on')
+    expect(window.localStorage.getItem('sd-family-push')).toBe('on:1')
+    const after = posts()
+    expect(await resyncPush(2)).toBe('none')
+    expect(posts()).toBe(after)
+    expect(await resyncPush(1)).toBe('posted')
+    expect(posts()).toBe(after + 1)
+  })
+
+  it('still posts where the phone kept no flag, so a changed subscription is never lost', async () => {
+    held = subOf('https://push.example.invalid/held')
+    service()
+    expect(window.localStorage.getItem('sd-family-push')).toBeNull()
+    expect(await resyncPush(2)).toBe('posted')
+  })
+
   it('runs once per open of the app while signed in, and again after signing in anew', async () => {
     held = subOf('https://push.example.invalid/held')
     const router = service()

@@ -120,7 +120,10 @@ class CancelSafeBackend(httpcore.AsyncNetworkBackend):
 def transport(**options: Any) -> httpx.AsyncHTTPTransport:
     """httpx's transport (``options`` as ``httpx.AsyncHTTPTransport`` takes them) on the
     cancel-safe backend. If a later httpx keeps its pool elsewhere, the plain transport is
-    returned and the journal says so once; ``test_family_safe_http.py`` fails on it first."""
+    returned and the journal says so once; ``test_family_safe_http.py`` fails on it first. It
+    reaches two private attributes (``_pool``, ``_network_backend``), written against httpx 0.28
+    with httpcore 1.0.9 (v0.12.0 review L9). One thing it does not cover: a connect still pending
+    when the event loop itself closes is left to its own timeout."""
     made = httpx.AsyncHTTPTransport(**options)
     pool = getattr(made, "_pool", None)
     backend = getattr(pool, "_network_backend", None)

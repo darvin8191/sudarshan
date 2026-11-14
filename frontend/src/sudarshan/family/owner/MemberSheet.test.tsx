@@ -35,11 +35,12 @@ import {
   REMOVE_ASK,
   RESET_ASK,
   SIGN_OUT_ASK,
+  SUSPEND_ASK,
   UNLOCK_LINE,
   UNLOCKED,
 } from './MemberSheet'
 import { FLOOR_CHANGED } from './privacySave'
-import { FUNDS_WITHOUT_AMOUNTS, PNL_HIDES_MONEY } from './words'
+import { FUNDS_WITHOUT_AMOUNTS, PNL_HIDDEN_NOTE } from './words'
 
 /** The portfolio's floor of the default card: in step with it. */
 const floorRow = (over: Record<string, unknown> = {}) => ({
@@ -102,6 +103,36 @@ const order = () =>
   ]
     .sort((a, b) => a[0] - b[0])
     .map(([, name]) => name)
+
+// Review M6 (v0.12.0): each privacy switch was a 44 x 24 target under a 14 px name. The whole
+// 48 dp row is the switch's label now. On the old row a tap on the line under the name did nothing.
+describe('the privacy switches', () => {
+  it('each sit in a row that is their label, at least 48 dp tall and as wide as the sheet', async () => {
+    mount()
+    await waitFor(() => expect(floors.list).toHaveBeenCalled())
+    for (const name of ['P&L', 'Quantities', 'Funds', 'Orders']) {
+      const toggle = screen.getByRole('switch', { name })
+      const row = toggle.closest('label') as HTMLElement
+      expect(row).toHaveAttribute('data-switch-row')
+      expect(row.getAttribute('for')).toBe(toggle.id)
+      expect(row.className.split(/\s+/)).toEqual(expect.arrayContaining(['min-h-12', 'w-full']))
+      // the line under the name describes the switch, and is not part of its name
+      expect(toggle).toHaveAccessibleDescription()
+    }
+  })
+
+  it('flip from a tap on the line under the name, once', async () => {
+    mount()
+    await waitFor(() => expect(floors.list).toHaveBeenCalled())
+    const orders = screen.getByRole('switch', { name: 'Orders' })
+    const before = orders.getAttribute('aria-checked')
+    const line = document.getElementById(`${orders.id}-line`) as HTMLElement
+    await userEvent.click(line)
+    expect(orders.getAttribute('aria-checked')).toBe(before === 'true' ? 'false' : 'true')
+    await userEvent.click(orders)
+    expect(orders.getAttribute('aria-checked')).toBe(before)
+  })
+})
 
 describe('the privacy floor follows the owner (cross-design Y6)', () => {
   it('hiding writes the floor first, then the family row, and says Saved when both are confirmed', async () => {
@@ -302,7 +333,11 @@ describe('editing a member', () => {
     const pnl = screen.getByRole('switch', { name: 'P&L' })
     expect(pnl).toBeDisabled()
     expect(pnl).toHaveAttribute('aria-checked', 'false')
-    expect(screen.getByText('Live P&L is worked out from quantities')).toBeInTheDocument()
+    // Review L7 (v0.12.0): "Live" is the trading-mode chip's word; this line said "Live P&L".
+    expect(
+      screen.getByText('P&L that moves with prices is worked out from quantities')
+    ).toBeInTheDocument()
+    expect(document.body.textContent).not.toMatch(/\bLive\b/)
     await userEvent.click(screen.getByRole('button', { name: 'Save changes' }))
     expect(api.memberUpdate).toHaveBeenCalledWith({
       id: 1,
@@ -311,13 +346,20 @@ describe('editing a member', () => {
     })
   })
 
-  it('says that hiding P&L hides every rupee figure with it, funds amounts too (review H1)', async () => {
+  // v0.12.0 server review M4: the line said "every rupee figure with it: cost, value, the day's
+  // change". With quantities shown a member can still work out the day's change, so the owner is
+  // told that, in the server's sentence. Fails on the old line.
+  it('says under a hidden P&L what quantities still give away, in the server words', async () => {
     mount(cardOf({ privacy: { pnl: true, qty: true, funds: true, orders: true } }))
-    expect(screen.queryByText(PNL_HIDES_MONEY)).toBeNull()
+    expect(screen.queryByText(new RegExp(PNL_HIDDEN_NOTE.slice(0, 40)))).toBeNull()
     await userEvent.click(screen.getByRole('switch', { name: 'P&L' }))
-    expect(screen.getByText(PNL_HIDES_MONEY)).toBeInTheDocument()
+    const line = document.getElementById('privacy-pnl-line') as HTMLElement
+    expect(line.textContent).toBe(`Hidden. ${PNL_HIDDEN_NOTE}`)
+    expect(line.textContent).not.toMatch(/every rupee figure|the day’s change/)
     expect(screen.getByText(FUNDS_WITHOUT_AMOUNTS)).toBeInTheDocument()
-    expect(PNL_HIDES_MONEY).toMatch(/cost, value, the day’s change/)
+    // with quantities hidden too there is nothing left to work it out from, and the note goes
+    await userEvent.click(screen.getByRole('switch', { name: 'Quantities' }))
+    expect(line.textContent).not.toContain(PNL_HIDDEN_NOTE)
   })
 
   it('shows a refusal in the service words and reads the members again after a conflict', async () => {
@@ -417,6 +459,9 @@ describe('the request id', () => {
     )
     const { spy } = mount()
     await userEvent.click(screen.getByRole('button', { name: 'Suspend' }))
+    await userEvent.click(
+      within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Suspend' })
+    )
     const said = await screen.findByText(/^Not confirmed/)
     expect(said.textContent).not.toMatch(/fail/i)
     expect(spy).toHaveBeenCalled() // the members are read again to see what happened
@@ -564,8 +609,24 @@ describe('Suspend and Resume', () => {
     const { unmount } = render(<div />)
     unmount()
     mount()
+    // Review L1 (v0.12.0): one tap sent it, with no question. Fails on the old sheet.
     await userEvent.click(screen.getByRole('button', { name: 'Suspend' }))
+    expect(api.memberStatus).not.toHaveBeenCalled()
+    const ask = screen.getByRole('alertdialog')
+    expect(ask.textContent).toContain(SUSPEND_ASK)
+    await userEvent.click(within(ask).getByRole('button', { name: 'Suspend' }))
+    expect(api.memberStatus).toHaveBeenCalledTimes(1)
     expect(api.memberStatus).toHaveBeenCalledWith({ id: 1, version: 3, status: 'suspended' })
+  })
+
+  it('keeps the member signed in when the owner answers Keep', async () => {
+    mount()
+    await userEvent.click(screen.getByRole('button', { name: 'Suspend' }))
+    await userEvent.click(
+      within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Keep' })
+    )
+    expect(screen.queryByRole('alertdialog')).toBeNull()
+    expect(api.memberStatus).not.toHaveBeenCalled()
   })
 
   it('offers Resume for a suspended member', async () => {

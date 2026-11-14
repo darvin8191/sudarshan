@@ -25,7 +25,6 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Switch } from '@/components/ui/switch'
 import type { SharesList } from '@/sudarshan/portfolio/types'
 import { BottomSheet } from '@/sudarshan/watchlist/BottomSheet'
 import { newRequestId, OwnerError, ownerApi, ownerProblem } from '../ownerApi'
@@ -40,7 +39,7 @@ import {
   type Role,
 } from '../types'
 import { devicesKey, MEMBERS_KEY, PORTFOLIO_SHARES_KEY } from './keys'
-import { Ask, ROW, SaidLine, useOnce } from './parts'
+import { Ask, SaidLine, SwitchRow, useOnce } from './parts'
 import {
   driftOf,
   type FloorDrift,
@@ -53,7 +52,7 @@ import { listOf, planPrivacy, runPrivacySave } from './privacySave'
 import {
   CATEGORY_LABEL,
   FUNDS_WITHOUT_AMOUNTS,
-  PNL_HIDES_MONEY,
+  PNL_HIDDEN_NOTE,
   PNL_NEEDS_QTY,
   ROLE_WORDS,
   SENT_OK,
@@ -61,6 +60,8 @@ import {
   whenOf,
 } from './words'
 
+export const SUSPEND_ASK =
+  'Suspend this member? Every device of theirs is signed out at once, and they cannot sign in until you resume them.'
 export const REMOVE_ASK =
   'Remove this member? Their devices are signed out and their Telegram unlinked. The audit record stays.'
 export const RESET_ASK =
@@ -113,7 +114,12 @@ const LANGUAGES: ReadonlyArray<{ value: Language; label: string }> = [
   { value: 'gu', label: 'ગુજરાતી' },
 ]
 
-type Asking = { kind: 'remove' } | { kind: 'reset' } | { kind: 'device'; id: string } | null
+type Asking =
+  | { kind: 'remove' }
+  | { kind: 'reset' }
+  | { kind: 'suspend' }
+  | { kind: 'device'; id: string }
+  | null
 
 function sameRole(a: Role): Privacy {
   return { ...PRIVACY_DEFAULTS[a] }
@@ -122,7 +128,7 @@ function sameRole(a: Role): Privacy {
 /** What a category's switch leaves the member, in the owner's words (Y24, H1). */
 function categoryLine(category: (typeof CATEGORIES)[number], privacy: Privacy): string {
   if (category === 'pnl' && !privacy.qty) return PNL_NEEDS_QTY
-  if (category === 'pnl' && !privacy.pnl) return PNL_HIDES_MONEY
+  if (category === 'pnl' && !privacy.pnl) return `Hidden. ${PNL_HIDDEN_NOTE}`
   if (category === 'funds' && privacy.funds && !privacy.pnl) return FUNDS_WITHOUT_AMOUNTS
   return privacy[category] ? 'Shown' : 'Hidden'
 }
@@ -224,20 +230,15 @@ function Fields({
         {CATEGORIES.map((category) => {
           const needsQty = category === 'pnl' && !effective.qty
           return (
-            <div key={category} className={ROW}>
-              <div className="flex flex-col">
-                <Label htmlFor={`privacy-${category}`}>{CATEGORY_LABEL[category].name}</Label>
-                <span className="text-[0.8125rem] text-[color:var(--text-tertiary)]">
-                  {categoryLine(category, effective)}
-                </span>
-              </div>
-              <Switch
-                id={`privacy-${category}`}
-                checked={effective[category]}
-                disabled={needsQty}
-                onCheckedChange={(on) => flip(category, on)}
-              />
-            </div>
+            <SwitchRow
+              key={category}
+              id={`privacy-${category}`}
+              name={CATEGORY_LABEL[category].name}
+              line={categoryLine(category, effective)}
+              checked={effective[category]}
+              disabled={needsQty}
+              onCheckedChange={(on) => flip(category, on)}
+            />
           )
         })}
       </fieldset>
@@ -584,6 +585,7 @@ export function MemberSheet({
         () => (status === 'suspended' ? 'Suspended. They are signed out.' : 'Resumed.')
       )
       .then((done) => {
+        setAsking(null)
         if (done) void reread()
       })
   }
@@ -734,12 +736,22 @@ export function MemberSheet({
                     variant="outline"
                     className="h-12 justify-start"
                     disabled={once.pending}
-                    onClick={() => suspend('suspended')}
+                    onClick={() => setAsking({ kind: 'suspend' })}
                   >
                     <CirclePause aria-hidden="true" className="size-4" />
                     Suspend
                   </Button>
                 )}
+                {/* Review L1 (v0.12.0): it signs the member out of every device, so it asks. */}
+                {status === 'active' && asking?.kind === 'suspend' ? (
+                  <Ask
+                    question={SUSPEND_ASK}
+                    yes="Suspend"
+                    pending={once.pending}
+                    onYes={() => suspend('suspended')}
+                    onNo={() => setAsking(null)}
+                  />
+                ) : null}
               </section>
             ) : null}
 

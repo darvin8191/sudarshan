@@ -7,7 +7,7 @@
 // The password and the code are only ever sent to the service in the one `join` call. Neither is
 // kept in the address, in storage or in a log. A wrong code keeps the other answers on screen.
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Bell, Check, ExternalLink, Smartphone } from 'lucide-react'
+import { Bell, Check, Copy, ExternalLink, Smartphone } from 'lucide-react'
 import { type FormEvent, useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router'
 import { BrandLockup } from '@/sudarshan/BrandLockup'
@@ -22,6 +22,7 @@ import { registerFamilyWorker } from '@/sudarshan/pwa/register'
 import { FamilyError, familyApi } from '../api'
 import { FamilyBadge } from '../FamilyBadge'
 import { Field, OUTLINE, PRIMARY, Problem } from '../forms'
+import { FAMILY_HOME } from '../navigation'
 import { QrCode } from '../QrCode'
 import { forgetMember, ME_KEY } from '../session'
 import { LIMITS, type Me } from '../types'
@@ -63,6 +64,9 @@ export function keyInGroups(key: string): string {
     .trim()
 }
 
+export const KEY_COPIED = 'Key copied. Paste it into your code app as a new account.'
+export const KEY_NOT_COPIED = 'This phone did not allow copying. Type the key into your code app.'
+
 type Step = 'welcome' | 'sign-in' | 'code' | 'after'
 
 function Frame({ children }: { children: React.ReactNode }) {
@@ -95,6 +99,10 @@ export default function FamilyJoin() {
   const [totp, setTotp] = useState('')
   const [problem, setProblem] = useState<{ field: string | null; text: string } | null>(null)
   const [busy, setBusy] = useState(false)
+  // Review M5 (v0.12.0): the invite ended while the member was joining (it ran out, or was used
+  // or replaced meanwhile). The service's sentence, shown on the invite-ended screen.
+  const [gone, setGone] = useState<string | null>(null)
+  const [copied, setCopied] = useState<string | null>(null)
 
   // The family worker is what lets Chrome offer the install at the end of joining; the shell that
   // normally registers it is not mounted on this public page.
@@ -129,6 +137,15 @@ export default function FamilyJoin() {
       </Frame>
     )
   }
+  if (gone !== null) {
+    // Nothing leads on from here: Continue would only go round to the same refusal.
+    return (
+      <Frame>
+        <h1 className="sd-display text-[1.5rem] font-bold">Invite</h1>
+        <Problem text={gone} />
+      </Frame>
+    )
+  }
   const invite = info.data
   const { handle_min, handle_max, password_min } = invite.rules
 
@@ -144,6 +161,15 @@ export default function FamilyJoin() {
     }
     setProblem(null)
     setStep('code')
+  }
+
+  const copyKey = async () => {
+    try {
+      await navigator.clipboard.writeText(invite.totp_key.replace(/\s+/g, ''))
+      setCopied(KEY_COPIED)
+    } catch {
+      setCopied(KEY_NOT_COPIED)
+    }
   }
 
   const finish = async (event: FormEvent) => {
@@ -176,7 +202,12 @@ export default function FamilyJoin() {
       // A name or password the service refused goes back to where it is typed; the wrong code
       // stays here so the next one can be tried.
       if (failure.field === 'handle' || failure.field === 'password') setStep('sign-in')
-      if (failure.code === 'invite_gone') setStep('welcome')
+      if (failure.code === 'invite_gone') {
+        // what was typed for an invite that no longer exists is not kept
+        setPassword('')
+        setTotp('')
+        setGone(failure.message)
+      }
     } finally {
       setBusy(false)
     }
@@ -255,6 +286,22 @@ export default function FamilyJoin() {
               {keyInGroups(invite.totp_key)}
             </code>
           </p>
+          {/* Review L2 (v0.12.0): a member joining on one phone cannot scan their own screen. */}
+          <div className="grid w-full grid-cols-2 gap-2">
+            <button type="button" className={OUTLINE} onClick={() => void copyKey()}>
+              <Copy aria-hidden="true" className="size-4" />
+              Copy key
+            </button>
+            <a href={invite.otpauth_uri} className={`${OUTLINE} no-underline`}>
+              <ExternalLink aria-hidden="true" className="size-4" />
+              Open in code app
+            </a>
+          </div>
+          {copied && (
+            <output className="block text-[0.8125rem] font-semibold text-[color:var(--text-secondary)]">
+              {copied}
+            </output>
+          )}
           <Field
             label="Enter the 6-digit code it shows"
             value={totp}
@@ -289,24 +336,25 @@ type After = 'install' | 'notifications' | 'telegram'
 
 /**
  * What follows a sign-in on this phone, one step at a time and each one skippable: the sentence
- * that it stays signed in for 30 days, the install hint, the Telegram link. It ends on `/family`.
+ * that it stays signed in for 30 days, the install hint, the Telegram link. It ends on `/family/`.
  */
 function AfterJoin() {
   const navigate = useNavigate()
+  const client = useQueryClient()
   const [step, setStep] = useState<After>('install')
   const [link, setLink] = useState<{ url: string } | null>(null)
   const [problem, setProblem] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const install = useInstallState()
   const [pushState, setPushState] = useState<PushStatus | null>(null)
-  const land = () => navigate('/family', { replace: true })
+  const land = () => navigate(FAMILY_HOME, { replace: true })
 
   // Chrome's permission question is asked here, on this tap, and nowhere before it.
   const turnOn = async () => {
     setBusy(true)
     setProblem(null)
     try {
-      const now = await enablePush()
+      const now = await enablePush(client.getQueryData<Me>(ME_KEY)?.member.id)
       setPushState(now)
       if (now === 'on') setStep('telegram')
     } catch (error) {

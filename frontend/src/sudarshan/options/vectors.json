@@ -1,0 +1,1445 @@
+{
+ "about": "Hand-worked small chains for options/model.ts: every symbol and figure is made up. maxPain holds golden cases generated from services/oi_tracker_service.calculate_max_pain (none of them a tie), so the phone and the wide page agree.",
+ "cases": [
+  {
+   "name": "a plain chain from the snapshot alone",
+   "now": 1000500,
+   "snapshot": {
+    "as_of": 1000000,
+    "spot": 121,
+    "expiry": "2026-11-17",
+    "expiry_ts": 260200500,
+    "strikes": [
+     {
+      "strike": 100,
+      "ce": {
+       "symbol": "TEST100CE",
+       "exchange": "NFO",
+       "lot": 65,
+       "tick": 0.05,
+       "ltp": 22,
+       "close": 20,
+       "oi": 100,
+       "prev_oi": 80
+      },
+      "pe": {
+       "symbol": "TEST100PE",
+       "exchange": "NFO",
+       "lot": 65,
+       "tick": 0.05,
+       "ltp": 1,
+       "close": 2,
+       "oi": 500,
+       "prev_oi": 600
+      }
+     },
+     {
+      "strike": 110,
+      "ce": {
+       "symbol": "TEST110CE",
+       "exchange": "NFO",
+       "lot": 65,
+       "tick": 0.05,
+       "ltp": 13,
+       "close": 12,
+       "oi": 200,
+       "prev_oi": 200
+      },
+      "pe": {
+       "symbol": "TEST110PE",
+       "exchange": "NFO",
+       "lot": 65,
+       "tick": 0.05,
+       "ltp": 2,
+       "close": 2.5,
+       "oi": 400,
+       "prev_oi": 300
+      }
+     },
+     {
+      "strike": 120,
+      "ce": {
+       "symbol": "TEST120CE",
+       "exchange": "NFO",
+       "lot": 65,
+       "tick": 0.05,
+       "ltp": 6,
+       "close": 5,
+       "oi": 300,
+       "prev_oi": 100
+      },
+      "pe": {
+       "symbol": "TEST120PE",
+       "exchange": "NFO",
+       "lot": 65,
+       "tick": 0.05,
+       "ltp": 5,
+       "close": 6,
+       "oi": 300,
+       "prev_oi": 250
+      }
+     },
+     {
+      "strike": 130,
+      "ce": {
+       "symbol": "TEST130CE",
+       "exchange": "NFO",
+       "lot": 65,
+       "tick": 0.05,
+       "ltp": 2,
+       "close": 3,
+       "oi": 600,
+       "prev_oi": 400
+      },
+      "pe": {
+       "symbol": "TEST130PE",
+       "exchange": "NFO",
+       "lot": 65,
+       "tick": 0.05,
+       "ltp": 11,
+       "close": 10,
+       "oi": 100,
+       "prev_oi": 150
+      }
+     },
+     {
+      "strike": 140,
+      "ce": {
+       "symbol": "TEST140CE",
+       "exchange": "NFO",
+       "lot": 65,
+       "tick": 0.05,
+       "ltp": 1,
+       "close": 1.5,
+       "oi": 400,
+       "prev_oi": 500
+      },
+      "pe": {
+       "symbol": "TEST140PE",
+       "exchange": "NFO",
+       "lot": 65,
+       "tick": 0.05,
+       "ltp": 20,
+       "close": 19,
+       "oi": 50,
+       "prev_oi": 50
+      }
+     }
+    ]
+   },
+   "ticks": {},
+   "spot": null,
+   "future": null,
+   "expect": {
+    "spot": 121,
+    "atm": 120,
+    "pcr": 0.84375,
+    "ceOi": 1600,
+    "peOi": 1350,
+    "maxPain": 120,
+    "callWall": {
+     "strike": 130,
+     "oi": 600
+    },
+    "putWall": {
+     "strike": 100,
+     "oi": 500
+    },
+    "expectedMove": {
+     "premium": 11,
+     "pct": 9.090909090909092
+    },
+    "forward": 121,
+    "forwardFrom": "parity",
+    "wingsAsOf": null,
+    "rows": {
+     "100": {
+      "ce": {
+       "change": 2,
+       "changePct": 10,
+       "oiChange": 20,
+       "oiChangePct": 25,
+       "buildUp": "long_buildup",
+       "oiFrom": "snapshot"
+      },
+      "pe": {
+       "change": -1,
+       "oiChange": -100,
+       "buildUp": "long_unwinding"
+      },
+      "pcr": 5
+     },
+     "110": {
+      "ce": {
+       "change": 1,
+       "oiChange": 0,
+       "oiChangePct": 0,
+       "buildUp": null
+      },
+      "pe": {
+       "change": -0.5,
+       "oiChange": 100,
+       "buildUp": "short_buildup"
+      }
+     },
+     "120": {
+      "ce": {
+       "buildUp": "long_buildup"
+      },
+      "atm": true
+     },
+     "130": {
+      "pe": {
+       "change": 1,
+       "oiChange": -50,
+       "buildUp": "short_covering"
+      },
+      "atm": false
+     },
+     "140": {
+      "pe": {
+       "change": 1,
+       "oiChange": 0,
+       "buildUp": null
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "a spot midway between two strikes: the at-the-money strike is the lower",
+   "now": 1000500,
+   "snapshot": {
+    "as_of": 1000000,
+    "spot": 121,
+    "expiry": "2026-11-17",
+    "expiry_ts": 260200500,
+    "strikes": [
+     {
+      "strike": 100,
+      "ce": {
+       "symbol": "TEST100CE",
+       "exchange": "NFO",
+       "lot": 65,
+       "tick": 0.05,
+       "ltp": 22,
+       "close": 20,
+       "oi": 100,
+       "prev_oi": 80
+      },
+      "pe": {
+       "symbol": "TEST100PE",
+       "exchange": "NFO",
+       "lot": 65,
+       "tick": 0.05,
+       "ltp": 1,
+       "close": 2,
+       "oi": 500,
+       "prev_oi": 600
+      }
+     },
+     {
+      "strike": 110,
+      "ce": {
+       "symbol": "TEST110CE",
+       "exchange": "NFO",
+       "lot": 65,
+       "tick": 0.05,
+       "ltp": 13,
+       "close": 12,
+       "oi": 200,
+       "prev_oi": 200
+      },
+      "pe": {
+       "symbol": "TEST110PE",
+       "exchange": "NFO",
+       "lot": 65,
+       "tick": 0.05,
+       "ltp": 2,
+       "close": 2.5,
+       "oi": 400,
+       "prev_oi": 300
+      }
+     },
+     {
+      "strike": 120,
+      "ce": {
+       "symbol": "TEST120CE",
+       "exchange": "NFO",
+       "lot": 65,
+       "tick": 0.05,
+       "ltp": 6,
+       "close": 5,
+       "oi": 300,
+       "prev_oi": 100
+      },
+      "pe": {
+       "symbol": "TEST120PE",
+       "exchange": "NFO",
+       "lot": 65,
+       "tick": 0.05,
+       "ltp": 5,
+       "close": 6,
+       "oi": 300,
+       "prev_oi": 250
+      }
+     },
+     {
+      "strike": 130,
+      "ce": {
+       "symbol": "TEST130CE",
+       "exchange": "NFO",
+       "lot": 65,
+       "tick": 0.05,
+       "ltp": 2,
+       "close": 3,
+       "oi": 600,
+       "prev_oi": 400
+      },
+      "pe": {
+       "symbol": "TEST130PE",
+       "exchange": "NFO",
+       "lot": 65,
+       "tick": 0.05,
+       "ltp": 11,
+       "close": 10,
+       "oi": 100,
+       "prev_oi": 150
+      }
+     },
+     {
+      "strike": 140,
+      "ce": {
+       "symbol": "TEST140CE",
+       "exchange": "NFO",
+       "lot": 65,
+       "tick": 0.05,
+       "ltp": 1,
+       "close": 1.5,
+       "oi": 400,
+       "prev_oi": 500
+      },
+      "pe": {
+       "symbol": "TEST140PE",
+       "exchange": "NFO",
+       "lot": 65,
+       "tick": 0.05,
+       "ltp": 20,
+       "close": 19,
+       "oi": 50,
+       "prev_oi": 50
+      }
+     }
+    ]
+   },
+   "ticks": {},
+   "spot": 115,
+   "future": null,
+   "expect": {
+    "spot": 115,
+    "atm": 110,
+    "expectedMove": {
+     "premium": 15,
+     "pct": 13.043478260869565
+    },
+    "forward": 121,
+    "forwardFrom": "parity",
+    "callWall": {
+     "strike": 130,
+     "oi": 600
+    },
+    "putWall": {
+     "strike": 100,
+     "oi": 500
+    },
+    "maxPain": 120,
+    "rows": {
+     "110": {
+      "atm": true
+     },
+     "120": {
+      "atm": false
+     }
+    }
+   }
+  },
+  {
+   "name": "a missing leg, a previous open interest of zero, figures nobody sent",
+   "now": 1000500,
+   "snapshot": {
+    "as_of": 1000000,
+    "spot": 108,
+    "expiry": "2026-11-17",
+    "expiry_ts": 260200500,
+    "strikes": [
+     {
+      "strike": 100,
+      "ce": {
+       "symbol": "TEST100CE",
+       "exchange": "NFO",
+       "lot": 65,
+       "tick": 0.05,
+       "ltp": 21,
+       "close": 20,
+       "oi": 100,
+       "prev_oi": 0
+      }
+     },
+     {
+      "strike": 110,
+      "ce": {
+       "symbol": "TEST110CE",
+       "exchange": "NFO",
+       "lot": 65,
+       "tick": 0.05,
+       "ltp": 12,
+       "close": 12,
+       "oi": 50
+      },
+      "pe": {
+       "symbol": "TEST110PE",
+       "exchange": "NFO",
+       "lot": 65,
+       "tick": 0.05,
+       "ltp": 3,
+       "oi": 70,
+       "prev_oi": 70
+      }
+     },
+     {
+      "strike": 120,
+      "pe": {
+       "symbol": "TEST120PE",
+       "exchange": "NFO",
+       "lot": 65,
+       "tick": 0.05,
+       "ltp": 0,
+       "oi": 0,
+       "prev_oi": 10
+      }
+     }
+    ]
+   },
+   "ticks": {},
+   "spot": null,
+   "future": null,
+   "expect": {
+    "atm": 110,
+    "pcr": 0.4666666666666667,
+    "maxPain": 100,
+    "callWall": {
+     "strike": 110,
+     "oi": 50
+    },
+    "putWall": null,
+    "expectedMove": {
+     "premium": 15,
+     "pct": 13.88888888888889
+    },
+    "forward": 119,
+    "forwardFrom": "parity",
+    "rows": {
+     "100": {
+      "ce": {
+       "oiChange": 100,
+       "oiChangePct": null,
+       "buildUp": "long_buildup"
+      },
+      "pe": null,
+      "pcr": null
+     },
+     "110": {
+      "ce": {
+       "change": 0,
+       "oiChange": null,
+       "oiChangePct": null,
+       "buildUp": null
+      },
+      "pe": {
+       "change": null,
+       "changePct": null,
+       "close": null,
+       "oiChange": 0,
+       "buildUp": null
+      },
+      "pcr": 1.4
+     },
+     "120": {
+      "ce": null,
+      "pe": {
+       "ltp": null,
+       "change": null,
+       "oi": 0,
+       "oiChange": -10,
+       "oiChangePct": -100,
+       "buildUp": null
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "a tick newer than the snapshot wins, an older one loses, and a tick fills what the snapshot lacks",
+   "now": 3000,
+   "snapshot": {
+    "as_of": 2000,
+    "spot": 121,
+    "expiry": "2026-11-17",
+    "expiry_ts": 259203000,
+    "strikes": [
+     {
+      "strike": 120,
+      "ce": {
+       "symbol": "TEST120CE",
+       "exchange": "NFO",
+       "lot": 65,
+       "tick": 0.05,
+       "ltp": 6,
+       "close": 5,
+       "oi": 300,
+       "prev_oi": 100
+      },
+      "pe": {
+       "symbol": "TEST120PE",
+       "exchange": "NFO",
+       "lot": 65,
+       "tick": 0.05,
+       "ltp": 5,
+       "close": 6,
+       "oi": 300,
+       "prev_oi": 250
+      }
+     },
+     {
+      "strike": 130,
+      "ce": {
+       "symbol": "TEST130CE",
+       "exchange": "NFO",
+       "lot": 65,
+       "tick": 0.05,
+       "ltp": 2,
+       "close": 3,
+       "prev_oi": 400
+      }
+     }
+    ]
+   },
+   "ticks": {
+    "NFO:TEST120CE": {
+     "at": 1500,
+     "data": {
+      "ltp": 7,
+      "oi": 350
+     }
+    },
+    "NFO:TEST120PE": {
+     "at": 2500,
+     "data": {
+      "ltp": 4,
+      "oi": 320,
+      "bid_price": 3.9,
+      "ask_price": 4.1
+     }
+    },
+    "NFO:TEST130CE": {
+     "at": 1500,
+     "data": {
+      "oi": 610
+     }
+    }
+   },
+   "spot": 121,
+   "future": null,
+   "expect": {
+    "rows": {
+     "120": {
+      "ce": {
+       "ltp": 6,
+       "oi": 300,
+       "oiFrom": "snapshot",
+       "oiChange": 200
+      },
+      "pe": {
+       "ltp": 4,
+       "bid": 3.9,
+       "ask": 4.1,
+       "oi": 320,
+       "oiFrom": "tick",
+       "oiChange": 70,
+       "change": -2,
+       "buildUp": "short_buildup"
+      }
+     },
+     "130": {
+      "ce": {
+       "ltp": 2,
+       "oi": 610,
+       "oiFrom": "tick",
+       "oiChange": 210
+      }
+     }
+    },
+    "forward": 122,
+    "forwardFrom": "parity"
+   }
+  },
+  {
+   "name": "max pain tied between two strikes goes to the one nearer the spot (above)",
+   "now": 1000500,
+   "snapshot": {
+    "as_of": 1000000,
+    "spot": 108,
+    "expiry": "2026-11-17",
+    "expiry_ts": 260200500,
+    "strikes": [
+     {
+      "strike": 100,
+      "ce": {
+       "symbol": "TEST100CE",
+       "exchange": "NFO",
+       "lot": 65,
+       "tick": 0.05,
+       "oi": 10
+      }
+     },
+     {
+      "strike": 110,
+      "pe": {
+       "symbol": "TEST110PE",
+       "exchange": "NFO",
+       "lot": 65,
+       "tick": 0.05,
+       "oi": 10
+      }
+     }
+    ]
+   },
+   "ticks": {},
+   "spot": null,
+   "future": null,
+   "expect": {
+    "maxPain": 110,
+    "forward": 108,
+    "forwardFrom": "spot"
+   }
+  },
+  {
+   "name": "max pain tied between two strikes goes to the one nearer the spot (below)",
+   "now": 1000500,
+   "snapshot": {
+    "as_of": 1000000,
+    "spot": 102,
+    "expiry": "2026-11-17",
+    "expiry_ts": 260200500,
+    "strikes": [
+     {
+      "strike": 100,
+      "ce": {
+       "symbol": "TEST100CE",
+       "exchange": "NFO",
+       "lot": 65,
+       "tick": 0.05,
+       "oi": 10
+      }
+     },
+     {
+      "strike": 110,
+      "pe": {
+       "symbol": "TEST110PE",
+       "exchange": "NFO",
+       "lot": 65,
+       "tick": 0.05,
+       "oi": 10
+      }
+     }
+    ]
+   },
+   "ticks": {},
+   "spot": null,
+   "future": 104.5,
+   "expect": {
+    "maxPain": 100,
+    "forward": 104.5,
+    "forwardFrom": "future"
+   }
+  },
+  {
+   "name": "expiry day with thirty seconds to the stop: the Greeks are still worked out",
+   "now": 1000500,
+   "snapshot": {
+    "as_of": 1000000,
+    "spot": 121,
+    "expiry": "2026-11-17",
+    "expiry_ts": 1030500,
+    "strikes": [
+     {
+      "strike": 100,
+      "ce": {
+       "symbol": "TEST100CE",
+       "exchange": "NFO",
+       "lot": 65,
+       "tick": 0.05,
+       "ltp": 22,
+       "close": 20,
+       "oi": 100,
+       "prev_oi": 80
+      },
+      "pe": {
+       "symbol": "TEST100PE",
+       "exchange": "NFO",
+       "lot": 65,
+       "tick": 0.05,
+       "ltp": 1,
+       "close": 2,
+       "oi": 500,
+       "prev_oi": 600
+      }
+     },
+     {
+      "strike": 110,
+      "ce": {
+       "symbol": "TEST110CE",
+       "exchange": "NFO",
+       "lot": 65,
+       "tick": 0.05,
+       "ltp": 13,
+       "close": 12,
+       "oi": 200,
+       "prev_oi": 200
+      },
+      "pe": {
+       "symbol": "TEST110PE",
+       "exchange": "NFO",
+       "lot": 65,
+       "tick": 0.05,
+       "ltp": 2,
+       "close": 2.5,
+       "oi": 400,
+       "prev_oi": 300
+      }
+     },
+     {
+      "strike": 120,
+      "ce": {
+       "symbol": "TEST120CE",
+       "exchange": "NFO",
+       "lot": 65,
+       "tick": 0.05,
+       "ltp": 6,
+       "close": 5,
+       "oi": 300,
+       "prev_oi": 100
+      },
+      "pe": {
+       "symbol": "TEST120PE",
+       "exchange": "NFO",
+       "lot": 65,
+       "tick": 0.05,
+       "ltp": 5,
+       "close": 6,
+       "oi": 300,
+       "prev_oi": 250
+      }
+     },
+     {
+      "strike": 130,
+      "ce": {
+       "symbol": "TEST130CE",
+       "exchange": "NFO",
+       "lot": 65,
+       "tick": 0.05,
+       "ltp": 2,
+       "close": 3,
+       "oi": 600,
+       "prev_oi": 400
+      },
+      "pe": {
+       "symbol": "TEST130PE",
+       "exchange": "NFO",
+       "lot": 65,
+       "tick": 0.05,
+       "ltp": 11,
+       "close": 10,
+       "oi": 100,
+       "prev_oi": 150
+      }
+     },
+     {
+      "strike": 140,
+      "ce": {
+       "symbol": "TEST140CE",
+       "exchange": "NFO",
+       "lot": 65,
+       "tick": 0.05,
+       "ltp": 1,
+       "close": 1.5,
+       "oi": 400,
+       "prev_oi": 500
+      },
+      "pe": {
+       "symbol": "TEST140PE",
+       "exchange": "NFO",
+       "lot": 65,
+       "tick": 0.05,
+       "ltp": 20,
+       "close": 19,
+       "oi": 50,
+       "prev_oi": 50
+      }
+     }
+    ]
+   },
+   "ticks": {},
+   "spot": null,
+   "future": null,
+   "expect": {
+    "years": 9.512937595129376e-07,
+    "greeks": true
+   }
+  },
+  {
+   "name": "past the stop: no time is left and no Greeks are shown",
+   "now": 1000500,
+   "snapshot": {
+    "as_of": 1000000,
+    "spot": 121,
+    "expiry": "2026-11-17",
+    "expiry_ts": 1000499,
+    "strikes": [
+     {
+      "strike": 100,
+      "ce": {
+       "symbol": "TEST100CE",
+       "exchange": "NFO",
+       "lot": 65,
+       "tick": 0.05,
+       "ltp": 22,
+       "close": 20,
+       "oi": 100,
+       "prev_oi": 80
+      },
+      "pe": {
+       "symbol": "TEST100PE",
+       "exchange": "NFO",
+       "lot": 65,
+       "tick": 0.05,
+       "ltp": 1,
+       "close": 2,
+       "oi": 500,
+       "prev_oi": 600
+      }
+     },
+     {
+      "strike": 110,
+      "ce": {
+       "symbol": "TEST110CE",
+       "exchange": "NFO",
+       "lot": 65,
+       "tick": 0.05,
+       "ltp": 13,
+       "close": 12,
+       "oi": 200,
+       "prev_oi": 200
+      },
+      "pe": {
+       "symbol": "TEST110PE",
+       "exchange": "NFO",
+       "lot": 65,
+       "tick": 0.05,
+       "ltp": 2,
+       "close": 2.5,
+       "oi": 400,
+       "prev_oi": 300
+      }
+     },
+     {
+      "strike": 120,
+      "ce": {
+       "symbol": "TEST120CE",
+       "exchange": "NFO",
+       "lot": 65,
+       "tick": 0.05,
+       "ltp": 6,
+       "close": 5,
+       "oi": 300,
+       "prev_oi": 100
+      },
+      "pe": {
+       "symbol": "TEST120PE",
+       "exchange": "NFO",
+       "lot": 65,
+       "tick": 0.05,
+       "ltp": 5,
+       "close": 6,
+       "oi": 300,
+       "prev_oi": 250
+      }
+     },
+     {
+      "strike": 130,
+      "ce": {
+       "symbol": "TEST130CE",
+       "exchange": "NFO",
+       "lot": 65,
+       "tick": 0.05,
+       "ltp": 2,
+       "close": 3,
+       "oi": 600,
+       "prev_oi": 400
+      },
+      "pe": {
+       "symbol": "TEST130PE",
+       "exchange": "NFO",
+       "lot": 65,
+       "tick": 0.05,
+       "ltp": 11,
+       "close": 10,
+       "oi": 100,
+       "prev_oi": 150
+      }
+     },
+     {
+      "strike": 140,
+      "ce": {
+       "symbol": "TEST140CE",
+       "exchange": "NFO",
+       "lot": 65,
+       "tick": 0.05,
+       "ltp": 1,
+       "close": 1.5,
+       "oi": 400,
+       "prev_oi": 500
+      },
+      "pe": {
+       "symbol": "TEST140PE",
+       "exchange": "NFO",
+       "lot": 65,
+       "tick": 0.05,
+       "ltp": 20,
+       "close": 19,
+       "oi": 50,
+       "prev_oi": 50
+      }
+     }
+    ]
+   },
+   "ticks": {},
+   "spot": null,
+   "future": null,
+   "expect": {
+    "years": 0,
+    "greeks": false,
+    "pcr": 0.84375,
+    "maxPain": 120
+   }
+  },
+  {
+   "name": "only the middle strike is followed: the wings carry the snapshot's time",
+   "now": 1000500,
+   "snapshot": {
+    "as_of": 1000000,
+    "spot": 121,
+    "expiry": "2026-11-17",
+    "expiry_ts": 260200500,
+    "strikes": [
+     {
+      "strike": 100,
+      "ce": {
+       "symbol": "TEST100CE",
+       "exchange": "NFO",
+       "lot": 65,
+       "tick": 0.05,
+       "ltp": 22,
+       "close": 20,
+       "oi": 100,
+       "prev_oi": 80
+      },
+      "pe": {
+       "symbol": "TEST100PE",
+       "exchange": "NFO",
+       "lot": 65,
+       "tick": 0.05,
+       "ltp": 1,
+       "close": 2,
+       "oi": 500,
+       "prev_oi": 600
+      }
+     },
+     {
+      "strike": 110,
+      "ce": {
+       "symbol": "TEST110CE",
+       "exchange": "NFO",
+       "lot": 65,
+       "tick": 0.05,
+       "ltp": 13,
+       "close": 12,
+       "oi": 200,
+       "prev_oi": 200
+      },
+      "pe": {
+       "symbol": "TEST110PE",
+       "exchange": "NFO",
+       "lot": 65,
+       "tick": 0.05,
+       "ltp": 2,
+       "close": 2.5,
+       "oi": 400,
+       "prev_oi": 300
+      }
+     },
+     {
+      "strike": 120,
+      "ce": {
+       "symbol": "TEST120CE",
+       "exchange": "NFO",
+       "lot": 65,
+       "tick": 0.05,
+       "ltp": 6,
+       "close": 5,
+       "oi": 300,
+       "prev_oi": 100
+      },
+      "pe": {
+       "symbol": "TEST120PE",
+       "exchange": "NFO",
+       "lot": 65,
+       "tick": 0.05,
+       "ltp": 5,
+       "close": 6,
+       "oi": 300,
+       "prev_oi": 250
+      }
+     },
+     {
+      "strike": 130,
+      "ce": {
+       "symbol": "TEST130CE",
+       "exchange": "NFO",
+       "lot": 65,
+       "tick": 0.05,
+       "ltp": 2,
+       "close": 3,
+       "oi": 600,
+       "prev_oi": 400
+      },
+      "pe": {
+       "symbol": "TEST130PE",
+       "exchange": "NFO",
+       "lot": 65,
+       "tick": 0.05,
+       "ltp": 11,
+       "close": 10,
+       "oi": 100,
+       "prev_oi": 150
+      }
+     },
+     {
+      "strike": 140,
+      "ce": {
+       "symbol": "TEST140CE",
+       "exchange": "NFO",
+       "lot": 65,
+       "tick": 0.05,
+       "ltp": 1,
+       "close": 1.5,
+       "oi": 400,
+       "prev_oi": 500
+      },
+      "pe": {
+       "symbol": "TEST140PE",
+       "exchange": "NFO",
+       "lot": 65,
+       "tick": 0.05,
+       "ltp": 20,
+       "close": 19,
+       "oi": 50,
+       "prev_oi": 50
+      }
+     }
+    ]
+   },
+   "followed": [
+    120
+   ],
+   "ticks": {
+    "NFO:TEST100CE": {
+     "at": 1000500,
+     "data": {
+      "ltp": 99,
+      "oi": 999
+     }
+    }
+   },
+   "spot": null,
+   "future": null,
+   "expect": {
+    "wingsAsOf": 1000000,
+    "rows": {
+     "100": {
+      "ce": {
+       "ltp": 22,
+       "oi": 100
+      },
+      "live": false
+     },
+     "120": {
+      "live": true
+     }
+    }
+   }
+  }
+ ],
+ "maxPain": [
+  {
+   "chain": [
+    {
+     "strike": 25500,
+     "ce_oi": 0,
+     "pe_oi": 18460
+    },
+    {
+     "strike": 25550,
+     "ce_oi": 0,
+     "pe_oi": 0
+    },
+    {
+     "strike": 25600,
+     "ce_oi": 0,
+     "pe_oi": 0
+    },
+    {
+     "strike": 25650,
+     "ce_oi": 910,
+     "pe_oi": 20475
+    },
+    {
+     "strike": 25700,
+     "ce_oi": 13260,
+     "pe_oi": 0
+    },
+    {
+     "strike": 25750,
+     "ce_oi": 0,
+     "pe_oi": 0
+    },
+    {
+     "strike": 25800,
+     "ce_oi": 0,
+     "pe_oi": 13195
+    },
+    {
+     "strike": 25850,
+     "ce_oi": 0,
+     "pe_oi": 0
+    },
+    {
+     "strike": 25900,
+     "ce_oi": 18785,
+     "pe_oi": 5915
+    },
+    {
+     "strike": 25950,
+     "ce_oi": 21385,
+     "pe_oi": 0
+    },
+    {
+     "strike": 26000,
+     "ce_oi": 0,
+     "pe_oi": 0
+    },
+    {
+     "strike": 26050,
+     "ce_oi": 3770,
+     "pe_oi": 0
+    },
+    {
+     "strike": 26100,
+     "ce_oi": 21320,
+     "pe_oi": 0
+    },
+    {
+     "strike": 26150,
+     "ce_oi": 14625,
+     "pe_oi": 0
+    },
+    {
+     "strike": 26200,
+     "ce_oi": 12545,
+     "pe_oi": 0
+    },
+    {
+     "strike": 26250,
+     "ce_oi": 0,
+     "pe_oi": 5005
+    },
+    {
+     "strike": 26300,
+     "ce_oi": 15925,
+     "pe_oi": 11895
+    }
+   ],
+   "max_pain": 25900
+  },
+  {
+   "chain": [
+    {
+     "strike": 58000,
+     "ce_oi": 0,
+     "pe_oi": 11115
+    },
+    {
+     "strike": 58100,
+     "ce_oi": 20215,
+     "pe_oi": 0
+    },
+    {
+     "strike": 58200,
+     "ce_oi": 16250,
+     "pe_oi": 5200
+    },
+    {
+     "strike": 58300,
+     "ce_oi": 0,
+     "pe_oi": 23140
+    },
+    {
+     "strike": 58400,
+     "ce_oi": 8125,
+     "pe_oi": 17290
+    },
+    {
+     "strike": 58500,
+     "ce_oi": 0,
+     "pe_oi": 20280
+    },
+    {
+     "strike": 58600,
+     "ce_oi": 0,
+     "pe_oi": 0
+    },
+    {
+     "strike": 58700,
+     "ce_oi": 23335,
+     "pe_oi": 0
+    },
+    {
+     "strike": 58800,
+     "ce_oi": 14430,
+     "pe_oi": 5200
+    },
+    {
+     "strike": 58900,
+     "ce_oi": 17810,
+     "pe_oi": 0
+    },
+    {
+     "strike": 59000,
+     "ce_oi": 0,
+     "pe_oi": 3705
+    },
+    {
+     "strike": 59100,
+     "ce_oi": 5915,
+     "pe_oi": 0
+    },
+    {
+     "strike": 59200,
+     "ce_oi": 0,
+     "pe_oi": 0
+    },
+    {
+     "strike": 59300,
+     "ce_oi": 0,
+     "pe_oi": 0
+    },
+    {
+     "strike": 59400,
+     "ce_oi": 16965,
+     "pe_oi": 24570
+    },
+    {
+     "strike": 59500,
+     "ce_oi": 0,
+     "pe_oi": 0
+    },
+    {
+     "strike": 59600,
+     "ce_oi": 975,
+     "pe_oi": 0
+    },
+    {
+     "strike": 59700,
+     "ce_oi": 14820,
+     "pe_oi": 0
+    },
+    {
+     "strike": 59800,
+     "ce_oi": 0,
+     "pe_oi": 0
+    },
+    {
+     "strike": 59900,
+     "ce_oi": 0,
+     "pe_oi": 25480
+    },
+    {
+     "strike": 60000,
+     "ce_oi": 15080,
+     "pe_oi": 20995
+    }
+   ],
+   "max_pain": 58800
+  },
+  {
+   "chain": [
+    {
+     "strike": 95.0,
+     "ce_oi": 24050,
+     "pe_oi": 0
+    },
+    {
+     "strike": 97.5,
+     "ce_oi": 0,
+     "pe_oi": 12155
+    },
+    {
+     "strike": 100.0,
+     "ce_oi": 0,
+     "pe_oi": 24180
+    },
+    {
+     "strike": 102.5,
+     "ce_oi": 0,
+     "pe_oi": 23660
+    },
+    {
+     "strike": 105.0,
+     "ce_oi": 0,
+     "pe_oi": 0
+    },
+    {
+     "strike": 107.5,
+     "ce_oi": 5915,
+     "pe_oi": 6110
+    },
+    {
+     "strike": 110.0,
+     "ce_oi": 0,
+     "pe_oi": 0
+    },
+    {
+     "strike": 112.5,
+     "ce_oi": 0,
+     "pe_oi": 19240
+    },
+    {
+     "strike": 115.0,
+     "ce_oi": 6825,
+     "pe_oi": 1170
+    }
+   ],
+   "max_pain": 107.5
+  },
+  {
+   "chain": [
+    {
+     "strike": 25700,
+     "ce_oi": 9100,
+     "pe_oi": 0
+    },
+    {
+     "strike": 25750,
+     "ce_oi": 0,
+     "pe_oi": 0
+    },
+    {
+     "strike": 25800,
+     "ce_oi": 12415,
+     "pe_oi": 13715
+    },
+    {
+     "strike": 25850,
+     "ce_oi": 10010,
+     "pe_oi": 13520
+    },
+    {
+     "strike": 25900,
+     "ce_oi": 0,
+     "pe_oi": 10140
+    }
+   ],
+   "max_pain": 25850
+  },
+  {
+   "chain": [
+    {
+     "strike": 84000,
+     "ce_oi": 17420,
+     "pe_oi": 0
+    },
+    {
+     "strike": 84100,
+     "ce_oi": 15340,
+     "pe_oi": 0
+    },
+    {
+     "strike": 84200,
+     "ce_oi": 0,
+     "pe_oi": 0
+    },
+    {
+     "strike": 84300,
+     "ce_oi": 14625,
+     "pe_oi": 0
+    },
+    {
+     "strike": 84400,
+     "ce_oi": 0,
+     "pe_oi": 0
+    },
+    {
+     "strike": 84500,
+     "ce_oi": 0,
+     "pe_oi": 0
+    },
+    {
+     "strike": 84600,
+     "ce_oi": 20605,
+     "pe_oi": 6630
+    },
+    {
+     "strike": 84700,
+     "ce_oi": 0,
+     "pe_oi": 3315
+    },
+    {
+     "strike": 84800,
+     "ce_oi": 0,
+     "pe_oi": 17745
+    },
+    {
+     "strike": 84900,
+     "ce_oi": 4095,
+     "pe_oi": 21060
+    },
+    {
+     "strike": 85000,
+     "ce_oi": 0,
+     "pe_oi": 25870
+    },
+    {
+     "strike": 85100,
+     "ce_oi": 0,
+     "pe_oi": 15730
+    },
+    {
+     "strike": 85200,
+     "ce_oi": 0,
+     "pe_oi": 13650
+    }
+   ],
+   "max_pain": 84900
+  }
+ ]
+}
