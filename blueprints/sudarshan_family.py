@@ -57,7 +57,9 @@ OpenAlgo never reads, so every route below answers it as it answers a stranger.
    a ``share_set`` of kind ``book`` is refused here, unsent (v0.12.0 review H1: nothing enforces
    one); a ``share_set`` of one of his lists that the service confirmed is noted with the list's
    ``created_at``; a ``share_remove`` is forgotten before it is sent, and noted again only when the
-   service answered that it still has the share; a removed member's shares are forgotten.
+   service answered that it still has the share; a removed member's shares are forgotten; and a
+   ``share_list`` forgets every entry whose share the service no longer has (v0.12.0 review L7:
+   the vault is not rolled back with family.db).
 """
 
 import json
@@ -595,6 +597,9 @@ _vault_lazy = LazyInit(lambda: Vault(pepper=pepper_from(os.environ)), "sudarshan
 #: under eventlet it is the hub's lock, as every request here runs on the hub (no real thread takes
 #: it); under gthread it is a real one, and the read, change and write are one step.
 _note_lock = threading.Lock()
+#: How many times a share was added to the note (changed under ``_note_lock``): ``_share_list``
+#: tidies the note only when none was added while the service answered its list.
+_note_adds = [0]
 
 
 def _note() -> dict:
@@ -698,6 +703,7 @@ def _share_set(op, fields):
 
     def note(shares: dict) -> bool:
         shares[str(share["id"])] = entry
+        _note_adds[0] += 1
         return True
 
     try:
@@ -728,12 +734,39 @@ def _share_remove(op, fields):
     if kept[0] is not None and not gone:
 
         def again(shares: dict) -> bool:
+            _note_adds[0] += 1
             return shares.setdefault(key, kept[0]) is kept[0]
 
         try:
             _note_change(again)
         except Exception:
             logger.exception("Family: a share still in place could not be noted again")
+    return response
+
+
+def _share_list(op, fields):
+    """The shares read: note entries the service no longer has are forgotten (v0.12.0 review L7).
+    The note lives in the owner vault, which a restore of family.db never rolls back, so after
+    one it could still name shares of the lost timeline; a family process that was broken into
+    could then ask for those lists. Nothing is forgotten when the answer is not the list itself
+    (switched off, refused), or when a share was noted while the service answered."""
+    adds = _note_adds[0]
+    response = _send(op, fields)
+    data = _data_of(response)
+    if not isinstance(data, list):
+        return response
+    have = {str(row.get("id")) for row in data if isinstance(row, dict)}
+
+    def tidy(shares: dict) -> bool:
+        gone = [] if _note_adds[0] != adds else [k for k in shares if k not in have]
+        for k in gone:
+            del shares[k]
+        return bool(gone)
+
+    try:
+        _note_change(tidy)
+    except Exception:
+        logger.exception("Family: the note of shared lists could not be tidied")
     return response
 
 
@@ -757,7 +790,8 @@ def _member_remove(op, fields):
 
 
 #: The owner's ops that change what is shared, each with its step in the note.
-_NOTED = {"share_set": _share_set, "share_remove": _share_remove, "member_remove": _member_remove}
+_NOTED = {"share_set": _share_set, "share_remove": _share_remove, "member_remove": _member_remove,
+          "share_list": _share_list}  # fmt: skip
 
 
 @sudarshan_family_bp.record_once

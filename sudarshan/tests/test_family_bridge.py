@@ -1098,6 +1098,64 @@ def test_m3_the_internal_route_answers_120_a_minute(monkeypatch, tmp_path, lists
     assert refused.status_code == 429 and b"Swing" not in refused.data
 
 
+def test_l7_reading_the_shares_forgets_note_entries_the_service_no_longer_has(
+    bridge, family, lists
+):
+    """v0.12.0 review L7: after a restore of family.db the vault's note can name shares of the
+    lost timeline. A share_list the service answered with its list forgets them; an answer that
+    is not the list (switched off, refused) forgets nothing. Fails on the old code: the entry
+    for a share the service does not have stayed, and its list was still served."""
+    kept, lost = "5", "9"
+
+    def two(shares: dict) -> bool:
+        shares.clear()
+        for key, name in ((kept, "swing"), (lost, "empty")):
+            made = bp_module._list_made(str(lists[name]))[1]
+            shares[key] = {"list": lists[name], "made": made, "member": 2, "role": None,
+                           "until": None}  # fmt: skip
+        return True
+
+    bp_module._note_change(two)
+    headers = as_owner(bridge)
+    before = shown(bridge, [lists["swing"], lists["empty"]], member_id=2, role="viewer")
+    assert len(before["lists"]) == 2
+    row = {"id": int(kept), "kind": "watchlist", "ref": str(lists["swing"]), "member_id": 2,
+           "role": None, "level": "view", "expires_at": None, "created_at": 1, "version": 1}  # fmt: skip
+    for answer in [
+        (200, {"status": "success", "data": {"enabled": False, "message": "Off."}}),
+        (503, {"status": "error", "code": "busy", "message": "Busy. Wait a minute."}),
+    ]:
+        family.answers["share_list"] = answer
+        send(bridge, OP["share_list"], headers=headers)
+        assert set(bp_module._note()) == {kept, lost}
+    family.answers["share_list"] = (200, {"status": "success", "data": [row]})
+    response = send(bridge, OP["share_list"], headers=headers)
+    assert response.get_json()["data"] == [row]
+    assert set(bp_module._note()) == {kept}
+    seen = shown(bridge, [lists["swing"], lists["empty"]], member_id=2, role="viewer")
+    assert [lst["id"] for lst in seen["lists"]] == [lists["swing"]]
+    assert seen["gone"] == [lists["empty"]]
+
+
+def test_l7_a_share_noted_while_the_list_was_on_its_way_is_not_forgotten(
+    bridge, family, lists, monkeypatch
+):
+    """A list read before a share was made must not undo the note of that share."""
+    bp_module._note_change(lambda shares: bool(shares.clear()) or True)
+    real = bp_module._send
+
+    def slow_list(op, fields):
+        response = real(op, fields)
+        note_shares({"swing": lists["swing"]}, member_id=2)  # noted while the list was read
+        bp_module._note_adds[0] += 1
+        return response
+
+    family.answers["share_list"] = (200, {"status": "success", "data": []})
+    monkeypatch.setattr(bp_module, "_send", slow_list)
+    send(bridge, OP["share_list"], headers=as_owner(bridge))
+    assert len(bp_module._note()) == 1
+
+
 def test_m1_a_stranger_forwarded_by_nginx_cannot_spend_the_internal_routes_limit(
     monkeypatch, lists
 ):
