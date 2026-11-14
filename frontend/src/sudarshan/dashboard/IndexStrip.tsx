@@ -1,5 +1,5 @@
 import { Clock } from 'lucide-react'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { type QuotesData, tradingApi } from '@/api/trading'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useMarketData } from '@/hooks/useMarketData'
@@ -7,6 +7,7 @@ import { cn } from '@/lib/utils'
 import { SymbolChartLink } from '@/sudarshan/chart/SymbolChartLink'
 import { directionOf, formatPercent, formatPrice } from './format'
 import { useNow } from './hooks'
+import { INDEX_CHOICES, useDashboardIndices } from './indexChoice'
 import { LiveLine } from './LiveLine'
 import {
   feedLine,
@@ -20,15 +21,8 @@ import {
 } from './live'
 import { TREND_TEXT, TrendArrow } from './Trend'
 
-/** The three the dashboard shows, in OpenAlgo's symbols for them. */
-export const INDICES = [
-  { symbol: 'NIFTY', exchange: 'NSE_INDEX', label: 'NIFTY 50' },
-  { symbol: 'BANKNIFTY', exchange: 'NSE_INDEX', label: 'NIFTY BANK' },
-  { symbol: 'INDIAVIX', exchange: 'NSE_INDEX', label: 'INDIA VIX' },
-] as const
-
-/** The instruments as the feed and the quote call take them: one array, so the subscription never churns. */
-const INDEX_SYMBOLS = INDICES.map(({ symbol, exchange }) => ({ symbol, exchange }))
+/** An instrument as the feed and the quote call take it. */
+type IndexSymbol = { symbol: string; exchange: string }
 
 /** A read older than this is made again when the page comes back into view or the feed reconnects. */
 export const SNAPSHOT_MAX_AGE_MS = 10 * 60_000
@@ -43,7 +37,7 @@ interface Snapshot {
 }
 
 /**
- * One REST read of the three quotes, for what the ticks do not give: a level
+ * One REST read of the chosen indices' quotes, for what the ticks do not give: a level
  * before the first tick (and all day when the market is shut and nothing
  * ticks), and the previous close until a tick brings its own (`indexView`
  * prefers the tick's, M11.3). Read on arrival; again when NSE opens or closes,
@@ -54,7 +48,9 @@ interface Snapshot {
 export function useIndexSnapshot(
   apiKey: string | null,
   nseOpen: boolean | null,
-  connectionEpoch: number
+  connectionEpoch: number,
+  /** The indices to read: one array while the choice stands, so nothing is read twice. */
+  symbols: readonly IndexSymbol[]
 ): Snapshot {
   const [snapshot, setSnapshot] = useState<Snapshot>(() => ({
     quotes: new Map(),
@@ -81,7 +77,7 @@ export function useIndexSnapshot(
         previous.status === 'ready' ? previous : { ...previous, status: 'error' }
       )
     try {
-      const response = await tradingApi.getMultiQuotes(apiKey, INDEX_SYMBOLS)
+      const response = await tradingApi.getMultiQuotes(apiKey, [...symbols])
       if (!alive.current) return
       if (response.status === 'success' && response.results) {
         const quotes = new Map<string, QuotesData>()
@@ -98,7 +94,7 @@ export function useIndexSnapshot(
     } finally {
       busy.current = false
     }
-  }, [apiKey])
+  }, [apiKey, symbols])
 
   useEffect(() => {
     load()
@@ -160,7 +156,7 @@ function IndexTile({
   return (
     <li
       data-stale={stale || undefined}
-      className="relative flex min-w-0 flex-col gap-px rounded-[0.875rem] border bg-card px-2 pt-2.5 pb-2 min-[360px]:px-2.5"
+      className="relative flex min-w-0 snap-start flex-col gap-px rounded-[0.875rem] border bg-card px-2 pt-2.5 pb-2 min-[360px]:px-2.5"
     >
       <span className="truncate text-[0.6875rem] font-semibold tracking-[0.05em] text-muted-foreground">
         {/* The whole tile opens the index's phone chart (M4.15); the figures
@@ -214,8 +210,11 @@ function IndexTile({
 }
 
 /**
- * NIFTY 50, NIFTY BANK and INDIA VIX, tick by tick: the level and the change on
- * the previous close, with sign and arrow. The levels stream through the one
+ * The indices the owner chose (M3.3, D8: one to six, NIFTY 50, NIFTY BANK,
+ * INDIA VIX and SENSEX until he chooses in Profile, Display), tick by tick: the
+ * level and the change on the previous close, with sign and arrow. Three fit a
+ * phone's width; more make the strip scroll sideways inside itself, the page
+ * never. The levels stream through the one
  * market-data connection the whole app shares (`useMarketData`, LTP mode),
  * starting from a REST read that also gives the previous close. While NSE is
  * open, a level that has stopped arriving is muted and marked with a clock;
@@ -234,21 +233,31 @@ export function IndexStrip({
   marketOpen: MarketOpen
 }) {
   const nseOpen = marketOpen('NSE_INDEX')
+  const chosen = useDashboardIndices()
+  const indices = useMemo(
+    () => INDEX_CHOICES.filter((choice) => chosen.includes(choice.symbol)),
+    [chosen]
+  )
+  // One array while the choice stands, so the subscription never churns.
+  const symbols = useMemo(
+    () => indices.map(({ symbol, exchange }) => ({ symbol, exchange })),
+    [indices]
+  )
   const {
     data: prices,
     connectionEpoch,
     isAuthenticated,
     isPaused,
   } = useMarketData({
-    symbols: INDEX_SYMBOLS,
+    symbols,
     mode: 'LTP',
     enabled: apiKey !== null,
   })
-  const snapshot = useIndexSnapshot(apiKey, nseOpen, connectionEpoch)
+  const snapshot = useIndexSnapshot(apiKey, nseOpen, connectionEpoch, symbols)
   const now = useNow()
   if (!apiKey) return null
 
-  const rows = INDICES.map((index) => {
+  const rows = indices.map((index) => {
     const key = keyOf(index.symbol, index.exchange)
     const tick = priceOf(prices.get(key))
     return {
@@ -262,7 +271,16 @@ export function IndexStrip({
 
   return (
     <section aria-label="Indices">
-      <ul className="grid grid-cols-3 gap-2">
+      <ul
+        // Three to a phone's width; a fourth and on are reached by scrolling the strip itself.
+        className={cn(
+          'grid gap-2',
+          rows.length <= 3
+            ? 'grid-cols-3'
+            : 'snap-x grid-flow-col auto-cols-[calc((100%-1.5rem)/3.25)] overflow-x-auto overscroll-x-contain pb-1 sm:auto-cols-fr'
+        )}
+        data-testid="index-strip"
+      >
         {rows.map((row) => (
           <IndexTile
             key={row.symbol}
@@ -271,7 +289,7 @@ export function IndexStrip({
             label={row.label}
             view={row.view}
             loading={empty && snapshot.status === 'loading'}
-            stale={isStale(row.view, now, nseOpen, feedTickAt)}
+            stale={isStale(row.view, now, marketOpen(row.exchange), feedTickAt)}
           />
         ))}
       </ul>
