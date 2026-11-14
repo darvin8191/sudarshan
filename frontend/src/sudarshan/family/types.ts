@@ -27,6 +27,8 @@ export const LIMITS = {
   admin_bytes: 65536,
   nudge_bytes: 4096,
   viewer_bytes: 65536,
+  internal_bytes: 4096,
+  internal_lists: 50,
   ws_symbols: 150,
 } as const
 
@@ -49,6 +51,8 @@ export const ERROR_STATUS = {
   off: 503,
   store_newer: 503,
   busy: 503,
+  unavailable: 503,
+  not_confirmed: 504,
 } as const
 
 export const CATEGORIES = ['pnl', 'qty', 'funds', 'orders'] as const
@@ -129,6 +133,8 @@ export interface Limits {
   admin_bytes: number
   nudge_bytes: number
   viewer_bytes: number
+  internal_bytes: number
+  internal_lists: number
   ws_symbols: number
 }
 
@@ -364,6 +370,27 @@ export interface WsStatus {
   type: WsType
   status: string
   message?: string
+}
+
+export interface InternalRow {
+  symbol: string
+  exchange: string
+  instrument_key: string | null
+  name: string | null
+  tick_size: number | null
+  lot_size: number | null
+}
+
+export interface InternalList {
+  id: number
+  name: string
+  created_at: string | null
+  rows: InternalRow[]
+}
+
+export interface InternalWatchlists {
+  lists: InternalList[]
+  gone: number[]
 }
 
 export interface MemberCard {
@@ -698,6 +725,10 @@ export interface AdminNudgeReq {
   kind: NudgeKind
   sandbox: boolean
   at: number
+}
+
+export interface InternalWatchlistsReq {
+  list_ids: number[]
 }
 
 export interface ViewerOps {

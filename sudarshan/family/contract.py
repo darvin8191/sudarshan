@@ -23,6 +23,14 @@ One listener, four doors:
                                   ``sudarshan/family/nudge/v1``, principal ``sudarshan-alerts``
     health  GET /health           counts and states only: no name, handle, endpoint or id
 
+and one call out, the family service's only route into OpenAlgo (lane FB serves it, F7 calls it):
+
+    POST /sudarshan/family/internal/watchlists   one token sealed for ``watchlists`` under
+                          ``sudarshan/family/internal/v1``, principal ``sudarshan-family``, with
+                          1 to 50 distinct ``list_ids`` (at most 4 KiB); the answer names each list
+                          found with its ``created_at`` (OpenAlgo reuses a deleted list's id, so a
+                          share is tied to the id and the ``created_at`` together) and the ids gone
+
 The sealed doors and /health refuse a request that carries X-Forwarded-For, X-Forwarded-Proto or
 X-Real-IP with 404: nginx sets them, and nothing it forwards may reach those doors.
 
@@ -62,10 +70,18 @@ FORWARDED_HEADERS = ("X-Forwarded-For", "X-Forwarded-Proto", "X-Real-IP")
 COOKIE = "__Host-sudarshan_family"
 CSRF_COOKIE = "__Host-sudarshan_family_csrf"
 CSRF_HEADER = "X-Family-CSRF"
-#: The seal purposes of the two sealed doors (``sudarshan/vault/keys.py`` holds the same strings).
-PURPOSES = {"admin": "sudarshan/family/admin/v1", "nudge": "sudarshan/family/nudge/v1"}
+#: The seal purposes of the two sealed doors and of the one call out (``sudarshan/vault/keys.py``
+#: holds the same strings).
+PURPOSES = {
+    "admin": "sudarshan/family/admin/v1",
+    "nudge": "sudarshan/family/nudge/v1",
+    "internal": "sudarshan/family/internal/v1",
+}
 ADMIN_PRINCIPAL = "owner"
 NUDGE_PRINCIPAL = "sudarshan-alerts"
+#: The family service's one route into OpenAlgo (the shared watchlists), and who it says it is.
+INTERNAL_PATH = "/sudarshan/family/internal/watchlists"
+INTERNAL_PRINCIPAL = SERVICE
 #: The WebSocket close code of a session that ended (signed out, expired, removed).
 WS_CLOSE_SIGNED_OUT = 4401
 
@@ -86,6 +102,8 @@ LIMITS = {
     "admin_bytes": 64 * 1024,
     "nudge_bytes": 4 * 1024,
     "viewer_bytes": 64 * 1024,
+    "internal_bytes": 4 * 1024,
+    "internal_lists": 50,
     "ws_symbols": 150,
 }
 #: Failures in a row (since the last good sign-in) that lock a sign-in, and for how long (s).
@@ -150,7 +168,9 @@ AUDIT_KINDS = (
 )
 
 # ---- errors -----------------------------------------------------------------------------------
-#: Every error code with its HTTP status. ``invalid`` and ``code_mismatch`` carry ``field``.
+#: Every error code with its HTTP status. ``invalid`` and ``code_mismatch`` carry ``field``. The
+#: last two are the owner bridge's own: the service did not answer or its seal could not be made
+#: (``unavailable``), and a write sent with no answer, which may have happened (``not_confirmed``).
 ERROR_STATUS = {
     "invalid": 400,
     "code_mismatch": 400,
@@ -170,6 +190,8 @@ ERROR_STATUS = {
     "off": 503,
     "store_newer": 503,
     "busy": 503,
+    "unavailable": 503,
+    "not_confirmed": 504,
 }
 ERROR_CODES = tuple(ERROR_STATUS)
 #: The sentences ``words.py`` holds, by key (each error code's own, and the rest a person reads).
@@ -260,6 +282,11 @@ RECORDS = {
     "WsFeedState": "type:WsType, state:FeedState, since:int",
     "WsBook": "type:WsType, part:BookPart, read_at:int",
     "WsStatus": "type:WsType, status:string, message?:string",
+    # ---- the one call out: OpenAlgo's internal watchlist route (F7 calls it, lane FB serves it) ----
+    "InternalRow": "symbol:string, exchange:string, instrument_key:string|null, "
+    "name:string|null, tick_size:number|null, lot_size:int|null",
+    "InternalList": "id:int, name:string, created_at:string|null, rows:InternalRow[]",
+    "InternalWatchlists": "lists:InternalList[], gone:int[]",
     # ---- the owner's admin ops (sealed) ----
     "MemberCard": "id:int, handle:string|null, display_name:string, role:Role, "
     "status:MemberStatus, privacy:Privacy, language:Language, devices:int, "
@@ -365,6 +392,8 @@ ADMIN_OPS = (
     SealedOp("share_remove", "id:int, version:int", "Done"),
 )  # fmt: skip
 NUDGE_OPS = (SealedOp("nudge", "kind:NudgeKind, sandbox:bool, at:int", "NudgeTaken"),)
+#: The one call out: ``list_ids`` are 1 to ``LIMITS["internal_lists"]`` distinct positive ids.
+INTERNAL_OPS = (SealedOp("watchlists", "list_ids:int[]", "InternalWatchlists"),)
 
 VIEWER_OP_NAMES = tuple(op.name for op in VIEWER_OPS)
 ADMIN_OP_NAMES = tuple(op.name for op in ADMIN_OPS)

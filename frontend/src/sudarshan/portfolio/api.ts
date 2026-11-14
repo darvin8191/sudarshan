@@ -141,9 +141,9 @@ function queryOf(spec: OpSpec, args: Record<string, unknown>): Record<string, st
   return out
 }
 
-function pathOf(spec: OpSpec, args: Record<string, unknown>): string {
+function pathOf(spec: OpSpec, args: Record<string, unknown>, base: string = API_PREFIX): string {
   const id = args.id
-  return `${API_PREFIX}${spec.route.replace('<id>', String(id ?? ''))}`
+  return `${base}${spec.route.replace('<id>', String(id ?? ''))}`
 }
 
 function bodyOf(args: Record<string, unknown>): Record<string, unknown> {
@@ -166,12 +166,17 @@ function uploadOf(args: Record<string, unknown>): FormData {
 export async function portfolioCall<N extends OpName>(
   name: N,
   args?: PortfolioOps[N]['args'],
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  // SUDARSHAN P6 D6 (M7.41, M7.37): the base path the route is added to. The owner's page never
+  // passes it. A reader of a shared portfolio through the family service's own copy of these
+  // routes passes `/family/api/portfolio`, and only a read op may be sent there (the family
+  // purpose accepts reads and nothing else).
+  options: { base?: string } = {}
 ): Promise<PortfolioResult<PortfolioOps[N]['data']>> {
   const spec = SPECS.get(name)
   if (!spec) throw new PortfolioError({ code: 'unsent', message: NOT_SENT, entryId: null })
   const given = (args ?? {}) as Record<string, unknown>
-  const url = pathOf(spec, given)
+  const url = pathOf(spec, given, options.base)
   const timeout = WAIT_MS[spec.cls]
   let body: unknown
   try {

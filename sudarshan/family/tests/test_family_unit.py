@@ -69,7 +69,6 @@ def test_the_unit_says_what_the_deploys_policy_and_the_design_ask():
         "Group": ["sudarshan-family"],
         "NoNewPrivileges": ["yes"],
         "ConditionPathExists": ["/etc/sudarshan-family/provisioned"],
-        "Requires": ["nft-sudarshan-family.service"],
         "EnvironmentFile": ["-/etc/sudarshan-family/family.env"],
         "ReadOnlyPaths": ["-/etc/sudarshan-family"],
         "InaccessiblePaths": [
@@ -94,6 +93,10 @@ def test_the_unit_says_what_the_deploys_policy_and_the_design_ask():
     for key, values in exact.items():
         assert directives(text, key) == values, key
     assert "nft-sudarshan-family.service" in directives(text, "After")
+    # Wants=, never Requires=: before the owner's set-up the firewall unit does not exist, and a
+    # Requires= on it fails every start instead of letting ConditionPathExists skip it.
+    assert "nft-sudarshan-family.service" in directives(text, "Wants")
+    assert not directives(text, "Requires")
     assert not directives(text, "IPAddressDeny")  # Telegram and push are outbound on 443
     assert not directives(text, "SupplementaryGroups")
 
@@ -110,8 +113,7 @@ def test_the_units_paths_are_the_codes():
 @pytest.mark.skipif(shutil.which("systemd-analyze") is None, reason="needs systemd-analyze")
 def test_systemd_reads_the_unit(tmp_path):
     """Set aside: the server's interpreter (absent here), and the firewall unit, which the owner's
-    one-time set-up installs. Before that set-up, Requires= on it makes a start fail at once
-    (systemd says the unit is not found) instead of being skipped by the condition."""
+    one-time set-up installs (the unit only wants it, so its absence never fails a start)."""
     for unit in (UNIT, SLICE):
         shutil.copy(unit, tmp_path / unit.name)
     done = subprocess.run(

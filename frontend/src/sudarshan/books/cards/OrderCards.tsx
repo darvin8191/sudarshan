@@ -50,6 +50,7 @@ import {
   WarningLine,
   WhyNot,
 } from './parts'
+import { ReadOnlyOrders, type ReadOnlyOrdersProps } from './ReadOnlyOrders'
 import { useBookOverlay, usePageDialog } from './useBookOverlay'
 import { type PricedRow, useFramePrices } from './useFramePrices'
 import { useHeld, useLatest } from './useLatest'
@@ -77,6 +78,8 @@ const FILTERS: Array<{ value: OrderFilter; label: string; empty: string }> = [
 ]
 
 export interface OrderCardsProps {
+  // SUDARSHAN P6 D5: the owner's board is never the read-only one (see OrderCards below).
+  readOnly?: never
   orders: Order[]
   loading: boolean
   error: string | null
@@ -210,7 +213,7 @@ export function cancelHeldWhy(mark: SentMark): string {
   return `A cancel for this order was sent at ${istTime(mark.sentAt)} and ${where}. Check its status before cancelling again.`
 }
 
-export function OrderCards(props: OrderCardsProps) {
+function OwnerOrderCards(props: OrderCardsProps) {
   const onRefresh = useLatest(props.onRefresh)
   const onCancel = useLatest(props.onCancel)
   const onCancelAll = useLatest(props.onCancelAll)
@@ -226,6 +229,13 @@ export function OrderCards(props: OrderCardsProps) {
       onModifyOpenChange={onModifyOpenChange}
     />
   )
+}
+
+// SUDARSHAN P6 D5 (M6.7): `readOnly` is the viewer's path, a board of its own with no Modify, no
+// Cancel, no Cancel all and no order ticket. The owner's board above it is unchanged.
+export function OrderCards(props: OrderCardsProps | ReadOnlyOrdersProps) {
+  if (props.readOnly) return <ReadOnlyOrders {...props} />
+  return <OwnerOrderCards {...props} />
 }
 
 const OrderBoard = memo(function OrderBoard({

@@ -148,6 +148,8 @@ def render() -> str:
         out += _interface(pascal(op.name) + "Req", c.parse_fields(op.req)) + [""]
     for op in (*c.ADMIN_OPS, *c.NUDGE_OPS):
         out += _interface("Admin" + pascal(op.name) + "Req", c.parse_fields(op.req)) + [""]
+    for op in c.INTERNAL_OPS:
+        out += _interface("Internal" + pascal(op.name) + "Req", c.parse_fields(op.req)) + [""]
     out += ["export interface ViewerOps {"]
     for op in c.VIEWER_OPS:
         out.append(f"  {op.name}: {{ req: {pascal(op.name)}Req; res: {ts_type(op.res)} }}")

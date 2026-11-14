@@ -1,0 +1,44 @@
+{
+  "id": "/family/",
+  "name": "सुदर्शन · SUDARSHAN · Family",
+  "short_name": "सुदर्शन",
+  "description": "View-only access to the account owner's positions, holdings and shared lists.",
+  "lang": "en",
+  "dir": "ltr",
+  "start_url": "/family/",
+  "scope": "/family/",
+  "display": "standalone",
+  "background_color": "#FFFFFF",
+  "theme_color": "#FFFFFF",
+  "icons": [
+    {
+      "src": "/images/android-chrome-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/images/android-chrome-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/images/maskable-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/images/maskable-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    { "name": "Positions", "url": "/family/positions" },
+    { "name": "Holdings", "url": "/family/holdings" },
+    { "name": "Watchlist", "url": "/family/watchlist" }
+  ]
+}

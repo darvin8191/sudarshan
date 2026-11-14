@@ -58,6 +58,7 @@ REASONS = {
     403: "Forbidden", 404: "Not Found", 405: "Method Not Allowed", 409: "Conflict", 410: "Gone",
     413: "Content Too Large", 422: "Unprocessable Content", 429: "Too Many Requests",
     500: "Internal Server Error", 501: "Not Implemented", 503: "Service Unavailable",
+    504: "Gateway Timeout",
 }  # fmt: skip
 _FORWARDED = {name.lower() for name in FORWARDED_HEADERS}
 
