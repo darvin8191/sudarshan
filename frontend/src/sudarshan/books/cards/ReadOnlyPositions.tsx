@@ -255,7 +255,11 @@ export function ReadOnlyPositions({
     <div className="flex flex-col gap-3">
       <ViewerNote name="positions" text={NOTE} />
       {content}
-      <ReadStamp part="Positions" readAt={readAt} />
+      <ReadStamp
+        part="Positions"
+        readAt={readAt}
+        closed={state === 'closed' || marketOpen('') === false}
+      />
       {overlay?.act === 'sheet' && target && (
         <PositionSheet
           row={target.row}

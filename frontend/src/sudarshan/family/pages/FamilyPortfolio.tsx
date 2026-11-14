@@ -2,7 +2,7 @@
 // "Shared portfolios" summary first, then one tab at a time. No New tab, Add, Import, Customize,
 // Tab settings or Delete exist here. Nothing on this screen is real-time: it is a read, stamped
 // with the time the service took it, and re-read when the service says it has (Y11), on return to
-// the page and every 45 s. A tab shared as restricted shows holdings and allocation by count only.
+// the page and every 45 s while the market is open. A tab shared as restricted shows holdings and allocation by count only.
 import { useQuery } from '@tanstack/react-query'
 import { Check, Lock } from 'lucide-react'
 import { useSearchParams } from 'react-router'
@@ -40,13 +40,15 @@ function Share({ pct }: { pct: string | null | undefined }) {
 }
 
 function Summary() {
+  // Review L4 (v0.12.0): no timed read while the market is closed, as a tab's own read does.
+  const closed = useFamilyFeed().state === 'closed'
   const query = useQuery({
     queryKey: ['family', 'portfolio'],
     queryFn: ({ signal }) => familyApi.portfolio(signal),
     retry: false,
     refetchOnMount: 'always',
     staleTime: 0,
-    refetchInterval: RESYNC_MS,
+    refetchInterval: closed ? false : RESYNC_MS,
   })
   const data = query.data
   const lines = summaryLines(data?.summary)
@@ -92,7 +94,7 @@ function Summary() {
           </ul>
         </>
       )}
-      <ReadStamp part="Portfolios" readAt={data?.read_at ?? null} />
+      <ReadStamp part="Portfolios" readAt={data?.read_at ?? null} closed={closed} />
     </section>
   )
 }
@@ -189,7 +191,7 @@ function TabBody({ tab }: { tab: SharedTab }) {
           )}
         </>
       )}
-      <ReadStamp part="Portfolio" readAt={data?.read_at ?? null} />
+      <ReadStamp part="Portfolio" readAt={data?.read_at ?? null} closed={feed === 'closed'} />
     </section>
   )
 }
@@ -197,13 +199,14 @@ function TabBody({ tab }: { tab: SharedTab }) {
 export default function FamilyPortfolio() {
   useFamilyScreen('portfolio')
   const [params, setParams] = useSearchParams()
+  const closed = useFamilyFeed().state === 'closed'
   const list = useQuery({
     queryKey: ['family', 'portfolio'],
     queryFn: ({ signal }) => familyApi.portfolio(signal),
     retry: false,
     refetchOnMount: 'always',
     staleTime: 0,
-    refetchInterval: RESYNC_MS,
+    refetchInterval: closed ? false : RESYNC_MS,
   })
   const tabs = list.data?.tabs ?? []
   const wanted = Number(params.get('tab'))

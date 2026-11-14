@@ -189,8 +189,9 @@ describe('Positions', () => {
       FakeSocket.last().open()
       FakeSocket.last().say({ type: 'feed_state', state: 'closed', since: Date.now() })
     })
+    // the status line says it, and (review L4) so does the read stamp
     await waitFor(() =>
-      expect(screen.getByText(/market closed|not real-time|closed/i)).toBeTruthy()
+      expect(screen.getAllByText(/market closed|not real-time|closed/i).length).toBeGreaterThan(0)
     )
     expect(screen.queryByText(/^Live$/)).toBeNull()
   })
@@ -439,5 +440,36 @@ describe('a part that was not read is not an empty account', () => {
     })
     mount('/family/positions', <FamilyPositions />)
     expect(await screen.findByText('No open positions')).toBeInTheDocument()
+  })
+})
+
+// Review L4 (v0.12.0): "refresh on every order and every 45 s" was said while the market was
+// closed, when no timed read runs. Fails on the old stamp.
+describe('the read stamp', () => {
+  it('promises the 45 s refresh only while a market is open', async () => {
+    routeFetch({ '/family/api/books/positions': ok(bookOf('positions', [FULL_POSITION])) })
+    mount('/family/positions', <FamilyPositions />)
+    expect(await screen.findByText(/Positions from .* · refresh on every order and every 45 s/)).toBeTruthy()
+    await waitFor(() => expect(FakeSocket.instances.length).toBeGreaterThan(0))
+    act(() => {
+      FakeSocket.last().open()
+      FakeSocket.last().say({ type: 'feed_state', state: 'closed', since: Date.now() })
+    })
+    expect(await screen.findByText(/Positions from .* · market closed/)).toBeTruthy()
+    expect(screen.queryByText(/every 45 s/)).toBeNull()
+  })
+
+  it('says market closed for a read the service marks closed', async () => {
+    routeFetch({
+      '/family/api/books/holdings': ok(
+        bookOf('holdings', [FULL_HOLDING], {
+          state: 'closed',
+          words: 'Market closed · figures from 15:40:12',
+        })
+      ),
+    })
+    mount('/family/holdings', <FamilyHoldings />, '/family/holdings')
+    expect(await screen.findByText(/Holdings from .* · market closed/)).toBeTruthy()
+    expect(screen.queryByText(/every 45 s/)).toBeNull()
   })
 })

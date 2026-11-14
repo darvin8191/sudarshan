@@ -189,7 +189,11 @@ export default function FamilyDashboard() {
             Holdings
           </Link>
         </div>
-        <ReadStamp part="Positions" readAt={positions.readAt} />
+        <ReadStamp
+          part="Positions"
+          readAt={positions.readAt}
+          closed={feed === 'closed' || positions.state === 'closed'}
+        />
       </section>
     </div>
   )

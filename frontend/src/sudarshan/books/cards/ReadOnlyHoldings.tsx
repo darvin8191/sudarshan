@@ -198,7 +198,11 @@ export function ReadOnlyHoldings({
     <div className="flex flex-col gap-3">
       <ViewerNote name="holdings" text={NOTE} />
       {content}
-      <ReadStamp part="Holdings" readAt={readAt} />
+      <ReadStamp
+        part="Holdings"
+        readAt={readAt}
+        closed={state === 'closed' || marketOpen('') === false}
+      />
       {overlay?.act === 'sheet' && target && (
         <HoldingSheet
           row={target.row}

@@ -69,13 +69,25 @@ export function ViewerNote({ name, text }: { name: string; text: string }) {
   )
 }
 
-/** "Positions from 10:41:05 · refresh on every order and every 45 s", in the quiet ink. */
-export function ReadStamp({ part, readAt }: { part: string; readAt: number | null }) {
+/**
+ * "Positions from 10:41:05 · refresh on every order and every 45 s", in the quiet ink. While the
+ * market is closed no timed read runs (review L4, v0.12.0), so `closed` leaves that half out.
+ */
+export function ReadStamp({
+  part,
+  readAt,
+  closed = false,
+}: {
+  part: string
+  readAt: number | null
+  closed?: boolean
+}) {
   if (readAt === null) return null
   return (
     <p className="flex items-center gap-1.5 px-1 text-[0.78125rem] font-medium text-[color:var(--text-tertiary)]">
       <Clock aria-hidden="true" className="size-3.5 shrink-0" />
-      {part} from {istTime(readAt)} · refresh on every order and every 45 s
+      {part} from {istTime(readAt)}
+      {closed ? ' · market closed' : ' · refresh on every order and every 45 s'}
     </p>
   )
 }

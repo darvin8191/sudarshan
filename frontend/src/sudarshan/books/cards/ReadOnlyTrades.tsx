@@ -67,7 +67,7 @@ export function ReadOnlyTrades({
     <div className="flex flex-col gap-3">
       <ViewerNote name="trades" text={NOTE} />
       {content}
-      {!notShared && <ReadStamp part="Trades" readAt={readAt} />}
+      {!notShared && <ReadStamp part="Trades" readAt={readAt} closed={state === 'closed'} />}
     </div>
   )
 }
