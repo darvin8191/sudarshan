@@ -227,7 +227,7 @@ def test_a_trade_is_in_the_year_it_closed_in():
 def test_a_hand_entered_share_without_its_isin_is_told_to_add_it_and_is_not_computed():
     base = inputs(charges={})
     before = pack.build_pack(base)
-    hand = dict(source="ledger", asset_class="equity")
+    hand = {"source": "ledger", "asset_class": "equity"}
     extra = (
         share(20240610, "BUY", 100, 1000, "Acme Industries", **hand),
         share(20260610, "SELL", 100, 1500, "Acme Industries", **hand),
@@ -252,7 +252,7 @@ def test_a_hand_entered_share_without_its_isin_is_told_to_add_it_and_is_not_comp
 def test_why_not_has_a_line_only_for_what_is_not_computed():
     from sudarshan.tax import classify
 
-    hand = dict(source="ledger", asset_class="equity")
+    hand = {"source": "ledger", "asset_class": "equity"}
     assert classify.why_not(share(20260610, "SELL", 1, 100, "Acme", **hand)) == classify.NO_ISIN
     assert classify.why_not(share(20260610, "SELL", 1, 100, "INF000D01015")) == classify.ETF_UNIT
     # A share with its ISIN is computed, by hand or from Upstox: nothing to say.
@@ -260,3 +260,9 @@ def test_why_not_has_a_line_only_for_what_is_not_computed():
     fund = Trade(1, 1, 20260610, 1, "SELL", "MF", "INF000D01015", 10**6, 10**6, 10_000)
     assert classify.why_not(fund) is None  # a fund's unit off the exchange is no ETF
     assert set(words.WHY_NOT) == {classify.NO_ISIN, classify.ETF_UNIT}
+    # A name of twelve letters that starts "IN" is still a name: the owner is told to add the ISIN.
+    for name in ("INDUSINDBANK", "IndusIndBank", "inf000d01015"):
+        assert not classify.looks_like_isin(name), name
+        assert classify.why_not(share(20260610, "SELL", 1, 100, name, **hand)) == classify.NO_ISIN
+    for isin in ("INF000D01015", "INE000Z01019", "IN0020200013", "IN9000A01014"):
+        assert classify.looks_like_isin(isin), isin

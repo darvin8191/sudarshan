@@ -14,6 +14,8 @@ gives it (a listed asset's class is "equity" until the owner changes it, so the 
 
 from __future__ import annotations
 
+import re
+
 from .model import Trade
 
 DELIVERY, EQUITY_MF, INTRADAY, DERIVATIVE, NOT_COMPUTED = (
@@ -68,17 +70,15 @@ def head_of(trade: Trade) -> str:
 #: Why a sale is not computed, where the owner can be told more than "not computed" (v0.13.0
 #: verify N9). Neither is computed; the words are in ``words.WHY_NOT``.
 NO_ISIN, ETF_UNIT = "no_isin", "etf_unit"
+#: An Indian ISIN's shape (``sudarshan/portfolio/book.py`` checks the same on an asset's save).
+ISIN_SHAPE = re.compile(r"IN[A-Z0-9]{9}[0-9]")
 
 
 def looks_like_isin(instrument: object) -> bool:
-    """Whether a key is an Indian ISIN by its shape (any kind of security), not a name."""
-    return (
-        isinstance(instrument, str)
-        and len(instrument) == 12
-        and instrument.isascii()
-        and instrument.isalnum()
-        and instrument[:2].upper() == "IN"
-    )
+    """Whether a key is an Indian ISIN by its shape (any kind of security), not a name: "IN",
+    nine capital letters or digits and a check digit, as the portfolio stores one. A name typed
+    in a tab can be twelve letters starting "IN" ("INDUSINDBANK", "IndusIndBank"); it is none."""
+    return isinstance(instrument, str) and ISIN_SHAPE.fullmatch(instrument) is not None
 
 
 def why_not(trade: Trade) -> str | None:
@@ -90,7 +90,7 @@ def why_not(trade: Trade) -> str | None:
         return None
     instrument = trade.instrument
     if looks_like_isin(instrument):
-        return ETF_UNIT if str(instrument)[:3].upper() == "INF" else None
+        return ETF_UNIT if str(instrument).startswith("INF") else None
     if trade.source == "ledger" and trade.asset_class == "equity" and isinstance(instrument, str):
         return NO_ISIN
     return None

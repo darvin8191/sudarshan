@@ -224,9 +224,8 @@ def test_a_sale_outside_the_paper_prints_what_the_owner_is_told_of_it():
     """v0.13.0 verify N9: a share entered without its ISIN and an ETF's unit each get their
     sentence under the table, once for each thing sold; a row with none prints none."""
     pack = copy.deepcopy(PACK)
-    add, etf = "Add its ISIN in the tab to have it computed.", (
-        "ETF units are not computed in this release."
-    )
+    add = "Add its ISIN in the tab to have it computed."
+    etf = "ETF units are not computed in this release."
     pack["not_computed_sales"] = [
         {"instrument": "Acme Industries", "day": 20260810, "amount_paise": 5_000_000, "why": add},
         {"instrument": "Acme Industries", "day": 20260811, "amount_paise": 1_000_000, "why": add},
