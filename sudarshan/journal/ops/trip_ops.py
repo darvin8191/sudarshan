@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..book import charges_of, update_trip
+from ..book import charges_of, shares_of, update_trip
 from ..core import kinds
 from ..core.metrics import strategy_of
 from ..errors import ApiError
@@ -72,16 +72,22 @@ async def trip_get(ctx, args):
             charges = charges_of(
                 [{"trade_id": leg["trade_id"], "qty": leg["leg_qty"]} for leg in legs],
                 fills, refs, row["mode"], tx.settings()["charges_plan"],
+                shares_of(tx, row, {leg["order_id"] for leg in legs}),
             )  # fmt: skip
         entry = next((leg for leg in legs if leg["leg_role"] == "entry"), None)
         first_ref = refs.get(entry["order_id"]) if entry else None
+        mine: dict[str, int] = {}
+        for leg in legs:
+            mine[leg["trade_id"]] = mine.get(leg["trade_id"], 0) + int(leg["leg_qty"])
         seen: set[str] = set()
         executed = []
         for leg in legs:
             if leg["trade_id"] in fills and leg["trade_id"] not in seen:
                 seen.add(leg["trade_id"])
                 fill = fills[leg["trade_id"]]
-                executed.append(fill_out(fill, refs.get(fill["order_id"])))
+                # A reversal's fill is in two trades: how much of it is this one's.
+                executed.append({**fill_out(fill, refs.get(fill["order_id"])),
+                                 "trip_qty": mine[leg["trade_id"]]})  # fmt: skip
         return {
             **trip_out(row),
             "legs": [leg_out(leg) for leg in legs],

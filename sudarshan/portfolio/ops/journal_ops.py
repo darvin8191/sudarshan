@@ -2,7 +2,7 @@
 reads, all answered with ``read_at``.
 
 One reader serves every ring service, so there is one budget and one set of pauses on Upstox's
-APIs. ``trades_day``, ``positions`` and ``funds`` go through the live reader's parts, so a journal
+APIs. ``trades_day``, ``positions``, ``holdings`` and ``funds`` go through the live reader's parts, so a journal
 read and a family or owner read within 5 seconds cost one Upstox call; the order history, the
 historical trades and the profit and loss report each have a bucket of their own. A principal
 other than the owner leaves the owner's reserve in every bucket (budget.RESERVE).
@@ -76,6 +76,13 @@ async def trades_day(ctx, message):
 @op("positions")
 async def positions(ctx, message):
     return await _part(ctx, "positions")
+
+
+@op("holdings")
+async def holdings(ctx, message):
+    """The holdings, read by the journal once per share at first sight: what was held before
+    its first fill of it (journal review B1)."""
+    return await _part(ctx, "holdings")
 
 
 @op("funds")

@@ -47,6 +47,10 @@ import {
  *
  * Marks are keyed by book (Live or the sandbox), kind, and the position
  * (exchange, symbol, product) or the order id.
+ *
+ * A GTT's cancel (B1) is a kind of its own, `gtt`, keyed by its trigger id: the
+ * GTT book settles it (`noteGttBook`), and an order book never does, since a
+ * trigger is not an order and is never in one.
  */
 
 /** How long a sent exit or cancel holds its button after the answer or the book's last change. */
@@ -78,7 +82,7 @@ const ORDERS_KEPT = 20
 
 const STORAGE_KEY = 'sudarshan-sent-v1'
 
-export type SentKind = 'exit' | 'cancel'
+export type SentKind = 'exit' | 'cancel' | 'gtt'
 export type SentState = 'sending' | 'sent' | 'unconfirmed'
 /**
  * What became of a send: it went, the app could not confirm it, no answer came
@@ -122,7 +126,7 @@ export interface SentMark {
   kind: SentKind
   /** Sent in Analyze mode, from the sandbox's book. */
   sandbox: boolean
-  /** The position's `exchange:symbol:product`, or the order id. */
+  /** The position's `exchange:symbol:product`, the order id, or a GTT's trigger id. */
   id: string
   state: SentState
   /** When the tap sent it. */
@@ -205,6 +209,15 @@ export function cancelMark(
   return all.get(keyOf('cancel', sandbox, orderid))
 }
 
+/** A GTT's cancel, by its trigger id. */
+export function gttMark(
+  all: ReadonlyMap<string, SentMark>,
+  sandbox: boolean,
+  triggerId: string
+): SentMark | undefined {
+  return all.get(keyOf('gtt', sandbox, triggerId))
+}
+
 /** Every mark of one kind in one book. */
 export function marksOf(
   all: ReadonlyMap<string, SentMark>,
@@ -227,7 +240,7 @@ function valid(mark: unknown): mark is SentMark {
   if (typeof mark !== 'object' || mark === null) return false
   const m = mark as Partial<SentMark>
   return (
-    (m.kind === 'exit' || m.kind === 'cancel') &&
+    (m.kind === 'exit' || m.kind === 'cancel' || m.kind === 'gtt') &&
     typeof m.sandbox === 'boolean' &&
     typeof m.id === 'string' &&
     (m.state === 'sending' || m.state === 'sent' || m.state === 'unconfirmed') &&
@@ -577,6 +590,26 @@ export function noteCancelBook(
     if (mark.kind !== 'cancel' || mark.sandbox !== sandbox) continue
     const now = status.get(mark.id)
     if (now === undefined || isFinalStatus(now)) {
+      next ??= new Map(marks)
+      next.delete(key)
+    }
+  }
+  if (next) commit(next)
+}
+
+/**
+ * A GTT book as shown (B1): a GTT's cancel whose trigger is gone from it, or
+ * can no longer be changed (it fired, expired or was cancelled), lets go.
+ */
+export function noteGttBook(
+  sandbox: boolean,
+  gtts: ReadonlyArray<{ id: string; working: boolean }>
+): void {
+  const working = new Map(gtts.map((gtt) => [gtt.id, gtt.working]))
+  let next: Map<string, SentMark> | null = null
+  for (const [key, mark] of marks) {
+    if (mark.kind !== 'gtt' || mark.sandbox !== sandbox) continue
+    if (working.get(mark.id) !== true) {
       next ??= new Map(marks)
       next.delete(key)
     }

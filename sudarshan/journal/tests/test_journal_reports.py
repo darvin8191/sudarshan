@@ -20,9 +20,10 @@ from test_journal_capture import rig as rig  # noqa: F401  (a fixture)
 from test_journal_jobs import answer_positions, live_rows, position, record
 
 from sudarshan.journal import reports
+from sudarshan.journal.core import kinds
 from sudarshan.journal.errors import ApiError
 from sudarshan.journal.jobs import check, day
-from sudarshan.journal.ops import REGISTRY
+from sudarshan.journal.ops import REGISTRY, settings_ops
 from sudarshan.journal.ops import common as ops_common
 from sudarshan.journal.store import Scope
 from sudarshan.ops.events import read_events
@@ -318,6 +319,41 @@ def test_alerts_on_reads_the_report_desks_own_block(rig, alerts, state, on):
     alerts.desk = {"state": state, "on": state == "on", "reason": None, "waiting": 3,
                    "last_delivery_ms": None}  # fmt: skip
     assert settings_of(rig)["alerts_on"] is on
+
+
+@pytest.mark.parametrize(
+    ("desk", "state"),
+    [({"state": "on"}, "on"), ({"state": "starting"}, "starting"),
+     ({"state": "journal_off"}, "journal_off"), ({"state": "journal_down"}, "journal_down"),
+     ({"state": "off"}, "off"), ({"state": "something new"}, "unknown"), ({"state": 7}, "unknown"),
+     (None, "unknown"), (["not", "a", "block"], "unknown")],
+)  # fmt: skip
+def test_the_desks_own_state_reaches_the_page(rig, alerts, desk, state):
+    """Review M5 (v0.11.0): the page words each state apart, so an alerts service that does not
+    answer, or one too old to carry the block, is never called switched off."""
+    alerts.desk = desk
+    got = settings_of(rig)
+    assert got["desk_state"] == state
+    assert got["alerts_on"] is (state in {"on", "starting", "journal_off", "journal_down"})
+
+
+def test_an_alerts_service_that_does_not_answer_is_unknown_not_off(rig, alerts):
+    alerts.up = False
+    got = settings_of(rig)
+    assert got["desk_state"] == "unknown" and got["alerts_on"] is False
+
+
+def test_every_settings_answer_is_the_contracts_record_whole(rig, alerts):
+    """The phone reads ``desk_state`` as always there (the contract's ``DeskState``): the answer
+    is the record field for field, with the alerts service up, naming a state, or not answering."""
+    fields = {f.name for f in kinds.record("Settings")}
+    assert "desk_state" in fields and set(settings_of(rig)) == fields
+    alerts.desk = {"state": "a state from later"}
+    assert set(settings_of(rig)) == fields
+    alerts.up = False
+    got = settings_of(rig)
+    assert set(got) == fields and got["desk_state"] in kinds.DESK_STATES
+    assert settings_ops.DESK_DELIVERS < settings_ops.DESK_STATES < set(kinds.DESK_STATES)
 
 
 def test_an_alerts_health_without_the_block_is_not_read_as_delivering(rig, alerts, a_report):

@@ -1,0 +1,105 @@
+{
+  "about": "What a plain order and a smart order answer when Upstox's reply is lost, refused, never asked for, or given (upstream 34ce7ca3 in SUDARSHAN). Each case runs the real service, the real Upstox module and the real shared client transport over a simulated Upstox (test_books_unanswered_place.py). 'wire' is what happens to the POST to /v3/order/place: 'answered' (Upstox answers), 'read_error', 'read_timeout' and 'protocol_error' (Upstox took the order, its reply never came back), 'connect_error' (the request never left) and 'refused' (Upstox's own 4xx). 'reached' is whether Upstox holds the order afterwards. A status of 502 with the sentence means: it may have been placed, never send it again unseen.",
+  "unanswered_message": "The connection to the broker dropped after the order was sent, so it may have been placed. Check the order book before placing it again.",
+  "cases": [
+    {
+      "name": "place: Upstox answers",
+      "path": "place",
+      "wire": "answered",
+      "success": true,
+      "status": 200,
+      "body": {"status": "success", "orderid": "261027000001"},
+      "reached": true
+    },
+    {
+      "name": "place: the reply is lost to a broken read after Upstox took the order",
+      "path": "place",
+      "wire": "read_error",
+      "success": false,
+      "status": 502,
+      "body": {"status": "error", "message": "<unanswered>"},
+      "reached": true
+    },
+    {
+      "name": "place: the reply times out after Upstox took the order",
+      "path": "place",
+      "wire": "read_timeout",
+      "success": false,
+      "status": 502,
+      "body": {"status": "error", "message": "<unanswered>"},
+      "reached": true
+    },
+    {
+      "name": "place: the connection is cut by the far side after Upstox took the order",
+      "path": "place",
+      "wire": "protocol_error",
+      "success": false,
+      "status": 502,
+      "body": {"status": "error", "message": "<unanswered>"},
+      "reached": true
+    },
+    {
+      "name": "place: the request never left (no connection)",
+      "path": "place",
+      "wire": "connect_error",
+      "success": false,
+      "status": 500,
+      "message_is_not_unanswered": true,
+      "reached": false
+    },
+    {
+      "name": "place: Upstox's own refusal keeps its code and its words",
+      "path": "place",
+      "wire": "refused",
+      "success": false,
+      "status": 400,
+      "message_is_not_unanswered": true,
+      "reached": false
+    },
+    {
+      "name": "smart exit: Upstox answers",
+      "path": "smart",
+      "wire": "answered",
+      "success": true,
+      "status": 200,
+      "body": {"status": "success", "orderid": "261027000001"},
+      "reached": true
+    },
+    {
+      "name": "smart exit: the reply is lost to a broken read after Upstox took the order",
+      "path": "smart",
+      "wire": "read_error",
+      "success": false,
+      "status": 502,
+      "body": {"status": "error", "message": "<unanswered>"},
+      "reached": true
+    },
+    {
+      "name": "smart exit: the reply times out after Upstox took the order",
+      "path": "smart",
+      "wire": "read_timeout",
+      "success": false,
+      "status": 502,
+      "body": {"status": "error", "message": "<unanswered>"},
+      "reached": true
+    },
+    {
+      "name": "smart exit: the request never left (no connection)",
+      "path": "smart",
+      "wire": "connect_error",
+      "success": false,
+      "status": 500,
+      "message_is_not_unanswered": true,
+      "reached": false
+    },
+    {
+      "name": "smart exit: Upstox's own refusal keeps its code and its words",
+      "path": "smart",
+      "wire": "refused",
+      "success": false,
+      "status": 400,
+      "message_is_not_unanswered": true,
+      "reached": false
+    }
+  ]
+}

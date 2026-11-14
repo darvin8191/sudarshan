@@ -34,7 +34,7 @@ from utils.broker_backpressure import (
     busy_response,
     cap_server_delay,
 )
-from utils.httpx_client import get_httpx_client
+from utils.httpx_client import NO_READ_RETRY, get_httpx_client
 from utils.logging import get_logger
 from utils.position_read import (
     PositionReadError,
@@ -88,10 +88,12 @@ _READ_LIMIT = contextvars.ContextVar("upstox_read_limit", default=None)
 
 
 def read_timeout() -> dict:
-    """SUDARSHAN M5.13: ``{"timeout": seconds}`` for a GET made while a read limit is set (the
+    """SUDARSHAN M5.13: the timeout (and no second try) for a GET made while a read limit is set (the
     risk gate's reads, Exit all's order book), else nothing: the shared client's own."""
     limit = _READ_LIMIT.get()
-    return {"timeout": limit} if limit else {}
+    # Never sent a second time either: the shared client sends a broken read once more
+    # (utils/httpx_client._BrokerTransport), which would take the limit twice.
+    return {"timeout": limit, "extensions": {NO_READ_RETRY: True}} if limit else {}
 
 
 def get_api_response(

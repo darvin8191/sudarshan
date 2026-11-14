@@ -38,6 +38,7 @@ export function trip(over: Partial<Trip> & { id: number }): Trip {
     excursion_source: 'none',
     excursion_note: null,
     version: 1,
+    charges_modelled: true,
     ...over,
   }
 }
@@ -87,6 +88,8 @@ export function metrics(over: Partial<Metrics> = {}): Metrics {
     r_total: '0.7950',
     r_avg: '0.1325',
     charges_impact_pct: '3.92',
+    charges_estimated: true,
+    charges_not_estimated: 0,
     ...over,
   }
 }

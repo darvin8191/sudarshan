@@ -3,6 +3,7 @@ import {
   Ban,
   CheckCircle2,
   Clock,
+  Download,
   Hourglass,
   Info,
   RefreshCw,
@@ -27,6 +28,7 @@ import { TREND_TEXT, TrendArrow } from '@/sudarshan/dashboard/Trend'
 import { PRODUCT_MEANING, type Product } from '@/sudarshan/ticket/productPref'
 import { useOpenGuard } from '@/sudarshan/watchlist/openGuard'
 import { priceDecimals } from '@/sudarshan/watchlist/rows'
+import { showToast } from '@/utils/toast'
 import { type OrderState, sideOf, signedUnits } from './format'
 
 /**
@@ -366,24 +368,116 @@ export function RefreshIcon({
   )
 }
 
-/** The page's title, as the watchlist sets it, with Refresh beside it. */
+/** The page's title, as the watchlist sets it, with Refresh beside it and `extra` before it. */
 export function BookHeading({
   title,
   refreshing,
   onRefresh,
+  extra,
 }: {
   title: string
   refreshing: boolean
   onRefresh: () => void
+  extra?: ReactNode
 }) {
   return (
     <div className="flex items-center justify-between gap-3">
       <h1 className="sd-display text-[1.75rem] leading-none font-bold">{title}</h1>
-      <button type="button" onClick={onRefresh} disabled={refreshing} className={OUTLINED}>
-        <RefreshCw aria-hidden="true" className={cn('size-4', refreshing && 'animate-spin')} />
-        {refreshing ? 'Refreshing' : 'Refresh'}
-      </button>
+      <div className="flex shrink-0 items-center gap-2">
+        {extra}
+        <button type="button" onClick={onRefresh} disabled={refreshing} className={OUTLINED}>
+          <RefreshCw aria-hidden="true" className={cn('size-4', refreshing && 'animate-spin')} />
+          {refreshing ? 'Refreshing' : 'Refresh'}
+        </button>
+      </div>
     </div>
+  )
+}
+
+/** "2026-11-14": today in India, for a saved file's name. */
+const FILE_DAY = new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'Asia/Kolkata',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+})
+
+/**
+ * How long a saved file's address lives after the tap: a phone's browser can start the
+ * download after the click returns, and drops it if the address is gone by then.
+ */
+const SAVE_REVOKE_MS = 60_000
+
+/** Give the phone `text` as `<name>_<today>.csv` (B3), and answer that file's name. */
+export function saveCsv(text: string, name: string): string {
+  const filename = `${name}_${FILE_DAY.format(Date.now())}.csv`
+  const url = URL.createObjectURL(new Blob([text], { type: 'text/csv;charset=utf-8' }))
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  setTimeout(() => URL.revokeObjectURL(url), SAVE_REVOKE_MS)
+  return filename
+}
+
+/**
+ * A book's CSV from the app's own export route (`/orderbook/export` and its kin), saved on
+ * the phone (B3), answering the file's name, or null when there is no CSV to save. The route
+ * answers a failed broker read with a redirect to the logout page, so a redirect is never
+ * followed: anything but a CSV is a failure, and the session stays as it was.
+ */
+export async function exportBook(path: string, name: string): Promise<string | null> {
+  try {
+    const response = await fetch(path, {
+      credentials: 'same-origin',
+      redirect: 'manual',
+      cache: 'no-store',
+    })
+    const type = response.headers.get('content-type') ?? ''
+    if (!response.ok || !type.includes('text/csv')) return null
+    return saveCsv(await response.text(), name)
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Export as a 48dp icon (B3): `run` saves the book as a CSV and answers the file's name, or
+ * null when it could not, which the toast then says in words.
+ */
+export function ExportIcon({
+  what,
+  run,
+}: {
+  /** The book, as a sentence names it: "order book", "positions". */
+  what: string
+  run: () => Promise<string | null> | string | null
+}) {
+  const [busy, setBusy] = useState(false)
+  return (
+    <button
+      type="button"
+      aria-label={busy ? `Exporting ${what}` : `Export ${what}`}
+      title={`Export ${what} as a CSV file`}
+      disabled={busy}
+      onClick={async () => {
+        setBusy(true)
+        let saved: string | null = null
+        try {
+          saved = await run()
+        } catch {
+          // The file could not be made or handed over: said below, like any failure.
+        }
+        setBusy(false)
+        if (saved) showToast.success(`Downloaded ${saved}`, 'clipboard')
+        else showToast.error(`The ${what} could not be exported just now. Try again.`, 'system')
+      }}
+      className={cn(OUTLINED, 'w-12 shrink-0 px-0')}
+    >
+      <Download aria-hidden="true" className="size-4" />
+    </button>
   )
 }
 

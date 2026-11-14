@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowUp, Layers, TriangleAlert } from 'lucide-react'
+import { ArrowDown, ArrowUp, Layers, LoaderCircle, TriangleAlert } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { directionOf } from '@/sudarshan/dashboard/format'
 import { TrendArrow } from '@/sudarshan/dashboard/Trend'
@@ -66,5 +66,72 @@ export function Problem({ children }: { children: React.ReactNode }) {
       />
       <span>{children}</span>
     </p>
+  )
+}
+
+const QUESTION_BUTTON =
+  'inline-flex min-h-12 items-center justify-center gap-2 rounded-[0.875rem] px-4 text-[0.9375rem] font-semibold outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-60'
+
+/**
+ * Closing a sheet that holds changes not saved asks first (review H2): Save, Discard changes, or
+ * Keep writing, which goes back to the form with everything in it. `canSave` is false when there is
+ * nothing a Save could send (the only change is text handed back for the owner to place).
+ */
+export function UnsavedQuestion({
+  title,
+  canSave,
+  saving,
+  onSave,
+  onDiscard,
+  onKeep,
+}: {
+  title: string
+  canSave: boolean
+  saving: boolean
+  onSave: () => void
+  onDiscard: () => void
+  onKeep: () => void
+}) {
+  return (
+    <section aria-label="Changes not saved" className="flex flex-col gap-3 py-2">
+      <p className="text-base font-bold">{title}</p>
+      <p className="text-sm text-[color:var(--text-secondary)]">
+        {canSave
+          ? 'Save them, or discard them and close. Keep writing goes back to the form.'
+          : 'Discard them and close, or keep writing to place them first.'}
+      </p>
+      <div className="flex flex-col gap-2">
+        {canSave && (
+          <button
+            type="button"
+            disabled={saving}
+            onClick={onSave}
+            className={cn(
+              QUESTION_BUTTON,
+              'bg-[color:var(--brand)] font-bold text-white hover:bg-[color:var(--brand-hover)]'
+            )}
+          >
+            {saving && <LoaderCircle aria-hidden="true" className="size-4 animate-spin" />}
+            {saving ? 'Saving' : 'Save'}
+          </button>
+        )}
+        <button
+          type="button"
+          disabled={saving}
+          onClick={onDiscard}
+          className={cn(QUESTION_BUTTON, 'border border-input bg-card hover:bg-accent')}
+        >
+          Discard changes
+        </button>
+        <button
+          type="button"
+          disabled={saving}
+          onClick={onKeep}
+          className={cn(QUESTION_BUTTON, 'border border-input bg-card hover:bg-accent')}
+        >
+          Keep writing
+        </button>
+      </div>
+    </section>
   )
 }
