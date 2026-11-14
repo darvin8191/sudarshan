@@ -69,6 +69,10 @@ LINES: dict[str, tuple[str, str]] = {
         "The account owner has paused your family account. Nothing is shown until it is resumed.",
         "એકાઉન્ટ માલિકે તમારું ફેમિલી એકાઉન્ટ અટકાવ્યું છે. ફરી શરૂ થાય ત્યાં સુધી કંઈ બતાવાશે નહીં.",
     ),
+    "not_active": (
+        "Your family account is not active right now. Ask the account owner.",
+        "તમારું ફેમિલી એકાઉન્ટ અત્યારે ચાલુ નથી. એકાઉન્ટ માલિકને પૂછો.",
+    ),
     # ---- what a book answer can say instead of figures ----
     "not_shared": ("Not shared with you.", "તમારી સાથે શેર કરેલું નથી."),
     "orders_hidden": ("Orders are not shared with you.", "ઓર્ડર તમારી સાથે શેર કરેલા નથી."),

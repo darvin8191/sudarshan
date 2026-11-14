@@ -378,6 +378,11 @@ def test_a_paused_member_is_told_so_and_can_still_unlink(tmp_path):
             assert fake.sent[-1]["text"] == words.say("paused")
             await made.handle(update("/stop", CHAT_A, date=clock() // 1000))
             assert fake.sent[-1]["text"] == words.say("unlinked") and not made.chats
+            # a member whose sign-in is being reset is not told it was paused
+            reset = add_member(opened, status="invited", display_name="Member B")
+            made.chats[reset["id"]] = CHAT_B
+            await made.handle(update("/positions", CHAT_B, date=clock() // 1000))
+            assert fake.sent[-1]["text"] == words.say("not_active")
             await settle(made)
         finally:
             close(opened)

@@ -349,8 +349,9 @@ class Bot:
             await self.send(chat_id, words.say("already_linked", language))
         elif command == "stop":
             await self.unlink(member_id, audit.member_actor(member_id), tell=True)
-        elif member["status"] != "active":
-            await self.send(chat_id, words.say("paused", language))
+        elif member["status"] != "active":  # paused by the owner, or a sign-in being reset
+            line = "paused" if member["status"] == "suspended" else "not_active"
+            await self.send(chat_id, words.say(line, language))
         elif command in COMMANDS:
             self.counts["answered"] += 1
             await self.send(chat_id, await self.answer(member, command, rest))
