@@ -17,11 +17,11 @@ from __future__ import annotations
 
 import pytest
 from flask import Flask
+from restx_routes import api_app, load, stop_the_health_monitor
 
 import database.apilog_db as apilog_db
 import database.auth_db as auth_db
 from events import AnalyzerErrorEvent, OrderFailedEvent
-from limiter import limiter
 from utils.event_bus import EventBus
 
 VALID = "g5-valid-key-for-tests"  # pragma: allowlist secret
@@ -40,13 +40,12 @@ ACCEPTED = [
 ]
 
 
-@pytest.fixture(scope="module", autouse=True)
-def _stop_the_health_monitor():
-    """Importing the REST API starts the market data health monitor; no test here needs it."""
-    yield
-    from services.market_data_service import get_market_data_service
-
-    get_market_data_service().health_monitor.stop()
+@pytest.fixture(scope="module")
+def routes():
+    """restx_api/cancel_order.py (an order event on refusal) and restx_api/orderstatus.py (a direct
+    log write), each loaded on its own (restx_routes says why)."""
+    yield load("cancel_order"), load("orderstatus")
+    stop_the_health_monitor()
 
 
 @pytest.fixture
@@ -156,18 +155,13 @@ def test_openalgo_s_own_log_executor_drops_it(app, keys):
 
 
 @pytest.fixture
-def api(monkeypatch, keys):
-    """The real REST API on a bare app, with a bus and a log executor of the test's own (the same
+def api(monkeypatch, keys, routes):
+    """The real routes on a bare app, with a bus and a log executor of the test's own (the same
     classes as OpenAlgo's), so every event and write a request causes is counted once settled."""
-    import restx_api.cancel_order as cancel_endpoint
-    import restx_api.orderstatus as status_endpoint
     import services.cancel_order_service as cancel_service
-    from restx_api import api_v1_bp
 
-    app = Flask("sudarshan-g5-refused-keys-api-tests")
-    app.config.update(TESTING=True, RATELIMIT_ENABLED=False)
-    limiter.init_app(app)
-    app.register_blueprint(api_v1_bp)
+    cancel_endpoint, status_endpoint = routes
+    app = api_app((cancel_endpoint, "/cancelorder"), (status_endpoint, "/orderstatus"))
     heard, writes = [], []
     bus = EventBus(workers=1)
     for topic in ("order.failed", "analyzer.error"):

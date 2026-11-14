@@ -11,9 +11,7 @@ from __future__ import annotations
 import hashlib
 
 import pytest
-from flask import Flask
-
-from limiter import limiter
+from restx_routes import api_app, load, stop_the_health_monitor
 
 UPDATE = {"update_id": 1, "message": {"text": "/start"}}
 SECRET = "g5-fake-webhook-secret"  # pragma: allowlist secret
@@ -21,27 +19,18 @@ BOT_TOKEN = "123456:g5-fake-bot-token"  # pragma: allowlist secret
 HEADER = "X-Telegram-Bot-Api-Secret-Token"
 
 
-@pytest.fixture(scope="module", autouse=True)
-def _stop_the_health_monitor():
-    """Importing the REST API starts the market data health monitor; no test here needs it."""
-    yield
-    from services.market_data_service import get_market_data_service
-
-    get_market_data_service().health_monitor.stop()
+@pytest.fixture(scope="module")
+def telegram():
+    """restx_api/telegram_bot.py, loaded on its own (restx_routes says why)."""
+    yield load("telegram_bot")
+    stop_the_health_monitor()
 
 
 @pytest.fixture
-def webhook(monkeypatch):
+def webhook(monkeypatch, telegram):
     """POST an update to the real route, with the bot's stored settings and the environment the
     test gives; the answer's status."""
-    import restx_api.telegram_bot as telegram
-    from restx_api import api_v1_bp
-
-    app = Flask("sudarshan-g5-telegram-webhook-tests")
-    app.config.update(TESTING=True, RATELIMIT_ENABLED=False)
-    limiter.init_app(app)
-    app.register_blueprint(api_v1_bp)
-    client = app.test_client()
+    client = api_app((telegram, "/telegram")).test_client()
 
     def post(*, secret=None, bot=None, header=None) -> int:
         if secret is None:
