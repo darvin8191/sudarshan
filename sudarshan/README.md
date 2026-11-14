@@ -359,14 +359,24 @@ represented a year after its nights are gone. A night is represented by its newe
 archive. The newest complete archive is never removed, whatever else is true: a run of partial
 archives cannot push the last good one out.
 
-**One archive per financial year, kept 8 years (M19.10).** The first complete archive made once
-the market has closed on 31 March (from 16:00) is that financial year's archive, whatever the
-counts above say; one made more than 92 days later is never taken for it. The newest 8 are kept
+**One archive per financial year, kept 8 years (M19.10).** The first complete archive made from
+4 April on is the archive of the financial year that ended on 31 March, whatever the counts
+above say; one made more than 92 days later (after 4 July) is never taken for it. It waits those
+four days so that the year's own papers are in it: the journal builds the year's Tax pack on
+1 April at 07:00, Upstox's charges for the last trading days arrive two nights after each, and
+March's charges are read from 3 April. An archive of 31 March's evening would hold none of them. The newest 8 are kept
 (`SUDARSHAN_BACKUP_KEEP_YEARLY`), for the years the tax records must be kept. Its offsite copy is
 uploaded under a name of its own, `sudarshan-fy-2026-27-YYYYMMDD-HHMMSS-<release>.tar.gz.cms`,
 so that the bucket's delete rules, which name the nightly prefix (step 3 below), never remove
 it. The System page shows the newest year's archive and its size: eight of them must fit the
 size cap and the bucket.
+
+If the upload of a year's archive fails on its night, the job remembers it (`status.json`,
+`fy_owed`) and sends it again under the year's name at the next backup whose own upload works,
+night after night until it has gone. Until then the System page's backup line reads "to look at"
+and says "The 2026-27 year's archive has no offsite copy yet", the Sunday summary says the same,
+and each failed try is a Telegram notice. With a command hook of your own
+(`SUDARSHAN_BACKUP_OFFSITE_CMD`) the hook sends every copy and nothing of this applies.
 
 Then a size cap (10 GB for all of them), which never takes a monthly or a year's archive:
 
@@ -1273,7 +1283,7 @@ Each April, for the year just ended:
 | every order request and the broker's answer | OpenAlgo's `logs.db` | SUDARSHAN, for ever |
 | what the risk layer refused, and the kill switch's history | `sudarshan_risk.db` (Settings > Risk > History) | SUDARSHAN, for ever |
 | market alerts that fired | the alerts' history | SUDARSHAN |
-| one full archive of the server from just after 31 March | the nightly backup: the first complete archive made once 31 March's market has closed, and its offsite copy under a name starting `sudarshan-fy-` ("Nightly backups") | SUDARSHAN, for 8 years on the server and in the bucket (once both delete rules carry the prefix filter of step 3); a copy with the year's papers costs nothing |
+| one full archive of the server from just after the year's end, with the year's Tax pack and March's charges in it | the nightly backup: the first complete archive made from 4 April on, and its offsite copy under a name starting `sudarshan-fy-` ("Nightly backups") | SUDARSHAN, for 8 years on the server and in the bucket (once both delete rules carry the prefix filter of step 3); a copy with the year's papers costs nothing |
 | installs, rollbacks, backup failures, restore drills, family sign-ins and every notice the watch told | the server diary, `/var/lib/sudarshan-watch/log/<year>.jsonl` ("Watching the server"), which the nightly backup takes | SUDARSHAN, for 8 years |
 
 A later release adds one records pack a year (the journal's statements with the order, risk and

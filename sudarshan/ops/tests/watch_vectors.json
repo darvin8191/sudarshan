@@ -1370,6 +1370,30 @@
    }
   },
   {
+   "name": "a year's archive with no offsite copy yet is something to look at",
+   "check": "backup",
+   "readings": {
+    "backup": {
+     "age_h": 17.6,
+     "size_mb": 412,
+     "offsite": "ok",
+     "fy": "2026-27",
+     "fy_mb": 398,
+     "fy_owed": "2026-27"
+    }
+   },
+   "memory": {},
+   "level": "warning",
+   "facts": {
+    "age_h": "17",
+    "size_mb": "412",
+    "offsite": "ok",
+    "fy": "2026-27",
+    "fy_mb": "398",
+    "fy_owed": "2026-27"
+   }
+  },
+  {
    "name": "an archive older than 30 hours",
    "check": "backup",
    "readings": {

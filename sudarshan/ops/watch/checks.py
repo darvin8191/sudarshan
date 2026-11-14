@@ -22,7 +22,8 @@ The readings (a dict; a value of None, or a key that is missing, means "could no
                       "links": Telegram accounts linked to the bot}, from OpenAlgo's own tables
     backup            {"age_h": hours since the newest complete archive or None when there is
                       none, "size_mb": its size, "offsite": the last run's offsite word,
-                      "fy": the newest financial-year archive's label, "fy_mb": its size}
+                      "fy": the newest financial-year archive's label, "fy_mb": its size,
+                      "fy_owed": the year whose archive has no offsite copy yet, if any}
     drill             the restore drill's last result: {"at": seconds, "ok": bool}, {} when never
     historify_gb      the size of Historify's file, 0 when there is none
 
@@ -311,13 +312,14 @@ def telegram_links(readings: Mapping, memory: Mapping) -> Result:
 
 
 def backup(readings: Mapping, memory: Mapping) -> Result:
-    """The newest complete nightly archive's age. Shown only: the backup job tells a late night."""
+    """The newest complete nightly archive's age, and a year's archive still owed its offsite
+    copy. Shown only: the backup job tells a late night and a failed upload itself."""
     reading = readings.get("backup")
     if not isinstance(reading, Mapping):
         return Result("backup", UNREAD)
     facts = {
         key: str(reading[key])
-        for key in ("size_mb", "offsite", "fy", "fy_mb")
+        for key in ("size_mb", "offsite", "fy", "fy_mb", "fy_owed")
         if isinstance(reading.get(key), int | str) and not isinstance(reading.get(key), bool)
     }
     age = reading.get("age_h")
@@ -326,7 +328,10 @@ def backup(readings: Mapping, memory: Mapping) -> Result:
     if isinstance(age, bool) or not isinstance(age, int | float):
         return Result("backup", UNREAD)
     facts["age_h"] = str(max(0, int(age)))
-    return Result("backup", WARNING if age > BACKUP_LATE_HOURS else FINE, facts)
+    # A year's archive with no offsite copy yet is something to look at, on the page and in the
+    # weekly summary (the backup job itself tells the failed upload, each night it fails).
+    late = age > BACKUP_LATE_HOURS or "fy_owed" in facts
+    return Result("backup", WARNING if late else FINE, facts)
 
 
 def drill(readings: Mapping, memory: Mapping) -> Result:

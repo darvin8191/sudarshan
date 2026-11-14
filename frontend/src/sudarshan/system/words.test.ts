@@ -84,6 +84,22 @@ describe('the System page words', () => {
     expect(lineOf(backup)?.detail).toBe(
       "Newest is 17 hours old (412 MB). Offsite copy: sent. The 2026-27 year's archive is kept (398 MB)."
     )
+    // Review L4: a year's archive whose offsite copy has not gone yet is said until it has.
+    expect(
+      lineOf(
+        check('backup', 'warning', {
+          age_h: '17',
+          offsite: 'ok',
+          fy: '2026-27',
+          fy_owed: '2026-27',
+        })
+      )?.detail
+    ).toBe(
+      "Newest is 17 hours old. Offsite copy: sent. The 2026-27 year's archive is kept. The 2026-27 year's archive has no offsite copy yet. It is sent again at the next backup."
+    )
+    expect(lineOf(check('backup', 'fine', { age_h: '17', fy_owed: '<script>' }))?.detail).toBe(
+      'Newest is 17 hours old.'
+    )
     expect(lineOf(check('backup', 'off'))?.detail).toBe('No backup has been made yet.')
     expect(lineOf(check('drill', 'fine', { days: '14' }))?.detail).toBe('Passed 14 days ago.')
     expect(lineOf(check('drill', 'fine', { days: '0' }))?.detail).toBe('Passed today.')
@@ -104,7 +120,7 @@ describe('the System page words', () => {
       ['disk', { free_gb: odd }],
       ['memory', { available_mb: odd }],
       ['certificate', { hours: odd }],
-      ['backup', { age_h: odd, size_mb: odd, offsite: odd, fy: odd, fy_mb: odd }],
+      ['backup', { age_h: odd, size_mb: odd, offsite: odd, fy: odd, fy_mb: odd, fy_owed: odd }],
       ['assistant', { clients: odd, families: odd }],
       ['telegram_links', { links: odd }],
       ['historify', { gb: odd }],

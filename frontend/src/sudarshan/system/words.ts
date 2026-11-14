@@ -218,10 +218,15 @@ export function lineOf(check: WatchCheck, drill: DrillResult | null = null): Lin
         facts.fy && /^\d{4}-\d{2}$/.test(facts.fy)
           ? ` The ${facts.fy} year's archive is kept${whole(facts.fy_mb) ? ` (${whole(facts.fy_mb)} MB)` : ''}.`
           : ''
+      // A year's archive whose offsite copy has not gone yet (review L4): said until it has.
+      const owed =
+        facts.fy_owed && /^\d{4}-\d{2}$/.test(facts.fy_owed)
+          ? ` The ${facts.fy_owed} year's archive has no offsite copy yet. It is sent again at the next backup.`
+          : ''
       return {
         group: 'backups',
         label: 'Nightly backup',
-        detail: `Newest is ${age ? hours(age) : 'some time'} old${size ? ` (${size} MB)` : ''}.${offsite ? ` Offsite copy: ${offsite}.` : ''}${year}`,
+        detail: `Newest is ${age ? hours(age) : 'some time'} old${size ? ` (${size} MB)` : ''}.${offsite ? ` Offsite copy: ${offsite}.` : ''}${year}${owed}`,
       }
     }
     case 'drill':

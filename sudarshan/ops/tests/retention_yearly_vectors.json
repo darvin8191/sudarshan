@@ -1,32 +1,42 @@
 {
  "labels": [
   [
-   "2027-03-31 15:59:59",
-   null,
-   "on 31 March before 16:00 the year that is ending is not whole yet, and last year's window is long over"
-  ],
-  [
-   "2027-03-31 16:00:00",
-   "2026-27",
-   "from 16:00 on 31 March the year is whole"
-  ],
-  [
    "2027-03-31 16:30:02",
-   "2026-27",
-   "the evening run of 31 March"
+   null,
+   "the evening of 31 March: the year's Tax pack is built the next morning (review M3)"
   ],
   [
    "2027-04-01 16:30:02",
-   "2026-27",
-   "the day after"
+   null,
+   "1 April: the Tax pack exists, the last trading days' charges do not"
   ],
   [
-   "2027-06-30 22:30:00",
+   "2027-04-03 22:30:00",
+   null,
+   "3 April: March's charges row is asked for tonight at 22:00, and may be in this one; the rule waits a night"
+  ],
+  [
+   "2027-04-03 23:59:59",
+   null,
+   "the last second before the year's papers are whole"
+  ],
+  [
+   "2027-04-04 00:00:00",
+   "2026-27",
+   "from 4 April the year's papers are whole"
+  ],
+  [
+   "2027-04-04 16:30:02",
+   "2026-27",
+   "the afternoon run of 4 April"
+  ],
+  [
+   "2027-07-04 22:30:00",
    "2026-27",
    "the last day of the window"
   ],
   [
-   "2027-07-01 16:30:00",
+   "2027-07-05 00:00:00",
    null,
    "after the window an archive is no year's archive"
   ],
@@ -36,50 +46,62 @@
    "a server first installed in November"
   ],
   [
-   "2100-03-31 16:00:00",
+   "2027-01-10 16:30:00",
+   null,
+   "January belongs to no year's archive: last year's window is long over"
+  ],
+  [
+   "2100-04-04 00:00:00",
    "2099-00",
    "the label keeps two digits"
   ]
  ],
  "yearlies": [
   {
-   "name": "the first complete archive after the close of 31 March is the year's",
+   "name": "the real timetable (16:30 and 22:30): the year's is the first of 4 April, never 31 March's",
    "archives": [
     "20270330-163000",
     "20270331-163000",
     "20270331-223000",
-    "20270401-163000"
+    "20270401-163000",
+    "20270401-223000",
+    "20270402-163000",
+    "20270402-223000",
+    "20270403-163000",
+    "20270403-223000",
+    "20270404-163000",
+    "20270404-223000",
+    "20270405-163000"
    ],
    "yearly": {
-    "2026-27": "20270331-163000"
+    "2026-27": "20270404-163000"
    }
   },
   {
-   "name": "an archive of 31 March before 16:00 is not the ending year's",
+   "name": "an archive made before the year's Tax pack and March's charges exist is not the year's",
    "archives": [
-    "20270331-100000",
-    "20270401-163000"
+    "20270331-163000",
+    "20270401-063000",
+    "20270403-223000"
    ],
-   "yearly": {
-    "2026-27": "20270401-163000"
-   }
+   "yearly": {}
   },
   {
    "name": "a partial archive does not count",
    "archives": [
-    "20270331-163000-partial",
-    "20270331-223000-partial",
-    "20270402-163000",
-    "20270403-163000"
+    "20270404-163000-partial",
+    "20270404-223000-partial",
+    "20270405-163000",
+    "20270406-163000"
    ],
    "yearly": {
-    "2026-27": "20270402-163000"
+    "2026-27": "20270405-163000"
    }
   },
   {
    "name": "a year with only partial archives has no archive",
    "archives": [
-    "20270331-163000-partial"
+    "20270404-163000-partial"
    ],
    "yearly": {}
   },
@@ -95,12 +117,25 @@
    }
   },
   {
-   "name": "a server down until July has no archive for that year",
+   "name": "a server down until 5 July has no archive for that year",
    "archives": [
     "20270329-163000",
-    "20270702-163000"
+    "20270705-163000"
    ],
    "yearly": {}
+  },
+  {
+   "name": "two years, each its own",
+   "archives": [
+    "20270404-163000",
+    "20270405-163000",
+    "20280403-223000",
+    "20280404-163000"
+   ],
+   "yearly": {
+    "2026-27": "20270404-163000",
+    "2027-28": "20280404-163000"
+   }
   }
  ]
 }

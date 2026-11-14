@@ -273,6 +273,19 @@ def _backup_failed(event: Event) -> list[str]:
         ]
     elif why == "offsite":
         reason = _OFFSITE_REASON.get(event.fact("reason"), "the offsite copy did not work")
+        year = event.fact("fy")
+        if _FY_LABEL.fullmatch(year):
+            # A financial year's archive (kept 8 years) has no offsite copy yet (review L4).
+            lead = (
+                f"Tonight's backup is the {year} year's archive, and its offsite copy did not "
+                f"upload: {reason}."
+                if event.fact("fy_tonight") == "yes"
+                else f"The {year} year's archive still has no offsite copy: {reason}."
+            )
+            return [
+                f"{lead} It is sent again at the next backup, and the System page says so "
+                "until it has gone. The copy on the server is kept."
+            ]
         return [f"Tonight's offsite backup did not upload: {reason}. The local backup is fine."]
     elif why == "offsite_soon":
         days, when = event.fact("days"), _date(event.fact("date"))
@@ -616,7 +629,7 @@ _CHECK_WORDS = {
     "posture_ports": "a service listening on the network",
     "posture_reboot": "a restart the system asks for",
     "posture_updates": "security updates waiting",
-    "backup": "nightly backup is late",
+    "backup": "nightly backup",  # late, or a year's archive with no offsite copy: the lines say
     "drill": "restore test of the backups",
     "historify": "Historify's size",
 }
@@ -627,6 +640,7 @@ _SIZE_WORDS = (
     ("ring", "SUDARSHAN's own stores"),
     ("bak", "the backups"),
 )
+_FY_LABEL = re.compile(r"\d{4}-\d{2}")
 _SIZES = re.compile(r"[a-z]{2,6}=[0-9]{1,8}(?:,[a-z]{2,6}=[0-9]{1,8}){0,9}")
 _NAMES = re.compile(r"[a-z_]{2,40}(?:,[a-z_]{2,40}){0,20}")
 
@@ -668,6 +682,12 @@ def _watch_summary(event: Event, now: datetime) -> list[str]:
         lines.append((lead + (", ".join(parts) + "." if parts else "")).strip())
     age, cause, days = number("backup_age_h"), event.fact("drill_cause"), number("drill_days")
     proof = [f"Newest backup: {age} hours old." if age else ""]
+    owed = event.fact("backup_fy_owed")
+    if _FY_LABEL.fullmatch(owed):
+        proof.append(
+            f"The {owed} year's archive has no offsite copy yet; it is sent again at the next "
+            "backup."
+        )
     proof.append(
         {
             "passed": f"Restore test: passed {days} days ago." if days else "Restore test: passed.",
@@ -697,12 +717,21 @@ def _watch_summary(event: Event, now: datetime) -> list[str]:
 
 
 def _drill_passed(event: Event, now: datetime) -> list[str]:
+    """What the drill tried, and no more (review L3): "the vault opens" only when a sealed
+    record was opened; an empty vault is said as empty."""
     count = event.fact("databases")
     opened = f"its {count} databases open" if _MINUTES.fullmatch(count) else "its databases open"
-    return [
-        f"The restore test of the backups passed: the newest backup reads back whole, {opened}, "
-        "and the vault opens with the backup's own keys."
-    ]
+    lead = f"The restore test of the backups passed: the newest backup reads back whole, {opened}"
+    vault = event.fact("vault")
+    if vault == "opened":
+        return [f"{lead}, and the vault opens with the backup's own keys."]
+    if vault == "empty":
+        return [
+            f"{lead}. The vault holds nothing sealed yet, so there was no sealed record to open "
+            "with the backup's keys; the next test after you save your Upstox sign-in details "
+            "on the Auto login page checks that too."
+        ]
+    return [f"{lead}."]
 
 
 def _drill_failed(event: Event, now: datetime) -> list[str]:
