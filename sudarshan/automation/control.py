@@ -245,10 +245,14 @@ CLAIMED_STALE_MS = 180_000
 
 def alert_line(row: dict[str, Any], name: str, now_ms: int) -> dict[str, Any]:
     """An alert's line for the page. A line still ``claimed`` minutes later was being handled
-    when the server stopped: its order is not confirmed."""
+    when the server stopped, or its answer could not be written (it then carries its own
+    sentence): its order is not confirmed, until the next alert settles it from the books."""
     line = {key: row.get(key) for key in contract.ALERT}
-    if line["verdict"] == "claimed" and now_ms - (line["received_ms"] or 0) > CLAIMED_STALE_MS:
-        line["verdict"], line["sentence"] = "not_confirmed", words.interrupted(name)
+    if line["verdict"] == "claimed" and (
+        line["sentence"] or now_ms - (line["received_ms"] or 0) > CLAIMED_STALE_MS
+    ):
+        line["verdict"] = "not_confirmed"
+        line["sentence"] = line["sentence"] or words.interrupted(name)
     return line
 
 

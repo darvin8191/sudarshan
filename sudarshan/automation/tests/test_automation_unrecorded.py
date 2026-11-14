@@ -282,3 +282,21 @@ def test_state_settled(books, row, bought, state, want):
     got = rules.state_settled(books, row, bought, 200_000, state)
     assert (got["held_symbol"], got["held_side"], got["last_target"], got["last_fired_s"]) == want
     assert (got["held_exchange"] is None) == (got["held_symbol"] is None)
+
+
+def test_the_page_reads_an_unrecorded_line_as_not_confirmed_with_its_own_sentence(
+    store, desk, monkeypatch
+):
+    from sudarshan.automation import control, words
+
+    strategy, token = make(store)
+    failing_writes(monkeypatch, store, 2)
+    send(store, desk, token, "long")
+    now_ms = int(desk.now() * 1000)
+    line = control.view(strategy, store, now_ms)["last_alert"]  # at once, not minutes later
+    assert line["verdict"] == "not_confirmed" and "could not record the result" in line["sentence"]
+    # a line claimed a moment ago with no sentence is an alert being handled: left as it is
+    fresh = {"verdict": "claimed", "sentence": "", "received_ms": now_ms - 1000}
+    assert control.alert_line(fresh, "OPT", now_ms)["verdict"] == "claimed"
+    stale = {**fresh, "received_ms": now_ms - control.CLAIMED_STALE_MS - 1}
+    assert control.alert_line(stale, "OPT", now_ms)["sentence"] == words.interrupted("OPT")
