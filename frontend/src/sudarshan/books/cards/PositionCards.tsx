@@ -40,6 +40,7 @@ import {
   productsFor,
   ticketProduct,
 } from '@/sudarshan/ticket/productPref'
+import { SettlementLine } from '@/sudarshan/ticket/SettlementLine'
 import { contractOf } from '@/sudarshan/watchlist/api'
 import { BottomSheet } from '@/sudarshan/watchlist/BottomSheet'
 import { describe, spokenContract } from '@/sudarshan/watchlist/rows'
@@ -783,6 +784,8 @@ const PositionCard = memo(function PositionCard({
         </span>
         {sentNote && <SentNote text={sentNote} />}
         {!sentNote && notSent && <SentNote text={notSent} state="not-sent" />}
+        {/* SUDARSHAN B7 (M5.21): an open stock contract in its expiry week. */}
+        {quantity !== 0 && <SettlementLine symbol={symbol} exchange={exchange} />}
       </button>
     </li>
   )

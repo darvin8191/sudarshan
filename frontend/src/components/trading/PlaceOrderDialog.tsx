@@ -31,6 +31,7 @@ import { QuoteStatus } from '@/sudarshan/books/QuoteStatus'
 import { KillSwitchNote } from '@/sudarshan/risk/RiskBanner'
 // SUDARSHAN B5 (M5.9): the margin the order needs and the funds available; it holds nothing back.
 import { MarginLine } from '@/sudarshan/ticket/MarginLine'
+import { SettlementLine } from '@/sudarshan/ticket/SettlementLine'
 // SUDARSHAN B4 (M5.11): size by risk, which fills the quantity box and sends nothing.
 import { SizeByRisk } from '@/sudarshan/ticket/SizeByRisk'
 import { entryOf } from '@/sudarshan/ticket/sizeHelper'
@@ -672,6 +673,9 @@ export function PlaceOrderDialog({
               </div>
             </div>
           )}
+
+          {/* SUDARSHAN B7 (M5.21): a stock contract in its expiry week is settled by delivery. */}
+          <SettlementLine symbol={symbol} exchange={exchange_} />
 
           {/* SUDARSHAN B5 (M5.9): read on open and on change; it never holds the button back. */}
           <MarginLine

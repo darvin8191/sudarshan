@@ -36,12 +36,19 @@ describe('an instrument session facts (review M1, M2, M3)', () => {
       day: '2026-12-10',
       stopsAt: null,
       closing: { from: dec10(15, 30) / 1000, until: dec10(15, 45) / 1000 },
+      delivery: null,
     })
     expect(readInstrumentSession({ day: '2026-12-08', stops_at: 1_765_188_000_000 })).toEqual({
       day: '2026-12-08',
       stopsAt: 1_765_188_000_000,
       closing: null,
+      delivery: null,
     })
+    // SUDARSHAN B7 (M5.21): a stock contract's delivery expiry, only as a date
+    expect(readInstrumentSession({ day: '2026-12-28', delivery: '2026-12-29' })?.delivery).toBe(
+      '2026-12-29'
+    )
+    expect(readInstrumentSession({ day: '2026-12-28', delivery: true })?.delivery).toBeNull()
     expect(readInstrumentSession(null)).toBeNull()
     expect(readInstrumentSession({ stops_at: 1 })).toBeNull()
     expect(

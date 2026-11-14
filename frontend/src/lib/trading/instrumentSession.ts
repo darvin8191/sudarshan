@@ -24,6 +24,11 @@ export interface InstrumentSession {
   stopsAt: number | null
   /** UTC seconds: a print stamped inside belongs to the day's last candle. */
   closing: ClosingWindow | null
+  /**
+   * SUDARSHAN B7 (M5.21): the expiry (YYYY-MM-DD) of a stock contract in its expiry week, which
+   * is settled by delivery if held to it; null for an index contract and outside that week.
+   */
+  delivery: string | null
 }
 
 const TIMEOUT_MS = 8_000
@@ -46,7 +51,7 @@ function epoch(value: unknown): number | null {
 /** The facts as the server sends them, or null when the answer cannot be read. */
 export function readInstrumentSession(data: unknown): InstrumentSession | null {
   if (!data || typeof data !== 'object') return null
-  const row = data as { day?: unknown; stops_at?: unknown; closing?: unknown }
+  const row = data as { day?: unknown; stops_at?: unknown; closing?: unknown; delivery?: unknown }
   if (typeof row.day !== 'string') return null
   const closing = row.closing as { from?: unknown; until?: unknown } | null | undefined
   const from = epoch(closing?.from)
@@ -57,6 +62,10 @@ export function readInstrumentSession(data: unknown): InstrumentSession | null {
     closing:
       from !== null && until !== null && until > from
         ? { from: from / 1000, until: until / 1000 }
+        : null,
+    delivery:
+      typeof row.delivery === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(row.delivery)
+        ? row.delivery
         : null,
   }
 }

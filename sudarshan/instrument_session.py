@@ -44,6 +44,9 @@ PROMINENT = ("NIFTY", "BANKNIFTY", "SENSEX", "FINNIFTY", "MIDCPNIFTY", "NIFTYNXT
              "SENSEX50")  # fmt: skip
 #: How far ahead the next trading day is looked for.
 LOOK_AHEAD_DAYS = 15
+#: SUDARSHAN B7 (M5.21): a stock contract's expiry week, as days before its expiry: the expiry
+#: day and the six days before it, which always hold its last four trading days and more.
+DELIVERY_NOTICE_DAYS = 6
 #: One day's hours: {exchange: (open, close)} in epoch ms, for each exchange that trades that day.
 Hours = Mapping[str, tuple[int, int]]
 
@@ -118,6 +121,7 @@ def facts(symbol: str, exchange: str, now_ms: int) -> dict[str, Any]:
     day = datetime.fromtimestamp(now_ms / 1000, IST).date()
     symbol, exchange = symbol.strip().upper(), exchange.strip().upper()
     found: dict[str, Any] = {"day": day.isoformat(), "stops_at": None, "closing": None}
+    found["delivery"] = None  # SUDARSHAN B7 (M5.21)
 
     def end_of(code: str) -> int | None:
         window = get_effective_session_window(day, code)
@@ -126,6 +130,15 @@ def facts(symbol: str, exchange: str, now_ms: int) -> dict[str, Any]:
     if exchange in FO_EXCHANGES:
         info = get_symbol_info(symbol, exchange)
         expiry = parse_expiry(getattr(info, "expiry", None)) if info is not None else None
+        # SUDARSHAN B7 (M5.21): a stock's option or future held to its expiry is settled by
+        # delivery of the shares, an index's in cash. Said from DELIVERY_NOTICE_DAYS before the
+        # expiry to the expiry day itself; ``delivery`` is that expiry's date.
+        if (
+            expiry is not None
+            and 0 <= (expiry - day).days <= DELIVERY_NOTICE_DAYS
+            and not index_contracts.is_index_contract(symbol)
+        ):
+            found["delivery"] = expiry.isoformat()
         if expiry == day:
             index = index_contracts.is_index_contract(symbol)
             found["stops_at"] = stop_of(exchange, day, expiry, index=index,
