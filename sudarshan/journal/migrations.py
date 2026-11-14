@@ -370,8 +370,31 @@ def _v3(conn: Connection) -> None:
         conn.exec_driver_sql(V3_NOT_MODELLED)
 
 
+def _v4(conn: Connection) -> None:
+    """Step 4 (review M2): when a report was last announced to the report desk, and whether that
+    was a part period. A scheduled build is announced unless this very build was, or the period
+    was announced whole already; never because its row is new. Each report already kept was
+    announced when its row was made (the rule until now), as a part period when its ``rows`` say
+    so: backfilled from what each row says."""
+    made_ms = add_column(conn, "report", "announced_ms", "INTEGER")
+    made_part = add_column(conn, "report", "announced_partial", "INTEGER NOT NULL DEFAULT 0")
+    if not (made_ms or made_part):
+        return
+    for report_id, rows, created in conn.exec_driver_sql(
+        "SELECT id, rows, created_at FROM report"
+    ).fetchall():
+        try:
+            partial = bool((json.loads(rows or "{}") or {}).get("partial"))
+        except (ValueError, AttributeError):
+            partial = False
+        conn.exec_driver_sql(
+            "UPDATE report SET announced_ms = ?, announced_partial = ? WHERE id = ?",
+            (created, 1 if partial else 0, report_id),
+        )
+
+
 Step = tuple[int, Callable[[Connection], None]]
-STEPS: tuple[Step, ...] = ((1, _v1), (2, _v2), (3, _v3))
+STEPS: tuple[Step, ...] = ((1, _v1), (2, _v2), (3, _v3), (4, _v4))
 LATEST = STEPS[-1][0]
 
 

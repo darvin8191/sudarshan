@@ -6,8 +6,12 @@ M15.1, M15.2, M15.10; design 3.5 and 3.6 as amended by cross-design Y8 and Y22).
   day's sessions, Upstox's funds and positions through the portfolio's journal purpose, the
   previous trading day's close and the kill switch.
 * **The archive** keeps one row per kind and period (``report``: ``YYYYMMDD`` for these two, the
-  form the Reports page reads). A rebuild of a period replaces its text; only a new row is
-  announced.
+  form the Reports page reads). A rebuild of a period replaces its text and its build time.
+* **Announced once a build** (review M2). A build is announced unless the report was announced
+  already, or it was and that was a part period (built on request before its time) and this
+  build is the whole: so the Build button never stops the scheduled report from going, and the
+  same build never goes twice. The row is claimed in the transaction that decides, and released
+  if the line could not be written, so a fault after the build announces on the retry.
 * **The announcement** is one line in the journal's spool for the alerts' report desk
   (``ops/events.py``): its id, src ``journal``, kind ``report``, the report's id, its kind and the
   sha256 of its file, never its text (Y8). The desk asks for the text and the file with the
@@ -74,28 +78,61 @@ async def _thread(fn):
 
 # ---- the archive and the announcement ------------------------------------------------------
 async def archive(service: Any, kind: str, period_key: str, text: str, rows: Mapping[str, Any],
-                  now: int, announce: bool = True,
-                  create: bool = True) -> tuple[int | None, bool]:  # fmt: skip
-    """Keep the report of ``kind`` for ``period_key``; announce it to the desk when the row is
-    new. ``create`` False only rewrites a row already kept. Returns the report's id (None when
-    nothing was kept) and whether it was new."""
+                  now: int, announce: bool = True, create: bool = True,
+                  partial: bool = False) -> tuple[int | None, bool]:  # fmt: skip
+    """Keep the report of ``kind`` for ``period_key`` (a rebuild replaces the text and the build
+    time) and, with ``announce``, announce this build to the desk when it is due
+    (``announce_once``; ``partial`` says it is a part period). ``create`` False only rewrites a
+    row already kept. Returns the report's id (None when nothing was kept) and whether it was
+    new."""
     values = {"kind": kind, "period_key": period_key, "built_ms": now, "text": text,
               "rows": dict(rows)}  # fmt: skip
 
     def write(tx):
         have = tx.rows("report", kind=kind, period_key=period_key)
         if have:
-            tx.touch("report", have[0]["id"], {"text": text, "rows": dict(rows)}, now)
-            return have[0]["id"], False, have[0]["built_ms"]
+            tx.touch("report", have[0]["id"], {"text": text, "rows": dict(rows), "built_ms": now},
+                     now)  # fmt: skip
+            return have[0]["id"], False
         if not create:
-            return None, False, None
+            return None, False
         made = tx.insert("report", values, now)
-        return made["id"], True, made["built_ms"]
+        return made["id"], True
 
-    report_id, new, built = await _thread(lambda: service.store.write(OWNER, write))
-    if new and announce:
-        await announce_report(service, report_id, kind, built, None)
+    report_id, new = await _thread(lambda: service.store.write(OWNER, write))
+    if report_id is not None and announce:
+        await announce_once(service, report_id, kind, None, partial, now)
     return report_id, new
+
+
+async def announce_once(service: Any, report_id: int, kind: str, sha256: str | None,
+                        partial: bool, now: int) -> bool:  # fmt: skip
+    """Announce this build of a report to the desk when it is due (review M2): never announced
+    yet, or last announced as a part period and this build is the whole one. The row is marked
+    in the transaction that decides (two builds at once announce once) and the mark is put back
+    if the spool line could not be written (the next build or retry announces). True when a line
+    was written."""
+
+    def claim(tx):
+        row = tx.get("report", report_id)
+        if row is None:
+            return None
+        before = (row.get("announced_ms"), bool(row.get("announced_partial")))
+        if before[0] is not None and not (before[1] and not partial):
+            return None
+        tx.touch("report", report_id, {"announced_ms": now, "announced_partial": partial}, now)
+        return row["built_ms"], before
+
+    claimed = await _thread(lambda: service.store.write(OWNER, claim))
+    if claimed is None:
+        return False
+    built_ms, (was_ms, was_partial) = claimed
+    done = await announce_report(service, report_id, kind, built_ms, sha256)
+    if not done:
+        await _thread(lambda: service.store.write(OWNER, lambda tx: tx.touch(
+            "report", report_id, {"announced_ms": was_ms, "announced_partial": was_partial},
+            now)))  # fmt: skip
+    return done
 
 
 async def announce_report(service: Any, report_id: int, kind: str, built_ms: int,
@@ -181,10 +218,11 @@ def eod_text(day: int, close: Mapping[str, Any], trips: list[Mapping[str, Any]],
 
 
 async def build_eod(service: Any, day: int, now: int, announce: bool = True,
-                    create: bool = True) -> int | None:  # fmt: skip
+                    create: bool = True, partial: bool = False) -> int | None:  # fmt: skip
     """Build (or rebuild) the day report of ``day`` from its close; None when there is none.
     ``create`` False (the close check) only rewrites a day report already kept, so one that is
-    yet to be built is still announced when it is."""
+    yet to be built is still announced when it is. ``partial``: built on request before the
+    day's close job, so the job's build is still announced."""
 
     def read(tx):
         close = tx.day_close_get("live", day)
@@ -201,7 +239,8 @@ async def build_eod(service: Any, day: int, now: int, announce: bool = True,
     check_at = clock_text(schedule_for(service).check_at(to_date(day)))
     text = eod_text(day, close, trips, more, check_at, aside)
     rows = {"trades": len(trips), "fills_live": close.get("fills_live"), "more": more}
-    report_id, _ = await archive(service, "eod", str(day), text, rows, now, announce, create)
+    report_id, _ = await archive(service, "eod", str(day), text, rows, now, announce, create,
+                                 partial)  # fmt: skip
     if report_id is not None and close.get("reconciled_at") is not None:
         await _thread(lambda: service.store.write(OWNER, lambda tx: tx.touch(
             "report", report_id, {"reconciled_at": close["reconciled_at"]}, now)))  # fmt: skip
@@ -301,11 +340,14 @@ async def brief_inputs(service: Any, day: int, now: int) -> dict[str, Any]:
     return out
 
 
-async def build_brief(service: Any, day: int, now: int, announce: bool = True) -> int:
+async def build_brief(service: Any, day: int, now: int, announce: bool = True,
+                      partial: bool = False) -> int:  # fmt: skip
+    """Build (or rebuild) the morning brief of ``day``; ``partial``: built on request before its
+    time, so the scheduled brief is still announced."""
     inputs = await brief_inputs(service, day, now)
     text = words.brief(**inputs)
     report_id, _ = await archive(service, "brief", str(day), text, {"inputs": inputs}, now,
-                                 announce)  # fmt: skip
+                                 announce, partial=partial)  # fmt: skip
     return report_id
 
 

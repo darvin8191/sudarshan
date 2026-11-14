@@ -61,7 +61,15 @@ JSON_COLUMNS = frozenset(
     {"mistakes", "screenshots", "rules", "positions_overnight", "rows", "delivery", "value"}
 )
 FLAG_COLUMNS = frozenset(
-    {"archived", "system", "own_expiry_day", "index_expiry_day", "approximate", "charges_modelled"}
+    {
+        "archived",
+        "system",
+        "own_expiry_day",
+        "index_expiry_day",
+        "approximate",
+        "charges_modelled",
+        "announced_partial",
+    }
 )
 #: Never leave the store in a row: who owns it, the client's retry key, and a report's file
 #: (its bytes leave only through ``Tx.report_file``).

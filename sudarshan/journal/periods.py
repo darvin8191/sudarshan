@@ -13,7 +13,8 @@ announced (JB9, M15.3 to M15.5; design 3.5 and 3.6, cross-design Y8, Y22, Y32, Y
 * **The keys** of the archive: ``2026W45`` (ISO week, Monday to Sunday), ``202610`` and
   ``FY2526`` (the year starting 1 April 2025). A period still running (built on request) is
   worked out to today and says so in its label; the job builds the whole period, and a rebuild
-  of a key replaces its text and file, announcing only a row that is new.
+  of a key replaces its text and file. A build is announced when the report was never announced,
+  or was announced as a part period and this build is the whole (review M2).
 * **The tax pack is a working paper**: it says to verify it with a CA and that the broker's own
   report is the filing source, and it carries no section number of any Act. Its trades are
   grouped by kind and holding period, never by a legal term.
@@ -41,7 +42,7 @@ from .render import doc as D
 from .render import tables
 from .render.pdf import render_pdf
 from .render.png import render_equity_png
-from .reports import OWNER, _thread, announce_report, archive, report_switch
+from .reports import OWNER, _thread, announce_once, archive, report_switch
 from .schedule import schedule_for
 
 PERIOD_KINDS = ("weekly", "monthly", "fy")
@@ -366,7 +367,8 @@ def fy_pdf(span: Span, text: str, rows: list[dict[str, Any]], charges: list[dict
 # ---- the build -------------------------------------------------------------------------------
 async def build_period(service: Any, kind: str, span: Span, now: int, announce: bool = True) -> int:
     """Build (or rebuild) the report of ``kind`` for ``span``: words, file, archive row, and one
-    line for the report desk when the row is new. Returns the report's id."""
+    line for the report desk when this build is due one (``reports.announce_once``: never
+    announced, or announced as a part period and this is the whole). Returns the report's id."""
     # The analytics op's own helpers; imported here because the ops package imports this module.
     from .ops.analytics_ops import beta_of, for_core, trading_days
 
@@ -409,13 +411,10 @@ async def build_period(service: Any, kind: str, span: Span, now: int, announce: 
                "left_out": aside}  # fmt: skip
     if kind == "monthly":
         summary["csv"] = tables.trades_csv(rows)
-    report_id, new = await archive(service, kind, span.key, text, summary, now, announce=False)
+    report_id, _ = await archive(service, kind, span.key, text, summary, now, announce=False)
     sha = await keep_file(service, report_id, kind, span.key, file[0], file[1], now)
-    if new and announce:
-        built = await _thread(
-            lambda: service.store.read(OWNER, lambda tx: tx.get("report", report_id))
-        )
-        await announce_report(service, report_id, kind, built["built_ms"], sha)
+    if announce:  # after the file is kept, so a fault before here announces on the retry (M2)
+        await announce_once(service, report_id, kind, sha, span.partial, now)
     return report_id
 
 
