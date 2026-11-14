@@ -2427,12 +2427,23 @@ export interface RiskFigures {
   emergency: RiskEmergency
 }
 
+/** What `concentration` was worked out from, read with it: the phone prices the rows from ticks
+ * newer than `read_at` and applies the same rule (vectors/risk.json), so the bars move. One row
+ * per holding of each tab asked for; the same asset in two tabs is two rows and one holding. */
+export interface RiskLive {
+  read_at: EpochMs
+  max_holding_pct: Pct
+  max_sector_pct: Pct
+  rows: HoldingRow[]
+}
+
 export interface RiskReport {
   tab_id: number | null
   as_of_day: Day
   /** "On closing values up to 13 Nov 2026." */
   basis: string
   risk: RiskFigures
+  live: RiskLive
 }
 
 export interface OwnerSettings {
