@@ -1,0 +1,56 @@
+Long term
+SUDARSHAN
+Performance · as of 26 Oct 2026, 13:03 IST
+Long term
+Performance · as of 26 Oct 2026, 13:03 IST
+ValueNet put inTotal gainXIRR
+₹4,45,765.00₹3,95,005.00+₹50,760.00+9.09%
+PROFIT
+Figures
+FigureValueResult
+Valued on26 Oct 2026
+First entry1 Sep 2025
+Value₹4,45,765.00
+Money in₹9,90,465.00
+Money out₹5,96,050.00
+Fees₹590.00
+Net put in₹3,95,005.00
+PROFIT
+Total gain+₹50,760.00
+Absolute return+5.12%
+XIRR+9.09%
+TWR+2.00%
+TWR a year
+TWR: TWR since 1 Sep 2025
+TWR a year: Shown once the history is longer than a year.
+Against the index
+IndexSame money, valueXIRRTWRAhead byBetaCorrelation
+NIFTY 50
+NIFTY 500
+NIFTY 50: Dividends not included. NIFTY 50 prices are not available yet; the comparison appears when they are. Shown after
+20 trading days (from 23 Nov 2026).
+NIFTY 500: Dividends not included. NIFTY 500 prices are not available yet; the comparison appears when they are. Shown
+after 20 trading days (from 23 Nov 2026).
+By financial year
+YearRealised gainResultIncomeFees
+FLAT
+FY 2025-26₹0.00₹1,200.00₹0.00
+LOSS
+FY 2026-27−₹5,350.00₹50.00₹590.00
+Exported from SUDARSHAN. As of 26 Oct 2026, 13:03 IST.Page 1 of 2
+Long term
+SUDARSHAN
+Performance · as of 26 Oct 2026, 13:03 IST
+Month-end values
+DayValueNet put in
+30 Sep 2025₹3,00,000.00₹3,00,450.00
+31 Oct 2025₹3,00,000.00₹3,00,450.00
+30 Nov 2025₹3,00,000.00₹3,00,450.00
+31 Dec 2025₹3,00,000.00₹3,00,450.00
+31 Jan 2026₹3,00,000.00₹3,00,450.00
+28 Feb 2026₹3,00,000.00₹3,00,450.00
+31 Mar 2026₹3,00,000.00₹2,99,250.00
+30 Apr 2026₹3,00,000.00₹2,99,250.00
+31 May 2026₹3,00,000.00₹2,99,250.00
+30 Jun 2026₹10,31,000.00₹9,79,250.00
+Exported from SUDARSHAN. As of 26 Oct 2026, 13:03 IST.Page 2 of 2

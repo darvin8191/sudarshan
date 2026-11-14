@@ -217,10 +217,11 @@ interface ScreenProps {
 /**
  * The chart reads with the API key and today's Upstox login
  * (src/sudarshan/access.ts), asked here, in a frame of its own: what that
- * asks through, the app's market data context, is a new value every second
- * (its page-visibility clock), and the screen below, sheets and all, would
- * otherwise draw itself again with it every second, frames a phone with five
- * studies cannot spare (C14). The screen draws again when the access changes.
+ * asks through, the app's market data context, is a new value whenever the
+ * connection's state changes (and was one every second until SCR-F stopped
+ * its page-visibility clock), and the screen below, sheets and all, would
+ * otherwise draw itself again with each, frames a phone with three studies
+ * cannot spare (C14). The screen draws again when the access changes.
  */
 function PhoneChartScreen(props: ScreenProps) {
   const access = usePriceAccess()

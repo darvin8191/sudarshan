@@ -37,6 +37,21 @@ export interface QuoteSnapshot {
   readAll: () => Promise<ReadonlyMap<string, Snapshot> | null>
 }
 
+/** A read waiting its turn: the youngest age asked for, per key or (null) for the whole list. */
+interface Queued {
+  maxAgeMs: number
+  keys: Set<string> | null
+}
+
+/** One more request folded into what already waits: the youngest age, and every key of both. */
+function fold(queued: Queued | null, maxAgeMs: number, only: ReadonlySet<string> | null): Queued {
+  if (queued === null) return { maxAgeMs, keys: only && new Set(only) }
+  return {
+    maxAgeMs: Math.min(queued.maxAgeMs, maxAgeMs),
+    keys: queued.keys === null || only === null ? null : new Set([...queued.keys, ...only]),
+  }
+}
+
 /**
  * One REST read of the list's quotes (`/api/v1/multiquotes`), for what the
  * ticks do not give: a level before the first tick (and all day for an
@@ -52,6 +67,11 @@ export interface QuoteSnapshot {
  * An instrument that leaves the list takes its quote with it, so it is read
  * afresh if it comes back. One read at a time; a request that arrives during
  * one is folded into a single read after it.
+ *
+ * Nothing is read while the page is hidden (SCR-F): nobody is looking, and a
+ * list fed by a screen, a market's open or a reconnect would each read then.
+ * What a hidden page would have read is owed, folded into one read, and made
+ * when the page is shown again.
  */
 export function useQuoteSnapshot({
   apiKey,
@@ -76,7 +96,9 @@ export function useQuoteSnapshot({
   const active = useRef(instruments)
   const busy = useRef(false)
   /** What to read once the read in flight is done: the youngest age asked for, per key or for all. */
-  const again = useRef<{ maxAgeMs: number; keys: Set<string> | null } | null>(null)
+  const again = useRef<Queued | null>(null)
+  /** What a hidden page was asked to read, for the moment it is shown (SCR-F). */
+  const owed = useRef<Queued | null>(null)
   const alive = useRef(true)
   /** F9: who is waiting for a full read, and how the last read ended (the quotes, or null for a failure). */
   const waiters = useRef<Array<(quotes: ReadonlyMap<string, Snapshot> | null) => void>>([])
@@ -101,17 +123,14 @@ export function useQuoteSnapshot({
         settle()
         return
       }
+      if (document.visibilityState === 'hidden') {
+        owed.current = fold(owed.current, maxAgeMs, only)
+        outcome.current = null
+        settle()
+        return
+      }
       if (busy.current) {
-        const queued = again.current
-        again.current = {
-          maxAgeMs: queued ? Math.min(queued.maxAgeMs, maxAgeMs) : maxAgeMs,
-          keys:
-            queued === null
-              ? only && new Set(only)
-              : queued.keys === null || only === null
-                ? null
-                : new Set([...queued.keys, ...only]),
-        }
+        again.current = fold(again.current, maxAgeMs, only)
         return
       }
       const at = Date.now()
@@ -219,7 +238,10 @@ export function useQuoteSnapshot({
         hiddenAt = Date.now()
         return
       }
+      const due = owed.current
+      owed.current = null
       if (hiddenAt !== null && Date.now() - hiddenAt > AWAY_MS) void read(0, null)
+      else if (due !== null) void read(due.maxAgeMs, due.keys)
       hiddenAt = null
     }
     document.addEventListener('visibilitychange', changed)

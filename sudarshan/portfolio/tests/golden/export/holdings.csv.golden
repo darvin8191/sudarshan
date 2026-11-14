@@ -1,0 +1,31 @@
+﻿SUDARSHAN / सुदर्शन,Holdings
+Long term,લાંબા ગાળા,"As of 26 Oct 2026, 13:03 IST"
+
+Value,445765.00
+Cost,390315.00
+Unrealised gain,55450.00
+Overall gain,50760.00
+
+Holdings
+Holding,Symbol,Exchange,ISIN,Class,Account,Quantity,Average cost,Cost,Price,Price date,Value,Gain,Gain %,Weight %,Note
+Gold bar,,,,gold,Zerodha,2,100150.00,200300.00,124500.00,2026-10-23,249000.00,48700.00,24.3135,55.8590,Value from 23 Oct · 3 days old
+Gold bar,,,,gold,Locker,1.5,120000.00,180000.00,124500.00,2026-10-23,186750.00,6750.00,3.7500,41.8943,Value from 23 Oct · 3 days old
+Reliance Industries,RELIANCE,NSE,INE002A01018,equity,Zerodha,10,1001.50,10015.00,,,10015.00,0.00,,2.2467,No price yet
+Total,,,,,,,,390315.00,,,445765.00,55450.00,,,
+
+Totals
+Figure,Value,Note
+Realised gain,-5350.00,
+Income,1250.00,
+Fees,590.00,
+Absolute return %,5.1218,
+Loans outstanding,200000.00,
+Value after loans,245765.00,
+
+Loans
+Loan,Outstanding,Balance of,Note
+Home loan,200000.00,2026-10-01,
+
+Notes
+"The whole tab, with no filter."
+1 holding has no price yet and is counted at its cost.
