@@ -99,6 +99,11 @@ class Prices:
         found = tx.index_closes()
         return {name: found.get(name, []) for name in BENCHMARKS}
 
+    def holidays(self) -> tuple[int, ...]:
+        """The exchange's holidays as days, for telling one trading day's move from two (M7.31).
+        Without the exchange's calendar, none; the price book knows them."""
+        return ()
+
     def last_session_day(self, today: int, now: int) -> int:
         """The latest trading day whose session has begun. Without the exchange's calendar, the
         latest weekday; the price book knows the holidays."""
@@ -489,9 +494,15 @@ class Views:
                 self.cache.put(key, days)
             closes = self.prices.index_closes(tx)
             span = days.span()
-            out["twr"] = days.twr().as_dict()
+            twr = days.twr()
+            out["twr"] = twr.as_dict()
+            # M7.31 (P7 lane R): beta, correlation and excess return beside the same-money figures.
+            shut = self.prices.holidays()
+            moves = history.day_returns(performance.periods(days.points, days.opening_paise), shut)
             out["benchmarks"] = [
-                history.benchmark(name, flows, closes.get(name, ()), today, None, span).as_dict()
+                history.compared(
+                    name, flows, closes.get(name, ()), today, None, span, moves, twr.pct, shut
+                )
                 for name in BENCHMARKS
             ]
             out["series"] = [point.as_dict() for point in days.series]

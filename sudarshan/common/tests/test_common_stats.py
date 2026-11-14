@@ -176,3 +176,16 @@ def test_the_journal_uses_this_copy_and_keeps_none_of_its_own():
     text = Path(benchmark.__file__).read_text(encoding="utf-8")
     assert "stats.correlation_beta(" in text
     assert "mean_p" not in text and ".sqrt()" not in text and "** 2" not in text
+
+
+def test_the_arithmetic_context_of_the_process_changes_nothing():
+    from decimal import ROUND_DOWN, Inexact, localcontext
+
+    case = DATA["moments"][1]
+    r_p, r_m = series(case["r_p"]), series(case["r_m"])
+    with localcontext() as ctx:
+        ctx.prec, ctx.rounding = 4, ROUND_DOWN
+        ctx.traps[Inexact] = True
+        got = stats.correlation(r_p, r_m)
+        assert stats.decimal_str(got, 30) == case["out"]["correlation"]
+        assert stats.decimal_str(stats.sqrt_ratio(Fraction(2)), 10) == "1.4142135624"

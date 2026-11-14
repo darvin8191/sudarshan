@@ -195,6 +195,24 @@ def index_missing(label: str) -> str:
     return f"{label} prices are not available yet; the comparison appears when they are."
 
 
+def stats_on(count: int, day: int) -> str:
+    """What beta and correlation rest on (design p7 9.2): "On 60 trading days to 13 Nov 2026"."""
+    return f"On {count} trading days to {date(day)}"
+
+
+def stats_after(need: int, ready_day: int) -> str:
+    """Too few days yet for beta and correlation, and the day there will be enough."""
+    return f"Shown after {need} trading days (from {date(ready_day)})"
+
+
+def stats_flat(label: str) -> str:
+    """The index closed at one level on every day read, so there is nothing to compare with."""
+    return f"{label} did not move on these days, so there is no beta yet."
+
+
+STATS_TAB_FLAT = "This tab's value did not move on these days, so there is no correlation yet."
+
+
 #: The names of the bars that hold what has no sector, no cap size or no tag (design 4.8), and the
 #: cap sizes an asset can carry.
 MCAP_LABELS = {"large": "Large cap", "mid": "Mid cap", "small": "Small cap"}

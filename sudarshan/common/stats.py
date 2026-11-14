@@ -18,11 +18,14 @@ portfolio (benchmark figures, risk). Pure: the standard library only, no clock, 
 from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
-from decimal import ROUND_HALF_UP, Decimal, localcontext
+from decimal import ROUND_HALF_EVEN, ROUND_HALF_UP, Context, Decimal, localcontext
 from fractions import Fraction
 from typing import Any, NamedTuple
 
 SQRT_DIGITS = 60
+#: The arithmetic of the one square root and of a figure's text, whatever the process was told
+#: (its precision, its rounding, what it traps): 60 digits, and nothing raised for rounding.
+_CONTEXT = Context(prec=SQRT_DIGITS, rounding=ROUND_HALF_EVEN, Emin=-999999, Emax=999999, traps=[])
 #: Whole numbers up to this many bits are compared exactly at once; longer ones by their leading
 #: bits first (``less``).
 _EXACT_BITS = 2048
@@ -42,16 +45,14 @@ def fraction_str(frac: Fraction, places: int) -> str:
 
 def decimal_str(value: Decimal, places: int) -> str:
     """A Decimal as text with ``places`` decimals, half-up, never "-0.00"."""
-    with localcontext() as ctx:
-        ctx.prec = SQRT_DIGITS
+    with localcontext(_CONTEXT):
         text = str(value.quantize(Decimal(1).scaleb(-places), rounding=ROUND_HALF_UP))
     return text[1:] if text.startswith("-") and not text.strip("-0.") else text
 
 
 def sqrt_ratio(frac: Fraction) -> Decimal:
     """The square root of a fraction that is not below nothing, to 60 digits."""
-    with localcontext() as ctx:
-        ctx.prec = SQRT_DIGITS
+    with localcontext(_CONTEXT):
         return (Decimal(frac.numerator) / Decimal(frac.denominator)).sqrt()
 
 
