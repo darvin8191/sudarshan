@@ -160,7 +160,7 @@ function Field({
         className={BOX}
       />
       {problem && (
-        <p id={`${id}-problem`} className="text-xs font-semibold text-[color:var(--loss)]">
+        <p id={`${id}-problem`} className="text-xs font-semibold text-[color:var(--down)]">
           {problem}
         </p>
       )}
