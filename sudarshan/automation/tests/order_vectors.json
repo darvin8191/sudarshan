@@ -885,6 +885,205 @@
      "disclosed_quantity": "0"
     }
    ]
+  },
+  {
+   "name": "scaled: chart size 2 times 65 is a target of +130",
+   "form": {
+    "name": "SCL",
+    "kind": "future",
+    "underlying": "NIFTY",
+    "product": "MIS",
+    "size_mode": "scaled",
+    "multiplier": 65,
+    "max_lots": 3
+   },
+   "state": {},
+   "now": "2026-11-16 10:15:02",
+   "alert": {
+    "v": 1,
+    "position": "long",
+    "fired_offset_s": -1,
+    "size": "2",
+    "contracts": "2"
+   },
+   "analyze": true,
+   "orders": [
+    {
+     "strategy": "SCL",
+     "exchange": "NFO",
+     "symbol": "NIFTY24NOV26FUT",
+     "product": "MIS",
+     "action": "BUY",
+     "pricetype": "MARKET",
+     "quantity": "130",
+     "position_size": "130",
+     "price": "0",
+     "trigger_price": "0",
+     "disclosed_quantity": "0"
+    }
+   ]
+  },
+  {
+   "name": "scaled: the size is the chart's position, never the order's contracts",
+   "form": {
+    "name": "SCL",
+    "kind": "future",
+    "underlying": "NIFTY",
+    "product": "MIS",
+    "size_mode": "scaled",
+    "multiplier": 65,
+    "max_lots": 3
+   },
+   "state": {
+    "last_target": 1,
+    "held_exchange": "NFO",
+    "held_symbol": "NIFTY24NOV26FUT",
+    "held_side": "long"
+   },
+   "now": "2026-11-16 10:15:02",
+   "alert": {
+    "v": 1,
+    "position": "long",
+    "fired_offset_s": -1,
+    "size": "3",
+    "contracts": "1"
+   },
+   "analyze": true,
+   "orders": [
+    {
+     "strategy": "SCL",
+     "exchange": "NFO",
+     "symbol": "NIFTY24NOV26FUT",
+     "product": "MIS",
+     "action": "BUY",
+     "pricetype": "MARKET",
+     "quantity": "195",
+     "position_size": "195",
+     "price": "0",
+     "trigger_price": "0",
+     "disclosed_quantity": "0"
+    }
+   ]
+  },
+  {
+   "name": "scaled: scaling out from 3 lots to 1 is a target of +65",
+   "form": {
+    "name": "SCL",
+    "kind": "future",
+    "underlying": "NIFTY",
+    "product": "MIS",
+    "size_mode": "scaled",
+    "multiplier": 65,
+    "max_lots": 3
+   },
+   "state": {
+    "last_target": 1,
+    "held_exchange": "NFO",
+    "held_symbol": "NIFTY24NOV26FUT",
+    "held_side": "long"
+   },
+   "now": "2026-11-16 10:15:02",
+   "alert": {
+    "v": 1,
+    "position": "long",
+    "fired_offset_s": -1,
+    "size": "1",
+    "contracts": "2",
+    "action": "sell"
+   },
+   "analyze": true,
+   "orders": [
+    {
+     "strategy": "SCL",
+     "exchange": "NFO",
+     "symbol": "NIFTY24NOV26FUT",
+     "product": "MIS",
+     "action": "BUY",
+     "pricetype": "MARKET",
+     "quantity": "65",
+     "position_size": "65",
+     "price": "0",
+     "trigger_price": "0",
+     "disclosed_quantity": "0"
+    }
+   ]
+  },
+  {
+   "name": "scaled: short 2",
+   "form": {
+    "name": "SCL",
+    "kind": "future",
+    "underlying": "NIFTY",
+    "product": "MIS",
+    "size_mode": "scaled",
+    "multiplier": 65,
+    "max_lots": 3
+   },
+   "state": {},
+   "now": "2026-11-16 10:15:02",
+   "alert": {
+    "v": 1,
+    "position": "short",
+    "fired_offset_s": -1,
+    "size": "2"
+   },
+   "analyze": true,
+   "orders": [
+    {
+     "strategy": "SCL",
+     "exchange": "NFO",
+     "symbol": "NIFTY24NOV26FUT",
+     "product": "MIS",
+     "action": "SELL",
+     "pricetype": "MARKET",
+     "quantity": "130",
+     "position_size": "-130",
+     "price": "0",
+     "trigger_price": "0",
+     "disclosed_quantity": "0"
+    }
+   ]
+  },
+  {
+   "name": "scaled: flat is an exit to 0, whatever the size was",
+   "form": {
+    "name": "SCL",
+    "kind": "future",
+    "underlying": "NIFTY",
+    "product": "MIS",
+    "size_mode": "scaled",
+    "multiplier": 65,
+    "max_lots": 3
+   },
+   "state": {
+    "last_target": 1,
+    "held_exchange": "NFO",
+    "held_symbol": "NIFTY24NOV26FUT",
+    "held_side": "long"
+   },
+   "now": "2026-11-16 10:15:02",
+   "alert": {
+    "v": 1,
+    "position": "flat",
+    "fired_offset_s": -1,
+    "size": "0"
+   },
+   "analyze": true,
+   "orders": [
+    {
+     "strategy": "SCL",
+     "exchange": "NFO",
+     "symbol": "NIFTY24NOV26FUT",
+     "product": "MIS",
+     "action": "SELL",
+     "pricetype": "MARKET",
+     "quantity": "1",
+     "position_size": "0",
+     "price": "0",
+     "trigger_price": "0",
+     "disclosed_quantity": "0"
+    }
+   ]
   }
  ]
 }

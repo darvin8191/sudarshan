@@ -29,6 +29,9 @@ export interface StrategyForm {
   direction?: Direction
   lots?: number | null
   quantity?: number | null
+  size_mode?: SizeMode
+  multiplier?: number | null
+  max_lots?: number | null
   max_age_s?: number
   max_alerts_day?: number
   roll_on_expiry_day?: boolean
@@ -52,6 +55,8 @@ export interface Strategy {
   size_mode: SizeMode
   lots: number | null
   quantity: number | null
+  multiplier: number | null
+  max_lots: number | null
   max_age_s: number
   max_alerts_day: number
   roll_on_expiry_day: boolean

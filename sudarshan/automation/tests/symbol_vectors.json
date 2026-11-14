@@ -1822,5 +1822,239 @@
    "now": "2026-11-25 09:15:00",
    "expect": true
   }
+ ],
+ "scaled": [
+  {
+   "name": "chart size 1 times 65 is one lot of 65",
+   "strategy": {
+    "size_mode": "scaled",
+    "lots": null,
+    "multiplier": 65,
+    "max_lots": 2
+   },
+   "size": 1,
+   "lot": 65,
+   "freeze": 1800,
+   "expect": 65
+  },
+  {
+   "name": "chart size 2 times 65 is two lots, exactly the cap",
+   "strategy": {
+    "size_mode": "scaled",
+    "lots": null,
+    "multiplier": 65,
+    "max_lots": 2
+   },
+   "size": 2,
+   "lot": 65,
+   "freeze": 1800,
+   "expect": 130
+  },
+  {
+   "name": "one lot above the cap: nothing is sent",
+   "strategy": {
+    "size_mode": "scaled",
+    "lots": null,
+    "multiplier": 65,
+    "max_lots": 2
+   },
+   "size": 3,
+   "lot": 65,
+   "freeze": 1800,
+   "expect": {
+    "not_sized": "cap",
+    "figure": 130
+   }
+  },
+  {
+   "name": "chart size 65 with multiplier 1",
+   "strategy": {
+    "size_mode": "scaled",
+    "lots": null,
+    "multiplier": 1,
+    "max_lots": 1
+   },
+   "size": 65,
+   "lot": 65,
+   "freeze": 1800,
+   "expect": 65
+  },
+  {
+   "name": "a size that is not a whole lot is never rounded",
+   "strategy": {
+    "size_mode": "scaled",
+    "lots": null,
+    "multiplier": 1,
+    "max_lots": 5
+   },
+   "size": 100,
+   "lot": 65,
+   "freeze": 1800,
+   "expect": {
+    "not_sized": "not_whole",
+    "figure": 65
+   }
+  },
+  {
+   "name": "half a contract on the chart times 130 is one lot",
+   "strategy": {
+    "size_mode": "scaled",
+    "lots": null,
+    "multiplier": 130,
+    "max_lots": 1
+   },
+   "size": 0.5,
+   "lot": 65,
+   "freeze": 1800,
+   "expect": 65
+  },
+  {
+   "name": "decimal arithmetic is exact: 0.7 times 650 is 455, though floats say 454.99999999999994",
+   "strategy": {
+    "size_mode": "scaled",
+    "lots": null,
+    "multiplier": 650,
+    "max_lots": 20
+   },
+   "size": 0.7,
+   "lot": 65,
+   "freeze": 1800,
+   "expect": 455
+  },
+  {
+   "name": "a fraction of a unit is not a size",
+   "strategy": {
+    "size_mode": "scaled",
+    "lots": null,
+    "multiplier": 0.5,
+    "max_lots": 5
+   },
+   "size": 1,
+   "lot": 1,
+   "freeze": 0,
+   "expect": {
+    "not_sized": "not_whole",
+    "figure": 1
+   }
+  },
+  {
+   "name": "shares: a lot is one share",
+   "strategy": {
+    "size_mode": "scaled",
+    "lots": null,
+    "multiplier": 10,
+    "max_lots": 500
+   },
+   "size": 25,
+   "lot": 1,
+   "freeze": 0,
+   "expect": 250
+  },
+  {
+   "name": "shares above the cap",
+   "strategy": {
+    "size_mode": "scaled",
+    "lots": null,
+    "multiplier": 10,
+    "max_lots": 200
+   },
+   "size": 25,
+   "lot": 1,
+   "freeze": 0,
+   "expect": {
+    "not_sized": "cap",
+    "figure": 200
+   }
+  },
+  {
+   "name": "an alert with no size",
+   "strategy": {
+    "size_mode": "scaled",
+    "lots": null,
+    "multiplier": 65,
+    "max_lots": 2
+   },
+   "size": null,
+   "lot": 65,
+   "freeze": 1800,
+   "expect": {
+    "not_sized": "no_size"
+   }
+  },
+  {
+   "name": "a size of 0 is no size",
+   "strategy": {
+    "size_mode": "scaled",
+    "lots": null,
+    "multiplier": 65,
+    "max_lots": 2
+   },
+   "size": 0,
+   "lot": 65,
+   "freeze": 1800,
+   "expect": {
+    "not_sized": "no_size"
+   }
+  },
+  {
+   "name": "inside the cap but above the freeze quantity",
+   "strategy": {
+    "size_mode": "scaled",
+    "lots": null,
+    "multiplier": 65,
+    "max_lots": 100
+   },
+   "size": 28,
+   "lot": 65,
+   "freeze": 1800,
+   "expect": {
+    "not_sized": "freeze",
+    "figure": 1800
+   }
+  },
+  {
+   "name": "the lot size could not be read",
+   "strategy": {
+    "size_mode": "scaled",
+    "lots": null,
+    "multiplier": 65,
+    "max_lots": 2
+   },
+   "size": 1,
+   "lot": null,
+   "freeze": 0,
+   "expect": {
+    "not_sized": "lot"
+   }
+  },
+  {
+   "name": "a new lot size needs no code: 75",
+   "strategy": {
+    "size_mode": "scaled",
+    "lots": null,
+    "multiplier": 75,
+    "max_lots": 2
+   },
+   "size": 2,
+   "lot": 75,
+   "freeze": 1800,
+   "expect": 150
+  },
+  {
+   "name": "the old multiplier after a lot-size change is not whole lots: nothing is sent",
+   "strategy": {
+    "size_mode": "scaled",
+    "lots": null,
+    "multiplier": 75,
+    "max_lots": 2
+   },
+   "size": 1,
+   "lot": 65,
+   "freeze": 1800,
+   "expect": {
+    "not_sized": "not_whole",
+    "figure": 65
+   }
+  }
  ]
 }

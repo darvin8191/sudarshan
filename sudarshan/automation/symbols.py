@@ -20,6 +20,7 @@ import re
 from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
+from fractions import Fraction
 
 from sudarshan.watchlists import dynamic
 from sudarshan.watchlists.tvimport import CHECKED_INDEX_FUTURES, INDEX_ALIASES
@@ -339,7 +340,7 @@ def futures_underlying(strategy: m.Strategy) -> str | None:
 
 @dataclass(frozen=True)
 class NotSized:
-    reason: str  # lot or freeze
+    reason: str  # lot, freeze, no_size, not_whole or cap
     figure: int = 0
 
 
@@ -355,6 +356,30 @@ def quantity(strategy: m.Strategy, lot_size: int | None, freeze_qty: int = 0) ->
         units = int(strategy.quantity or 0)
         if units <= 0:
             return NotSized("lot")
+    if freeze_qty and units > freeze_qty:
+        return NotSized("freeze", int(freeze_qty))
+    return units
+
+
+def scaled_quantity(
+    strategy: m.Strategy, size: float | None, lot_size: int | None, freeze_qty: int = 0
+) -> int | NotSized:
+    """A scaled strategy's size in units: TradingView's position size times the strategy's
+    multiplier. It must come to a whole number of lots (of shares, for a share: ``lot_size`` 1)
+    and never above the strategy's cap; anything else is not sized and nothing is sent. A size is
+    never rounded: a rounded size is a position the chart does not have."""
+    if not isinstance(lot_size, int) or isinstance(lot_size, bool) or lot_size <= 0:
+        return NotSized("lot")
+    if isinstance(size, bool) or not isinstance(size, (int, float)) or not 0 < size < 1e12:
+        return NotSized("no_size")
+    if not strategy.multiplier or not strategy.max_lots:
+        return NotSized("no_size")
+    units = Fraction(str(size)) * Fraction(str(strategy.multiplier))
+    if units.denominator != 1 or units <= 0 or int(units) % lot_size:
+        return NotSized("not_whole", lot_size)
+    units = int(units)
+    if units // lot_size > strategy.max_lots:
+        return NotSized("cap", strategy.max_lots * lot_size)
     if freeze_qty and units > freeze_qty:
         return NotSized("freeze", int(freeze_qty))
     return units

@@ -250,7 +250,7 @@ def plan(
         said = words.mode_refused(name, rules.SEMI_AUTO, target)
         return _refuse("mode_refused", said, target, **common)
     # the contract and the size
-    steps = _steps(strategy, state, target, desk, now_ms, indices)
+    steps = _steps(strategy, state, target, desk, now_ms, indices, alert.size)
     if isinstance(steps, Plan):
         if steps.verdict == rules.NO_ACTION:
             # Nothing held and nothing to close: the state says flat. An option that expired
@@ -312,7 +312,7 @@ def _resolve(strategy: m.Strategy, desk: Desk, now_ms: int, indices, entering: b
     )
 
 
-def _steps(strategy: m.Strategy, state: m.State, target: int, desk: Desk, now_ms: int, indices):
+def _steps(strategy, state, target: int, desk: Desk, now_ms: int, indices, size=None):
     """The order, or the two orders, for a target; or the refusal as a ``Plan``."""
     name = strategy.name
     held = (state.held_exchange, state.held_symbol) if state.held_symbol else None
@@ -330,7 +330,7 @@ def _steps(strategy: m.Strategy, state: m.State, target: int, desk: Desk, now_ms
     if option and held and symbols.option_side(held[1]) == symbols.wanted_side(target):
         # The same target with its option already bought: the held contract is asked, never a
         # new strike or a later expiry. A strategy never rolls a held position by itself.
-        quantity = _size(strategy, desk, *held)
+        quantity = _size(strategy, desk, *held, size=size)
         if isinstance(quantity, Plan):
             return replace(quantity, target=target)
         return (_step(strategy, *held, target, quantity, None),)
@@ -348,7 +348,7 @@ def _steps(strategy: m.Strategy, state: m.State, target: int, desk: Desk, now_ms
         # A strategy never rolls a held position by itself: the same target with an older
         # contract held is asked of the held contract, and reads as already there.
         found = replace(found, exchange=held[0], symbol=held[1])
-    quantity = _size(strategy, desk, found.exchange, found.symbol)
+    quantity = _size(strategy, desk, found.exchange, found.symbol, size=size)
     if isinstance(quantity, Plan):
         return replace(quantity, target=target)
     entry = replace(
@@ -363,11 +363,16 @@ def _steps(strategy: m.Strategy, state: m.State, target: int, desk: Desk, now_ms
     return (entry,)
 
 
-def _size(strategy: m.Strategy, desk: Desk, exchange: str, symbol: str, exit_: bool = False):
-    lot = desk.lot_size(exchange, symbol) if strategy.lots else 1
+def _size(strategy, desk: Desk, exchange: str, symbol: str, exit_: bool = False, size=None):
     found = symbols.expiry_of(symbol)
+    scaled = strategy.size_mode == m.SCALED
+    lot = desk.lot_size(exchange, symbol) if strategy.lots or (scaled and found) else 1
     freeze = desk.freeze_qty(found[0], exchange) if found and not exit_ else 0
-    got = symbols.quantity(strategy, lot, freeze)
+    if scaled and not exit_:
+        # TradingView's position size times the multiplier: whole lots, never above the cap.
+        got = symbols.scaled_quantity(strategy, size, lot, freeze)
+    else:
+        got = symbols.quantity(strategy, lot, freeze)
     if isinstance(got, symbols.NotSized):
         if exit_:
             return 1  # an exit is sized from the account; this only marks the order as an exit

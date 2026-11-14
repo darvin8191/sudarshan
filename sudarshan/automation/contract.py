@@ -61,6 +61,9 @@ FORM = {
     "direction?": "Direction",
     "lots?": "number | null",
     "quantity?": "number | null",
+    "size_mode?": "SizeMode",
+    "multiplier?": "number | null",
+    "max_lots?": "number | null",
     "max_age_s?": "number",
     "max_alerts_day?": "number",
     "roll_on_expiry_day?": "boolean",
@@ -83,6 +86,8 @@ STRATEGY = {
     "size_mode": "SizeMode",
     "lots": "number | null",
     "quantity": "number | null",
+    "multiplier": "number | null",
+    "max_lots": "number | null",
     "max_age_s": "number",
     "max_alerts_day": "number",
     "roll_on_expiry_day": "boolean",
@@ -323,10 +328,41 @@ def clean(form: dict[str, Any]) -> dict[str, Any]:
                     "kind",
                 )
             exchange, underlying = ex, ticker
+    size_mode = form.get("size_mode") or m.FIXED
+    if size_mode not in m.SIZE_MODES:
+        raise Refused("Choose a fixed size, or a size scaled from the chart's.", "size_mode")
+    scaled = size_mode == m.SCALED
+    multiplier, max_lots = None, None
+    if scaled:
+        if kind == m.OPTION:
+            raise Refused("An option strategy takes a fixed size.", "size_mode")
+        multiplier = form.get("multiplier")
+        if (
+            isinstance(multiplier, bool)
+            or not isinstance(multiplier, (int, float))
+            or not 0.0001 <= multiplier <= 100000
+        ):
+            raise Refused(
+                "The multiplier must be a number from 0.0001 to 100000: the chart's size times "
+                "it is the quantity traded.",
+                "multiplier",
+            )
+        multiplier = float(multiplier)
     if derivative:
         if product == "CNC":
             raise Refused("Futures and options take Intraday (MIS) or Carry (NRML).", "product")
-        lots = _whole(form.get("lots", 1), 1, 100, "Lots", "lots")
+        if scaled:
+            max_lots = _whole(form.get("max_lots"), 1, 100, "The cap in lots", "max_lots")
+        else:
+            lots = _whole(form.get("lots", 1), 1, 100, "Lots", "lots")
+    elif scaled:
+        if product == "NRML":
+            raise Refused("Shares take Intraday (MIS) or Delivery (CNC).", "product")
+        if product == "CNC" and direction != m.LONG:
+            raise Refused(
+                "Delivery (CNC) cannot go short. Choose Intraday (MIS), or long only.", "direction"
+            )
+        max_lots = _whole(form.get("max_lots"), 1, 100000, "The cap in shares", "max_lots")
     else:
         if product == "NRML":
             raise Refused("Shares take Intraday (MIS) or Delivery (CNC).", "product")
@@ -346,9 +382,11 @@ def clean(form: dict[str, Any]) -> dict[str, Any]:
         "strike_offset": strike_offset,
         "product": product,
         "direction": direction,
-        "size_mode": m.FIXED,
+        "size_mode": size_mode,
         "lots": lots,
         "quantity": quantity,
+        "multiplier": multiplier,
+        "max_lots": max_lots,
         "max_age_s": _whole(
             form.get("max_age_s", m.MAX_AGE_DEFAULT_S),
             m.MAX_AGE_MIN_S,

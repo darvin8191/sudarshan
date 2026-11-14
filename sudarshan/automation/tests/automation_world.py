@@ -188,7 +188,7 @@ class FakeDesk:
             return True, {"status": "success", "orderid": f"2611160000{self.order_seq:02d}"}, 200
 
     def position(self, symbol: str, analyze: bool = True, product: str = "MIS") -> int:
-        exchange = "NFO" if symbol.endswith(("FUT", "CE", "PE")) else "NSE"
+        exchange = "NFO" if symbol.endswith("FUT") or symbol[-3:-2].isdigit() else "NSE"
         return self.positions.get((analyze, exchange, symbol, product), 0)
 
     # telling

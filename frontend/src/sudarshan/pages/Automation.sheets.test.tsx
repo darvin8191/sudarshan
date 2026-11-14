@@ -159,6 +159,29 @@ describe('the Automation sheets', () => {
     })
   })
 
+  it('makes a scaled strategy: a multiplier and a cap in place of the fixed size', async () => {
+    api.list.mockResolvedValue(listOf([]))
+    api.create.mockResolvedValue(made())
+    renderBook('/automation', <Automation />)
+    await settle()
+    await tap('New strategy')
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'SCL' } })
+    fireEvent.change(screen.getByLabelText('Size'), { target: { value: 'scaled' } })
+    expect(screen.queryByLabelText('Lots')).toBeNull()
+    fireEvent.change(screen.getByLabelText('Multiplier'), { target: { value: '65' } })
+    fireEvent.change(screen.getByLabelText('Cap, lots'), { target: { value: '2' } })
+    expect(screen.getByText(/or nothing is sent/)).toBeInTheDocument()
+    // an option strategy takes a fixed size: the choice goes away and lots come back
+    fireEvent.click(screen.getByRole('tab', { name: 'An option' }))
+    expect(screen.queryByLabelText('Size')).toBeNull()
+    expect(screen.getByLabelText('Lots')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('tab', { name: 'A future' }))
+    await tap('Create strategy')
+    const sent = api.create.mock.calls[0][0]
+    expect(sent).toMatchObject({ size_mode: 'scaled', multiplier: 65, max_lots: 2 })
+    expect(sent).not.toHaveProperty('lots')
+  })
+
   it('sizes a share chart in shares and offers Delivery, a future chart in lots', async () => {
     api.list.mockResolvedValue(listOf([]))
     renderBook('/automation', <Automation />)

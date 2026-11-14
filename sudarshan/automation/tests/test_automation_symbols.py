@@ -93,6 +93,20 @@ def test_size_vector(case):
         assert got == case["expect"]
 
 
+@pytest.mark.parametrize("case", VECTORS["scaled"], ids=[c["name"] for c in VECTORS["scaled"]])
+def test_scaled_size_vector(case):
+    """A8b: whole lots, never above the cap, never rounded."""
+    strategy = m.Strategy(id=1, name="SCL", **case["strategy"])
+    got = symbols.scaled_quantity(strategy, case["size"], case["lot"], case["freeze"])
+    if isinstance(case["expect"], dict):
+        assert isinstance(got, symbols.NotSized) and got.reason == case["expect"]["not_sized"]
+        if "figure" in case["expect"]:
+            assert got.figure == case["expect"]["figure"]
+    else:
+        assert got == case["expect"] and got % case["lot"] == 0
+        assert got // case["lot"] <= strategy.max_lots
+
+
 @pytest.mark.parametrize("case", VECTORS["held"], ids=[c["name"] for c in VECTORS["held"]])
 def test_a_held_contract_past_its_stop(case):
     got = symbols.held_expired(case["symbol"], case["exchange"], ms(case["now"]), MASTER["indices"])

@@ -49,6 +49,12 @@ def contract_name(symbol: str | None) -> str:
     return f"{base} {int(day)} {_MONTHS[month]} {tail}"
 
 
+def _is_option(symbol: str | None) -> bool:
+    """An option's symbol, never a share whose name happens to end in CE or PE (RELIANCE)."""
+    found = _CONTRACT.fullmatch(symbol or "")
+    return bool(found and found.group(6))
+
+
 def side(target: int) -> str:
     return _SIDE[(target > 0) - (target < 0)]
 
@@ -63,7 +69,13 @@ def product_name(product: str) -> str:
 
 def trades(strategy: m.Strategy) -> str:
     """The card's line: what the strategy trades, how, and how much."""
-    if strategy.lots:
+    if strategy.size_mode == m.SCALED:
+        unit = "lot" if strategy.exchange in ("NFO", "BFO") else "share"
+        most = strategy.max_lots or 0
+        size = f"chart size x {strategy.multiplier:g}, at most {most} {unit}" + (
+            "" if most == 1 else "s"
+        )
+    elif strategy.lots:
         size = f"{strategy.lots} lot" + ("" if strategy.lots == 1 else "s")
     else:
         size = f"{strategy.quantity} share" + ("" if strategy.quantity == 1 else "s")
@@ -225,6 +237,24 @@ def too_close(name: str, symbol: str, stop_s: int) -> str:
 
 
 def not_sized(name: str, reason: str, symbol: str = "", figure: int = 0) -> str:
+    if reason == "no_size":
+        return (
+            f"{name}: this alert does not carry the chart's position size, and {name} takes its "
+            "size from it. Nothing was sent. Use the strategy alert message from Alert set-up, or "
+            "give the strategy a fixed size."
+        )
+    if reason == "not_whole":
+        unit = "a whole number of shares" if figure <= 1 else f"whole lots of {figure}"
+        return (
+            f"{name}: the chart's size times this strategy's multiplier does not come to {unit} "
+            f"of {contract_name(symbol)}. Nothing was sent. Check the multiplier in the strategy."
+        )
+    if reason == "cap":
+        return (
+            f"{name}: the chart's size times this strategy's multiplier is above its cap for "
+            f"{contract_name(symbol)} ({figure}). Nothing was sent. Raise the cap in the strategy "
+            "if you mean to trade this size."
+        )
     if reason == "freeze":
         return (
             f"{name}: its size is above the most the exchange takes in one order for "
@@ -286,7 +316,7 @@ def expired(name: str, symbol: str) -> str:
 def sent(name: str, target: int, quantity: int, symbol: str) -> str:
     if target == 0:
         return f"{name}: exit sent for {contract_name(symbol)}."
-    if symbol.endswith(("CE", "PE")):
+    if _is_option(symbol):
         return f"{name}: order sent to buy {quantity} {contract_name(symbol)}."
     return f"{name}: order sent to be {side(target)} {quantity} {contract_name(symbol)}."
 
@@ -300,7 +330,7 @@ def cut_to_exit(name: str, symbol: str, said: str) -> str:
 def no_action(name: str, target: int, quantity: int, symbol: str, flat_found: bool) -> str:
     if target == 0 or flat_found:
         return f"{name}: no open position in {contract_name(symbol)}. Nothing to send."
-    if symbol.endswith(("CE", "PE")):
+    if _is_option(symbol):
         return f"{name}: already holds {quantity} {contract_name(symbol)}. Nothing to send."
     return f"{name}: already {side(target)} {quantity} {contract_name(symbol)}. Nothing to send."
 

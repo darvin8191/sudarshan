@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input'
 import { Segmented } from '@/sudarshan/journal/Segmented'
 import { BottomSheet } from '@/sudarshan/watchlist/BottomSheet'
 import { automationApi, LIST_KEY } from './api'
-import type { CreateAnswer, Direction, Product, Strategy, StrategyForm } from './types'
+import type { CreateAnswer, Direction, Product, SizeMode, Strategy, StrategyForm } from './types'
 
 interface Draft {
   name: string
@@ -22,6 +22,9 @@ interface Draft {
   product: Product
   direction: Direction
   size: string
+  size_mode: SizeMode
+  multiplier: string
+  max_lots: string
   max_age_s: string
   max_alerts_day: string
 }
@@ -37,6 +40,9 @@ const BLANK: Draft = {
   product: 'MIS',
   direction: 'both',
   size: '1',
+  size_mode: 'fixed',
+  multiplier: '',
+  max_lots: '',
   max_age_s: '30',
   max_alerts_day: '20',
 }
@@ -53,6 +59,9 @@ function draftOf(strategy: Strategy): Draft {
     product: strategy.product,
     direction: strategy.direction,
     size: String(strategy.lots ?? strategy.quantity ?? ''),
+    size_mode: strategy.kind === 'option' ? 'fixed' : strategy.size_mode,
+    multiplier: strategy.multiplier == null ? '' : String(strategy.multiplier),
+    max_lots: strategy.max_lots == null ? '' : String(strategy.max_lots),
     max_age_s: String(strategy.max_age_s),
     max_alerts_day: String(strategy.max_alerts_day),
   }
@@ -64,6 +73,14 @@ export const inLots = (draft: Pick<Draft, 'kind' | 'chart'>): boolean =>
 
 /** A whole number as typed, or null: the server's sentence then says what the field takes. */
 const whole = (text: string): number | null => (/^\d+$/.test(text.trim()) ? Number(text) : null)
+
+/** A number as typed, or null. */
+const numberOf = (text: string): number | null =>
+  /^\d+(\.\d+)?$/.test(text.trim()) ? Number(text) : null
+
+/** An option strategy always takes a fixed size. */
+const scaledOf = (draft: Pick<Draft, 'kind' | 'size_mode'>): boolean =>
+  draft.size_mode === 'scaled' && draft.kind !== 'option'
 
 export function formOf(draft: Draft): StrategyForm {
   const lots = inLots(draft)
@@ -82,7 +99,15 @@ export function formOf(draft: Draft): StrategyForm {
       expiry_rule: ruleOf(draft),
     }),
     ...(draft.kind === 'option' && { strike_offset: draft.strike_offset }),
-    ...(lots ? { lots: whole(draft.size) } : { quantity: whole(draft.size) }),
+    ...(scaledOf(draft)
+      ? {
+          size_mode: 'scaled' as const,
+          multiplier: numberOf(draft.multiplier),
+          max_lots: whole(draft.max_lots),
+        }
+      : lots
+        ? { lots: whole(draft.size) }
+        : { quantity: whole(draft.size) }),
   }
 }
 
@@ -348,18 +373,64 @@ export function StrategySheet({
               }
               onChange={(value) => set('product', value)}
             />
-            <Field label={lots ? 'Lots' : 'Shares'}>
-              {(id) => (
-                <Input
-                  id={id}
-                  className="h-12 text-base"
-                  inputMode="numeric"
-                  value={draft.size}
-                  onChange={(e) => set('size', e.target.value)}
-                />
-              )}
-            </Field>
+            {!scaledOf(draft) && (
+              <Field label={lots ? 'Lots' : 'Shares'}>
+                {(id) => (
+                  <Input
+                    id={id}
+                    className="h-12 text-base"
+                    inputMode="numeric"
+                    value={draft.size}
+                    onChange={(e) => set('size', e.target.value)}
+                  />
+                )}
+              </Field>
+            )}
           </div>
+          {draft.kind !== 'option' && (
+            <Choice
+              label="Size"
+              value={draft.size_mode}
+              options={[
+                ['fixed', 'Fixed'],
+                ['scaled', "Scaled from the chart's size"],
+              ]}
+              onChange={(value) => set('size_mode', value)}
+            />
+          )}
+          {scaledOf(draft) && (
+            <>
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="Multiplier">
+                  {(id) => (
+                    <Input
+                      id={id}
+                      className="h-12 text-base"
+                      inputMode="decimal"
+                      value={draft.multiplier}
+                      onChange={(e) => set('multiplier', e.target.value)}
+                    />
+                  )}
+                </Field>
+                <Field label={lots ? 'Cap, lots' : 'Cap, shares'}>
+                  {(id) => (
+                    <Input
+                      id={id}
+                      className="h-12 text-base"
+                      inputMode="numeric"
+                      value={draft.max_lots}
+                      onChange={(e) => set('max_lots', e.target.value)}
+                    />
+                  )}
+                </Field>
+              </div>
+              <p className="text-[0.875rem] text-[color:var(--text-secondary)]">
+                The quantity is the chart's position size times the multiplier. It must come to
+                whole {lots ? 'lots' : 'shares'} and stay at or under the cap, or nothing is sent.
+                Needs the strategy alert message, which carries the size.
+              </p>
+            </>
+          )}
           <Choice
             label="Direction"
             value={draft.direction}
