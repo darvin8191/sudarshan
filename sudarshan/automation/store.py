@@ -355,6 +355,31 @@ class AutomationStore:
                     state_row.version = (state_row.version or 0) + 1
             session.commit()
 
+    def note_unrecorded(self, alert_id: int, sentence: str) -> None:
+        """Only a sentence on a row that stays ``claimed``: its order's answer could not be
+        written, and the next alert settles it from the books (intake.settle)."""
+        with self._session() as session:
+            alert = session.get(AlertRow, alert_id)
+            if alert is not None and alert.verdict == "claimed":
+                alert.sentence = str(sentence)[:SENTENCE_KEEP]
+                session.commit()
+
+    def unsettled(self, strategy_id: int) -> list[dict[str, Any]]:
+        """A strategy's rows still ``claimed``, oldest first. Read holding the strategy's lock,
+        none of them is being handled: each is an alert whose answer was never written (the
+        write failed, or the server stopped), so what its order did is not known."""
+        with self._session() as session:
+            rows = session.scalars(
+                select(AlertRow)
+                .where(AlertRow.strategy_id == strategy_id, AlertRow.verdict == "claimed")
+                .order_by(AlertRow.id)
+                .limit(20)
+            ).all()
+            return [
+                {column.name: getattr(row, column.name) for column in AlertRow.__table__.columns}
+                for row in rows
+            ]
+
     def note_alert(self, strategy_id: int, **columns: Any) -> int | None:
         """A line that is no claim: a repeat, or a message that could not be read."""
         if not columns.get("claim"):

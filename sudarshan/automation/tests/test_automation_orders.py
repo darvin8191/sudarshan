@@ -382,11 +382,12 @@ def test_an_alert_whose_handling_died_stays_claimed_and_is_never_sent_twice(stor
     with pytest.raises(SystemExit):
         send(store, desk, token, body)
     desk.before_place = None
+    assert [r["verdict"] for r in lines(store, strategy.id)] == ["claimed"]
     assert send(store, desk, token, body).verdict == "repeat"  # TradingView sends it again
-    assert desk.placed == [] and [r["verdict"] for r in lines(store, strategy.id)] == [
-        "claimed",
-        "repeat",
-    ]
+    # M2: the next alert, holding the lock, settles the row from the books: nothing is held
+    rows = lines(store, strategy.id)
+    assert desk.placed == [] and [r["verdict"] for r in rows] == ["not_confirmed", "repeat"]
+    assert "Positions was read: ORB holds nothing." in rows[0]["sentence"]
     assert len(intake.LOCKS) == 0  # the lock was let go on the way out
 
 

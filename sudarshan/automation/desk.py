@@ -270,6 +270,48 @@ class Desk:
         token, broker = (found[0], found[1]) if found else (None, None)
         return (token, broker) if token and broker else (None, None)
 
+    def held_quantity(
+        self, exchange: str, symbol: str, product: str, api_key: str, analyze: bool
+    ) -> int | None:
+        """The signed quantity the account holds in one contract and product, in one pipe; or
+        ``None`` when it cannot be read. Never a guess: an unread book is not "flat".
+
+        The sandbox's own position row is the one its smart order reads. Upstox's is the
+        positions rows corrected by the order book's fills (``sudarshan.books.fills``), read in
+        that order, as an exit is sized: the row alone can show a fill a minute late. This only
+        reads; it is asked when an earlier alert's answer was never recorded (intake.settle).
+        """
+        try:
+            if analyze:
+                from database.sandbox_db import SandboxPositions
+                from services.sandbox_service import get_user_id_from_apikey
+
+                user_id = get_user_id_from_apikey(api_key)
+                if not user_id:
+                    return None
+                row = SandboxPositions.query.filter_by(
+                    user_id=user_id, symbol=symbol, exchange=exchange, product=product
+                ).first()
+                return int(row.quantity or 0) if row is not None else 0
+            token, broker = self.broker_session(api_key)
+            if token is None or broker != "upstox":
+                return None
+            import broker.upstox.api.order_api as upstox
+            from broker.upstox.mapping.transform_data import map_product_type
+            from sudarshan.books import exit_guard
+
+            upstox._invalidate_position_cache(token)
+            rows = upstox._position_rows(symbol, exchange, token)
+            orders = upstox._read_order_rows(token, exit_guard.EXIT_ORDERS_READ_S)
+            held = upstox._held_products(rows, symbol, exchange, orders)
+            if held is None:
+                return None
+            found = held.get(map_product_type(product), 0)
+            return None if found is None else int(found)
+        except Exception:
+            logger.exception("Automation: the position could not be read")
+            return None
+
     def place(self, order: dict[str, Any], api_key: str, analyze: bool) -> tuple[bool, Any, int]:
         """One smart order, in the pipe the caller decided. Every claim, hold, sizing rule and the
         risk gate are the service's and stay there.

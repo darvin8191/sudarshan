@@ -197,3 +197,53 @@ def test_the_sandbox_pipe_is_as_it_was(monkeypatch, store):
     out = intake.handle(token, strategy_alert("long", NOW - 1, before="flat"), TV, desk, store)
     assert out.verdict == "sent" and desk.placed[0]["analyze"] is True
     assert asked == []
+
+
+# ---- M2: what the account holds, for an alert whose answer was never recorded --------------------
+
+
+def test_m2_the_live_read_is_the_row_corrected_by_the_fills(live):
+    broker, desk, send = live
+    read = lambda: Desk.held_quantity(desk, "NFO", FUT, "MIS", desk.key, False)  # noqa: E731
+    assert read() == 0
+    assert send("long", before="flat").verdict == "sent"
+    # Upstox's positions row is a minute late: the order book's fill says long 65
+    assert broker.true_qty(FUT) == 65 and read() == 65
+    before = len(broker.orders)
+    assert read() == 65 and len(broker.orders) == before  # a read sends nothing
+    broker.orders_unreadable = True
+    assert read() is None  # an unread book is never "flat"
+
+
+def test_m2_no_broker_session_or_another_broker_reads_as_unknown(monkeypatch):
+    from database import auth_db
+
+    monkeypatch.setattr(auth_db, "get_auth_token_broker", lambda key: (None, None))
+    assert Desk().held_quantity("NFO", FUT, "MIS", "k" * 64, False) is None
+    monkeypatch.setattr(auth_db, "get_auth_token_broker", lambda key: ("token", "zerodha"))
+    assert Desk().held_quantity("NFO", FUT, "MIS", "k" * 64, False) is None
+
+
+def test_m2_the_sandbox_read_is_the_sandbox_s_own_position_row(monkeypatch):
+    import services.sandbox_service as sandbox_service
+    from database import sandbox_db
+
+    sandbox_db.Base.metadata.create_all(sandbox_db.engine)
+    monkeypatch.setattr(sandbox_service, "get_user_id_from_apikey", lambda key: "owner-m2")
+    read = lambda symbol: Desk().held_quantity("NFO", symbol, "MIS", "k" * 64, True)  # noqa: E731
+    try:
+        assert read(FUT) == 0
+        sandbox_db.db_session.add(
+            sandbox_db.SandboxPositions(
+                user_id="owner-m2", symbol=FUT, exchange="NFO", product="MIS", quantity=-65,
+                average_price=25000,
+            )
+        )  # fmt: skip
+        sandbox_db.db_session.commit()
+        assert read(FUT) == -65 and read("NIFTY29DEC26FUT") == 0
+        monkeypatch.setattr(sandbox_service, "get_user_id_from_apikey", lambda key: None)
+        assert read(FUT) is None
+    finally:
+        sandbox_db.SandboxPositions.query.filter_by(user_id="owner-m2").delete()
+        sandbox_db.db_session.commit()
+        sandbox_db.db_session.remove()

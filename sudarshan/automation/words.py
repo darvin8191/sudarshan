@@ -374,6 +374,39 @@ def interrupted(name: str) -> str:
     )
 
 
+def unrecorded(name: str, said: str = "") -> str:
+    """An order's answer could not be written: what is known is said, and what happens next."""
+    return (
+        f"{name}: an alert's order was handled but SUDARSHAN could not record the result. "
+        f"{said} Check Orders. Before the next alert is applied, {name}'s position is read "
+        "again."
+    ).replace("  ", " ")
+
+
+def settled(name: str, symbol: str | None, side_: str | None) -> str:
+    """What the books showed for an alert whose answer was never recorded."""
+    holds = f"{side_} {contract_name(symbol)}" if symbol else "nothing"
+    return (
+        f"{name}: the result of an earlier alert was not recorded, so Positions was read: "
+        f"{name} holds {holds}. Check Orders if that is not what you expect."
+    )
+
+
+def unsettled(name: str, target: int) -> str:
+    """The books could not be read to settle an earlier alert: an entry waits, an exit goes."""
+    return (
+        f"{name}: the result of an earlier alert was not recorded and Positions could not be "
+        f"read, so this {_what(target)} alert was not sent. Check Positions and Orders."
+    )
+
+
+def unsettled_gave_up(name: str) -> str:
+    return (
+        f"{name}: the result of an earlier alert was never recorded, and its position could not "
+        "be read since. Its order is not confirmed. Check Orders."
+    )
+
+
 def _service(said: str) -> str:
     """The order service's own sentence, passed on; never a code or a brace."""
     text = " ".join(str(said or "").split())[:300]

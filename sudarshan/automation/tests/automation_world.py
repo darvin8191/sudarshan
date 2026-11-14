@@ -81,6 +81,8 @@ class FakeDesk:
         self.phrase = "STOP"
         self.phrases_asked: list[tuple[str, str]] = []
         self.positions: dict[tuple, int] = {}
+        self.book_reads: list[tuple] = []  # every read of what the account holds (M2)
+        self.books_unreadable = False
         self.placed: list[dict[str, Any]] = []
         self.script: list[Any] = []  # answers to give next, before the book is asked
         self.delay = 0.0
@@ -193,6 +195,13 @@ class FakeDesk:
             self.positions[key] = want
             self.order_seq += 1
             return True, {"status": "success", "orderid": f"2611160000{self.order_seq:02d}"}, 200
+
+    def held_quantity(self, exchange, symbol, product, api_key, analyze) -> int | None:
+        assert api_key == self.key
+        self.book_reads.append((analyze, exchange, symbol, product))
+        if self.books_unreadable:
+            return None
+        return self.positions.get((analyze, exchange, symbol, product), 0)
 
     def position(self, symbol: str, analyze: bool = True, product: str = "MIS") -> int:
         exchange = "NFO" if symbol.endswith("FUT") or symbol[-3:-2].isdigit() else "NSE"

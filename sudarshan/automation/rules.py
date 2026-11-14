@@ -235,6 +235,69 @@ def state_after(
     return values
 
 
+@dataclass(frozen=True)
+class Books:
+    """What the account holds of the contracts an unsettled alert can have touched.
+
+    ``named`` is the (exchange, symbol) the alert's row names: the contract it ends in. ``held``
+    is the one the state holds. ``quantity`` is the signed quantity the account shows for each.
+    """
+
+    named: tuple | None
+    held: tuple | None
+    quantity: dict
+
+
+def state_settled(
+    books: Books, row: dict, bought: bool, now_ms: int, state: m.State
+) -> dict[str, object]:
+    """The state for a strategy whose alert was claimed and never answered on record, from what
+    the account holds. Pure. The account is the truth and the state only a note:
+
+    - the contract the alert named is held on the alert's side: the strategy holds it, and the
+      alert was applied (its time becomes the order mark);
+    - else the contract the state held is still held: the alert's order did not go, and the
+      state stays as it was;
+    - else nothing is held: the strategy holds nothing.
+
+    ``bought`` says the strategy only buys (an option strategy), so what it holds is long
+    whichever way the alert pointed.
+    """
+    target = int(row.get("target") or 0)
+    mark = min(int(row.get("fired_s") or 0), now_ms // 1000) or state.last_fired_s
+    named_qty = books.quantity.get(books.named, 0) if books.named else 0
+    held_qty = books.quantity.get(books.held, 0) if books.held else 0
+    wanted = named_qty > 0 if bought or target > 0 else named_qty < 0
+    if target != 0 and books.named and wanted:
+        side = m.LONG if bought or target > 0 else m.SHORT
+        same = (state.held_symbol, state.held_side) == (books.named[1], side)
+        return {
+            "last_target": target,
+            "last_fired_s": mark,
+            "held_exchange": books.named[0],
+            "held_symbol": books.named[1],
+            "held_side": side,
+            "held_since_ms": state.held_since_ms if same else now_ms,
+        }
+    if books.held and held_qty != 0:
+        return {
+            "last_target": state.last_target,
+            "last_fired_s": state.last_fired_s,
+            "held_exchange": state.held_exchange,
+            "held_symbol": state.held_symbol,
+            "held_side": state.held_side,
+            "held_since_ms": state.held_since_ms,
+        }
+    return {
+        "last_target": 0,
+        "last_fired_s": mark if target == 0 else state.last_fired_s,
+        "held_exchange": None,
+        "held_symbol": None,
+        "held_side": None,
+        "held_since_ms": None,
+    }
+
+
 def quiet_days(since_day: str, today: str, trading) -> int:
     """Whole trading days that passed with no alert: the days after ``since_day`` and before
     ``today`` (both YYYY-MM-DD in India) on which the market traded. ``trading`` answers that for
