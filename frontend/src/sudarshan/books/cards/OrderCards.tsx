@@ -33,6 +33,8 @@ import {
   Confirm,
   Details,
   EmptyCard,
+  ExportIcon,
+  exportBook,
   Last,
   LoadingCards,
   OUTLINED,
@@ -187,6 +189,9 @@ export function cancelWarning(mark: SentMark | undefined): string | null {
   if (!mark?.expired) return null
   return `A cancel was sent at ${istTime(mark.sentAt)} and the order still shows working.`
 }
+
+/** The day's order book as a CSV, from the app's own export route (B3). */
+const exportOrders = () => exportBook('/orderbook/export', 'orderbook')
 
 /** Why Cancel all sends nothing with no order open. */
 export const NOTHING_TO_CANCEL = 'Nothing is open to cancel.'
@@ -431,6 +436,7 @@ const OrderBoard = memo(function OrderBoard({
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-center justify-end gap-2" data-testid="order-actions">
+        <ExportIcon what="order book" run={exportOrders} />
         <RefreshIcon refreshing={refreshing} onRefresh={refresh} />
         <button
           type="button"

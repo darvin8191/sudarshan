@@ -536,6 +536,19 @@ describe('Order book on a phone: the cards', () => {
     await tap.click(screen.getByRole('tab', { name: 'GTT' }))
     expect(await screen.findByText('GTT book as cards')).toBeInTheDocument()
   })
+
+  it('exports the order book from the app’s own route, never following its redirect (B3)', async () => {
+    const tap = user()
+    const fetch = vi.fn(async () => ({ ok: false, status: 0, headers: { get: () => null } }))
+    vi.stubGlobal('fetch', fetch)
+    await renderPhone(WORKING)
+    const actions = screen.getByTestId('order-actions')
+    await tap.click(within(actions).getByRole('button', { name: 'Export order book' }))
+    expect(fetch).toHaveBeenCalledWith(
+      '/orderbook/export',
+      expect.objectContaining({ redirect: 'manual' })
+    )
+  })
 })
 
 describe('Order book on a phone: the sheet and its actions', () => {
