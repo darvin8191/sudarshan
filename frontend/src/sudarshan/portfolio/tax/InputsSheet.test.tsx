@@ -28,10 +28,10 @@ import { draftOf, fmvWanted, newDraft, rowOf } from './inputs'
 const INPUTS: TaxInputs = {
   member_id: 1,
   accounts: [
-    { id: 1, name: 'Upstox', kind: 'upstox', tax_mode: 'reports' },
-    { id: 2, name: 'Old demat', kind: 'demat', tax_mode: 'ledger' },
-    { id: 3, name: 'Gold locker', kind: 'other', tax_mode: 'none' },
-  ] as TaxInputs['accounts'],
+    { id: 1, name: 'Upstox', kind: 'upstox', tax_mode: 'reports', version: 1 },
+    { id: 2, name: 'Old demat', kind: 'demat', tax_mode: 'ledger', version: 4 },
+    { id: 3, name: 'Gold locker', kind: 'other', tax_mode: 'none', version: 2 },
+  ],
   opening_lots: [],
   fmvs: [{ id: 5, isin: 'INE002A01018', fmv_u: 9_215_500, source: 'owner', version: 2 }],
   carries: [
@@ -167,6 +167,52 @@ describe('the sheet', () => {
     expect(accounts.getByText(/Counted from Upstox’s reports/)).toBeTruthy()
     expect(accounts.getByText(/Counted from its entries/)).toBeTruthy()
     expect(accounts.getByText(/Not for tax/)).toBeTruthy()
+    // The Upstox account's way is not the owner's to set: its row opens nothing.
+    expect(accounts.getAllByRole('button').map((b) => b.textContent)).toEqual([
+      expect.stringContaining('Old demat'),
+      expect.stringContaining('Gold locker'),
+    ])
+  })
+
+  it('sets an account of his own as not for tax only after the dry run, from its version', async () => {
+    api.save.mockResolvedValue({
+      enabled: true,
+      data: {
+        kind: 'account_mode',
+        row: null,
+        effect: ['In FY 2026-27 this changes short-term gain from Rs 4,994.88 to Rs 0.'],
+      },
+    })
+    const refreshed = show()
+    const accounts = within(await screen.findByRole('region', { name: 'Accounts' }))
+    await userEvent.click(accounts.getByRole('button', { name: /Old demat/ }))
+    expect(screen.getByRole('heading', { name: 'How this account counts' })).toBeTruthy()
+    const choice = screen.getByLabelText('How it counts for tax') as HTMLSelectElement
+    expect(choice.value).toBe('ledger')
+    expect(
+      within(choice)
+        .getAllByRole('option')
+        .map((o) => o.textContent)
+    ).toEqual(['Choose', 'Counted from its entries', 'Not for tax'])
+    expect(screen.queryByRole('button', { name: 'Remove this entry' })).toBeNull()
+    await userEvent.selectOptions(choice, 'none')
+    expect(screen.queryByRole('button', { name: 'Save' })).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'See what it changes' }))
+    const effect = within(await screen.findByRole('region', { name: 'What this changes' }))
+    expect(effect.getByText(/short-term gain from Rs 4,994.88 to Rs 0/)).toBeTruthy()
+    const row = { member_id: 1, account_id: 2, tax_mode: 'none' }
+    expect(api.save).toHaveBeenLastCalledWith({
+      kind: 'account_mode',
+      row,
+      id: 2,
+      version: 4,
+      dry_run: true,
+      fy: 2026,
+    })
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(refreshed).toHaveBeenCalled())
+    expect(api.save.mock.lastCall?.[0]).toMatchObject({ kind: 'account_mode', row, version: 4 })
+    expect(api.save.mock.lastCall?.[0].dry_run).toBeUndefined()
   })
 
   it('a price the paper waits for opens its form filled; the dry run speaks before Save exists', async () => {

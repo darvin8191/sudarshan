@@ -1,6 +1,7 @@
 // SUDARSHAN P7 F2 (M7.27): what the owner types for the tax working paper, as the rows the service
 // keeps (`tax_input_set`): a loss brought forward from a filed return, the price of 31 Jan 2018 of
-// an old holding, a day's trading marked as delivery. Every check of a value is the service's own
+// an old holding, a day's trading marked as delivery, and how an account of his own counts
+// (owner decision 9: "not for tax"). Every check of a value is the service's own
 // (its sentence comes back); a text that is not a number goes as null and gets that sentence.
 import {
   dayToInput,
@@ -22,7 +23,9 @@ import type {
   TaxPack,
 } from '../types'
 
-export type InputKind = 'carry' | 'fmv' | 'day_override'
+export type InputKind = 'carry' | 'fmv' | 'day_override' | 'account_mode'
+/** The kinds kept as a list of entries, each with its own "add" button. */
+export type ListKind = Exclude<InputKind, 'account_mode'>
 export type Fields = Record<string, string>
 /** A form open in the sheet: a new row, or a kept one at the version it was read at. */
 export interface Draft {
@@ -32,7 +35,7 @@ export interface Draft {
   fields: Fields
 }
 
-export const KIND_WORDS: Record<InputKind, { title: string; add: string; none: string }> = {
+export const KIND_WORDS: Record<ListKind, { title: string; add: string; none: string }> = {
   carry: {
     title: 'Losses brought forward',
     add: 'Add a loss from a filed return',
@@ -61,11 +64,31 @@ export const MODE_WORDS: Record<TaxMode, string> = {
   none: 'Not for tax',
 }
 
-export function newDraft(kind: InputKind, fields: Fields = {}): Draft {
+/** The form's heading for each kind. */
+export const FORM_TITLES: Record<InputKind, string> = {
+  carry: KIND_WORDS.carry.title,
+  fmv: KIND_WORDS.fmv.title,
+  day_override: KIND_WORDS.day_override.title,
+  account_mode: 'How this account counts',
+}
+/** How an account of the owner's own can count; the Upstox account's way is not his to set. */
+export const OWN_MODES = ['ledger', 'none'] as const satisfies readonly TaxMode[]
+
+/** The form that changes how `account` counts, from the version it was read at. */
+export function modeDraft(account: TaxAccount): Draft {
+  return {
+    kind: 'account_mode',
+    id: account.id,
+    version: account.version,
+    fields: { account_id: String(account.id), tax_mode: account.tax_mode },
+  }
+}
+
+export function newDraft(kind: ListKind, fields: Fields = {}): Draft {
   return { kind, fields }
 }
 
-export function draftOf(kind: InputKind, row: TaxCarryInput | TaxFmv | TaxDayOverride): Draft {
+export function draftOf(kind: ListKind, row: TaxCarryInput | TaxFmv | TaxDayOverride): Draft {
   const fields: Fields = {}
   if (kind === 'carry') {
     const carry = row as TaxCarryInput
@@ -103,6 +126,13 @@ export function rowOf(draft: Draft, memberId: number): Record<string, unknown> {
     }
   }
   if (draft.kind === 'fmv') return { isin: f.isin ?? '', fmv_u: parsePrice(f.price ?? '') }
+  if (draft.kind === 'account_mode') {
+    return {
+      member_id: memberId,
+      account_id: whole(f.account_id),
+      tax_mode: f.tax_mode || null,
+    }
+  }
   return {
     member_id: memberId,
     account_id: whole(f.account_id),

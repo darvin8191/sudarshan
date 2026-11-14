@@ -265,6 +265,7 @@ export const TAX_INPUT_KINDS = [
   'day_override',
   'trade_mark',
   'settings',
+  'account_mode',
 ] as const
 export type TaxInputKind = (typeof TAX_INPUT_KINDS)[number]
 export const TAX_MODES = ['reports', 'ledger', 'none'] as const
@@ -2106,12 +2107,15 @@ export interface TaxSettings {
   version: number
 }
 
-/** An account of the taxpayer and how it counts: by Upstox's reports, by its ledger, or not. */
+/** An account of the taxpayer and how it counts: by Upstox's reports, by its ledger, or not.
+ * `tax_input_set` with kind `account_mode` (row `member_id`, `account_id`, `tax_mode`) sets an
+ * account of the owner's own to `ledger` or `none`, from this version; never the Upstox account. */
 export interface TaxAccount {
   id: number
   name: string
   kind: AccountKind
   tax_mode: TaxMode
+  version: number
 }
 
 export interface TaxInputs {
@@ -2132,13 +2136,15 @@ export type TaxInputRecord =
   | TaxDayOverride
   | TaxTradeMark
   | TaxSettings
+  | TaxAccount
 
 export interface TaxInputSetArgs {
   kind: TaxInputKind
   /** The row's own fields, as the matching record holds them (no id, source or version). */
   row: Record<string, unknown>
   /** An existing row and the version it was read at; none for a new one. The readings always
-   * send the version they were read at (0 before the first save). */
+   * send the version they were read at (0 before the first save), and `account_mode` the
+   * account's. */
   id?: number
   version?: number
   request_id?: string

@@ -1,8 +1,9 @@
 // SUDARSHAN P7 F2 (M7.27): the owner's inputs to the tax working paper (design p7 9.1; owner
 // decisions 5, 7, 8, 9): losses brought forward from his filed returns beside SUDARSHAN's own
 // figure, the prices of 31 Jan 2018 of the old holdings the paper lists, days marked as delivery,
-// and how each account counts. Nothing is saved before its dry run has said, in the service's
-// sentences, what it changes in the year on screen; a changed field asks for the dry run again.
+// and how each account counts (an account of his own tabs can be set as not for tax). Nothing is
+// saved before its dry run has said, in the service's sentences, what it changes in the year on
+// screen; a changed field asks for the dry run again.
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ChevronRight, Plus } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
@@ -20,11 +21,14 @@ import {
   countedAccounts,
   type Draft,
   draftOf,
+  FORM_TITLES,
   fmvWanted,
-  type InputKind,
   KIND_WORDS,
+  type ListKind,
   MODE_WORDS,
+  modeDraft,
   newDraft,
+  OWN_MODES,
   ownFigure,
   rowOf,
 } from './inputs'
@@ -105,7 +109,24 @@ function Form({
   const running = fyOfDay(dayOfInstant(Date.now()))
   return (
     <div className="flex flex-col gap-3">
-      <h3 className="text-base font-bold">{KIND_WORDS[draft.kind].title}</h3>
+      <h3 className="text-base font-bold">{FORM_TITLES[draft.kind]}</h3>
+      {draft.kind === 'account_mode' && (
+        <>
+          <p className="text-[0.9375rem] font-semibold break-words">
+            {inputs.accounts.find((a) => a.id === draft.id)?.name}
+          </p>
+          <Choice
+            label="How it counts for tax"
+            value={fields.tax_mode ?? ''}
+            onChange={set('tax_mode')}
+            options={OWN_MODES.map((mode) => ({ value: mode, label: MODE_WORDS[mode] }))}
+          />
+          <p className="text-xs text-[color:var(--text-tertiary)]">
+            An account that is not for tax is left out of the working paper: its sales, its
+            dividends and its losses. Its entries stay in its tab.
+          </p>
+        </>
+      )}
       {draft.kind === 'carry' && (
         <>
           <Choice
@@ -142,7 +163,7 @@ function Form({
           options={countedAccounts(inputs).map((a) => ({ value: String(a.id), label: a.name }))}
         />
       )}
-      {draft.kind !== 'carry' && (
+      {(draft.kind === 'fmv' || draft.kind === 'day_override') && (
         <Box
           label="ISIN of the share"
           value={fields.isin ?? ''}
@@ -207,6 +228,7 @@ function Form({
         Back to the list
       </button>
       {draft.id !== undefined &&
+        draft.kind !== 'account_mode' &&
         (removing ? (
           <button
             type="button"
@@ -231,7 +253,7 @@ function Group({
   onAdd,
   empty,
 }: {
-  kind: InputKind
+  kind: ListKind
   children: React.ReactNode
   onAdd: () => void
   empty: boolean
@@ -371,11 +393,14 @@ function Lists({
               key={account.id}
               title={account.name}
               sub={`${ACCOUNT_KIND_LABELS[account.kind]} · ${MODE_WORDS[account.tax_mode]}`}
+              figure={account.kind === 'upstox' ? undefined : 'Change'}
+              onOpen={account.kind === 'upstox' ? undefined : () => onDraft(modeDraft(account))}
             />
           ))}
         </ul>
         <p className="text-xs text-[color:var(--text-tertiary)]">
-          How an account counts cannot be changed on this screen yet.
+          The Upstox account always counts from Upstox’s reports. An account of your own tabs counts
+          from its entries, or can be set as not for tax.
         </p>
       </section>
     </div>
