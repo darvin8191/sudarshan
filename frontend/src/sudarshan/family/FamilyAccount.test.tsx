@@ -224,7 +224,7 @@ describe('Join', () => {
     const link = await screen.findByRole('link', { name: 'Open Telegram' })
     expect(link.getAttribute('href')).toBe('https://t.me/synthetic_bot?start=code1')
     await user.click(screen.getByRole('button', { name: 'Continue' }))
-    expect(where.path).toBe('/family')
+    expect(where.path).toBe('/family/')
     expect(onlyFamily(router.urls())).toBe(true)
   })
   // Review M5 (v0.12.0): Finish answered that the invite had ended and the page went back to the
@@ -317,7 +317,7 @@ describe('Login', () => {
     await user.type(screen.getByLabelText('6-digit code'), '123 456')
     expect(submit.disabled).toBe(false)
     await user.click(submit)
-    await waitFor(() => expect(where.path).toBe('/family'))
+    await waitFor(() => expect(where.path).toBe('/family/'))
     const post = router.calls.find((call) => call.method === 'POST')
     expect(post?.body).toEqual({
       handle: 'member_one',
@@ -331,7 +331,7 @@ describe('Login', () => {
   it('goes straight on when the phone is already signed in', async () => {
     routeFetch({ '/family/api/me': ok(meOf('viewer')) })
     mountFamily('/family/login', <FamilyLogin />)
-    await waitFor(() => expect(where.path).toBe('/family'))
+    await waitFor(() => expect(where.path).toBe('/family/'))
   })
 })
 

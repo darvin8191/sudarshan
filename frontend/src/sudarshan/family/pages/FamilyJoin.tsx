@@ -22,6 +22,7 @@ import { registerFamilyWorker } from '@/sudarshan/pwa/register'
 import { FamilyError, familyApi } from '../api'
 import { FamilyBadge } from '../FamilyBadge'
 import { Field, OUTLINE, PRIMARY, Problem } from '../forms'
+import { FAMILY_HOME } from '../navigation'
 import { QrCode } from '../QrCode'
 import { forgetMember, ME_KEY } from '../session'
 import { LIMITS, type Me } from '../types'
@@ -306,7 +307,7 @@ type After = 'install' | 'notifications' | 'telegram'
 
 /**
  * What follows a sign-in on this phone, one step at a time and each one skippable: the sentence
- * that it stays signed in for 30 days, the install hint, the Telegram link. It ends on `/family`.
+ * that it stays signed in for 30 days, the install hint, the Telegram link. It ends on `/family/`.
  */
 function AfterJoin() {
   const navigate = useNavigate()
@@ -316,7 +317,7 @@ function AfterJoin() {
   const [busy, setBusy] = useState(false)
   const install = useInstallState()
   const [pushState, setPushState] = useState<PushStatus | null>(null)
-  const land = () => navigate('/family', { replace: true })
+  const land = () => navigate(FAMILY_HOME, { replace: true })
 
   // Chrome's permission question is asked here, on this tap, and nowhere before it.
   const turnOn = async () => {

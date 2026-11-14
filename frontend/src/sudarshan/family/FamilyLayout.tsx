@@ -24,7 +24,7 @@ import { BottomSheet } from '@/sudarshan/watchlist/BottomSheet'
 import { FamilyError, familyApi, onSignedOut } from './api'
 import { FamilyBadge } from './FamilyBadge'
 import { getFamilyManager } from './familyManager'
-import { familyMenu, familyTitle } from './navigation'
+import { bare, FAMILY_HOME, familyMenu, familyTitle } from './navigation'
 import {
   claimForMember,
   FamilyMeContext,
@@ -39,8 +39,9 @@ import {
 const LOGIN = '/family/login'
 
 function isActive(pathname: string, href: string): boolean {
-  const here = pathname.replace(/\/$/, '') || '/'
-  return href === '/family' ? here === '/family' : here === href || here.startsWith(`${href}/`)
+  const here = bare(pathname)
+  const there = bare(href)
+  return there === bare(FAMILY_HOME) ? here === there : here === there || here.startsWith(`${there}/`)
 }
 
 /** The phone can not reach the service and there is no earlier answer to keep showing. */
@@ -128,6 +129,17 @@ export function FamilyLayout() {
   useEffect(() => {
     if (memberId !== null) markSignedIn()
   }, [memberId])
+
+  // Review M7: `/family` is outside the installed app's scope; the Dashboard lives at `/family/`.
+  if (location.pathname === bare(FAMILY_HOME)) {
+    return (
+      <Navigate
+        to={{ pathname: FAMILY_HOME, search: location.search, hash: location.hash }}
+        replace
+        state={location.state}
+      />
+    )
+  }
 
   if (signedOut) {
     // Review M1: the service's own sentence (paused, removed, expired, signed out elsewhere) goes

@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { ReactNode } from 'react'
-import { MemoryRouter, Route, Routes } from 'react-router'
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { FamilyBadge, WIDE_ONLY } from './FamilyBadge'
 import { FamilyLayout } from './FamilyLayout'
@@ -303,6 +303,45 @@ describe('the viewer bottom bar', () => {
     expect(names).toEqual(['Portfolio', 'Settings'])
     expect(screen.queryByText('Orders')).toBeNull()
     expect(screen.queryByText('Trades')).toBeNull()
+  })
+})
+
+// Review M7 (v0.12.0): the Dashboard link and the sign-in redirect led to `/family`, outside the
+// installed app's scope `/family/`. Both fail on the old shell.
+describe('the Dashboard address', () => {
+  function Where() {
+    const location = useLocation()
+    return <p data-testid="where">{location.pathname}</p>
+  }
+
+  it('is /family/ on the bar, and stays marked as the current page', async () => {
+    routeFetch({ '/family/api/me': ok(meOf('viewer')) })
+    mount('/family/')
+    const nav = await screen.findByRole('navigation', { name: 'Family' })
+    const link = within(nav).getByRole('link', { name: 'Dashboard' })
+    expect(link).toHaveAttribute('href', '/family/')
+    expect(link).toHaveAttribute('aria-current', 'page')
+    expect(screen.getByRole('heading', { level: 1, name: 'Dashboard' })).toBeInTheDocument()
+    expect(within(nav).getByRole('link', { name: 'Positions' })).not.toHaveAttribute('aria-current')
+  })
+
+  it('moves a phone that opened /family to /family/', async () => {
+    routeFetch({ '/family/api/me': ok(meOf('viewer')) })
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={['/family']}>
+          <Where />
+          <Routes>
+            <Route path="/family" element={<FamilyLayout />}>
+              <Route index element={<Probe label="Dashboard" />} />
+            </Route>
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>
+    )
+    await screen.findByText('Dashboard for member_one')
+    expect(screen.getByTestId('where').textContent).toBe('/family/')
   })
 })
 

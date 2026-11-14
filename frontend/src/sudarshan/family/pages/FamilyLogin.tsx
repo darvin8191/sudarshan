@@ -11,6 +11,7 @@ import { BrandLockup } from '@/sudarshan/BrandLockup'
 import { FamilyError, familyApi } from '../api'
 import { FamilyBadge } from '../FamilyBadge'
 import { Field, Notice, PRIMARY, Problem } from '../forms'
+import { FAMILY_HOME } from '../navigation'
 import { clearSignedIn, forgetMember, ME_KEY, markSignedIn, reasonOf } from '../session'
 
 export const FORGOT =
@@ -79,7 +80,7 @@ export default function FamilyLogin() {
     }
   }
 
-  if (signedIn) return <Navigate to="/family" replace />
+  if (signedIn) return <Navigate to={FAMILY_HOME} replace />
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4 py-6">
