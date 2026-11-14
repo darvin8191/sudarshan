@@ -262,8 +262,13 @@ class Desk:
         """One smart order, in the pipe the caller decided. Every claim, hold, sizing rule and the
         risk gate are the service's and stay there."""
         from services.place_smart_order_service import place_smart_order
+        from sudarshan.books import add_sizing
 
-        return place_smart_order(dict(order), api_key=api_key, analyze=analyze)
+        # A7: an order of the intake's that only adds is sized from the fills, not from a
+        # positions row that may not show the strategy's last fill yet. The mark is this call's
+        # alone and no part of the order, so no event or log line carries it.
+        with add_sizing.sized_from_fills():
+            return place_smart_order(dict(order), api_key=api_key, analyze=analyze)
 
     # -- telling the owner ----------------------------------------------------------------------
 

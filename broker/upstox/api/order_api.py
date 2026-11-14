@@ -25,7 +25,11 @@ from broker.upstox.mapping.transform_data import (
 )
 from database.auth_db import get_auth_token
 from database.token_db import get_br_symbol, get_symbol, get_token
-from sudarshan.books import exit_guard, fills  # SUDARSHAN M6.9: an Exit all's exits, noted
+from sudarshan.books import (
+    add_sizing,  # SUDARSHAN M12.1 (A7): the Automation intake's adds, sized from the fills
+    exit_guard,  # SUDARSHAN M6.9: an Exit all's exits, noted
+    fills,
+)
 from sudarshan.books.single_exit import EXIT_NOT_CONFIRMED, placed_order_ids  # SUDARSHAN M6.9
 from sudarshan.guard import gate as risk_gate  # SUDARSHAN M5.13: the risk gate
 from utils.broker_backpressure import (
@@ -666,7 +670,35 @@ def place_smartorder_api(data, auth):
             else:
                 row_position = int(get_open_position(symbol, exchange, request_product, auth))
                 current_position = row_position
-                if _reduces_or_crosses(row_position, position_size):
+                closes_from = row_position  # the position a working closing order is looked for on
+                claims = _reduces_or_crosses(row_position, position_size)
+                if not claims and add_sizing.asked():
+                    # SUDARSHAN M12.1 (A7): an order from the Automation intake that only adds, as
+                    # the row says, is sized as one that reduces is: the rows, then the order
+                    # book, corrected by its fills. The row alone can show a fill a minute late:
+                    # an entry right after the strategy's own exit then read "already matched",
+                    # and one repeated before the row showed the first went beside it. When what
+                    # is held cannot be worked out nothing is sent, which is safe for an entry.
+                    # It takes no claim, so it is never refused for being busy; only when the
+                    # corrected figure shows that it reduces or crosses the position is it
+                    # claimed, checked and held below, as any such order is. A call without the
+                    # mark (every other caller) makes no order book read, as before.
+                    rows = _position_rows(symbol, exchange, auth)
+                    orders = _read_order_rows(auth, exit_guard.EXIT_ORDERS_READ_S)
+                    add_held = _held_products(rows, symbol, exchange, orders)
+                    if add_held is None:
+                        logger.warning(f"Order for {symbol} not sent: the quantity held is unknown")
+                        said = exit_guard.exit_not_sized(
+                            exit_guard.position_of(exchange, symbol, product),
+                            orders is not None,
+                            order=True,
+                        )
+                        refusal = {"status": "error", "message": said, "nothing_sent": True}
+                        return _ErrorResponse(424), refusal, None
+                    current_position = add_held.get(request_product, 0)
+                    closes_from = current_position
+                    claims = _reduces_or_crosses(current_position, position_size)
+                if claims:
                     # SUDARSHAN M6.9 (Y2): an order that reduces or crosses the position, as the
                     # row says, claims the position before the read it is sized from and holds
                     # it until its order is sent and noted, as a size-0 exit does: an Exit all
@@ -709,7 +741,7 @@ def place_smartorder_api(data, auth):
                     # order is looked for on the side that closes what the row shows.
                     reducing = True
                     refused = _market_exit_working(
-                        rows, orders, symbol, exchange, product, request_product, row_position,
+                        rows, orders, symbol, exchange, product, request_product, closes_from,
                         order=True,
                     )  # fmt: skip
                     if refused:
