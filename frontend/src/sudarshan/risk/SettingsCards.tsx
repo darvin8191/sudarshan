@@ -62,8 +62,10 @@ interface Said {
  * Saving one card's changes. A change the server says loosens a limit is kept as it was asked,
  * and confirmed with the phrase as that same change: never the card's fields as they are by
  * then, so a "turn off" confirmed is a turn off. One save at a time, however it is tapped.
+ * `onSettled` hears each change once its save has its last answer: saved, refused or not
+ * answered, never the server asking for the phrase (the change still waits then).
  */
-export function useSaveSettings() {
+export function useSaveSettings(onSettled?: (changes: SettingsChange) => void) {
   const queryClient = useQueryClient()
   const sending = useRef(false)
   const [busy, setBusy] = useState(false)
@@ -91,9 +93,11 @@ export function useSaveSettings() {
       if (answer.ok || answer.code === 409) {
         void queryClient.invalidateQueries({ queryKey: RISK_STATUS_KEY })
       }
+      onSettled?.(changes)
       return answer.ok
     } catch {
       setSaid({ ok: false, message: NOT_SAVED })
+      onSettled?.(changes)
       return false
     } finally {
       sending.current = false
@@ -315,25 +319,39 @@ export function DailyLimitEditor({
   settings: RiskSettings
   days?: RiskStatus['daily']
 }) {
-  const saver = useSaveSettings()
   const current = settings.daily_loss_limit
   const [text, setText] = useState(current === null ? '' : String(current))
   // The limit the lock warning was confirmed for: a second tap on the same figure saves it.
   const [confirmed, setConfirmed] = useState<number | null>(null)
+  // The limit whose save has its answer, saved or refused: the warning is about a save still to
+  // make, so it goes with that answer, not when the status is next read (which can take a while,
+  // or fail), and an edit or the first tap of a new try brings it back.
+  const [answered, setAnswered] = useState<unknown>(undefined)
+  const saver = useSaveSettings((changes) => {
+    setAnswered(changes.daily_loss_limit)
+    setConfirmed(null)
+  })
   // biome-ignore lint/correctness/useExhaustiveDependencies: refilled per saved version only
   useEffect(() => {
     if (saver.phraseNeeded) return // the change waiting for the phrase stays on the card
     setText(current === null ? '' : String(current))
     setConfirmed(null)
+    setAnswered(undefined)
   }, [settings.updated_at, saver.phraseNeeded])
   const typed = numberOf(text)
   const loss = lossToday(days)
   // Only while the typed limit is not the saved one: once saved, the day card says the rest.
   const locks =
     !Number.isNaN(typed) && typed > 0 && typed !== current && loss !== null && typed <= loss
-  const asking = locks && confirmed === typed
+  const warns = locks && answered !== typed
+  const asking = warns && confirmed === typed
+  const edit = (next: string) => {
+    setText(next)
+    setAnswered(undefined)
+  }
   const save = () => {
     if (locks && !asking) {
+      setAnswered(undefined)
       setConfirmed(typed) // the first tap: the card says what saving does, the second saves
       return
     }
@@ -347,10 +365,10 @@ export function DailyLimitEditor({
         label={current === null ? 'Set a limit for the day' : 'Limit for the day'}
         unit="₹ of loss"
         value={text}
-        onChange={setText}
+        onChange={edit}
         whole
       />
-      {locks && loss !== null && (
+      {warns && loss !== null && (
         <p role="alert" className="sd-risk-note sd-risk-note--day" data-testid="daily-locks-today">
           <TriangleAlert aria-hidden="true" className="size-5 shrink-0" />
           {locksTodayWords(loss)}

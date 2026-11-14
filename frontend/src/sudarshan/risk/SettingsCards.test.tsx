@@ -359,6 +359,48 @@ describe("the daily limit, typed at or below the day's loss", () => {
     )
   })
 
+  // Backlog 2c (Analyzer session): after a save the warning stayed until the status was read
+  // again, beside "Saved."; the card's settings below stay the old ones throughout.
+  function saveAtLockingLimit() {
+    wrap(
+      <DailyLimitEditor
+        settings={{ ...SETTINGS, daily_loss_limit: 6000 }}
+        days={{ live: today({}) }}
+      />
+    )
+    fireEvent.change(screen.getByLabelText('Limit for the day'), { target: { value: '4000' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save the daily limit' }))
+    expect(screen.getByTestId('daily-locks-today')).toBeInTheDocument()
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Save, and lock new orders until tomorrow' })
+    )
+  }
+
+  it('stops warning as soon as the save is answered saved, before the status is read', async () => {
+    saveSettings.mockResolvedValue(answer())
+    saveAtLockingLimit()
+    expect(await screen.findByText('Saved.')).toBeInTheDocument()
+    expect(screen.queryByTestId('daily-locks-today')).toBeNull()
+  })
+
+  it('stops warning on a refusal too, and a new try asks again from the first tap', async () => {
+    const refused =
+      'Your risk settings were changed from another screen just now, so nothing was saved. Check them and try again.'
+    saveSettings.mockResolvedValue(answer({ code: 409, ok: false, message: refused }))
+    saveAtLockingLimit()
+    expect(await screen.findByText(refused)).toBeInTheDocument()
+    expect(screen.queryByTestId('daily-locks-today')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Save the daily limit' })).toBeEnabled()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save the daily limit' }))
+    expect(screen.getByTestId('daily-locks-today')).toBeInTheDocument()
+    expect(saveSettings).toHaveBeenCalledTimes(1) // that tap only asked
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Save, and lock new orders until tomorrow' })
+    )
+    await waitFor(() => expect(saveSettings).toHaveBeenCalledTimes(2))
+  })
+
   it('stops warning once the limit typed is the limit saved', () => {
     saveSettings.mockResolvedValue(answer())
     const days = { live: today({}) }
