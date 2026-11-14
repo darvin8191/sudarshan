@@ -11,7 +11,7 @@ import { BrandLockup } from '@/sudarshan/BrandLockup'
 import { FamilyError, familyApi } from '../api'
 import { FamilyBadge } from '../FamilyBadge'
 import { Field, PRIMARY, Problem } from '../forms'
-import { ME_KEY } from '../session'
+import { forgetMember, ME_KEY } from '../session'
 
 export const FORGOT =
   'Forgot? Ask the account owner to send a new invite; it replaces your password and code app.'
@@ -27,9 +27,11 @@ export default function FamilyLogin() {
 
   // The service hands out the page's CSRF cookie with any answer it gives, so a first look at
   // `me` is what lets the sign-in below be sent at all. A phone that is already signed in
-  // goes straight on.
+  // goes straight on. Whatever the page held of the member before is forgotten first: every way a
+  // session ends leads here (review M5).
   useEffect(() => {
     let live = true
+    forgetMember(client)
     familyApi
       .me()
       .then((me) => {
@@ -53,6 +55,7 @@ export default function FamilyLogin() {
         password,
         totp: totp.replace(/\s+/g, ''),
       })
+      forgetMember(client) // nothing read for anyone before may show for this member
       client.setQueryData(ME_KEY, me)
       setPassword('')
       setTotp('')

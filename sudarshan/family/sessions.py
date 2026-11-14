@@ -10,15 +10,16 @@ A check reads the member row on every request, so a privacy change applies to th
 a removed or paused member is refused at once. A session that ended is told apart in the member's
 words: expired, signed out on this device, removed by the owner, paused by the owner.
 
-Sessions that ended are kept 90 days (the "new phone" notice compares a sign-in's device with them)
-and then forgotten (``prune``). These are functions of one store transaction (``store.Tx``).
+Sessions that ended are kept 90 days (the "new phone" notice compares a sign-in's browser summary
+and network area with them) and then forgotten (``prune``). These are functions of one store
+transaction (``store.Tx``).
 """
 
 from __future__ import annotations
 
 import hashlib
 import secrets
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from . import audit, words
@@ -39,11 +40,14 @@ ID_BYTES = 32
 @dataclass(frozen=True)
 class Device:
     """The phone a sign-in comes from: its label (from the browser), its fixed summary and the keyed
-    hash of its address (None when it is not known)."""
+    hash of its address (None when it is not known); the keyed hash of its network area and the
+    phone cookie it sent (``lockout.py``), which is never stored, logged or shown."""
 
     label: str
     summary: str
     place: str | None = None
+    area: str | None = None
+    phone: str | None = field(default=None, repr=False)
 
 
 @dataclass(frozen=True)
@@ -93,6 +97,7 @@ def mint(
             "device_label": device.label,
             "ua_summary": device.summary,
             "ip_hash": device.place,
+            "area_hash": device.area,
             "created_at": now,
             "last_seen_at": now,
             "absolute_expires_at": now + ABSOLUTE_MS,

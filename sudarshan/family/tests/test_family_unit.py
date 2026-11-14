@@ -81,6 +81,10 @@ def test_the_unit_says_what_the_deploys_policy_and_the_design_ask():
         "MemoryHigh": ["192M"],
         "MemoryMax": ["256M"],
         "CPUWeight": ["40"],
+        # Review H2: ceilings that hold on an idle box too, beside the service's own bounds.
+        "CPUQuota": ["60%"],
+        "TasksMax": ["64"],
+        "LimitNOFILE": ["1024"],
         "Slice": ["sudarshan.slice"],
         "Type": ["simple"],
         "Restart": ["on-failure"],

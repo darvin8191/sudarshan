@@ -93,6 +93,7 @@ export type AuditKind =
   | 'session_revoked'
   | 'session_expired'
   | 'invite_created'
+  | 'invite_opened'
   | 'invite_used'
   | 'invite_revoked'
   | 'member_created'
@@ -102,6 +103,7 @@ export type AuditKind =
   | 'member_removed'
   | 'privacy_changed'
   | 'signin_reset'
+  | 'signin_unlocked'
   | 'share_set'
   | 'share_removed'
   | 'device_renamed'
@@ -406,6 +408,7 @@ export interface MemberCard {
   devices: number
   last_seen_at: number | null
   invite_expires_at: number | null
+  invite_opened_at: number | null
   locked_until: number | null
   telegram_linked: boolean
   created_at: number
@@ -560,6 +563,7 @@ export type AdminOpName =
   | 'invite_create'
   | 'invite_revoke'
   | 'signin_reset'
+  | 'signin_unlock'
   | 'device_list'
   | 'device_revoke'
   | 'audit_list'
@@ -702,6 +706,10 @@ export interface AdminSigninResetReq {
   request_id?: string
 }
 
+export interface AdminSigninUnlockReq {
+  member_id: number
+}
+
 export interface AdminDeviceListReq {
   member_id: number
 }
@@ -784,6 +792,7 @@ export interface AdminOps {
   invite_create: { req: AdminInviteCreateReq; res: Invite }
   invite_revoke: { req: AdminInviteRevokeReq; res: Done }
   signin_reset: { req: AdminSigninResetReq; res: Invite }
+  signin_unlock: { req: AdminSigninUnlockReq; res: MemberCard }
   device_list: { req: AdminDeviceListReq; res: Device[] }
   device_revoke: { req: AdminDeviceRevokeReq; res: Done }
   audit_list: { req: AdminAuditListReq; res: AuditPage }
