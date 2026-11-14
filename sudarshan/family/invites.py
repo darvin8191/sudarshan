@@ -70,6 +70,14 @@ class InviteCodes:
         return len(self._codes)
 
 
+def awaits_link(tx: Tx, member: dict[str, Any]) -> bool:
+    """Whether a member is waiting for an invite link: never joined or reset (``invited``), or
+    paused and reset (``suspended`` with no password yet, review M4)."""
+    if member["status"] == "invited":
+        return True
+    return member["status"] == "suspended" and tx.row("credential", member_id=member["id"]) is None
+
+
 def revoke_open(tx: Tx, member_id: int, now: int, actor: str = audit.OWNER) -> int:
     """Revoke the member's unused invite, if any (audited); how many were revoked."""
     t = tx.t("invite")
@@ -87,12 +95,13 @@ def revoke_open(tx: Tx, member_id: int, now: int, actor: str = audit.OWNER) -> i
 def create(
     tx: Tx, member_id: int, totp_secret: str, now: int, request_id: str | None = None
 ) -> tuple[str, int]:
-    """A new invite for a member who has not joined; its code and end. The member's unused invite
-    before it is revoked. NotFound for a member who is gone, Invalid for one who has joined."""
+    """A new invite for a member who awaits a link (``awaits_link``); its code and end. The
+    member's unused invite before it is revoked. NotFound for a member who is gone, Invalid for one
+    who has joined and was not reset."""
     member = tx.member(member_id)
     if member is None or member["status"] == "removed":
         raise NotFound("member_gone")
-    if member["status"] != "invited":
+    if not awaits_link(tx, member):
         raise Invalid("already_joined", field="member_id")
     revoke_open(tx, member_id, now)
     code = secrets.token_urlsafe(CODE_BYTES)
@@ -122,7 +131,7 @@ def usable(tx: Tx, code: Any, now: int) -> tuple[dict[str, Any], dict[str, Any]]
     if row is None or row["used_at"] is not None or row["revoked_at"] is not None:
         raise FamilyError("invite_gone")
     member = tx.member(row["member_id"])
-    if now >= row["expires_at"] or member is None or member["status"] != "invited":
+    if now >= row["expires_at"] or member is None or not awaits_link(tx, member):
         raise FamilyError("invite_gone")
     return row, member
 

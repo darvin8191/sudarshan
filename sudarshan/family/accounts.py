@@ -714,8 +714,10 @@ def _join(tx: Tx, code: Any, handle: str, hashed: str, totp: Any, device: Device
                              "totp_last_counter": step, "password_changed_at": now,
                              "updated_at": now})  # fmt: skip
     invites.mark_used(tx, invite["id"], now)
+    paused = member["status"] == "suspended"  # reset while paused: the pause holds (review M4)
+    status = "suspended" if paused else "active"
     joined = tx.member_change(member["id"], member["version"],
-                              {"status": "active", "handle": handle}, now)  # fmt: skip
+                              {"status": status, "handle": handle}, now)  # fmt: skip
     lockout.clear(tx, lockout.name_key(tx.secrets, handle))  # type: ignore[arg-type]
     audit.record(
         tx,
@@ -724,8 +726,12 @@ def _join(tx: Tx, code: Any, handle: str, hashed: str, totp: Any, device: Device
         kind="invite_used",
         member_id=member["id"],
         ip_hash=device.place,
-        detail={"invite": invite["id"]},
+        detail={"invite": invite["id"], "paused": paused},
     )
+    if paused:  # the password and code app are set; signing in waits for the owner's resume
+        return Outcome(
+            FamilyError("signed_out", "suspended"), notices=[("invite_used", joined, {})]
+        )
     outcome = _signed_in(tx, joined, device, now, {"joined": True}, False, max_devices)
     outcome.notices.append(("invite_used", joined, {}))
     outcome.phone = _phone_cookie(tx, device, member["id"], now, now)

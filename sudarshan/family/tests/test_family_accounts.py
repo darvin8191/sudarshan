@@ -560,6 +560,51 @@ def test_a_sign_in_reset_revokes_everything_and_the_new_invite_works(rig):
     assert cards[0]["status"] == "active" and cards[0]["devices"] == 1
 
 
+def test_a_pause_holds_through_a_sign_in_reset_until_the_owner_resumes(rig):
+    """Review M4 (probe P5): suspend, reset, join: the member is not active. Only the owner's
+    resume clears the pause; the new password and code app work from then on."""
+    card, _, done = rig.joined()
+    paused = rig.run(rig.acc.member_status({"id": card["id"], "version": 2, "status": "suspended"}))
+    invite = rig.run(rig.acc.signin_reset({"member_id": card["id"], "version": paused["version"]}))
+    shown = rig.run(rig.acc.member_list())[0]
+    assert shown["status"] == "suspended" and shown["invite_expires_at"] == invite["expires_at"]
+    fresh = rig.run(rig.acc.join_info(invite["code"]))["totp_key"]
+    rig.clock.step()
+    told = rig.refused(rig.acc.join(invite["code"], "member_a", "a new long passphrase",
+                                    rig.code(fresh), PHONE))  # fmt: skip
+    assert (told.code, str(told)) == (
+        "signed_out",
+        "The account owner has paused this sign-in. Ask them to resume it.",
+    )
+    after = rig.run(rig.acc.member_list())[0]
+    assert after["status"] == "suspended" and after["devices"] == 0  # no session was made
+    assert rig.refused(rig.acc.join_info(invite["code"])).code == "invite_gone"  # used
+    assert ("invite_used", card["id"]) in [(k, m["id"]) for k, m, _ in rig.notices]
+    rig.clock.step()
+    still = rig.refused(rig.acc.login("member_a", "a new long passphrase", rig.code(fresh), PHONE))
+    assert "paused" in str(still)
+    rig.run(rig.acc.member_status({"id": card["id"], "version": after["version"],
+                                   "status": "active"}))  # fmt: skip
+    rig.clock.step()
+    assert rig.run(rig.acc.login("member_a", "a new long passphrase", rig.code(fresh), PHONE))
+    assert done.session_id not in json.dumps(rig.rows("viewer_session"))
+
+
+def test_a_resume_before_the_new_link_is_used_makes_the_member_invited(rig):
+    card, _, _ = rig.joined()
+    paused = rig.run(rig.acc.member_status({"id": card["id"], "version": 2, "status": "suspended"}))
+    invite = rig.run(rig.acc.signin_reset({"member_id": card["id"], "version": paused["version"]}))
+    version = rig.run(rig.acc.member_list())[0]["version"]
+    resumed = rig.run(rig.acc.member_status({"id": card["id"], "version": version,
+                                             "status": "active"}))  # fmt: skip
+    assert resumed["status"] == "invited"  # active always means a member who can sign in
+    fresh = rig.run(rig.acc.join_info(invite["code"]))["totp_key"]
+    rig.clock.step()
+    joined = rig.run(rig.acc.join(invite["code"], "member_a", "a new long passphrase",
+                                  rig.code(fresh), PHONE))  # fmt: skip
+    assert joined.session.member["status"] == "active"
+
+
 def test_the_owner_lists_and_signs_out_a_members_devices(rig):
     card, secret, first = rig.joined()
     second = rig.login(secret=secret, phone=OTHER_PHONE)

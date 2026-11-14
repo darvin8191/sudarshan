@@ -326,6 +326,28 @@ def test_a_viewer_session_reaches_no_admin_op_and_the_owner_unlocks_a_lock(tmp_p
     scenario(tmp_path, body)
 
 
+def test_a_paused_member_is_still_paused_after_a_reset_and_a_join(tmp_path):
+    """Review M4, the probe P5 the other way round, over the listener and the owner's sealed ops."""
+
+    async def body(world: World):
+        card, _, _ = await world.member("member_a")
+        paused = await world.owner("member_status", id=card["id"], status="suspended", version=2)
+        invite = await world.owner("signin_reset", member_id=card["id"],
+                                   version=paused["version"])  # fmt: skip
+        phone = Phone(world.port)
+        await phone.call("GET", "/me")
+        info = (await phone.call("GET", f"/join/{invite['code']}"))[1]["data"]
+        world.clock.at += 30_000
+        status, answer = await phone.call("POST", "/join", {
+            "code": invite["code"], "handle": "member_a", "password": PASSWORD,
+            "totp": world.code(info["totp_key"])})  # fmt: skip
+        assert (status, answer["code"]) == (401, "signed_out") and "paused" in answer["message"]
+        assert contract.COOKIE not in phone.jar
+        assert (await world.owner("member_list"))[0]["status"] == "suspended"
+
+    scenario(tmp_path, body)
+
+
 def test_the_member_row_is_read_on_every_request(tmp_path):
     async def body(world: World):
         card, _, phone = await world.member()

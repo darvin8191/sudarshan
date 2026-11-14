@@ -2,7 +2,10 @@
 
 A member is made by the owner (display name, role, privacy, language), joins through an invite and
 is then ``active``; the owner may pause (``suspended``) and resume them, reset their sign-in (a new
-invite replaces their password and code app) or remove them. Removal keeps the row for the audit
+invite replaces their password and code app) or remove them. A pause holds until the owner resumes
+it (review M4): a reset of a paused member keeps them ``suspended``, with no password until they
+use the new link, and joining through it keeps them paused; a resume of a member who has not used
+it yet makes them ``invited``, so that ``active`` always means a member who can sign in. Removal keeps the row for the audit
 (status ``removed``, the sign-in name freed) and deletes the credential, the push subscriptions and
 the Telegram link; the member's sessions are revoked as ``removed`` so a phone still open is told
 why. At most four members are not removed (``LIMITS``).
@@ -151,7 +154,10 @@ def set_status(tx: Tx, args: dict[str, Any], now: int) -> tuple[dict[str, Any], 
     status = _choice(args.get("status"), SET_STATUSES, "status")
     if member["status"] not in SET_STATUSES:
         raise Invalid("invalid", field="status")  # not joined yet: nothing to pause
-    after = tx.member_change(member["id"], args.get("version"), {"status": status}, now)
+    stored = status
+    if status == "active" and tx.row("credential", member_id=member["id"]) is None:
+        stored = "invited"  # paused and reset, the new link not used yet: it still works
+    after = tx.member_change(member["id"], args.get("version"), {"status": stored}, now)
     revoked: list[str] = []
     if status != member["status"]:
         if status == "suspended":
@@ -177,12 +183,14 @@ def remove(tx: Tx, args: dict[str, Any], now: int) -> tuple[dict[str, Any], list
 
 
 def reset_signin(tx: Tx, args: dict[str, Any], now: int) -> tuple[dict[str, Any], list[str]]:
-    """Revoke a joined member's password, code app and sessions, and make them invited again (the
-    caller makes the new invite in the same transaction); the row after and the sessions revoked."""
+    """Revoke a joined member's password, code app and sessions, and make them invited again, or
+    keep them paused when they are (the caller makes the new invite in the same transaction); the
+    row after and the sessions revoked."""
     member = live(tx, args.get("member_id"))
     if member["status"] not in SET_STATUSES:
         raise Invalid("invalid", field="member_id")
-    after = tx.member_change(member["id"], args.get("version"), {"status": "invited"}, now)
+    status = "suspended" if member["status"] == "suspended" else "invited"  # a pause holds (M4)
+    after = tx.member_change(member["id"], args.get("version"), {"status": status}, now)
     revoked = sessions.revoke_member(tx, member["id"], now, "signin_reset")
     tx.delete("credential", member_id=member["id"])
     lockout.clear_member(tx, member)  # a fresh start: no count from before the reset holds
