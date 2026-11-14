@@ -244,7 +244,7 @@ export const ChainRow = memo(
         data-atm={row.atm || undefined}
         data-wing={!row.live || undefined}
         className={cn(
-          'grid grid-cols-[minmax(0,1fr)_5.25rem_minmax(0,1fr)] items-stretch border-b border-[color:var(--divider)]',
+          'grid grid-cols-[minmax(0,1fr)_5.25rem_minmax(0,1fr)] items-stretch border-b border-[color:var(--divider)] [contain:layout_style]',
           row.atm && 'rounded-md border-2 border-[color:var(--brand)]'
         )}
       >

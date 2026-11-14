@@ -11,7 +11,7 @@
  */
 import { useQuery } from '@tanstack/react-query'
 import { Unplug } from 'lucide-react'
-import { useCallback, useEffect, useState } from 'react'
+import { memo, useCallback, useEffect, useState } from 'react'
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router'
 import { PlaceOrderDialog } from '@/components/trading/PlaceOrderDialog'
 import { cn } from '@/lib/utils'
@@ -24,6 +24,7 @@ import {
   MarketCalendarSource,
   useIstDay,
 } from '@/sudarshan/dashboard/MarketCalendar'
+import type { OrderRequest } from '@/sudarshan/watchlist/SymbolSheet'
 import { readListing } from './api'
 import { ChainTab } from './ChainTab'
 import { Header } from './Header'
@@ -73,6 +74,67 @@ function LoginNeeded({ words }: { words: string }) {
     </section>
   )
 }
+
+/**
+ * The parts below do not change with a tick, so they are kept out of the once-a-frame redraw: the
+ * calendar's reader, the tab strip, and the app's own order ticket.
+ */
+const Calendar = memo(MarketCalendarSource)
+
+const TabStrip = memo(function TabStrip({ tab, onPick }: { tab: Tab; onPick: (tab: Tab) => void }) {
+  return (
+    <div
+      role="tablist"
+      aria-label="Views of the chain"
+      className="grid grid-flow-col auto-cols-fr gap-1 border-b border-[color:var(--border-subtle)]"
+    >
+      {TABS.map((each) => (
+        <button
+          key={each.tab}
+          type="button"
+          role="tab"
+          id={`sd-options-tab-${each.tab}`}
+          aria-selected={tab === each.tab}
+          aria-controls="sd-options-panel"
+          onClick={() => onPick(each.tab)}
+          className={cn(
+            '-mb-px min-h-12 border-b-[3px] text-[0.9375rem] font-semibold outline-none focus-visible:ring-2 focus-visible:ring-ring',
+            tab === each.tab
+              ? 'border-[color:var(--brand)] font-bold text-primary'
+              : 'border-transparent text-[color:var(--text-secondary)]'
+          )}
+        >
+          {each.label}
+        </button>
+      ))}
+    </div>
+  )
+})
+
+/** The app's own order ticket, opened by the strike sheet's Buy and Sell: no order code here. */
+const Ticket = memo(function Ticket({
+  order,
+  onClose,
+}: {
+  order: OrderRequest | null
+  onClose: () => void
+}) {
+  return (
+    <PlaceOrderDialog
+      open={order !== null}
+      onOpenChange={(next) => {
+        if (!next) onClose()
+      }}
+      symbol={order?.item.symbol ?? ''}
+      exchange={order?.item.exchange ?? ''}
+      action={order?.action ?? 'BUY'}
+      lotSize={order?.contract.lotSize ?? 1}
+      tickSize={order?.contract.tickSize ?? 0.05}
+      product={order?.product}
+      strategy="Options"
+    />
+  )
+})
 
 export default function OptionsPage() {
   const params = useParams<{ exchange: string; underlying: string }>()
@@ -127,6 +189,24 @@ export default function OptionsPage() {
     sheet: sheetFollows,
     enabled: ready,
   })
+  const pickTab = useCallback(
+    (next: Tab) => {
+      const params = new URLSearchParams(query)
+      if (next === 'chain') params.delete('tab')
+      else params.set('tab', next)
+      setQuery(params, { replace: true })
+    },
+    [query, setQuery]
+  )
+  const pickExpiry = useCallback(
+    (next: string) => {
+      const params = new URLSearchParams(query)
+      params.set('expiry', next)
+      setQuery(params, { replace: true })
+    },
+    [query, setQuery]
+  )
+  const pickUnderlying = useCallback(() => sheets.open({ sheet: 'underlying' }), [sheets.open])
   const openStrike = useCallback(
     (strike: number, side: 'ce' | 'pe') => sheets.open({ sheet: 'strike', strike, side }),
     [sheets.open]
@@ -142,7 +222,6 @@ export default function OptionsPage() {
   // The picker's own history entry is replaced by the chain picked, so Back leaves the page.
   const pick = (to: 'NFO' | 'BFO', name: string) =>
     navigate(optionsPath(to, name), { replace: true })
-  const pickUnderlying = () => sheets.open({ sheet: 'underlying' })
   const sheet = picking && (
     <UnderlyingSheet current={underlying} onPick={pick} onClose={sheets.close} />
   )
@@ -151,7 +230,7 @@ export default function OptionsPage() {
       Pick another underlying
     </button>
   )
-  const calendar = <MarketCalendarSource key={day} onChange={setMarket} />
+  const calendar = <Calendar key={day} onChange={setMarket} />
 
   if (!listing || !expiry) {
     const state =
@@ -192,12 +271,6 @@ export default function OptionsPage() {
   const tab = tabOf(query.get('tab'))
   const strikeAsked = Number(query.get('strike'))
   const startAt = query.get('strike') && Number.isFinite(strikeAsked) ? strikeAsked : null
-  const pickTab = (next: Tab) => {
-    const params = new URLSearchParams(query)
-    if (next === 'chain') params.delete('tab')
-    else params.set('tab', next)
-    setQuery(params, { replace: true })
-  }
   const loggedOut = access.state === 'upstox-logged-out' || status.state === 'signin'
   const heldAt = model ? clockTime(model.asOf) : null
   return (
@@ -210,11 +283,7 @@ export default function OptionsPage() {
         now={now}
         bare={!ready || loggedOut}
         onUnderlying={pickUnderlying}
-        onExpiry={(next) => {
-          const params = new URLSearchParams(query)
-          params.set('expiry', next)
-          setQuery(params, { replace: true })
-        }}
+        onExpiry={pickExpiry}
       />
       {loggedOut ? (
         <LoginNeeded
@@ -247,33 +316,7 @@ export default function OptionsPage() {
               )}
             </div>
           )}
-          {model && (
-            <div
-              role="tablist"
-              aria-label="Views of the chain"
-              className="grid grid-flow-col auto-cols-fr gap-1 border-b border-[color:var(--border-subtle)]"
-            >
-              {TABS.map((each) => (
-                <button
-                  key={each.tab}
-                  type="button"
-                  role="tab"
-                  id={`sd-options-tab-${each.tab}`}
-                  aria-selected={tab === each.tab}
-                  aria-controls="sd-options-panel"
-                  onClick={() => pickTab(each.tab)}
-                  className={cn(
-                    '-mb-px min-h-12 border-b-[3px] text-[0.9375rem] font-semibold outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                    tab === each.tab
-                      ? 'border-[color:var(--brand)] font-bold text-primary'
-                      : 'border-transparent text-[color:var(--text-secondary)]'
-                  )}
-                >
-                  {each.label}
-                </button>
-              ))}
-            </div>
-          )}
+          {model && <TabStrip tab={tab} onPick={pickTab} />}
           {model && (
             <div role="tabpanel" id="sd-options-panel" aria-labelledby={`sd-options-tab-${tab}`}>
               {tab === 'oi' && <OiTab model={model} dim={dim} />}
@@ -311,20 +354,7 @@ export default function OptionsPage() {
           )}
         </>
       )}
-      {/* The app's own order ticket, opened by the strike sheet's Buy and Sell: no order code here. */}
-      <PlaceOrderDialog
-        open={ticket !== null}
-        onOpenChange={(next) => {
-          if (!next) sheets.close()
-        }}
-        symbol={ticket?.item.symbol ?? ''}
-        exchange={ticket?.item.exchange ?? ''}
-        action={ticket?.action ?? 'BUY'}
-        lotSize={ticket?.contract.lotSize ?? 1}
-        tickSize={ticket?.contract.tickSize ?? 0.05}
-        product={ticket?.product}
-        strategy="Options"
-      />
+      <Ticket order={ticket} onClose={sheets.close} />
       {sheet}
     </div>
   )

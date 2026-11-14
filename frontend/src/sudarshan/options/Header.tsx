@@ -1,7 +1,9 @@
 import { ChevronDown, RefreshCw } from 'lucide-react'
+import { memo } from 'react'
 import { cn } from '@/lib/utils'
 import { directionOf, formatPercent, formatPrice } from '@/sudarshan/dashboard/format'
 import { LiveLine } from '@/sudarshan/dashboard/LiveLine'
+import { istDay } from '@/sudarshan/dashboard/live'
 import { TREND_TEXT, TrendArrow } from '@/sudarshan/dashboard/Trend'
 import type { Listing } from './api'
 import { clockTime } from './TimedRefresh'
@@ -29,6 +31,92 @@ function Fact({ label, children }: { label: string; children: React.ReactNode })
     </span>
   )
 }
+
+/** The underlying (a tap opens the picker) and Refresh: redrawn only when the chain changes. */
+const Title = memo(function Title({
+  name,
+  bare,
+  onUnderlying,
+  onRefresh,
+}: {
+  name: string
+  bare: boolean
+  onUnderlying: () => void
+  onRefresh: () => void
+}) {
+  return (
+    <div className="flex items-center justify-between gap-2">
+      <button
+        type="button"
+        onClick={onUnderlying}
+        aria-haspopup="dialog"
+        className="-ml-1 inline-flex min-h-12 items-center gap-1 rounded-[0.75rem] px-1 outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <h1 className="sd-display text-[1.75rem] leading-none font-bold">{name}</h1>
+        <ChevronDown aria-hidden="true" className="size-5 text-[color:var(--text-secondary)]" />
+        <span className="sr-only">Change the underlying</span>
+      </button>
+      {!bare && (
+        <button
+          type="button"
+          onClick={onRefresh}
+          className="inline-flex size-12 items-center justify-center rounded-[0.75rem] text-[color:var(--text-secondary)] outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <RefreshCw aria-hidden="true" className="size-5" />
+          <span className="sr-only">Read the option chain again</span>
+        </button>
+      )}
+    </div>
+  )
+})
+
+/** The expiry chips: redrawn when the expiries, the choice or the day in India changes. */
+const ExpiryChips = memo(
+  function ExpiryChips({
+    expiries,
+    expiry,
+    now,
+    onExpiry,
+  }: {
+    expiries: Listing['expiries']
+    expiry: string
+    /** The date in India: the days left change with it, not with the clock. */
+    day: string
+    now: number
+    onExpiry: (expiry: string) => void
+  }) {
+    return (
+      <ul aria-label="Expiry" className="flex gap-2 overflow-x-auto pb-1">
+        {expiries.map((each) => {
+          const chosen = each.date === expiry
+          return (
+            <li key={each.date} className="shrink-0">
+              <button
+                type="button"
+                aria-pressed={chosen}
+                aria-label={expirySpeech(each.date, now)}
+                onClick={() => onExpiry(each.date)}
+                className={cn(
+                  'inline-flex min-h-12 items-center rounded-full border px-4 text-sm font-semibold whitespace-nowrap outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                  chosen
+                    ? 'border-[color:var(--brand)] bg-[color:var(--primary-tint)] font-bold text-primary underline underline-offset-4'
+                    : 'border-input bg-card text-foreground hover:bg-accent'
+                )}
+              >
+                {expiryLabel(each.date, now)}
+              </button>
+            </li>
+          )
+        })}
+      </ul>
+    )
+  },
+  (before, after) =>
+    before.expiries === after.expiries &&
+    before.expiry === after.expiry &&
+    before.day === after.day &&
+    before.onExpiry === after.onExpiry
+)
 
 /**
  * The header strip of the options screen (M11.1, O4): the underlying (a tap opens the picker), the
@@ -59,28 +147,12 @@ export function Header({
   const wingsOld = wingsAt !== null && now - wingsAt > WINGS_OLD_MS
   return (
     <header className="flex flex-col gap-2">
-      <div className="flex items-center justify-between gap-2">
-        <button
-          type="button"
-          onClick={onUnderlying}
-          aria-haspopup="dialog"
-          className="-ml-1 inline-flex min-h-12 items-center gap-1 rounded-[0.75rem] px-1 outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          <h1 className="sd-display text-[1.75rem] leading-none font-bold">{listing.underlying}</h1>
-          <ChevronDown aria-hidden="true" className="size-5 text-[color:var(--text-secondary)]" />
-          <span className="sr-only">Change the underlying</span>
-        </button>
-        {!bare && (
-          <button
-            type="button"
-            onClick={live.refresh}
-            className="inline-flex size-12 items-center justify-center rounded-[0.75rem] text-[color:var(--text-secondary)] outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <RefreshCw aria-hidden="true" className="size-5" />
-            <span className="sr-only">Read the option chain again</span>
-          </button>
-        )}
-      </div>
+      <Title
+        name={listing.underlying}
+        bare={bare}
+        onUnderlying={onUnderlying}
+        onRefresh={live.refresh}
+      />
 
       {!bare && (
         <>
@@ -129,29 +201,13 @@ export function Header({
         </>
       )}
 
-      <ul aria-label="Expiry" className="flex gap-2 overflow-x-auto pb-1">
-        {listing.expiries.map((each) => {
-          const chosen = each.date === expiry
-          return (
-            <li key={each.date} className="shrink-0">
-              <button
-                type="button"
-                aria-pressed={chosen}
-                aria-label={expirySpeech(each.date, now)}
-                onClick={() => onExpiry(each.date)}
-                className={cn(
-                  'inline-flex min-h-12 items-center rounded-full border px-4 text-sm font-semibold whitespace-nowrap outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                  chosen
-                    ? 'border-[color:var(--brand)] bg-[color:var(--primary-tint)] font-bold text-primary underline underline-offset-4'
-                    : 'border-input bg-card text-foreground hover:bg-accent'
-                )}
-              >
-                {expiryLabel(each.date, now)}
-              </button>
-            </li>
-          )
-        })}
-      </ul>
+      <ExpiryChips
+        expiries={listing.expiries}
+        expiry={expiry}
+        day={istDay(now)}
+        now={now}
+        onExpiry={onExpiry}
+      />
     </header>
   )
 }
