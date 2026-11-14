@@ -7,8 +7,16 @@
  * - Connection state management
  */
 
-import { createContext, type ReactNode, useContext, useEffect, useRef, useState } from 'react'
-import { usePageVisibility } from '@/hooks/usePageVisibility'
+import {
+  createContext,
+  type ReactNode,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
+import { useIsPageVisible } from '@/hooks/usePageVisibility'
 import {
   type ConnectionState,
   type DataCallback,
@@ -56,7 +64,10 @@ export function MarketDataProvider({
   manager,
 }: MarketDataProviderProps) {
   const managerRef = useRef<MarketDataManager>(manager ?? MarketDataManager.getInstance()) // SUDARSHAN P6 D2
-  const { isVisible } = usePageVisibility()
+  // SUDARSHAN (SCR-F): visibility alone, without the hook's once-a-second
+  // counts: they rendered this provider, and so every reader of its context,
+  // again each second.
+  const isVisible = useIsPageVisible()
 
   // Initialize state from manager's current state
   const initialState = managerRef.current.getState()
@@ -122,8 +133,26 @@ export function MarketDataProvider({
     }
   }, [isVisible, isConnected, isAuthenticated, isPaused, pauseWhenHidden, pauseDelay])
 
-  const value: MarketDataContextValue = {
-    manager: managerRef.current,
+  // SUDARSHAN (SCR-F): one value until something in it changes, so a reader
+  // renders again for a change of connection state and for nothing else.
+  const value = useMemo<MarketDataContextValue>(() => {
+    const manager = managerRef.current
+    return {
+      manager,
+      connectionState,
+      isConnected,
+      isAuthenticated,
+      isPaused,
+      isFallbackMode,
+      connectionEpoch,
+      error,
+      subscribe: (symbol, exchange, mode, callback) =>
+        manager.subscribe(symbol, exchange, mode, callback),
+      getCachedData: (symbol, exchange) => manager.getCachedData(symbol, exchange),
+      connect: () => manager.connect(),
+      disconnect: () => manager.disconnect(),
+    }
+  }, [
     connectionState,
     isConnected,
     isAuthenticated,
@@ -131,12 +160,7 @@ export function MarketDataProvider({
     isFallbackMode,
     connectionEpoch,
     error,
-    subscribe: (symbol, exchange, mode, callback) =>
-      managerRef.current.subscribe(symbol, exchange, mode, callback),
-    getCachedData: (symbol, exchange) => managerRef.current.getCachedData(symbol, exchange),
-    connect: () => managerRef.current.connect(),
-    disconnect: () => managerRef.current.disconnect(),
-  }
+  ])
 
   return <MarketDataContext.Provider value={value}>{children}</MarketDataContext.Provider>
 }
