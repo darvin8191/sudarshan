@@ -9,7 +9,13 @@ import { useSearchParams } from 'react-router'
 import { cn } from '@/lib/utils'
 import { Hidden } from '@/sudarshan/books/cards/Hidden'
 import { ProblemCard } from '@/sudarshan/books/cards/parts'
-import { Figure, HiddenTotal, ReadStamp, ServiceWords } from '@/sudarshan/books/cards/readOnlyParts'
+import {
+  Figure,
+  HiddenTotal,
+  Plain,
+  ReadStamp,
+  ServiceWords,
+} from '@/sudarshan/books/cards/readOnlyParts'
 import { RESYNC_MS } from '@/sudarshan/dashboard/live'
 import { FamilyError, familyApi, NO_ANSWER } from '../api'
 import { useFamilyFeed } from '../familyManager'
@@ -23,7 +29,7 @@ const NOT_SHARED = 'Not shared with you.'
 
 const wordsOf = (error: unknown) => (error instanceof FamilyError ? error.message : NO_ANSWER)
 
-/** Money where a slot may be hidden or not known; a percentage is the service's own text. */
+/** A percentage is the service's own text. Worth is drawn plain; only a gain carries a sign. */
 function Share({ pct }: { pct: string | null | undefined }) {
   if (pct === undefined) return null
   return (
@@ -63,7 +69,7 @@ function Summary() {
       ) : (
         <>
           <p data-testid="shared-value" className="sd-display text-[2rem] leading-[1.05] font-bold">
-            {value === undefined ? <HiddenTotal /> : <Figure value={value} />}
+            {value === undefined ? <HiddenTotal /> : <Plain value={value} />}
           </p>
           <p className="flex items-baseline gap-1.5 text-sm font-semibold">
             <span className="text-muted-foreground">Today</span>
@@ -79,7 +85,7 @@ function Summary() {
               >
                 <span className="min-w-0 truncate text-sm font-medium">{line.name}</span>
                 <span className="text-sm font-semibold">
-                  <Figure value={line.figures.value} />
+                  <Plain value={line.figures.value} />
                 </span>
               </li>
             ))}
@@ -128,7 +134,7 @@ function TabBody({ tab }: { tab: SharedTab }) {
               <div className="flex flex-col gap-px">
                 <dt className="text-xs font-semibold text-muted-foreground">Value</dt>
                 <dd data-testid="tab-value" className="text-[0.9375rem] font-bold">
-                  <Figure value={figures.value} />
+                  <Plain value={figures.value} />
                 </dd>
               </div>
               <div className="flex flex-col gap-px">
@@ -160,7 +166,7 @@ function TabBody({ tab }: { tab: SharedTab }) {
                       <>
                         <Share pct={row.pct} />
                         <span className="font-semibold">
-                          <Figure value={row.value} />
+                          <Plain value={row.value} />
                         </span>
                       </>
                     )}

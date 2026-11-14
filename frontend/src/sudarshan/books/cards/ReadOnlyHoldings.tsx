@@ -36,6 +36,7 @@ import {
 import {
   Figure,
   NotRealTime,
+  Plain,
   type ReadOnlyBookProps,
   ReadStamp,
   ServiceWords,
@@ -51,21 +52,6 @@ const idOf = (row: MaskedHolding) => `${row.exchange}:${row.symbol ?? row.name}`
 const keyOf = (row: MaskedHolding) => {
   const instrument = instrumentOf(row)
   return instrument ? `${instrument.exchange.toUpperCase()}:${instrument.symbol.toUpperCase()}` : ''
-}
-
-/** Money without an arrow, where a figure is a size and not a gain: a value, an amount invested. */
-function Plain({
-  value,
-  stale = false,
-  className,
-}: {
-  value: number | null | undefined
-  stale?: boolean
-  className?: string
-}) {
-  if (value === undefined) return <Hidden className={className} />
-  if (value === null) return <span className={cn('text-muted-foreground', className)}>-</span>
-  return <span className={cn(stale && STALE, className)}>{formatRupees(value)}</span>
 }
 
 export function ReadOnlyHoldings({

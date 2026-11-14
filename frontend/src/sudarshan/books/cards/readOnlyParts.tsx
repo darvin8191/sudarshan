@@ -4,9 +4,10 @@ import { Clock, Info, X } from 'lucide-react'
 import { useState } from 'react'
 import { cn } from '@/lib/utils'
 import { istTime } from '@/sudarshan/books/time'
+import { formatRupees } from '@/sudarshan/dashboard/format'
 import type { Category, ReadState } from '@/sudarshan/family/types'
 import { Hidden } from './Hidden'
-import { Money, OUTLINED, StaleBookNote } from './parts'
+import { Money, OUTLINED, STALE, StaleBookNote } from './parts'
 
 /** What a viewer's board is given: rows as the service sent them, and where they stand. */
 export interface ReadOnlyBookProps<Row> {
@@ -101,6 +102,29 @@ export function Figure({
 }) {
   if (value === undefined) return <Hidden className={className} />
   return <Money value={value} stale={stale} className={className} />
+}
+
+/**
+ * Money without a sign, an arrow or a trend colour, where a figure is a size and not a gain: what
+ * something is worth, what went into it. Review M2 (v0.12.0): a portfolio's value drawn as
+ * "▲ +₹2,27,06,125.00" in profit green read as a profit of that size.
+ */
+export function Plain({
+  value,
+  stale = false,
+  className,
+}: {
+  value: number | null | undefined
+  stale?: boolean
+  className?: string
+}) {
+  if (value === undefined) return <Hidden className={className} />
+  if (value === null) return <span className={cn('text-muted-foreground', className)}>-</span>
+  return (
+    <span data-plain="" className={cn(stale && STALE, className)}>
+      {formatRupees(value)}
+    </span>
+  )
 }
 
 /** The row's price slot when its price is not coming live: the book's price, with its time. */
