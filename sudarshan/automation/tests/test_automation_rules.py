@@ -151,6 +151,11 @@ ANSWERS = [
     (True, {"status": "success", "message": "No action needed. Position size matches current position."}, 200, ("no_action", False, False)),
     (True, {"status": "success", "message": "No open position found. Not placing exit order."}, 200, ("no_action", True, False)),
     (True, {"status": "success", "message": "No OpenPosition Found. Not placing Exit order."}, 200, ("no_action", True, False)),
+    # The Live service's answer to an exit that found the position flat: a failure with no order.
+    (False, {"status": "error", "message": "No open position found. Not placing exit order."}, 500, ("no_action", True, False)),
+    (False, {"status": "error", "message": "No open position found. Not placing exit order."}, 502, ("not_confirmed", False, False)),
+    (False, {"status": "error", "message": "No open position found. Not placing exit order.", "not_confirmed": True}, 500, ("not_confirmed", False, False)),
+    (False, {"status": "error", "message": "No open position found for it at Upstox."}, 500, ("not_confirmed", False, False)),
     (True, {"status": "success"}, 200, ("not_confirmed", False, False)),
     (True, None, 200, ("not_confirmed", False, False)),
     (False, {"status": "error", "message": "busy"}, 409, ("order_refused", False, False)),

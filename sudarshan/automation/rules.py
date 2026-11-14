@@ -149,6 +149,11 @@ SENT, NO_ACTION, ORDER_REFUSED, NOT_CONFIRMED = (
 )
 
 
+#: The Upstox module's own words for a size-0 order that found the position flat
+#: (broker/upstox/api/order_api.py), as the Live service passes them on.
+_NOTHING_TO_CLOSE = "no open position found. not placing exit order."
+
+
 def read_answer(success: bool, response: object, status: int) -> tuple[str, bool, bool]:
     """What the smart order's answer means: (verdict, flat_found, cut).
 
@@ -170,6 +175,11 @@ def read_answer(success: bool, response: object, status: int) -> tuple[str, bool
         if "no action" in message or "already matched" in message:
             return NO_ACTION, False, False
         return NOT_CONFIRMED, False, False
+    if message == _NOTHING_TO_CLOSE and status != 502 and not body.get("not_confirmed"):
+        # The Live service answers an exit that found the position flat as a failure with no
+        # order (the sandbox answers the same words as a success). Nothing was sent, and there
+        # was nothing to close: read as the sandbox's answer is, never as "not confirmed".
+        return NO_ACTION, True, False
     if isinstance(status, int) and 400 <= status < 500 and not body.get("not_confirmed"):
         return ORDER_REFUSED, False, False
     return NOT_CONFIRMED, False, False
