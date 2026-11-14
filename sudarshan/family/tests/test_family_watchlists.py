@@ -414,6 +414,24 @@ def test_a_phone_follows_a_shared_lists_rows_and_lets_go_when_the_share_ends(tmp
     run(go())
 
 
+def test_reading_the_lists_reads_no_book_for_a_member_with_no_socket_open(tmp_path):
+    """Design 7.2 (no read with no screen open): a page's read of the lists, and a share that
+    changes them, never make the books be read for a member with no socket open."""
+
+    async def go():
+        async with World(tmp_path) as world:
+            a, cookie = await signed_in(world.service, VIEWER, world.clock())
+            world.openalgo.add(7, "Swing", [list_row(1)])
+            share = await world.share(7, member_id=a["id"])
+            assert [x["id"] for x in (await world.get("/watchlists", cookie))[1]["data"]] == [7]
+            assert (await world.admin("share_remove", id=share["id"], version=1))[0] == 200
+            assert (await world.get("/watchlists", cookie))[1]["data"] == []
+            await asyncio.sleep(0.2)
+            assert world.portfolio.calls == []
+
+    run(go())
+
+
 def test_more_than_fifty_shares_ask_for_the_first_fifty(tmp_path):
     async def go():
         async with World(tmp_path) as world:
