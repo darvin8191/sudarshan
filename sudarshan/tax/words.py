@@ -43,3 +43,62 @@ TURNOVER_METHODS = {
     "abs_pnl": "Sum of profits and losses, ICAI method",
     "abs_pnl_plus_sale_premium": "Sum of profits and losses plus premium on options sold",
 }
+
+BUCKET_NOUNS = {
+    "stcl": "short-term capital loss",
+    "ltcl": "long-term capital loss",
+    "business": "F&O (business) loss",
+    "speculative": "intraday (speculative) loss",
+}
+TARGET_NOUNS = {
+    "short": "short-term gain",
+    "long": "long-term gain",
+    "business": "F&O profit",
+    "speculative": "intraday profit",
+}
+BUCKET_USE = {
+    "stcl": "against capital gains",
+    "ltcl": "against long-term capital gains only",
+    "business": "against business income only",
+    "speculative": "against intraday (speculative) profit only",
+}
+
+
+def _cap(text: str) -> str:
+    return text[:1].upper() + text[1:]
+
+
+def set_off_step(step: dict, amount: str, year: str) -> str:
+    """One step of a set-off as a sentence; ``year`` is the label of the loss's own year."""
+    whose = "This year's" if step["step"] == "same_year" else f"The {year}"
+    noun = BUCKET_NOUNS[step["bucket"]]
+    return f"{whose} {noun}: {amount} set against this year's {TARGET_NOUNS[step['against']]}."
+
+
+def carried_on(row: dict, amount: str, year: str, last: str, years: int) -> str:
+    noun, use = BUCKET_NOUNS[row["bucket"]], BUCKET_USE[row["bucket"]]
+    return f"{_cap(noun)} of {year}: {amount} carried {years} years (to {last}), {use}."
+
+
+def lapsed(row: dict, amount: str, year: str, last: str) -> str:
+    noun = BUCKET_NOUNS[row["bucket"]]
+    return f"{_cap(noun)} of {year}: {amount} could be used up to {last}. It has lapsed."
+
+
+def own_figure(row: dict, amount: str, year: str) -> str:
+    noun = BUCKET_NOUNS[row["bucket"]]
+    return f"SUDARSHAN's own figure for the {noun} of {year} is {amount}; yours is used."
+
+
+def other_heads(amount: str) -> str:
+    return (
+        f"Available against other income this year except salary: {amount}; what is not used "
+        "is carried, against business income only."
+    )
+
+
+SPECULATIVE_STAYS = "An intraday (speculative) loss cannot reduce any other income."
+SET_OFF_ORDER = (
+    "Order used: this year's losses first, then earlier years' oldest first, an intraday "
+    "(speculative) loss before a business loss. Verify with your CA."
+)

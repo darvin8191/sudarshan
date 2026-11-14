@@ -153,6 +153,7 @@ def year_schedule(gains, fy: int, carries=(), settings: Settings | None = None) 
         },
         "carried": set_off["carried"],
         "lapsed": set_off["lapsed"],
+        "own_figures": set_off["own_figures"],
         "needs_fmv": [g for g in rows if g.status == "needs_fmv"],
         "unknown_cost": [g for g in rows if g.status == "unknown_cost"],
         "exempt_buybacks": [g for g in rows if g.status == "exempt_buyback"],

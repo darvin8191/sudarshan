@@ -36,6 +36,7 @@ def test_year_schedule(case):
     for name, count in out.get("out_lists", {}).items():
         assert len(got[name]) == count, name
     assert got["buyback_dividend_paise"] == out.get("out_buyback_dividend_paise", 0)
+    assert got["own_figures"] == out.get("out_own_figures", [])
 
 
 @pytest.mark.parametrize("case", cases("year.json", "schedule"))

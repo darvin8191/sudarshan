@@ -134,6 +134,12 @@ CASES = [
          "at 15% = 3,000; cess 320", 2023,
          [g("long", 20231110, 1000, 150_000), g("short", 20231110, 1500, 20_000)],
          20_000, 50_000, 8_000, 320, 100_000),
+    case("Y15-owner-figure-wins", "short gain 60,000; the owner entered a short-term loss of "
+         "FY 2024-25 of 50,000 and 80,000 was computed here for the same year: the owner's is "
+         "used (10,000 at 20% = 2,000, cess 80) and the computed one is only shown beside it",
+         2026, [g(*S26, 60_000)], 10_000, 0, 2_000, 80, 0,
+         carries=[carry(2024, "stcl", 80_000, "computed"), carry(2024, "stcl", 50_000)],
+         out_own_figures=[carried(2024, "stcl", 80_000, 2032, "computed")]),
 ]  # fmt: skip
 assert 123_456 * 5 // 10 == 61_728 and 123_456 * 3 // 10 == 37_036 and 123_456 * 2 // 10 == 24_691
 ALLOCATE = [{

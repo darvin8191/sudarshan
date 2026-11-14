@@ -745,6 +745,57 @@
     "carried": [],
     "lapsed": []
    }
+  },
+  {
+   "id": "Y15-owner-figure-wins",
+   "note": "short gain 60,000; the owner entered a short-term loss of FY 2024-25 of 50,000 and 80,000 was computed here for the same year: the owner's is used (10,000 at 20% = 2,000, cess 80) and the computed one is only shown beside it",
+   "in": {
+    "fy": 2026,
+    "gains": [
+     {
+      "term": "short",
+      "sale_day": 20260812,
+      "rate_bp": 2000,
+      "gain_paise": 6000000
+     }
+    ],
+    "carries": [
+     {
+      "taxpayer": 1,
+      "loss_fy": 2024,
+      "bucket": "stcl",
+      "paise": 8000000,
+      "source": "computed"
+     },
+     {
+      "taxpayer": 1,
+      "loss_fy": 2024,
+      "bucket": "stcl",
+      "paise": 5000000,
+      "source": "owner"
+     }
+    ]
+   },
+   "out": {
+    "taxable": {
+     "st_paise": 1000000,
+     "lt_paise": 0
+    },
+    "tax_paise": 200000,
+    "cess_paise": 8000,
+    "exempt_used_paise": 0,
+    "carried": [],
+    "lapsed": [],
+    "out_own_figures": [
+     {
+      "loss_fy": 2024,
+      "bucket": "stcl",
+      "paise": 8000000,
+      "source": "computed",
+      "last_fy": 2032
+     }
+    ]
+   }
   }
  ],
  "allocate": [
