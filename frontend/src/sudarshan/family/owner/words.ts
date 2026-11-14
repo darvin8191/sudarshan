@@ -115,6 +115,7 @@ export const AUDIT_WORDS: Record<AuditKind, string> = {
   member_removed: 'Member removed',
   privacy_changed: 'Privacy changed',
   signin_reset: 'Sign-in reset',
+  signin_unlocked: 'Sign-in unlocked',
   share_set: 'Sharing set',
   share_removed: 'Sharing removed',
   device_renamed: 'Device renamed',

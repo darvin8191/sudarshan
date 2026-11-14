@@ -11,6 +11,7 @@ const api = vi.hoisted(() => ({
   inviteCreate: vi.fn(),
   inviteRevoke: vi.fn(),
   signinReset: vi.fn(),
+  signinUnlock: vi.fn(),
   deviceList: vi.fn(),
   deviceRevoke: vi.fn(),
 }))
@@ -21,7 +22,14 @@ vi.mock('../ownerApi', async () => ({
 
 import { OwnerError } from '../ownerApi'
 import { cardOf, deviceOf, inviteOf, NOW } from './fixtures'
-import { MemberSheet, REMOVE_ASK, RESET_ASK, SIGN_OUT_ASK } from './MemberSheet'
+import {
+  MemberSheet,
+  REMOVE_ASK,
+  RESET_ASK,
+  SIGN_OUT_ASK,
+  UNLOCK_LINE,
+  UNLOCKED,
+} from './MemberSheet'
 
 function mount(
   card: ReturnType<typeof cardOf> | 'new' = cardOf(),
@@ -283,6 +291,30 @@ describe('Invite or Reset sign-in', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Cancel the open invite' }))
     expect(api.inviteRevoke).toHaveBeenCalledWith({ member_id: 1 })
     expect(await screen.findByText('The invite link no longer works.')).toBeInTheDocument()
+  })
+})
+
+describe('Unlock sign-in (review L1)', () => {
+  it('is offered only while wrong attempts hold the sign-in', () => {
+    mount(cardOf({ locked_until: NOW - 1 }))
+    expect(screen.queryByRole('button', { name: 'Unlock sign-in' })).toBeNull()
+    expect(screen.queryByText(UNLOCK_LINE)).toBeNull()
+  })
+
+  it('clears the lock with one tap, keeps the sign-in, and reads the members again', async () => {
+    const answer = later<ReturnType<typeof cardOf>>()
+    api.signinUnlock.mockReturnValue(answer.promise)
+    const { spy } = mount(cardOf({ locked_until: NOW + 300_000 }))
+    expect(screen.getByText(UNLOCK_LINE)).toBeInTheDocument()
+    const button = screen.getByRole('button', { name: 'Unlock sign-in' })
+    await userEvent.click(button)
+    await userEvent.click(button) // sent once however it is tapped
+    expect(api.signinUnlock).toHaveBeenCalledTimes(1)
+    expect(api.signinUnlock).toHaveBeenCalledWith({ member_id: 1 })
+    expect(api.signinReset).not.toHaveBeenCalled()
+    await act(async () => answer.resolve(cardOf({ locked_until: null })))
+    expect(await screen.findByText(UNLOCKED)).toBeInTheDocument()
+    expect(spy).toHaveBeenCalled()
   })
 })
 

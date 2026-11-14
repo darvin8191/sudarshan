@@ -122,8 +122,8 @@ class FamilyService(Router):
             return call
 
         names = ("member_create", "member_update", "member_status", "member_remove",
-                 "invite_create", "invite_revoke", "signin_reset", "device_list",
-                 "device_revoke")  # fmt: skip
+                 "invite_create", "invite_revoke", "signin_reset", "signin_unlock",
+                 "device_list", "device_revoke")  # fmt: skip
         built = {name: via(name) for name in names}
         built["member_list"] = self._member_list
         built["state"] = self._admin_state

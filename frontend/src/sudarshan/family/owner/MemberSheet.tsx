@@ -1,11 +1,20 @@
 // SUDARSHAN P6 D7a (M20.6): the sheet of one member, or of a member about to be added. Edit (name,
-// role, privacy, language), Invite or Reset sign-in, Suspend or Resume, Devices (each with Sign
-// out) and Remove. Every write goes through one lock (`useOnce`): it sends once however it is
+// role, privacy, language), Invite or Reset sign-in, Unlock sign-in while wrong attempts hold it
+// (review L1), Suspend or Resume, Devices (each with Sign out) and Remove. Every write goes through one lock (`useOnce`): it sends once however it is
 // tapped, carries the card's `version` (or a `request_id` for a create, an invite, a reset), and
 // shows the answer's sentence. A destructive action asks first. A write that was not answered
 // says "Not confirmed" and the page reads the members again; it never says "failed".
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { CirclePause, KeyRound, Loader2, Play, Smartphone, Trash2, UserPlus } from 'lucide-react'
+import {
+  CirclePause,
+  KeyRound,
+  Loader2,
+  LockOpen,
+  Play,
+  Smartphone,
+  Trash2,
+  UserPlus,
+} from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -32,6 +41,10 @@ export const REMOVE_ASK =
 export const RESET_ASK =
   'Reset sign-in? Their devices are signed out, and their password and code app stop working until they use the new invite link.'
 export const SIGN_OUT_ASK = 'Sign out this device? They can sign in again on it.'
+/** Review L1: what Unlock sign-in does, said under its button while a lock is on. */
+export const UNLOCK_LINE =
+  'Wrong attempts paused sign-ins on phones this member has not used. Unlock lets them try again now; their password and code app stay as they are.'
+export const UNLOCKED = 'Unlocked. They can sign in again now.'
 
 const LANGUAGES: ReadonlyArray<{ value: Language; label: string }> = [
   { value: 'en', label: 'English' },
@@ -387,6 +400,18 @@ export function MemberSheet({
       })
   }
 
+  const unlock = () => {
+    if (!card) return
+    void once
+      .run(
+        () => ownerApi.signinUnlock({ member_id: card.id }),
+        () => UNLOCKED
+      )
+      .then((done) => {
+        if (done) void reread()
+      })
+  }
+
   const revoke = () => {
     if (!card) return
     void once
@@ -443,6 +468,7 @@ export function MemberSheet({
 
   const status = card?.status
   const joined = card?.handle != null
+  const locked = card?.locked_until != null && card.locked_until > now
   const fieldsKey = useMemo(() => `${id ?? 'new'}:${version ?? 0}`, [id, version])
 
   return (
@@ -470,6 +496,22 @@ export function MemberSheet({
               </h3>
               {joined ? (
                 <>
+                  {locked ? (
+                    <>
+                      <Button
+                        type="button"
+                        className="h-12 justify-start"
+                        disabled={once.pending}
+                        onClick={unlock}
+                      >
+                        <LockOpen aria-hidden="true" className="size-4" />
+                        Unlock sign-in
+                      </Button>
+                      <p className="text-[0.8125rem] text-[color:var(--text-secondary)]">
+                        {UNLOCK_LINE}
+                      </p>
+                    </>
+                  ) : null}
                   <Button
                     type="button"
                     variant="outline"

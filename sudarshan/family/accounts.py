@@ -590,6 +590,22 @@ class Accounts:
         self.codes.put(request_id, *made)
         return invites.answer(*made)
 
+    async def signin_unlock(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Clear a member's counts of wrong sign-ins (their name's and their phones') and let every
+        held network area try again, keeping their password, code app and phones (review L1): the
+        owner's answer to "I am locked out" that is not a new invite."""
+
+        def decide(tx: Tx, now: int) -> Outcome:
+            member = members.live(tx, args.get("member_id"))
+            cleared = lockout.clear_member(tx, member)
+            audit.record(tx, at=now, actor=audit.OWNER, kind="signin_unlocked",
+                         member_id=member["id"], detail={"counts": cleared})  # fmt: skip
+            return Outcome(data=members.card(tx, member, now))
+
+        card = (await self._write(decide)).data
+        self.areas.clear()  # the owner decided: a member held back by an area waits no longer
+        return card
+
     async def device_list(self, args: dict[str, Any]) -> list[dict[str, Any]]:
         def read(tx: Tx) -> list[dict[str, Any]]:
             member = members.live(tx, args.get("member_id"))

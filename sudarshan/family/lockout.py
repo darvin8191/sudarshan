@@ -13,8 +13,9 @@ The rule, as a stranger meets it and as a member does:
   failure after it locks again for twice as long as the last, up to 15 minutes (``LOCKOUT``).
   While a count is locked an attempt against it is refused at once: no password is tried and it
   counts for nothing. A right sign-in clears its count; a count is forgotten a day after its last
-  failure and its lock (``prune``); the owner clears a member's counts (``clear_member``). The
-  owner is told at the first lock of a run, not at every lock after it.
+  failure and its lock (``prune``); the owner's Unlock sign-in (``signin_unlock``) clears a member's
+  counts and every held area, keeping their password and code app. The owner is told at the first
+  lock of a run, not at every lock after it.
 * **A name nobody has is counted the same way**, in the same table, under the same keyed hash of
   the name typed, with the same thresholds: the same sentence, a 429 at the same failure, one
   password check of the same cost and one write each time. Nothing an outsider can see tells a
@@ -166,6 +167,10 @@ class Areas:
 
     def __len__(self) -> int:
         return len(self._seen)
+
+    def clear(self) -> None:
+        """Every area may try again (the owner unlocked a member's sign-in)."""
+        self._seen.clear()
 
     def _recent(self, area: str, now: int) -> deque[int] | None:
         found = self._seen.get(area)

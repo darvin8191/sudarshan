@@ -158,6 +158,7 @@ AUDIT_KINDS = (
     "member_removed",
     "privacy_changed",
     "signin_reset",
+    "signin_unlocked",
     "share_set",
     "share_removed",
     "device_renamed",
@@ -388,6 +389,8 @@ ADMIN_OPS = (
     SealedOp("invite_create", "member_id:int, request_id?:string", "Invite"),
     SealedOp("invite_revoke", "member_id:int", "Done"),
     SealedOp("signin_reset", "member_id:int, version:int, request_id?:string", "Invite"),
+    # Review L1: the counts of wrong sign-ins cleared, the password and code app kept.
+    SealedOp("signin_unlock", "member_id:int", "MemberCard"),
     SealedOp("device_list", "member_id:int", "Device[]"),
     SealedOp("device_revoke", "member_id:int, id:string", "Done"),
     SealedOp("audit_list", "member_id?:int|null, kind?:AuditKind|null, before?:int|null, "

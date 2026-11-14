@@ -294,6 +294,38 @@ def test_a_stranger_cannot_lock_a_member_out_of_their_phone_nor_learn_the_name(t
     scenario(tmp_path, body)
 
 
+def test_a_viewer_session_reaches_no_admin_op_and_the_owner_unlocks_a_lock(tmp_path):
+    """Review L1: signin_unlock is the owner's alone, as every admin op is: a signed-in member's
+    cookies open no admin door and no viewer route serves it; the owner's sealed op clears the
+    lock, and the password and code app stay."""
+
+    async def body(world: World):
+        card, secret, phone = await world.member()
+        headers = {"Cookie": phone.cookie_header(), "Content-Type": "application/json",
+                   contract.CSRF_HEADER: phone.jar[contract.CSRF_COOKIE]}  # fmt: skip
+        raw = json.dumps({"member_id": card["id"]}).encode()
+        for more in ({}, {"X-Real-IP": "198.51.100.7"}):
+            status, _, answer = await ask(world.port, "POST", "/v1/admin/signin_unlock", body=raw,
+                                          headers=headers | more)  # fmt: skip
+            assert status in (403, 404) and answer["status"] == "error", (more, status)
+        assert (await phone.call("POST", "/signin_unlock", {"member_id": card["id"]}))[0] == 404
+        stranger = Phone(world.port)
+        await stranger.call("GET", "/me")
+        wrong = {"handle": "member_a", "password": "wrong wrong wrong", "totp": "000000"}
+        for _ in range(5):
+            status, _ = await stranger.call("POST", "/login", wrong)
+        assert status == 429
+        locked = (await world.owner("member_list"))[0]["locked_until"]
+        assert locked is not None
+        unlocked = await world.owner("signin_unlock", member_id=card["id"])
+        assert unlocked["locked_until"] is None and unlocked["status"] == "active"
+        world.clock.at += 30_000
+        right = {"handle": "member_a", "password": PASSWORD, "totp": world.code(secret)}
+        assert (await stranger.call("POST", "/login", right))[0] == 200  # same password, same app
+
+    scenario(tmp_path, body)
+
+
 def test_the_member_row_is_read_on_every_request(tmp_path):
     async def body(world: World):
         card, _, phone = await world.member()
