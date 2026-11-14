@@ -11,7 +11,7 @@ import { Figure, HiddenTotal, ReadStamp, ServiceWords } from '@/sudarshan/books/
 import { formatPrice } from '@/sudarshan/dashboard/format'
 import { LiveLine } from '@/sudarshan/dashboard/LiveLine'
 import { FamilyError, familyApi, NO_ANSWER } from '../api'
-import { type MaskedPosition, positionFigures, totalOf } from '../books'
+import { instrumentOf, isOpen, type MaskedPosition, positionFigures, totalOf } from '../books'
 import { useFamilyFeed } from '../familyManager'
 import { familyMarketOpen } from '../feedLine'
 import type { Quote } from '../types'
@@ -50,16 +50,35 @@ export default function FamilyDashboard() {
   const marketOpen = useMemo(() => familyMarketOpen(feed), [feed])
 
   const quotes = market.data?.indices ?? []
+  // Review M3 (v0.12.0): the glance follows the open positions' own ticks, as the Positions
+  // screen does. It was worked out from the read alone, so the home screen's one big figure was
+  // up to 45 s old under a line that said Real-time (rule 7). The indices come first, so the cap
+  // on followed symbols takes positions last.
+  const open = useMemo(() => positions.rows.filter(isOpen), [positions.rows])
   const instruments = useMemo(
-    () => quotes.map((quote) => ({ symbol: quote.symbol, exchange: quote.exchange })),
-    [quotes]
+    () => [
+      ...quotes.map((quote) => ({ symbol: quote.symbol, exchange: quote.exchange })),
+      ...open.map(instrumentOf).filter((i): i is NonNullable<typeof i> => i !== null),
+    ],
+    [quotes, open]
   )
   const live = useViewerLive({ instruments, marketOpen })
 
-  const held = positions.rows.filter((row) => row.side !== 'closed')
+  const held = open
   const total = totalOf(
-    positions.rows.map((row) => positionFigures(row, undefined, positions.readAt).pnl)
+    positions.rows.map((row) => {
+      const instrument = instrumentOf(row)
+      const tick = instrument
+        ? live.ticks.get(`${instrument.exchange.toUpperCase()}:${instrument.symbol.toUpperCase()}`)
+        : undefined
+      return positionFigures(row, tick, positions.readAt).pnl
+    })
   )
+  // Stale on the Positions screen's rule: the feed is late or coming back with old figures.
+  const totalStale =
+    held.length > 0 &&
+    (live.line.kind === 'delayed' || live.line.kind === 'connecting') &&
+    live.line.stale
   const problem = market.error
     ? market.error instanceof FamilyError
       ? market.error.message
@@ -117,7 +136,11 @@ export default function FamilyDashboard() {
               {total === undefined ? (
                 <HiddenTotal />
               ) : (
-                <Figure value={total} className="sd-display text-[1.75rem] font-bold" />
+                <Figure
+                  value={total}
+                  stale={totalStale}
+                  className="sd-display text-[1.75rem] font-bold"
+                />
               )}
             </p>
             <p className="text-sm font-medium text-[color:var(--text-secondary)]">

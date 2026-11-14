@@ -316,4 +316,58 @@ describe('Dashboard', () => {
     const total = await screen.findByTestId('glance-total')
     await waitFor(() => expect(total.textContent).toContain('50.00'))
   })
+
+  // Review M3 (v0.12.0): the glance was worked out from the read alone and never moved between
+  // reads, under a Real-time line. Fails on the old screen: it never asked for SYNTH's ticks.
+  it('moves the glance total with a tick newer than the read', async () => {
+    routeFetch({
+      '/family/api/market': ok({ ...market, feed: 'realtime' }),
+      '/family/api/books/positions': ok(bookOf('positions', [FULL_POSITION])),
+    })
+    mount('/family', <FamilyDashboard />, '/family')
+    const total = await screen.findByTestId('glance-total')
+    await waitFor(() => expect(total.textContent).toContain('50.00'))
+    await waitFor(() => expect(FakeSocket.instances.length).toBeGreaterThan(0))
+    act(() => {
+      FakeSocket.last().open()
+      FakeSocket.last().say({ type: 'auth', status: 'success' })
+    })
+    // the screen follows the open position, not the indices alone
+    await waitFor(() =>
+      expect(FakeSocket.last().sent.some((sent) => sent.includes('"SYNTH"'))).toBe(true)
+    )
+    act(() => {
+      FakeSocket.last().say({
+        type: 'market_data',
+        symbol: 'SYNTH',
+        exchange: 'NSE',
+        mode: 1,
+        data: { ltp: 107, close: 100, ltt: Date.now(), timestamp: Date.now() },
+      })
+    })
+    // 10 held at 100, read at 105 (P&L 50.00); a tick at 107 makes it 70.00
+    await waitFor(() => expect(total.textContent).toContain('70.00'))
+    expect(total.textContent).not.toContain('50.00')
+  })
+
+  it('does not follow a closed position, whose P&L is booked', async () => {
+    routeFetch({
+      '/family/api/market': ok(market),
+      '/family/api/books/positions': ok(
+        bookOf('positions', [{ ...FULL_POSITION, symbol: 'SHUTX', qty_u: 0, pnl_paise: 1_200 }])
+      ),
+    })
+    mount('/family', <FamilyDashboard />, '/family')
+    const total = await screen.findByTestId('glance-total')
+    await waitFor(() => expect(total.textContent).toContain('12.00'))
+    await waitFor(() => expect(FakeSocket.instances.length).toBeGreaterThan(0))
+    act(() => {
+      FakeSocket.last().open()
+      FakeSocket.last().say({ type: 'auth', status: 'success' })
+    })
+    await waitFor(() =>
+      expect(FakeSocket.last().sent.some((sent) => sent.includes('"SYNIDX"'))).toBe(true)
+    )
+    expect(FakeSocket.last().sent.some((sent) => sent.includes('"SHUTX"'))).toBe(false)
+  })
 })
