@@ -27,6 +27,7 @@ import { StrikeRowItem, strikeNames } from './StrikeRow'
 import { StrikeSheet } from './StrikeSheet'
 import {
   type ArrangeActions,
+  type ChainTarget,
   type FollowSheet,
   type OrderRequest,
   SymbolSheet,
@@ -475,7 +476,13 @@ export const LiveList = memo(function LiveList({
       pair && now && (now.ce.key !== pair.ce.key || now.pe.key !== pair.pe.key)
         ? { words: followsWords(current.rule, current.shown), onShow: () => setSheetPin(null) }
         : null
-    const chain = chainOf(current.rule.underlying, current.rule.underlying_exchange)
+    // O9: the sheet's chain link opens the phone's chain on this row's expiry and strike.
+    const under = chainOf(current.rule.underlying, current.rule.underlying_exchange)
+    const chain: ChainTarget | null = under && {
+      ...under,
+      expiry: pair?.ce.expiry ?? null,
+      strike: pair?.strike ?? null,
+    }
     return (
       <StrikeSheet
         title={`${current.rule.underlying} ${pair?.strike === null || !pair ? names.middle : num(pair.strike)}`}

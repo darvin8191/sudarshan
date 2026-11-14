@@ -1,7 +1,8 @@
 /**
  * SUDARSHAN O10 (screens design 8.3, 8.4): the options screen on a phone, 360 x 800 with touch, in
  * each state of its table (market open with ticks, market closed, the feed down, the Upstox login
- * lapsed), the strike sheet and the ticket it opens, and the cost run. Every REST call is answered
+ * lapsed), the strike sheet and the ticket it opens, the Straddle tab with its computed chart (O8,
+ * C11), and the cost run on the chain and on the straddle. Every REST call is answered
  * here and the market-data socket plays a tape synthesised in the proxy's message shape: nothing
  * reaches Upstox, NSE or Telegram, no recorded market data is used and no order is sent anywhere.
  * A screenshot of each state is kept as a test artifact.
@@ -19,7 +20,7 @@
  * carries a sign or an arrow, not colour alone; and no colour-contrast finding from axe.
  */
 import AxeBuilder from '@axe-core/playwright'
-import { expect, type Page, test, type WebSocketRoute } from '@playwright/test'
+import { type Browser, expect, type Page, type TestInfo, test, type WebSocketRoute } from '@playwright/test'
 
 test.use({ viewport: { width: 360, height: 800 }, deviceScaleFactor: 3, hasTouch: true, isMobile: true })
 
@@ -101,7 +102,23 @@ async function serve(page: Page, state: State, path = '/options/NFO/NIFTY') {
     start_time: ist(day, window[0]),
     end_time: ist(day, window[1]),
   }))
-  const seen = { chain: 0, orders: 0, subscribed: new Map<string, string>() }
+  const seen = { chain: 0, orders: 0, history: [] as string[], subscribed: new Map<string, string>() }
+  /** A leg's candles for today, from 09:15 to now, at the interval asked: made up, flat near its price. */
+  const history = (body: { symbol?: string; interval?: string }) => {
+    const symbol = String(body.symbol ?? '')
+    seen.history.push(`${symbol}:${body.interval}`)
+    const strike = Number(symbol.slice(12, -2))
+    if (!Number.isFinite(strike) || !/(CE|PE)$/.test(symbol)) return json({ status: 'success', data: [] })
+    const of = leg(strike, symbol.endsWith('CE') ? 'CE' : 'PE')
+    const found = /^(\d+)([mh])$/.exec(String(body.interval ?? '5m'))
+    const step = found ? Number(found[1]) * (found[2] === 'h' ? 3600 : 60) : 300
+    const data: Array<Record<string, number>> = []
+    for (let t = ist(day, '09:15') / 1000, i = 0; t * 1000 <= now; t += step, i += 1) {
+      const close = Math.round((of.ltp + Math.sin(i / 3) * 4) * 100) / 100
+      data.push({ timestamp: t, open: close - 0.5, high: close + 1, low: close - 1, close, volume: 6500 })
+    }
+    return json({ status: 'success', data })
+  }
   const answers: Record<string, () => ReturnType<typeof json>> = {
     '/auth/session-status': () =>
       json({
@@ -170,6 +187,7 @@ async function serve(page: Page, state: State, path = '/options/NFO/NIFTY') {
     (route) => {
       const url = new URL(route.request().url())
       if (url.pathname.startsWith('/socket.io/')) return route.abort()
+      if (url.pathname === '/api/v1/history') return route.fulfill(history(route.request().postDataJSON() ?? {}))
       const answer = answers[url.pathname]
       return route.fulfill(answer ? answer() : json({ status: 'error', message: 'not here' }, 404))
     }
@@ -308,6 +326,65 @@ const STATES: Array<State & { words: Array<string | RegExp>; live: boolean; rows
   },
 ]
 
+/**
+ * The cost of a tape on one tab: every followed instrument ticks 5 times a second for 10 s, a tenth
+ * of them every 20 ms, and each main-thread task is read by the CPU time the thread itself used.
+ */
+async function costRun(
+  page: Page,
+  browser: Browser,
+  info: TestInfo,
+  ticks: (step?: number, slice?: number | null) => void,
+  moved: () => Promise<number>
+) {
+  await page.waitForTimeout(1500) // the load's own work is not what is measured
+  await browser.startTracing(page, { categories: ['toplevel', 'disabled-by-default-devtools.timeline'] })
+  const began = Date.now()
+  for (let step = 1; step <= 50; step += 1) {
+    for (let slice = 0; slice < 10; slice += 1) {
+      ticks(step, slice)
+      await page.waitForTimeout(20)
+    }
+  }
+  const seconds = (Date.now() - began) / 1000
+  const ticked = await moved()
+  const trace = JSON.parse((await browser.stopTracing()).toString()) as {
+    traceEvents: Array<{ name: string; ph: string; pid: number; tid: number; tdur?: number; args?: { name?: string } }>
+  }
+  // The page's main thread, and each of its tasks by the CPU time the thread itself used (`tdur`,
+  // microseconds): what the task costs, whatever else the machine is doing. A mid-range phone is
+  // taken as four times slower (design 2.5), so each is scaled by 4 against the budget.
+  const mains = new Set(
+    trace.traceEvents
+      .filter((event) => event.name === 'thread_name' && event.args?.name === 'CrRendererMain')
+      .map((event) => `${event.pid}:${event.tid}`)
+  )
+  const tasks = trace.traceEvents
+    .filter((event) => event.name === 'RunTask' && event.ph === 'X' && mains.has(`${event.pid}:${event.tid}`))
+    .map((event) => ((event.tdur ?? 0) / 1000) * SLOWER)
+    .sort((a, b) => a - b)
+  const busy = tasks.filter((ms) => ms >= 1)
+  const cost = {
+    tasks: tasks.length,
+    over50: tasks.filter((ms) => ms > 50).map((ms) => Math.round(ms)),
+    largest: Math.round(tasks[tasks.length - 1] ?? 0),
+    p95: Math.round((busy[Math.floor(busy.length * 0.95)] ?? 0) * 10) / 10,
+    /** The share of each second the main thread would be busy on such a phone. */
+    busyShare: Math.round((tasks.reduce((sum, ms) => sum + ms, 0) / (seconds * 1000)) * 100) / 100,
+    ticked,
+  }
+  info.annotations.push({ type: 'cost', description: JSON.stringify(cost) })
+  console.log(`cost run (${info.title.slice(0, 40)}): ${JSON.stringify(cost)}`)
+  expect(cost.tasks, 'tasks measured').toBeGreaterThan(500)
+  expect(cost.over50, 'tasks over 50 ms on a phone four times slower').toEqual([])
+  expect(cost.p95, 'a busy task at the 95th percentile, well inside two frames (34 ms)').toBeLessThan(34)
+  expect(cost.busyShare, 'the main thread keeps up with the tape').toBeLessThan(0.75)
+  return cost
+}
+
+const isDevServer = (page: Page) =>
+  page.evaluate(() => document.querySelector('script[src*="@vite/client"]') !== null)
+
 test.describe('the options screen at 360 x 800', () => {
   for (const state of STATES) {
     test(state.name, async ({ page }, info) => {
@@ -439,55 +516,96 @@ test.describe('the options screen at 360 x 800', () => {
     await expect.poll(() => seen.chain, 'the snapshot is read again after the sleep').toBe(2)
   })
 
+  test('the Straddle tab: a tapped strike, its figures, the computed chart, inside the 84 followed', async ({ page }, info) => {
+    const { seen, ticks } = await serve(page, OPEN)
+    await expect(page.locator('[data-feed="live"]').first()).toBeVisible()
+    await page.getByRole('button', { name: 'Straddle at 25,950' }).tap()
+    await expect(page.getByRole('tab', { name: 'Straddle' })).toHaveAttribute('aria-selected', 'true')
+    await expect(page).toHaveURL(/tab=straddle&strike=25950/)
+    const tab = page.locator('[data-straddle-strike="25950"]')
+    await expect(tab).toBeVisible()
+    const premium = leg(25_950, 'CE').ltp + leg(25_950, 'PE').ltp
+    await expect(tab.locator('[data-straddle-premium]')).toHaveText(/^\d{3}\.\d\d$/)
+    const shown = Number(await tab.locator('[data-straddle-premium]').textContent())
+    expect(Math.abs(shown - premium), 'call + put, within the tape\'s own move').toBeLessThan(0.5)
+    await expect(tab.locator('[data-straddle-change]')).toHaveText(/^[+−]\d+\.\d\d · [+−]\d+\.\d%$/)
+    await expect(tab.locator('[data-straddle-breakevens]')).toHaveText(/^25,\d{3}\.\d\d and 26,\d{3}\.\d\d$/)
+    await expect(tab.getByText('Computed · not tradable')).toBeVisible()
+    // The chart: both legs' candles read once each on 5m, then drawn.
+    await expect(tab.locator('[data-straddle-chart] canvas').first()).toBeVisible()
+    await expect.poll(() => seen.history).toEqual([`${symbolOf(25_950, 'CE')}:5m`, `${symbolOf(25_950, 'PE')}:5m`])
+    await expect(tab.locator('[data-chart-state]')).toHaveCount(0)
+    // No instrument was added for it, and none while its legs tick.
+    expect(seen.subscribed.size, 'the straddle follows nothing new').toBe(84)
+    ticks(1)
+    ticks(2)
+    await expect(page.locator('[data-feed="live"]').first()).toBeVisible()
+    expect(seen.subscribed.size).toBe(84)
+    expect(seen.chain, 'one snapshot read for all of it').toBe(1)
+
+    const checks = await pageChecks(page)
+    expect(checks.sideways, 'no sideways scroll').toBe(false)
+    expect(checks.small, 'targets under 48 x 48').toEqual([])
+    expect(checks.colourOnly, 'figures told by colour alone').toEqual([])
+    expect(await axeFindings(page)).toEqual([])
+    await page.screenshot({ path: info.outputPath('straddle-tab.png'), fullPage: true })
+
+    // Another interval reads both legs again; nothing else changes on the socket.
+    await tab.getByRole('button', { name: '15m' }).tap()
+    await expect.poll(() => seen.history.slice(2)).toEqual([`${symbolOf(25_950, 'CE')}:15m`, `${symbolOf(25_950, 'PE')}:15m`])
+    expect(seen.subscribed.size).toBe(84)
+
+    // "Trade the legs" opens the strike sheet, the put first, and sends nothing.
+    await tab.getByRole('button', { name: '25,950 put' }).tap()
+    const sheet = page.getByRole('dialog', { name: 'NIFTY 25,950' })
+    await expect(sheet.getByRole('button', { name: 'Sell PE' })).toBeVisible()
+    await expect(sheet.getByText('Edit row')).toBeHidden()
+    await page.screenshot({ path: info.outputPath('straddle-legs.png') })
+    await page.goBack()
+    await expect(page.getByRole('dialog')).toHaveCount(0)
+    expect(seen.orders, 'no order was sent').toBe(0)
+  })
+
+  test('a far strike\'s straddle follows its two legs while shown (86), never more than 100', async ({ page }) => {
+    const { seen } = await serve(page, OPEN, '/options/NFO/NIFTY?tab=straddle&strike=23900')
+    const tab = page.locator('[data-straddle-strike="23900"]')
+    await expect(tab).toBeVisible()
+    await expect(tab.getByText(/a far strike, followed while shown/)).toBeVisible()
+    await expect.poll(() => seen.subscribed.size).toBe(86)
+    expect(seen.subscribed.get(`NFO:${symbolOf(23_900, 'CE')}`)).toBe('Quote')
+    // Its sheet over it: the same two legs, so still 86 (the other expiries cannot be read here).
+    await tab.getByRole('button', { name: '23,900 call' }).tap()
+    await expect(page.getByRole('dialog', { name: 'NIFTY 23,900' })).toBeVisible()
+    expect(seen.subscribed.size).toBeLessThanOrEqual(100)
+    await expect.poll(() => seen.subscribed.size).toBe(86)
+    await page.goBack()
+    await page.getByRole('tab', { name: 'Chain' }).tap()
+    await expect.poll(() => seen.subscribed.size).toBe(84)
+  })
+
   test('the cost run: 84 instruments at 5 ticks a second for 10 s, by the main thread\'s own CPU time', async ({ page, browser }, info) => {
     test.slow()
     const { ticks } = await serve(page, OPEN)
-    const devServer = await page.evaluate(() => document.querySelector('script[src*="@vite/client"]') !== null)
-    test.skip(devServer, 'the cost run measures a production build: vite build, then vite preview')
+    test.skip(await isDevServer(page), 'the cost run measures a production build: vite build, then vite preview')
     await expect(page.locator('[data-feed="live"]').first()).toBeVisible()
-    await page.waitForTimeout(1500) // the load's own work is not what is measured
-    await browser.startTracing(page, { categories: ['toplevel', 'disabled-by-default-devtools.timeline'] })
-    const began = Date.now()
-    // The tape: every instrument ticks 5 times a second for 10 s, a tenth of them every 20 ms.
-    for (let step = 1; step <= 50; step += 1) {
-      for (let slice = 0; slice < 10; slice += 1) {
-        ticks(step, slice)
-        await page.waitForTimeout(20)
-      }
-    }
-    const seconds = (Date.now() - began) / 1000
-    const ticked = await page.locator('[data-tick]').count()
-    const trace = JSON.parse((await browser.stopTracing()).toString()) as {
-      traceEvents: Array<{ name: string; ph: string; pid: number; tid: number; tdur?: number; args?: { name?: string } }>
-    }
-    // The page's main thread, and each of its tasks by the CPU time the thread itself used (`tdur`,
-    // microseconds): what the task costs, whatever else the machine is doing. A mid-range phone is
-    // taken as four times slower (design 2.5), so each is scaled by 4 against the budget.
-    const mains = new Set(
-      trace.traceEvents
-        .filter((event) => event.name === 'thread_name' && event.args?.name === 'CrRendererMain')
-        .map((event) => `${event.pid}:${event.tid}`)
-    )
-    const tasks = trace.traceEvents
-      .filter((event) => event.name === 'RunTask' && event.ph === 'X' && mains.has(`${event.pid}:${event.tid}`))
-      .map((event) => ((event.tdur ?? 0) / 1000) * SLOWER)
-      .sort((a, b) => a - b)
-    const busy = tasks.filter((ms) => ms >= 1)
-    const cost = {
-      tasks: tasks.length,
-      over50: tasks.filter((ms) => ms > 50).map((ms) => Math.round(ms)),
-      largest: Math.round(tasks[tasks.length - 1] ?? 0),
-      p95: Math.round((busy[Math.floor(busy.length * 0.95)] ?? 0) * 10) / 10,
-      /** The share of each second the main thread would be busy on such a phone. */
-      busyShare: Math.round((tasks.reduce((sum, ms) => sum + ms, 0) / (seconds * 1000)) * 100) / 100,
-      ticked,
-    }
-    info.annotations.push({ type: 'cost', description: JSON.stringify(cost) })
-    console.log(`cost run: ${JSON.stringify(cost)}`)
+    const cost = await costRun(page, browser, info, ticks, () => page.locator('[data-tick]').count())
     expect(cost.ticked, 'the rows followed the tape').toBeGreaterThan(10)
-    expect(cost.tasks, 'tasks measured').toBeGreaterThan(500)
-    expect(cost.over50, 'tasks over 50 ms on a phone four times slower').toEqual([])
-    expect(cost.p95, 'a busy task at the 95th percentile, well inside two frames (34 ms)').toBeLessThan(34)
-    expect(cost.busyShare, 'the main thread keeps up with the tape').toBeLessThan(0.75)
+  })
+
+  test('the cost run on the Straddle tab: the same tape with the computed chart drawing', async ({ page, browser }, info) => {
+    test.slow()
+    const { ticks, seen } = await serve(page, OPEN, '/options/NFO/NIFTY?tab=straddle')
+    test.skip(await isDevServer(page), 'the cost run measures a production build: vite build, then vite preview')
+    const tab = page.locator('[data-straddle-strike="25900"]')
+    await expect(tab.locator('[data-straddle-chart] canvas').first()).toBeVisible()
+    await expect.poll(() => seen.history.length).toBe(2)
+    const before = await tab.locator('[data-straddle-premium]').textContent()
+    const cost = await costRun(page, browser, info, ticks, async () => {
+      ticks(1) // the tape ends where it began: one more step, and the premium must have moved
+      await expect(tab.locator('[data-straddle-premium]')).not.toHaveText(before ?? '')
+      return 1
+    })
+    expect(cost.ticked, 'the premium followed the tape').toBe(1)
+    expect(seen.subscribed.size, 'still the 84 instruments').toBe(84)
   })
 })

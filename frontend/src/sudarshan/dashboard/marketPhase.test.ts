@@ -103,6 +103,18 @@ describe('the expiry chip', () => {
     expect(expiryChip(saturday, at('2026-11-14', '07:00'))?.words).toBe('Expiry Mon: NIFTY')
   })
 
+  it('names the first expiry it speaks of, for the chain a tap opens (O9)', () => {
+    expect(expiryChip(factsOf('2026-11-17'), at('2026-11-17', '11:00'))?.chain).toEqual({
+      exchange: 'NFO',
+      underlying: 'NIFTY',
+      day: '2026-11-17',
+    })
+    expect(expiryChip(factsOf('2026-11-16'), at('2026-11-16', '16:00'))?.chain).toMatchObject({
+      underlying: 'NIFTY',
+      day: '2026-11-17',
+    })
+  })
+
   it('says nothing while the master contract is not loaded', () => {
     expect(
       expiryChip({ ...factsOf('2026-11-17'), expiries: null }, at('2026-11-17', '11:00'))

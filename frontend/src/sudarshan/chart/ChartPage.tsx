@@ -75,6 +75,7 @@ import {
   loadPreviousOi,
   searchSymbols,
 } from './api'
+import { ChainLink } from './ChainLink'
 import { DepthSheet, DepthStrip } from './DepthStrip'
 import { DrawingSheet } from './DrawingSheet'
 import { DRAW_ROW, DrawRow } from './DrawRow'
@@ -1221,6 +1222,8 @@ function AppBar({
           <Search aria-hidden="true" className="size-5" />
         </button>
       )}
+      {/* SUDARSHAN O9: the option chain of what is charted, on its expiry and strike. */}
+      <ChainLink symbol={symbol} exchange={exchange} />
       {onAlert && (
         <button
           type="button"
