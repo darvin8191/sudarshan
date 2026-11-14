@@ -124,6 +124,8 @@ export interface ChainModel {
   expectedMove: { premium: number; pct: number | null } | null
   /** IV of the put two strikes below the money less IV of the call two above. */
   skew: number | null
+  /** When the snapshot was read, epoch ms. */
+  asOf: number
   /** The snapshot's time when some strike shows it instead of ticks; null when every strike ticks. */
   wingsAsOf: number | null
 }
@@ -359,6 +361,7 @@ export function chainModel({
     expectedMove:
       premium === null ? null : { premium, pct: spot !== null ? (premium / spot) * 100 : null },
     skew: putIv !== null && callIv !== null ? putIv - callIv : null,
+    asOf,
     wingsAsOf: rows.some((row) => !row.live) ? asOf : null,
   }
 }

@@ -11,8 +11,9 @@
  */
 import { useQuery } from '@tanstack/react-query'
 import { Unplug } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router'
+import { PlaceOrderDialog } from '@/components/trading/PlaceOrderDialog'
 import { AccessNotice } from '@/sudarshan/AccessNotice'
 import { usePriceAccess } from '@/sudarshan/access'
 import { useMarketOpen, useNow } from '@/sudarshan/dashboard/hooks'
@@ -23,8 +24,11 @@ import {
   useIstDay,
 } from '@/sudarshan/dashboard/MarketCalendar'
 import { readListing } from './api'
+import { ChainTab } from './ChainTab'
 import { Header } from './Header'
 import { readLastChain, saveLastChain } from './prefs'
+import { StrikeEntry } from './StrikeEntry'
+import { useSheets } from './sheets'
 import { clockTime } from './TimedRefresh'
 import { UnderlyingSheet } from './UnderlyingSheet'
 import { useChainModel } from './useChainModel'
@@ -72,7 +76,10 @@ export default function OptionsPage() {
   const day = useIstDay()
   const { isOpen } = useMarketOpen(market)
   const now = useNow()
-  const [picking, setPicking] = useState(false)
+  const sheets = useSheets()
+  const picking = sheets.sheet?.sheet === 'underlying'
+  /** What the open strike sheet needs followed, beside the window. */
+  const [sheetFollows, setSheetFollows] = useState<string[]>([])
 
   // The expiries: read when the chain is named and again on a new day in India.
   const read = useQuery({
@@ -106,8 +113,13 @@ export default function OptionsPage() {
     apiKey: access.apiKey,
     marketOpen: listing ? isOpen(listing.exchange) : null,
     now,
+    sheet: sheetFollows,
     enabled: ready,
   })
+  const openStrike = useCallback(
+    (strike: number, side: 'ce' | 'pe') => sheets.open({ sheet: 'strike', strike, side }),
+    [sheets.open]
+  )
 
   if (!named) {
     const last = readLastChain()
@@ -116,15 +128,15 @@ export default function OptionsPage() {
     )
   }
 
-  const pick = (to: 'NFO' | 'BFO', name: string) => {
-    setPicking(false)
-    navigate(optionsPath(to, name))
-  }
+  // The picker's own history entry is replaced by the chain picked, so Back leaves the page.
+  const pick = (to: 'NFO' | 'BFO', name: string) =>
+    navigate(optionsPath(to, name), { replace: true })
+  const pickUnderlying = () => sheets.open({ sheet: 'underlying' })
   const sheet = picking && (
-    <UnderlyingSheet current={underlying} onPick={pick} onClose={() => setPicking(false)} />
+    <UnderlyingSheet current={underlying} onPick={pick} onClose={sheets.close} />
   )
   const other = (
-    <button type="button" onClick={() => setPicking(true)} className={QUIET}>
+    <button type="button" onClick={pickUnderlying} className={QUIET}>
       Pick another underlying
     </button>
   )
@@ -164,8 +176,9 @@ export default function OptionsPage() {
   }
 
   const { status, model } = live
+  const ticket = sheets.sheet?.sheet === 'ticket' ? sheets.sheet.order : null
   const loggedOut = access.state === 'upstox-logged-out' || status.state === 'signin'
-  const heldAt = model ? clockTime(model.wingsAsOf ?? now) : null
+  const heldAt = model ? clockTime(model.asOf) : null
   return (
     <div data-options-page="true" className="flex flex-col gap-3">
       {calendar}
@@ -175,7 +188,7 @@ export default function OptionsPage() {
         live={live}
         now={now}
         bare={!ready || loggedOut}
-        onUnderlying={() => setPicking(true)}
+        onUnderlying={pickUnderlying}
         onExpiry={(next) => setQuery({ expiry: next }, { replace: true })}
       />
       {loggedOut ? (
@@ -209,8 +222,50 @@ export default function OptionsPage() {
               )}
             </div>
           )}
+          {model && (
+            <ChainTab
+              model={model}
+              chainKey={`${listing.exchange}:${listing.underlying}:${expiry}`}
+              directions={live.directions}
+              dim={live.line.kind !== 'live' && live.line.kind !== 'closed' && !live.feed.connected}
+              onOpen={openStrike}
+            />
+          )}
+          {model && sheets.sheet?.sheet === 'strike' && (
+            <StrikeEntry
+              listing={listing}
+              expiry={expiry}
+              model={model}
+              asOf={model.asOf}
+              strike={sheets.sheet.strike}
+              feed={{
+                lines: live.lines,
+                directions: live.directions,
+                feed: live.feed,
+                now,
+                marketOpen: isOpen(listing.exchange),
+              }}
+              onClose={sheets.close}
+              onOrder={(order) => sheets.open({ sheet: 'ticket', order })}
+              onFollow={setSheetFollows}
+            />
+          )}
         </>
       )}
+      {/* The app's own order ticket, opened by the strike sheet's Buy and Sell: no order code here. */}
+      <PlaceOrderDialog
+        open={ticket !== null}
+        onOpenChange={(next) => {
+          if (!next) sheets.close()
+        }}
+        symbol={ticket?.item.symbol ?? ''}
+        exchange={ticket?.item.exchange ?? ''}
+        action={ticket?.action ?? 'BUY'}
+        lotSize={ticket?.contract.lotSize ?? 1}
+        tickSize={ticket?.contract.tickSize ?? 0.05}
+        product={ticket?.product}
+        strategy="Options"
+      />
       {sheet}
     </div>
   )

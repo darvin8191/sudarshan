@@ -129,7 +129,7 @@ export function Header({
         </>
       )}
 
-      <ul aria-label="Expiry" className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1">
+      <ul aria-label="Expiry" className="flex gap-2 overflow-x-auto pb-1">
         {listing.expiries.map((each) => {
           const chosen = each.date === expiry
           return (

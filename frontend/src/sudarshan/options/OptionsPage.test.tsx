@@ -27,6 +27,30 @@ const calendar = vi.hoisted(() => {
   }
 })
 vi.mock('@/hooks/useMarketStatus', () => ({ useMarketStatus: () => calendar.value }))
+const ticket = vi.hoisted(() => ({ props: [] as Array<Record<string, unknown>> }))
+vi.mock('@/components/trading/PlaceOrderDialog', () => ({
+  PlaceOrderDialog: (
+    props: Record<string, unknown> & { open: boolean; onOpenChange(open: boolean): void }
+  ) => {
+    if (!props.open) return null
+    ticket.props.push(props)
+    return (
+      <div role="dialog" aria-label="Order ticket">
+        <button type="button" onClick={() => props.onOpenChange(false)}>
+          Close ticket
+        </button>
+      </div>
+    )
+  },
+}))
+const same = vi.hoisted(() => ({ rows: [] as unknown[] }))
+vi.mock('@/sudarshan/watchlist/useSameStrike', () => ({
+  useSameStrike: (args: unknown) => ({
+    state: 'ready',
+    rows: args ? same.rows : [],
+    retry: () => {},
+  }),
+}))
 vi.mock('@/components/auth/AuthSync', () => ({ syncSession: vi.fn(async () => {}) }))
 vi.mock('@/api/client', () => ({
   webClient: {
@@ -91,6 +115,7 @@ beforeEach(() => {
   localStorage.clear()
   feed.reset()
   frames.install()
+  ticket.props = []
   vi.spyOn(Date, 'now').mockReturnValue(NOW + 2000)
   calendar.state.open = true
   useAuthStore.setState({ apiKey: 'test-key', sessionChecked: true, brokerSessionExpired: false })
@@ -315,6 +340,79 @@ describe('the options page', () => {
     await settle()
     expect(screen.getByRole('heading', { level: 1, name: 'NIFTY' })).toBeInTheDocument()
   })
+
+  it('opens the existing strike sheet on a tapped side, without a watchlist row’s buttons', async () => {
+    await open()
+    expect(document.querySelectorAll('[data-strike]')).toHaveLength(21)
+    fireEvent.click(screen.getByRole('button', { name: /25,900 put/ }))
+    await settle()
+    const sheet = screen.getByRole('dialog', { name: 'NIFTY 25,900' })
+    expect(sheet).toHaveTextContent('NFO · 17 Nov · 1d')
+    expect(sheet).toHaveTextContent('ATM')
+    expect(within(sheet).getByRole('button', { name: 'Buy CE' })).toBeEnabled()
+    expect(within(sheet).getByRole('button', { name: 'Sell PE' })).toBeEnabled()
+    expect(within(sheet).queryByRole('link', { name: /option chain/i })).toBeNull()
+    for (const name of ['Edit row', 'Remove row'])
+      expect(within(sheet).getByText(name).closest('button')).not.toBeVisible()
+    expect(feed.live()).toHaveLength(84) // a followed strike's legs are already on the socket
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Close' }))
+    await settle()
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('opens the app’s own ticket from the sheet’s Buy and Sell, with the ticket’s product rule', async () => {
+    await open()
+    fireEvent.click(screen.getByRole('button', { name: /25,950 call/ }))
+    await settle()
+    fireEvent.click(screen.getByRole('button', { name: 'Sell CE' }))
+    await settle()
+    expect(screen.getByRole('dialog', { name: 'Order ticket' })).toBeInTheDocument()
+    expect(ticket.props.at(-1)).toMatchObject({
+      symbol: symbolOf(25_950, 'CE'),
+      exchange: 'NFO',
+      action: 'SELL',
+      lotSize: 65,
+      tickSize: 0.05,
+      product: 'MIS',
+      strategy: 'Options',
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Close ticket' }))
+    await settle()
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(document.querySelectorAll('[data-strike]')).toHaveLength(21)
+  })
+
+  it('follows a far strike’s legs, and the same strike on later expiries, only while its sheet is open', async () => {
+    same.rows = [
+      {
+        expiry: '2026-11-24',
+        ce: {
+          exchange: 'NFO',
+          symbol: 'NIFTY24NOV2624500CE',
+          key: 'NFO:NIFTY24NOV2624500CE',
+          name: '',
+          lot: 65,
+          tick: 0.05,
+          expiry: '2026-11-24',
+          isin: null,
+        },
+        pe: null,
+      },
+    ]
+    await open()
+    fireEvent.click(screen.getByText('Show more strikes'))
+    fireEvent.click(screen.getByText(/^Show 20 far strikes/))
+    fireEvent.click(document.querySelector('[data-strike="24500"] [data-leg="CE"]') as HTMLElement)
+    await settle()
+    expect(feed.live()).toHaveLength(87)
+    expect(feed.live()).toContain(`NFO:${symbolOf(24_500, 'PE')}:Quote`)
+    expect(feed.live()).toContain('NFO:NIFTY24NOV2624500CE:Quote')
+    expect(screen.getByRole('dialog', { name: 'NIFTY 24,500' })).toHaveTextContent('A far strike')
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+    await settle()
+    expect(feed.live()).toHaveLength(84)
+    same.rows = []
+  }, 20_000)
 
   it('lets every subscription go when the page is left', async () => {
     const view = await open()
