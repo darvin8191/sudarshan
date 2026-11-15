@@ -1524,3 +1524,34 @@ cannot be added, and then:
   `ssh -N -L 5000:127.0.0.1:5000 <you>@<server>`, with `http://127.0.0.1:5000` as the host.
 
 Tests: `sudarshan/assistant/tests/`, `sudarshan/guard/tests/test_guard_migration.py`.
+
+## The TRINETRA view (M13)
+
+TRINETRA's readings reach SUDARSHAN only through a letterbox: a folder SUDARSHAN owns
+(`/var/spool/sudarshan-signals/in`), into which TRINETRA's operators add one small publisher.
+`sudarshan-signals` (127.0.0.1:5588) reads it once a second, keeps the readings and their
+timeline in `/var/lib/sudarshan-signals/signals.db`, and shows them on your screens with how old
+they are. Nothing of TRINETRA's is ever opened, asked, restarted or changed from here; the whole
+contract, and the page to hand TRINETRA's operators, is `sudarshan/signals/README.md` (section
+1). The view ships **switched off** (`SUDARSHAN_SIGNALS off` in "OpenAlgo settings that ship with
+a release"); while it is on and the set-up below has not been run, the TRINETRA page says
+"TRINETRA is not connected yet" with the line to run.
+
+### The letterbox's one-time set-up (M13.3)
+
+1. Ask TRINETRA's operators which account TRINETRA runs as, and give them section 1 of
+   `sudarshan/signals/README.md`. Their publisher stays behind a switch of their own until they
+   choose.
+2. On the server, in the app's folder:
+   `sudo sudarshan/ops/signals/bootstrap.sh --publisher <that account>`
+   (add `--dry-run` first to see what it would do). It makes the letterbox (owner `sudarshan`,
+   mode 1733) and writes the account's number to `/etc/sudarshan/signals.env`, then says
+   `PASS.` It reads the system's account list for that number and nothing else; it touches
+   nothing of TRINETRA's. Running it again is safe ("Nothing was changed").
+3. Check it as SUDARSHAN's account: `sudo -u sudarshan .venv/bin/python -m sudarshan.signals.check`.
+   It writes one file into the letterbox as an account that is not TRINETRA's and sees it refused,
+   then says `PASS.`
+4. Nothing needs a restart: the service notices the set-up within a minute.
+
+After a server is rebuilt, run step 2 again: the letterbox is a queue and is not backed up
+(`signals.db` is). Tests: `sudarshan/signals/tests/`, `sudarshan/ops/tests/test_signals_bootstrap.py`.

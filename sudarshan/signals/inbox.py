@@ -273,6 +273,25 @@ class Letterbox:
         """Leave a newer-format file for a later release; it is not read again while it stays."""
         self._kept[found.name] = found.ident
 
+    def probe(self, name: str) -> str:
+        """Judge one named file as a scan would, touching no other: ``stranger`` (removed),
+        ``refused:<rule>`` (removed), ``found`` (left) or ``gone`` (not there, or no folder)."""
+        fd, _state = self._open_folder()
+        if fd is None:
+            return "gone"
+        out = Scan()
+        try:
+            if self._lstat(fd, name) is None:
+                return "gone"
+            self._take(fd, name, out)
+        finally:
+            os.close(fd)
+        if out.strangers:
+            return "stranger"
+        if out.refused:
+            return f"refused:{out.refused[0][1]}"
+        return "found" if out.found else "gone"
+
 
 def _ident(st: os.stat_result) -> tuple[int, int, int, int]:
     return st.st_dev, st.st_ino, st.st_ctime_ns, st.st_size
