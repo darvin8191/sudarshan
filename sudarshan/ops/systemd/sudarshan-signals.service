@@ -1,0 +1,70 @@
+# सुदर्शन / SUDARSHAN TRINETRA view (M13): reads the readings TRINETRA publishes into its letterbox
+# (/var/spool/sudarshan-signals/in), keeps them and their timeline in signals.db and serves them to
+# OpenAlgo's bridge and the journal on 127.0.0.1:5588 (loopback only); GET /health there says which
+# release is installed and how fresh TRINETRA's readings are. It holds no API key and no order path,
+# and never opens, asks or signals anything of TRINETRA's: the letterbox is the only way in.
+# The service is off until the release turns SUDARSHAN_SIGNALS on in OpenAlgo's .env
+# (ops/deploy/openalgo-env.conf); off, it reads nothing and answers every request as off. The
+# letterbox and the publisher's number come from ops/signals/bootstrap.sh, run once by the owner.
+# Docs: sudarshan/signals/README.md. Installed, enabled and restarted by sudarshan-deploy.
+
+[Unit]
+Description=SUDARSHAN TRINETRA view
+After=network-online.target
+Wants=network-online.target
+# Ordering only: it reads OpenAlgo's .env for the switch and the pepper at start.
+After=openalgo.service
+
+[Service]
+Type=simple
+User=sudarshan
+Group=sudarshan
+Slice=sudarshan.slice
+WorkingDirectory=/opt/sudarshan/apps/openalgo
+ExecStart=/opt/sudarshan/apps/openalgo/.venv/bin/python -m sudarshan.signals
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+# The only places it writes: /var/lib/sudarshan-signals (signals.db, its notices) and the
+# letterbox, where it removes each file once it is stored. The letterbox is optional ("-"): before
+# the set-up has made it the service starts all the same and says "not set up".
+StateDirectory=sudarshan-signals
+StateDirectoryMode=0750
+ReadWritePaths=-/var/spool/sudarshan-signals/in
+# Restarted after a crash, every 10 s. Not after exit status 2 (a setting or key it cannot use).
+Restart=on-failure
+RestartSec=10
+RestartPreventExitStatus=2
+# SIGTERM: the reading stops, the listener closes and the store is closed; killed after 20 s.
+TimeoutStopSec=20
+# Squeezed before it is killed (75% of MemoryMax), and behind TRINETRA when the box is busy.
+MemoryHigh=96M
+MemoryMax=128M
+CPUWeight=40
+UMask=0027
+LimitCORE=0
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectProc=invisible
+ProtectSystem=strict
+ProtectHome=yes
+ReadOnlyPaths=-/etc/sudarshan
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+RestrictNamespaces=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+LockPersonality=yes
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+SystemCallArchitectures=native
+# Loopback only: OpenAlgo's push route, the alerts' desk and the feed's snapshot are on this server.
+IPAddressDeny=any
+IPAddressAllow=localhost
+
+[Install]
+WantedBy=multi-user.target
