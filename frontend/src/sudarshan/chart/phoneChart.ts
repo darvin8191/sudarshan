@@ -1477,9 +1477,14 @@ function lineLook(line: OverlayLine) {
   }
 }
 
-/** A mark at a bar: an arrow up under a buy, down over a sell, in the side's colour. */
+/**
+ * A mark at a bar: an arrow up under a buy, down over a sell, in the side's
+ * colour. A triangle (the trade markers, M14.8) is drawn a size up, so its
+ * letter and price read on a phone outdoors.
+ */
 function markerLook(marker: OverlayMarker) {
   const buy = marker.side === 'BUY'
+  const triangle = marker.shape === 'triangle'
   return {
     id: marker.id,
     time: marker.time,
@@ -1490,8 +1495,14 @@ function markerLook(marker: OverlayMarker) {
           : ('aboveBar' as const)
         : ('atPrice' as const),
     ...(marker.price === undefined ? {} : { price: marker.price }),
-    shape: buy ? ('arrowUp' as const) : ('arrowDown' as const),
-    size: 'small' as const,
+    shape: triangle
+      ? buy
+        ? ('triangleUp' as const)
+        : ('triangleDown' as const)
+      : buy
+        ? ('arrowUp' as const)
+        : ('arrowDown' as const),
+    size: triangle ? ('medium' as const) : ('small' as const),
     color: resolveCssColor(`var(${buy ? '--buy-solid' : '--sell-solid'})`),
     ...(marker.text ? { text: marker.text } : {}),
   }
