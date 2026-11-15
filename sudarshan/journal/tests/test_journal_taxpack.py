@@ -340,13 +340,39 @@ def test_the_build_of_4_april_never_puts_a_pack_without_the_paper_over_one_with_
     assert "as of 4 Apr 2027, 07:45" in again["text"]
 
 
-def test_a_kept_pack_without_the_paper_is_built_over_on_4_april(on):
+def test_a_kept_pack_without_the_paper_waits_on_4_april_for_the_paper(on):
+    """The pack of 1 April was printed without the paper (the portfolio did not answer): the
+    build of 4 April is there to complete it, so it too waits for the paper rather than print a
+    second pack without it; once the paper answers, the year is printed with it."""
     from test_journal_period_reports import at
 
     from sudarshan.journal.jobs import fypack
     from sudarshan.journal.schedule import once_a_day
 
     on.portfolio.down = True
+
+    async def go():
+        run = [await once_a_day(on.svc, "fy", at(20270401, "07:05"), fypack.fy_job)]
+        made = kept(on, "fy")["built_ms"]
+        run.append(await once_a_day(on.svc, "fy", at(20270404, "07:05"), fypack.fy_job))
+        waited = kept(on, "fy")["built_ms"]
+        on.portfolio.down = False
+        run.append(await once_a_day(on.svc, "fy", at(20270404, "07:25"), fypack.fy_job))
+        return run, made, waited
+
+    run, made, waited = scenario(on, go)
+    assert run == ["ok", "failed", "late"] and waited == made
+    row = kept(on, "fy")
+    assert row["built_ms"] > made and row["rows"]["tax_pack"] == PACK
+
+
+def test_with_the_paper_switched_off_throughout_4_april_builds_as_1_april_did(on):
+    from test_journal_period_reports import at
+
+    from sudarshan.journal.jobs import fypack
+    from sudarshan.journal.schedule import once_a_day
+
+    on.svc.settings = dataclasses.replace(on.svc.settings, tax=False)
 
     async def go():
         first = await once_a_day(on.svc, "fy", at(20270401, "07:05"), fypack.fy_job)
@@ -358,6 +384,7 @@ def test_a_kept_pack_without_the_paper_is_built_over_on_4_april(on):
     assert (first, again) == ("ok", "ok")
     row = kept(on, "fy")
     assert row["built_ms"] > made and row["rows"]["tax_pack"] is None
+    assert "is switched off on the server" in row["rows"]["tax_note"]
 
 
 def test_the_family_never_gets_the_paper(on):

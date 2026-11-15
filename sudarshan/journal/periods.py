@@ -217,7 +217,7 @@ async def read_pack(service: Any, fy_start: int) -> tuple[dict[str, Any] | None,
     return (dict(answer), None) if taxpack.usable(answer) else (None, "unreadable")
 
 
-#: Why the build of 4 April left the kept pack as it was (v0.13.0 verify N3): the job log's line.
+#: Why the build of 4 April left the kept report as it was (v0.13.0 verify N3): the job log's line.
 PAPER_KEPT = (
     "The year's Tax pack was not built again: the tax working paper could not be read just now. "
     "The one already kept stays as it was; this is tried again shortly."
@@ -228,9 +228,13 @@ PAPER_KEPT_OFF = (
 )
 
 
-async def _keep_kept_paper(service: Any, span: Span, why: str | None) -> None:
-    """Raise ``JobFailed`` when the report kept for ``span`` holds the tax working paper: a build
-    that cannot read the paper now must not put a pack without it in that one's place."""
+async def _paper_or_again(service: Any, span: Span, why: str | None) -> None:
+    """The year's build of 4 April, with no paper to print: it is there to complete the pack, so
+    it writes nothing and raises ``JobFailed`` (asked again) when the paper could not be read, and,
+    with the paper switched off, when the report kept for ``span`` holds a paper: a pack without
+    the paper never takes the place of one with it. With the paper off and none kept, it builds."""
+    if why not in ("switched_off", "not_ready"):
+        raise JobFailed(PAPER_KEPT)
 
     def held(tx) -> bool:
         have = tx.rows("report", kind="fy", period_key=span.key)
@@ -238,7 +242,7 @@ async def _keep_kept_paper(service: Any, span: Span, why: str | None) -> None:
         return isinstance(kept, Mapping) and kept.get("tax_pack") is not None
 
     if await _thread(lambda: service.store.read(OWNER, held)):
-        raise JobFailed(PAPER_KEPT_OFF if why in ("switched_off", "not_ready") else PAPER_KEPT)
+        raise JobFailed(PAPER_KEPT_OFF)
 
 
 def leaves_out(rows: list[dict[str, Any]], aside: Mapping[str, int]) -> tuple[str, ...]:
@@ -375,9 +379,9 @@ async def build_period(service: Any, kind: str, span: Span, now: int, announce: 
     line for the report desk when this build is due one (``reports.announce_once``: never
     announced, or announced as a part period and this is the whole). Returns the report's id.
 
-    ``keep_paper`` (the year's build of 4 April): when the tax working paper cannot be read now
-    and the report already kept holds it, nothing is written and ``JobFailed`` is raised, so the
-    run is asked again and the archive keeps the paper (v0.13.0 verify N3)."""
+    ``keep_paper`` (the year's build of 4 April): when the tax working paper cannot be read now,
+    nothing is written and ``JobFailed`` is raised, so the run is asked again and the kept report
+    stays; with the paper switched off, only when that report holds a paper (v0.13.0 verify N3)."""
     # The analytics op's own helpers; imported here because the ops package imports this module.
     from .ops.analytics_ops import beta_of, for_core, trading_days
 
@@ -410,7 +414,7 @@ async def build_period(service: Any, kind: str, span: Span, now: int, announce: 
     else:
         pack, why = await read_pack(service, 2000 + int(span.key[2:4]))
         if pack is None and keep_paper:
-            await _keep_kept_paper(service, span, why)
+            await _paper_or_again(service, span, why)
         no_pack = None if pack is not None else taxpack.no_pack_words(why)
         paper = taxpack.pack_lines(pack) if pack is not None else [no_pack]
         text = words.fy(span.label, len(days), block, paper=paper, **extra)

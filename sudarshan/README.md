@@ -370,8 +370,9 @@ from 3 April. An archive of 31 March's evening would hold none of them.
 The Tax pack of 1 April is printed before those last charges arrive, so the journal builds the
 year's Tax pack again by itself on 4 April at 07:00, in the same job, with nothing for you to
 press. If the tax working paper cannot be read just then, it keeps the pack it has and tries
-again every 15 minutes that day; it never puts a pack without the paper in its place. The first
-backup of 4 April runs at 16:30, after it, so the archive kept 8 years holds the complete pack.
+again every 15 minutes, for up to three days; it never puts a pack without the paper in its
+place. The first backup of 4 April runs at 16:30, after it, so the archive kept 8 years holds
+the complete pack.
 Telegram does not get the new pack a second time, and the copy it got on 1 April has estimates
 for the charges of the year's last days: give your CA the Tax pack from the Journal's Reports
 on or after 4 April. (If the journal was not running at all on 4 April, it builds the pack at
