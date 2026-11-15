@@ -240,6 +240,8 @@ export class PhoneChart {
   private lineYs: readonly LineY[] = []
   private layoutQueued = false
   private readonly layoutListeners = new Set<() => void>()
+  /** Who hears that a load drew its history (M14.8: the trade markers). */
+  private readonly loadListeners = new Set<(interval: string) => void>()
   /** History as the candle clock repairs it: never read while the page is hidden. */
   private readonly whenShown = {
     bars: () => this.data.bars(),
@@ -384,6 +386,8 @@ export class PhoneChart {
     if (!same || !this.subscribed) this.subscribe(symbol, exchange)
     this.syncCountdown()
     if (!same) void this.firstQuote(symbol, exchange, ticket)
+    if (!failure && bars.length)
+      for (const listener of [...this.loadListeners]) listener(this.interval)
   }
 
   /**
@@ -581,6 +585,28 @@ export class PhoneChart {
     return () => {
       this.layoutListeners.delete(listener)
     }
+  }
+
+  /**
+   * Hear when a load has drawn its history (M14.8), with the interval it
+   * loaded ('1m', 'D'). A load that failed or found nothing says nothing.
+   */
+  readonly onLoaded = (listener: (interval: string) => void): (() => void) => {
+    this.loadListeners.add(listener)
+    return () => {
+      this.loadListeners.delete(listener)
+    }
+  }
+
+  /** The candles as loaded, their times in UTC seconds, oldest first (M14.8). */
+  barTimes(): number[] {
+    return this.bars.map((bar) => bar.time)
+  }
+
+  /** Show the candles from index `from` to `to` of `barTimes()` (M14.8). */
+  showBars(range: { from: number; to: number }): void {
+    if (this.destroyed || !this.bars.length) return
+    this.chart.setVisibleLogicalRange(range)
   }
 
   /** The lines and marks as they are now, on the chart as it is now. */

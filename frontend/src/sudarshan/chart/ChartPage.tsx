@@ -119,6 +119,9 @@ import { SidewaysStrip } from './SidewaysStrip'
 import { StudyLegend } from './StudyLegend'
 import { StyleSheet } from './StyleSheet'
 import { TimeframeSheet } from './TimeframeSheet'
+// SUDARSHAN M14.8: a trade opened from its sheet, marked on the chart.
+import { TripNotice } from './TripNotice'
+import { tripIdOf, useTripMarkers } from './tripMarkers'
 import { useChartBooks, useChartLines } from './useChartLines'
 import { usePhoneSideways } from './usePhoneLayout'
 import { useWakeLock } from './useWakeLock'
@@ -464,6 +467,17 @@ const ChartScreen = memo(function ChartScreen({
     owner?.setOverlays({ lines: drawn.lines })
   }, [owner, drawn.lines])
 
+  // SUDARSHAN M14.8: "See on chart" from a trade's sheet (?trip=<id>): its fills marked, its
+  // interval chosen from its length and the view on its entry; the saved timeframe is untouched.
+  const trip = useTripMarkers({
+    owner,
+    tripId: tripIdOf(location.search),
+    symbol,
+    exchange,
+    decimals: priceDp(info?.tickSize, 0),
+    setTimeframe,
+  })
+
   // Press and hold to read a candle; not while the drawing tools are out.
   useEffect(() => {
     const el = surface.current
@@ -782,6 +796,9 @@ const ChartScreen = memo(function ChartScreen({
           </div>
         </>
       )}
+
+      {/* SUDARSHAN M14.8: why the trade is not shown as asked, until dismissed. */}
+      {trip.notice && <TripNotice text={trip.notice} onDismiss={trip.dismiss} />}
 
       <div
         ref={surface}

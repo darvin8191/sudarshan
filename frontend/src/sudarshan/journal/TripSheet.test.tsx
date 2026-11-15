@@ -457,11 +457,18 @@ describe('what happened', () => {
     expect(screen.getByText('Closed trade').textContent).toBe('Closed trade · NFO · 17 Nov 2026')
   })
 
-  it('links to the chart of the instrument', async () => {
+  it('links to the chart of the instrument with this trade marked (M14.8)', async () => {
     serve()
     show()
     const link = await screen.findByRole('link', { name: 'See on chart' })
-    expect(link.getAttribute('href')).toBe('/chart/NSE/SBIN')
+    expect(link.getAttribute('href')).toBe('/chart/NSE/SBIN?trip=7')
+  })
+
+  it("names a contract's chart as the chart's own address writes it", async () => {
+    serve(detail({ exchange: 'NFO', symbol: 'NIFTY17NOV2625000CE' }))
+    show()
+    const link = await screen.findByRole('link', { name: 'See on chart' })
+    expect(link.getAttribute('href')).toBe('/chart/NFO/NIFTY17NOV2625000CE?trip=7')
   })
 
   it('says when the fills are not there yet', async () => {

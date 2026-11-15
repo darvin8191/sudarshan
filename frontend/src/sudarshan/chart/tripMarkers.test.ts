@@ -1,9 +1,19 @@
 /**
  * A trade from the journal on the phone chart (M14.8, design p7 9.7): the interval chosen from
  * the trade's length, the candle each fill lands in, the marks (shape, letter, price, side) and
- * the view, as vectors. Every value is synthetic.
+ * the view, as vectors; then the hook that reads the trade and drives the chart, on a fake chart.
+ * Every value is synthetic.
  */
-import { describe, expect, it } from 'vitest'
+import { act, renderHook } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+const call = vi.hoisted(() => vi.fn())
+vi.mock('@/sudarshan/journal/api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/sudarshan/journal/api')>()),
+  journalCall: (...args: unknown[]) => call(...args),
+}))
+
+import { JournalError } from '@/sudarshan/journal/api'
 import {
   barIndexOf,
   FOCUS_ENTRY_BARS,
@@ -11,10 +21,16 @@ import {
   FOCUS_MIN_BARS,
   focusRange,
   type MarkLeg,
+  NOT_SHOWN,
+  OLDER_THAN_HISTORY,
+  PICK_LONGER,
+  SHOWN_DAILY,
+  type TripChart,
   tripChartPath,
   tripIdOf,
   tripInterval,
   tripMarkers,
+  useTripMarkers,
 } from './tripMarkers'
 
 /** Epoch ms of a time in India in November 2026. */
@@ -270,5 +286,249 @@ describe('the view (vectors)', () => {
       // Both ends in view, or a trade too wide for that opens on its entry.
       expect(to >= last || to - from === FOCUS_ENTRY_BARS).toBe(true)
     }
+  })
+})
+
+// ---- the hook ---------------------------------------------------------------------------------
+
+const MINUTES = session([16], 60)
+const DAYS = [9, 10, 11, 12, 13, 16].map((d) => sec(ist(d, 0, 0)))
+
+/** A trade of SBIN as the journal's trip_get answers it. */
+function detail(over: Record<string, unknown> = {}) {
+  return {
+    id: 7,
+    mode: 'live',
+    exchange: 'NSE',
+    symbol: 'SBIN',
+    side: 'long',
+    status: 'closed',
+    opened_ms: ist(16, 10, 2, 5),
+    closed_ms: ist(16, 10, 41, 50),
+    legs: [
+      { ...leg('entry', 'BUY', 10, 803.05, ist(16, 10, 2, 5)), trade_id: 'T1', order_id: 'O1' },
+      { ...leg('exit', 'SELL', 10, 809.4, ist(16, 10, 41, 50)), trade_id: 'T2', order_id: 'O2' },
+    ],
+    ...over,
+  }
+}
+
+class FakeChart implements TripChart {
+  times: number[] = []
+  listeners = new Set<(interval: string) => void>()
+  setOverlays = vi.fn()
+  showBars = vi.fn()
+  barTimes = () => this.times
+  onLoaded = (listener: (interval: string) => void) => {
+    this.listeners.add(listener)
+    return () => this.listeners.delete(listener)
+  }
+  /** A load at `interval` drew `times`. */
+  load(interval: string, times: number[]) {
+    this.times = times
+    act(() => {
+      for (const listener of [...this.listeners]) listener(interval)
+    })
+  }
+}
+
+function mount(
+  chart: FakeChart | null,
+  search = '?trip=7',
+  over: Partial<{ decimals: number }> = {}
+) {
+  const setTimeframe = vi.fn()
+  const view = renderHook(
+    (props: { owner: FakeChart | null; decimals: number }) =>
+      useTripMarkers({
+        owner: props.owner,
+        tripId: tripIdOf(search),
+        symbol: 'SBIN',
+        exchange: 'NSE',
+        decimals: props.decimals,
+        setTimeframe,
+      }),
+    { initialProps: { owner: chart, decimals: over.decimals ?? 2 } }
+  )
+  return { view, setTimeframe }
+}
+
+async function settle() {
+  await act(async () => {
+    await Promise.resolve()
+  })
+}
+
+const lastMarkers = (chart: FakeChart) =>
+  chart.setOverlays.mock.lastCall?.[0]?.markers as Array<{ text: string; time: number }>
+
+describe('the trade on the chart', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'], now: ist(16, 15, 0) })
+    call.mockReset().mockResolvedValue({ enabled: true, data: detail() })
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('reads the trade once, chooses its interval, marks it and shows its entry', async () => {
+    const chart = new FakeChart()
+    const { setTimeframe } = mount(chart)
+    await settle()
+    expect(call).toHaveBeenCalledTimes(1)
+    expect(call.mock.calls[0].slice(0, 2)).toEqual(['trip_get', { id: 7 }])
+    expect(setTimeframe).toHaveBeenCalledWith('1m')
+    expect(chart.setOverlays).not.toHaveBeenCalled()
+    chart.load('1m', MINUTES)
+    expect(lastMarkers(chart).map((m) => m.text)).toEqual(['B 803.05', 'S'])
+    expect(chart.setOverlays.mock.lastCall?.[0]).not.toHaveProperty('lines')
+    const entry = MINUTES.indexOf(sec(ist(16, 10, 2)))
+    const exit = MINUTES.indexOf(sec(ist(16, 10, 41)))
+    expect(chart.showBars).toHaveBeenCalledWith(focusRange(entry, exit, MINUTES.length))
+    expect(call).toHaveBeenCalledTimes(1)
+  })
+
+  it('marks at once when the chart had already loaded the chosen interval', async () => {
+    let answer: (value: unknown) => void = () => {}
+    call.mockReturnValue(
+      new Promise((resolve) => {
+        answer = resolve
+      })
+    )
+    const chart = new FakeChart()
+    mount(chart)
+    chart.load('1m', MINUTES)
+    expect(chart.setOverlays).not.toHaveBeenCalled()
+    await act(async () => answer({ enabled: true, data: detail() }))
+    expect(lastMarkers(chart).map((m) => m.text)).toEqual(['B 803.05', 'S'])
+    expect(chart.showBars).toHaveBeenCalledTimes(1)
+  })
+
+  it('lays the marks on every load, another timeframe the owner picks included', async () => {
+    const chart = new FakeChart()
+    mount(chart)
+    await settle()
+    chart.load('1m', MINUTES)
+    chart.load('5m', session([16], 300))
+    expect(lastMarkers(chart).map((m) => m.time)).toEqual([
+      sec(ist(16, 10, 0)),
+      sec(ist(16, 10, 40)),
+    ])
+    expect(chart.showBars).toHaveBeenCalledTimes(2)
+  })
+
+  it('a trade older than the candles at its interval says so and moves to daily candles', async () => {
+    call.mockResolvedValue({
+      enabled: true,
+      data: detail({
+        opened_ms: ist(12, 10, 2),
+        closed_ms: ist(12, 10, 30),
+        legs: [
+          { ...leg('entry', 'BUY', 10, 790, ist(12, 10, 2)), trade_id: 'T1', order_id: 'O1' },
+          { ...leg('exit', 'SELL', 10, 795, ist(12, 10, 30)), trade_id: 'T2', order_id: 'O2' },
+        ],
+      }),
+    })
+    const chart = new FakeChart()
+    const { view, setTimeframe } = mount(chart)
+    await settle()
+    expect(setTimeframe).toHaveBeenLastCalledWith('1m')
+    chart.load('1m', MINUTES)
+    expect(view.result.current.notice).toBe(`${OLDER_THAN_HISTORY} ${SHOWN_DAILY}`)
+    expect(setTimeframe).toHaveBeenLastCalledWith('D')
+    expect(chart.showBars).not.toHaveBeenCalled()
+    chart.load('D', DAYS)
+    expect(lastMarkers(chart).map((m) => [m.text, m.time])).toEqual([
+      ['B 790.00', sec(ist(12, 0, 0))],
+      ['S', sec(ist(12, 0, 0))],
+    ])
+    expect(chart.showBars).toHaveBeenCalledTimes(1)
+    // The sentence says why the chart is daily, and stays until dismissed.
+    expect(view.result.current.notice).toBe(`${OLDER_THAN_HISTORY} ${SHOWN_DAILY}`)
+    act(() => view.result.current.dismiss())
+    expect(view.result.current.notice).toBeNull()
+  })
+
+  it('never overrides a timeframe the owner picks: it only says the trade is older', async () => {
+    const chart = new FakeChart()
+    const { view, setTimeframe } = mount(chart)
+    await settle()
+    chart.load('1m', MINUTES)
+    setTimeframe.mockClear()
+    chart.load('5m', session([16], 300).slice(20)) // picked; its history starts at 10:55
+    expect(view.result.current.notice).toBe(`${OLDER_THAN_HISTORY} ${PICK_LONGER}`)
+    expect(setTimeframe).not.toHaveBeenCalled()
+    chart.load('15m', session([16], 900))
+    expect(view.result.current.notice).toBeNull()
+    expect(lastMarkers(chart).map((m) => m.time)).toEqual([
+      sec(ist(16, 10, 0)),
+      sec(ist(16, 10, 30)),
+    ])
+  })
+
+  it('says the marks could not be shown when the journal is switched off', async () => {
+    const words = 'The journal is switched off on the server.'
+    call.mockResolvedValue({ enabled: false, data: null, message: words })
+    const chart = new FakeChart()
+    const { view, setTimeframe } = mount(chart)
+    await settle()
+    expect(view.result.current.notice).toBe(`${NOT_SHOWN} ${words}`)
+    chart.load('5m', session([16], 300))
+    expect(chart.setOverlays).not.toHaveBeenCalled()
+    expect(setTimeframe).not.toHaveBeenCalled()
+  })
+
+  it('says the journal own words when the trade cannot be read', async () => {
+    call.mockRejectedValue(
+      new JournalError({
+        code: 'refused',
+        message: 'This trade is not in the journal any more. Open the list again.',
+      })
+    )
+    const { view } = mount(new FakeChart())
+    await settle()
+    expect(view.result.current.notice).toBe(
+      `${NOT_SHOWN} This trade is not in the journal any more. Open the list again.`
+    )
+  })
+
+  it("marks nothing for a link to another instrument's trade", async () => {
+    call.mockResolvedValue({ enabled: true, data: detail({ symbol: 'INFY' }) })
+    const chart = new FakeChart()
+    const { view, setTimeframe } = mount(chart)
+    await settle()
+    chart.load('5m', session([16], 300))
+    expect(setTimeframe).not.toHaveBeenCalled()
+    expect(chart.setOverlays).not.toHaveBeenCalled()
+    expect(view.result.current.notice).toBeNull()
+  })
+
+  it('reads nothing and hears nothing without a trade in the address', async () => {
+    const chart = new FakeChart()
+    const { view, setTimeframe } = mount(chart, '')
+    await settle()
+    expect(call).not.toHaveBeenCalled()
+    expect(chart.listeners.size).toBe(0)
+    expect(setTimeframe).not.toHaveBeenCalled()
+    expect(view.result.current.notice).toBeNull()
+  })
+
+  it('writes the prices again when the instrument tick arrives after the marks', async () => {
+    const chart = new FakeChart()
+    const { view } = mount(chart)
+    await settle()
+    chart.load('1m', MINUTES)
+    view.rerender({ owner: chart, decimals: 3 })
+    expect(lastMarkers(chart).map((m) => m.text)).toEqual(['B 803.050', 'S'])
+    expect(chart.showBars).toHaveBeenCalledTimes(1)
+  })
+
+  it('stops hearing the chart when the screen goes', async () => {
+    const chart = new FakeChart()
+    const { view } = mount(chart)
+    await settle()
+    expect(chart.listeners.size).toBe(1)
+    view.unmount()
+    expect(chart.listeners.size).toBe(0)
   })
 })

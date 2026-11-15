@@ -19,11 +19,14 @@
  *   so and moves to daily candles. A timeframe the owner picks himself is never
  *   overridden: there it only says so.
  *
- * Nothing here sends anything anywhere.
+ * The trade is read once, through the journal's existing `trip_get`. Nothing
+ * here sends anything anywhere.
  */
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { formatPrice } from '@/sudarshan/dashboard/format'
-import { IST_OFFSET_S, PRICE_SCALE } from '@/sudarshan/journal/types'
-import type { OverlayMarker } from './overlays'
+import { journalCall, problemOf, type TripDetail } from '@/sudarshan/journal/api'
+import { IST_OFFSET_S, PRICE_SCALE, type TripLeg } from '@/sudarshan/journal/types'
+import type { OverlayMarker, Overlays } from './overlays'
 import { chartPath } from './prefs'
 
 /** The query that names the trade on the chart's address. */
@@ -204,4 +207,129 @@ export function focusRange(
     from = 0
   }
   return { from, to }
+}
+
+/** What of the phone chart a trade's view uses (`PhoneChart` has each). */
+export interface TripChart {
+  setOverlays(next: Overlays): void
+  barTimes(): number[]
+  showBars(range: { from: number; to: number }): void
+  onLoaded(listener: (interval: string) => void): () => void
+}
+
+type NoticeKind = 'daily' | 'picked' | 'failed'
+
+/** The trade sheet's answer: `trip_get` sends each leg with its role (the contract's `legs`). */
+type TripWithLegs = TripDetail & { legs?: TripLeg[] }
+
+/**
+ * The trade named in the chart's address, on the chart: read once, its
+ * interval chosen, its marks laid on every load and the view placed on it.
+ * `notice` is a sentence for the owner, or null.
+ */
+export function useTripMarkers({
+  owner,
+  tripId,
+  symbol,
+  exchange,
+  decimals,
+  setTimeframe,
+}: {
+  owner: TripChart | null
+  tripId: number | null
+  symbol: string
+  exchange: string
+  decimals: number
+  setTimeframe: (interval: string) => void
+}): { notice: string | null; dismiss: () => void } {
+  const [notice, setNotice] = useState<{ kind: NoticeKind; text: string } | null>(null)
+  const trip = useRef<TripWithLegs | null>(null)
+  /** The interval chosen for the trade; one the owner picks himself is never overridden. */
+  const chosen = useRef<string | null>(null)
+  /** The interval of the last load that drew its candles. */
+  const loaded = useRef<string | null>(null)
+  const now = useRef({ owner, decimals, setTimeframe })
+  now.current = { owner, decimals, setTimeframe }
+
+  const apply = useCallback((interval: string, place: boolean) => {
+    const { owner: chart, decimals: dp, setTimeframe: pick } = now.current
+    const found = trip.current
+    if (!chart || !found) return
+    const times = chart.barTimes()
+    if (!times.length) return
+    const daily = byDay(interval)
+    const marks = tripMarkers(found.legs ?? [], times, daily, dp)
+    chart.setOverlays({ markers: marks.markers })
+    if (!place) return
+    if (marks.older) {
+      if (!daily && interval === chosen.current) {
+        chosen.current = DAILY
+        setNotice({ kind: 'daily', text: `${OLDER_THAN_HISTORY} ${SHOWN_DAILY}` })
+        pick(DAILY)
+      } else {
+        const text = daily ? OLDER_THAN_HISTORY : `${OLDER_THAN_HISTORY} ${PICK_LONGER}`
+        setNotice({ kind: 'picked', text })
+      }
+      return
+    }
+    // The trade is in view: a sentence about another timeframe no longer holds.
+    setNotice((was) =>
+      was?.kind === 'picked' || (was?.kind === 'daily' && interval !== chosen.current) ? null : was
+    )
+    if (marks.first !== null && marks.last !== null)
+      chart.showBars(focusRange(marks.first, marks.last, times.length))
+  }, [])
+
+  // Read once per trade; its interval is chosen from its length.
+  useEffect(() => {
+    trip.current = null
+    chosen.current = null
+    setNotice(null)
+    if (tripId === null) return
+    const control = new AbortController()
+    let alive = true
+    void journalCall('trip_get', { id: tripId }, control.signal).then(
+      (result) => {
+        if (!alive) return
+        if (!result.enabled) {
+          setNotice({ kind: 'failed', text: `${NOT_SHOWN} ${result.message}` })
+          return
+        }
+        const found = result.data
+        // A link to another instrument's trade marks nothing here.
+        if (found.symbol !== symbol || found.exchange !== exchange) return
+        trip.current = found
+        const interval = tripInterval(found.opened_ms, found.closed_ms, Date.now())
+        chosen.current = interval
+        now.current.setTimeframe(interval)
+        if (loaded.current === interval) apply(interval, true)
+      },
+      (error: unknown) => {
+        if (alive) setNotice({ kind: 'failed', text: `${NOT_SHOWN} ${problemOf(error).message}` })
+      }
+    )
+    return () => {
+      alive = false
+      control.abort()
+    }
+  }, [tripId, symbol, exchange, apply])
+
+  // Every load that draws its candles lays the marks again, and places the view.
+  useEffect(() => {
+    if (!owner || tripId === null) return
+    loaded.current = null
+    return owner.onLoaded((interval) => {
+      loaded.current = interval
+      apply(interval, true)
+    })
+  }, [owner, tripId, apply])
+
+  // The instrument's tick arrived after the marks: their prices are written again.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the decimals are the trigger
+  useEffect(() => {
+    if (loaded.current) apply(loaded.current, false)
+  }, [decimals, apply])
+
+  const dismiss = useCallback(() => setNotice(null), [])
+  return { notice: notice?.text ?? null, dismiss }
 }
