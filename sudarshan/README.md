@@ -1168,6 +1168,11 @@ folder (`cd /opt/sudarshan/apps/openalgo`):
    If that block already has an `error_page` line naming 502 or 504, take those two numbers out
    of it first, or nginx keeps the older line.
 
+   Before you add the line, look for one more setting, in that same file and in nginx's main
+   file: `sudo grep -n proxy_intercept_errors /etc/nginx/nginx.conf <SUDARSHAN's site file>`.
+   Nothing printed, or only `off`, is as it should be. If a line reads `on`, read "When nginx
+   takes over the app's errors" below before you go on.
+
 3. Test, then reload; never restart. If `nginx -t` reports an error, undo step 2 and stop.
 
    ```
@@ -1182,8 +1187,21 @@ What the lines do not change: the answer keeps its status (a restart never reads
 TradingView or to the app's own order calls), anything the app itself answers is passed on as it
 is, and the family view's API keeps its own "did not answer" sentence. After a release that
 changes the page (the changelog says so), run the `install` line of step 1 again, then step 3:
-the page is part of the lines, so nginx takes it up at the reload. To take the lines out, remove the `include` line, then
-`sudo nginx -t` and `sudo systemctl reload nginx`.
+the page is part of the lines, so nginx takes it up at the reload. To take the lines out, remove
+the `include` line, then `sudo nginx -t` and `sudo systemctl reload nginx`.
+
+**When nginx takes over the app's errors.** "Anything the app itself answers is passed on as it
+is" holds only while `proxy_intercept_errors` is off for SUDARSHAN's site, which is nginx's own
+default; SUDARSHAN's lines never turn it on. With it on (in SUDARSHAN's site, or in nginx's main
+file with no `off` in SUDARSHAN's site), nginx replaces the app's own 502 and 504 answers with
+the restart page as well. The app answers 502 when Upstox took an order without naming it, with
+the sentence that the order may have been placed. That sentence is then lost, on the phone and
+for TradingView, which sees only the gateway error. The phone still holds the exit or cancel: an
+answer that is not the app's own is read as "no answer came", never as a refusal, so its hold
+stays as it does for an answer that never came. To keep the sentence, set that line in
+SUDARSHAN's site to `proxy_intercept_errors off;`, or, when only the main file turns it on, add
+that line inside SUDARSHAN's `server { }` block (none of SUDARSHAN's lines needs it on). Or leave
+the restart lines out.
 
 Tests: `sudarshan/ops/tests/test_ops_restart_page.py`, `frontend/src/sudarshan/pwa/restartPage.test.ts`
 and `frontend/src/sudarshan/pwa/sw.test.ts`.
