@@ -414,6 +414,9 @@ test.describe('a trade on the phone chart (M14.8)', () => {
     await page.goto('/journal?trade=7')
     const link = page.getByRole('link', { name: 'See on chart' })
     await expect(link).toHaveAttribute('href', '/chart/NSE/SBIN?trip=7')
+    // The sheet takes no tap in its first half second (M6.9): the tap comes after it.
+    await page.clock.runFor(600)
+    await expect(page.locator('[data-settling]')).toHaveCount(0)
     await link.click()
     await expect(page).toHaveURL(/\/chart\/NSE\/SBIN\?trip=7$/)
     await expect(page.getByTestId('phone-chart')).toBeVisible()

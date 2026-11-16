@@ -6,10 +6,10 @@
  */
 
 import { act, renderHook } from '@testing-library/react'
-import { type Bar, type Chart, SessionCalendar } from 'openalgo-charts'
+import { type Bar, type Chart, type SeriesApi, SessionCalendar } from 'openalgo-charts'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ist } from '@/test/tapes/scenarios'
-import type { PhoneChart } from './phoneChart'
+import { MARK_ROOM, type PhoneChart, PLAIN_ROOM } from './phoneChart'
 import { historyOf, host, installHost, mountChart, removeHost } from './testing/host'
 
 vi.mock('@/lib/trading/sessionHours', () => ({
@@ -146,6 +146,22 @@ describe('the host a trade view uses', () => {
         text: 'S',
       }),
     ])
+  })
+})
+
+describe('room for the marks', () => {
+  it('keeps room above and below the candles while marks are laid, and gives it back after', async () => {
+    const { chart } = mountChart()
+    await chart.load('SBIN', 'NSE', '1m')
+    const scale = () => (chart as unknown as { price: SeriesApi }).price.priceScale().options
+    expect([scale().marginTop, scale().marginBottom]).toEqual([PLAIN_ROOM, PLAIN_ROOM])
+    const time = chart.barTimes()[10]
+    chart.setOverlays({ markers: [{ id: 'e', time, side: 'BUY', shape: 'triangle', text: 'B' }] })
+    expect([scale().marginTop, scale().marginBottom]).toEqual([MARK_ROOM, MARK_ROOM])
+    await chart.load('SBIN', 'NSE', '5m') // a new chart keeps it while the marks stay
+    expect([scale().marginTop, scale().marginBottom]).toEqual([MARK_ROOM, MARK_ROOM])
+    chart.setOverlays({ markers: [] })
+    expect([scale().marginTop, scale().marginBottom]).toEqual([PLAIN_ROOM, PLAIN_ROOM])
   })
 })
 

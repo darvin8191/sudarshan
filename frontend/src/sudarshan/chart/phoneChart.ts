@@ -91,6 +91,14 @@ export { WAKE_RECONNECT_MS }
 /** Bars in view when a chart opens: enough candles to read a trend at phone width. */
 export const PHONE_VISIBLE_BARS = 70
 
+/**
+ * The candles pane's empty band above and below, as a share of its height:
+ * the engine's own 10%, and while marks are laid over the candles (M14.8)
+ * enough for a triangle and its letter beyond the highest and lowest candle.
+ */
+export const PLAIN_ROOM = 0.1
+export const MARK_ROOM = 0.2
+
 /** An index is quoted, never traded: no book, no volume, LTP mode. */
 export function isQuoteOnly(exchange: string): boolean {
   return exchange.endsWith('_INDEX')
@@ -632,6 +640,9 @@ export class PhoneChart {
     if (this.overlays.markers.length || this.markerLayer) {
       this.markerLayer ??= this.price.createMarkers(() => this.bars)
       this.markerLayer.setMarkers(this.overlays.markers.map(markerLook))
+      // A mark over the highest candle or under the lowest needs room in the pane (M14.8).
+      const room = this.overlays.markers.length ? MARK_ROOM : PLAIN_ROOM
+      this.price.priceScale().setOptions({ marginTop: room, marginBottom: room })
     }
     this.measureOverlays()
   }
