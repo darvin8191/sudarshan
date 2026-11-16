@@ -862,6 +862,12 @@ protected     /sudarshan/screener/api/today                                     
 protected     /sudarshan/screener/api/universes                                         sudarshan_screener.universes
 protected     /sudarshan/session/instrument                                             sudarshan_session_bp.instrument
 protected     /sudarshan/session/today                                                  sudarshan_session_bp.today
+protected     /sudarshan/signals/api/changes/<int:id>                                   sudarshan_signals.change_get
+protected     /sudarshan/signals/api/performance                                        sudarshan_signals.performance
+protected     /sudarshan/signals/api/settings                                           sudarshan_signals.settings_get
+protected     /sudarshan/signals/api/settings                                           sudarshan_signals.settings_set
+protected     /sudarshan/signals/api/state                                              sudarshan_signals.state
+protected     /sudarshan/signals/api/timeline                                           sudarshan_signals.timeline
 protected     /sudarshan/system/api/assistant/disconnect                                sudarshan_system.disconnect
 protected     /sudarshan/system/api/status                                              sudarshan_system.status
 protected     /sudarshan/watchlists/api/copy                                            sudarshan_watchlists.copy
