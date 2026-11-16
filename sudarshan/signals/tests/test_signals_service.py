@@ -9,6 +9,7 @@ import re
 import socket
 import sqlite3
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -197,20 +198,31 @@ def test_refused_newer_and_strangers_files(tmp_path):
 def test_a_fault_on_one_document_does_not_hold_up_the_rest(tmp_path, monkeypatch):
     port = free_port()
     svc, box = make(tmp_path, port, now=lambda: AT + 1000)
-    real = diff.apply
+    real, real_lapses, held = diff.apply, diff.lapses, []
 
     def apply(prior, snap, now):
         if snap.seq == 1:
             raise RuntimeError("a fault of ours")
         return real(prior, snap, now)
 
+    def lapses(current, now):
+        # v0.15.0 verify V8: the day's counts are refreshed at the end of the cycle, on the
+        # store's thread, after the last file is removed and `last` is set. Held open once here,
+        # so a wait that ends on the files and `last` alone reads them early on every run.
+        if svc.last is not None and not held:
+            held.append(time.sleep(0.3))
+        return real_lapses(current, now)
+
     monkeypatch.setattr(service.diff, "apply", apply)
+    monkeypatch.setattr(service.diff, "lapses", lapses)
     box.drop(document(seq=1))
     box.drop(document(seq=2, at=AT + 5))
 
     async def scenario():
         task = await started(svc)
-        await until(lambda: box.names() == set() and svc.last is not None)
+        await until(
+            lambda: box.names() == set() and svc.last is not None and svc.today.get("refused") == 1
+        )
         assert svc.last["seq"] == 2 and svc.today["refused"] == 1
         await stopped(svc, task)
 
