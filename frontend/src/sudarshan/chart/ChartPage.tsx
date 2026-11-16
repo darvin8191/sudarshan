@@ -614,7 +614,8 @@ const ChartScreen = memo(function ChartScreen({
     const el = surface.current
     if (!el) return
     const onClick = (event: MouseEvent) => {
-      if (!(event.target instanceof HTMLCanvasElement)) return
+      // Only a tap on the chart itself: a label, a legend or a row over it has its own tap.
+      if (!(event.target instanceof Node) || !host.current?.contains(event.target)) return
       const rect = el.getBoundingClientRect()
       tapMark.current(event.clientX - rect.left, event.clientY - rect.top)
     }
