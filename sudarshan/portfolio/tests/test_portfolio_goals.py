@@ -90,3 +90,27 @@ def test_the_arithmetic_context_of_the_process_changes_nothing():
         ctx.prec, ctx.rounding = 4, ROUND_DOWN
         ctx.traps[Inexact] = True
         assert monthly(case) == case["required_monthly_paise"]
+
+
+def test_a_target_with_too_many_zeros_gives_a_number_never_not_a_number():
+    """Review M5: from Rs 1,000 crore a month the forty digits could not keep thirty decimals,
+    and the amount was NaN (``int`` of it raised, and the whole list failed)."""
+    lakh_crore = 10**15  # the largest sum the store keeps, in paise
+    assert goals.required_monthly(lakh_crore, 0, 1, 1200) == lakh_crore
+    assert goals.required_monthly(lakh_crore, 0, 0, 0) == lakh_crore
+    seven = goals.required_monthly(2_000 * 10**9, 0, 7, 1200)  # Rs 2,000 crore in 7 months
+    assert 27_768 * 10**7 <= seven < 27_769 * 10**7 and seven % 100 == 0  # about 277.68 crore
+    card = goals.figures(lakh_crore, lakh_crore, 20261114, 20261115, 5000)
+    assert card["required_monthly_paise"] == 0 and card["progress_pct"] == "100.0000"
+    for target in (10**13, 10**14, 10**15, 10**30):
+        for months in (0, 1, 7, 600):
+            got = goals.required_monthly(target, 12_345, months, 5000)
+            assert got.__class__ is int and got > 0 and got % 100 == 0
+
+
+def test_a_month_end_keeps_its_month():
+    """Review L6: 31 Dec to 30 Jun was 5 months, and 29 Feb to 28 Feb was 11."""
+    assert goals.months_left(20261231, 20270630) == 6
+    assert goals.months_left(20280229, 20290228) == 12
+    assert goals.months_left(20270131, 20270227) == 0
+    assert goals.months_left(20261130, 20261231) == 1 and goals.months_left(20261130, 20261230) == 1

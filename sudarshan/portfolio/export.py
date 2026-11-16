@@ -13,7 +13,10 @@ A ``Sheet`` holds typed cells, and each format writes a cell its own way:
   in front of a loss; no commas, no rupee sign), a day is YYYY-MM-DD, and any text a spreadsheet
   would run as a formula gets an apostrophe in front (``csvutil.guard``).
 * The entries (view ``activity``) are the import format itself, with no header rows, so the file
-  reads back into a tab as the same ledger.
+  reads back through Import: every posted entry of every kind of holding a tab allows (a listed
+  share by its symbol; gold, a plot, a deposit or a fund without an ISIN by its name), into a
+  tab of the same portfolio, as the same entries. ``ENTRIES_NOTE`` says what the file does not
+  carry, and so what does not come back from it.
 
 File names are ASCII: ``SUDARSHAN_Portfolio_<tab-slug>_<view>_<YYYY-MM-DD>.csv``, the slug from
 the tab's English name (letters, digits and hyphens, at most 24), else ``tab<id>``.
@@ -63,8 +66,17 @@ WORDS = {
     "whole_tab": "The whole tab, with no filter.",
     "not_yet": "Not shown yet",
     "twr_year": "Shown once the history is longer than a year.",
+    "no_price": "no price",
     "newest": "The {shown} newest of {count} entries. The CSV file has every entry.",
 }
+#: What the entries file is and is not, said wherever the entries are offered (the phone's Export
+#: sheet has the same sentence, ``ENTRIES_NOTE`` in ExportSheet.tsx; a test holds the two
+#: together) and printed under the entries on paper.
+ENTRIES_NOTE = (
+    "The entries CSV reads back through Import into a tab of this portfolio. It holds entries "
+    "only: a holding you named yourself (gold, a plot, a deposit) must already be in your list "
+    "under the same name, and the values you typed for it, loans and drafts are not in the file."
+)
 #: The most entries a PDF lists (about twelve pages); the CSV has them all.
 PAPER_ENTRIES = 400
 SLUG_MAX = 24
@@ -79,9 +91,12 @@ class Amount(NamedTuple):
 
 
 class Gain(NamedTuple):
-    """A gain or a loss in paise: on paper it carries its sign and its word."""
+    """A gain or a loss in paise: on paper it carries its sign and its word. ``unpriced`` is a
+    holding with no price yet, counted at its cost: its gain of nothing is not a result, so paper
+    prints "no price" and no box (the CSV keeps the number, and the row's note says the same)."""
 
     paise: int | None
+    unpriced: bool = False
 
 
 class Qty(NamedTuple):
@@ -190,7 +205,8 @@ def holdings(tab_view: Mapping[str, Any], accounts: Mapping[int, str]) -> Sheet:
                 asset["isin"] or "", asset["asset_class"] or "",
                 accounts.get(line.account_id, ""), Qty(line.qty_u),
                 Price(money.unit_price_u(line.cost_paise, line.qty_u)), Amount(line.cost_paise),
-                Price(price), Day(row["price"]["day"]), Amount(value), Gain(gain),
+                Price(price), Day(row["price"]["day"]), Amount(value),
+                Gain(gain, price is None),
                 Pct(money.pct(gain, line.cost_paise) if price is not None else None, True),
                 Pct(money.pct(value, totals["value_paise"])),
                 row["fresh"]["words"] or "",
@@ -385,6 +401,7 @@ def entries(
     )  # fmt: skip
     cut = len(listed) > len(lines)
     said = (WORDS["newest"].format(shown=len(lines), count=len(listed)),) if cut else ()
+    said += (ENTRIES_NOTE,)
     figures = (
         ("Entries", str(len(listed))),
         ("First entry", Day(listed[0].trade_date) if listed else WORDS["not_yet"]),

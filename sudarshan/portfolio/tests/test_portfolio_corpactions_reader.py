@@ -133,7 +133,7 @@ async def test_the_instruments_are_what_is_held_and_what_was_traded(n):
                             isin="INE000D01013", name="Never bought")  # fmt: skip
 
     def seed(tx):
-        tx.upstox_eod_put(TODAY, {"read_at": NOW}, [
+        tx.upstox_eod_put(TODAY, {"read_at": NOW, "holdings_value_paise": 50_000}, [
             {"instrument_key": f"NSE_EQ|{UPSTOX}", "qty": 5_000_000},
             {"instrument_key": "NSE_INDEX|Nifty 50", "qty": 1},
         ], NOW)  # fmt: skip
@@ -141,6 +141,11 @@ async def test_the_instruments_are_what_is_held_and_what_was_traded(n):
         tx.report_put("trades", 2026, "EQ", "ok", NOW, None, {"rows": rows}, NOW)
 
     n.svc.store.write(OWNER, seed)
+    assert n.read(ca.known_isins) == {HELD, UPSTOX, TRADED}
+    # A later record whose holdings could not be read (no lines, no holdings' value) is no
+    # holdings record: the share held is still read (v0.13.0 verification M2).
+    partly = {"read_at": NOW, "holdings_value_paise": None, "positions_pnl_paise": 0}
+    n.svc.store.write(OWNER, lambda tx: tx.upstox_eod_put(TODAY + 1, partly, [], NOW))
     assert n.read(ca.known_isins) == {HELD, UPSTOX, TRADED}
     held_now = [{"isin": "INE000E01014"}, {"isin": None}]
     assert n.read(lambda tx: ca.known_isins(tx, held_now)) == {HELD, UPSTOX, TRADED, "INE000E01014"}
@@ -251,8 +256,10 @@ async def test_a_refusal_or_a_turned_down_request_is_never_kept_as_nothing_liste
         n.upstox.answers[HELD] = status
         assert await n.read_one(HELD, NOW) == "rejected"
         read = n.reads()[HELD]
+        # ``read_at`` of a failed row is when it was tried (the rotation retries the one tried
+        # longest ago first); its state says it was never read.
         assert (read["state"], read["read_at"], read["note"]) == (
-            "failed", None, ca.WORDS["rejected"])  # fmt: skip
+            "failed", NOW, ca.WORDS["rejected"])  # fmt: skip
 
 
 @night
@@ -312,6 +319,63 @@ async def test_three_turned_down_requests_in_a_row_end_the_run(n):
     status, note = await n.reader.run(NIGHT)
     assert status == "failed" and note.endswith(ca.WORDS["rejected"])
     assert len(n.upstox.asked) == ca.SILENT_STOP
+
+
+# ---- a share that always fails (v0.14.0 verification M5) ------------------------------------------
+EIGHT = [f"INE00{letter}A01010" for letter in "ABCDEFGH"]
+
+
+async def tonight(n, night: int) -> tuple[str, str]:
+    """One night's run on the ``night``-th night from 26 Oct, what it asked kept in ``asked``."""
+    n.upstox.asked.clear()
+    n.rig.now = NIGHT + night * DAY_MS
+    return await n.reader.run(n.rig.now)
+
+
+@night
+async def test_a_share_upstox_always_turns_down_does_not_fail_the_night(n):
+    """The verifier's probe. Eight shares, two of which Upstox always answers with a 400. The
+    first night reads six. The next night only the two are due, and both fail again: old code
+    called that night failed ("Upstox's list could not be read last night ... Dividends may be
+    missing here"), six nights in seven. Something was read in the rotation week, and the two
+    failed before: the night is not failed."""
+    n.reader._held_now = lambda: [{"isin": isin} for isin in EIGHT]
+    n.upstox.answers.update(dict.fromkeys(EIGHT, [SAMPLE]))
+    n.upstox.answers.update({EIGHT[1]: 400, EIGHT[4]: 400})
+    assert (await tonight(n, 0))[0] == "ok"
+    status, note = await tonight(n, 1)
+    assert n.upstox.asked == [EIGHT[1], EIGHT[4]]
+    assert (status, note) == ("ok", "0 of 2 instruments read, 0 with nothing listed, 2 not read")
+    # A week on all eight are due again, and six are read.
+    status, note = await tonight(n, 8)
+    assert status == "ok" and len(n.upstox.asked) == 8
+    # Upstox turns every request down: shares it answered before fail, and the night has failed
+    # at once, after three, as before.
+    n.upstox.answers.update(dict.fromkeys(EIGHT, 400))
+    status, note = await tonight(n, 16)
+    assert status == "failed" and note.endswith(ca.WORDS["rejected"])
+    assert len(n.upstox.asked) == ca.SILENT_STOP
+
+
+@night
+async def test_shares_that_always_fail_never_keep_the_others_waiting(n):
+    """The verifier's probe. Three shares Upstox always turns down (A, B, C) sort before two
+    that were turned down once by chance (D, E). Old code asked A, B and C every night, stopped
+    on three in a row, and never asked D or E again: their events never arrived. The ones that
+    failed are asked the one tried longest ago first, so D and E are asked again within two
+    nights; behind their good reads A, B and C neither end the night nor fail it."""
+    five = EIGHT[:5]
+    n.reader._held_now = lambda: [{"isin": isin} for isin in five]
+    n.upstox.answers.update(dict.fromkeys(five, 400))
+    assert (await tonight(n, 0))[0] == "failed" and n.upstox.asked == five[:3]
+    assert (await tonight(n, 1))[0] == "failed" and n.upstox.asked == [*five[3:], five[0]]
+    n.upstox.answers.update(dict.fromkeys(five[3:], [SAMPLE]))  # D and E would answer now
+    assert n.upstox.asked and (await tonight(n, 2))[0] == "failed"
+    assert n.upstox.asked == [five[1], five[2], five[0]]  # tried longest ago first
+    status, _ = await tonight(n, 3)
+    assert n.upstox.asked == [*five[3:], *five[:3]] and status == "ok"
+    assert {isin: n.reads()[isin]["state"] for isin in five} == {
+        **dict.fromkeys(five[:3], "failed"), **dict.fromkeys(five[3:], "ok")}  # fmt: skip
 
 
 # ---- before the first read (review M1) ----------------------------------------------------------

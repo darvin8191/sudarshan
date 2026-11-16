@@ -82,8 +82,9 @@ STRUCTURAL = frozenset(
         "details", "not_computed_sales", "read_status", "lot_check", "uncounted",
         # where a quantity is from, and flags and counts of rows that carry no figure
         "held_from", "to_check", "left_out_count", "unrecorded_count", "uncounted_count",
-        # the change to a decision a lot check offers (an event id, a version and a ratio)
-        "fix",
+        # the change to a decision a lot check offers (an event id, a version and a ratio), and
+        # what was confirmed for a bonus or a split (its ratio, words and choices are hidden)
+        "fix", "decided",
     }
 )  # fmt: skip
 

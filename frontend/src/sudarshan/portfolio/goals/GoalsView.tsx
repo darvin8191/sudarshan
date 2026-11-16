@@ -2,15 +2,18 @@
 // name, a bar with the percentage in figures, the amount of the target, the date with the months
 // left, and what to add each month at the owner's assumed return, or that it is on track. A goal
 // that counts tabs moves with their ticks, and its meta line shows where the feed stands
-// ("Real-time" only while ticks arrive); a typed amount says it does not move. The monthly amount
-// is the service's own sum at its last read. The owner's page only.
+// ("Real-time" only while ticks arrive); a typed amount says it does not move. The amount to add
+// is the service's own sum at its last read, and is worked out again on the phone when the value
+// moves (sums.ts). A goal past its date, a tab that was deleted or archived and a goal whose
+// figures could not be worked out each say so in words. The owner's page only.
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { PencilLine, Plus } from 'lucide-react'
+import { PencilLine, Plus, TriangleAlert } from 'lucide-react'
 import { useCallback, useState } from 'react'
 import { cn } from '@/lib/utils'
 import { formatAmount } from '@/sudarshan/dashboard/format'
-import { useMarketOpen } from '@/sudarshan/dashboard/hooks'
+import { useMarketOpen, useNow } from '@/sudarshan/dashboard/hooks'
 import { LiveLine } from '@/sudarshan/dashboard/LiveLine'
+import type { FeedLine } from '@/sudarshan/dashboard/live'
 import {
   CALENDAR_LOADING,
   type MarketCalendar,
@@ -19,36 +22,61 @@ import {
 } from '@/sudarshan/dashboard/MarketCalendar'
 import { listGoals, PortfolioError, problemOf } from '../api'
 import { dateTimeOfInstant } from '../days'
-import { pctNumber } from '../Signed'
 import { PORTFOLIO_KEY } from '../tab/ActivityTab'
-import { monthOf, rupeesText } from '../tab/format'
+import { rupeesText } from '../tab/format'
 import { GOALS_MAX, type Goal, type GoalsList, type TabInfo } from '../types'
 import { GoalSheet } from './GoalSheet'
-import { type GoalNow, goalNow, type TabNow, TabValue } from './live'
+import { type GoalNow, goalNow, sameTabNow, type TabNow, TabValue } from './live'
+import { addWords, archivedWords, byWords, goneWords, shownProgress } from './sums'
 
 export const GOALS_KEY = [...PORTFOLIO_KEY, 'goals'] as const
 /** The view's own sentence while its switch is off on the server (the ops answer `not_ready`). */
 export const GOALS_OFF =
   'Goals are switched off on the server. They open here once a release switches them on.'
 
+const NO_TABS: readonly TabInfo[] = []
 const CARD = 'rounded-[1.125rem] border bg-card px-4 py-3.5 shadow-[var(--shadow-card)]'
 const BUTTON =
   'inline-flex min-h-12 items-center justify-center gap-2 rounded-[0.875rem] border border-[color:var(--border-strong)] bg-card px-4 text-[0.9375rem] font-semibold text-[color:var(--brand)] outline-none hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50'
 
-/** "By March 2031 · 52 months left". */
-export function byWords(goal: Goal): string {
-  const left = goal.months_left === 1 ? '1 month left' : `${goal.months_left} months left`
-  return `By ${monthOf(goal.target_day).label} · ${left}`
+const BASIS_WORDS = {
+  typed: 'Counts the amount you typed; it does not move with prices.',
+  still: 'Counts holdings that have no live price; it does not move during the day.',
+  read: 'As the service last read it.',
+} as const
+
+/** The feed line of a goal's tabs. The age it shows moves every second, so the clock is its own. */
+function GoalLine({ line }: { line: FeedLine }) {
+  const now = useNow()
+  return <LiveLine line={line} now={now} />
 }
 
-/** What to add each month at the owner's assumed return, or that nothing more is needed. */
-export function addWords(goal: Goal): string {
-  if (goal.on_track) return 'On track without adding more'
-  return `Add about ${rupeesText(goal.required_monthly_paise)} a month at ${goal.rate_bp / 100}% a year (your assumption)`
+function Warning({ children }: { children: string }) {
+  return (
+    <span className="flex items-start gap-1.5 text-sm font-semibold text-[color:var(--warning-text)]">
+      <TriangleAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+      <span className="min-w-0">{children}</span>
+    </span>
+  )
 }
 
-function GoalCard({ goal, now, onEdit }: { goal: Goal; now: GoalNow; onEdit: () => void }) {
-  const progress = pctNumber(now.progress_pct) ?? 0
+function GoalCard({
+  goal,
+  now,
+  today,
+  archivedTabs,
+  onEdit,
+}: {
+  goal: Goal
+  now: GoalNow
+  today: number
+  /** The names of the archived tabs this goal counts. */
+  archivedTabs: readonly string[]
+  onEdit: () => void
+}) {
+  const progress = shownProgress(now.progress_pct)
+  const gone = goneWords(goal.gone_tab_ids.length)
+  const shelved = archivedWords(archivedTabs)
   return (
     <article aria-label={goal.name} className={cn(CARD, 'flex flex-col gap-2')}>
       <div className="flex items-start justify-between gap-3">
@@ -67,63 +95,74 @@ function GoalCard({ goal, now, onEdit }: { goal: Goal; now: GoalNow; onEdit: () 
           <PencilLine aria-hidden="true" className="size-5" />
         </button>
       </div>
-      <span className="sd-display text-[1.75rem] leading-tight font-bold">
-        {formatAmount(progress, 1)}%
-      </span>
-      <div
-        role="progressbar"
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-valuenow={Math.min(100, Math.max(0, Math.round(progress)))}
-        aria-label={`${goal.name}: progress`}
-        className="h-2.5 rounded-full bg-[color:var(--divider)]"
-      >
-        <div
-          className="h-2.5 rounded-full bg-[color:var(--brand)]"
-          style={{ width: `${Math.min(100, Math.max(0, progress))}%` }}
-        />
-      </div>
-      <span className="text-[0.9375rem] font-semibold">
-        <span className="whitespace-nowrap">{rupeesText(now.value_paise)}</span> of{' '}
-        <span className="whitespace-nowrap">{rupeesText(goal.target_paise)}</span>
-      </span>
-      <span className="text-sm text-[color:var(--text-secondary)]">{byWords(goal)}</span>
-      <span className="text-sm">{addWords(goal)}</span>
-      {now.line !== null ? (
-        <LiveLine line={now.line} now={now.now} />
+      {goal.problem !== null ? (
+        <Warning>{goal.problem}</Warning>
       ) : (
-        <span className="text-xs text-[color:var(--text-tertiary)]">
-          {goal.fixed_paise !== null
-            ? 'Counts the amount you typed; it does not move with prices.'
-            : 'As the service last read it.'}
-        </span>
+        <>
+          <span className="sd-display text-[1.75rem] leading-tight font-bold">
+            {formatAmount(progress, 1)}%
+          </span>
+          <div
+            role="progressbar"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={Math.min(100, Math.floor(progress))}
+            aria-label={`${goal.name}: progress`}
+            className="h-2.5 rounded-full bg-[color:var(--divider)]"
+          >
+            <div
+              className="h-2.5 rounded-full bg-[color:var(--brand)]"
+              style={{ width: `${Math.min(100, progress)}%` }}
+            />
+          </div>
+          <span className="text-[0.9375rem] font-semibold">
+            <span className="whitespace-nowrap">{rupeesText(now.value_paise)}</span> of{' '}
+            <span className="whitespace-nowrap">{rupeesText(goal.target_paise)}</span>
+          </span>
+          <span className="text-sm text-[color:var(--text-secondary)]">{byWords(goal, today)}</span>
+          <span className="text-sm">{addWords(goal, now.value_paise, today)}</span>
+          {gone !== null && <Warning>{gone}</Warning>}
+          {shelved !== null && (
+            <span className="text-sm text-[color:var(--text-secondary)]">{shelved}</span>
+          )}
+          {now.line !== null ? (
+            <GoalLine line={now.line} />
+          ) : (
+            <span className="text-xs text-[color:var(--text-tertiary)]">
+              {BASIS_WORDS[now.basis === 'ticks' ? 'read' : now.basis]}
+            </span>
+          )}
+        </>
       )}
     </article>
   )
 }
 
-export function GoalsView({ tabs }: { tabs: readonly TabInfo[] }) {
+export function GoalsView({
+  tabs,
+  archivedTabs = NO_TABS,
+}: {
+  /** The owner's own tabs that a goal may count. */
+  tabs: readonly TabInfo[]
+  /** His archived tabs: a goal that counts one still does, and says so. */
+  archivedTabs?: readonly TabInfo[]
+}) {
   const queries = useQueryClient()
   const [market, setMarket] = useState<MarketCalendar>(CALENDAR_LOADING)
   const day = useIstDay()
   const { isOpen } = useMarketOpen(market)
+  const today = Number(day.replaceAll('-', ''))
   const [editing, setEditing] = useState<Goal | 'new' | null>(null)
   const [values, setValues] = useState<ReadonlyMap<number, TabNow>>(new Map())
   const onValue = useCallback((tabId: number, now: TabNow) => {
     setValues((was) => {
+      // Compared by what it says: the same report, in a new object, changes nothing (review B1).
       const kept = was.get(tabId)
-      if (
-        kept &&
-        kept.value_paise === now.value_paise &&
-        kept.line === now.line &&
-        kept.now === now.now
-      ) {
-        return was
-      }
-      return new Map(was).set(tabId, now)
+      return kept && sameTabNow(kept, now) ? was : new Map(was).set(tabId, now)
     })
   }, [])
-  const key = [...GOALS_KEY, 'list'] as const
+  // The day is part of the key: the months left and the amount are read again when it turns.
+  const key = [...GOALS_KEY, 'list', day] as const
   const query = useQuery({
     queryKey: key,
     queryFn: async ({ signal }): Promise<GoalsList> => {
@@ -140,7 +179,8 @@ export function GoalsView({ tabs }: { tabs: readonly TabInfo[] }) {
   const goals = query.data?.goals ?? []
   const active = goals.filter((goal) => !goal.archived)
   const archived = goals.filter((goal) => goal.archived)
-  const known = new Set(tabs.map((tab) => tab.id))
+  const shelved = new Map(archivedTabs.map((tab) => [tab.id, tab.name]))
+  const known = new Set([...tabs.map((tab) => tab.id), ...shelved.keys()])
   const linked = [...new Set(active.flatMap((goal) => goal.tab_ids))].filter((id) => known.has(id))
   return (
     <div className="flex flex-col gap-3">
@@ -177,6 +217,8 @@ export function GoalsView({ tabs }: { tabs: readonly TabInfo[] }) {
               key={goal.id}
               goal={goal}
               now={goalNow(goal, values)}
+              today={today}
+              archivedTabs={goal.tab_ids.flatMap((id) => shelved.get(id) ?? [])}
               onEdit={() => setEditing(goal)}
             />
           ))}
@@ -204,7 +246,8 @@ export function GoalsView({ tabs }: { tabs: readonly TabInfo[] }) {
             </details>
           )}
           <p className="text-xs text-[color:var(--text-tertiary)]">
-            The monthly amounts are as of {dateTimeOfInstant(query.data.as_of).slice(0, -3)}.
+            Read at {dateTimeOfInstant(query.data.as_of).slice(0, -3)}. The amount to add follows
+            the value shown. A goal counts a tab's value before its loans.
           </p>
         </>
       )}
@@ -212,6 +255,8 @@ export function GoalsView({ tabs }: { tabs: readonly TabInfo[] }) {
         open={editing !== null}
         goal={editing === 'new' ? null : editing}
         tabs={tabs}
+        archivedTabs={archivedTabs}
+        onStale={() => void queries.invalidateQueries({ queryKey: key })}
         onClose={() => setEditing(null)}
         onSaved={(list) => {
           queries.setQueryData(key, list)

@@ -65,6 +65,7 @@ export const IMPORT_MAX_FILE_BYTES = 900_000
 export const IMPORT_MAX_ROWS = 5_000
 export const LAYOUT_VERSION = 1
 export const GOALS_MAX = 20
+export const GOAL_TARGET_MAX_PAISE = 1_000_000_000_000
 export const STAT_DAYS = 60
 export const STAT_MIN_DAYS = 20
 export const CALENDAR_PAST_DAYS = 90
@@ -2285,6 +2286,7 @@ export interface CaEvent {
 
 export interface CaRead {
   isin: string
+  /** When it was last read; for `failed` (never read), when it was last tried. */
   read_at: EpochMs | null
   state: string
   note: string | null
@@ -2437,6 +2439,25 @@ export interface CalendarArgs {
   to?: Day
 }
 
+/**
+ * What the owner confirmed for the Upstox account on a bonus or a split (v0.14.0 verification
+ * M3): "Change what I confirmed" on the event's row sends `ca_decide` from `version`, with the
+ * choices To confirm offered, in the same words.
+ */
+export interface CaDecided {
+  /** The wording the decision was made on: the id `ca_decide` changes it from. */
+  event_id: number
+  version: number
+  state: CaDecision
+  /** The reading applied; null when the lots were left as they are. */
+  ratio_num: number | null
+  ratio_den: number | null
+  /** "You applied this split as every 1 made 5: 100 became 500." */
+  words: string
+  /** The choices again, on the quantity held the day before, as To confirm put them. */
+  expected: CaExpected
+}
+
 export interface CalendarRow {
   event_id: number
   isin: string
@@ -2450,6 +2471,8 @@ export interface CalendarRow {
   held_qty_u: QtyU | null
   expected_paise: Paise | null
   checked_at: EpochMs | null
+  /** A bonus or a split: what was confirmed for the Upstox account; null while nothing is. */
+  decided: CaDecided | null
 }
 
 export interface CalendarReport {
@@ -2571,6 +2594,10 @@ export interface Goal {
   required_monthly_paise: Paise
   months_left: number
   on_track: boolean
+  /** Linked tabs that have since been deleted: each counts as nothing until it is unlinked. */
+  gone_tab_ids: number[]
+  /** The sentence of a goal whose figures could not be worked out; its figures are then zeros. */
+  problem: string | null
 }
 
 export interface GoalsList {
