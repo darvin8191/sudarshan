@@ -4,6 +4,7 @@ import type { ReactNode } from 'react'
 import { cn } from '@/lib/utils'
 import { ACTION, OUTLINED } from '@/sudarshan/books/cards/parts'
 import { sendChange, useHeld } from './actions'
+import { useAlertsSeen } from './alertsSeen'
 import { StatusChip } from './marks'
 import { countsWords } from './ScreenCard'
 import type { ScreenRow } from './types'
@@ -37,6 +38,7 @@ export function ScreenPage({
   children?: ReactNode
 }) {
   const client = useQueryClient()
+  useAlertsSeen(row)
   const held = useHeld(row.id)
   const busy = held !== undefined
   const word = (action: 'pause' | 'resume') => {

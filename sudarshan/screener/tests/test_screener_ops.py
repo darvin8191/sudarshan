@@ -198,6 +198,13 @@ def test_results_runs_run_since_membership_and_pins_read_a_recorded_run(tmp_path
             assert data["not_checked"] == {
                 "count": 1,
                 "reasons": ["Not checked: no price from Upstox yet"],
+                "groups": [
+                    {
+                        "reason": "Not checked: no price from Upstox yet",
+                        "count": 1,
+                        "symbols": ["CCC"],
+                    }
+                ],
             }
 
             status, body = await client.op("state")

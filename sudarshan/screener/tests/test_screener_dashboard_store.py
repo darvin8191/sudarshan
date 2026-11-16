@@ -60,7 +60,7 @@ def test_step_four_is_idempotent_ddl_without_check_constraints():
         head = " ".join(statement.split()[:6])
         assert "IF NOT EXISTS" in head, head
         assert "CHECK" not in statement.upper()
-    assert migrations.STEPS[-1][0] == migrations.LATEST == 4
+    assert migrations.STEPS[-1][0] == migrations.LATEST == 5
     assert {"dashboard", "dashboard_widget"} <= set(migrations.OWNER_TABLES)
     assert {"sort_by", "value_clauses"} <= store.JSON_COLUMNS
 
@@ -69,10 +69,10 @@ def test_a_fresh_file_applies_one_to_four_and_opened_again_none(tmp_path):
     path = tmp_path / "screener.db"
     first = ScreenerStore(path)
     try:
-        assert first.applied == [1, 2, 3, 4]
+        assert first.applied == [1, 2, 3, 4, 5]
         with first.engine.connect() as conn:
             assert {"dashboard", "dashboard_widget"} <= set(store.tables_of(conn))
-            assert migrations.version(conn) == 4
+            assert migrations.version(conn) == 5
     finally:
         first.close()
     second = ScreenerStore(path)
@@ -134,7 +134,7 @@ def test_a_populated_schema_three_file_applies_only_step_four_and_keeps_every_ro
     _populated_schema_three(path)
     again = ScreenerStore(path)
     try:
-        assert again.applied == [4]
+        assert again.applied == [4, 5]
         with again.engine.connect() as conn:
             kept = {
                 name: conn.exec_driver_sql(f"SELECT count(*) FROM {name}").scalar()
@@ -152,7 +152,7 @@ def test_a_populated_schema_three_file_applies_only_step_four_and_keeps_every_ro
         store.stop()
     third = ScreenerStore(path)
     try:
-        assert third.applied == [4]
+        assert third.applied == [4, 5]
         assert [(w["screen_id"], w["kind"]) for w in third.read(OWNER, Tx.widgets)] == [
             (1, "table"),
             (1, "count"),
@@ -178,11 +178,11 @@ def test_a_file_from_a_newer_release_is_refused(tmp_path):
     path = tmp_path / "screener.db"
     made = ScreenerStore(path)
     with made.writer.begin() as conn:
-        conn.exec_driver_sql("PRAGMA user_version = 5")
+        conn.exec_driver_sql("PRAGMA user_version = 6")
     made.close()
     with pytest.raises(migrations.SchemaTooNew) as caught:
         ScreenerStore(path)
-    assert caught.value.found == 5 and caught.value.known == 4
+    assert caught.value.found == 6 and caught.value.known == 5
     assert not re.search(r"[A-Z][a-z]+Error|sqlite|version \d", str(caught.value))
     store.stop()
 

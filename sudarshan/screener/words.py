@@ -599,6 +599,23 @@ def paused_add_words(used: int, limit: int) -> str:
     )
 
 
+def over_keys_words(total: int, limit: int) -> str:
+    """A screen refused at save for the key limit (GA7.3): which limit, and how far over."""
+    return (
+        f"With this screen the screener would follow {quantity(total)} instruments tick by tick, "
+        f"{quantity(total - limit)} over its limit of {quantity(limit)}. Pause another screen, "
+        "or choose a smaller list for this one."
+    )
+
+
+def paused_keys_words(total: int, limit: int) -> str:
+    return (
+        f"Added Paused: with it the screener would follow {quantity(total)} instruments tick by "
+        f"tick, {quantity(total - limit)} over its limit of {quantity(limit)}. Pause another "
+        "screen to start this."
+    )
+
+
 def _as_of(at: int | None, now: int) -> str:
     return f" · matches as of {when(at, now)}" if at else ""
 

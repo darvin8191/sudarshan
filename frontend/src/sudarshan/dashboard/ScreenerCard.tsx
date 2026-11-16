@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { ChevronRight, Clock, LogOut, Minus, Plus, ScanSearch } from 'lucide-react'
+import { BellRing, ChevronRight, Clock, LogOut, Minus, Plus, ScanSearch } from 'lucide-react'
 import { Link } from 'react-router'
 import { useSocketContext } from '@/components/socket/SocketProvider'
 import { cn } from '@/lib/utils'
@@ -7,6 +7,7 @@ import { istTime } from '@/sudarshan/books/time'
 import { screenerApi } from '@/sudarshan/screener/api'
 import { TODAY_KEY } from '@/sudarshan/screener/keys'
 import { useHearing, useScreenerPush } from '@/sudarshan/screener/push'
+import { newAlertsWords } from '@/sudarshan/screener/ScreenCard'
 import { useScreenerState } from '@/sudarshan/screener/useScreenerState'
 import { keyOf, type MarketOpen } from './live'
 
@@ -68,6 +69,8 @@ export function ScreenerCard({ marketOpen = NOT_KNOWN }: { marketOpen?: MarketOp
   const closed = marketOpen('NSE') === false
   const behind = hearing === 'not_joined'
   const unseen = today.unseen_alerts > 0
+  // which screen the alerts are on: opening it (the row below) is what marks them looked at
+  const unseenOf = new Map(active.map((screen) => [screen.id, screen.unseen_alerts ?? 0]))
 
   return (
     <section
@@ -78,11 +81,6 @@ export function ScreenerCard({ marketOpen = NOT_KNOWN }: { marketOpen?: MarketOp
         <h2 id="sd-screener-title" className="flex items-center gap-2 text-[0.9375rem] font-bold">
           <ScanSearch aria-hidden="true" className="size-4" />
           Screener today
-          {unseen && (
-            <span className="flex h-6 items-center rounded-full bg-[color:var(--gold-tint)] px-2.5 text-xs font-semibold text-[color:var(--warning-text)]">
-              {today.unseen_alerts} new {today.unseen_alerts === 1 ? 'alert' : 'alerts'}
-            </span>
-          )}
         </h2>
         <Link
           to="/screener"
@@ -93,13 +91,26 @@ export function ScreenerCard({ marketOpen = NOT_KNOWN }: { marketOpen?: MarketOp
         </Link>
       </div>
 
-      {sessionWords(today.session, Date.now()) && (
-        <p
-          data-session={today.session}
-          className="text-[0.8125rem] font-semibold text-[color:var(--text-secondary)]"
-        >
-          {sessionWords(today.session, Date.now())}
-        </p>
+      {(sessionWords(today.session, Date.now()) || unseen) && (
+        <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
+          {sessionWords(today.session, Date.now()) && (
+            <p
+              data-session={today.session}
+              className="text-[0.8125rem] font-semibold text-[color:var(--text-secondary)]"
+            >
+              {sessionWords(today.session, Date.now())}
+            </p>
+          )}
+          {unseen && (
+            <span
+              data-unseen-alerts={today.unseen_alerts}
+              className="flex h-6 shrink-0 items-center gap-1 rounded-full whitespace-nowrap bg-[color:var(--gold-tint)] px-2.5 text-xs font-semibold text-[color:var(--warning-text)]"
+            >
+              <BellRing aria-hidden="true" className="size-3.5" />
+              {newAlertsWords(today.unseen_alerts)}
+            </span>
+          )}
+        </div>
       )}
       {(behind || closed) && (
         <p
@@ -120,7 +131,24 @@ export function ScreenerCard({ marketOpen = NOT_KNOWN }: { marketOpen?: MarketOp
               to={`/screener?screen=${screen.id}`}
               className="flex min-h-12 items-center justify-between gap-3 py-1.5 outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
-              <span className="min-w-0 truncate text-[0.9375rem] font-semibold">{screen.name}</span>
+              <span className="flex min-w-0 items-center gap-1.5">
+                <span className="min-w-0 truncate text-[0.9375rem] font-semibold">
+                  {screen.name}
+                </span>
+                {(unseenOf.get(screen.id) ?? 0) > 0 && (
+                  <span
+                    data-unseen={unseenOf.get(screen.id)}
+                    className="inline-flex shrink-0 items-center gap-0.5 text-[0.8125rem] font-semibold text-[color:var(--warning-text)]"
+                  >
+                    <BellRing aria-hidden="true" className="size-3.5" />
+                    {unseenOf.get(screen.id)}
+                    <span className="sr-only">
+                      {' '}
+                      {unseenOf.get(screen.id) === 1 ? 'new alert' : 'new alerts'}
+                    </span>
+                  </span>
+                )}
+              </span>
               <span className="flex shrink-0 items-center gap-2.5 text-[0.8125rem] font-semibold">
                 <span className="text-[0.9375rem] font-bold">{screen.matches}</span>
                 <span className="inline-flex items-center gap-0.5 text-[color:var(--brand)]">

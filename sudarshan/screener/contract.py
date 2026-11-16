@@ -121,11 +121,15 @@ OPS = (
     ),
     OpSpec("runs_since", "GET", "/runs/since", "read", query=(("after", "int"), ("limit", "int"))),
     OpSpec("run", "GET", "/runs/<id>", "read"),
+    # One run's results as a CSV file (M9.16, GA7.5): ``{filename, text}``, as every export answers.
+    OpSpec("run_csv", "GET", "/runs/<id>/csv", "read"),
     OpSpec("membership", "GET", "/membership", "read", query=(("list", "int"), ("screen", "int"))),
     OpSpec("membership_update", "PATCH", "/membership/<id>", "write"),
     OpSpec("presets", "GET", "/presets", "read"),
     OpSpec("universes", "GET", "/universes", "read"),
     OpSpec("today", "GET", "/today", "read"),
+    # The owner opened his alerts (M3.8, GA7.6): ``{screen_id?, through?}``.
+    OpSpec("alerts_seen", "POST", "/alerts/seen", "write"),
     # The dashboard (M9.16): a widget is addressed by its screen and its kind, never by an id.
     OpSpec("dashboard", "GET", "/dashboard", "read"),
     OpSpec("widget", "GET", "/dashboard/widgets/<id>", "read", query=(("kind", "str"),)),

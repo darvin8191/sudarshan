@@ -79,9 +79,11 @@ def test_an_empty_universe_does_not_empty_the_list(world):
     assert run["not_checked"] == 1 and run["matched"] == 0
     assert NOT_LOADED.lower() in [m.lower() for m in words.mark_words(run["marks"])]
     changes = store.read(OWNER, lambda tx: tx.run_changes(run["id"]))
-    assert [(c["key"], c["change"]) for c in changes] == [("NSE_EQ|A", "not_checked")]
+    assert changes == [], "not checked is a group in the run's values, never a change (GA7.4)"
     values = store.read(OWNER, lambda tx: tx.run_values(run["id"]))
-    assert values["NSE_EQ|A"]["_not_checked"] == NOT_LOADED
+    assert values == {
+        runs.NOT_CHECKED_KEY: {"groups": [{"reason": NOT_LOADED, "count": 1, "symbols": ["AAA"]}]}
+    }
 
 
 def test_a_screen_whose_universe_is_not_built_keeps_its_members(world):

@@ -142,6 +142,14 @@ class Runner:
         settle = getattr(self.source, "settle", None)
         if callable(settle):
             settle(now)
+        # a watchlist the screen looks at is read again before the run (GA7.2); a source that
+        # cannot (a replay, a test's fake) keeps the members it has
+        fresh = getattr(self.source, "fresh_members", None)
+        if callable(fresh):
+            try:
+                await fresh(screen_row["spec"]["universe"], now)
+            except Exception:
+                log.exception("the list of the run %s could not be read again", due.key)
         try:
             plan = spec.compile_plan(screen_row["spec"])
             members = list(self.source.members(screen_row["spec"]["universe"]))

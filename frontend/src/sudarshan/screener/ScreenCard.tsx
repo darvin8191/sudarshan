@@ -1,4 +1,4 @@
-import { ArrowUpRight, Bell, BellOff, Clock, ListChecks } from 'lucide-react'
+import { ArrowUpRight, Bell, BellOff, BellRing, Clock, ListChecks } from 'lucide-react'
 import { memo } from 'react'
 import { cn } from '@/lib/utils'
 import { CARD } from '@/sudarshan/books/cards/parts'
@@ -9,6 +9,11 @@ import type { ScreenRow } from './types'
 export function countsWords(row: Pick<ScreenRow, 'matches' | 'entered_today'>): string {
   const match = `${row.matches} match`
   return row.entered_today > 0 ? `${match} · ${row.entered_today} new today` : match
+}
+
+/** '2 new alerts': alerts the owner has not looked at. */
+export function newAlertsWords(count: number): string {
+  return `${count} new ${count === 1 ? 'alert' : 'alerts'}`
 }
 
 /**
@@ -70,6 +75,15 @@ export const ScreenCard = memo(function ScreenCard({
               <Bell aria-hidden="true" className="size-4" />
             )}
             {row.alerts}
+          </span>
+        )}
+        {(row.unseen_alerts ?? 0) > 0 && (
+          <span
+            data-unseen={row.unseen_alerts}
+            className="inline-flex items-center gap-1 text-[color:var(--warning-text)]"
+          >
+            <BellRing aria-hidden="true" className="size-4" />
+            {newAlertsWords(row.unseen_alerts ?? 0)}
           </span>
         )}
         <ArrowUpRight
