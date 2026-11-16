@@ -1,4 +1,5 @@
 import { CalendarDays, type LucideIcon, Receipt, ShieldCheck, Target } from 'lucide-react'
+import { useEffect, useRef } from 'react'
 import { cn } from '@/lib/utils'
 import { type SwitchName, WORDS } from './types'
 import { CUSTOM_VIEWS, type CustomView, UPSTOX_VIEWS, type UpstoxView } from './usePortfolioOverlay'
@@ -50,11 +51,18 @@ export function Segments<V extends string>({
   value: V
   onChange: (view: V) => void
 }) {
+  // The row scrolls sideways on a phone: the part shown is always brought into sight.
+  const shown = useRef<HTMLButtonElement | null>(null)
+  // biome-ignore lint/correctness/useExhaustiveDependencies: it follows the part shown
+  useEffect(() => {
+    shown.current?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
+  }, [value])
   return (
     <div role="tablist" aria-label="Parts of this tab" className="flex gap-1.5 overflow-x-auto">
       {views.map((view) => (
         <button
           key={view}
+          ref={value === view ? shown : undefined}
           type="button"
           role="tab"
           aria-selected={value === view}

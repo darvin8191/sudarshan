@@ -42,7 +42,7 @@ WORDS = {
     "Trades and choose that year to read it.",
     "uncounted": "{count} {holdings} worth {value} {have} no purchase in that history: bought "
     "before {day}, or received without a trade. They are not counted in the gain, the return "
-    "or the index comparison, and are listed below.",
+    "or the index comparison, and are listed under Not counted.",
     "left_out": "Sales of such shares, {value} in all, are not counted either.",
     "gone": "Upstox's trades show more of {names} than you hold now. The difference is counted "
     "as lost, so the return shown is lower than the true one if you moved or tendered those "
