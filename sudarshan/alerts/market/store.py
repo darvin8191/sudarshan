@@ -31,7 +31,10 @@ every owner-data table carries it and every read filters on it. A structural tes
 public method to this.
 
 Retention: events with their deliveries, and pauses, older than ``keep_days`` (100, never under
-90) go at start and after each session; baselines after 10 days; definitions never.
+90) go at start and after each session; baselines after 10 days; definitions never. The
+financial-year rule (M19.10) holds them longer, never shorter: an event also stays until the end
+of the April after its financial year (``fy_floor``), so the year's records pack, built on 1 and
+4 April, lists every alert of the year. At most about 13 months are held.
 
 Read-only (cross-design X7, A7p): ``MarketStore(path, read_only=True)`` is for the replay check
 and anything else that only reads. It never creates the file, never migrates it and never
@@ -49,7 +52,7 @@ import contextlib
 import json
 import uuid
 from collections.abc import Callable, Iterator, Mapping
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -83,6 +86,23 @@ from sudarshan.alerts.store import _cause, _private_file
 DB_FILENAME = "market.db"
 KEEP_DAYS, MIN_KEEP_DAYS, BASELINE_DAYS = 100, 90, 10
 DAY_MS = 86_400_000
+#: The financial year in India starts on 1 April. Through April the year just ended is still
+#: held: its records pack is built on 1 April and again on 4 April (sudarshan/journal/jobs/
+#: fypack.py), a missed build is made up within three days, and the owner may build it again.
+FY_START_MONTH, FY_HELD_THROUGH_MONTH = 4, 4
+_IST = timezone(timedelta(hours=5, minutes=30))
+
+
+def fy_floor(now: int) -> int:
+    """The first instant (epoch ms; 1 April, 00:00 in India) of the oldest financial year whose
+    alerts are still held at ``now``: the running year's, and through April the year before's."""
+    today = datetime.fromtimestamp(now / 1000, _IST)
+    year = today.year if today.month >= FY_START_MONTH else today.year - 1
+    if FY_START_MONTH <= today.month <= FY_HELD_THROUGH_MONTH:
+        year -= 1
+    return int(datetime(year, FY_START_MONTH, 1, tzinfo=_IST).timestamp() * 1000)
+
+
 STATUSES = ("active", "paused", "stopped")
 #: The owner's own status changes: each is accepted from one status only (store._move).
 MOVES = {"pause": ("active", "paused"), "resume": ("paused", "active"),
@@ -877,9 +897,15 @@ class MarketStore:
             conn.execute(stmt.on_conflict_do_update(index_elements=["name"], set_={"value": at}))
 
     # ---- upkeep ----------------------------------------------------------------------------
+    def cutoff(self, now: int) -> int:
+        """Events fired before this instant are forgotten at ``now``: never later than
+        ``keep_days`` back, and earlier while the financial-year rule still holds them."""
+        return min(now - self.keep_days * DAY_MS, fy_floor(now))
+
     def prune(self, now: int) -> int:
-        """Drop events, deliveries and pauses older than keep_days, baselines over 10 days."""
-        cutoff = now - self.keep_days * DAY_MS
+        """Drop events, deliveries and pauses older than keep_days and from before the oldest
+        financial year still held (``fy_floor``), whichever is earlier; baselines over 10 days."""
+        cutoff = self.cutoff(now)
         old = select(alert_event.c.id).where(alert_event.c.fired_at < cutoff)
         with self._tx() as conn:
             removed = conn.execute(

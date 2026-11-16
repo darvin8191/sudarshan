@@ -258,8 +258,8 @@ class MarketRuntime:
     async def _serve(self) -> None:
         now = self._started = self._now()
         if removed := await self._db(self.store.prune, now):
-            log.info("forgot %d market alert records older than %d days", removed,
-                     self.store.keep_days)  # fmt: skip
+            log.info("forgot %d market alert records older than %d days and from before the "
+                     "financial year still held", removed, self.store.keep_days)  # fmt: skip
         rows, states = (
             await self._db(self.store.alerts, OWNER),
             await self._db(self.store.states, OWNER),
