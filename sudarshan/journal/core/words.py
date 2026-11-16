@@ -22,6 +22,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from sudarshan.journal.core import money
+from sudarshan.signals.contract import BIAS_WORDS, INSTRUMENTS
 from sudarshan.tax.words import WORKING_PAPER
 
 HEADER = "सुदर्शन · SUDARSHAN"
@@ -184,6 +185,44 @@ def eod(
     )
 
 
+#: The TRINETRA readings the brief names (J3), with what it calls each.
+TRINETRA_MODULES = (("regime", "regime"), ("gap_bias", "gap bias"))
+
+
+def _trinetra_part(name: str, reading: Mapping[str, Any] | None) -> str:
+    if not reading:
+        return f"{name} not published"
+    if reading.get("lapsed"):
+        return f"{name} lapsed"
+    if reading.get("quality") == "no_data":
+        return f"{name}: no data"
+    detail = [BIAS_WORDS.get(reading.get("bias"), "neutral")]
+    if reading.get("confidence"):
+        detail.append(f"confidence {reading['confidence']}")
+    if reading.get("quality") == "degraded":
+        detail.append("on incomplete data")
+    return f"{name} {reading.get('label') or ''} ({', '.join(detail)})"
+
+
+def trinetra_lines(trinetra: Mapping[str, Any] | None) -> list[str]:
+    """The brief's TRINETRA lines (J3, P8 3.7.7): none while the view is switched off (None); one
+    per index when its readings are fresh ("TRINETRA NIFTY: regime ..., gap bias ..."), the
+    confidence a ready string; else the view's own sentence (``sentence``)."""
+    if not trinetra:
+        return []
+    readings = trinetra.get("readings")
+    if not isinstance(readings, Mapping):
+        return [str(trinetra["sentence"])] if trinetra.get("sentence") else []
+    return [
+        f"TRINETRA {instrument}: "
+        + ", ".join(
+            _trinetra_part(name, (readings.get(instrument) or {}).get(module))
+            for module, name in TRINETRA_MODULES
+        )
+        for instrument in INSTRUMENTS
+    ]
+
+
 def brief(
     day: int,
     kind: str = "normal",
@@ -202,9 +241,11 @@ def brief(
     yesterday: Mapping[str, Any] | None = None,
     kill_switch: bool | None = False,
     autologin: str | None = None,
+    trinetra: Mapping[str, Any] | None = None,
 ) -> str:
     """The morning brief (M15.1). ``kind`` is ``normal``, ``muhurat`` (any special session, named
-    by ``session_name``) or ``holiday``."""
+    by ``session_name``) or ``holiday``. ``trinetra``: TRINETRA's lines after the market's
+    (``trinetra_lines``; J3), on a trading day only."""
     if kind not in ("normal", "muhurat", "holiday"):
         raise ValueError(f"unknown brief kind: {kind!r}")
     head = [HEADER, f"{day_label(day)}{SEP}Morning brief"]
@@ -252,6 +293,7 @@ def brief(
     return _lines(
         *head,
         SEP.join([market, *extras]),
+        *trinetra_lines(trinetra),
         funds,
         f"Overnight: {_positions(overnight)}",
         y,

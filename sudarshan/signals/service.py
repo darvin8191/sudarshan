@@ -538,3 +538,4 @@ def main() -> int:
 # One line per module that adds a job (``@job``) or a hand-on hook (``@hand_on``):
 from sudarshan.signals import perf as _perf  # noqa: E402,F401  (T8: the daily index marks)
 from sudarshan.signals import push as _push  # noqa: E402,F401  (B2: the push to the open screens)
+from sudarshan.signals import relay as _relay  # noqa: E402,F401  (AL2: changes to the alerts' desk)

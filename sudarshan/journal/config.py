@@ -16,6 +16,8 @@ returned by ``read_pepper`` and kept out of ``Settings``. The journal never read
 | ``SUDARSHAN_JOURNAL_FEED_URL`` | ``http://127.0.0.1:5580`` (loopback only) |
 | ``SUDARSHAN_JOURNAL_FEED_ZMQ`` | ``tcp://127.0.0.1:5581`` (loopback only) |
 | ``SUDARSHAN_JOURNAL_PORTFOLIO_URL`` | ``http://127.0.0.1:5583`` (loopback only) |
+| ``SUDARSHAN_SIGNALS`` | ``off`` (the TRINETRA view's switch, in OpenAlgo's ``.env``, where sudarshan-signals reads the same name): off, the morning brief says nothing of TRINETRA (J3) |
+| ``SUDARSHAN_JOURNAL_SIGNALS_URL`` | ``http://127.0.0.1:5588`` (loopback only; the journal purpose's two reads) |
 | ``SUDARSHAN_JOURNAL_MAX_CLAIMS`` | ``50`` (the feed's quota for this client, at most 50; Y12) |
 | ``SUDARSHAN_JOURNAL_EOD_AFTER_MIN`` | ``5`` (the day report: the day's last close plus this) |
 | ``SUDARSHAN_JOURNAL_CHECK_AFTER_MIN`` | ``5`` (the close check: the cash post-close session's end plus this; Y22) |
@@ -54,6 +56,8 @@ STATE_DIR = "/var/lib/sudarshan-journal"
 FEED_URL = f"http://{LOCAL_HOST}:5580"
 FEED_ZMQ = f"tcp://{LOCAL_HOST}:5581"
 PORTFOLIO_URL = f"http://{LOCAL_HOST}:5583"
+#: sudarshan-signals, the TRINETRA view (J3): its journal purpose reads ``state`` and ``state_at``.
+SIGNALS_URL = f"http://{LOCAL_HOST}:5588"
 #: The alerts service, whose report desk delivers the reports (its /health says it runs).
 ALERTS_URL = f"http://{LOCAL_HOST}:5582"
 TICKS_DIR = "/var/lib/sudarshan-feed/ticks"
@@ -182,6 +186,9 @@ class Settings:
     feed_zmq: str = FEED_ZMQ
     portfolio_url: str = PORTFOLIO_URL
     alerts_url: str = ALERTS_URL
+    #: J3: the TRINETRA view's switch (``SUDARSHAN_SIGNALS``) and its reader's address.
+    signals: bool = False
+    signals_url: str = SIGNALS_URL
     max_claims: int = MAX_CLAIMS_CEILING
     eod_after_min: int = 5
     check_after_min: int = 5
@@ -222,6 +229,8 @@ class Settings:
             feed_zmq=_loopback_url(env, "SUDARSHAN_JOURNAL_FEED_ZMQ", FEED_ZMQ, "tcp"),
             portfolio_url=_loopback_url(env, "SUDARSHAN_JOURNAL_PORTFOLIO_URL", PORTFOLIO_URL),
             alerts_url=_loopback_url(env, "SUDARSHAN_JOURNAL_ALERTS_URL", ALERTS_URL),
+            signals=_switch(env, "SUDARSHAN_SIGNALS", False),
+            signals_url=_loopback_url(env, "SUDARSHAN_JOURNAL_SIGNALS_URL", SIGNALS_URL),
             max_claims=_number(
                 env, "SUDARSHAN_JOURNAL_MAX_CLAIMS", MAX_CLAIMS_CEILING, 1, MAX_CLAIMS_CEILING
             ),

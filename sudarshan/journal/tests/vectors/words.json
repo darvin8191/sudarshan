@@ -391,6 +391,81 @@
    "text": "सुदर्शन · SUDARSHAN\nMonthly statement · October 2026\nNo trading day this month.\nOpen the full report: SUDARSHAN > Reports"
   },
   {
+   "id": "W15",
+   "fn": "brief",
+   "note": "J3: TRINETRA fresh at 08:45, a line per index",
+   "args": {
+    "day": 20261116,
+    "hours": "09:15-15:30",
+    "fno_close": "15:40",
+    "funds_available_paise": 18240000,
+    "overnight": [],
+    "yesterday": {
+     "net_paise": 0,
+     "trades": 0
+    },
+    "kill_switch": false,
+    "trinetra": {
+     "readings": {
+      "NIFTY": {
+       "regime": {
+        "label": "FII distribution",
+        "bias": "bear",
+        "confidence": "0.71",
+        "quality": "ok",
+        "lapsed": false
+       },
+       "gap_bias": {
+        "label": "Gap down",
+        "bias": "bear",
+        "confidence": "0.64",
+        "quality": "ok",
+        "lapsed": false
+       }
+      },
+      "BANKNIFTY": {
+       "regime": {
+        "label": "Range",
+        "bias": "neutral",
+        "confidence": null,
+        "quality": "degraded",
+        "lapsed": false
+       },
+       "gap_bias": {
+        "label": "Flat open",
+        "bias": "neutral",
+        "confidence": "0.55",
+        "quality": "ok",
+        "lapsed": true
+       }
+      }
+     }
+    }
+   },
+   "text": "सुदर्शन · SUDARSHAN\nMon 16 Nov · Morning brief\nMarket open 09:15-15:30 (F&O to 15:40)\nTRINETRA NIFTY: regime FII distribution (bearish, confidence 0.71), gap bias Gap down (bearish, confidence 0.64)\nTRINETRA BANKNIFTY: regime Range (neutral, on incomplete data), gap bias lapsed\nFunds available ₹1,82,400.00\nOvernight: none\nYesterday: no trades\nKill switch off"
+  },
+  {
+   "id": "W16",
+   "fn": "brief",
+   "note": "J3: TRINETRA not fresh, the view's own sentence",
+   "args": {
+    "day": 20261116,
+    "hours": "09:15-15:30",
+    "fno_close": "15:40",
+    "funds_available_paise": 18240000,
+    "overnight": [],
+    "yesterday": {
+     "net_paise": 0,
+     "trades": 0
+    },
+    "kill_switch": false,
+    "trinetra": {
+     "sentence": "TRINETRA has not published since 15 Nov 15:58. This is its last reading, 16 hours old."
+    }
+   },
+   "text": "सुदर्शन · SUDARSHAN\nMon 16 Nov · Morning brief\nMarket open 09:15-15:30 (F&O to 15:40)\nTRINETRA has not published since 15 Nov 15:58. This is its last reading, 16 hours old.\nFunds available ₹1,82,400.00\nOvernight: none\nYesterday: no trades\nKill switch off"
+  },
+  {
    "id": "F1",
    "fn": "family_line",
    "note": "all shown",

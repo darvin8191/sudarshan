@@ -1,7 +1,10 @@
-"""AL1: the owner bot's lanes on the one Pacer: orders, market, notices, reports (Y18, R8).
+"""AL1: the owner bot's lanes on the one Pacer: orders, market, signals, notices, reports (Y18,
+R8, P8 5.2).
 
 The class is ``sudarshan.common.pacer.Pacer`` (tested in ``sudarshan/common/tests``); here the
-owner bot's numbers and rules, and the notice desk taking its slots from it.
+owner bot's numbers and rules, and the notice desk taking its slots from it. The signals lane's
+vectors (P8 10.8) are at the end: an order never waits more than one gap behind a signal, 4 a
+minute, and it gives way to a market message that has waited 20 s.
 """
 
 from __future__ import annotations
@@ -15,7 +18,7 @@ from alerts_fakes import API_KEY, OWNER, FakeOpenAlgo, RunningClock, ist, wait_u
 
 from sudarshan.alerts import notices, outbox
 from sudarshan.alerts.notices import LanePace
-from sudarshan.alerts.outbox import MARKET, NOTICES, ORDERS, REPORTS, Pacer
+from sudarshan.alerts.outbox import MARKET, NOTICES, ORDERS, REPORTS, SIGNALS, Pacer
 from sudarshan.alerts.owner import Owner
 from sudarshan.alerts.service import AlertService
 from sudarshan.common import pacer as common
@@ -29,11 +32,15 @@ def slots(pacer: Pacer, lane: str) -> list[float]:
 
 def test_the_lanes_and_their_order_of_service():
     pacer = Pacer()
-    assert list(pacer.lanes) == [ORDERS, MARKET, NOTICES, REPORTS]
-    assert (ORDERS, MARKET, NOTICES, REPORTS) == ("orders", "market", "notices", "reports")
+    assert list(pacer.lanes) == [ORDERS, MARKET, SIGNALS, NOTICES, REPORTS]
+    assert (ORDERS, MARKET, SIGNALS, NOTICES, REPORTS) == (
+        "orders", "market", "signals", "notices", "reports",
+    )  # fmt: skip
     assert isinstance(pacer, common.Pacer)
     assert pacer.lanes[ORDERS].yields_to == ()
     assert pacer.lanes[MARKET].yields_to == (ORDERS,)
+    assert pacer.lanes[SIGNALS].yields_to == (ORDERS,)
+    assert [other for other, _ in pacer.lanes[SIGNALS].yields_after] == [MARKET]
     assert pacer.lanes[NOTICES].yields_to == (ORDERS,)
     assert pacer.lanes[REPORTS].yields_to == (ORDERS, MARKET)
 
@@ -41,6 +48,7 @@ def test_the_lanes_and_their_order_of_service():
 def test_the_caps_a_minute():
     assert (outbox.PER_MINUTE, outbox.MARKET_PER_MINUTE) == (20, 12)
     assert (outbox.NOTICES_PER_MINUTE, outbox.REPORTS_PER_MINUTE) == (1, 4)
+    assert (outbox.SIGNALS_PER_MINUTE, outbox.SIGNALS_YIELD_MARKET_S) == (4, 20.0)
     assert notices.NOTICES_PER_MINUTE == 1  # the notice lane's cap stays in notices.py
 
 
@@ -80,21 +88,23 @@ def test_the_order_lane_keeps_at_least_eight_a_minute_whatever_the_others_do(fas
     assert pacer.allowed_at(ORDERS) > time.monotonic() + 900  # the 20 are used
 
 
-def test_the_gap_holds_across_all_four_lanes(monkeypatch):
+def test_the_gap_holds_across_all_five_lanes(monkeypatch):
     monkeypatch.setattr(outbox, "MIN_GAP_S", 1.1)
-    for lane in (ORDERS, MARKET, NOTICES, REPORTS):
+    lanes = (ORDERS, MARKET, SIGNALS, NOTICES, REPORTS)
+    for lane in lanes:
         pacer = Pacer()
         pacer.took(lane)
-        for other in (ORDERS, MARKET, NOTICES, REPORTS):
+        for other in lanes:
             gap = pacer.allowed_at(other) - time.monotonic()
             assert 0.0 < gap <= 1.1 or (other == lane and lane in (NOTICES, REPORTS))
 
 
-def test_a_waiting_order_alert_holds_back_the_market_notices_and_reports():
+def test_a_waiting_order_alert_holds_back_every_other_lane():
     pacer = Pacer()
     assert not any(pacer.blocked(lane) for lane in pacer.lanes)
     pacer.orders_waiting = lambda: True
-    assert [lane for lane in pacer.lanes if pacer.blocked(lane)] == [MARKET, NOTICES, REPORTS]
+    blocked = [lane for lane in pacer.lanes if pacer.blocked(lane)]
+    assert blocked == [MARKET, SIGNALS, NOTICES, REPORTS]
     assert pacer.orders_waiting() is True
     pacer.orders_waiting = lambda: False
     assert not any(pacer.blocked(lane) for lane in pacer.lanes)
@@ -240,3 +250,107 @@ def test_the_service_builds_the_notice_desk_on_the_outbox_pacer(
             await asyncio.wait_for(task, 10)
 
     asyncio.run(scenario())
+
+
+# ---- the signals lane (AL1, P8 5.2 and 10.8) ----------------------------------------------------
+
+
+class Clock:
+    """The Pacer's own clock, moved by hand."""
+
+    def __init__(self) -> None:
+        self.now = 1000.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+def owner_pacer(clock: Clock) -> Pacer:
+    pacer = Pacer()
+    pacer.clock = clock
+    return pacer
+
+
+def test_the_signals_lane_takes_at_most_four_starts_a_minute(monkeypatch):
+    monkeypatch.setattr(outbox, "MIN_GAP_S", 0.0)
+    clock = Clock()
+    pacer = owner_pacer(clock)
+    for _ in range(4):
+        assert pacer.allowed_at(SIGNALS) <= clock.now
+        pacer.took(SIGNALS)
+    assert pacer.allowed_at(SIGNALS) == clock.now + 60.0  # the fifth waits for the minute
+    assert pacer.allowed_at(ORDERS) <= clock.now  # the cap is the lane's own
+    assert pacer.allowed_at(MARKET) <= clock.now
+    clock.now += 60.0
+    assert pacer.allowed_at(SIGNALS) <= clock.now
+
+
+def test_an_order_never_waits_more_than_one_gap_behind_a_signal(monkeypatch):
+    """A signal that has just started holds an order for one gap at most; a signal waiting holds
+    it for nothing, since the lane takes no slot while order alerts wait (mutant: yields_to=())."""
+    monkeypatch.setattr(outbox, "MIN_GAP_S", 1.1)
+    clock = Clock()
+    pacer = owner_pacer(clock)
+    for _ in range(3):  # a burst of signals, each one gap apart
+        assert pacer.allowed_at(SIGNALS) <= clock.now
+        pacer.took(SIGNALS)
+        assert pacer.allowed_at(ORDERS) - clock.now == pytest.approx(1.1)
+        clock.now += 1.1
+    pacer.orders_waiting = lambda: True
+    assert pacer.blocked(SIGNALS)  # an order alert waiting: no slot for a signal
+    assert not pacer.blocked(ORDERS) and pacer.allowed_at(ORDERS) <= clock.now
+
+
+def test_the_signals_lane_gives_way_to_a_market_message_that_has_waited_20_seconds():
+    clock = Clock()
+    pacer = owner_pacer(clock)
+    since: dict[str, float | None] = {"at": None}
+    pacer.set_waiting(MARKET, lambda: since["at"] is not None, since=lambda: since["at"])
+    assert not pacer.blocked(SIGNALS)
+    since["at"] = clock.now  # a market message starts to wait (the market lane's own cap, say)
+    clock.now += 19.9
+    assert not pacer.blocked(SIGNALS)  # a fresh market message: the two lanes race for the slot
+    clock.now += 0.2
+    assert pacer.blocked(SIGNALS)  # 20.1 s: the signal waits until the market lane has sent
+    assert not pacer.blocked(MARKET)  # and never the other way round
+    since["at"] = None  # the market message took its slot
+    assert not pacer.blocked(SIGNALS)
+
+
+def test_the_market_lane_tells_the_pacer_since_when_its_messages_wait():
+    """Without ``since`` the Pacer counts a market wait as 0 s and the 20 s rule never holds."""
+    from sudarshan.alerts.market.lane import Line, MarketLane
+
+    async def send(text):
+        return outbox.SENT, ""
+
+    pacer = Pacer()
+    lane = MarketLane(send, lambda: ist(2026, 11, 16, 10, 0), pacer, lambda *a: None)
+    assert pacer.waited(MARKET) == 0.0
+    lane.add([Line(1, "Alert: line 1", ist(2026, 11, 16, 10, 0))])
+    lane._since -= outbox.SIGNALS_YIELD_MARKET_S + 1.0  # as if it had waited 21 s for a slot
+    assert pacer.waited(MARKET) > outbox.SIGNALS_YIELD_MARKET_S
+    assert pacer.blocked(SIGNALS) and pacer.blocked(REPORTS)  # reports wait for any
+
+
+def test_a_waiting_signal_holds_back_no_other_lane():
+    pacer = Pacer()
+    pacer.set_waiting(SIGNALS, lambda: True, since=lambda: pacer.clock() - 3600.0)
+    assert [lane for lane in pacer.lanes if pacer.blocked(lane)] == []
+
+
+def test_signals_share_the_twelve_slots_the_order_lane_leaves(monkeypatch):
+    """Four signals and eight market messages use the twelve the lanes share: the notices and the
+    reports wait, and the order lane still has its eight."""
+    monkeypatch.setattr(outbox, "MIN_GAP_S", 0.0)
+    clock = Clock()
+    pacer = owner_pacer(clock)
+    for lane, count in ((SIGNALS, 4), (MARKET, 8)):
+        for _ in range(count):
+            pacer.took(lane)
+    for lane in (MARKET, SIGNALS, NOTICES, REPORTS):
+        assert pacer.allowed_at(lane) > clock.now
+    for _ in range(8):
+        assert pacer.allowed_at(ORDERS) <= clock.now
+        pacer.took(ORDERS)
+    assert pacer.allowed_at(ORDERS) > clock.now
