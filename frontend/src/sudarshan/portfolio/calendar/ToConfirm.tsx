@@ -91,6 +91,11 @@ function Holding({
     <li className="flex flex-col gap-2 border-t border-[color:var(--divider)] pt-2.5">
       <h4 className="text-sm font-bold">{where}</h4>
       <p className="text-[0.9375rem]">{way?.words ?? expected.words}</p>
+      {expected.held_from === 'trades' && (
+        <p className="text-xs text-[color:var(--text-tertiary)]">
+          Quantity from Upstox’s trade history: no holdings record reaches this date.
+        </p>
+      )}
       {way?.fraction && (
         <p className="text-sm text-[color:var(--warning-text)]">
           Part of a share is left over. Enter what the company paid for it in the tab.
