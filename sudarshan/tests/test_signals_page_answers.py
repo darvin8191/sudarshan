@@ -152,21 +152,61 @@ def seed_scores(folder: Path) -> None:
         for n, day in enumerate(days[:96]):
             docs = []
             if 1 <= n <= 12:
-                docs.append((day_at(day, 8, 50), [reading(
-                    "gap_bias", "NIFTY", "GAP", "Gap call", "bull" if n % 2 else "bear",
-                    as_of=day_at(day, 8, 49), valid_until=day_at(day, 9, 15), horizon="open")]))
+                docs.append(
+                    (
+                        day_at(day, 8, 50),
+                        [
+                            reading(
+                                "gap_bias",
+                                "NIFTY",
+                                "GAP",
+                                "Gap call",
+                                "bull" if n % 2 else "bear",
+                                as_of=day_at(day, 8, 49),
+                                valid_until=day_at(day, 9, 15),
+                                horizon="open",
+                            )
+                        ],
+                    )
+                )
                 open_px = round(closes[n - 1] * (1 + 0.003 * math.cos(n)), 2)
-                levels.append({"day": perf.day_key(day), "instrument": "NIFTY",
-                               "open_px": open_px, "prev_close_px": closes[n - 1],
-                               "at_ms": day_at(day, 9, 16)})
+                levels.append(
+                    {
+                        "day": perf.day_key(day),
+                        "instrument": "NIFTY",
+                        "open_px": open_px,
+                        "prev_close_px": closes[n - 1],
+                        "at_ms": day_at(day, 9, 16),
+                    }
+                )
             bias = ("bull", "bear", "neutral")[n % 3]
-            docs.append((day_at(day, 15, 20), [reading(
-                "regime", "NIFTY", bias.upper(), f"Invented {bias}", bias,
-                as_of=day_at(day, 15, 19))]))
+            docs.append(
+                (
+                    day_at(day, 15, 20),
+                    [
+                        reading(
+                            "regime",
+                            "NIFTY",
+                            bias.upper(),
+                            f"Invented {bias}",
+                            bias,
+                            as_of=day_at(day, 15, 19),
+                        )
+                    ],
+                )
+            )
             for at, signals in docs:
                 seq += 1
-                raw = json.dumps({"v": 1, "run": "invented-score", "seq": seq, "at": at,
-                                  "next_by": at + 3_600_000, "signals": signals}).encode()
+                raw = json.dumps(
+                    {
+                        "v": 1,
+                        "run": "invented-score",
+                        "seq": seq,
+                        "at": at,
+                        "next_by": at + 3_600_000,
+                        "signals": signals,
+                    }
+                ).encode()
                 snap = contract.read_document(raw, now_ms=at, written_ms=at)
                 assert isinstance(snap, contract.Snapshot), snap
                 out = diff.apply(current, snap, at)
