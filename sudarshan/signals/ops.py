@@ -170,6 +170,23 @@ async def settings_set(service: Any, args: dict[str, Any]) -> dict[str, Any]:
     return new
 
 
+@op("performance")
+async def performance(service: Any, args: dict[str, Any]) -> dict[str, Any]:
+    """T8: the score of every module, or of one, from the timeline and the daily levels."""
+    from sudarshan.signals import perf
+
+    module = args.get("module")
+    if module is not None and (not isinstance(module, str) or not _MODULE.fullmatch(module)):
+        raise _bad("module", "bad_module")
+
+    def work() -> dict[str, Any]:
+        store = service.store
+        return perf.score(store.scored(module), store.levels(), service.calendar.is_trading_day,
+                          module)  # fmt: skip
+
+    return await _call(service, work)
+
+
 @op("state_at")
 async def state_at(service: Any, args: dict[str, Any]) -> dict[str, Any]:
     ts = _int(args, "ts", low=10**12, high=10**13 - 1)

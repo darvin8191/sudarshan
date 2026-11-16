@@ -524,3 +524,7 @@ def main() -> int:
         log.exception("sudarshan-signals stopped unexpectedly")
         return 1
     return 0
+
+
+# One line per module that adds a job (``@job``) or a hand-on hook (``@hand_on``):
+from sudarshan.signals import perf as _perf  # noqa: E402,F401  (T8: the daily index marks)

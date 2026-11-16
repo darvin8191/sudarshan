@@ -59,7 +59,7 @@ def test_a_new_file_is_private_migrated_and_seeded(tmp_path):
     path = tmp_path / "state" / "signals.db"
     made = SignalsStore(path)
     try:
-        assert made.applied == [1]
+        assert made.applied == [1, 2]
         assert stat.S_IMODE(path.stat().st_mode) == 0o640
         assert stat.S_IMODE(path.parent.stat().st_mode) == 0o750
         assert made.settings() == {"lang": "hi", "relay": True, "night": True, "version": 1}
@@ -77,14 +77,15 @@ def test_a_file_from_a_newer_release_is_refused_in_words(tmp_path):
         conn.execute(f"PRAGMA user_version = {migrations.LATEST + 1}")
     with pytest.raises(migrations.SchemaTooNew) as caught:
         SignalsStore(path)
-    assert str(caught.value) == c.WORDS["store_newer"] and caught.value.found == 2
+    assert str(caught.value) == c.WORDS["store_newer"]
+    assert caught.value.found == migrations.LATEST + 1
 
 
 def test_migrate_status_changes_nothing(tmp_path, capsys):
     path = tmp_path / "signals.db"
     assert migrate.main(["--status", "--path", str(path)]) == 0
     assert not path.exists()
-    assert "version: file none, code 1" in capsys.readouterr().out
+    assert f"version: file none, code {migrations.LATEST}" in capsys.readouterr().out
     SignalsStore(path).close()
     assert migrate.main(["--status", "--path", str(path)]) == 0
     assert "pending: none" in capsys.readouterr().out
@@ -106,7 +107,7 @@ def test_migrate_refuses_while_the_service_holds_its_port(tmp_path, capsys):
     port = free.getsockname()[1]
     free.close()
     assert migrate.main(["--path", str(tmp_path / "y.db"), "--port", str(port)]) == 0
-    assert "applied: [1]" in capsys.readouterr().out
+    assert "applied: [1, 2]" in capsys.readouterr().out
 
 
 def test_an_accepted_document_is_one_transaction(store):

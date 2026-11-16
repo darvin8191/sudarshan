@@ -606,6 +606,86 @@ class SignalsStore:
 
         return self._write(write) if ids else 0
 
+    # ---- the score (T8) ----------------------------------------------------------------------
+    def levels_put(self, found: Iterable[Mapping[str, Any]]) -> None:
+        """Today's open (with the previous close) or close of each index; a figure already there
+        is kept when the new reading has none."""
+
+        def write(conn: Connection) -> None:
+            for row in found:
+                conn.exec_driver_sql(
+                    "INSERT INTO level (day, instrument, open_px, prev_close_px, close_px, open_ms, "
+                    "close_ms) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (day, instrument) DO UPDATE "
+                    "SET open_px = COALESCE(excluded.open_px, open_px), prev_close_px = "
+                    "COALESCE(excluded.prev_close_px, prev_close_px), close_px = "
+                    "COALESCE(excluded.close_px, close_px), open_ms = COALESCE(excluded.open_ms, "
+                    "open_ms), close_ms = COALESCE(excluded.close_ms, close_ms)",
+                    (row["day"], row["instrument"], row.get("open_px"), row.get("prev_close_px"),
+                     row.get("close_px"), row["at_ms"] if row.get("open_px") else None,
+                     row["at_ms"] if row.get("close_px") else None),
+                )  # fmt: skip
+
+        self._write(write)
+
+    def levels(self) -> dict[tuple[int, str], dict[str, Any]]:
+        def read(conn: Connection) -> dict[tuple[int, str], dict[str, Any]]:
+            return {
+                (row["day"], row["instrument"]): dict(row)
+                for row in conn.exec_driver_sql("SELECT * FROM level").mappings()
+            }
+
+        return self._read(read)
+
+    def scored(self, module: str | None = None) -> list[dict[str, Any]]:
+        """The timeline's changes the score counts: id, when, module, instrument, kind, bias."""
+        sql = "SELECT id, at, module, instrument, kind, bias FROM change WHERE kind != 'lapsed'"
+        args: tuple = ()
+        if module is not None:
+            sql, args = sql + " AND module = ?", (module,)
+
+        def read(conn: Connection) -> list[dict[str, Any]]:
+            return [
+                {**dict(row), "at_ms": row["at"]}
+                for row in conn.exec_driver_sql(sql + " ORDER BY id", args).mappings()
+            ]
+
+        return self._read(read)
+
+    def fill_marks(self, is_trading_day: Callable[[Any], bool]) -> int:
+        """Each scored change's index closes (session 0 its own day; 1, 3, 5 after) as the levels
+        have them, and its ``mark_px`` (its day's close). How many marks were written."""
+        from sudarshan.signals import perf
+
+        changes, levels = self.scored(), self.levels()
+
+        def write(conn: Connection) -> int:
+            made = 0
+            for ch in changes:
+                if ch["kind"] not in perf.SCORED_KINDS:
+                    continue
+                start = perf.day0(ch["at_ms"], is_trading_day)
+                days = {0: start} | {
+                    k: perf.after(start, k, is_trading_day) for k in c.PERF["sessions"]
+                }
+                for session, day in days.items():
+                    level = levels.get((perf.day_key(day), ch["instrument"])) if day else None
+                    if not level or level.get("close_px") is None:
+                        continue
+                    made += conn.exec_driver_sql(
+                        "INSERT OR IGNORE INTO mark (change_id, session_n, day, close_px, open_px) "
+                        "VALUES (?, ?, ?, ?, ?)",
+                        (ch["id"], session, perf.day_key(day), level["close_px"],
+                         level.get("open_px")),
+                    ).rowcount  # fmt: skip
+                    if session == 0:
+                        conn.exec_driver_sql(
+                            "UPDATE change SET mark_px = ? WHERE id = ? AND mark_px IS NULL",
+                            (level["close_px"], ch["id"]),
+                        )
+            return made
+
+        return self._write(write)
+
     # ---- keeping it small --------------------------------------------------------------------
     def prune(self, now_ms: int) -> dict[str, int]:
         """Documents older than 30 days and counters older than 40 days; the timeline, alerts and

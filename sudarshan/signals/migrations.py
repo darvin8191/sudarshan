@@ -19,6 +19,7 @@ day as YYYYMMDD (IST), prices as REAL index points, JSON as text.
     mark     index closes after a change, for the performance (T8), kept for ever.
     counter  per IST day and kind: refused, gaps, strangers, repeat, older, newer_format,
              overflow. 40 days.
+    level    (step 2) each trading day's index open, previous close and close, for T8.
     meta     the last accepted document, the settings, the notices' memory.
 """
 
@@ -130,8 +131,30 @@ def _v1(conn: Connection) -> None:
         conn.exec_driver_sql(sql)
 
 
+#: Step 2 (T8): the index's level each trading day, as the feed's snapshot gave it: the open (read
+#: just after 09:15), the previous close Upstox names with it, and the close (read after the
+#: close). The performance is worked out from these and the timeline; kept for ever.
+V2 = (
+    """CREATE TABLE IF NOT EXISTS level (
+        day INTEGER NOT NULL,
+        instrument TEXT NOT NULL,
+        open_px REAL,
+        prev_close_px REAL,
+        close_px REAL,
+        open_ms INTEGER,
+        close_ms INTEGER,
+        PRIMARY KEY (day, instrument)
+    )""",
+)
+
+
+def _v2(conn: Connection) -> None:
+    for sql in V2:
+        conn.exec_driver_sql(sql)
+
+
 Step = tuple[int, Callable[[Connection], None]]
-STEPS: tuple[Step, ...] = ((1, _v1),)
+STEPS: tuple[Step, ...] = ((1, _v1), (2, _v2))
 LATEST = STEPS[-1][0]
 
 

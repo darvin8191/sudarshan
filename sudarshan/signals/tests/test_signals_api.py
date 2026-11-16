@@ -189,12 +189,24 @@ def test_state_at_for_the_journal(served):
     assert call(loop, ask(port, "state_at", "journal", ts="x")).json()["field"] == "ts"
 
 
-def test_performance_is_not_ready_until_its_op_exists(served):
-    svc, _box, port, loop = served
-    if "performance" in __import__("sudarshan.signals.ops", fromlist=["REGISTRY"]).REGISTRY:
-        pytest.skip("the performance op is built")
-    got = call(loop, ask(port, "performance"))
-    assert got.status_code == 501 and got.json()["message"] == c.WORDS["not_ready"]
+def test_performance_through_the_api(served):
+    svc, box, port, loop = served
+    empty = call(loop, ask(port, "performance")).json()["data"]
+    assert empty == {"module": None, "as_of_day": None, "rows": [], "words": c.WORDS["no_scores"]}
+    box.drop(document(), written_ms=AT)
+    call(loop, until(lambda: svc.last is not None))
+    levels = [
+        {"day": 20261116, "instrument": "NIFTY", "close_px": 26000.0, "at_ms": AT},
+        {"day": 20261117, "instrument": "NIFTY", "close_px": 25900.0, "at_ms": AT},
+    ]
+    call(loop, svc.store.call(svc.store.levels_put, levels))
+    got = call(loop, ask(port, "performance", module="regime")).json()["data"]
+    assert got["module"] == "regime" and got["as_of_day"] == 20261117
+    (row,) = got["rows"]
+    assert (row["bias"], row["sessions"], row["cases"], row["hits"]) == ("bear", 1, 1, 1)
+    assert row["words"] == c.WORDS["too_few"] and row["hit_pct"] is None
+    bad = call(loop, ask(port, "performance", module="Bad Name"))
+    assert bad.status_code == 400 and bad.json()["field"] == "module"
 
 
 def test_every_op_answers_off_while_switched_off(tmp_path):

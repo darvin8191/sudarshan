@@ -240,6 +240,7 @@ WORDS = {
     "back_notice": "TRINETRA is publishing again since {time}.",
     # performance (M13.8)
     "too_few": "too few cases to judge",
+    "no_direction": "a neutral reading names no direction to score",
     "no_scores": "No scores yet: a change is scored once 5 trading sessions have passed after it.",
     # answers to the owner's requests
     "version_conflict": "TRINETRA's settings were changed on another screen. Nothing was saved; "
