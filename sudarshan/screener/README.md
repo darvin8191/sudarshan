@@ -70,6 +70,8 @@ then forwards one sealed request to the service and passes its answer back. The 
 | `/screens/<id>/runs` | GET | `runs` | `?before=&limit=` |
 | `/runs/since` | GET | `runs_since` | `?after=&limit=` |
 | `/runs/<id>` | GET | `run` | - |
+| `/runs/<id>/csv` | GET | `run_csv` | - |
+| `/alerts/seen` | POST | `alerts_seen` | `{screen_id?, through?}` |
 | `/membership` | GET | `membership` | `?list=&screen=` (one at least) |
 | `/membership/<id>` | PATCH | `membership_update` | `{version, action: "pin", "unpin", "dismiss", "restore"}` |
 | `/presets`, `/universes`, `/today` | GET | `presets`, `universes`, `today` | - |
@@ -94,7 +96,7 @@ What the data carries (the shapes of `types.ts`):
   `next_at`), `screens` (each a `ScreenRow`: `id`, `version`, `name`, `status`, `status_reason`,
   `where` (the conditions in words), `spec`, `matches`, `entered_today`, `added_count`,
   `target_name`, `list_id`, `next_check`, `last_run_id`, `alerts`, `alerts_paused`,
-  `updated_at`), `limits` (`active`, `active_used`, `max_keys`), `last_run_id` (the newest run
+  `unseen_alerts` (its runs that raised an alert he has not looked at), `updated_at`), `limits` (`active`, `active_used`, `max_keys`), `last_run_id` (the newest run
   the service holds, for the catch-up), `server_time`.
 - `create` and `update`: one `ScreenRow`; `delete`: `deleted` (the id) and `removed_from_list`
   (with `remove_added`: the screener's items in the list that no other screen wants, which the
@@ -103,13 +105,24 @@ What the data carries (the shapes of `types.ts`):
   10:15"), `matches`, `entered`, `exited`, `missing`, `not_checked`, `status`, `marks` (words),
   `alerts`), `rows` (each a `ResultRow`: `member_id`, `key`, `symbol`, `exchange`, `rank`,
   `values` ("Close 120.00 · RSI 61.2"), `forming`, `chip` (icon, text, tone, name, note),
-  `ltp`, `change_pct`), `not_checked` (`count`, `reasons`). Rows are the run's matches best
+  `ltp`, `change_pct`), `not_checked` (`count`, `reasons`, and `groups`: each a `reason` in
+  words, its `count` and its first five `symbols`, the largest group first). Rows are the run's matches best
   ranked first as the screen ranks them; matches the list could not take are counted in the
   run's marks ("2 more matched, waiting for the next check (at most 1 added a check)").
 - `runs`: `runs` (`RunRow`s, newest first) and `more`; `run`: `screen_id`, `run`, `rows` (that
   run's whole match set: from its values while they are kept, else replayed from the day's first
   run and its changes), `not_checked`, `values_note` ("Values are kept for 7 days; the list for
   100 days." once the values are gone, else null); `runs_since`: `runs` (oldest first) and `more`.
+- `run_csv`: `filename` and `text`, the shape every SUDARSHAN export answers and the page hands
+  to the phone: that run's match set as the screen ranks it, with the prices of the run, then
+  what was not checked, grouped. The name is ASCII whatever the screen is called
+  (`SUDARSHAN_Screener_<screen>_<YYYY-MM-DD>_<HHMM>.csv`, the candle's close in IST; a name with
+  no Latin letter or digit becomes `screen<id>`); a text cell a spreadsheet would run as a
+  formula is written as text; lines end CRLF after a byte-order mark.
+- `alerts_seen`: `seen` (how many were marked) and `unseen_alerts` (how many are left). It marks
+  a screen's alerts looked at, or every screen's without `screen_id`, up to run `through` (the
+  newest the page showed, so an alert that came after stays new). The page sends it when a
+  screen is opened and when a run raises an alert while its page is on screen.
 - `preview`: `label` ("Preview on the 10:15 to 10:30 candle, not saved"), `count`, `first` (at
   most 25 `ResultRow`s), `not_checked`, `needs`.
 - `membership`: `rows` (each a `MemberRow`: the membership fields with `chip`);
@@ -121,15 +134,16 @@ What the data carries (the shapes of `types.ts`):
   `underlying` or `list_id`; the owner's own watchlists are not listed, the page has them);
   `today`: `screens` (`id`, `name`, `entered`, `exited`, `matches`),
   `recent` (`symbol`, `exchange`, `kind`, `at`, `screen`: the day's real entries and exits, from
-  the membership), `unseen_alerts`, `session`.
+  the membership), `unseen_alerts` (runs that raised an alert and were not opened since, of the
+  screens still there; a digest dropped for good is not one), `session`.
 
 Units everywhere (cross-design X3): prices in paise as integers, percentages as decimal strings,
 instants in epoch milliseconds, a trading day as `YYYYMMDD`.
 
 Live updates reach an open app over Socket.IO: the app emits `sudarshan_screener_join` (the owner
 only) and then receives `sudarshan_screener_run` (`{screen_id, run_id, run_key, at, candle, counts: {matches,
-entered, exited, missing, not_checked}, entered, exited, more_entered, more_exited, marks}`: at most 40 names a
-side, the counts carry the rest), `sudarshan_screener_lists` (`{list_id}`: a target list changed) and
+entered, exited, missing, not_checked}, entered, exited, more_entered, more_exited, marks, alert}`: at most 40 names a
+side, the counts carry the rest; `alert` says the run raised one), `sudarshan_screener_lists` (`{list_id}`: a target list changed) and
 `sudarshan_screener_state` (`{engine, screens: [], removed: []}`, sent whenever the engine line's state or
 words change, so an open page never keeps "Real-time" after the feed stops). The service's two internal routes
 (`/sudarshan/screener/internal/watchlist?op=watchlist_read|watchlist_apply` and
@@ -253,14 +267,24 @@ session's, on the phone.
 
 ## Storage
 
-`screener.db` (schema 4, `migrations.py`; step 2 adds each bar's running volume `cum` and last
-trade time `last_trade`, step 3 a pause's `key`, step 4 the dashboard and its widgets): screens and their state, runs with their changes and values (kept 100
-and 7 days), membership per screen, list and instrument (`first_seen`, `last_seen`, `exited_at`,
+`screener.db` (schema 5, `migrations.py`; step 2 adds each bar's running volume `cum` and last
+trade time `last_trade`, step 3 a pause's `key`, step 4 the dashboard and its widgets, step 5 a
+run's `alerted` and `alert_seen_at`: whether it raised an alert and when the owner looked at it;
+runs recorded before are filled in from their own alert line and taken as looked at): screens and their state, runs with their changes and values (kept 100
+and 7 days; an instrument a run could not judge has no row of its own: the run keeps them
+grouped by reason in one value row, `*not_checked`, and a not-checked instrument is never an
+"out" or a miss), membership per screen, list and instrument (`first_seen`, `last_seen`, `exited_at`,
 `pinned`, never pruned, kept when a screen is deleted), the list as last seen (each add recorded
 before it is sent), the alert marks per session and the pauses (kept 7 days), the outbox (list
 syncs, digests, pushes), universes, today's bars, history coverage, the daily OI and IV stores, and
 the seen mark (every 10 s). One writer thread, `BEGIN IMMEDIATE` on every write, versions on every
 owner edit and run.
+
+The service runs the steps on the file when it starts. `upgrade/migrate_sudarshan_screener.py`
+runs the same steps from `upgrade/migrate_all.py` (listed, not required) and reports them with
+`--status`; it changes nothing, and says why, when there is no file yet (the screener never
+switched on), when the file is not the upgrading user's to write, when the file is from a newer
+release, and while the service is running (it has migrated the file already).
 
 `bar_today` holds one trading day: a start or midnight clears every earlier day and restores only
 today's bars, each with its running volume, so a restart's first bar carries its own volume. A
@@ -295,10 +319,28 @@ the pre-open volume is in no bar.
   OpenAlgo says the download is running or its symbol table is empty: that is tried again every
   5 minutes. A screen whose universe is empty or not built yet is "Not checked: the instruments
   of this screen are not loaded yet": no member counts as a miss, nothing is taken out of a list.
-- A watchlist universe is the owner's list, read through the bridge; an option window waits for
-  its index's first price, follows that index, and is built at the next tick after it.
-- Keys past `SUDARSHAN_SCREENER_MAX_KEYS` are not claimed and read "Not checked: past the 320
-  instruments the screener can follow tick by tick".
+- A watchlist universe is the owner's list, read through the bridge when the universes are built
+  and again before each run of a screen that looks at it (once a close for the screens that
+  share a list). An instrument added is followed from then, so its first candle reads "Not
+  checked" as for any instrument first followed after the open; one taken out is let go. A list
+  that cannot be read stays as it was last read; one that could not be read at the build is
+  loaded at the next run.
+- An option window waits for its index's first price, follows that index, and is built at the
+  next tick after it, `SUDARSHAN_SCREENER_OPTION_STRIKES` each side of the money. One placed
+  before 09:16 (on the last close or a pre-open price) is placed again at 09:16, on a price of
+  the session; and any window is placed again when the index comes within three strikes of its
+  outermost strike, unless the chain ends there. The strikes left behind are let go and the new
+  ones are followed from then (their first candle reads "Not checked"). A window that cannot be
+  read again (the master being downloaded) stays where it was and is tried again after a minute.
+- A screen that would take the screener past `SUDARSHAN_SCREENER_MAX_KEYS` is refused when it is
+  saved Active, resumed, or edited to another universe: "With this screen the screener would
+  follow 350 instruments tick by tick, 30 over its limit of 320. Pause another screen, or choose
+  a smaller list for this one." A screen that adds no instrument is never refused, a Paused one
+  is judged when it is resumed, a ready-made screen added from the dashboard is added Paused
+  with the reason, and nothing is refused when the count cannot be worked out (the master being
+  downloaded, a list that cannot be read). Keys past the limit all the same (a list that grew,
+  a limit lowered) are not claimed and read "Not checked: past the 320 instruments the screener
+  can follow tick by tick".
 - A screen made, resumed or edited during the session has one check, on the latest candle closed
   by then (on time), and then follows its schedule: the day's earlier checks are never run at once,
   so no list change or alert comes for a candle that closed before the latest one. An edit within
@@ -318,7 +360,5 @@ the pre-open volume is in no bar.
   wait for the feed's REST governor (SV3, SV4). Until then a plan that needs more candles than one
   session holds reads "Not checked: needs 151 candles of 15 minutes; a day gives 25, ...", the
   eight presets that need them are not usable, and "Warming up · history loading" never shows.
-- Re-anchoring an option window at 09:16 and near its edge; reading a watchlist universe again at
-  each run; refusing a screen at save when it would pass the key limit.
-- Compacting the not-checked rows: every not-checked instrument is still written to `run_change`
-  and `run_value` at every run.
+- Forward-return figures for a run's matches (how each did after it matched): they need a short
+  design first (same-day returns before the governor, multi-day ones after it).

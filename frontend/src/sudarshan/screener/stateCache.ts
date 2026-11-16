@@ -50,6 +50,7 @@ export function applyRun(state: ScreenerState, push: RunPush): ScreenerState | n
     matches: push.counts.matches,
     entered_today: row.entered_today + push.counts.entered,
     last_run_id: push.run_id,
+    unseen_alerts: (row.unseen_alerts ?? 0) + (push.alert ? 1 : 0),
   }
   return {
     ...putRow(state, next),

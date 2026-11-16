@@ -96,6 +96,34 @@ describe('Screener today', () => {
     expect(screen.getByText('2 new alerts')).toBeInTheDocument()
   })
 
+  it('says which screen the new alerts are on, with a sign and words (GA7.6)', async () => {
+    api.state.mockResolvedValue(
+      screenerState([
+        screenRow({ id: 1, unseen_alerts: 2 }),
+        screenRow({ id: 2, name: 'Volume spike' }),
+      ])
+    )
+    show()
+    const first = (await screen.findByText('15-min EMA cross')).closest('a') as HTMLElement
+    const mark = first.querySelector('[data-unseen]') as HTMLElement
+    expect(mark.dataset.unseen).toBe('2')
+    expect(mark).toHaveTextContent('2 new alerts')
+    expect(mark.querySelector('svg')).not.toBeNull()
+    const second = screen.getByText('Volume spike').closest('a') as HTMLElement
+    expect(second.querySelector('[data-unseen]')).toBeNull()
+    // the count over the card is the service's own, with its sign
+    const total = screen.getByText('2 new alerts', { selector: '[data-unseen-alerts]' })
+    expect(total.querySelector('svg')).not.toBeNull()
+  })
+
+  it('shows no alert mark when every alert was looked at', async () => {
+    api.today.mockResolvedValue({ ...TODAY, unseen_alerts: 0 })
+    show()
+    await screen.findByText('15-min EMA cross')
+    expect(document.querySelector('[data-unseen-alerts]')).toBeNull()
+    expect(document.querySelector('[data-unseen]')).toBeNull()
+  })
+
   it('colours entries in the brand and exits in amber, never as a price move', async () => {
     // design 4.3: green and red are the up and down of a price; an entry is not a price move
     const room = fakeSocket()

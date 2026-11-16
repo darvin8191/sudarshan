@@ -6,6 +6,7 @@ import { describe } from '@/sudarshan/watchlist/rows'
 import { ChipMark } from './ChipMark'
 import { RunFacts, runMoment } from './History'
 import { NotChecked, RunFigures, Values } from './Results'
+import { RunCsv } from './RunCsv'
 import { WORDS } from './types'
 import { useRunSet } from './useRuns'
 
@@ -75,6 +76,7 @@ export function RunSheet({ runId, onClose }: { runId: number | null; onClose: ()
             </ul>
           )}
           <NotChecked data={set.not_checked} />
+          <RunCsv runId={set.run.id} />
         </div>
       ) : query.isError ? (
         <div role="alert" className="flex flex-col items-start gap-3">
