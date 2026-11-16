@@ -25,6 +25,7 @@ import { ScreenerCard } from '@/sudarshan/dashboard/ScreenerCard'
 import { Shortcuts } from '@/sudarshan/dashboard/Shortcuts' // SUDARSHAN D7
 import { StatusRow } from '@/sudarshan/dashboard/StatusRow' // SUDARSHAN D2
 import { SystemList } from '@/sudarshan/dashboard/SystemList' // SUDARSHAN D7
+import { GapBiasCard, SwingCard } from '@/sudarshan/signals' // SUDARSHAN M13.5, M13.6
 
 interface MasterContractStatus {
   status: 'pending' | 'downloading' | 'success' | 'error'
@@ -238,6 +239,8 @@ export default function Dashboard() {
           <IndexStrip apiKey={apiKey} marketOpen={marketOpen} />
         </>
       )}
+      {/* SUDARSHAN M13.5: TRINETRA's gap bias, 08:45 until its first change after the open. */}
+      <GapBiasCard />
 
       <div className="grid items-start gap-2.5 md:gap-4 lg:grid-cols-2">
         <div className="flex min-w-0 flex-col gap-2.5 md:gap-4">
@@ -288,6 +291,8 @@ export default function Dashboard() {
         {/* SUDARSHAN D7: the right-hand column on a wide screen (design 3.1): the screener's
             day, the shortcuts and the System pages, in place of upstream's Quick Access. */}
         <div className="flex min-w-0 flex-col gap-2.5 md:gap-4">
+          {/* SUDARSHAN M13.6: TRINETRA's swing readings (nothing while the view is off). */}
+          <SwingCard />
           {/* SUDARSHAN M9 UI8: the screener's day, live from its run pushes. */}
           <ScreenerCard marketOpen={marketOpen} />
           <Shortcuts />
