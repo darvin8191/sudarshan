@@ -180,7 +180,7 @@ export default function Portfolio() {
       ) : money === 'risk' ? (
         <RiskView tabs={tabs} />
       ) : (
-        <GoalsView tabs={tabs} />
+        <GoalsView tabs={tabs} archivedTabs={archived} />
       )
   } else {
     body =

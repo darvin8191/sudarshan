@@ -1,17 +1,34 @@
 // SUDARSHAN P7 F8 (M7.34): the form of a goal (design p7 9.4; owner decision 13): its name and
 // second-language name, the target, the date, the tabs it counts or an amount typed instead, and
 // the owner's assumed return (10% a year unless he sets one). A kept goal is changed from the
-// version read and can be archived; the service's sentence shows when a value is refused.
+// version read and can be archived; the service's sentence shows when a value is refused. A
+// linked tab that is archived, or was deleted, is listed by what it is and can be unticked. When
+// the goal was changed on another screen the list is read again, so opening it again has the
+// new version.
 import { useEffect, useRef, useState } from 'react'
 import { BottomSheet } from '@/sudarshan/watchlist/BottomSheet'
-import { createGoal, updateGoal } from '../api'
+import { createGoal, PortfolioError, updateGoal } from '../api'
 import { Box } from '../sheets/EntryFields'
 import { dayToInput, inputToDay, parseRupees, rupeesInput, scaledText } from '../sheets/parse'
 import { LABEL, PRIMARY, ProblemLine, SECONDARY } from '../sheets/TabFields'
 import { useSend } from '../sheets/useSend'
-import type { Goal, GoalsList, TabInfo } from '../types'
+import { GOAL_TARGET_MAX_PAISE, type Goal, type GoalsList, type TabInfo } from '../types'
 
 export const DEFAULT_RATE = '10'
+/** The service's own sentence for a target above its limit (goal_ops.py), said before sending. */
+export const TARGET_BIG =
+  "A goal's target can be up to ₹1,000 crore. Check the amount for extra zeros."
+export const GONE_TAB = 'A tab that was deleted (counts as nothing)'
+/** The codes that mean the list on screen is old: read it again. */
+const STALE_CODES = ['version_conflict', 'version_conflict_item', 'not_found']
+
+/** Whether the target typed is a number above what a goal may have (too big even to hold). */
+export function targetTooBig(text: string): boolean {
+  const digits = text.replace(/[,\s]/g, '')
+  if (!/^\d+(\.\d{0,2})?$/.test(digits)) return false
+  const paise = parseRupees(text)
+  return paise === null || paise > GOAL_TARGET_MAX_PAISE
+}
 
 export interface GoalForm {
   name: string
@@ -56,6 +73,8 @@ export function GoalSheet({
   open,
   goal,
   tabs,
+  archivedTabs = [],
+  onStale,
   onClose,
   onSaved,
 }: {
@@ -63,6 +82,10 @@ export function GoalSheet({
   /** The goal to change; null for a new one. */
   goal: Goal | null
   tabs: readonly TabInfo[]
+  /** His archived tabs: one a goal counts is listed as archived, with its tick. */
+  archivedTabs?: readonly TabInfo[]
+  /** The goal was changed or removed on another screen: the list should be read again. */
+  onStale?: () => void
   onClose: () => void
   onSaved: (list: GoalsList) => void
 }) {
@@ -86,16 +109,33 @@ export function GoalSheet({
   const run = async (change: () => Promise<{ enabled: boolean; data: GoalsList | null }>) => {
     let list: GoalsList | null = null
     const done = await send.run(async () => {
-      list = (await change()).data
+      try {
+        list = (await change()).data
+      } catch (error) {
+        if (error instanceof PortfolioError && STALE_CODES.includes(error.code)) onStale?.()
+        throw error
+      }
     })
     if (done && list) onSaved(list)
   }
   const save = () =>
-    run(() =>
-      goal === null
+    run(() => {
+      if (targetTooBig(form.target)) {
+        throw new PortfolioError({ code: 'bad_request', message: TARGET_BIG, entryId: null })
+      }
+      return goal === null
         ? createGoal({ ...fieldsOf(form), request_id: requestId.current })
         : updateGoal({ ...fieldsOf(form), id: goal.id, version: goal.version })
-    )
+    })
+  // The tabs this goal counts that are not among the ones on offer: archived, or deleted.
+  const linked = goal?.tab_ids ?? []
+  const shelved = archivedTabs.filter((tab) => linked.includes(tab.id))
+  const gone = goal?.gone_tab_ids ?? []
+  const rows = [
+    ...tabs.map((tab) => ({ id: tab.id, label: tab.name })),
+    ...shelved.map((tab) => ({ id: tab.id, label: `${tab.name} (archived)` })),
+    ...gone.map((id) => ({ id, label: GONE_TAB })),
+  ]
   const archive = (archived: boolean) => {
     if (goal) void run(() => updateGoal({ id: goal.id, version: goal.version, archived }))
   }
@@ -118,22 +158,32 @@ export function GoalSheet({
         <Box label="Reach it by" type="date" value={form.day} onChange={set('day')} />
         <fieldset className="flex min-w-0 flex-col gap-1">
           <legend className={LABEL}>Tabs to count</legend>
-          {tabs.length === 0 && (
+          {rows.length === 0 && (
             <p className="text-sm text-[color:var(--text-secondary)]">
               You have no tab of your own yet. Type the amount saved so far instead.
             </p>
           )}
-          {tabs.map((tab) => (
-            <label key={tab.id} className="flex min-h-12 items-center gap-3 text-[0.9375rem]">
+          {rows.map((row) => (
+            <label key={row.id} className="flex min-h-12 items-center gap-3 text-[0.9375rem]">
               <input
                 type="checkbox"
                 className="size-5 accent-[color:var(--brand)]"
-                checked={form.tabs.includes(tab.id)}
-                onChange={() => toggle(tab.id)}
+                checked={form.tabs.includes(row.id)}
+                onChange={() => toggle(row.id)}
               />
-              {tab.name}
+              {row.label}
             </label>
           ))}
+          {gone.length > 0 && (
+            <p className="text-sm text-[color:var(--text-secondary)]">
+              Untick a deleted tab to unlink it from this goal.
+            </p>
+          )}
+          {rows.length > 0 && (
+            <p className="text-xs text-[color:var(--text-tertiary)]">
+              A tab counts at its value before its loans.
+            </p>
+          )}
         </fieldset>
         {form.tabs.length === 0 && (
           <Box
