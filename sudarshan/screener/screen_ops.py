@@ -530,6 +530,52 @@ def _within_limit(ctx, tx: Tx, screen_id: int | None) -> None:
         )
 
 
+def _same_universe(a: Mapping[str, Any], b: Mapping[str, Any]) -> bool:
+    return {k: v for k, v in a.items() if v is not None} == {
+        k: v for k, v in b.items() if v is not None
+    }
+
+
+async def over_keys(
+    ctx, universe_spec: Mapping[str, Any], screen_id: int | None
+) -> tuple[int, int] | None:
+    """(the instruments the screener would follow, its limit) when a screen on this universe,
+    Active beside the others, would pass ``SUDARSHAN_SCREENER_MAX_KEYS``; None when it would
+    not, when it adds no instrument (another Active screen already looks at the same ones), or
+    when the count cannot be worked out now (no price source in this process, the master being
+    downloaded, a list that cannot be read): a save is never refused on a guess, and a run past
+    the limit still says "Not checked: past the N instruments" (GA7.3)."""
+    source = ctx.parts.get("source")
+    count = getattr(source, "keys_with", None)
+    if not callable(count) or ctx.store is None:
+        return None
+    try:
+        others = ctx.store.read(
+            OWNER,
+            lambda tx: [
+                r["spec"]["universe"]
+                for r in tx.screens()
+                if r["status"] == "active" and r["id"] != screen_id
+            ],
+        )
+        total = await count(others, universe_spec)
+        limit = ctx.settings.max_keys
+        if total is None or total <= limit:
+            return None
+        without = await count(others)
+    except StoreError:
+        return None
+    if without is not None and without >= total:
+        return None
+    return total, limit
+
+
+async def _within_keys(ctx, universe_spec: Mapping[str, Any], screen_id: int | None) -> None:
+    over = await over_keys(ctx, universe_spec, screen_id)
+    if over is not None:
+        raise ApiError.of("refused", words.over_keys_words(*over), "universe")
+
+
 @op("create")
 async def create(ctx, args: Mapping[str, Any]) -> dict[str, Any]:
     stored, _plan = _spec(args.get("spec"))
@@ -543,6 +589,13 @@ async def create(ctx, args: Mapping[str, Any]) -> dict[str, Any]:
         raise ApiError.of("bad_request", WORDS["unreadable"])
     now = ctx.clock()
     store = _store(ctx)
+    if status == "active":
+        # a resend of a save already made is answered with the screen, never refused
+        resent = request_id is not None and _translate(
+            lambda: store.read(OWNER, lambda tx: tx.screen_by_request(request_id))
+        )
+        if not resent:
+            await _within_keys(ctx, stored["universe"], None)
 
     def make(tx: Tx):
         if request_id is not None:
@@ -570,6 +623,20 @@ async def update(ctx, args: Mapping[str, Any]) -> dict[str, Any]:
     stored = _spec(args.get("spec"))[0] if action == "edit" else None
     now = ctx.clock()
     store = _store(ctx)
+    if action in ("edit", "resume"):
+        # the key limit, for a screen that would start following instruments or follow others:
+        # an Active screen whose universe stays as it is adds nothing and is never refused
+        held = _translate(lambda: store.read(OWNER, lambda tx: tx.screen(screen_id)))
+        if held is not None and held["version"] == version:
+            wanted = (stored or held["spec"])["universe"]
+            starts = action == "resume" and held["status"] != "active"
+            moves = (
+                action == "edit"
+                and held["status"] == "active"
+                and not _same_universe(held["spec"]["universe"], wanted)
+            )
+            if starts or moves:
+                await _within_keys(ctx, wanted, screen_id)
 
     def change(tx: Tx):
         before = tx.screen(screen_id)
