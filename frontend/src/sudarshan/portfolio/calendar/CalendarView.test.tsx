@@ -20,6 +20,7 @@ vi.mock('../api', async (importOriginal) => ({
 import { createQueryClient } from '@/app/providers'
 import { PortfolioError } from '../api'
 import type {
+  CaConfirmed,
   CaDecided,
   CaEvent,
   CaExpected,
@@ -129,6 +130,7 @@ const NO_CHECK: LotCheck = {
 const LIST: CaList = {
   events: [],
   to_confirm: [],
+  confirmed: [],
   left_out_count: 0,
   reads: [],
   read_status: { state: 'ok', night: 20261113, words: null },
@@ -409,6 +411,7 @@ describe('what is left out, and the check', () => {
     words:
       'Alpha Industries: after the split of 28 Sep 2026 the lots say 2,500 and Upstox holds 500. Without it the lots would say 500: it may have been counted twice.',
     fix: { event_id: 41, version: 1, state: 'dismissed', ratio_num: null, ratio_den: null },
+    event_id: null,
   }
   const differ = (rows: LotCheckRow[]) => ({
     ca_list: {
@@ -497,9 +500,11 @@ describe('what is left out, and the check', () => {
   })
 })
 
-// v0.14.0 verification M3: a decision is changed from the event's row, from its version, with
-// To confirm's own choices; the one applied now is not offered again.
-describe('changing what was confirmed', () => {
+// v0.14.0 verification M3, N1: every bonus and split confirmed for the Upstox account is listed
+// under Confirmed, whatever its day, and changed there from its version with To confirm's own
+// choices; the one that stands is not offered again, and a Check row that asks for a look
+// again opens the same choices.
+describe('what was confirmed', () => {
   const SPLIT_WORDS = 'Split 1:5: you held 100, they become 500. Is that right?'
   const decided = (more: Partial<CaDecided> = {}): CaDecided => ({
     event_id: 7,
@@ -515,7 +520,7 @@ describe('changing what was confirmed', () => {
       ratio_den: 1,
       words: SPLIT_WORDS,
       after_qty_u: 500_000_000,
-      held_from: 'record',
+      held_from: 'trades',
       other: {
         ratio_num: 1,
         ratio_den: 5,
@@ -525,27 +530,36 @@ describe('changing what was confirmed', () => {
     },
     ...more,
   })
-  const split = (more: Partial<CaDecided> = {}) =>
-    row({
-      event_id: 8,
-      ex_day: 20261009,
-      kind: 'split',
-      amount_u: null,
-      ratio_num: 1,
-      ratio_den: 5,
-      expected_paise: null,
-      decided: decided(more),
-    })
+  /** A split of 1 Jun 2026: older than the 90 days the calendar shows. */
+  const kept = (more: Partial<CaDecided> = {}, gone: number | null = null): CaConfirmed => ({
+    event_id: 7,
+    isin: 'INE000D01013',
+    name: 'Delta Motors',
+    kind: 'split',
+    ex_day: 20260601,
+    ratio_num: 1,
+    ratio_den: 5,
+    gone_at: gone,
+    decided: decided(more),
+  })
+  const listing = (rows: CaConfirmed[], more: Partial<CaList> = {}) => ({
+    ca_list: { ...LIST, confirmed: rows, ...more },
+  })
 
-  it('says what was confirmed and opens To confirm’s choices, sending the other one from the version', async () => {
+  it('lists one older than the calendar’s 90 days and sends the other reading from its version', async () => {
     const user = userEvent.setup()
-    serve({ ca_list: LIST, calendar: { ...CALENDAR, calendar: [split()] } })
+    serve(listing([kept()]))
     show()
-    const past = within(await screen.findByRole('region', { name: 'The last 90 days' }))
-    expect(past.getByText(decided().words)).toBeInTheDocument()
-    await user.click(past.getByRole('button', { name: 'Change what I confirmed' }))
-    expect(past.getByText(SPLIT_WORDS)).toBeInTheDocument()
-    await user.click(past.getByRole('button', { name: 'Yes, apply this split' }))
+    const list = within(await screen.findByRole('region', { name: 'Confirmed' }))
+    expect(list.getByText('Delta Motors')).toBeInTheDocument()
+    expect(list.getByText('Ex-date 1 Jun 2026 · Ratio 1:5, as Upstox lists it')).toBeInTheDocument()
+    expect(list.getByText(decided().words)).toBeInTheDocument()
+    await user.click(list.getByRole('button', { name: 'Change what I confirmed' }))
+    expect(list.getByText(SPLIT_WORDS)).toBeInTheDocument()
+    expect(
+      list.getByText('Quantity from Upstox’s trade history: no holdings record reaches this date.')
+    ).toBeInTheDocument()
+    await user.click(list.getByRole('button', { name: 'Yes, apply this split' }))
     await waitFor(() => expect(calls('ca_decide')).toHaveLength(1))
     expect(calls('ca_decide')[0]).toEqual({
       id: 7,
@@ -555,47 +569,95 @@ describe('changing what was confirmed', () => {
       ratio_den: 1,
       version: 3,
     })
-    for (const button of past.getAllByRole('button')) expect(button.className).toContain('min-h-12')
+    for (const button of list.getAllByRole('button')) expect(button.className).toContain('min-h-12')
   })
 
-  it('does not offer the reading applied now, or leaving the lots as they are when that is what stands', async () => {
+  it('does not offer the reading applied now, or leaving the lots as they are when that stands', async () => {
     const user = userEvent.setup()
-    serve({ ca_list: LIST, calendar: { ...CALENDAR, calendar: [split()] } })
+    serve(listing([kept()]))
     show()
-    const past = within(await screen.findByRole('region', { name: 'The last 90 days' }))
-    await user.click(past.getByRole('button', { name: 'Change what I confirmed' }))
-    await user.click(past.getByRole('button', { name: 'The other way round' }))
-    expect(past.getByText('This is the reading applied now.')).toBeInTheDocument()
-    expect(past.queryByRole('button', { name: 'Yes, apply this split' })).toBeNull()
-    await user.click(past.getByRole('button', { name: 'Leave my lots as they are' }))
+    const list = within(await screen.findByRole('region', { name: 'Confirmed' }))
+    await user.click(list.getByRole('button', { name: 'Change what I confirmed' }))
+    await user.click(list.getByRole('button', { name: 'The other way round' }))
+    expect(list.getByText('This is the reading applied now.')).toBeInTheDocument()
+    expect(list.queryByRole('button', { name: 'Yes, apply this split' })).toBeNull()
+    await user.click(list.getByRole('button', { name: 'Leave my lots as they are' }))
     await waitFor(() => expect(calls('ca_decide')[0]).toMatchObject({ state: 'dismissed' }))
     expect(calls('ca_decide')[0].version).toBe(3)
   })
 
-  it('offers putting back a split left out of the lots, and closes again untouched', async () => {
+  it('lists one Upstox no longer lists, and offers putting back one left out of the lots', async () => {
     const user = userEvent.setup()
-    const left = split({
-      state: 'dismissed',
-      ratio_num: null,
-      ratio_den: null,
-      words: 'You left your lots as they are for this split.',
-    })
-    serve({ ca_list: LIST, calendar: { ...CALENDAR, calendar: [left] } })
+    const left = kept(
+      {
+        state: 'dismissed',
+        ratio_num: null,
+        ratio_den: null,
+        words: 'You left your lots as they are for this split.',
+      },
+      Date.UTC(2026, 9, 20)
+    )
+    serve(listing([left]))
     show()
-    const past = within(await screen.findByRole('region', { name: 'The last 90 days' }))
-    expect(past.getByText('You left your lots as they are for this split.')).toBeInTheDocument()
-    await user.click(past.getByRole('button', { name: 'Change what I confirmed' }))
-    expect(past.getByRole('button', { name: 'Yes, apply this split' })).toBeInTheDocument()
-    expect(past.queryByRole('button', { name: 'Leave my lots as they are' })).toBeNull()
-    await user.click(past.getByRole('button', { name: 'Keep it as it is' }))
-    expect(past.queryByRole('button', { name: 'Yes, apply this split' })).toBeNull()
+    const list = within(await screen.findByRole('region', { name: 'Confirmed' }))
+    expect(
+      list.getByText('Upstox no longer lists it; what you confirmed still counts.')
+    ).toBeInTheDocument()
+    await user.click(list.getByRole('button', { name: 'Change what I confirmed' }))
+    expect(list.getByRole('button', { name: 'Yes, apply this split' })).toBeInTheDocument()
+    expect(list.queryByRole('button', { name: 'Leave my lots as they are' })).toBeNull()
+    await user.click(list.getByRole('button', { name: 'Keep it as it is' }))
+    expect(list.queryByRole('button', { name: 'Yes, apply this split' })).toBeNull()
     expect(calls('ca_decide')).toHaveLength(0)
   })
 
-  it('shows nothing to change on a row nothing was confirmed for', async () => {
-    serve({ ca_list: LIST })
+  it('leads a Check row that asks for a look again to the same choices', async () => {
+    const user = userEvent.setup()
+    const neither: LotCheckRow = {
+      isin: 'INE000D01013',
+      name: 'Delta Motors',
+      held_qty_u: 750_000_000,
+      lots_qty_u: 20_000_000,
+      ex_day: 20260601,
+      words:
+        'Delta Motors: after the split of 1 Jun 2026 the lots say 20 and Upstox holds 750. Neither reading of it makes the two agree: a purchase or a sale may be missing from the records. You can see the reading you confirmed, and change it, under Confirmed in the Calendar.',
+      fix: null,
+      event_id: 7,
+    }
+    serve(
+      listing([kept()], {
+        lot_check: {
+          ...NO_CHECK,
+          day: 20261021,
+          words: 'Lots and holdings differ.',
+          rows: [neither],
+        },
+      })
+    )
     show()
-    await screen.findByText('Coming up')
-    expect(screen.queryByRole('button', { name: 'Change what I confirmed' })).toBeNull()
+    const card = within(await screen.findByRole('region', { name: 'Check' }))
+    await user.click(card.getByRole('button', { name: 'Change what I confirmed' }))
+    await user.click(card.getByRole('button', { name: 'Yes, apply this split' }))
+    await waitFor(() => expect(calls('ca_decide')).toHaveLength(1))
+    expect(calls('ca_decide')[0]).toMatchObject({ id: 7, ratio_num: 5, ratio_den: 1, version: 3 })
+  })
+
+  it('says on a calendar row what stands, and keeps the change under Confirmed', async () => {
+    const row8 = row({
+      event_id: 8,
+      ex_day: 20261009,
+      kind: 'split',
+      amount_u: null,
+      ratio_num: 1,
+      ratio_den: 5,
+      expected_paise: null,
+      decided: decided({ event_id: 8 }),
+    })
+    serve({ ca_list: LIST, calendar: { ...CALENDAR, calendar: [row8] } })
+    show()
+    const past = within(await screen.findByRole('region', { name: 'The last 90 days' }))
+    expect(past.getByText(decided().words)).toBeInTheDocument()
+    expect(past.queryByRole('button', { name: 'Change what I confirmed' })).toBeNull()
+    expect(screen.queryByRole('region', { name: 'Confirmed' })).toBeNull() // nothing listed
   })
 })

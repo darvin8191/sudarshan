@@ -656,8 +656,10 @@ def listing(tx: Tx, today: int, *, scope: str | None = None, from_day: int, to_d
             held_now: list[dict[str, Any]] | None = None, now: int | None = None,
             ) -> dict[str, Any]:  # fmt: skip
     """``ca_list``: the events between two days with the owner's decisions, the bonuses and
-    splits still waiting for his tap (whatever their day, up to today), and when each
-    instrument was last read. ``scope`` narrows the decisions and the waiting list to one.
+    splits still waiting for his tap (whatever their day, up to today), every one he confirmed
+    for the Upstox account (``confirmed``, whatever its day and whether or not Upstox still
+    lists it: v0.14.0 verification N1), and when each instrument was last read. ``scope``
+    narrows the decisions and the waiting list to one.
 
     An event is one per company and ex-date, however often Upstox rewords it (``core.groups``):
     a decision made on one wording stands for every other, so a relisted event is never asked a
@@ -684,10 +686,26 @@ def listing(tx: Tx, today: int, *, scope: str | None = None, from_day: int, to_d
         if found:
             shown = _shown(event, holdings, by_event.get(event["id"], []))
             to_confirm.append({**shown, "expected": found})
+    kept = []
+    for group in core.groups(tx.ca_events(gone=True)) if scope in (None, UPSTOX_SCOPE) else ():
+        done = confirmed(holdings, group, decided, upstox)
+        if done is None:
+            continue
+        made_on = next(e for e in group if e["id"] == done["event_id"])
+        live = [event for event in group if event["gone_at"] is None]
+        event = live[-1] if live else made_on  # dated as the tax lots date it
+        kept.append({
+            "event_id": event["id"], "isin": event["isin"], "name": holdings.name(event["isin"]),
+            "kind": event["kind"], "ex_day": event["ex_day"], "ratio_num": event["ratio_num"],
+            "ratio_den": event["ratio_den"], "gone_at": None if live else made_on["gone_at"],
+            "decided": done,
+        })  # fmt: skip
+    kept.sort(key=lambda row: (-row["ex_day"], row["event_id"]))
     events = tx.ca_events(from_day=from_day, to_day=to_day, gone=True)
     return {
         "events": [_shown(e, holdings, by_event.get(e["id"], [])) for e in events],
         "to_confirm": to_confirm,
+        "confirmed": kept,
         "left_out_count": left_out,
         "reads": tx.ca_reads(),
         "read_status": read_status(tx, today),
