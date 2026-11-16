@@ -191,7 +191,8 @@ def _actions(tx: Tx, up_to: int) -> tuple[dict, dict, dict, set[str], set[str]]:
     it (``core.groups``): per share, the one the owner applied last (its action as the tax core
     gets it, the decision and the event decided: the likelier mistake when one was applied twice),
     the last one still waiting, the last one he left out of the lots (dated as Upstox lists it
-    now), the shares with one in the ``core.EVE_REACH_DAYS`` up to the day, and the shares where
+    now, with the event the decision was made on), the shares with one in the
+    ``core.EVE_REACH_DAYS`` up to the day, and the shares where
     another event of the same kind as the last one applied is applied too (the only way one
     event can be counted twice: Upstox listed it again, too far apart to be known as the
     same)."""
@@ -199,7 +200,7 @@ def _actions(tx: Tx, up_to: int) -> tuple[dict, dict, dict, set[str], set[str]]:
     applied: dict[str, tuple[dict, dict, dict]] = {}
     kinds: dict[str, list[str]] = {}
     pending: dict[str, dict] = {}
-    left: dict[str, tuple[int, dict]] = {}
+    left: dict[str, tuple[int, dict, int]] = {}
     recent: set[str] = set()
     for group in core.groups(tx.ca_events(to_day=up_to, gone=True)):
         if any(0 <= days_between(e["ex_day"], up_to) < core.EVE_REACH_DAYS for e in group):
@@ -216,12 +217,12 @@ def _actions(tx: Tx, up_to: int) -> tuple[dict, dict, dict, set[str], set[str]]:
         elif row is not None:
             event = next(e for e in group if e["id"] == row["event_id"])
             if event["isin"] not in left or left[event["isin"]][0] < row["id"]:
-                left[event["isin"]] = (row["id"], live[-1] if live else event)
+                left[event["isin"]] = (row["id"], live[-1] if live else event, event["id"])
         elif live:
             pending[live[-1]["isin"]] = live[-1]
     twice = {isin for isin, (_, _, event) in applied.items()
              if kinds[isin].count(event["kind"]) > 1}  # fmt: skip
-    return applied, pending, {isin: e for isin, (_, e) in left.items()}, recent, twice
+    return applied, pending, {isin: (e, made) for isin, (_, e, made) in left.items()}, recent, twice
 
 
 def _fix(lots: TaxLots, isin: str, day: int, held: int, applied: tuple,
@@ -278,6 +279,7 @@ def _purchase(lots: TaxLots) -> str:
 def _row(isin: str, name: str | None, held: int, lots: int, purchase: str, applied, pending,
          left, fix: dict | None, late: bool, insights: bool) -> dict[str, Any]:  # fmt: skip
     label, have, said = name or isin, quantity(held), quantity(lots)
+    review = None  # the decision whose reading the owner is sent to look at again
     if applied is not None:
         action = applied[0]
         what = f"the {action['kind'].lower()} of {day_words(action['ex_day'])}"
@@ -296,15 +298,20 @@ def _row(isin: str, name: str | None, held: int, lots: int, purchase: str, appli
         else:
             words += (" Neither reading of it makes the two agree: a purchase or a sale may "
                       "be missing from the records.")  # fmt: skip
+            if insights:  # v0.14.0 verification N1: whatever its day, it is listed there
+                words += (" You can see the reading you confirmed, and change it, under "
+                          "Confirmed in the Calendar.")  # fmt: skip
+                review = applied[2]["id"]
     elif pending is not None:
         words = (f"{label}: Upstox holds {have} and the lots say {said}. The {pending['kind']} "
                  f"of {day_words(pending['ex_day'])} waits for you under To confirm.")  # fmt: skip
     elif lots < held:
         cause = BONUS_CALENDAR if insights else BONUS_LATER
-        if insights and left is not None:  # v0.14.0 verification M3: the way back
-            cause = (f"You left the {left['kind']} of {day_words(left['ex_day'])} out of your "
-                     "lots: if the company did give it, change what you confirmed on its row "
-                     "in the Calendar.")  # fmt: skip
+        if insights and left is not None:  # v0.14.0 verification M3 and N1: the way back
+            event, review = left
+            cause = (f"You left the {event['kind']} of {day_words(event['ex_day'])} out of your "
+                     "lots: if the company did give it, change that under Confirmed in the "
+                     "Calendar.")  # fmt: skip
         words = f"{label}: Upstox holds {have} and the lots say {said}. {cause} {purchase}"
     else:
         words = (f"{label}: Upstox holds {have} and the lots say {said}. A sale, a transfer "
@@ -317,6 +324,7 @@ def _row(isin: str, name: str | None, held: int, lots: int, purchase: str, appli
         "ex_day": applied[0]["ex_day"] if applied is not None else None,
         "words": words,
         "fix": fix,
+        "event_id": review,
     }
 
 

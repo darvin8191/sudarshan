@@ -2308,6 +2308,8 @@ export interface CaList {
   events: CaEvent[]
   /** Bonuses and splits waiting for the owner's one tap. */
   to_confirm: CaEvent[]
+  /** Every bonus and split confirmed for the Upstox account, whatever its day, newest first. */
+  confirmed: CaConfirmed[]
   /** Bonuses and splits not asked about: no record shows the share held on their day. */
   left_out_count: number
   reads: CaRead[]
@@ -2329,6 +2331,12 @@ export interface LotCheckRow {
   words: string
   /** The change to an applied bonus or split that makes the two agree; null when none does. */
   fix: LotCheckFix | null
+  /**
+   * The event a confirmation was made on that the row asks the owner to look at again under
+   * Confirmed (a reading neither way of which makes the two agree, or one left out of the
+   * lots); null otherwise, and always while the Calendar is switched off.
+   */
+  event_id: number | null
 }
 
 /** A decision changed from its version (`ca_decide` on the event it was made on). */
@@ -2439,9 +2447,27 @@ export interface CalendarArgs {
 }
 
 /**
+ * A bonus or a split confirmed for the Upstox account, whatever its day and whether or not
+ * Upstox still lists it (v0.14.0 verification N1): listed under Confirmed in the Calendar.
+ */
+export interface CaConfirmed {
+  /** The wording Upstox lists now; the one decided on when Upstox no longer lists it. */
+  event_id: number
+  isin: string
+  name: string | null
+  kind: CaKind
+  ex_day: Day
+  ratio_num: number | null
+  ratio_den: number | null
+  /** Upstox no longer lists it; what was confirmed still counts. */
+  gone_at: EpochMs | null
+  decided: CaDecided
+}
+
+/**
  * What the owner confirmed for the Upstox account on a bonus or a split (v0.14.0 verification
- * M3): "Change what I confirmed" on the event's row sends `ca_decide` from `version`, with the
- * choices To confirm offered, in the same words.
+ * M3, N1): "Change what I confirmed" sends `ca_decide` from `version`, with the choices To
+ * confirm offered, in the same words.
  */
 export interface CaDecided {
   /** The wording the decision was made on: the id `ca_decide` changes it from. */

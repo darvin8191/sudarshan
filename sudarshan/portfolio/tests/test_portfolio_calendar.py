@@ -195,13 +195,63 @@ async def test_what_was_confirmed_is_on_the_events_row_and_is_changed_from_its_v
     (row,) = (await check_of(n))["rows"]
     assert row["words"].startswith(
         "PROBE LTD: Upstox holds 500 and the lots say 100. You left the split of 9 Oct 2026 out "
-        "of your lots: if the company did give it, change what you confirmed on its row in the "
-        "Calendar. "
+        "of your lots: if the company did give it, change that under Confirmed in the Calendar. "
     )
+    assert row["event_id"] == split  # the Check row leads to it (v0.14.0 verification N1)
     back = await n.rig.call("ca_decide", id=split, scope="upstox", state="applied", ratio_num=5,
                             ratio_den=1, version=now["version"])  # fmt: skip
     assert back["status"] == "success" and (await check_of(n))["rows"] == []
     assert answer_misses(await calendar(n)) == set()
+
+
+@scenario
+async def test_every_bonus_or_split_confirmed_is_listed_whatever_its_day_and_changed_there(n):
+    """v0.14.0 verification N1, its probe. A split of 1 Jun 2026, 147 days back, tapped the
+    wrong way round on 26 Oct; 50 older shares are outside the records, so neither reading makes
+    the lots agree with the 750 held and no tap is offered. Old code carried what was confirmed
+    only on calendar rows inside the 90 days: this split had none, so nothing on the phone could
+    change it, and the Check card's sentence sent the owner to a row that was not there. Every
+    bonus and split confirmed for the Upstox account is now listed under Confirmed, whatever its
+    day and whether Upstox still lists it, and the Check row leads there."""
+    from test_portfolio_ca_ops import check_of, history
+
+    history(n, (20260410, "BUY", 100))
+    record(n, 20261021, **{UPSTOX: 750})
+    split = event(n, "split", ex_day=20260601, ratio=(1, 5))
+    wrong = await n.rig.call("ca_decide", id=split, scope="upstox", state="applied",
+                             ratio_num=1, ratio_den=5)  # fmt: skip
+    assert wrong["status"] == "success"
+    assert (await calendar(n))["calendar"] == []  # outside the 90 days
+    listed = (await n.rig.call("ca_list"))["data"]
+    (row,) = listed["lot_check"]["rows"]
+    assert (row["held_qty_u"], row["lots_qty_u"], row["fix"], row["event_id"]) == (
+        750 * U, 20 * U, None, split)  # fmt: skip
+    assert row["words"].endswith(
+        "Neither reading of it makes the two agree: a purchase or a sale may be missing from the "
+        "records. You can see the reading you confirmed, and change it, under Confirmed in the "
+        "Calendar."
+    )
+    (kept,) = listed["confirmed"]
+    assert {key: kept[key] for key in kept if key != "decided"} == {
+        "event_id": split, "isin": UPSTOX, "name": "PROBE LTD", "kind": "split",
+        "ex_day": 20260601, "ratio_num": 1, "ratio_den": 5, "gone_at": None}  # fmt: skip
+    decided = kept["decided"]
+    assert (decided["event_id"], decided["state"], decided["words"]) == (
+        split, "applied", "You applied this split as every 5 made 1: 100 became 20.")  # fmt: skip
+    assert decided["expected"]["held_from"] == "trades"  # no closing record reaches 31 May
+    assert answer_misses(listed) == set()
+    # Upstox no longer lists it: what was confirmed still counts, is listed, and is changed there.
+    n.svc.store.write(OWNER, lambda tx: tx.ca_events_gone(UPSTOX, [], NOW))
+    (kept,) = (await n.rig.call("ca_list"))["data"]["confirmed"]
+    assert kept["gone_at"] == NOW
+    turned = await n.rig.call("ca_decide", id=kept["decided"]["event_id"], scope="upstox",
+                              state="applied", ratio_num=5, ratio_den=1,
+                              version=kept["decided"]["version"])  # fmt: skip
+    assert turned["status"] == "success"
+    (row,) = (await check_of(n))["rows"]
+    assert (row["lots_qty_u"], row["event_id"]) == (500 * U, split)  # the 50 are still missing
+    # Nothing is listed for a tab's scope, and nothing for a bonus or split still undecided.
+    assert (await n.rig.call("ca_list", scope=f"tab:{n.rig.tab['id']}"))["data"]["confirmed"] == []
 
 
 @scenario

@@ -1,14 +1,12 @@
 // SUDARSHAN P7 F4 (M7.36): the Calendar view, `/portfolio?view=calendar` (design p7 9.5): what
 // waits for the owner's tap first, then Upstox's dividends, bonuses, splits and rights issues for
 // what he holds, 90 days back and 180 on. Dates and ratios are public facts read every night, not
-// market data: each row says when it was checked and nothing here says "Real-time". A bonus or a
-// split he confirmed says what he confirmed, and can be changed from its row. The owner's page
-// only; a family viewer is offered none of it.
+// market data: each row says when it was checked and nothing here says "Real-time". Every bonus
+// and split he confirmed is listed under Confirmed, whatever its day, and can be changed there.
+// The owner's page only; a family viewer is offered none of it.
 import { useQuery } from '@tanstack/react-query'
-import { Info, PencilLine, RefreshCw } from 'lucide-react'
-import { useState } from 'react'
+import { Info, RefreshCw } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { useOpenGuard } from '@/sudarshan/watchlist/openGuard'
 import {
   getCalendar,
   listCorporateActions,
@@ -17,13 +15,13 @@ import {
   problemOf,
 } from '../api'
 import { dayOfInstant } from '../days'
-import { SECONDARY } from '../sheets/TabFields'
 import { PORTFOLIO_KEY } from '../tab/ActivityTab'
 import { dayText, monthOf } from '../tab/format'
-import type { CaDecided, CalendarRow, TabInfo } from '../types'
+import type { CaConfirmed, CalendarRow, TabInfo } from '../types'
+import { Decided } from './Decided'
 import { checkedText, factText, holdText, KINDS } from './format'
 import { LotCheckCard } from './LotCheckCard'
-import { Choices, ToConfirm } from './ToConfirm'
+import { ToConfirm } from './ToConfirm'
 
 export const CALENDAR_KEY = [...PORTFOLIO_KEY, 'calendar'] as const
 /** The view's own sentence while its switch is off on the server (the ops answer `not_ready`). */
@@ -53,63 +51,50 @@ async function need<T>(call: Promise<PortfolioResult<T>>): Promise<T> {
 }
 
 /**
- * What the owner confirmed for a bonus or a split, and "Change what I confirmed" (v0.14.0
- * verification M3): To confirm's own choices, sent from the decision's version. What opens
- * takes no tap for its first half second (`openGuard.ts`), so the second tap of a double tap
- * never presses a choice that appeared under the finger.
+ * Every bonus and split confirmed for the Upstox account, whatever its day and whether or not
+ * Upstox still lists it (v0.14.0 verification N1), each with "Change what I confirmed".
  */
-function Decided({
-  row,
-  decided,
-  onDone,
-}: {
-  row: CalendarRow
-  decided: CaDecided
-  onDone: () => void
-}) {
-  const [open, setOpen] = useState(false)
-  const guard = useOpenGuard(open)
-  const { onPointerDownCapture, onClickCapture, onKeyDownCapture } = guard.handlers
+function Confirmed({ rows, onDone }: { rows: readonly CaConfirmed[]; onDone: () => void }) {
+  if (rows.length === 0) return null
   return (
-    <div className="flex flex-col gap-2 pt-1.5">
-      <p className="text-sm">{decided.words}</p>
-      {open ? (
-        <div
-          className="flex flex-col gap-2"
-          onPointerDownCapture={onPointerDownCapture}
-          onClickCapture={onClickCapture}
-          onKeyDownCapture={onKeyDownCapture}
-          data-settling={guard.settling || undefined}
-        >
-          <ul className="flex flex-col">
-            <Choices
-              kind={row.kind}
-              eventId={decided.event_id}
-              expected={decided.expected}
-              tab={undefined}
-              version={decided.version}
-              current={decided}
-              onDone={() => {
-                setOpen(false)
-                onDone()
-              }}
-            />
-          </ul>
-          <button type="button" className={SECONDARY} onClick={() => setOpen(false)}>
-            Keep it as it is
-          </button>
-        </div>
-      ) : (
-        <button type="button" className={SECONDARY} onClick={() => setOpen(true)}>
-          <PencilLine aria-hidden="true" className="size-4" />
-          Change what I confirmed
-        </button>
-      )}
-    </div>
+    <section aria-label="Confirmed" className={cn(CARD, 'flex flex-col gap-1')}>
+      <h3 className="text-base font-bold">Confirmed</h3>
+      <p className="text-xs text-[color:var(--text-tertiary)]">
+        Each bonus and split you confirmed for the Upstox account. A change reaches the tax lots at
+        once.
+      </p>
+      <ul className="flex flex-col divide-y divide-[color:var(--divider)]">
+        {rows.map((row) => {
+          const Icon = KINDS[row.kind].icon
+          return (
+            <li key={row.event_id} className="flex flex-col gap-0.5 py-2.5">
+              <div className="flex items-start justify-between gap-3">
+                <span className="min-w-0 text-[0.9375rem] font-semibold break-words">
+                  {row.name ?? row.isin}
+                </span>
+                <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-[color:var(--border-strong)] px-2 py-0.5 text-xs font-semibold">
+                  <Icon aria-hidden="true" className="size-3.5" />
+                  {KINDS[row.kind].word}
+                </span>
+              </div>
+              <span className="text-sm text-[color:var(--text-secondary)]">
+                Ex-date {dayText(row.ex_day)} · {factText({ ...row, amount_u: null })}
+              </span>
+              {row.gone_at !== null && (
+                <span className="text-xs text-[color:var(--text-tertiary)]">
+                  Upstox no longer lists it; what you confirmed still counts.
+                </span>
+              )}
+              <Decided kind={row.kind} decided={row.decided} onDone={onDone} />
+            </li>
+          )
+        })}
+      </ul>
+    </section>
   )
 }
 
-function Event({ row, today, onDone }: { row: CalendarRow; today: number; onDone: () => void }) {
+function Event({ row, today }: { row: CalendarRow; today: number }) {
   const Icon = KINDS[row.kind].icon
   const hold = holdText(row, today)
   return (
@@ -128,23 +113,16 @@ function Event({ row, today, onDone }: { row: CalendarRow; today: number; onDone
       </span>
       {hold && <span className="text-sm font-semibold">{hold}</span>}
       <span className="text-xs text-[color:var(--text-tertiary)]">{checkedText(row, today)}</span>
-      {row.decided && <Decided row={row} decided={row.decided} onDone={onDone} />}
+      {row.decided && (
+        // What stands; it is changed under Confirmed, the one place for every one of them.
+        <span className="text-sm">{row.decided.words}</span>
+      )}
     </li>
   )
 }
 
 /** The rows of one stretch of the calendar, month by month in the order given. */
-function Months({
-  title,
-  rows,
-  today,
-  onDone,
-}: {
-  title: string
-  rows: CalendarRow[]
-  today: number
-  onDone: () => void
-}) {
+function Months({ title, rows, today }: { title: string; rows: CalendarRow[]; today: number }) {
   if (rows.length === 0) return null
   const months = new Map<number, { label: string; rows: CalendarRow[] }>()
   for (const row of rows) {
@@ -161,7 +139,7 @@ function Months({
           <h4 className="pt-1.5 text-xs font-semibold text-muted-foreground">{month.label}</h4>
           <ul className="flex flex-col divide-y divide-[color:var(--divider)]">
             {month.rows.map((row) => (
-              <Event key={row.event_id} row={row} today={today} onDone={onDone} />
+              <Event key={row.event_id} row={row} today={today} />
             ))}
           </ul>
         </div>
@@ -220,8 +198,13 @@ export function CalendarView({ tabs }: { tabs: readonly TabInfo[] }) {
         </p>
       ) : (
         <>
-          <LotCheckCard check={actions.data.lot_check} onDone={refresh} />
+          <LotCheckCard
+            check={actions.data.lot_check}
+            onDone={refresh}
+            confirmed={actions.data.confirmed ?? []}
+          />
           <ToConfirm events={actions.data.to_confirm} tabs={tabs} onDone={refresh} />
+          <Confirmed rows={actions.data.confirmed ?? []} onDone={refresh} />
           {actions.data.left_out_count > 0 && (
             <p className="text-sm text-[color:var(--text-secondary)]">
               {leftOutWords(actions.data.left_out_count)}
@@ -252,8 +235,8 @@ export function CalendarView({ tabs }: { tabs: readonly TabInfo[] }) {
               {NO_FUTURE}
             </p>
           )}
-          <Months title="Coming up" rows={coming} today={today} onDone={refresh} />
-          <Months title="The last 90 days" rows={past} today={today} onDone={refresh} />
+          <Months title="Coming up" rows={coming} today={today} />
+          <Months title="The last 90 days" rows={past} today={today} />
           {read && rows.length === 0 && (
             <p className={cn(CARD, 'text-sm text-[color:var(--text-secondary)]')}>
               No dividend, bonus, split or rights issue is listed for what you hold, from{' '}

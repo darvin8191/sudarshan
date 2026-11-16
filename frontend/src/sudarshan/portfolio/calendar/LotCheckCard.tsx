@@ -4,15 +4,18 @@
 // do; the working paper marks its sales "to check". Where the service can prove the change that
 // makes the two agree (an applied bonus or split read the other way round, or taken out when it
 // was counted twice), the row offers it as one tap, sent as `ca_decide` from the decision's
-// version. Quantities at a day's close, not market data: the card says which day. Shown first on
-// the Calendar and on the Tax view, never to a family viewer.
+// version. Where it asks the owner to look at a reading again (neither way agrees, or one was
+// left out of the lots), the Calendar's card offers that decision's own choices on the row
+// (v0.14.0 verification N1). Quantities at a day's close, not market data: the card says which
+// day. Shown first on the Calendar and on the Tax view, never to a family viewer.
 import { ArrowLeftRight, TriangleAlert, Undo2 } from 'lucide-react'
 import { decideCorporateAction } from '../api'
 import { ProblemLine, SECONDARY } from '../sheets/TabFields'
 import { useSend } from '../sheets/useSend'
 import { dayText } from '../tab/format'
-import type { LotCheck, LotCheckRow } from '../types'
+import type { CaConfirmed, LotCheck, LotCheckRow } from '../types'
 import { UPSTOX_SCOPE } from './confirm'
+import { Decided } from './Decided'
 
 const CARD =
   'flex flex-col gap-2 rounded-[1.125rem] border border-[color:var(--gold)] bg-[color:var(--gold-tint)] px-4 py-3.5'
@@ -25,10 +28,22 @@ export function fixLabel(row: LotCheckRow): string | null {
     : 'Take this one out of my lots'
 }
 
-function Row({ row, onDone }: { row: LotCheckRow; onDone: () => void }) {
+function Row({
+  row,
+  onDone,
+  confirmed,
+}: {
+  row: LotCheckRow
+  onDone: () => void
+  confirmed: readonly CaConfirmed[]
+}) {
   const send = useSend()
   const label = fixLabel(row)
   const fix = row.fix
+  const review =
+    row.event_id === null
+      ? undefined
+      : confirmed.find((entry) => entry.decided.event_id === row.event_id)
   const apply = async () => {
     if (fix === null) return
     const done = await send.run(() =>
@@ -63,6 +78,9 @@ function Row({ row, onDone }: { row: LotCheckRow; onDone: () => void }) {
           {label}
         </button>
       )}
+      {label === null && review && (
+        <Decided kind={review.kind} decided={review.decided} onDone={onDone} words={false} />
+      )}
     </li>
   )
 }
@@ -70,10 +88,13 @@ function Row({ row, onDone }: { row: LotCheckRow; onDone: () => void }) {
 export function LotCheckCard({
   check,
   onDone,
+  confirmed = [],
 }: {
   check: LotCheck | undefined
   /** After a fix is sent: read the check (and whatever rests on the lots) again. */
   onDone: () => void
+  /** The Calendar's list of what was confirmed: a row that asks for a look again opens it. */
+  confirmed?: readonly CaConfirmed[]
 }) {
   if (!check || check.state !== 'ok' || check.rows.length === 0) return null
   return (
@@ -89,7 +110,7 @@ export function LotCheckCard({
       </p>
       <ul className="flex flex-col gap-2.5">
         {check.rows.map((row) => (
-          <Row key={row.isin} row={row} onDone={onDone} />
+          <Row key={row.isin} row={row} onDone={onDone} confirmed={confirmed} />
         ))}
       </ul>
       <p className="text-xs text-[color:var(--text-secondary)]">

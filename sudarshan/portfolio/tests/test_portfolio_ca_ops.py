@@ -665,8 +665,8 @@ async def test_the_list_answers_the_contracts_shape_and_no_key_is_unaccounted_fo
     event(n, "bonus", ratio=(1, 2))
     n.svc.store.write(OWNER, lambda tx: tx.ca_read_put(UPSTOX, NOW, "ok", None))
     data = (await n.rig.call("ca_list"))["data"]
-    assert set(data) == {"events", "to_confirm", "reads", "left_out_count", "read_status",
-                         "lot_check"}  # fmt: skip
+    assert set(data) == {"events", "to_confirm", "confirmed", "reads", "left_out_count",
+                         "read_status", "lot_check"}  # fmt: skip
     assert set(data["events"][0]) == {"id", "isin", "name", "kind", "ex_day", "amount_u",
                                       "ratio_num", "ratio_den", "details", "read_at", "gone_at",
                                       "decisions"}  # fmt: skip
