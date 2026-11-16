@@ -33,7 +33,7 @@ from typing import Any
 
 from sudarshan.autologin.schedule import TradingCalendar
 from sudarshan.signals import contract as c
-from sudarshan.signals import diff, inbox
+from sudarshan.signals import diff, inbox, notices
 from sudarshan.signals.api import SignalsApi
 from sudarshan.signals.config import (
     ConfigError,
@@ -177,6 +177,9 @@ class Service:
         self._today_day = None
         #: When a document of a newer format than this release reads was last seen.
         self.newer_format_ms: int | None = None
+        #: What the notices told (T9; signals.db meta "notices"), so a restart tells nothing twice.
+        self.notice_memory: dict[str, Any] | None = None
+        self.events_path = settings.state_dir / c.EVENTS_FILE
 
     # ---- what the ops and /health see ----------------------------------------------------------
     @property
@@ -268,6 +271,7 @@ class Service:
         self.last = await self.store.call(self.store.last)
         self.prefs = await self.store.call(self.store.settings)
         self.newer_format_ms = await self.store.call(self.store.meta_get, "newer_format_ms")
+        self.notice_memory = await self.store.call(self.store.meta_get, "notices")
 
     async def _serve_api(self) -> None:
         """Bind the port; while it is taken say so and try again every minute; then hold it."""
@@ -381,7 +385,32 @@ class Service:
         day = diff.ist_day(now)
         if out.counted or out.strangers or out.overflow or out.refused or day != self._today_day:
             self.today, self._today_day = store.counts(now), day
+        self._tell(now)
         return out
+
+    def _tell(self, now: int) -> None:
+        """T9: the notices due now, recorded for the alerts' notice desk (on the store's thread),
+        only while the view is on and set up."""
+        if self.switch_state != "on":
+            return
+        memory = notices.Memory.of(self.notice_memory)
+        due, after = notices.due(
+            memory,
+            now_ms=now,
+            last=self.last,
+            newer_format_ms=self.newer_format_ms,
+            is_trading_day=self.calendar.is_trading_day,
+            in_market_hours=self.calendar.in_market_hours,
+        )
+        if due:
+            told = notices.tell(self.events_path, due, now)
+            for notice in told:
+                log.info("TRINETRA notice recorded for Telegram: %s", notice.kind)
+            if len(told) != len(due):
+                return  # tried again at the next look; one already in the file is not doubled
+        if after != memory:
+            self.store.meta_set("notices", after.as_dict())
+            self.notice_memory = after.as_dict()
 
     def _judge(self, found: inbox.Found, now: int, out: Cycle) -> None:
         store, box = self.store, self.letterbox

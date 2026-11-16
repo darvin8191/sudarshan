@@ -90,6 +90,10 @@ FAMILY_AT_ONCE = frozenset(
 #: one and its news (a new AI connection, a Telegram account linked or unlinked); a warning and
 #: the return from a warning wait for the close (``_at_once``).
 AT_ONCE = FAILURES | FAMILY_AT_ONCE | {"watch_failing", "watch_new"}
+#: The TRINETRA view's notices (src signals, M13): TRINETRA silent on a trading day, or stale in
+#: market hours, and its return are told at once (a market reading the owner may be acting on); a
+#: newer format waits for the close.
+AT_ONCE = AT_ONCE | {"signals_quiet", "signals_stale", "signals_back"}
 MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 UNIT = re.compile(r"sudarshan-[a-z0-9-]+\.(?:service|timer)")
 #: The order the facts of one run are told in.
@@ -115,6 +119,10 @@ KIND_ORDER = (
     "drill_failed",
     "drill_passed",
     "watch_summary",
+    "signals_quiet",
+    "signals_stale",
+    "signals_back",
+    "signals_format",
 )
 
 #: Why an install was undone, in the owner's words (the cause only; ``rolled_back`` adds the rest).
@@ -777,6 +785,24 @@ def _drill_failed(event: Event, now: datetime) -> list[str]:
     ]
 
 
+_SECONDS = re.compile(r"[0-9]{9,11}")
+
+
+def _signals(event: Event, now: datetime) -> list[str]:
+    """The TRINETRA view's notices, in its contract's words (sudarshan/signals/contract.py): the
+    same sentences its page shows. ``since`` is the published time of TRINETRA's last reading."""
+    from sudarshan.signals.contract import WORDS as SIGNAL_WORDS
+
+    since = event.fact("since")
+    at = float(since) if _SECONDS.fullmatch(since) else event.at
+    return {
+        "signals_quiet": [SIGNAL_WORDS["not_today"]],
+        "signals_stale": [SIGNAL_WORDS["stale_notice"].format(time=_when(at, now))],
+        "signals_back": [SIGNAL_WORDS["back_notice"].format(time=_when(at, now))],
+        "signals_format": [SIGNAL_WORDS["newer_format"]],
+    }.get(event.kind, [])
+
+
 def _at_once(event: Event) -> bool:
     """Whether a notice goes out in market hours too."""
     if event.kind == "watch_fine":
@@ -802,6 +828,10 @@ _FAMILY_WORDS = {
     "drill_passed": _drill_passed,
     "drill_failed": _drill_failed,
     "watch_summary": _watch_summary,
+    "signals_quiet": _signals,
+    "signals_stale": _signals,
+    "signals_back": _signals,
+    "signals_format": _signals,
 }
 
 
