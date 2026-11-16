@@ -827,7 +827,14 @@ def _reducing_exit(symbol, exchange, product, action, quantity, auth_token, brok
     # A close that may have reached Upstox without naming its order (a timeout) is held until the
     # order book settles it, since the next close is sized from a positions row that can lag its
     # fill, and it is said as not confirmed, never in the failure's own words.
+    # SUDARSHAN M6.9 (GA1.1): the close is also sized against exits still filling, as the app's
+    # own exits are: from Upstox's positions corrected by its order book's fills, read with the
+    # same session. Nothing is sent when the quantity cannot be confirmed held, and only what is
+    # still held when that is less than asked (resize), never more.
     from sudarshan.books import surface_exits
+
+    def resize(held):  # SUDARSHAN M6.9 (GA1.1)
+        (split_data if split_chunk and quantity > split_chunk else order_data)["quantity"] = held
 
     live = _current_mode() == "live"
     answer = surface_exits.exit_once(
@@ -836,8 +843,10 @@ def _reducing_exit(symbol, exchange, product, action, quantity, auth_token, brok
         symbol,
         product,
         send,
-        surface_exits.statuses_reader(api_key, auth_token, broker),
         side=action,
+        quantity=quantity,
+        read_book=surface_exits.book_reader(api_key, auth_token, broker),
+        resize=resize,
     )
     return surface_exits.not_confirmed(answer) if live else answer
 

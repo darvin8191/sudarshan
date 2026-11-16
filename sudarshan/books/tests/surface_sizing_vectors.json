@@ -1,0 +1,719 @@
+{
+ "about": "A scalping or strategy close sized from Upstox's raw positions rows and order book rows (sudarshan/books/surface_exits.py, GA1.1). Each case: the rows as Upstox sends them (positions read first; null: the read failed), the close its surface asks for on NIFTY27OCT2625900CE as MIS, and either the quantity sent or why nothing is sent.",
+ "cases": [
+  {
+   "name": "the row and the order book agree: the close goes as asked",
+   "positions": [
+    {
+     "instrument_token": "NSE_FO|1001",
+     "exchange": "NFO",
+     "product": "I",
+     "tradingsymbol": "NIFTY27OCT2625900CE",
+     "quantity": 65,
+     "day_buy_quantity": 65,
+     "day_sell_quantity": 0,
+     "average_price": 100.0,
+     "last_price": 101.0,
+     "pnl": 0.0
+    }
+   ],
+   "orders": [
+    {
+     "order_id": "261027000001",
+     "instrument_token": "NSE_FO|1001",
+     "exchange": "NFO",
+     "product": "I",
+     "tradingsymbol": "NIFTY27OCT2625900CE",
+     "transaction_type": "BUY",
+     "status": "complete",
+     "order_type": "MARKET",
+     "trigger_price": 0,
+     "price": 0,
+     "pending_quantity": 0,
+     "quantity": 65,
+     "filled_quantity": 65,
+     "order_timestamp": "2026-10-27 10:15:02"
+    }
+   ],
+   "side": "SELL",
+   "quantity": 65,
+   "send": 65
+  },
+  {
+   "name": "GA1.1, the defect: the earlier close is complete in the order book and the row still shows the position",
+   "positions": [
+    {
+     "instrument_token": "NSE_FO|1001",
+     "exchange": "NFO",
+     "product": "I",
+     "tradingsymbol": "NIFTY27OCT2625900CE",
+     "quantity": 65,
+     "day_buy_quantity": 65,
+     "day_sell_quantity": 0,
+     "average_price": 100.0,
+     "last_price": 101.0,
+     "pnl": 0.0
+    }
+   ],
+   "orders": [
+    {
+     "order_id": "261027000001",
+     "instrument_token": "NSE_FO|1001",
+     "exchange": "NFO",
+     "product": "I",
+     "tradingsymbol": "NIFTY27OCT2625900CE",
+     "transaction_type": "BUY",
+     "status": "complete",
+     "order_type": "MARKET",
+     "trigger_price": 0,
+     "price": 0,
+     "pending_quantity": 0,
+     "quantity": 65,
+     "filled_quantity": 65,
+     "order_timestamp": "2026-10-27 10:15:02"
+    },
+    {
+     "order_id": "261027000002",
+     "instrument_token": "NSE_FO|1001",
+     "exchange": "NFO",
+     "product": "I",
+     "tradingsymbol": "NIFTY27OCT2625900CE",
+     "transaction_type": "SELL",
+     "status": "complete",
+     "order_type": "MARKET",
+     "trigger_price": 0,
+     "price": 0,
+     "pending_quantity": 0,
+     "quantity": 65,
+     "filled_quantity": 65,
+     "order_timestamp": "2026-10-27 10:15:02"
+    }
+   ],
+   "side": "SELL",
+   "quantity": 65,
+   "refused": "nothing_left",
+   "status": 409
+  },
+  {
+   "name": "half was closed elsewhere and the row lags: only what is still held is sent",
+   "positions": [
+    {
+     "instrument_token": "NSE_FO|1001",
+     "exchange": "NFO",
+     "product": "I",
+     "tradingsymbol": "NIFTY27OCT2625900CE",
+     "quantity": 130,
+     "day_buy_quantity": 130,
+     "day_sell_quantity": 0,
+     "average_price": 100.0,
+     "last_price": 101.0,
+     "pnl": 0.0
+    }
+   ],
+   "orders": [
+    {
+     "order_id": "261027000001",
+     "instrument_token": "NSE_FO|1001",
+     "exchange": "NFO",
+     "product": "I",
+     "tradingsymbol": "NIFTY27OCT2625900CE",
+     "transaction_type": "BUY",
+     "status": "complete",
+     "order_type": "MARKET",
+     "trigger_price": 0,
+     "price": 0,
+     "pending_quantity": 0,
+     "quantity": 130,
+     "filled_quantity": 130,
+     "order_timestamp": "2026-10-27 10:15:02"
+    },
+    {
+     "order_id": "261027000002",
+     "instrument_token": "NSE_FO|1001",
+     "exchange": "NFO",
+     "product": "I",
+     "tradingsymbol": "NIFTY27OCT2625900CE",
+     "transaction_type": "SELL",
+     "status": "complete",
+     "order_type": "MARKET",
+     "trigger_price": 0,
+     "price": 0,
+     "pending_quantity": 0,
+     "quantity": 65,
+     "filled_quantity": 65,
+     "order_timestamp": "2026-10-27 10:15:02"
+    }
+   ],
+   "side": "SELL",
+   "quantity": 130,
+   "send": 65
+  },
+  {
+   "name": "the surface asks for less than is held: never more than it asked",
+   "positions": [
+    {
+     "instrument_token": "NSE_FO|1001",
+     "exchange": "NFO",
+     "product": "I",
+     "tradingsymbol": "NIFTY27OCT2625900CE",
+     "quantity": 130,
+     "day_buy_quantity": 130,
+     "day_sell_quantity": 0,
+     "average_price": 100.0,
+     "last_price": 101.0,
+     "pnl": 0.0
+    }
+   ],
+   "orders": [
+    {
+     "order_id": "261027000001",
+     "instrument_token": "NSE_FO|1001",
+     "exchange": "NFO",
+     "product": "I",
+     "tradingsymbol": "NIFTY27OCT2625900CE",
+     "transaction_type": "BUY",
+     "status": "complete",
+     "order_type": "MARKET",
+     "trigger_price": 0,
+     "price": 0,
+     "pending_quantity": 0,
+     "quantity": 130,
+     "filled_quantity": 130,
+     "order_timestamp": "2026-10-27 10:15:02"
+    }
+   ],
+   "side": "SELL",
+   "quantity": 65,
+   "send": 65
+  },
+  {
+   "name": "a complete order with no filled quantity: the size is unknown, not 0",
+   "positions": [
+    {
+     "instrument_token": "NSE_FO|1001",
+     "exchange": "NFO",
+     "product": "I",
+     "tradingsymbol": "NIFTY27OCT2625900CE",
+     "quantity": 65,
+     "day_buy_quantity": 65,
+     "day_sell_quantity": 0,
+     "average_price": 100.0,
+     "last_price": 101.0,
+     "pnl": 0.0
+    }
+   ],
+   "orders": [
+    {
+     "order_id": "261027000001",
+     "instrument_token": "NSE_FO|1001",
+     "exchange": "NFO",
+     "product": "I",
+     "tradingsymbol": "NIFTY27OCT2625900CE",
+     "transaction_type": "BUY",
+     "status": "complete",
+     "order_type": "MARKET",
+     "trigger_price": 0,
+     "price": 0,
+     "pending_quantity": 0,
+     "quantity": 65,
+     "filled_quantity": 65,
+     "order_timestamp": "2026-10-27 10:15:02"
+    },
+    {
+     "order_id": "261027000002",
+     "instrument_token": "NSE_FO|1001",
+     "exchange": "NFO",
+     "product": "I",
+     "tradingsymbol": "NIFTY27OCT2625900CE",
+     "transaction_type": "SELL",
+     "status": "complete",
+     "order_type": "MARKET",
+     "trigger_price": 0,
+     "price": 0,
+     "pending_quantity": 65,
+     "quantity": 65,
+     "filled_quantity": null,
+     "order_timestamp": "2026-10-27 10:15:02"
+    }
+   ],
+   "side": "SELL",
+   "quantity": 65,
+   "refused": "not_sized",
+   "status": 424
+  },
+  {
+   "name": "a market order still works on the closing side: nothing beside it",
+   "positions": [
+    {
+     "instrument_token": "NSE_FO|1001",
+     "exchange": "NFO",
+     "product": "I",
+     "tradingsymbol": "NIFTY27OCT2625900CE",
+     "quantity": 65,
+     "day_buy_quantity": 65,
+     "day_sell_quantity": 0,
+     "average_price": 100.0,
+     "last_price": 101.0,
+     "pnl": 0.0
+    }
+   ],
+   "orders": [
+    {
+     "order_id": "261027000001",
+     "instrument_token": "NSE_FO|1001",
+     "exchange": "NFO",
+     "product": "I",
+     "tradingsymbol": "NIFTY27OCT2625900CE",
+     "transaction_type": "BUY",
+     "status": "complete",
+     "order_type": "MARKET",
+     "trigger_price": 0,
+     "price": 0,
+     "pending_quantity": 0,
+     "quantity": 65,
+     "filled_quantity": 65,
+     "order_timestamp": "2026-10-27 10:15:02"
+    },
+    {
+     "order_id": "261027000002",
+     "instrument_token": "NSE_FO|1001",
+     "exchange": "NFO",
+     "product": "I",
+     "tradingsymbol": "NIFTY27OCT2625900CE",
+     "transaction_type": "SELL",
+     "status": "open",
+     "order_type": "MARKET",
+     "trigger_price": 0,
+     "price": 0,
+     "pending_quantity": 65,
+     "quantity": 65,
+     "filled_quantity": 0,
+     "order_timestamp": "2026-10-27 10:15:02"
+    }
+   ],
+   "side": "SELL",
+   "quantity": 65,
+   "refused": "market_working",
+   "status": 409
+  },
+  {
+   "name": "a resting stop is not a market order and does not block the close",
+   "positions": [
+    {
+     "instrument_token": "NSE_FO|1001",
+     "exchange": "NFO",
+     "product": "I",
+     "tradingsymbol": "NIFTY27OCT2625900CE",
+     "quantity": 65,
+     "day_buy_quantity": 65,
+     "day_sell_quantity": 0,
+     "average_price": 100.0,
+     "last_price": 101.0,
+     "pnl": 0.0
+    }
+   ],
+   "orders": [
+    {
+     "order_id": "261027000001",
+     "instrument_token": "NSE_FO|1001",
+     "exchange": "NFO",
+     "product": "I",
+     "tradingsymbol": "NIFTY27OCT2625900CE",
+     "transaction_type": "BUY",
+     "status": "complete",
+     "order_type": "MARKET",
+     "trigger_price": 0,
+     "price": 0,
+     "pending_quantity": 0,
+     "quantity": 65,
+     "filled_quantity": 65,
+     "order_timestamp": "2026-10-27 10:15:02"
+    },
+    {
+     "order_id": "261027000002",
+     "instrument_token": "NSE_FO|1001",
+     "exchange": "NFO",
+     "product": "I",
+     "tradingsymbol": "NIFTY27OCT2625900CE",
+     "transaction_type": "SELL",
+     "status": "trigger pending",
+     "order_type": "SL-M",
+     "trigger_price": 98.5,
+     "price": 0,
+     "pending_quantity": 65,
+     "quantity": 65,
+     "filled_quantity": 0,
+     "order_timestamp": "2026-10-27 10:15:02"
+    }
+   ],
+   "side": "SELL",
+   "quantity": 65,
+   "send": 65
+  },
+  {
+   "name": "bought a second ago and not listed by the positions yet: sized from its fills",
+   "positions": [],
+   "orders": [
+    {
+     "order_id": "261027000001",
+     "instrument_token": "NSE_FO|1001",
+     "exchange": "NFO",
+     "product": "I",
+     "tradingsymbol": "NIFTY27OCT2625900CE",
+     "transaction_type": "BUY",
+     "status": "complete",
+     "order_type": "MARKET",
+     "trigger_price": 0,
+     "price": 0,
+     "pending_quantity": 0,
+     "quantity": 65,
+     "filled_quantity": 65,
+     "order_timestamp": "2026-10-27 10:15:02"
+    }
+   ],
+   "side": "SELL",
+   "quantity": 65,
+   "send": 65
+  },
+  {
+   "name": "a short is closed by a BUY",
+   "positions": [
+    {
+     "instrument_token": "NSE_FO|1001",
+     "exchange": "NFO",
+     "product": "I",
+     "tradingsymbol": "NIFTY27OCT2625900CE",
+     "quantity": -65,
+     "day_buy_quantity": 0,
+     "day_sell_quantity": 65,
+     "average_price": 100.0,
+     "last_price": 101.0,
+     "pnl": 0.0
+    }
+   ],
+   "orders": [
+    {
+     "order_id": "261027000001",
+     "instrument_token": "NSE_FO|1001",
+     "exchange": "NFO",
+     "product": "I",
+     "tradingsymbol": "NIFTY27OCT2625900CE",
+     "transaction_type": "SELL",
+     "status": "complete",
+     "order_type": "MARKET",
+     "trigger_price": 0,
+     "price": 0,
+     "pending_quantity": 0,
+     "quantity": 65,
+     "filled_quantity": 65,
+     "order_timestamp": "2026-10-27 10:15:02"
+    }
+   ],
+   "side": "BUY",
+   "quantity": 65,
+   "send": 65
+  },
+  {
+   "name": "the fills show the position reversed already: a close on that side would add",
+   "positions": [
+    {
+     "instrument_token": "NSE_FO|1001",
+     "exchange": "NFO",
+     "product": "I",
+     "tradingsymbol": "NIFTY27OCT2625900CE",
+     "quantity": 65,
+     "day_buy_quantity": 65,
+     "day_sell_quantity": 0,
+     "average_price": 100.0,
+     "last_price": 101.0,
+     "pnl": 0.0
+    }
+   ],
+   "orders": [
+    {
+     "order_id": "261027000001",
+     "instrument_token": "NSE_FO|1001",
+     "exchange": "NFO",
+     "product": "I",
+     "tradingsymbol": "NIFTY27OCT2625900CE",
+     "transaction_type": "BUY",
+     "status": "complete",
+     "order_type": "MARKET",
+     "trigger_price": 0,
+     "price": 0,
+     "pending_quantity": 0,
+     "quantity": 65,
+     "filled_quantity": 65,
+     "order_timestamp": "2026-10-27 10:15:02"
+    },
+    {
+     "order_id": "261027000002",
+     "instrument_token": "NSE_FO|1001",
+     "exchange": "NFO",
+     "product": "I",
+     "tradingsymbol": "NIFTY27OCT2625900CE",
+     "transaction_type": "SELL",
+     "status": "complete",
+     "order_type": "MARKET",
+     "trigger_price": 0,
+     "price": 0,
+     "pending_quantity": 0,
+     "quantity": 130,
+     "filled_quantity": 130,
+     "order_timestamp": "2026-10-27 10:15:02"
+    }
+   ],
+   "side": "SELL",
+   "quantity": 65,
+   "refused": "would_add",
+   "status": 409
+  },
+  {
+   "name": "converted to NRML in Upstox's app: nothing is held as MIS",
+   "positions": [
+    {
+     "instrument_token": "NSE_FO|1001",
+     "exchange": "NFO",
+     "product": "I",
+     "tradingsymbol": "NIFTY27OCT2625900CE",
+     "quantity": 0,
+     "day_buy_quantity": 65,
+     "day_sell_quantity": 0,
+     "average_price": 100.0,
+     "last_price": 101.0,
+     "pnl": 0.0
+    },
+    {
+     "instrument_token": "NSE_FO|1001",
+     "exchange": "NFO",
+     "product": "D",
+     "tradingsymbol": "NIFTY27OCT2625900CE",
+     "quantity": 65,
+     "day_buy_quantity": 0,
+     "day_sell_quantity": 0,
+     "average_price": 100.0,
+     "last_price": 101.0,
+     "pnl": 0.0
+    }
+   ],
+   "orders": [
+    {
+     "order_id": "261027000001",
+     "instrument_token": "NSE_FO|1001",
+     "exchange": "NFO",
+     "product": "I",
+     "tradingsymbol": "NIFTY27OCT2625900CE",
+     "transaction_type": "BUY",
+     "status": "complete",
+     "order_type": "MARKET",
+     "trigger_price": 0,
+     "price": 0,
+     "pending_quantity": 0,
+     "quantity": 65,
+     "filled_quantity": 65,
+     "order_timestamp": "2026-10-27 10:15:02"
+    }
+   ],
+   "side": "SELL",
+   "quantity": 65,
+   "refused": "another_product",
+   "status": 409
+  },
+  {
+   "name": "the row shows more sold than the order book lists: it cannot be worked out",
+   "positions": [
+    {
+     "instrument_token": "NSE_FO|1001",
+     "exchange": "NFO",
+     "product": "I",
+     "tradingsymbol": "NIFTY27OCT2625900CE",
+     "quantity": 0,
+     "day_buy_quantity": 65,
+     "day_sell_quantity": 65,
+     "average_price": 100.0,
+     "last_price": 101.0,
+     "pnl": 0.0
+    }
+   ],
+   "orders": [
+    {
+     "order_id": "261027000001",
+     "instrument_token": "NSE_FO|1001",
+     "exchange": "NFO",
+     "product": "I",
+     "tradingsymbol": "NIFTY27OCT2625900CE",
+     "transaction_type": "BUY",
+     "status": "complete",
+     "order_type": "MARKET",
+     "trigger_price": 0,
+     "price": 0,
+     "pending_quantity": 0,
+     "quantity": 65,
+     "filled_quantity": 65,
+     "order_timestamp": "2026-10-27 10:15:02"
+    }
+   ],
+   "side": "SELL",
+   "quantity": 65,
+   "refused": "not_sized",
+   "status": 424
+  },
+  {
+   "name": "bought and sold today, flat in both books",
+   "positions": [
+    {
+     "instrument_token": "NSE_FO|1001",
+     "exchange": "NFO",
+     "product": "I",
+     "tradingsymbol": "NIFTY27OCT2625900CE",
+     "quantity": 0,
+     "day_buy_quantity": 65,
+     "day_sell_quantity": 65,
+     "average_price": 100.0,
+     "last_price": 101.0,
+     "pnl": 0.0
+    }
+   ],
+   "orders": [
+    {
+     "order_id": "261027000001",
+     "instrument_token": "NSE_FO|1001",
+     "exchange": "NFO",
+     "product": "I",
+     "tradingsymbol": "NIFTY27OCT2625900CE",
+     "transaction_type": "BUY",
+     "status": "complete",
+     "order_type": "MARKET",
+     "trigger_price": 0,
+     "price": 0,
+     "pending_quantity": 0,
+     "quantity": 65,
+     "filled_quantity": 65,
+     "order_timestamp": "2026-10-27 10:15:02"
+    },
+    {
+     "order_id": "261027000002",
+     "instrument_token": "NSE_FO|1001",
+     "exchange": "NFO",
+     "product": "I",
+     "tradingsymbol": "NIFTY27OCT2625900CE",
+     "transaction_type": "SELL",
+     "status": "complete",
+     "order_type": "MARKET",
+     "trigger_price": 0,
+     "price": 0,
+     "pending_quantity": 0,
+     "quantity": 65,
+     "filled_quantity": 65,
+     "order_timestamp": "2026-10-27 10:15:02"
+    }
+   ],
+   "side": "SELL",
+   "quantity": 65,
+   "refused": "nothing_left",
+   "status": 409
+  },
+  {
+   "name": "the order book did not answer",
+   "positions": [
+    {
+     "instrument_token": "NSE_FO|1001",
+     "exchange": "NFO",
+     "product": "I",
+     "tradingsymbol": "NIFTY27OCT2625900CE",
+     "quantity": 65,
+     "day_buy_quantity": 65,
+     "day_sell_quantity": 0,
+     "average_price": 100.0,
+     "last_price": 101.0,
+     "pnl": 0.0
+    }
+   ],
+   "orders": null,
+   "side": "SELL",
+   "quantity": 65,
+   "refused": "orders_not_read",
+   "status": 424
+  },
+  {
+   "name": "the positions did not answer",
+   "positions": null,
+   "orders": [
+    {
+     "order_id": "261027000001",
+     "instrument_token": "NSE_FO|1001",
+     "exchange": "NFO",
+     "product": "I",
+     "tradingsymbol": "NIFTY27OCT2625900CE",
+     "transaction_type": "BUY",
+     "status": "complete",
+     "order_type": "MARKET",
+     "trigger_price": 0,
+     "price": 0,
+     "pending_quantity": 0,
+     "quantity": 65,
+     "filled_quantity": 65,
+     "order_timestamp": "2026-10-27 10:15:02"
+    }
+   ],
+   "side": "SELL",
+   "quantity": 65,
+   "refused": "positions_not_read",
+   "status": 424
+  },
+  {
+   "name": "a part fill of the earlier close, cancelled: the rest is still held",
+   "positions": [
+    {
+     "instrument_token": "NSE_FO|1001",
+     "exchange": "NFO",
+     "product": "I",
+     "tradingsymbol": "NIFTY27OCT2625900CE",
+     "quantity": 65,
+     "day_buy_quantity": 65,
+     "day_sell_quantity": 0,
+     "average_price": 100.0,
+     "last_price": 101.0,
+     "pnl": 0.0
+    }
+   ],
+   "orders": [
+    {
+     "order_id": "261027000001",
+     "instrument_token": "NSE_FO|1001",
+     "exchange": "NFO",
+     "product": "I",
+     "tradingsymbol": "NIFTY27OCT2625900CE",
+     "transaction_type": "BUY",
+     "status": "complete",
+     "order_type": "MARKET",
+     "trigger_price": 0,
+     "price": 0,
+     "pending_quantity": 0,
+     "quantity": 65,
+     "filled_quantity": 65,
+     "order_timestamp": "2026-10-27 10:15:02"
+    },
+    {
+     "order_id": "261027000002",
+     "instrument_token": "NSE_FO|1001",
+     "exchange": "NFO",
+     "product": "I",
+     "tradingsymbol": "NIFTY27OCT2625900CE",
+     "transaction_type": "SELL",
+     "status": "cancelled",
+     "order_type": "MARKET",
+     "trigger_price": 0,
+     "price": 0,
+     "pending_quantity": 0,
+     "quantity": 65,
+     "filled_quantity": 30,
+     "order_timestamp": "2026-10-27 10:15:02"
+    }
+   ],
+   "side": "SELL",
+   "quantity": 65,
+   "send": 35
+  }
+ ]
+}
