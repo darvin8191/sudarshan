@@ -82,11 +82,13 @@ def test_a_wait_for_another_exit_is_one_event_and_no_message(why):
 
 
 def test_a_leg_that_stopped_asking_is_forgotten_and_a_later_hold_is_a_first_hold():
+    """A record nobody was told of (a wait for another exit) goes after five quiet minutes. One
+    he was told of is kept (v0.15.0 verify, forgotten holds: the outage tests below)."""
     holds = Holds()
-    holds.note(KEY, "unconfirmed", 0.0)
-    holds.note((7, 2), "unconfirmed", 0.0)
+    holds.note(KEY, "working", 0.0)
+    holds.note((7, 2), "earlier", 0.0)
     later = held_exits.STALE_S + 1.0
-    assert holds.note(KEY, "unconfirmed", later) == Note(event=True, tell=FIRST)
+    assert holds.note(KEY, "working", later) == Note(event=True)  # a first hold: its event again
     assert len(holds) == 1  # the other leg's record went with the sweep
     assert holds.run_is_held(7, later) and not holds.run_is_held(8, later)
 
@@ -519,3 +521,133 @@ def test_a_close_that_goes_keeps_nothing():
     (ok, _body, _code), sent = _close(surface_exits.Book(held=65))
     assert ok and sent == [1]
     assert surface_exits.kept_refusal("live", *POSITION, "SELL") is None
+
+
+# ---- forgotten holds: a hold he was told of is kept until its exit goes ------------------------
+# v0.15.0 verify, fix round 2's "still open": a record unseen for 5 minutes was dropped, told or
+# not. After a feed outage (no tick, so no hold) the exit could go and he, told "Exit NOT sent",
+# was never told it went. A record he was told of is now kept until its exit goes, the books show
+# no position, or its run ends; at most KEPT_AT_MOST records are kept.
+
+
+def test_the_probe_s_outage_an_exit_that_goes_after_six_quiet_minutes_is_told(
+    held_exit_messages, clock
+):
+    """The verifier's "stale: unconfirmed, 6 min no tick, sent". Before: nothing after "Exit NOT
+    sent", although the exit had gone."""
+    said = _story(held_exit_messages, clock, [(0, U), (360, "sent")])
+    assert said == [["Exit NOT sent (Live)"], ["Exit sent (Live)"]]
+    assert "The exit that was held for 6 min has now been sent." in held_exit_messages[-1]
+
+
+def test_the_probe_s_outage_a_hold_after_it_is_a_reminder_not_a_first_message(
+    held_exit_messages, clock
+):
+    """The verifier's "stale: unconfirmed, 6 min no tick, unconfirmed": the same hold goes on.
+    Before: "Exit NOT sent" again, as if new, with its event written again."""
+    said = _story(held_exit_messages, clock, [(0, U), (360, U), (2, U), (60, U)])
+    assert said == [
+        ["Exit NOT sent (Live)"],
+        ["Exit still NOT sent (Live), 6 min now"],
+        [],
+        [],  # 6 minutes in, the next reminder is 5 minutes after this one
+    ]
+    assert held_exits.held(7, 1, "exit_sl", ORDER, _result(U)).event is False
+
+
+def test_a_whole_session_without_ticks_still_ends_on_exit_sent(held_exit_messages, clock):
+    said = _story(held_exit_messages, clock, [(0, U), (2, U), (5 * 3600, "sent")])
+    assert said == [["Exit NOT sent (Live)"], [], ["Exit sent (Live)"]]
+    assert "held for 300 min" in held_exit_messages[-1]
+
+
+@pytest.mark.parametrize("told_by", ["unconfirmed", "other_way", "elsewhere"])
+def test_a_told_record_outlives_the_sweep_of_another_leg_s_first_hold(told_by):
+    holds = Holds()
+    holds.note(KEY, told_by, 0.0)
+    holds.note((7, 9), "working", 0.0)  # nobody was told of this one
+    later = held_exits.STALE_S * 4
+    assert holds.note((8, 1), "busy", later) == Note(event=True)  # sweeps what is stale
+    assert len(holds) == 2 and holds.clear((7, 9), later) is None
+    assert holds.clear(KEY, later + 1.0) == 20  # told when its exit goes, an hour later
+    # a record kept is not "held now": a stop asked for again after it is written again
+    assert not holds.run_is_held(7, later)
+
+
+def test_after_no_position_a_record_is_forgotten_after_five_quiet_minutes_as_before():
+    """The books showing no position is one of the three ends: the record then goes after five
+    quiet minutes, and a later failed read is a first hold again (a V3 test above does the same
+    through held())."""
+    holds = Holds()
+    holds.note(KEY, U, 0.0)
+    assert holds.note(KEY, N, 10.0) == Note(event=True, tell=GONE)
+    later = 10.0 + held_exits.STALE_S + 1.0
+    assert holds.note(KEY, U, later) == Note(event=True, tell=FIRST)
+
+
+def test_the_run_ending_forgets_its_holds_told_or_not():
+    holds = Holds()
+    holds.note((7, 1, "a"), U, 0.0)
+    holds.note((7, 2, "b"), "elsewhere", 0.0)
+    holds.note((8, 1, "c"), U, 0.0)
+    assert holds.forget_run(7) == 2 and len(holds) == 1
+    assert holds.clear((7, 1, "a"), 1.0) is None  # an exit going after the run ended: nothing
+    assert holds.forget_run(7) == 0
+
+
+def test_every_end_of_a_run_lets_its_holds_go(held_exit_messages):
+    """Through the strategy module's one place a run's live state is dropped: the engine's and
+    recovery's finalise, and a signal run that could not be opened, all end there."""
+    from services.strategy_module import state
+
+    held_exits.held(7, 1, "exit_sl", ORDER, _result(U), ref="pos-7")
+    held_exits.held(8, 1, "exit_sl", ORDER, _result(U), ref="pos-8")
+    state.clear_run_state(7)
+    assert len(held_exits.HOLDS) == 1
+    assert held_exits.sent(7, 1, ORDER, SimpleNamespace(ok=True, response={}), ref="pos-7") == ""
+    assert held_exits.sent(8, 1, ORDER, SimpleNamespace(ok=True, response={}), ref="pos-8")
+
+
+def test_a_failure_to_let_a_run_go_never_reaches_the_strategy_module(monkeypatch):
+    def broken(run_id):
+        raise RuntimeError("no")
+
+    monkeypatch.setattr(held_exits.HOLDS, "forget_run", broken)
+    held_exits.forget_run(7)  # does not raise
+
+
+def test_the_records_kept_are_capped_and_the_one_seen_longest_ago_goes(caplog):
+    holds = Holds()
+    cap = held_exits.KEPT_AT_MOST
+    for each in range(cap):
+        holds.note((7, each), U, float(each))  # each told, each kept
+    holds.note((7, 0), U, cap + 1.0)  # the first one is asked again: now the latest seen
+    assert len(holds) == cap
+    with caplog.at_level("WARNING"):
+        assert holds.note((9, 1), U, cap + 2.0) == Note(event=True, tell=FIRST)
+    assert len(holds) == cap  # never more
+    assert holds.clear((7, 1), cap + 3.0) is None  # the one seen longest ago went
+    assert holds.clear((7, 0), cap + 3.0) is not None and holds.clear((9, 1), cap + 3.0) == 0
+    assert "will not be told when they go" in caplog.text
+
+
+def test_the_cap_drops_what_is_stale_before_anything_he_was_told_of():
+    holds = Holds()
+    cap = held_exits.KEPT_AT_MOST
+    for each in range(cap - 1):
+        holds.note((7, each), U, 0.0)  # told: kept however long
+    holds.note((8, 1), "working", 0.0)  # untold: goes when stale
+    later = held_exits.STALE_S + 1.0
+    holds.note((9, 1), U, later)
+    assert len(holds) == cap and holds.clear((8, 1), later) is None
+    assert all(holds.clear((7, each), later) == 5 for each in range(cap - 1))
+
+
+def test_defect_without_the_cap_told_records_would_grow_without_end(monkeypatch):
+    """The cap asserted so the test above cannot pass vacuously: with told records kept and no
+    cap, every new leg would add one for the life of the process."""
+    monkeypatch.setattr(held_exits, "KEPT_AT_MOST", 10**9)
+    holds = Holds()
+    for each in range(900):  # a new leg each second, each told: none is ever stale
+        holds.note((7, each), U, float(each))
+    assert len(holds) == 900
