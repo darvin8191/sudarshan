@@ -29,6 +29,7 @@ from sudarshan.books import (
     add_sizing,  # SUDARSHAN M12.1 (A7): the Automation intake's adds, sized from the fills
     exit_guard,  # SUDARSHAN M6.9: an Exit all's exits, noted
     fills,
+    lag_flag,  # SUDARSHAN M6.9 (GA1.2): a reversal the positions row hides
 )
 from sudarshan.books.single_exit import EXIT_NOT_CONFIRMED, placed_order_ids  # SUDARSHAN M6.9
 from sudarshan.guard import gate as risk_gate  # SUDARSHAN M5.13: the risk gate
@@ -698,6 +699,39 @@ def place_smartorder_api(data, auth):
                     current_position = add_held.get(request_product, 0)
                     closes_from = current_position
                     claims = _reduces_or_crosses(current_position, position_size)
+                also_closes_from = 0
+                if not claims and row_position == position_size and not add_sizing.asked():
+                    # SUDARSHAN M6.9 (GA1.2): the row already shows the size asked for. It can
+                    # show a fill a minute late: long 65, reversed to -65, and reversed back to
+                    # +65 while the row still shows +65 read as nothing to do, and the account
+                    # stayed at -65. So this too is judged on the row corrected by the order
+                    # book's fills, read after it. When the corrected figure is the size asked
+                    # for, the answer is "No action needed", as before. When it is not, nothing
+                    # is sent and the sentence says the positions are behind; with
+                    # SUDARSHAN_REVERSAL_FROM_FILLS on (off by default, sudarshan/books/
+                    # lag_flag.py) an order that reduces or crosses the corrected position is
+                    # claimed, checked and sent below as any reversal is. When the order book did
+                    # not answer the row stands, as before: nothing is sent either way.
+                    rows = _position_rows(symbol, exchange, auth)
+                    orders = _read_order_rows(auth, exit_guard.EXIT_ORDERS_READ_S)
+                    lag_held = None if orders is None else _held_products(
+                        rows, symbol, exchange, orders
+                    )  # fmt: skip
+                    corrected = None if lag_held is None else lag_held.get(request_product, 0)
+                    behind = orders is not None and corrected != position_size
+                    if behind and corrected is not None and lag_flag.sends():
+                        claims = _reduces_or_crosses(corrected, position_size)
+                        also_closes_from = corrected if claims else 0
+                    if behind and not claims:
+                        logger.warning(f"Order for {symbol} not sent: the positions are behind")
+                        place = exit_guard.position_of(exchange, symbol, product)
+                        said = (
+                            exit_guard.exit_not_sized(place, True, order=True)
+                            if corrected is None
+                            else exit_guard.fills_not_shown_yet(place)
+                        )
+                        refusal = {"status": "error", "message": said, "nothing_sent": True}
+                        return _ErrorResponse(424 if corrected is None else 409), refusal, None
                 if claims:
                     # SUDARSHAN M6.9 (Y2): an order that reduces or crosses the position, as the
                     # row says, claims the position before the read it is sized from and holds
@@ -744,6 +778,13 @@ def place_smartorder_api(data, auth):
                         rows, orders, symbol, exchange, product, request_product, closes_from,
                         order=True,
                     )  # fmt: skip
+                    if not refused and also_closes_from:
+                        # SUDARSHAN M6.9 (GA1.2): and on the side that closes what the fills
+                        # show, which the row does not: an earlier reversal back still working.
+                        refused = _market_exit_working(
+                            rows, orders, symbol, exchange, product, request_product,
+                            also_closes_from, order=True,
+                        )  # fmt: skip
                     if refused:
                         logger.warning(f"Order for {symbol} not sent: a market exit is working")
                         return refused
@@ -1072,7 +1113,9 @@ def _exit_outcome(held, answer, res, response, orderid):
     else:
         said = _refusal_words(response)
         why = f"Upstox refused its exit: {said}" if said else "Upstox refused its exit."
-    return _outcome(held, "not_sent", why)
+    # SUDARSHAN M5.13 (GA1.3): an exit that was sent for and refused leaves the position open
+    # with no order working on it; the kill switch's stop warning counts it by this mark.
+    return {**_outcome(held, "not_sent", why), "refused": True}
 
 
 def _late_words(names):
