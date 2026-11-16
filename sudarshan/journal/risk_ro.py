@@ -13,8 +13,9 @@ never "off": a guess there would read as safety.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -41,6 +42,19 @@ class RiskState:
 
 
 NOT_READ = RiskState(read=False, kill_switch=None)
+#: The columns of the year's risk history file, in order (``RiskReader.history``).
+HISTORY_COLUMNS = ("time_ist", "last_time_ist", "what", "pipe", "where", "by", "times", "summary")
+HISTORY_PAGE = 2000
+_CELL = 300
+
+
+def _cell(value: Any) -> str:
+    return "" if value is None else " ".join(str(value).split())[:_CELL]
+
+
+def _ist_text(value: Any) -> str:
+    ms = _utc_ms(value)
+    return "" if ms is None else datetime.fromtimestamp(ms / 1000, IST).isoformat()
 
 
 def _utc_ms(value: Any) -> int | None:
@@ -84,6 +98,63 @@ class RiskReader:
             kill_since_ms=_utc_ms(row["ks_since"]) if on else None,
             lock_at_ms=_utc_ms(locks[0]["at"]) if locks else None,
         )
+
+
+def _utc_text(day_start_ist: datetime) -> str:
+    """An India midnight as the risk store writes a time: naive UTC text."""
+    return day_start_ist.astimezone(UTC).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def history(reader: RiskReader, start_day: int, end_day: int,
+            page: int = HISTORY_PAGE) -> Iterator[dict[str, str]]:  # fmt: skip
+    """The risk layer's history from ``start_day`` to ``end_day`` (India dates, both included)
+    for the year's records pack: the audit (orders refused, the kill switch, settings changed)
+    as the risk layer still holds it, then the days a daily loss limit was reached. Oldest
+    first, a page at a time. Raises ``RecordsUnavailable``. The audit's ``detail`` is left out:
+    the summary is the sentence the owner was shown."""
+    first = datetime.combine(to_date(start_day), datetime.min.time(), IST)
+    last = datetime.combine(to_date(end_day) + timedelta(days=1), datetime.min.time(), IST)
+    after = 0
+    while True:
+        rows = reader.file.query(
+            "SELECT id, at, last_at, kind, pipe, surface, actor, count, summary FROM risk_audit "
+            "WHERE id > :after AND last_at >= :start AND last_at < :end ORDER BY id LIMIT :page",
+            after=after,
+            start=_utc_text(first),
+            end=_utc_text(last),
+            page=page,
+        )
+        for row in rows:
+            yield {
+                "time_ist": _ist_text(row["at"]),
+                "last_time_ist": _ist_text(row["last_at"]),
+                "what": _cell(row["kind"]),
+                "pipe": _cell(row["pipe"]),
+                "where": _cell(row["surface"]),
+                "by": _cell(row["actor"]),
+                "times": _cell(row["count"]),
+                "summary": _cell(row["summary"]),
+            }
+        if len(rows) < page:
+            break
+        after = int(rows[-1]["id"])
+    for row in reader.file.query(
+        "SELECT pipe, ist_date, at, figure, loss_limit FROM daily_locks "
+        "WHERE ist_date >= :start AND ist_date <= :end ORDER BY ist_date, pipe",
+        start=to_date(start_day).isoformat(),
+        end=to_date(end_day).isoformat(),
+    ):
+        yield {
+            "time_ist": _ist_text(row["at"]),
+            "last_time_ist": "",
+            "what": "daily_loss_limit_reached",
+            "pipe": _cell(row["pipe"]),
+            "where": "",
+            "by": "",
+            "times": "1",
+            "summary": f"Day's P&L {_cell(row['figure'])} against a limit of "
+            f"{_cell(row['loss_limit'])} rupees on {_cell(row['ist_date'])}",
+        }
 
 
 def risk_for(service: Any) -> RiskReader:
