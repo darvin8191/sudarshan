@@ -1182,3 +1182,33 @@ def test_an_entry_is_never_recorded_as_an_exit_hold(placed):
     assert refused.ok is False
     kinds = [e["kind"] for e in store.list_events(strategy.id) if e["kind"].startswith("leg_")]
     assert "leg_exit_held" not in kinds and "leg_entry_placed" in kinds
+
+
+# SUDARSHAN M6.9 (O1): a signal exit held for its size is said once and told on Telegram.
+
+
+def test_a_signal_exit_held_for_its_size_is_one_event_and_one_message(placed, held_exit_messages):
+    strategy = _make()
+    strategy_id = strategy.id
+    signals.handle_signal(strategy, "long_entry", leg_id=1)
+    _fill(strategy, 1)
+    held = DispatchResult(
+        ok=False, error="could not confirm", held=True, response={"why": "unconfirmed"}
+    )
+    with patch.object(signals.order_dispatch, "dispatch_order", return_value=held):
+        for _ in range(3):
+            strategy = store.get_strategy(strategy_id, USER)
+            assert signals.handle_signal(strategy, "long_exit", leg_id=1).ok is False
+
+    events = [e for e in store.list_events(strategy_id) if e["kind"] == "leg_exit_held"]
+    assert len(events) == 1 and events[0]["severity"] == "critical"
+    assert events[0]["message"].startswith("Exit NOT sent for leg 1 (SELL 100 RELIANCE): SUDARSHAN")
+    assert len(held_exit_messages) == 1
+    assert held_exit_messages[0].startswith(
+        "Exit NOT sent (Live)\nStrategy: Signal test\nLeg 1: SELL 100 RELIANCE\n"
+        "An exit alert arrived, but the exit was not sent because SUDARSHAN could not confirm"
+    )
+
+    strategy = store.get_strategy(strategy_id, USER)
+    assert signals.handle_signal(strategy, "long_exit", leg_id=1).ok is True
+    assert placed[-1]["action"] == "SELL"

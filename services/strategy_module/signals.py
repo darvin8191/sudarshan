@@ -735,6 +735,16 @@ def _place(
         strategy_name=strategy_name,
         pricetype=order_dispatch.EXIT_PRICETYPE if exiting else strategy_pricetype,
     )
+    # SUDARSHAN M6.9 (O1): the same refusal for this exit's size was given moments ago and
+    # would only be repeated; no order row and no event are written for it, as on the batch
+    # path (engine._exit_legs). The caller releases the exit claim, as for any held exit.
+    kept = order_dispatch.kept_hold(mode, order) if exiting else None
+    if kept is not None:
+        from sudarshan.books import held_exits
+
+        held_exits.held(run_id, leg["leg_id"], kind, order, kept)
+        return _Placement(ok=False, error=kept.error, exit_claim_id=exit_claim_id)
+
     # Durable intent before the broker is called, exactly as the batch path
     # does. Recording afterwards meant a crash or a database failure between
     # broker acceptance and the insert left a real position that no row
@@ -868,21 +878,32 @@ def _place(
         # another exit for the position is on its way, or an earlier one is not yet seen ended in
         # the order book. Nothing was sent; the caller releases the exit claim, and the leg stays
         # exitable by the next signal, its stop, its target and the square-off.
-        kind, severity = "leg_exit_held", "warn"
-        said = f"{said} held, to be sent again: {result.error}"
+        # SUDARSHAN M6.9 (O1): one event for a leg's hold, and the owner told on Telegram
+        # when the size cannot be confirmed (sudarshan/books/held_exits.py).
+        from sudarshan.books import held_exits
+
+        note = held_exits.held(run_id, leg["leg_id"], kind, order, result)
+        kind, severity, written = "leg_exit_held", note.severity, note.event
+        said = note.message or f"{said} held, to be sent again: {result.error}"
     else:
+        written = True
+        if exiting and result.ok and mode == "live":  # SUDARSHAN M6.9 (O1)
+            from sudarshan.books import held_exits
+
+            said += held_exits.sent(run_id, leg["leg_id"], order, result)
         kind = "leg_exit_placed" if exiting else "leg_entry_placed"
         said += "" if result.ok else f" rejected: {result.error}"
         severity = "info" if result.ok else "warn"
-    store.record_event(
-        strategy_id,
-        user_id,
-        kind,
-        said,
-        run_id=run_id,
-        leg_id=leg["leg_id"],
-        severity=severity,
-    )
+    if written:
+        store.record_event(
+            strategy_id,
+            user_id,
+            kind,
+            said,
+            run_id=run_id,
+            leg_id=leg["leg_id"],
+            severity=severity,
+        )
 
     if row_id is not None and result.ok:
         # After the leg bookkeeping and accepted-placement audit above, never

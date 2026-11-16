@@ -1289,6 +1289,31 @@ def _exit_legs(
             strategy_name=strategy.get("name", ""),
             pricetype=order_dispatch.EXIT_PRICETYPE,
         )
+        # SUDARSHAN M6.9 (O1): the same refusal for this exit's size was given moments ago and
+        # would only be repeated, with no read and no send. No order row and no event are
+        # written for it; the claim is released as for any held dispatch, the leg stays
+        # managed, and the next tick asks again.
+        kept = order_dispatch.kept_hold(mode, order)
+        if kept is not None:
+            from sudarshan.books import held_exits
+
+            if exit_owner == "superseded":
+                state.release_superseded_exit(run_id, leg["leg_id"], leg.get("claim_token"))
+            else:
+                state.release_leg_exit(run_id, leg["leg_id"], leg.get("exit_claim_token"))
+            held_exits.held(run_id, leg["leg_id"], kind, order, kept)
+            outcomes.append(
+                {
+                    "leg_id": leg["leg_id"],
+                    "ok": False,
+                    "error": kept.error,
+                    "position_ref": leg.get("position_ref"),
+                    "exit_owner": exit_owner,
+                    "quiet": True,
+                }
+            )
+            continue
+
         # Recorded before dispatch, as entries are, so an exit that reaches the
         # broker is never invisible afterwards.
         row = store.record_order(
@@ -1420,17 +1445,30 @@ def _exit_legs(
         # for the position is on its way or an earlier one is not yet seen ended in the order
         # book; the claim above was released, the leg stays managed, and the next tick or the
         # pending-stop job sends it again. Recorded as a hold, at warn, with the sentence.
+        # SUDARSHAN M6.9 (O1): a hold writes one event for the leg, not one a tick, and the
+        # owner is told on Telegram when the size cannot be confirmed
+        # (sudarshan/books/held_exits.py).
+        quiet = False
         if result.ok:
             kind_said, said, severity = (
                 "leg_exit_placed",
                 f"Exit {action} {quantity} {leg['symbol']} placed ({kind})",
                 "info",
             )
+            if mode == "live":
+                from sudarshan.books import held_exits
+
+                said += held_exits.sent(run_id, leg["leg_id"], order, result)
         elif getattr(result, "held", False):
+            from sudarshan.books import held_exits
+
+            note = held_exits.held(run_id, leg["leg_id"], kind, order, result)
+            quiet = not note.event
             kind_said, said, severity = (
                 "leg_exit_held",
-                f"Exit held on leg {leg['leg_id']}, to be sent again: {result.error}",
-                "warn",
+                note.message
+                or f"Exit held on leg {leg['leg_id']}, to be sent again: {result.error}",
+                note.severity,
             )
         else:
             kind_said, said, severity = (
@@ -1438,15 +1476,16 @@ def _exit_legs(
                 f"Exit rejected on leg {leg['leg_id']}: {result.error}",
                 "critical",
             )
-        _emit(
-            strategy["id"],
-            user_id,
-            kind_said,
-            said,
-            run_id=run_id,
-            leg_id=leg["leg_id"],
-            severity=severity,
-        )
+        if not quiet:
+            _emit(
+                strategy["id"],
+                user_id,
+                kind_said,
+                said,
+                run_id=run_id,
+                leg_id=leg["leg_id"],
+                severity=severity,
+            )
 
         if result.ok and row_id is not None:
             # The accepted acknowledgement and its audit event must precede a
@@ -1463,6 +1502,7 @@ def _exit_legs(
                 "error": result.error,
                 "position_ref": leg.get("position_ref"),
                 "exit_owner": exit_owner,
+                "quiet": quiet,  # SUDARSHAN M6.9 (O1)
             }
         )
 
@@ -1603,13 +1643,18 @@ def stop_run(run_id: int, user_id: str, reason: str = "manual") -> dict[str, Any
     # a signal that has not claimed yet is refused by this flag under the same
     # run lock used to create claims.
     state.mark_stopping(run_id)
-    _emit(
-        strategy_id,
-        user_id,
-        "run_stop_requested",
-        f"Stop requested ({reason}); exit orders are being attempted",
-        run_id=run_id,
-    )
+    # SUDARSHAN M6.9 (O1): a stop asked for again while its exits are held (every tick of a
+    # breach that lasts) is not written again; the first request and the hold already are.
+    from sudarshan.books import held_exits
+
+    if not (run_row.stop_requested_reason and held_exits.run_is_held(run_id)):
+        _emit(
+            strategy_id,
+            user_id,
+            "run_stop_requested",
+            f"Stop requested ({reason}); exit orders are being attempted",
+            run_id=run_id,
+        )
 
     from services.strategy_module import ack_reconciliation
 
@@ -1756,15 +1801,17 @@ def stop_run(run_id: int, user_id: str, reason: str = "manual") -> dict[str, Any
     # at 15:20 is enough to reach this, so it stays open and says why.
     refused = [outcome for outcome in exits if not outcome.get("ok")]
     if refused and still_held:
-        _emit(
-            strategy_id,
-            user_id,
-            "run_stop_failed",
-            f"Stop refused for {len(refused)} position(s); the run remains open, managed, "
-            "and retryable",
-            run_id=run_id,
-            severity="critical",
-        )
+        # SUDARSHAN M6.9 (O1): not written again while every refusal is a hold already said.
+        if not all(outcome.get("quiet") for outcome in refused):
+            _emit(
+                strategy_id,
+                user_id,
+                "run_stop_failed",
+                f"Stop refused for {len(refused)} position(s); the run remains open, managed, "
+                "and retryable",
+                run_id=run_id,
+                severity="critical",
+            )
         return {
             "ok": False,
             "stop_pending": True,

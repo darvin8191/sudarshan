@@ -206,6 +206,31 @@ def dispatch_order(
     return DispatchResult(ok=False, error=f"Unknown run mode: {mode!r}")
 
 
+def kept_hold(mode: str, order: dict[str, Any]) -> DispatchResult | None:
+    """SUDARSHAN M6.9 (O1): the held answer a live exit would get without a read of the
+    broker's books, because the same refusal for its size was given moments ago
+    (sudarshan/books/surface_exits.py keeps one 2 s); None when the exit must be dispatched.
+    The caller then writes no order row for an answer that is only being repeated. Nothing
+    is sent or read here, and a failure reads as None: the exit is dispatched as before.
+    """
+    if mode != "live":
+        return None
+    try:
+        from sudarshan.books import surface_exits
+
+        kept = surface_exits.kept_refusal(
+            "live", order.get("exchange"), order.get("symbol"), order.get("product"),
+            order.get("action"),
+        )  # fmt: skip
+        if kept is None or not surface_exits.held(kept[1], kept[2]):
+            return None
+        result = _normalise(False, kept[1])
+        return DispatchResult(ok=False, response=result.response, error=result.error, held=True)
+    except Exception:
+        logger.exception("The kept answer for a held exit could not be read")
+        return None
+
+
 def cancel_order(
     *,
     mode: str,

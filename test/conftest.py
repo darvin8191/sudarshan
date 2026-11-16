@@ -155,3 +155,28 @@ def _no_exit_placed_lately(monkeypatch):
     guard = sys.modules.get("sudarshan.books.exit_guard")
     if guard is not None:
         monkeypatch.setattr(guard, "EXITS", guard.ExitsInFlight())
+
+
+# SUDARSHAN M6.9 (O1): a held strategy exit is remembered per (run, leg) and told on Telegram
+# (sudarshan/books/held_exits.py). Run ids repeat between tests, and no test may reach Telegram:
+# each test starts with nothing remembered, and the messages land in this list instead. The
+# strategy module imports the module only when an exit is held or sent, so it is imported here
+# for the strategy module's own test files alone.
+@pytest.fixture(autouse=True)
+def held_exit_messages(request, monkeypatch):
+    import sys
+
+    told: list[str] = []
+    if "strategy_module" in request.module.__name__ or "held_exits" in request.module.__name__:
+        import sudarshan.books.held_exits  # noqa: F401
+    held_exits = sys.modules.get("sudarshan.books.held_exits")
+    if held_exits is None:
+        yield told
+        return
+    surface_exits = sys.modules["sudarshan.books.surface_exits"]
+    held_exits.HOLDS.reset()
+    surface_exits.REFUSALS.clear()
+    monkeypatch.setattr(held_exits, "_tell", told.append)
+    yield told
+    held_exits.HOLDS.reset()
+    surface_exits.REFUSALS.clear()

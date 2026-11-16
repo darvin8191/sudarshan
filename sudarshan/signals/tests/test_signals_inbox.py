@@ -245,3 +245,130 @@ def test_ten_thousand_scans_leave_no_descriptor_open(box):
             box.reader.keep(got.found[0])
     box.reader.state()
     watch.assert_clean()
+
+
+# ---- S1 (v0.15.0 review): a folder in the letterbox -------------------------------------------
+def test_an_empty_folder_is_removed_whatever_its_name(box):
+    """Before S1 a folder was unlinked as a file, which fails, so it was refused again on every
+    scan for ever: a row, a count and a log line a second."""
+    (box.folder / f"{AT}-1.json").mkdir()
+    (box.folder / "anything").mkdir()
+    (box.folder / ".hidden").mkdir()
+    scan = box.reader.scan()
+    assert sorted(scan.refused) == [
+        (".hidden", "kind"),
+        (f"{AT}-1.json", "kind"),
+        ("anything", "kind"),
+    ]
+    assert box.names() == set()
+    assert box.reader.scan() == inbox.Scan()
+
+
+def test_a_strangers_empty_folder_is_removed_and_counted_as_a_strangers(box):
+    folder = box.folder / "theirs"
+    folder.mkdir()
+    box.strangers.add(folder.stat().st_ino)
+    assert box.reader.scan().strangers == 1 and box.names() == set()
+
+
+def test_a_folder_with_something_in_it_is_counted_and_logged_once_then_passed_over(box, caplog):
+    folder = box.folder / f"{AT}-1.json"
+    folder.mkdir()
+    (folder / "inside").write_text("kept")
+    box.put(f"{AT}-2.json", body(2))
+    with caplog.at_level("WARNING", logger="sudarshan.signals"):
+        first = box.reader.scan()
+        later = [box.reader.scan() for _ in range(50)]
+    assert first.refused == [(folder.name, "kind")] and first.stuck == 0
+    assert [f.name for f in first.found] == [f"{AT}-2.json"]  # the publisher's document is read
+    for scan in later:  # nothing counted, nothing refused, nothing logged again
+        assert (scan.refused, scan.strangers, scan.stuck) == ([], 0, 1)
+    said = [r.getMessage() for r in caplog.records if "could not be removed" in r.getMessage()]
+    assert len(said) == 1 and said[0].startswith("A folder in the TRINETRA letterbox")
+    assert (folder / "inside").read_text() == "kept"  # nothing inside is touched or read
+
+
+def test_a_stuck_folder_is_tried_again_when_it_changes_and_goes_once_empty(box):
+    folder = box.folder / "stuck"
+    folder.mkdir()
+    (folder / "inside").write_text("x")
+    assert box.reader.scan().refused == [("stuck", "kind")]
+    assert box.reader.scan().stuck == 1
+    (folder / "inside").unlink()  # emptied: the folder's own times change
+    scan = box.reader.scan()
+    assert scan.refused == [("stuck", "kind")] and scan.stuck == 0 and box.names() == set()
+    assert box.reader._stuck == {}
+
+
+def test_what_is_remembered_as_stuck_goes_when_the_entry_goes(box):
+    import shutil
+
+    folder = box.folder / "stuck"
+    folder.mkdir()
+    (folder / "inside").write_text("x")
+    box.reader.scan()
+    assert list(box.reader._stuck) == ["stuck"]
+    shutil.rmtree(folder)
+    assert box.reader.scan() == inbox.Scan() and box.reader._stuck == {}
+
+
+def test_probing_a_folder_named_like_a_document_removes_it(box):
+    (box.folder / f"{AT}-1.json").mkdir()
+    assert box.reader.probe(f"{AT}-1.json") == "refused:kind" and box.names() == set()
+
+
+# ---- S3 (v0.15.0 review): the publisher's dot-named files -------------------------------------
+def _aged_box(tmp_path, now):
+    aged = Box(tmp_path / "aged")
+    aged.reader.clock = lambda: now[0]
+    return aged
+
+
+def test_a_dead_writers_dot_file_is_removed_after_an_hour_and_not_before(tmp_path):
+    """A writer killed between its temporary file and the rename left it for ever (S3)."""
+    import time
+
+    now = [time.time()]
+    box = _aged_box(tmp_path, now)
+    name = f".{AT}-1.json.4242"
+    box.put(name)
+    for ahead in (0, 60, inbox.DOT_FILE_AGE_S - 5):
+        now[0] = time.time() + ahead
+        assert box.reader.scan() == inbox.Scan() and box.names() == {name}
+    now[0] = time.time() + inbox.DOT_FILE_AGE_S + 5
+    assert box.reader.scan() == inbox.Scan(swept=1) and box.names() == set()
+
+
+def test_a_dot_file_still_being_written_is_never_old(tmp_path):
+    """Age runs from the last write or change, whichever is later: an old modification time on
+    a file just touched (its change time is now) does not make it a dead writer's."""
+    import time
+
+    now = [time.time() + inbox.DOT_FILE_AGE_S - 5]
+    box = _aged_box(tmp_path, now)
+    path = box.put(".being-written")
+    os.utime(path, (0, 0))  # modified in 1970, changed just now
+    assert box.reader.scan() == inbox.Scan() and box.names() == {".being-written"}
+    now[0] = time.time() + 2 * inbox.DOT_FILE_AGE_S
+    path.write_bytes(b"more")  # written again: touched now, by the real clock
+    now[0] = time.time() + inbox.DOT_FILE_AGE_S - 5
+    assert box.reader.scan() == inbox.Scan() and box.names() == {".being-written"}
+
+
+def test_a_dot_file_from_the_future_is_left_alone(tmp_path):
+    import time
+
+    now = [time.time() - 86_400]  # this machine's clock stepped back a day
+    box = _aged_box(tmp_path, now)
+    box.put(".tmp")
+    assert box.reader.scan() == inbox.Scan() and box.names() == {".tmp"}
+
+
+def test_a_strangers_old_dot_file_is_a_strangers_as_before(tmp_path):
+    import time
+
+    now = [time.time() + 2 * inbox.DOT_FILE_AGE_S]
+    box = _aged_box(tmp_path, now)
+    box.put(".theirs", stranger=True)
+    scan = box.reader.scan()
+    assert (scan.strangers, scan.swept) == (1, 0) and box.names() == set()

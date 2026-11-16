@@ -83,3 +83,16 @@ def _books_that_show_the_asked_quantity_still_held(monkeypatch):
 
     monkeypatch.setattr(surface_exits, "upstox_book", book)
     monkeypatch.setattr(surface_exits, "REFUSALS", surface_exits._Refusals())
+
+
+@pytest.fixture(autouse=True)
+def held_exit_messages(monkeypatch):
+    """M6.9 (O1): nothing remembered of a held strategy exit from the test before, and what
+    would be told on Telegram lands in this list instead (sudarshan/books/held_exits.py)."""
+    from sudarshan.books import held_exits
+
+    told: list[str] = []
+    held_exits.HOLDS.reset()
+    monkeypatch.setattr(held_exits, "_tell", told.append)
+    yield told
+    held_exits.HOLDS.reset()
