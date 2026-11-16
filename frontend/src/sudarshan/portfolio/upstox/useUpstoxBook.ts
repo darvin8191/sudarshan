@@ -22,8 +22,12 @@ export const ACCOUNT_RESYNC_MS = 45_000
 /** A part read this recently is answered from memory; an event asks for a read this fresh. */
 export const EVENT_MAX_AGE_S = 2
 
-/** The views that read the account book; History, Trades and P&L read their own records. */
-export type BookView = Exclude<UpstoxView, 'history' | 'trades' | 'pnl'>
+/** The views that read the account book; History, Trades and P&L read their own records, and
+ *  Allocation and Performance (M7.15) read the holdings as the Holdings view does. */
+export type BookView = Exclude<
+  UpstoxView,
+  'history' | 'trades' | 'pnl' | 'allocation' | 'performance'
+>
 
 export const PARTS_OF: Record<BookView, UpstoxPartName[]> = {
   holdings: ['holdings'],
