@@ -122,6 +122,7 @@ import { StudyLegend } from './StudyLegend'
 import { StyleSheet } from './StyleSheet'
 import { TimeframeSheet } from './TimeframeSheet'
 // SUDARSHAN M14.8: a trade opened from its sheet, marked on the chart.
+import { TripMarkSheet } from './TripMarkSheet'
 import { TripNotice } from './TripNotice'
 import { tripIdOf, useTripMarkers } from './tripMarkers'
 import { useChartBooks, useChartLines } from './useChartLines'
@@ -204,6 +205,7 @@ type Sheet =
   | { sheet: 'indicators' }
   | { sheet: 'study'; index: number }
   | { sheet: 'depth' }
+  | { sheet: 'fills'; id: string }
 
 function readSheet(state: unknown): Sheet | null {
   if (!state || typeof state !== 'object') return null
@@ -217,6 +219,8 @@ function readSheet(state: unknown): Sheet | null {
   }
   if (value.sheet === 'search') return { sheet: 'search' }
   if (value.sheet === 'note' && typeof value.id === 'string') return { sheet: 'note', id: value.id }
+  if (value.sheet === 'fills' && typeof value.id === 'string')
+    return { sheet: 'fills', id: value.id }
   if (value.sheet === 'alert')
     return typeof value.id === 'number' ? { sheet: 'alert', id: value.id } : { sheet: 'alert' }
   if (
@@ -481,6 +485,7 @@ const ChartScreen = memo(function ChartScreen({
     exchange,
     decimals: priceDp(info?.tickSize, 0),
     setTimeframe,
+    restoreTimeframe: () => setTimeframe(readInterval()),
   })
 
   // Press and hold to read a candle; not while the drawing tools are out.
@@ -596,6 +601,27 @@ const ChartScreen = memo(function ChartScreen({
     navigate(-1)
   }, [location.state, navigate])
   askNote.current = (id) => openSheet({ sheet: 'note', id })
+
+  // SUDARSHAN M14.8 (review L4): a tap on a trade's mark opens its fills in full. The mark is
+  // small, so the tap is found within a finger of it; not while drawing or reading a candle.
+  const tapMark = useRef<(x: number, y: number) => void>(() => {})
+  tapMark.current = (x, y) => {
+    if (!owner || drawing || inspect) return
+    const id = owner.markerAt(x, y)
+    if (id && trip.fillsOf(id)) openSheet({ sheet: 'fills', id })
+  }
+  useEffect(() => {
+    const el = surface.current
+    if (!el) return
+    const onClick = (event: MouseEvent) => {
+      // Only a tap on the chart itself: a label, a legend or a row over it has its own tap.
+      if (!(event.target instanceof Node) || !host.current?.contains(event.target)) return
+      const rect = el.getBoundingClientRect()
+      tapMark.current(event.clientX - rect.left, event.clientY - rect.top)
+    }
+    el.addEventListener('click', onClick)
+    return () => el.removeEventListener('click', onClick)
+  }, [])
   // Every move through history settles what is open.
   // biome-ignore lint/correctness/useExhaustiveDependencies: the key is the trigger
   useEffect(() => {
@@ -1043,6 +1069,11 @@ const ChartScreen = memo(function ChartScreen({
         prices={prices}
         decimals={dp(prices.get().tick?.ltp ?? 0)}
         quiet={bookQuiet(status)}
+      />
+      <TripMarkSheet
+        fills={sheet?.sheet === 'fills' ? trip.fillsOf(sheet.id) : null}
+        decimals={priceDp(info?.tickSize, 0)}
+        onOpenChange={(open) => !open && closeSheet()}
       />
       <StyleSheet
         open={sheet?.sheet === 'style'}

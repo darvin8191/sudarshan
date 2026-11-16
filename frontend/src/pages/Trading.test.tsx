@@ -11,6 +11,9 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@/test
 import Trading from './Trading'
 
 const fake = vi.hoisted(() => ({
+  /** SUDARSHAN M4.18: which copy of the layouts was kept, as the catalogue hook says it. */
+  catalogNotice: null as string | null,
+  dismissNotice: vi.fn(),
   autosave: {
     paused: false,
     capture: () => ({}),
@@ -67,7 +70,15 @@ vi.mock('@/hooks/useProfileMenuItems', async () => {
 })
 vi.mock('openalgo-charts', () => ({ createLinkGroup: () => ({ setOptions() {}, destroy() {} }) }))
 vi.mock('@/hooks/useChartWorkspaceCatalog', () => ({
-  useChartWorkspaceCatalog: () => ({ catalog: null, loading: false, pending: false, error: null }),
+  useChartWorkspaceCatalog: () => ({
+    catalog: null,
+    loading: false,
+    pending: false,
+    error: null,
+    notice: fake.catalogNotice,
+    dismissNotice: fake.dismissNotice,
+    keptOnServer: false,
+  }),
 }))
 vi.mock('@/hooks/useWorkspaceAutosave', () => ({
   useWorkspaceAutosave: (options: typeof fake.autosave) => {
@@ -149,6 +160,7 @@ beforeEach(() => {
   localStorage.clear()
   fake.snapshot = { phase: 'idle', scope: 'focused', ownerId: null, state: null }
   fake.missingPane = ''
+  fake.catalogNotice = null
   fake.stop.mockImplementation(() => {
     fake.snapshot = { ...fake.snapshot, phase: 'idle', ownerId: null }
     fake.callbacks?.onChange(fake.snapshot)
@@ -255,6 +267,32 @@ describe('workspace replay page ownership', () => {
     expect(fake.terminal.setWorkspaceTransitionLocked).toHaveBeenLastCalledWith(true)
     view.unmount()
     expect(fake.destroy).toHaveBeenCalledOnce()
+  })
+})
+
+// SUDARSHAN M4.18 (review M3): which copy of the layouts was kept is said on the terminal's own
+// line, quietly, and stays until dismissed.
+describe('the sentence about which layout was kept', () => {
+  const KEPT =
+    'Layouts were changed on another device too. “Morning” kept the other device’s version, and the change made in this browser was not saved.'
+
+  it('is on the terminal’s notice line as a status, never an alert, with a way to dismiss it', async () => {
+    fake.catalogNotice = KEPT
+    const { container } = render(<Trading />)
+    const line = container.querySelector('[data-workspace-notice]') as HTMLElement
+    expect(line).toHaveTextContent(KEPT)
+    expect(line.tagName).toBe('OUTPUT')
+    expect(line.className).not.toContain('destructive')
+    expect(
+      screen.queryAllByRole('alert').some((alert) => alert.textContent?.includes('Layouts were'))
+    ).toBe(false)
+    fireEvent.click(within(line).getByRole('button', { name: 'Dismiss' }))
+    expect(fake.dismissNotice).toHaveBeenCalledOnce()
+  })
+
+  it('shows nothing when there is nothing to say', async () => {
+    const { container } = render(<Trading />)
+    expect(container.querySelector('[data-workspace-notice]')).toBeNull()
   })
 })
 

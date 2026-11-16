@@ -35,6 +35,7 @@ export function IndicatorTemplates({
   loading,
   pending,
   error,
+  keptOnServer,
   run,
   reload,
   target,
@@ -124,8 +125,11 @@ export function IndicatorTemplates({
         <DialogHeader>
           <DialogTitle>Indicator templates</DialogTitle>
           <DialogDescription>
-            Save studies and their styles, then apply them to the selected chart. Templates are
-            saved for your account in this browser.
+            Save studies and their styles, then apply them to the selected chart.{' '}
+            {/* SUDARSHAN M4.18 (review M3): where the templates are actually kept. */}
+            {keptOnServer
+              ? 'Templates are kept for your account on the server, so your other devices have them too.'
+              : 'Templates are saved for your account in this browser.'}
           </DialogDescription>
         </DialogHeader>
         {(failure || error) && (
