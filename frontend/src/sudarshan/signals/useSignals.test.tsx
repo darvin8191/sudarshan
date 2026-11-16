@@ -4,7 +4,7 @@
  * stale, the age, the colour going, a reading lapsing) at the moment each changes; the room joined
  * unless the view is off. Every answer is the real bridge's (bridge.answers.json).
  */
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { focusManager, QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -185,6 +185,49 @@ describe('the view as it stands now', () => {
     await waitFor(() => expect(result.current.off).toBe(WORDS.off))
     expect(result.current.state).toBeNull()
     await waitFor(() => expect(off).toHaveBeenCalledWith(EVENT_UPDATE, expect.any(Function)))
+  })
+
+  // Review v0.15.0 L7: off is read once per visit, not on every return to the app after 30 s.
+  it('switched off: not read again on a return to the app, however long after', async () => {
+    vi.useFakeTimers({ now: NOW_MS, toFake: ['Date'] })
+    answering(['off'])
+    const { result } = renderHook(() => useSignals(), { wrapper: wrapper(client) })
+    await waitFor(() => expect(result.current.off).toBe(WORDS.off))
+    expect(webClient.get).toHaveBeenCalledTimes(1)
+    vi.setSystemTime(NOW_MS + 10 * 60_000)
+    await act(async () => {
+      focusManager.setFocused(false)
+      focusManager.setFocused(true)
+      await Promise.resolve()
+    })
+    // A second screen that shows the view (the Dashboard's chip, then /trinetra) asks nothing.
+    renderHook(() => useSignals(), { wrapper: wrapper(client) })
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(webClient.get).toHaveBeenCalledTimes(1)
+    // Try again still asks.
+    await act(async () => {
+      result.current.refetch()
+      await Promise.resolve()
+    })
+    expect(webClient.get).toHaveBeenCalledTimes(2)
+    focusManager.setFocused(undefined)
+  })
+
+  it('on: a return to the app after 30 s reads the state again, as before', async () => {
+    vi.useFakeTimers({ now: NOW_MS, toFake: ['Date'] })
+    answering(['state'])
+    const { result } = renderHook(() => useSignals(), { wrapper: wrapper(client) })
+    await waitFor(() => expect(result.current.state).not.toBeNull())
+    vi.setSystemTime(NOW_MS + 31_000)
+    await act(async () => {
+      focusManager.setFocused(false)
+      focusManager.setFocused(true)
+      await Promise.resolve()
+    })
+    await waitFor(() => expect(webClient.get).toHaveBeenCalledTimes(2))
+    focusManager.setFocused(undefined)
   })
 
   it('on: the room is joined on the shared connection', async () => {
