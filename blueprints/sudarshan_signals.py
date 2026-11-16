@@ -34,6 +34,14 @@ never the status. When the service does not answer, its own ``/health`` says whe
 switched off or not set up; otherwise "SUDARSHAN's TRINETRA reader is not answering.", and a write
 sent and not answered is "Not confirmed". Whether the view is on is never read here from a second
 switch.
+
+The push to the owner's open screens (B2, README section 9): the service posts each update to
+``POST /sudarshan/signals/internal/push``, one token sealed for op ``push`` under
+``SIGNALS_PUSH_INFO`` (principal ``sudarshan-signals``, at most 32 KiB). No session and no CSRF:
+the seal is the authentication, and nginx's headers make it 404. Each item whose event is in
+``contract.PUSH_EVENTS`` is emitted to the room ``sudarshan:signals:owner`` only, inside the
+request (``extensions.emit_from_any_thread``), and the answer is the room's size. An open app joins
+the room with ``sudarshan_signals_join`` after each connect, only with the owner's session.
 """
 
 import os
@@ -43,15 +51,25 @@ from typing import NamedTuple
 
 import httpx
 from flask import Blueprint, jsonify, request, session
+from flask_socketio import join_room
 from werkzeug.exceptions import HTTPException, RequestEntityTooLarge
 
 from database.user_db import find_user_by_username
+from extensions import emit_from_any_thread, is_owner_session, socketio
 from limiter import limiter
 from sudarshan.alerts import loopback
 from sudarshan.autologin.config import is_loopback_url
-from sudarshan.autologin.handoff import seal
+from sudarshan.autologin.handoff import (
+    SEAL_TTL_S,
+    HandoffRejected,
+    NonceBook,
+    NoncesFull,
+    open_sealed,
+    seal,
+)
 from sudarshan.signals import contract
-from sudarshan.vault import SIGNALS_API_INFO, fernet_for, pepper_from
+from sudarshan.vault import SIGNALS_API_INFO, SIGNALS_PUSH_INFO, fernet_for, pepper_from
+from utils import real_threading
 from utils.httpx_client import get_httpx_client
 from utils.lazy import LazyInit
 from utils.logging import get_logger
@@ -61,7 +79,9 @@ from utils.thread_safe_cache import MISSING, LockedTTLCache
 logger = get_logger(__name__)
 
 API_PREFIX = contract.API_PREFIX
-sudarshan_signals_bp = Blueprint("sudarshan_signals", __name__, url_prefix=API_PREFIX)
+#: The page's routes are under API_PREFIX and the service's push at contract.PUSH_PATH: each rule
+#: is written whole, so the blueprint has no prefix of its own.
+sudarshan_signals_bp = Blueprint("sudarshan_signals", __name__)
 
 PRINCIPAL = contract.PRINCIPALS["api"]
 LOCAL_HOST = "127.0.0.1"
@@ -381,10 +401,109 @@ def _register(spec: OpSpec) -> None:
     guarded = limiter.shared_limit(LIMITS[spec.cls], scope=SCOPES[spec.cls])(view)
     guarded = _owner_only(guarded)
     guarded = _session_required(guarded)
-    rule = spec.route.replace("<id>", "<int:id>")
+    rule = API_PREFIX + spec.route.replace("<id>", "<int:id>")
     sudarshan_signals_bp.add_url_rule(rule, endpoint=spec.name, view_func=guarded,
                                       methods=[spec.method])  # fmt: skip
 
 
 for _spec in OPS:
     _register(_spec)
+
+
+# -- the service's push and the owner's room (B2) ----------------------------------------------
+
+NAMESPACE = "/"
+PUSH_MAX_BYTES = contract.SEAL_LIMITS["push"]
+#: The service sends one item a request; anything past this is not its push.
+MAX_PUSH_ITEMS = 8
+#: Set by nginx on every proxied location: a request carrying any of them did not come from this
+#: server's sudarshan-signals, which calls 127.0.0.1:5000 directly.
+PROXY_HEADERS = ("X-Forwarded-For", "X-Real-IP", "Forwarded", "X-Forwarded-Proto",
+                 "X-Forwarded-Host")  # fmt: skip
+
+_push_fernet_lazy = LazyInit(
+    lambda: fernet_for(pepper_from(os.environ), SIGNALS_PUSH_INFO), "sudarshan-signals-push"
+)
+# One push per update, folded per burst: a few a second at most. The book holds 2 x 60 s of 4 a
+# second and answers 503 past it rather than forget a nonce that could still be replayed.
+_push_nonces = NonceBook(2 * SEAL_TTL_S * 4, lock=real_threading.RLock())
+
+
+def _push_fernet():
+    return _push_fernet_lazy.get()
+
+
+def _screens() -> int:
+    """How many open apps are in the owner's room (one worker, no message queue: exact)."""
+    rooms = getattr(getattr(getattr(socketio, "server", None), "manager", None), "rooms", None)
+    if not isinstance(rooms, dict):
+        return 0
+    members = rooms.get(NAMESPACE, {}).get(contract.ROOM)
+    try:
+        return len(members) if members is not None else 0
+    except TypeError:
+        return 0
+
+
+def _refused(status: int, message: str):
+    return jsonify({"status": "error", "message": message}), status
+
+
+@sudarshan_signals_bp.route(contract.PUSH_PATH, methods=["POST"])
+def internal_push():
+    """sudarshan-signals' update for the owner's open screens: emitted to his room only, inside
+    this request (safe in every runtime); the answer is the room's size. Never retried."""
+    if any(header in request.headers for header in PROXY_HEADERS):
+        return _refused(404, "Not found")
+    length = request.content_length
+    if length is None:
+        return _refused(411, "Length required")
+    if length > PUSH_MAX_BYTES:
+        return _refused(413, "Too large")
+    try:
+        message = open_sealed(_push_fernet(), request.get_data(cache=False), op=contract.PUSH_OP,
+                              seen=_push_nonces, max_bytes=PUSH_MAX_BYTES)  # fmt: skip
+    except NoncesFull:
+        _warn_once("push-busy", "The TRINETRA view: too many pushes in the last two minutes")
+        return _refused(503, "Busy")
+    except HandoffRejected as exc:
+        _warn_once("push-refused", "The TRINETRA view: refused a push that was not sealed by this "
+                   "server's sudarshan-signals (%s)", exc)  # fmt: skip
+        return _refused(403, "Forbidden")
+    if message.get("principal") != contract.PRINCIPALS["push"]:
+        return _refused(403, "Forbidden")
+    items = message.get("items")
+    if not isinstance(items, list) or len(items) > MAX_PUSH_ITEMS:
+        return _refused(400, "Bad push")
+    screens = _screens()
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        event, data = item.get("event"), item.get("data")
+        if event in contract.PUSH_EVENTS and isinstance(data, dict):
+            emit_from_any_thread(event, data, to=contract.ROOM, namespace=NAMESPACE)
+    return jsonify({"status": "success", "screens": screens})
+
+
+@socketio.on(contract.JOIN_EVENT)
+def _join_owner_room(data=None):
+    """An open app joins the owner's room if its session is the owner's: the check every connect
+    makes (SIO1), made again because a socket admitted before the daily expiry may ask after it.
+    A check that raises is a refusal."""
+    try:
+        owner = is_owner_session()
+    except Exception:
+        logger.exception("The TRINETRA view: the owner check failed when a screen asked to join")
+        owner = False
+    if not owner:
+        return {"ok": False, "message": WORDS["forbidden"]}
+    join_room(contract.ROOM)
+    return {"ok": True}
+
+
+@sudarshan_signals_bp.record_once
+def _exempt_the_push_from_csrf(state):
+    """The service has no browser session to forge; its push is authenticated by the seal."""
+    csrf = state.app.extensions.get("csrf") or getattr(state.app, "csrf", None)
+    if csrf is not None:
+        csrf.exempt(internal_push)

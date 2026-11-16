@@ -46,7 +46,7 @@ from sudarshan.signals.config import (
 from sudarshan.signals.migrations import SchemaTooNew
 from sudarshan.signals.store import DB_FILENAME, SignalsStore, StoreError
 from sudarshan.tasks import cancel_and_wait
-from sudarshan.vault import SIGNALS_API_INFO, SIGNALS_JOURNAL_INFO, fernet_for
+from sudarshan.vault import SIGNALS_API_INFO, SIGNALS_JOURNAL_INFO, SIGNALS_PUSH_INFO, fernet_for
 
 log = logging.getLogger("sudarshan.signals")
 
@@ -56,7 +56,8 @@ SETUP_EVERY_S = 30.0
 PRUNE_EVERY_S = 3600.0
 #: How often the same warning (strangers' files, files beyond the ceiling) may be logged.
 WARN_EVERY_S = 3600.0
-PURPOSE_KEYS = {"api": SIGNALS_API_INFO, "journal": SIGNALS_JOURNAL_INFO}
+#: The API serves "api" and "journal" only (contract.SERVED_PURPOSES); "push" seals what it sends.
+PURPOSE_KEYS = {"api": SIGNALS_API_INFO, "journal": SIGNALS_JOURNAL_INFO, "push": SIGNALS_PUSH_INFO}
 
 
 @dataclass
@@ -180,6 +181,11 @@ class Service:
         #: What the notices told (T9; signals.db meta "notices"), so a restart tells nothing twice.
         self.notice_memory: dict[str, Any] | None = None
         self.events_path = settings.state_dir / c.EVENTS_FILE
+        #: The push to the owner's screens (B2, push.py): its key (None: nothing is pushed), the
+        #: causes not pushed yet, and the event its job waits on.
+        self.push_key = keys.get("push")
+        self.push_causes: set[str] = set()
+        self.push_due = asyncio.Event()
 
     # ---- what the ops and /health see ----------------------------------------------------------
     @property
@@ -482,8 +488,10 @@ class Service:
             self.updated("lapse" if cycle.lapsed and not cycle.altered else "document")
 
     def updated(self, cause: str) -> None:
-        """The current readings or the settings changed (``contract.UPDATE_CAUSES``): the place
-        the push to the owner's screens (B2) starts from."""
+        """The current readings or the settings changed (``contract.UPDATE_CAUSES``): a push to
+        the owner's screens is due. push.py's job sends it; nothing waits here."""
+        self.push_causes.add(cause)
+        self.push_due.set()
 
     def _warn(self, key: str, message: str, *args: Any) -> None:
         now = time.monotonic()
@@ -504,7 +512,8 @@ async def _serve(service: Service) -> None:
 
 
 def keys_for(pepper: str) -> dict[str, Any]:
-    """The two served purposes' keys, derived from OpenAlgo's pepper (sudarshan/vault/keys.py)."""
+    """The keys of the purposes this service opens or seals, derived from OpenAlgo's pepper
+    (sudarshan/vault/keys.py)."""
     return {name: fernet_for(pepper, info) for name, info in PURPOSE_KEYS.items()}
 
 
@@ -528,3 +537,4 @@ def main() -> int:
 
 # One line per module that adds a job (``@job``) or a hand-on hook (``@hand_on``):
 from sudarshan.signals import perf as _perf  # noqa: E402,F401  (T8: the daily index marks)
+from sudarshan.signals import push as _push  # noqa: E402,F401  (B2: the push to the open screens)

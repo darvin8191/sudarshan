@@ -84,7 +84,7 @@ def test_every_op_of_the_contract_has_its_route():
     }  # fmt: skip
     expected = {
         (s.name, PREFIX + s.route.replace("<id>", "<int:id>"), (s.method,)) for s in contract.OPS
-    }
+    } | {("internal_push", contract.PUSH_PATH, ("POST",))}  # the service's push (B2)
     assert rules == expected
     assert {s.name: s.query for s in bp_module.OPS}["timeline"] == (
         ("module", "str"), ("instrument", "str"), ("before", "int"), ("after_ms", "int"),
