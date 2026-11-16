@@ -362,6 +362,162 @@ def test_two_ratios_say_the_same_thing_as_fractions_or_the_other_way_round():
     )
 
 
+# ---- the lots against the holdings (design p7 4.3, 6.3; review H3) -------------------------------
+#: A split of Friday 9 Oct 2026, a week and more before the records compared (its new shares reach
+#: the demat account days after the ex-date, so the check leaves the week after it alone).
+SPLIT_DAY = 20261009
+
+
+async def check_of(n):
+    answer = await n.rig.call("ca_list")
+    assert answer["status"] == "success", answer
+    return answer["data"]["lot_check"]
+
+
+@scenario
+async def test_the_lots_are_checked_against_the_holdings_and_a_double_apply_is_caught(n):
+    """100 bought on 10 Jun 2026. Split 1:5 on 9 Oct: Upstox holds 100 on the 8th and 500 on
+    the 21st. The trades were read on 26 Oct (NOW), so the record compared is the 21st's, the
+    last one two days or more before. Applied as 5 for 1 the lots say 100 x 5 = 500: agreed.
+
+    Then the same split is applied a second time in a way no matching can see (Upstox lists it
+    again dated 28 Sep, eleven days off, and the owner taps yes): the lots say 100 x 5 x 5 =
+    2,500 against 500 held, and the check says so, naming both figures, with the change that
+    makes them agree: leaving out the one confirmed last. Old code had no such check at all."""
+    history(n, (20260610, "BUY", 100))
+    record(n, 20261008, **{UPSTOX: 100})
+    record(n, 20261021, **{UPSTOX: 500})
+    split = event(n, "split", ex_day=SPLIT_DAY, ratio=(1, 5))
+    before = await check_of(n)
+    # Not applied yet: 100 in the lots against 500 held, and the sentence names the split that
+    # waits, the likeliest reason, never a purchase to add.
+    assert (before["state"], before["day"]) == ("ok", 20261021)
+    (row,) = before["rows"]
+    assert (row["held_qty_u"], row["lots_qty_u"], row["fix"]) == (500 * U, 100 * U, None)
+    assert row["words"] == ("PROBE LTD: Upstox holds 500 and the lots say 100. The split of "
+                            "9 Oct 2026 waits for you under To confirm.")  # fmt: skip
+    await n.rig.call("ca_decide", id=split, scope="upstox", state="applied", ratio_num=5,
+                     ratio_den=1)  # fmt: skip
+    after = await check_of(n)
+    assert (after["state"], after["rows"], after["words"]) == ("ok", [], None)
+    # The forced second apply.
+    twice = event(n, "split", ex_day=20260928, ratio=(1, 5))
+    done = await n.rig.call("ca_decide", id=twice, scope="upstox", state="applied",
+                            ratio_num=5, ratio_den=1)  # fmt: skip
+    assert done["status"] == "success"
+    check = await check_of(n)
+    (row,) = check["rows"]
+    assert (row["isin"], row["name"], row["held_qty_u"], row["lots_qty_u"]) == (
+        UPSTOX, "PROBE LTD", 500 * U, 2500 * U)  # fmt: skip
+    assert row["words"] == (
+        "PROBE LTD: after the split of 28 Sep 2026 the lots say 2,500 and Upstox holds 500. "
+        "Without it the lots would say 500: it may have been counted twice."
+    )
+    assert check["words"] == (
+        "Lots and holdings differ for 1 share: PROBE LTD 500 held, 2,500 in lots. Compared at "
+        "the close of 21 Oct 2026."
+    )
+    version = n.read(lambda tx: tx.rows("ca_decision", event_id=twice))[0]["version"]
+    assert row["fix"] == {"event_id": twice, "version": version, "state": "dismissed",
+                          "ratio_num": None, "ratio_den": None}  # fmt: skip
+    assert answer_misses({"lot_check": check}) == set()
+    # The fix, sent as the phone sends it, is the decision changed from its version.
+    fixed = await n.rig.call("ca_decide", id=twice, scope="upstox", **row["fix"])
+    assert fixed["status"] == "success", fixed
+    assert (await check_of(n))["rows"] == []
+    assert lots_after(n)[0] == [(20260610, 500, 1_000_000)]
+
+
+@scenario
+async def test_a_wrong_way_split_is_caught_with_its_fix_and_like_is_compared_with_like(n):
+    """The wrong reading of 1:5 (every 5 made 1): 100 / 5 = 20 in the lots, 500 at Upstox, and
+    the other reading, 100 x 5 = 500, makes them agree: the check offers it."""
+    history(n, (20260610, "BUY", 100), (20261023, "BUY", 7), read_at=NOW + 2 * 86_400_000)
+    record(n, 20261008, **{UPSTOX: 100})
+    record(n, 20261016, **{UPSTOX: 500})
+    record(n, 20261023, **{UPSTOX: 507})
+    record(n, 20261026, **{UPSTOX: 507})
+    split = event(n, "split", ex_day=SPLIT_DAY, ratio=(1, 5))
+    await n.rig.call("ca_decide", id=split, scope="upstox", state="applied", ratio_num=1,
+                     ratio_den=5)  # fmt: skip
+    check = await check_of(n)
+    # Trades read on 28 Oct: the record compared is the 26th's, with the trades up to it:
+    # 100 / 5 + 7 = 27 against 507.
+    assert check["day"] == 20261026
+    (row,) = check["rows"]
+    assert (row["held_qty_u"], row["lots_qty_u"]) == (507 * U, 27 * U)
+    assert row["words"] == (
+        "PROBE LTD: after the split of 9 Oct 2026 the lots say 27 and Upstox holds 507. Read "
+        "the other way round, the lots would say 507: it was likely confirmed the wrong way "
+        "round."
+    )
+    assert (row["fix"]["state"], row["fix"]["ratio_num"], row["fix"]["ratio_den"]) == (
+        "applied", 5, 1)  # fmt: skip
+    # Trades read on the 25th: the record of the 23rd is the last one two days before, but the
+    # share was traded that day (its record may not show that day's trade yet), so it is not
+    # compared tonight: no row, never a difference made of the 23rd's own purchase.
+    history(n, (20260610, "BUY", 100), (20261023, "BUY", 7), read_at=NOW - 86_400_000)
+    check = await check_of(n)
+    assert (check["day"], check["rows"]) == (20261023, [])
+    # Trades read on the 22nd know nothing of the 23rd: the record of the 16th is compared, with
+    # the trades up to the 16th (20 against 500), never the 23rd's holdings.
+    history(n, (20260610, "BUY", 100), read_at=NOW - 4 * 86_400_000)
+    check = await check_of(n)
+    assert check["day"] == 20261016
+    assert [(r["held_qty_u"], r["lots_qty_u"]) for r in check["rows"]] == [(500 * U, 20 * U)]
+    # Turned round from the row, the lots and the holdings agree.
+    row = check["rows"][0]
+    assert (await n.rig.call("ca_decide", id=split, scope="upstox", **row["fix"]))["status"] == (
+        "success")  # fmt: skip
+    assert (await check_of(n))["rows"] == []
+
+
+@scenario
+async def test_the_week_after_a_split_is_left_alone(n):
+    """Split 1:5 on 20 Oct, applied. Upstox credits the new shares days after the ex-date, so
+    the record of the 21st may still say 100: the check does not compare the share in the week
+    after the split (that night it compares the others), and compares it after."""
+    history(n, (20260610, "BUY", 100), (20260610, "BUY", 50))
+    record(n, 20261019, **{UPSTOX: 150})
+    record(n, 20261021, **{UPSTOX: 150})  # the new shares not credited yet
+    split = event(n, "split", ratio=(1, 5))
+    await n.rig.call("ca_decide", id=split, scope="upstox", state="applied", ratio_num=5,
+                     ratio_den=1)  # fmt: skip
+    check = await check_of(n)
+    assert (check["day"], check["rows"]) == (20261021, [])
+    # A week on, with the record still at 150, the difference is said.
+    history(n, (20260610, "BUY", 100), (20260610, "BUY", 50), read_at=NOW + 4 * 86_400_000)
+    record(n, 20261028, **{UPSTOX: 150})
+    (row,) = (await check_of(n))["rows"]
+    assert (row["held_qty_u"], row["lots_qty_u"]) == (150 * U, 750 * U)
+
+
+@scenario
+async def test_the_check_waits_for_the_trades_and_counts_shares_with_no_purchase_record(n):
+    record(n, 20261023, **{UPSTOX: 100, TRADED: 30})
+    check = await check_of(n)
+    assert (check["state"], check["rows"]) == ("waiting", [])
+    assert "waits until Upstox's share trades of this year are read in full" in check["words"]
+    # Read on the 23rd itself: no record two days before it, so it waits for one.
+    history(n, (20260610, "BUY", 60), read_at=NOW - 3 * 86_400_000)
+    check = await check_of(n)
+    assert (check["state"], check["rows"]) == ("waiting", [])
+    assert check["words"].startswith("The check of the tax lots against your Upstox holdings "
+                                     "waits for a closing record")  # fmt: skip
+    # UPSTOX: 60 bought in the records, 100 held: 40 are from before them, and the sentence
+    # says where to add them. TRADED: held, never bought in the records, no bonus or split
+    # decided: not a mismatch, counted in one figure.
+    history(n, (20260610, "BUY", 60))
+    check = await check_of(n)
+    (row,) = check["rows"]
+    assert (row["isin"], row["held_qty_u"], row["lots_qty_u"]) == (UPSTOX, 100 * U, 60 * U)
+    assert row["words"] == (
+        "PROBE LTD: Upstox holds 100 and the lots say 60. If you bought the rest before "
+        "1 Apr 2024 or moved it in from another account, add that purchase under Tax, Inputs."
+    )
+    assert (row["fix"], check["unrecorded_count"]) == (None, 1)
+
+
 @scenario
 async def test_an_event_upstox_no_longer_lists_is_not_asked_but_an_applied_one_stays(n):
     record(n, 20261019, **{UPSTOX: 100})
@@ -430,7 +586,7 @@ async def test_the_list_answers_the_contracts_shape_and_no_key_is_unaccounted_fo
     event(n, "bonus", ratio=(1, 2))
     n.svc.store.write(OWNER, lambda tx: tx.ca_read_put(UPSTOX, NOW, "ok", None))
     data = (await n.rig.call("ca_list"))["data"]
-    assert set(data) == {"events", "to_confirm", "reads"}
+    assert set(data) == {"events", "to_confirm", "reads", "lot_check"}
     assert set(data["events"][0]) == {"id", "isin", "name", "kind", "ex_day", "amount_u",
                                       "ratio_num", "ratio_den", "details", "read_at", "gone_at",
                                       "decisions"}  # fmt: skip

@@ -399,14 +399,16 @@ def share_names(tx: Tx, held_now: list[dict[str, Any]] | None = None) -> dict[st
 class Holdings:
     """What the Upstox account and each custom tab held the day before a day, read once."""
 
-    def __init__(self, tx: Tx, today: int, held_now: list[dict[str, Any]] | None = None):
-        self.tx, self.today = tx, today
+    def __init__(self, tx: Tx, today: int, held_now: list[dict[str, Any]] | None = None,
+                 now: int | None = None):  # fmt: skip
+        self.tx, self.today, self.now = tx, today, now
         self.assets = {a["isin"]: a for a in tx.rows("asset", kind="listed") if a["isin"]}
         self.tabs = [t for t in tx.rows("tab") if not t["system"] and not t["archived"]]
         self.record_days = [row["day"] for row in tx.rows("upstox_eod", "day")]
         self.names = share_names(tx, held_now)
         self._records: dict[int, dict[str, int]] = {}
         self._moves: dict[int, dict[tuple[int, int], list[tuple[int, int]]]] = {}
+        self._lots: Any = None
 
     def name(self, isin: str) -> str | None:
         return self.names.get(isin)
@@ -425,6 +427,14 @@ class Holdings:
                     held[key] = held.get(key, 0) + line["qty"] + (line["t1_qty"] or 0)
             self._records[day] = held
         return self._records[day].get(isin, 0)
+
+    def lots(self):
+        """The Upstox account's tax lots (``lotcheck.TaxLots``), built on first use."""
+        if self._lots is None:
+            from . import lotcheck  # it reads the tax adapter, which reads this module
+
+            self._lots = lotcheck.TaxLots(self.tx, self.today, self.now or 0)
+        return self._lots
 
     def moves(self, tab_id: int) -> dict[tuple[int, int], list[tuple[int, int]]]:
         """``(account, asset) -> [(day, quantity change)]`` of a tab's ledger."""
@@ -563,15 +573,18 @@ def standing(group: list[dict[str, Any]], decided: dict[int, list[dict]], scope:
 
 
 def listing(tx: Tx, today: int, *, scope: str | None = None, from_day: int, to_day: int,
-            held_now: list[dict[str, Any]] | None = None) -> dict[str, Any]:  # fmt: skip
+            held_now: list[dict[str, Any]] | None = None, now: int | None = None,
+            ) -> dict[str, Any]:  # fmt: skip
     """``ca_list``: the events between two days with the owner's decisions, the bonuses and
     splits still waiting for his tap (whatever their day, up to today), and when each
     instrument was last read. ``scope`` narrows the decisions and the waiting list to one.
 
     An event is one per company and ex-date, however often Upstox rewords it (``core.groups``):
     a decision made on one wording stands for every other, so a relisted event is never asked a
-    second time."""
-    holdings, upstox = Holdings(tx, today, held_now), upstox_isins(tx, held_now)
+    second time. ``lot_check`` is the tax lots against the Upstox holdings (``lotcheck.check``)."""
+    from . import lotcheck
+
+    holdings, upstox = Holdings(tx, today, held_now, now), upstox_isins(tx, held_now)
     decided = decisions(tx)
     by_event = {key: [r for r in rows if scope in (None, r["scope"])]
                 for key, rows in decided.items()}  # fmt: skip
@@ -592,6 +605,7 @@ def listing(tx: Tx, today: int, *, scope: str | None = None, from_day: int, to_d
         "events": [_shown(e, holdings, by_event.get(e["id"], [])) for e in events],
         "to_confirm": to_confirm,
         "reads": tx.ca_reads(),
+        "lot_check": lotcheck.check(tx, today, now or 0, holdings.lots()),
     }
 
 
@@ -737,8 +751,19 @@ def _sync_dividends(service: Any) -> str:
     from . import dividends
 
     now = service.clock()
-    changed = service.store.write(OWNER, lambda tx: dividends.sync(tx, day_of_instant(now), now))
-    return f"{changed} dividend lines made or changed"
+    today = day_of_instant(now)
+
+    def run(tx: Tx) -> tuple[int, dict[str, Any]]:
+        from . import lotcheck
+
+        return dividends.sync(tx, today, now), lotcheck.check(tx, today, now)
+
+    changed, check = service.store.write(OWNER, run)
+    differ = len(check["rows"])  # the nightly check of the lots against the holdings
+    said = f"{changed} dividend lines made or changed"
+    if check["state"] == "ok":
+        said += f"; lots and holdings differ for {differ} shares"
+    return said
 
 
 def register_jobs() -> None:

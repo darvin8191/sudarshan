@@ -55,7 +55,7 @@ async def ca_list(ctx, message):
         lambda: store.read(
             OWNER,
             lambda tx: corpactions.listing(
-                tx, today, scope=scope, from_day=start, to_day=end, held_now=held
+                tx, today, scope=scope, from_day=start, to_day=end, held_now=held, now=now
             ),
         )
     )
