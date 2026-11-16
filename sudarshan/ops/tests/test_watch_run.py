@@ -31,7 +31,16 @@ FINE = {
     "health": {
         "feed": {"state": "connected", "market_window": {"open": True}},
         "alerts": {"state": "connected"},
-        **{name: {"state": "running"} for name in ("portfolio", "screener", "family", "journal")},
+        **{name: {"state": "running"} for name in ("screener", "family", "journal")},
+        "signals": {"state": "off", "signals": "off"},  # installed and running, switched off
+        # GA5.1: the portfolio publishes its own daily check of the Analytics Token.
+        "portfolio": {
+            "state": "running",
+            "portfolio_state": {
+                "enabled": True,
+                "analytics_token": {"state": "ok", "at": int(NOW) - 7200},
+            },
+        },
     },
     "enabled": dict.fromkeys(checks.SERVICES, True),
     "openalgo": True,
@@ -415,10 +424,13 @@ def test_the_reports_shape_is_pinned_for_the_system_page(tmp_path):
     assert report["at"] == int(NOW + 120) and report["release"] is None
     assert [c["name"] for c in report["checks"]] == [
         *(f"service_{name}" for name in checks.SERVICES),
-        "openalgo", "login", "feed", "instrument_list", "disk", "memory", "certificate",
-        "posture_locks", "posture_debug", "posture_modes", "posture_ports", "posture_reboot",
-        "posture_updates", "assistant", "telegram_links", "backup", "drill", "historify",
+        "openalgo", "login", "feed", "analytics_token", "instrument_list", "disk", "memory",
+        "certificate", "posture_locks", "posture_debug", "posture_modes", "posture_ports",
+        "posture_reboot", "posture_updates", "assistant", "telegram_links", "backup", "drill",
+        "historify",
     ]  # fmt: skip
+    token = next(c for c in report["checks"] if c["name"] == "analytics_token")
+    assert token["level"] == "fine" and token["facts"] == {"when": str(int(NOW) - 7200)}
     disk = report["checks"][-14]
     assert disk == {
         "name": "disk",
@@ -475,9 +487,13 @@ def test_the_check_option_prints_and_writes_nothing(tmp_path, monkeypatch, capsy
     monkeypatch.setattr(readers, "gather", lambda *a, **k: dict(FINE))
     assert main(["--check"]) == 0
     printed = capsys.readouterr().out.splitlines()
-    assert len(printed) == len(checks.SERVICES) + 20 and printed[0].split()[:2] == [
+    assert len(printed) == len(checks.SERVICES) + 21 and printed[0].split()[:2] == [
         "service_feed",
         "fine",
+    ]
+    # GA5.1: the Analytics Token's line, as the portfolio's daily check found it
+    assert [line.split() for line in printed if line.startswith("analytics_token")] == [
+        ["analytics_token", "fine", f"when={int(NOW) - 7200}"]
     ]
     assert printed[-1].split()[:2] == ["heartbeat", "not_set"]
     # L5: which name the certificate is asked for by, or that none is known and none is checked

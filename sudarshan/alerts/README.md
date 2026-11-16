@@ -552,7 +552,7 @@ sudarshan-feed (one Upstox socket) -> ZMQ 127.0.0.1:5581 (ticks, __health__)
 | `SUDARSHAN_ALERTS_FEED_ZMQ` | `tcp://127.0.0.1:5581` | the feed's ZMQ, loopback only |
 | `SUDARSHAN_MARKET_ALERTS_MAX_INSTRUMENTS` | `200` | instruments followed at once (the feed's quota is 300) |
 | `SUDARSHAN_MARKET_ALERTS_MAX_ACTIVE` | `500` | Active alerts at once |
-| `SUDARSHAN_MARKET_ALERTS_KEEP_DAYS` | `100` | days of history kept (never under 90) |
+| `SUDARSHAN_MARKET_ALERTS_KEEP_DAYS` | `100` | days of history kept (never under 90). An alert that fired is also kept until the end of the April after its financial year, so the year's records pack lists the whole year (about 13 months at most) |
 | `SUDARSHAN_MARKET_ALERTS_REPLAY` | `0` | tests only: trust a replay's health and judge on its ticks' clock (`python -m sudarshan.feed.replay`) |
 
 `market.db` lives beside `alerts.db` in the state directory (directory 700, file 600) and is

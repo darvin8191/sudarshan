@@ -16,6 +16,7 @@ from sqlalchemy.engine import Engine
 
 import database
 from sudarshan.alerts.market import migrations, spec
+from sudarshan.alerts.market import store as market_store
 from sudarshan.alerts.market.clock import Pause
 from sudarshan.alerts.market.engine import Fire, State
 from sudarshan.alerts.market.store import (
@@ -574,25 +575,97 @@ def test_prune_keeps_100_days_never_fewer_than_90_and_every_definition(path):
     assert store.keep_days == 90
     store.close()
     store = MarketStore(path)
-    row = store.create("owner", FIELDS, NOW - 200 * DAY_MS)
-    for n, age in enumerate((101, 99)):
+    row = store.create("owner", FIELDS, NOW - 400 * DAY_MS)
+    # NOW is 21 Oct 2026: 210 days back is 25 Mar 2026, the financial year before; 101 days
+    # back is 12 Jul 2026, inside the running year, which the FY rule holds (GA5.3).
+    for n, age in enumerate((210, 101, 99)):
         at = NOW - age * DAY_MS
         store.record_fire("owner", fire(row["id"], f"1:v1:{n}", at), State(),
                           title="t", line="l", value="v", level="l", channels=BOTH)  # fmt: skip
         store.open_pause("owner", at, "feed")
     store.put_baseline("owner", "K", 1, 20, 1.0, NOW - 11 * DAY_MS)
     store.put_baseline("owner", "K", 2, 20, 1.0, NOW - 9 * DAY_MS)
-    assert store.prune(NOW) == 5  # the 101-day event, its 2 deliveries, a pause, a baseline
-    assert [e["fired_at"] for e in store.events("owner")] == [NOW - 99 * DAY_MS]
+    assert store.prune(NOW) == 5  # the 210-day event, its 2 deliveries, a pause, a baseline
+    assert [e["fired_at"] for e in store.events("owner")] == [
+        NOW - 99 * DAY_MS,
+        NOW - 101 * DAY_MS,
+    ]
     assert store.alert("owner", row["id"]) is not None
     assert store.baseline("owner", "K", 1) is None and store.baseline("owner", "K", 2) == (20, 1.0)
+    store.close()
+
+
+def _ist_ms(*when: int) -> int:
+    return int(datetime(*when, tzinfo=IST).timestamp() * 1000)
+
+
+@pytest.mark.parametrize(
+    ("now", "floor"),
+    [
+        # the running year is held from its 1 April
+        ((2026, 10, 21, 10, 0), (2026, 4, 1)),
+        ((2027, 3, 31, 23, 59), (2026, 4, 1)),
+        # through April the year just ended is still held: its pack is built on 1 and 4 April
+        ((2027, 4, 1, 0, 0), (2026, 4, 1)),
+        ((2027, 4, 1, 7, 0), (2026, 4, 1)),
+        ((2027, 4, 4, 7, 0), (2026, 4, 1)),  # a Sunday
+        ((2027, 4, 30, 23, 59), (2026, 4, 1)),
+        ((2027, 5, 1, 0, 0), (2027, 4, 1)),
+        ((2028, 2, 29, 12, 0), (2027, 4, 1)),
+        ((2028, 1, 1, 0, 0), (2027, 4, 1)),
+    ],
+)
+def test_the_financial_year_still_held_starts_on_a_first_of_april(now, floor):
+    assert market_store.fy_floor(_ist_ms(*now)) == _ist_ms(*floor)
+
+
+@pytest.mark.parametrize(
+    "now",
+    [(2027, 3, 31, 16, 0), (2027, 4, 1, 7, 0), (2027, 4, 4, 7, 0), (2027, 4, 4, 16, 30),
+     (2027, 4, 7, 3, 0), (2027, 4, 30, 23, 0)],
+)  # fmt: skip
+def test_every_alert_of_the_year_is_still_there_when_its_records_pack_is_built(path, now):
+    """GA5.3 (family-pwa section 1): on 31 March, on 1 and 4 April (a Sunday in 2027) and for
+    the rest of April, the store still holds the year's first alert, of 1 April 2026 00:00."""
+    at = _ist_ms(*now)
+    first, before = _ist_ms(2026, 4, 1, 0, 0), _ist_ms(2026, 3, 31, 23, 59)
+    store = MarketStore(path)
+    row = store.create("owner", FIELDS, before)
+    for n, fired in enumerate((before, first, at - 50 * DAY_MS)):
+        store.record_fire("owner", fire(row["id"], f"1:v1:{n}", fired), State(),
+                          title="t", line="l", value="v", level="l", channels=BOTH)  # fmt: skip
+    store.prune(at)
+    assert sorted(e["fired_at"] for e in store.events("owner")) == [first, at - 50 * DAY_MS]
+    store.close()
+
+
+def test_the_rule_never_forgets_anything_the_100_days_keep(path):
+    """From 1 May the year before is let go, and the cut is the 100 days again: 1 May 2027 less
+    100 days is 21 Jan 2027, well before the new year's 1 April. Never shorter than before."""
+    for when in ((2027, 5, 1, 0, 0), (2027, 4, 1, 0, 0), (2026, 10, 21, 10, 0)):
+        at = _ist_ms(*when)
+        store = MarketStore(path)
+        assert store.cutoff(at) <= at - 100 * DAY_MS
+        store.close()
+    at = _ist_ms(2027, 5, 1, 0, 0)
+    store = MarketStore(path, keep_days=3650)
+    assert store.cutoff(at) == at - 3650 * DAY_MS  # the owner's longer setting still rules
+    store.close()
+    store = MarketStore(path)
+    assert store.cutoff(at) == at - 100 * DAY_MS
+    row = store.create("owner", FIELDS, at - 400 * DAY_MS)
+    for n, age in enumerate((101, 99)):
+        store.record_fire("owner", fire(row["id"], f"1:v1:{n}", at - age * DAY_MS), State(),
+                          title="t", line="l", value="v", level="l", channels=BOTH)  # fmt: skip
+    store.prune(at)
+    assert [e["fired_at"] for e in store.events("owner")] == [at - 99 * DAY_MS]
     store.close()
 
 
 # ---- principal -----------------------------------------------------------------------------
 
 #: Upkeep, not readers: they touch no one's rows by principal.
-UPKEEP = {"prune", "close", "consistent"}
+UPKEEP = {"prune", "cutoff", "close", "consistent"}
 
 
 def test_every_public_method_takes_the_principal_first():

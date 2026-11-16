@@ -47,6 +47,10 @@ KINDS = {
     "png": FileKind("png", "image/png", "sendPhoto", "photo"),
 }
 MIMES = frozenset(kind.mime for kind in KINDS.values())
+#: A file the Reports page may download and Telegram is never sent: the year's records pack, a
+#: zip (M19.10). It has no Bot API method, and ``kind_of`` and ``problem`` do not know it.
+ZIP = FileKind("zip", "application/zip", "", "")
+ZIP_SIGNATURE = b"PK\x03\x04"
 
 #: Why OpenAlgo refused a file, in the words its answer gives (``code`` beside each).
 WORDS = {
@@ -82,12 +86,24 @@ def kind_of(name: str | None) -> FileKind | None:
     return KINDS.get(extension.lower())
 
 
+def download_kind_of(name: str | None) -> FileKind | None:
+    """The kind of a file the Reports page may download: one Telegram takes, or the zip."""
+    kind = kind_of(name)
+    if kind is None and isinstance(name, str) and NAME.fullmatch(name):
+        stem, dot, extension = name.rpartition(".")
+        if dot and stem and extension.lower() == ZIP.extension:
+            return ZIP
+    return kind
+
+
 def content_matches(kind: FileKind, data: bytes) -> bool:
     """Whether the bytes are what the name says: a PDF, a PNG, or UTF-8 text for a CSV."""
     if kind.extension == "pdf":
         return data.startswith(PDF_SIGNATURE)
     if kind.extension == "png":
         return data.startswith(PNG_SIGNATURE)
+    if kind.extension == "zip":
+        return data.startswith(ZIP_SIGNATURE)
     if b"\x00" in data:
         return False
     try:

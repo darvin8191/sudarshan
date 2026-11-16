@@ -185,7 +185,7 @@ export function HistoryList({ now }: { now: number }) {
     return (
       <EmptyCard
         title="Nothing has fired yet"
-        hint="Each alert that fires shows here, with where it was sent, for 100 days."
+        hint="Each alert that fires shows here, with where it was sent, for at least 100 days and through its financial year."
       />
     )
   }

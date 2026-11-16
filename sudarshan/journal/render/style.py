@@ -52,6 +52,7 @@ FILE_KIND: Final = {
     "weekly": "Week-in-review",
     "monthly": "Monthly-statement",
     "fy": "Tax-pack",
+    "records": "Records-pack",
 }
 
 BRAND_WORD: Final = "SUDARSHAN"

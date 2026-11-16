@@ -36,6 +36,15 @@ const SERVICES: Record<string, string> = {
   screener: 'Screener',
   family: 'Family view',
   journal: 'Journal',
+  signals: 'TRINETRA reader',
+}
+
+/** A service with a switch of its own says which way it is (the watch's `view` fact). */
+const VIEW: Record<string, string> = {
+  on: 'Answering.',
+  off: 'Answering. The TRINETRA view is switched off.',
+  not_set_up:
+    'Answering. The TRINETRA view is switched on but not set up yet: the TRINETRA page says what is missing.',
 }
 
 const UNREAD = 'Could not be read at the last look.'
@@ -78,6 +87,40 @@ function drillLine(check: WatchCheck, drill: DrillResult | null): string {
   return UNREAD
 }
 
+/** "14 Nov, 08:36" in India for a fact that is a time in seconds; '' for any other. No clock is read. */
+function stamp(value: string | undefined): string {
+  if (!value || !/^[1-9]\d{8,10}$/.test(value)) return ''
+  const at = new Date(Number(value) * 1000)
+  return `${day.format(at)}, ${clock.format(at)}`
+}
+
+const TOKEN_LOOK =
+  'Open the Upstox developer page (My Apps) and see whether the token is still there and active. Do not create a new token before you have looked: a new one ends the old one for everything else that uses it.'
+const TOKEN_NEXT = 'It is checked when the portfolio service next starts on a new day.'
+
+/** The Analytics Token's line (M13.12): what the portfolio's own daily check found, and when. */
+function tokenLine(check: WatchCheck): string {
+  const facts = check.facts ?? {}
+  const when = stamp(facts.when)
+  switch (check.level) {
+    case 'fine':
+      return `Accepted by Upstox${when ? ` at the last check, ${when}` : ' at the last check'}. It is checked at the portfolio service's first start of a day.`
+    case 'failing':
+      return `Not accepted by Upstox${when ? ` at the check of ${when}` : ' at the last check'}. ${TOKEN_LOOK}`
+    case 'warning': {
+      const tried = stamp(facts.tried)
+      return `Could not be checked${tried ? ` at the last start, ${tried}` : ' at the last start'}: Upstox gave no answer, or the token's file on the server could not be read. ${when ? `Last accepted ${when}.` : 'No check has been answered yet.'} If the Portfolio page shows your Upstox holdings, the token is working.`
+    }
+    case 'off':
+      return 'Not checked: the portfolio is switched off.'
+    default:
+      if (facts.cause === 'changed')
+        return `The token on the server was changed after the last check${when ? ` (${when})` : ''}, so the new one has not been checked yet. ${TOKEN_NEXT}`
+      if (facts.cause === 'never') return `Not checked yet. ${TOKEN_NEXT}`
+      return UNREAD
+  }
+}
+
 /** A check as the page shows it, or null for a check this build does not know. */
 export function lineOf(check: WatchCheck, drill: DrillResult | null = null): Line | null {
   const { name, level } = check
@@ -90,10 +133,12 @@ export function lineOf(check: WatchCheck, drill: DrillResult | null = null): Lin
     const detail = unread
       ? UNREAD
       : level === 'off'
-        ? 'Not set up on this server.'
+        ? facts.view === 'off'
+          ? 'The TRINETRA view is switched off.'
+          : 'Not set up on this server.'
         : level === 'failing'
           ? `Not answering${minutes ? ` for ${minutes} minutes` : ''}. The server restarts it by itself.`
-          : 'Answering.'
+          : (VIEW[facts.view ?? ''] ?? 'Answering.')
     return { group: 'services', label, detail }
   }
   switch (name) {
@@ -128,6 +173,12 @@ export function lineOf(check: WatchCheck, drill: DrillResult | null = null): Lin
             : level === 'failing'
               ? 'Not connected. Prices are not Real-time.'
               : 'Connected.',
+      }
+    case 'analytics_token':
+      return {
+        group: 'market',
+        label: 'Upstox read-only token (Analytics Token)',
+        detail: tokenLine(check),
       }
     case 'instrument_list':
       return {

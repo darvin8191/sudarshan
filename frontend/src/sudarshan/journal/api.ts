@@ -229,8 +229,8 @@ export function reportFileUrl(id: number, format?: 'csv'): string {
   return format === 'csv' ? `${path}?format=csv` : path
 }
 
-/** The types a report's file comes as (cross-design Y32). */
-const FILE_TYPES = new Set(['application/pdf', 'text/csv', 'image/png'])
+/** The types a report's file comes as (cross-design Y32); the zip is the year's records pack. */
+const FILE_TYPES = new Set(['application/pdf', 'text/csv', 'image/png', 'application/zip'])
 
 /** A file that came back as something no phone can open: said, never saved. */
 export const FILE_UNREADABLE =

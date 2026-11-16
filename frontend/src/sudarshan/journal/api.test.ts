@@ -155,6 +155,9 @@ describe('reportFile (review H4)', () => {
     expect(client.get.mock.calls[1][0]).toBe(`${PREFIX}/reports/12/file?format=csv`)
     client.get.mockResolvedValue(file(blob('png', 'image/png'), 'image/png; charset=binary'))
     expect((await reportFile(3)).type).toBe('image/png')
+    // M19.10: the year's records pack comes as a zip
+    client.get.mockResolvedValue(file(blob('PK', 'application/zip'), 'application/zip'))
+    expect((await reportFile(4)).type).toBe('application/zip')
   })
 
   it('throws the switched-off sentence of a 200 that is not a file, never handing it back', async () => {

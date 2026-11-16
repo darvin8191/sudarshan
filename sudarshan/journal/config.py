@@ -25,6 +25,8 @@ returned by ``read_pepper`` and kept out of ``Settings``. The journal never read
 | ``SUDARSHAN_JOURNAL_WEEKLY_AT`` | ``SUN 18:00`` |
 | ``SUDARSHAN_JOURNAL_MONTHLY_AT`` | ``1 07:00`` (day of the month, then the time) |
 | ``SUDARSHAN_JOURNAL_TICKS_DIR`` | ``/var/lib/sudarshan-feed/ticks`` (the feed's recording, read only) |
+| ``SUDARSHAN_JOURNAL_ALERTS_DIR`` | ``/var/lib/sudarshan-alerts`` (the alerts' ``market.db``, read only, for the year's records pack) |
+| ``SUDARSHAN_JOURNAL_WATCH_DIR`` | ``/var/lib/sudarshan-watch`` (the server diary, read only, for the same pack) |
 | ``SUDARSHAN_NSE_HOLIDAYS_FILE`` / ``SUDARSHAN_NSE_EXTRA_DAYS_FILE`` | the calendar files the other services read |
 | ``SUDARSHAN_JOURNAL_LOG_LEVEL`` | ``INFO`` |
 
@@ -62,6 +64,11 @@ SIGNALS_URL = f"http://{LOCAL_HOST}:5588"
 ALERTS_URL = f"http://{LOCAL_HOST}:5582"
 TICKS_DIR = "/var/lib/sudarshan-feed/ticks"
 RISK_DB = "db/sudarshan_risk.db"
+#: Two other services' state folders, read for the year's records pack and never written
+#: (``jobs/fypack.py``): the alerts' history and the server diary. Every ring service runs as
+#: the same account, so the journal may read them; its unit gives it no write access to either.
+ALERTS_DIR = "/var/lib/sudarshan-alerts"
+WATCH_DIR = "/var/lib/sudarshan-watch"
 #: The most keys this client may claim at the feed (cross-design Y12: the journal's quota).
 MAX_CLAIMS_CEILING = LIMITS["claims"]
 LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
@@ -205,6 +212,9 @@ class Settings:
     latency_db: Path | None = None
     sandbox_db: Path | None = None
     risk_db: Path | None = None
+    #: None: not known here (a test, a laptop); the records pack then says the file is not kept.
+    alerts_dir: Path | None = None
+    watch_dir: Path | None = None
     holidays_file: Path = Path(HOLIDAYS_FILE)
     extra_days_file: Path = Path(EXTRA_TRADING_DAYS_FILE)
 
@@ -253,6 +263,8 @@ class Settings:
                 get("SANDBOX_DATABASE_URL") or "sqlite:///db/sandbox.db", app_dir
             ),
             risk_db=_app_path(get("SUDARSHAN_RISK_DB") or RISK_DB, app_dir),
+            alerts_dir=Path(get("SUDARSHAN_JOURNAL_ALERTS_DIR") or ALERTS_DIR),
+            watch_dir=Path(get("SUDARSHAN_JOURNAL_WATCH_DIR") or WATCH_DIR),
             holidays_file=Path(get("SUDARSHAN_NSE_HOLIDAYS_FILE") or HOLIDAYS_FILE),
             extra_days_file=Path(get("SUDARSHAN_NSE_EXTRA_DAYS_FILE") or EXTRA_TRADING_DAYS_FILE),
         )

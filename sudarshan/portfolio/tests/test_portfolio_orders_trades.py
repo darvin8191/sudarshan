@@ -333,6 +333,7 @@ class ProbeService:
     def __init__(self, folder, reader, clock):
         self.settings = type("Settings", (), {"state_dir": folder})()
         self.clock, self._reader = clock, reader
+        self.token_check, self.token_missed_at = None, None
 
     def ensure_upstox(self):
         return self._reader
@@ -394,3 +395,133 @@ def test_a_refused_token_in_the_probe_does_not_pause_the_tabs_reads(fake, token_
         return book
 
     assert run(go())["positions"]["state"] == "ok"
+
+
+# ---- GA5.1 (M13.12, M19.5): what the daily check found, for /health ----------------------------
+def _checked(service, token_file):
+    return probe.view(service.token_check, service.token_missed_at, token_file)
+
+
+def _start(service, reader, times=1):
+    async def go():
+        try:
+            return [await probe.at_start(service, 0) for _ in range(times)]
+        finally:
+            await reader.aclose()
+
+    return run(go())
+
+
+def test_the_check_is_published_as_a_state_and_a_time_and_never_the_token(
+    fake, token_file, tmp_path
+):
+    reader, clock = make(fake, token_file)
+    service = ProbeService(tmp_path / "state", reader, clock)
+    (tmp_path / "state").mkdir()
+    _start(service, reader)
+    assert _checked(service, token_file) == {"state": "ok", "at": ist(11) // 1000}
+    kept = (tmp_path / "state" / probe.RESULT_FILE).read_text()
+    assert TOKEN not in kept and "200" not in kept
+    assert set(probe.read_result(tmp_path / "state")) == {"at", "state", "sig"}
+
+
+def test_a_restart_the_same_day_shows_the_morning_result_and_asks_upstox_nothing(
+    fake, token_file, tmp_path
+):
+    reader, clock = make(fake, token_file)
+    _start(ProbeService(tmp_path, reader, clock), reader)
+    asked = fake.count()
+    again_reader, later = make(fake, token_file, at=ist(15, 30))
+    again = ProbeService(tmp_path, again_reader, later)
+    assert _start(again, again_reader) == [None]
+    assert fake.count() == asked  # GA5.1: no call is added for publishing
+    assert _checked(again, token_file) == {"state": "ok", "at": ist(11) // 1000}
+
+
+@pytest.mark.parametrize(
+    ("statuses", "state"),
+    [
+        ((401, 401, 401), "failed"),
+        ((403, 403, 403), "ok"),  # reads the token may not make: the token itself was taken
+        ((401, 200, 200), "ok"),  # one endpoint closed to it, the others answered it
+        ((200, 500, 400), "ok"),
+    ],
+)
+def test_only_a_token_upstox_refused_everywhere_is_failed(
+    fake, token_file, tmp_path, statuses, state
+):
+    for name, status in zip(("day_orders", "day_trades", "order_history"), statuses, strict=True):
+        fake.status[name] = status
+    reader, clock = make(fake, token_file)
+    service = ProbeService(tmp_path, reader, clock)
+    _start(service, reader)
+    assert _checked(service, token_file)["state"] == state
+
+
+def test_a_check_that_got_no_answer_keeps_the_last_result_and_says_it_was_missed(
+    fake, token_file, tmp_path
+):
+    reader, clock = make(fake, token_file)
+    _start(ProbeService(tmp_path, reader, clock), reader)
+    # The next day's start finds no token file: nothing is asked and nothing is recorded.
+    lost = tmp_path / "missing"
+    next_reader, next_clock = make(fake, lost, at=ist(9, 0, day=27))
+    service = ProbeService(tmp_path, next_reader, next_clock)
+    _start(service, next_reader)
+    shown = probe.view(service.token_check, service.token_missed_at, token_file)
+    assert shown == {"state": "ok", "at": ist(11) // 1000, "missed_at": ist(9, 0, day=27) // 1000}
+    assert (tmp_path / probe.DAY_FILE).read_text().strip() == "20261026"
+
+
+def test_with_no_check_ever_answered_the_state_is_unknown(fake, tmp_path):
+    reader, clock = make(fake, tmp_path / "missing")
+    service = ProbeService(tmp_path, reader, clock)
+    _start(service, reader)
+    assert _checked(service, tmp_path / "missing") == {
+        "state": "unknown", "at": None, "missed_at": ist(11) // 1000,
+    }  # fmt: skip
+    assert not (tmp_path / probe.RESULT_FILE).exists()
+
+
+def test_a_token_file_changed_after_the_check_is_not_the_token_that_was_checked(
+    fake, token_file, tmp_path
+):
+    """A refused token the owner then replaces must not stay "failed", and a new token is not
+    "ok" on the old one's word: unknown until the next check."""
+    fake.status.update(day_orders=401, day_trades=401, order_history=401)
+    reader, clock = make(fake, token_file)
+    service = ProbeService(tmp_path, reader, clock)
+    _start(service, reader)
+    assert _checked(service, token_file)["state"] == "failed"
+    token_file.write_text(TOKEN + "-renewed\n")
+    assert _checked(service, token_file) == {
+        "state": "unknown", "at": ist(11) // 1000, "changed": True,
+    }  # fmt: skip
+    token_file.unlink()
+    assert _checked(service, token_file)["state"] == "unknown"
+
+
+@pytest.mark.parametrize(
+    "kept",
+    ["", "{", '{"at":17', '{"at":1,"state":"fine","sig":[1,2]}', '{"at":"x","state":"ok"}',
+     '{"at":5,"state":"ok","sig":[1]}', "[]", '{"at":true,"state":"ok","sig":null}'],
+)  # fmt: skip
+def test_a_result_file_cut_off_or_misshapen_is_no_result(tmp_path, kept):
+    (tmp_path / probe.RESULT_FILE).write_text(kept)
+    assert probe.read_result(tmp_path) is None
+
+
+def test_the_service_health_carries_the_check(tmp_path, token_file):
+    from sudarshan.portfolio import config
+    from sudarshan.portfolio.service import Service
+
+    settings = config.Settings(enabled=False, state_dir=tmp_path, token_file=token_file)
+    service = Service(settings, None, jobs={})
+    signature = token_file.stat()
+    service.token_check = {
+        "at": 1_793_000_000, "state": "failed",
+        "sig": [signature.st_mtime_ns, signature.st_size],
+    }  # fmt: skip
+    shown = service.health()["portfolio_state"]["analytics_token"]
+    assert shown == {"state": "failed", "at": 1_793_000_000}
+    assert TOKEN not in str(service.health())

@@ -72,6 +72,18 @@ One switch, the portfolio's too, read from OpenAlgo's `.env`; off in code.
   symbol, side, quantity, `price_u`, product) priced on the card of today as one executed order
   on the owner's plan. Read only; a segment the card does not cover answers `modelled: false`,
   never a figure; a delivery sale names the depository charge as left out.
+- **The records pack** (report kind `records`, M19.10; `jobs/fypack.py`) is the year's zip:
+  the Tax pack, `trades.csv`, `orders.csv`, `risk-history.csv`, `alerts.csv`,
+  `assistant-calls.csv` (its header only until the assistant's tools exist),
+  `server-diary.jsonl` and a one-page `00-read-first.pdf` with the checklist of what the owner
+  adds from Upstox and his bank. The fy job builds it straight after the Tax pack, on 1 April
+  and again on 4 April at 07:00, so it is in the year's archive; `report_build` with kind
+  `records` builds it on request for `FY2627`, or for the year running. It reads OpenAlgo's
+  order log, the risk layer's file, the alerts' `market.db` (`SUDARSHAN_JOURNAL_ALERTS_DIR`)
+  and the watch's diary (`SUDARSHAN_JOURNAL_WATCH_DIR`), each read-only and a page at a time.
+  A store that is not on the server gives its file with the header alone; one that cannot be
+  read puts the scheduled build off. It is never announced to the report desk: the Reports
+  page downloads it (the bridge passes a zip only when its name, type and first bytes say so).
 - **The Tax pack** asks the portfolio for the tax working paper (`tax_pack`) and prints it
   (`taxpack.py`). The journal works out no tax figure and holds no lot matching of its own; the
   paper printed is kept whole in the archive row, so an archived pack never changes until it is

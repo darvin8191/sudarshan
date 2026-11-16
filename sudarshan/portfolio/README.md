@@ -373,7 +373,12 @@ two exists in this release. Each purpose has its own principal and its own list 
   bucket (`day_trades`) apart from the trade history's (`trades`).
 * **Start-up probe** (`probe.py`): one line in the journal with the HTTP status the Analytics Token
   got from retrieve-all, get-trades-for-day and order history. Read it with
-  `journalctl -u sudarshan-portfolio | grep "Analytics Token probe"`.
+  `journalctl -u sudarshan-portfolio | grep "Analytics Token probe"`. What it found is published
+  in `/health` as `portfolio_state.analytics_token`: `state` (`ok`, `failed` when Upstox refused
+  the token at every read that answered, `unknown`), `at` (seconds, the last check Upstox
+  answered), `changed` when the token file is not the one that was checked, and `missed_at` when
+  a later check got no answer. Never the token, and no call is made for it: the server's watch
+  and the System page read this field.
 * **Schema step 4** adds `tab_share` and `member_privacy`.
 * **Set from the owner's Family page** (v0.12.0). The four sharing ops are routes of the owner's
   bridge (`/sudarshan/portfolio/api/family/shares` and `/family/privacy`), sealed under the owner's

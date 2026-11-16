@@ -43,7 +43,8 @@ How it forwards:
 - A download is the stored file itself: ``report_file`` answers ``{"file_name", "file_mime",
   "file_sha256", "file_b64"}``; the bytes are checked against the sha256 and sent with
   ``Content-Disposition: attachment`` and the stored ASCII name, ``X-Content-Type-Options:
-  nosniff`` and only the stored MIME type, one of PDF, CSV or PNG (cross-design Y32).
+  nosniff`` and only the stored MIME type, one of PDF, CSV or PNG (cross-design Y32), or the
+  year's records pack, a zip whose bytes must start as a zip does (M19.10).
   ``?format=csv`` asks for a monthly statement's trades as its CSV instead (JB9); that is the one
   value it takes (any other is refused in words and nothing is sent), and the answer must be a
   CSV, ``text/csv`` under a ``.csv`` name, or it is not sent either.
@@ -487,7 +488,7 @@ def _file(data, csv: bool = False):
     name, mime, encoded = data.get("file_name"), data.get("file_mime"), data.get("file_b64")
     if name is None and not encoded:
         return _error("not_found", WORDS["no_csv" if csv else "no_file"])
-    kind = report_files.kind_of(name)
+    kind = report_files.download_kind_of(name)
     if (
         kind is None
         or mime != kind.mime
@@ -504,6 +505,8 @@ def _file(data, csv: bool = False):
     expected = data.get("file_sha256")
     digest = hashlib.sha256(raw).hexdigest()
     # a file goes only with the record to check it against: none sent is a refusal (review L6)
+    if kind is report_files.ZIP and not report_files.content_matches(kind, raw):
+        raw = b""  # a name that says zip over bytes that are not one is never sent
     if not raw or not isinstance(expected, str) or digest != expected.strip().lower():
         logger.error("The journal: a report's file did not match its record; it was not sent")
         return _error("unavailable", WORDS["bad_file"])

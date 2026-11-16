@@ -15,13 +15,18 @@ empty one): the reader says it is unavailable.
 Only these columns are copied out of a placement: strategy, symbol, exchange, action, quantity,
 price type, product, price and trigger price, never the API key field. Nothing is written to any
 of these files, and nothing read here is logged at INFO.
+
+``order_log`` is the year's order record for the records pack (``jobs/fypack.py``, M19.10):
+every request that placed, changed or cancelled an order and what was answered, read a page at
+a time so a year never sits in memory. It copies the named fields above and the answer's
+status, order ids and message; a field it does not name (the API key) is never read out.
 """
 
 from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
@@ -51,6 +56,21 @@ UPSTOX_APP = "Upstox app"
 FO_EXCHANGES = ("NFO", "BFO")
 MONTHS = ("JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC")
 BATCH = 400
+
+
+#: Log rows that only read (nothing is placed, changed or cancelled by them): not order records.
+READS = frozenset(
+    {"orderstatus", "orderbook", "tradebook", "positionbook", "openposition", "gttorderbook",
+     "holdings", "funds", "margin", "analyzer_status"}
+)  # fmt: skip
+#: The columns of the year's orders file, in order (``order_lines``).
+ORDER_COLUMNS = (
+    "time_ist", "mode", "request", "strategy", "exchange", "symbol", "action", "quantity",
+    "pricetype", "product", "price", "trigger_price", "order_id", "answer", "answer_order_ids",
+    "answer_message",
+)  # fmt: skip
+ORDER_PAGE = 2000
+_CELL = 300
 
 
 class RecordsUnavailable(Exception):
@@ -199,6 +219,54 @@ def placements_of(rows: Iterable[Mapping[str, Any]]) -> dict[str, Placement]:
     return out
 
 
+def _cell(value: Any) -> str:
+    """A request's or an answer's field as one short line of text; "" when it has none."""
+    if value is None or isinstance(value, bool | dict | list):
+        return ""
+    return " ".join(str(value).split())[:_CELL]
+
+
+def order_lines(row: Mapping[str, Any], mode: str) -> list[dict[str, str]]:
+    """One log row as lines of the year's orders file: one line, or one per leg of a basket.
+    Nothing for a row that only read. Only the named fields are copied; the API key never is."""
+    api_type = str(row.get("api_type") or "")
+    if api_type in READS:
+        return []
+    request, response = _json(row.get("request_data")), _json(row.get("response_data"))
+    request = request if isinstance(request, dict) else {}
+    response = response if isinstance(response, dict) else {}
+    placed = instant_ms(str(row.get("created_at") or ""))
+    when = "" if placed is None else datetime.fromtimestamp(placed / 1000, IST).isoformat()
+    ids = _order_ids(response)
+    legs = next(
+        (request[name] for name in ("orders", "legs") if isinstance(request.get(name), list)),
+        None,
+    )
+    legs = [leg for leg in legs or [] if isinstance(leg, dict)] or [{}]
+    lines = []
+    for n, leg in enumerate(legs):
+        fields = {**request, **leg}
+        own = ids[n : n + 1] if len(legs) > 1 and len(ids) == len(legs) else ids
+        lines.append(
+            {
+                "time_ist": when,
+                "mode": mode,
+                "request": _cell(api_type),
+                "strategy": _cell(request.get("strategy")),
+                **{
+                    name: _cell(fields.get(name))
+                    for name in ("exchange", "symbol", "action", "quantity", "pricetype",
+                                 "product", "price", "trigger_price")
+                },
+                "order_id": _cell(fields.get("orderid")),
+                "answer": _cell(response.get("status")),
+                "answer_order_ids": " ".join(own),
+                "answer_message": _cell(response.get("message")),
+            }
+        )  # fmt: skip
+    return lines
+
+
 def _upper(value: Any) -> str | None:
     return value.strip().upper()[:16] if isinstance(value, str) and value.strip() else None
 
@@ -260,6 +328,32 @@ class OpenAlgoRecords:
             since=f"{d.isoformat()} 00:00:00",
         )
         return placements_of(rows)
+
+    def order_log(
+        self, mode: str, start_day: int, end_day: int, page: int = ORDER_PAGE
+    ) -> Iterator[dict[str, str]]:
+        """The order requests logged from ``start_day`` to ``end_day`` (India dates, both
+        included) as ``order_lines``, oldest first: ``order_logs`` for live, ``analyzer_logs``
+        for the sandbox. Read ``page`` rows at a time, each on its own engine, so a year of
+        requests is never held at once. Raises ``RecordsUnavailable`` like every read here."""
+        table = "order_logs" if mode == "live" else "analyzer_logs"
+        start, end = to_date(start_day), to_date(end_day) + timedelta(days=1)
+        after = 0
+        while True:
+            rows = self.main.query(
+                f"SELECT id, api_type, request_data, response_data, created_at FROM {table} "
+                "WHERE id > :after AND created_at >= :start AND created_at < :end "
+                "ORDER BY id LIMIT :page",
+                after=after,
+                start=f"{start.isoformat()} 00:00:00",
+                end=f"{end.isoformat()} 00:00:00",
+                page=page,
+            )
+            for row in rows:
+                yield from order_lines(row, mode)
+            if len(rows) < page:
+                return
+            after = int(rows[-1]["id"])
 
     def latency(self, order_ids: Iterable[str]) -> dict[str, tuple[int | None, int | None]]:
         """(round trip, total) in whole milliseconds by order id, the newest row of an order."""
