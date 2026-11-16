@@ -412,3 +412,91 @@ async def test_what_cannot_be_exported_is_said_in_words(rig):
     # A tab with nothing in it still gives a file that says so.
     rows = table((await file_of(rig, "holdings"))["text"])
     assert ["No holdings in this tab."] in rows and block(rows, "Holdings")[-1]["Value"] == "0.00"
+
+
+@scenario_of
+async def test_gold_a_plot_and_a_typed_value_read_back_by_name(rig):
+    """Review M4: the invented tab's nine entries into an empty tab were 4 new and 5 refused
+    ("Gold bar is not in today's instrument list"). A holding with no symbol is written by its
+    name and is now read back by it."""
+    stocked(rig)
+    book, tab = rig.book, rig.tab
+    file = await file_of(rig, "activity")
+    copy = book.tab_create(OWNER, "t-9", "Copy", "mixed", now=NOW)
+    shown = (
+        await rig.call("import_preview", id=copy["id"], format="generic", filename="x.csv",
+                       text=file["text"])
+    )["data"]  # fmt: skip
+    assert (shown["rows_total"], shown["rows_new"], shown["rows_bad"]) == (9, 9, 0), shown
+    done = await rig.call("import_commit", id=shown["batch_id"], version=shown["tab_version"])
+    assert done["data"]["added"] == 9
+    again = (await rig.call("export_csv", id=copy["id"], view="activity"))["data"]
+    assert again["text"] == file["text"]  # the same entries, cell for cell
+    was = (await rig.call("tab_get", id=tab["id"], accounts=[]))["data"]
+    now = (await rig.call("tab_get", id=copy["id"], accounts=[]))["data"]
+    # The same holdings at the same typed values. The loan is the first tab's alone: a loan is
+    # no entry, and the note under Entries says the file does not hold it.
+    assert now["totals"] == was["totals"]
+    owed = was["fixed"]["liabilities_paise"]
+    assert owed == 20_000_000 and now["fixed"]["liabilities_paise"] == 0
+    assert {**now["fixed"], "liabilities_paise": owed} == was["fixed"]
+    assert [(r["asset"]["name"], r["price"]["price_u"]) for r in now["rows"]] == [
+        (r["asset"]["name"], r["price"]["price_u"]) for r in was["rows"]
+    ]
+
+
+@scenario_of
+async def test_a_name_that_could_mean_two_holdings_is_refused_with_a_sentence_never_guessed(rig):
+    book = rig.book
+    on(rig)
+    # A holding the owner named exactly like a listed symbol that is also in his list.
+    book.asset_create(OWNER, "g-1", "manual", now=NOW, name="reliance", asset_class="other")
+    # Two funds of one name, neither with an ISIN.
+    for n, code in enumerate(("100001", "100002")):
+        book.asset_create(OWNER, f"f-{n}", "mf", now=NOW, name="Index Fund", amfi_code=code)
+    head = "date,action,symbol,exchange,isin,quantity,price,amount,account\r\n"
+    rows = (
+        "2026-10-01,BUY,RELIANCE,,,1,100,100,Zerodha\r\n"  # either: not guessed
+        "2026-10-01,BUY,RELIANCE,NSE,,1,100,100,Zerodha\r\n"  # the exchange says the share
+        "2026-10-01,BUY,RELIANCE,,INE002A01018,2,100,200,Zerodha\r\n"  # so does the ISIN
+        "2026-10-01,BUY,Index Fund,,,1,100,100,Zerodha\r\n"
+        "2026-10-01,BUY,Silver coin,,,1,100,100,Zerodha\r\n"  # not in the list at all
+    )
+    shown = (await rig.preview(head + rows))["data"]
+    said = {row["row"]: row["words"] for row in shown["rows"] if row["status"] == "bad"}
+    assert (shown["rows_new"], shown["rows_bad"]) == (2, 3), shown
+    assert said[2] == (
+        "Row 2: RELIANCE is both a listed symbol and a holding you named yourself. Add the "
+        "exchange (NSE or BSE) to the row for the listed one, or rename your own holding."
+    )
+    assert said[5] == (
+        "Row 5: Index Fund is the name of more than one of your holdings. Rename one of them, "
+        "then choose the file again."
+    )
+    assert said[6] == "Row 6: Silver coin is not in today's instrument list. Check the symbol."
+    share = {row["row"]: row["entry"]["asset_id"] for row in shown["rows"] if row["entry"]}
+    assert share[3] == share[4] == rig.share["id"]
+
+
+def test_no_sentence_claims_the_same_ledger_back_for_everything():
+    """Review M4: what the entries file does not bring back is said where it is offered, in the
+    module's own account and in the README, in the same words on the phone and the service."""
+    here = Path(__file__).resolve()
+    sheet = here.parents[3] / "frontend/src/sudarshan/portfolio/export/ExportSheet.tsx"
+    assert f"'{export.ENTRIES_NOTE}'" in sheet.read_text(encoding="utf-8")
+    for must in ("named yourself", "values you typed", "loans", "drafts"):
+        assert must in export.ENTRIES_NOTE, must
+    readme = (here.parents[1] / "README.md").read_text(encoding="utf-8")
+    assert "What the entries file does not bring back" in readme
+    assert "importing into an empty tab gives the same ledger" not in " ".join(readme.split())
+    assert "reads back into a tab as the same ledger" not in " ".join(export.__doc__.split())
+
+
+@scenario_of
+async def test_the_entries_on_paper_carry_the_note(rig):
+    stocked(rig)
+    done = clean(await rig.call("export_pdf", id=rig.tab["id"], view="activity"))
+    assert done["status"] == "success"
+    names = {a["id"]: a["name"] for a in rig.book.accounts(OWNER)}
+    sheet = export.entries({"id": 1, "name": "T", "name_alt": None}, [], names, {}, NOW)
+    assert sheet.notes == (export.ENTRIES_NOTE,)

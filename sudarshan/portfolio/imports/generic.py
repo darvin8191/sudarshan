@@ -25,7 +25,9 @@ there; a row needs the cells its action needs, and the entry's own checks say wh
 
 An export writes the posted entries in the order the ledger applies them, so that reading the file
 back in file order gives the same ledger; drafts are not exported, and nor is a charges breakdown
-(the total is).
+(the total is). A holding with no symbol (gold, a plot, a fund without an ISIN) is written by its
+name in ``symbol`` and read back by that name, when the book has a holding so named; the list of
+holdings, the values typed for them and loans are not entries and are not in the file.
 """
 
 from __future__ import annotations
