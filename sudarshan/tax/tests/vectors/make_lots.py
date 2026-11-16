@@ -132,11 +132,24 @@ CASES = [
          [t(20250602, "BUY", 10, 100, isin=OLD), t(20260812, "SELL", 20, 60, isin=NEW)],
          [sold(20260812, 20, 120_000, 20250602, 100_000, isin=NEW)],
          actions=[act("SPLIT", 20260105, 2, 1, isin=OLD, new_isin=NEW)]),
-    case("B1-bonus-fraction", "5 held, bonus 1 for 2: 2.5 shares at nil on the ex-date, kept as "
-         "a fraction and reported", [t(20250602, "BUY", 5, 100)], [],
-         [lot(20250602, 5, 50_000), lot(20250910, 2.5, 0, source="bonus")],
+    case("B1-bonus-fraction", "5 held, bonus 1 for 2: 5 x 1 / 2 = 2.5, so 2 whole shares at nil "
+         "on the ex-date (what the demat account is credited) and half a share reported as left "
+         "over, never kept in a lot and never rounded up: 5 + 2 = 7 held",
+         [t(20250602, "BUY", 5, 100)], [],
+         [lot(20250602, 5, 50_000), lot(20250910, 2, 0, source="bonus")],
          actions=[act("BONUS", 20250910, 1, 2)], notes=1,
-         fractions=[[1, 1, XYZ, 20250910, "BONUS", 7_500_000]]),
+         fractions=[[1, 1, XYZ, 20250910, "BONUS", 7_000_000]]),
+    case("B2-bonus-third", "100 held, bonus 1 for 3: 100 / 3 = 33.33, so 33 whole shares and a "
+         "third of a share left over: 133 held (review L3: the lots must match the holdings)",
+         [t(20250602, "BUY", 100, 100)], [],
+         [lot(20250602, 100, 1_000_000), lot(20250910, 33, 0, source="bonus")],
+         actions=[act("BONUS", 20250910, 1, 3)], notes=1,
+         fractions=[[1, 1, XYZ, 20250910, "BONUS", 133_000_000]]),
+    case("B3-bonus-under-one", "1 held, bonus 1 for 2: half a share, so no lot at all and the "
+         "half reported", [t(20250602, "BUY", 1, 100)], [],
+         [lot(20250602, 1, 10_000)],
+         actions=[act("BONUS", 20250910, 1, 2)], notes=1,
+         fractions=[[1, 1, XYZ, 20250910, "BONUS", 1_000_000]]),
     case("I1", "holding 100 (cost 18,000); one day buy 50 at 200, sell 80 at 210: intraday "
          "min(50, 80) = 50, bought 10,000, sold 16,800 x 50/80 = 10,500, +500; the other 30 are "
          "a delivery sale of 6,300 against 18,000 x 30/100 = 5,400; no lot opens that day",

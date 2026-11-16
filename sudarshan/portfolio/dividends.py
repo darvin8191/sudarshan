@@ -17,7 +17,11 @@ tax working paper can never disagree.
   has no line yet. A line still expected follows a late closing record; a confirmed one is never
   touched; an expected line of an event Upstox withdrew is removed.
 * **Where no closing record says** what the Upstox account held (an ex-date from before
-  SUDARSHAN kept records), no line is made: an amount is never guessed.
+  SUDARSHAN kept records), an amount is never guessed, and the dividend is never dropped in
+  silence either (v0.13.0 review H1): when the records do not show the share was not held, the
+  account gets a line with no quantity and no amount, listed apart as not counted
+  (``rules.uncounted``) with its sentence, in no total, until the owner confirms what reached his
+  bank. The same for a dividend Upstox lists with no amount.
 * A family member sees none of this: no op here is a family op.
 """
 
@@ -28,7 +32,8 @@ from typing import Any
 from sudarshan.tax import dividends as rules
 
 from . import corpactions
-from .core.days import add_days, financial_year, is_day
+from .core import corpactions as core
+from .core.days import add_days, day_of_instant, financial_year, is_day
 from .core.kinds import DIVIDEND_STATES
 from .core.money import paise_ok
 from .store import Invalid, NotFound, Refused, Tx
@@ -103,25 +108,45 @@ def taken_lines(tx: Tx) -> set[int]:
     return {r["id"] for r in tx.rows("dividend_line") if r["activity_id"] is not None}
 
 
-def sync(tx: Tx, today: int, now: int) -> int:
-    """Bring the lines up to what Upstox lists and what was held. How many lines changed."""
-    holdings = corpactions.Holdings(tx, today)
+def sync(tx: Tx, today: int, now: int, held_now: list[dict[str, Any]] | None = None) -> int:
+    """Bring the lines up to what Upstox lists and what was held. How many lines changed.
+
+    A dividend is never silently dropped (review H1). Where no closing record says what the
+    Upstox account held the day before the ex-date, and the records do not show the share was
+    not held (``Holdings.upstox_maybe``), the account gets a line with no quantity and no
+    amount: listed as "Not counted" (``rules.uncounted``) until the owner confirms what reached
+    his bank. The same for a dividend Upstox lists without an amount."""
+    holdings = corpactions.Holdings(tx, today, held_now, now)
     accounts = {a["id"]: a for a in tx.rows("account")}
     upstox = next((a for a in accounts.values() if a["kind"] == "upstox"), None)
+    mine = corpactions.upstox_isins(tx, held_now) if upstox else set()
     lines = {(r["account_id"], r["event_id"]): r for r in tx.rows("dividend_line")}
     changed, pending = 0, []
     for event in tx.ca_events(to_day=today, gone=True):
-        if event["kind"] != "dividend" or event["amount_u"] is None:
+        if event["kind"] != "dividend":
             continue
-        mine = {key: row for key, row in lines.items() if key[1] == event["id"]}
+        have_all = {key: row for key, row in lines.items() if key[1] == event["id"]}
         if event["gone_at"] is not None:
-            for row in mine.values():
+            for row in have_all.values():
                 if row["state"] == "expected":
                     changed += tx.remove("dividend_line", row["id"])
             continue
-        for account, qty in _held(holdings, upstox, event).items():
-            values = {"qty_u": qty, "expected_paise": rules.expected_paise(qty, event["amount_u"])}
-            have = mine.get((account, event["id"]))
+        held = _held(holdings, upstox, event)
+        if (
+            upstox is not None
+            and event["isin"] in mine
+            and holdings.upstox(event["isin"], event["ex_day"]) is None
+            and holdings.upstox_maybe(event["isin"], event["ex_day"])
+        ):
+            held.setdefault(upstox["id"], 0)  # held or not is not known: no quantity
+        for key, row in have_all.items():  # an unknown line the records no longer call for
+            if key[0] not in held and row["state"] == "expected" and not row["qty_u"]:
+                changed += tx.remove("dividend_line", row["id"])
+        for account, qty in held.items():
+            amount = event["amount_u"]
+            values = {"qty_u": qty,
+                      "expected_paise": rules.expected_paise(qty, amount) if amount else 0}  # fmt: skip
+            have = have_all.get((account, event["id"]))
             if have is None:
                 have = tx.insert("dividend_line", {
                     **values, "member_id": accounts[account]["member_id"], "account_id": account,
@@ -143,30 +168,99 @@ def owner_member(tx: Tx) -> int:
     return upstox[0]["member_id"] if upstox else tx.rows("member")[0]["id"]
 
 
-def _year(tx: Tx, fy: int, member_id: int, accounts: set[int] | None = None) -> dict[str, Any]:
-    names = {a["isin"]: a["name"] for a in tx.rows("asset", kind="listed") if a["isin"]}
+def _year(tx: Tx, fy: int, member_id: int, accounts: set[int] | None = None,
+          names: dict[str, str] | None = None) -> dict[str, Any]:  # fmt: skip
+    names = corpactions.share_names(tx) if names is None else names
     lines = [
-        {**{key: row[key] for key in LINE_KEYS}, "name": names.get(row["isin"])}
+        {**{key: row[key] for key in LINE_KEYS}, "name": names.get(row["isin"]), "record_day": None}
         for row in tx.rows("dividend_line", "ex_day,id", member_id=member_id, fy=fy)
         if accounts is None or row["account_id"] in accounts
     ]
     return rules.year(lines, fy, names)
 
 
-def report(tx: Tx, fy: int, member_id: int, now: int) -> dict[str, Any]:
+def _mark_records(tx: Tx, of_year: dict[str, Any], today: int, previous_day) -> None:
+    """Review L4. A line of the Upstox account still expected takes its quantity from the last
+    closing record within ``core.EVE_REACH_DAYS`` before the ex-date. Where that record is not
+    the one of the trading day just before the ex-date (``previous_day``: a night's record was
+    missed), the line says which record it is from (``record_day``): a trade in between would
+    not be in it."""
+    upstox = next((a for a in tx.rows("account") if a["kind"] == "upstox"), None)
+    if upstox is None or previous_day is None:
+        return
+    record_days = [row["day"] for row in tx.rows("upstox_eod", "day")]
+    for line in [ln for payer in of_year["payers"] for ln in payer["lines"]]:
+        if line["account_id"] != upstox["id"] or line["state"] != "expected":
+            continue
+        used = core.eve_record(record_days, line["ex_day"], today)
+        eve = previous_day(line["ex_day"])
+        if used is not None and eve is not None and used < eve:
+            line["record_day"] = used
+
+
+NO_YEAR = "Dividends are worked out from the financial year {first} on. Choose a later year."
+
+
+def report(tx: Tx, fy: int, member_id: int, now: int, held_now: list[dict] | None = None,
+           previous_day=None) -> dict[str, Any]:  # fmt: skip
     """``dividends``: a taxpayer's lines of a financial year by payer, the totals and the
-    likely-TDS flags (types.ts ``DividendsReport``)."""
+    likely-TDS flags, the dividends that could not be counted, and whether Upstox's list was
+    read at all (types.ts ``DividendsReport``). ``held_now`` names a share the Upstox account
+    holds (review M2); ``previous_day(day)`` is the trading day before a day, or None."""
     if tx.get("member", member_id) is None:
         raise NotFound()
-    return {"fy": fy, "member_id": member_id, "as_of": now, "dividends": _year(tx, fy, member_id)}
+    if fy < rules.first_year():
+        first = rules.first_year()
+        raise Invalid(NO_YEAR.format(first=f"{first}-{(first + 1) % 100:02d}"))
+    today = day_of_instant(now)
+    of_year = _year(tx, fy, member_id, names=corpactions.share_names(tx, held_now))
+    _mark_records(tx, of_year, today, previous_day)
+    return {"fy": fy, "member_id": member_id, "as_of": now, "dividends": of_year,
+            "read_status": corpactions.read_status(tx, today)}  # fmt: skip
 
 
-def for_pack(tx: Tx, fy: int, member_id: int, buyback_paise: int = 0) -> dict[str, Any]:
+#: What the working paper says of its dividends when it cannot count them all (v0.13.0 review
+#: H1): the insights switch is off, so Upstox's list is never read; it was never read yet; or the
+#: last night's read failed (that night's own sentence follows).
+PAPER_OFF = (
+    "This paper counts no dividends yet: SUDARSHAN reads them from Upstox's corporate actions "
+    "only once the dividends view is switched on in a later release. Take the year's dividends "
+    "from your bank statements or Form 26AS."
+)
+PAPER_NOT_READ = (
+    "This paper counts no dividends yet: SUDARSHAN reads Upstox's corporate actions for the "
+    "first time tonight after 23:45, and the dividends of what you held follow."
+)
+PAPER_PAUSED = (
+    "The dividends view is switched off, so no dividend after it was switched off is read from "
+    "Upstox. Take any later ones from your bank statements or Form 26AS."
+)
+PAPER_FAILED = "Dividends may be missing here."
+
+
+def for_pack(tx: Tx, fy: int, member_id: int, buyback_paise: int = 0, today: int | None = None,
+             insights: bool = True) -> dict[str, Any]:  # fmt: skip
     """For the tax working paper (``tax_ops``): the pack's ``dividends`` block of the taxpayer's
     accounts that count for tax, with a buyback's receipt (the pack's own figure) beside the
-    payers. A line still expected counts at its expected amount; ``unconfirmed_count`` says so."""
+    payers. A line still expected counts at its expected amount; ``unconfirmed_count`` says so.
+    The dividends it could not count are listed (``uncounted``), and ``note`` says why a total
+    of nothing is not "none": the insights switch is off (``insights``), the list was never read
+    yet, or the last night failed."""
     counted = {a["id"] for a in tx.tax_accounts(member_id) if a["tax_mode"] != "none"}
-    return rules.block(_year(tx, fy, member_id, counted), buyback_paise)
+    if fy < rules.first_year():
+        of_year = rules.no_year()
+    else:
+        of_year = _year(tx, fy, member_id, counted)
+    block = rules.block(of_year, buyback_paise)
+    if not insights:
+        block["note"] = PAPER_PAUSED if block["by_payer"] or block["uncounted"] else PAPER_OFF
+        return block
+    status = corpactions.read_status(tx, today) if today is not None else None
+    if status is not None and status["state"] == "never":
+        block["note"] = PAPER_NOT_READ
+    elif status is not None and status["state"] == "failed":
+        block["note"] = f"{PAPER_FAILED} {status['words']}"
+    return block
 
 
 def set_line(tx: Tx, line_id: int, args: dict[str, Any], today: int, now: int) -> dict[str, Any]:
@@ -199,12 +293,15 @@ def set_line(tx: Tx, line_id: int, args: dict[str, Any], today: int, now: int) -
     return {key: row[key] for key in LINE_KEYS}
 
 
-def calendar(tx: Tx, today: int, from_day: int, to_day: int) -> dict[str, Any]:
+def calendar(tx: Tx, today: int, from_day: int, to_day: int,
+             held_now: list[dict[str, Any]] | None = None) -> dict[str, Any]:  # fmt: skip
     """``calendar``: the events between two days, each with its public facts and, apart from
     them, what is held (the day before the ex-date; for an event to come, now) and the amount a
     dividend is expected to bring (types.ts ``CalendarReport``). ``listed_future`` is whether
-    Upstox lists any event to come at all."""
-    holdings = corpactions.Holdings(tx, today)
+    Upstox lists any event to come at all; ``read_status`` whether its list was read at all, so
+    that an empty answer before the first night, or after a failed one, is never shown as
+    "nothing listed"."""
+    holdings = corpactions.Holdings(tx, today, held_now)
     upstox = next((a for a in tx.rows("account") if a["kind"] == "upstox"), None)
     reads = {r["isin"]: r["read_at"] for r in tx.ca_reads() if r["state"] == "ok"}
     rows = []
@@ -220,7 +317,8 @@ def calendar(tx: Tx, today: int, from_day: int, to_day: int) -> dict[str, Any]:
             "checked_at": reads.get(event["isin"]),
         })  # fmt: skip
     ahead = tx.ca_events(from_day=add_days(today, 1))
-    return {"from": from_day, "to": to_day, "listed_future": bool(ahead), "calendar": rows}
+    return {"from": from_day, "to": to_day, "listed_future": bool(ahead), "calendar": rows,
+            "read_status": corpactions.read_status(tx, today)}  # fmt: skip
 
 
 __all__ = ["calendar", "for_pack", "owner_member", "report", "set_line", "sync"]

@@ -199,7 +199,9 @@
     "total_paise": 1065000,
     "tds_expected_paise": 106500,
     "unconfirmed_count": 2,
-    "tds_threshold_paise": 1000000
+    "tds_threshold_paise": 1000000,
+    "uncounted": [],
+    "uncounted_count": 0
    }
   },
   {
@@ -252,7 +254,9 @@
     "total_paise": 1200000,
     "tds_expected_paise": 0,
     "unconfirmed_count": 2,
-    "tds_threshold_paise": 1000000
+    "tds_threshold_paise": 1000000,
+    "uncounted": [],
+    "uncounted_count": 0
    }
   },
   {
@@ -287,7 +291,9 @@
     "total_paise": 1000000,
     "tds_expected_paise": 0,
     "unconfirmed_count": 1,
-    "tds_threshold_paise": 1000000
+    "tds_threshold_paise": 1000000,
+    "uncounted": [],
+    "uncounted_count": 0
    }
   },
   {
@@ -322,7 +328,9 @@
     "total_paise": 600000,
     "tds_expected_paise": 60000,
     "unconfirmed_count": 1,
-    "tds_threshold_paise": 500000
+    "tds_threshold_paise": 500000,
+    "uncounted": [],
+    "uncounted_count": 0
    }
   },
   {
@@ -365,7 +373,9 @@
     "total_paise": 960000,
     "tds_expected_paise": 0,
     "unconfirmed_count": 0,
-    "tds_threshold_paise": 1000000
+    "tds_threshold_paise": 1000000,
+    "uncounted": [],
+    "uncounted_count": 0
    }
   },
   {
@@ -408,7 +418,9 @@
     "total_paise": 200000,
     "tds_expected_paise": 0,
     "unconfirmed_count": 1,
-    "tds_threshold_paise": 1000000
+    "tds_threshold_paise": 1000000,
+    "uncounted": [],
+    "uncounted_count": 0
    }
   },
   {
@@ -423,7 +435,120 @@
     "total_paise": 0,
     "tds_expected_paise": 0,
     "unconfirmed_count": 0,
-    "tds_threshold_paise": 1000000
+    "tds_threshold_paise": 1000000,
+    "uncounted": [],
+    "uncounted_count": 0
+   }
+  },
+  {
+   "id": "D-UNCOUNTED",
+   "note": "review H1: a dividend with no record of what was held (no quantity, no amount) and one Upstox lists with no amount (300 held) are in no payer and no total, and are not 'unconfirmed': each is listed with why. The counted line of 1,650 stands alone. Once the first is confirmed with 1,800 credited and 200 deducted it is a line like any other (next case)",
+   "in": {
+    "fy": 2026,
+    "lines": [
+     {
+      "ex_day": 20261020,
+      "qty_u": 300000000,
+      "isin": "INE000A01010",
+      "fy": 2026,
+      "state": "expected",
+      "expected_paise": 165000,
+      "credited_paise": null,
+      "tds_paise": null
+     },
+     {
+      "ex_day": 20260715,
+      "qty_u": 0,
+      "isin": "INE000A01010",
+      "fy": 2026,
+      "state": "expected",
+      "expected_paise": 0,
+      "credited_paise": null,
+      "tds_paise": null
+     },
+     {
+      "ex_day": 20260801,
+      "qty_u": 300000000,
+      "isin": "INE000B01018",
+      "fy": 2026,
+      "state": "expected",
+      "expected_paise": 0,
+      "credited_paise": null,
+      "tds_paise": null
+     }
+    ]
+   },
+   "out": {
+    "payers": [
+     {
+      "isin": "INE000A01010",
+      "expected_paise": 165000,
+      "confirmed_paise": 0,
+      "total_paise": 165000,
+      "tds_likely": false,
+      "tds_expected_paise": null,
+      "unconfirmed_count": 1,
+      "lines": 1
+     }
+    ],
+    "total_paise": 165000,
+    "tds_expected_paise": 0,
+    "unconfirmed_count": 1,
+    "tds_threshold_paise": 1000000,
+    "uncounted": [
+     "No holdings record reaches the day before this ex-date, so the amount is not known: confirm what reached your bank on the Dividends card",
+     "Upstox lists no amount for this dividend, so it is not known: confirm what reached your bank on the Dividends card"
+    ],
+    "uncounted_count": 2
+   }
+  },
+  {
+   "id": "D-UNCOUNTED-CONFIRMED",
+   "note": "the same July line confirmed by the owner: 1,800 + 200 = 2,000 counted, 1,650 + 2,000 = 3,650 in the year, nothing left uncounted",
+   "in": {
+    "fy": 2026,
+    "lines": [
+     {
+      "ex_day": 20261020,
+      "qty_u": 300000000,
+      "isin": "INE000A01010",
+      "fy": 2026,
+      "state": "expected",
+      "expected_paise": 165000,
+      "credited_paise": null,
+      "tds_paise": null
+     },
+     {
+      "ex_day": 20260715,
+      "qty_u": 0,
+      "isin": "INE000A01010",
+      "fy": 2026,
+      "state": "confirmed",
+      "expected_paise": 0,
+      "credited_paise": 180000,
+      "tds_paise": 20000
+     }
+    ]
+   },
+   "out": {
+    "payers": [
+     {
+      "isin": "INE000A01010",
+      "expected_paise": 165000,
+      "confirmed_paise": 200000,
+      "total_paise": 365000,
+      "tds_likely": false,
+      "tds_expected_paise": null,
+      "unconfirmed_count": 1,
+      "lines": 2
+     }
+    ],
+    "total_paise": 365000,
+    "tds_expected_paise": 0,
+    "unconfirmed_count": 1,
+    "tds_threshold_paise": 1000000,
+    "uncounted": [],
+    "uncounted_count": 0
    }
   }
  ]

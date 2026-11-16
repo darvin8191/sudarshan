@@ -703,7 +703,7 @@
  },
  {
   "id": "B1-bonus-fraction",
-  "note": "5 held, bonus 1 for 2: 2.5 shares at nil on the ex-date, kept as a fraction and reported",
+  "note": "5 held, bonus 1 for 2: 5 x 1 / 2 = 2.5, so 2 whole shares at nil on the ex-date (what the demat account is credited) and half a share reported as left over, never kept in a lot and never rounded up: 5 + 2 = 7 held",
   "in": {
    "trades": [
     {
@@ -739,7 +739,7 @@
     },
     {
      "acquired_day": 20250910,
-     "qty_u": 2500000,
+     "qty_u": 2000000,
      "cost_paise": 0,
      "source": "bonus"
     }
@@ -753,7 +753,115 @@
      "INE000A01010",
      20250910,
      "BONUS",
-     7500000
+     7000000
+    ]
+   ]
+  }
+ },
+ {
+  "id": "B2-bonus-third",
+  "note": "100 held, bonus 1 for 3: 100 / 3 = 33.33, so 33 whole shares and a third of a share left over: 133 held (review L3: the lots must match the holdings)",
+  "in": {
+   "trades": [
+    {
+     "taxpayer": 1,
+     "account": 1,
+     "day": 20250602,
+     "seq": 23,
+     "side": "BUY",
+     "segment": "EQ",
+     "instrument": "INE000A01010",
+     "qty_u": 100000000,
+     "price_u": 1000000,
+     "amount_paise": 1000000
+    }
+   ],
+   "actions": [
+    {
+     "kind": "BONUS",
+     "instrument": "INE000A01010",
+     "ex_day": 20250910,
+     "num": 1,
+     "den": 3
+    }
+   ]
+  },
+  "out": {
+   "disposals": [],
+   "open_lots": [
+    {
+     "acquired_day": 20250602,
+     "qty_u": 100000000,
+     "cost_paise": 1000000
+    },
+    {
+     "acquired_day": 20250910,
+     "qty_u": 33000000,
+     "cost_paise": 0,
+     "source": "bonus"
+    }
+   ],
+   "intraday": [],
+   "notes": 1,
+   "fractions": [
+    [
+     1,
+     1,
+     "INE000A01010",
+     20250910,
+     "BONUS",
+     133000000
+    ]
+   ]
+  }
+ },
+ {
+  "id": "B3-bonus-under-one",
+  "note": "1 held, bonus 1 for 2: half a share, so no lot at all and the half reported",
+  "in": {
+   "trades": [
+    {
+     "taxpayer": 1,
+     "account": 1,
+     "day": 20250602,
+     "seq": 24,
+     "side": "BUY",
+     "segment": "EQ",
+     "instrument": "INE000A01010",
+     "qty_u": 1000000,
+     "price_u": 1000000,
+     "amount_paise": 10000
+    }
+   ],
+   "actions": [
+    {
+     "kind": "BONUS",
+     "instrument": "INE000A01010",
+     "ex_day": 20250910,
+     "num": 1,
+     "den": 2
+    }
+   ]
+  },
+  "out": {
+   "disposals": [],
+   "open_lots": [
+    {
+     "acquired_day": 20250602,
+     "qty_u": 1000000,
+     "cost_paise": 10000
+    }
+   ],
+   "intraday": [],
+   "notes": 1,
+   "fractions": [
+    [
+     1,
+     1,
+     "INE000A01010",
+     20250910,
+     "BONUS",
+     1000000
     ]
    ]
   }
@@ -918,7 +1026,7 @@
      "taxpayer": 1,
      "account": 1,
      "day": 20260803,
-     "seq": 23,
+     "seq": 25,
      "side": "BUY",
      "segment": "EQ",
      "instrument": "INE000A01010",
@@ -930,7 +1038,7 @@
      "taxpayer": 1,
      "account": 1,
      "day": 20260803,
-     "seq": 24,
+     "seq": 26,
      "side": "SELL",
      "segment": "EQ",
      "instrument": "INE000A01010",
@@ -942,7 +1050,7 @@
      "taxpayer": 1,
      "account": 1,
      "day": 20260803,
-     "seq": 25,
+     "seq": 27,
      "side": "BUY",
      "segment": "EQ",
      "instrument": "INE000A01010",
@@ -985,7 +1093,7 @@
      "taxpayer": 1,
      "account": 1,
      "day": 20260803,
-     "seq": 26,
+     "seq": 28,
      "side": "BUY",
      "segment": "EQ",
      "instrument": "INE000A01010",
@@ -997,7 +1105,7 @@
      "taxpayer": 1,
      "account": 1,
      "day": 20260803,
-     "seq": 27,
+     "seq": 29,
      "side": "SELL",
      "segment": "EQ",
      "instrument": "INE000A01010",
@@ -1034,7 +1142,7 @@
      "taxpayer": 1,
      "account": 1,
      "day": 20260803,
-     "seq": 28,
+     "seq": 30,
      "side": "SELL",
      "segment": "EQ",
      "instrument": "INE000A01010",
@@ -1046,7 +1154,7 @@
      "taxpayer": 1,
      "account": 1,
      "day": 20260803,
-     "seq": 29,
+     "seq": 31,
      "side": "BUY",
      "segment": "EQ",
      "instrument": "INE000A01010",
@@ -1100,7 +1208,7 @@
      "taxpayer": 1,
      "account": 1,
      "day": 20260803,
-     "seq": 30,
+     "seq": 32,
      "side": "BUY",
      "segment": "EQ",
      "instrument": "INE000A01010",
@@ -1112,7 +1220,7 @@
      "taxpayer": 1,
      "account": 1,
      "day": 20260803,
-     "seq": 31,
+     "seq": 33,
      "side": "SELL",
      "segment": "EQ",
      "instrument": "INE000A01010",
@@ -1171,7 +1279,7 @@
      "taxpayer": 1,
      "account": 2,
      "day": 20250602,
-     "seq": 32,
+     "seq": 34,
      "side": "BUY",
      "segment": "EQ",
      "instrument": "INE000A01010",
@@ -1183,7 +1291,7 @@
      "taxpayer": 1,
      "account": 1,
      "day": 20260803,
-     "seq": 33,
+     "seq": 35,
      "side": "BUY",
      "segment": "EQ",
      "instrument": "INE000A01010",
@@ -1195,7 +1303,7 @@
      "taxpayer": 1,
      "account": 2,
      "day": 20260803,
-     "seq": 34,
+     "seq": 36,
      "side": "SELL",
      "segment": "EQ",
      "instrument": "INE000A01010",
@@ -1238,7 +1346,7 @@
      "taxpayer": 1,
      "account": 1,
      "day": 20250602,
-     "seq": 35,
+     "seq": 37,
      "side": "BUY",
      "segment": "MF",
      "instrument": "INF000A01011",
@@ -1251,7 +1359,7 @@
      "taxpayer": 1,
      "account": 1,
      "day": 20260803,
-     "seq": 36,
+     "seq": 38,
      "side": "BUY",
      "segment": "MF",
      "instrument": "INF000A01011",
@@ -1264,7 +1372,7 @@
      "taxpayer": 1,
      "account": 1,
      "day": 20260803,
-     "seq": 37,
+     "seq": 39,
      "side": "SELL",
      "segment": "MF",
      "instrument": "INF000A01011",
@@ -1306,7 +1414,7 @@
      "taxpayer": 1,
      "account": 1,
      "day": 20260803,
-     "seq": 38,
+     "seq": 40,
      "side": "BUY",
      "segment": "FO",
      "instrument": [
@@ -1324,7 +1432,7 @@
      "taxpayer": 1,
      "account": 1,
      "day": 20260803,
-     "seq": 39,
+     "seq": 41,
      "side": "BUY",
      "segment": "MF",
      "instrument": "INF000A01011",
@@ -1351,7 +1459,7 @@
      "taxpayer": 1,
      "account": 1,
      "day": 20250602,
-     "seq": 40,
+     "seq": 42,
      "side": "BUY",
      "segment": "EQ",
      "instrument": "INE000A01010",
@@ -1363,7 +1471,7 @@
      "taxpayer": 1,
      "account": 2,
      "day": 20250602,
-     "seq": 41,
+     "seq": 43,
      "side": "BUY",
      "segment": "EQ",
      "instrument": "INE000A01010",
@@ -1438,7 +1546,7 @@
      "taxpayer": 1,
      "account": 1,
      "day": 20250602,
-     "seq": 42,
+     "seq": 44,
      "side": "BUY",
      "segment": "EQ",
      "instrument": "INE000A01010",
@@ -1450,7 +1558,7 @@
      "taxpayer": 1,
      "account": 2,
      "day": 20250602,
-     "seq": 43,
+     "seq": 45,
      "side": "BUY",
      "segment": "EQ",
      "instrument": "INE000A01010",
@@ -1462,7 +1570,7 @@
      "taxpayer": 1,
      "account": 1,
      "day": 20260812,
-     "seq": 44,
+     "seq": 46,
      "side": "SELL",
      "segment": "EQ",
      "instrument": "INE000A01010",

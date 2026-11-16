@@ -221,15 +221,25 @@ RISK_NO_DOWN_DAY = "No losing day yet, so there is no Sortino ratio."
 RISK_SET_EXPENSES = "Set your monthly expenses to check this"
 
 
+def _hundredths(pct_text: str) -> int:
+    """A figure of four decimals in hundredths, half up, its sign kept: "22.5650" -> 2257."""
+    count = int(pct_text.replace(".", "").lstrip("-"))
+    hundredths = count // 100 + (count % 100 >= 50)
+    return -hundredths if pct_text.startswith("-") else hundredths
+
+
+def _said(hundredths: int) -> str:
+    """Hundredths as a sentence says them; a whole number stays whole: 1500 -> "15"."""
+    sign, whole = ("-" if hundredths < 0 else ""), abs(hundredths)
+    if whole % 100 == 0:
+        return f"{sign}{whole // 100}"
+    return f"{sign}{whole // 100}.{whole % 100:02d}"
+
+
 def _two(pct_text: str) -> str:
     """A figure of four decimals as a sentence says it, to two, half up: "22.5650" -> "22.57";
     one that is whole stays whole: "15.0000" -> "15"."""
-    count = int(pct_text.replace(".", "").lstrip("-"))
-    hundredths = count // 100 + (count % 100 >= 50)
-    sign = "-" if pct_text.startswith("-") and hundredths else ""
-    if hundredths % 100 == 0:
-        return f"{sign}{hundredths // 100}"
-    return f"{sign}{hundredths // 100}.{hundredths % 100:02d}"
+    return _said(_hundredths(pct_text))
 
 
 def risk_days_more(need: int, have: int) -> str:
@@ -245,9 +255,11 @@ def risk_basis(day: int) -> str:
 def risk_over(label: str, weight_pct: str, limit_pct: str, *, sector: bool) -> str:
     """One holding, or one sector tag, is a larger share than the owner's limit."""
     what = f"The sector {label}" if sector else label
-    return (
-        f"{what} is {_two(weight_pct)}% of what is held here, above your {_two(limit_pct)}% limit."
-    )
+    # Review L2: a share only just above the limit never reads as the limit itself ("15.0040"
+    # against 15 is said as 15.01, never 15); every other figure is rounded half up as ever.
+    limit = _hundredths(limit_pct)
+    weight = max(_hundredths(weight_pct), limit + 1)
+    return f"{what} is {_said(weight)}% of what is held here, above your {_said(limit)}% limit."
 
 
 def risk_untagged(weight_pct: str) -> str:
@@ -256,10 +268,26 @@ def risk_untagged(weight_pct: str) -> str:
 
 def risk_months(months: str, target: int, enough: bool) -> str:
     """How long the cash-like value lasts at the owner's monthly expenses, against his target."""
-    covered = f"Covers {_two(months)} months of your expenses"
     if enough:
-        return f"{covered}: at or above your target of {target}."
-    return f"{covered}; your target is {target}."
+        return f"Covers {_two(months)} months of your expenses: at or above your target of {target}."
+    # Review L2: below the target it never reads as the target ("5.9999" is 5.99, never 6).
+    below = min(_hundredths(months), target * 100 - 1)
+    return f"Covers {_said(below)} months of your expenses; your target is {target}."
+
+
+def risk_typed(count: int) -> str:
+    """Said beside the volatility when a tab holds values the owner types (review L1): between
+    two typed values a holding counts as unchanged, so the swings read steadier than they are."""
+    held = (
+        "1 holding here has a typed value"
+        if count == 1
+        else f"{count} holdings here have typed values"
+    )
+    return f"{held}; days without a new value count as no change, so the swings read steadier."
+
+
+#: The risk view is the owner's own tabs only (review M4).
+RISK_OWN_TABS = "Risk is worked out on your own tabs; the Upstox portfolio is not included yet."
 
 
 #: The names of the bars that hold what has no sector, no cap size or no tag (design 4.8), and the

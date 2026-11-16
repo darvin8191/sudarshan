@@ -30,6 +30,21 @@ export const RISK_KEY = [...PORTFOLIO_KEY, 'risk'] as const
 /** The view's own sentence while its switch is off on the server (the op answers `not_ready`). */
 export const RISK_OFF =
   'The risk view is switched off on the server. It opens here once a release switches it on.'
+/** Risk reads the owner's own tabs only, and says so (v0.14.0 review M4). */
+export const RISK_OWN_TABS =
+  'Risk is worked out on your own tabs; the Upstox portfolio is not included yet.'
+export const RISK_NO_TAB =
+  'You have no tab of your own yet. To see risk figures, go back to Portfolio, tap New tab and enter what you hold in it.'
+
+/**
+ * The months the emergency fund covers, to one decimal as the figure shows them. Below the
+ * target it never reads as the target (v0.14.0 review L2): 5.9999 months is 5.9, never 6.0
+ * against a target of 6; every other figure is rounded as ever.
+ */
+export function monthsText(months: number, target: number): string {
+  const tenths = Math.round(months * 10)
+  return formatAmount((months < target && tenths >= target * 10 ? target * 10 - 1 : tenths) / 10, 1)
+}
 
 const CARD = 'rounded-[1.125rem] border bg-card px-4 py-3.5 shadow-[var(--shadow-card)]'
 const LABEL = 'text-xs font-semibold text-muted-foreground'
@@ -129,6 +144,13 @@ function Figures({
         <p className={cn(MEANING, 'pt-1')}>
           {report.basis} {risk.days > 0 && `Rests on ${risk.days} trading days.`}
         </p>
+        {(report.words ?? [])
+          .filter((line) => line !== RISK_OWN_TABS)
+          .map((line) => (
+            <p key={line} className={MEANING}>
+              {line}
+            </p>
+          ))}
       </section>
       <Concentration report={report} readAt={readAt} marketOpen={marketOpen} />
       {risk.overlap.length > 0 && shared && (
@@ -166,7 +188,7 @@ function Figures({
         {months !== null && (
           <>
             <span className="sd-display text-[1.75rem] leading-tight font-bold">
-              {formatAmount(months, 1)} months
+              {monthsText(months, risk.emergency.target_months)} months
             </span>
             <div className="h-2 rounded-full bg-[color:var(--divider)]">
               <div
@@ -196,7 +218,10 @@ export function RiskView({ tabs }: { tabs: readonly TabInfo[] }) {
   const [market, setMarket] = useState<MarketCalendar>(CALENDAR_LOADING)
   const day = useIstDay()
   const { isOpen } = useMarketOpen(market)
-  const chosen = tab !== null && tabs.some((t) => t.id === tab) ? tab : null
+  // Only the owner's own tabs in use have risk figures: the Upstox tab and an archived one
+  // answer "not found", so they are not offered.
+  const own = tabs.filter((t) => !t.system && !t.archived && t.kind !== 'upstox')
+  const chosen = tab !== null && own.some((t) => t.id === tab) ? tab : null
   const query = useQuery({
     queryKey: [...RISK_KEY, 'report', chosen] as const,
     queryFn: async ({ signal }) => {
@@ -206,6 +231,7 @@ export function RiskView({ tabs }: { tabs: readonly TabInfo[] }) {
       }
       return result.data
     },
+    enabled: own.length > 0,
     retry: false,
     refetchOnWindowFocus: false,
   })
@@ -230,7 +256,10 @@ export function RiskView({ tabs }: { tabs: readonly TabInfo[] }) {
           </button>
         </span>
       </div>
-      {tabs.length > 0 && (
+      <p role="note" className="text-sm text-[color:var(--text-secondary)]">
+        {RISK_OWN_TABS}
+      </p>
+      {own.length > 0 && (
         <label className="flex flex-col gap-1.5">
           <span className="text-sm font-semibold text-[color:var(--text-secondary)]">Tab</span>
           <select
@@ -239,7 +268,7 @@ export function RiskView({ tabs }: { tabs: readonly TabInfo[] }) {
             onChange={(e) => setTab(e.target.value === '' ? null : Number(e.target.value))}
           >
             <option value="">All your tabs together</option>
-            {tabs.map((t) => (
+            {own.map((t) => (
               <option key={t.id} value={t.id}>
                 {t.name}
               </option>
@@ -247,7 +276,10 @@ export function RiskView({ tabs }: { tabs: readonly TabInfo[] }) {
           </select>
         </label>
       )}
-      {problem !== null ? (
+      {own.length === 0 ? (
+        // No tab of his own: say how to start one, never "60 more to go" for ever.
+        <p className={cn(CARD, 'text-sm text-[color:var(--text-secondary)]')}>{RISK_NO_TAB}</p>
+      ) : problem !== null ? (
         <p className={cn(CARD, 'text-sm text-[color:var(--text-secondary)]')} aria-live="polite">
           {problem.code === 'not_ready' ? RISK_OFF : problem.message}
         </p>

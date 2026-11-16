@@ -49,6 +49,12 @@ function Sale({ row }: { row: TaxGain }) {
         {row.fmv_used && <span className={TAG}>31 Jan 2018 price used</span>}
         {row.buyback !== null && <span className={TAG}>Buyback</span>}
       </span>
+      {row.to_check && (
+        <span className="flex gap-1.5 text-sm font-semibold text-[color:var(--warning-text)]">
+          <Info aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+          To check: the tax lots and your Upstox holdings differ for this share.
+        </span>
+      )}
       {row.status !== 'ok' && (
         <span className="flex gap-1.5 text-sm font-semibold text-[color:var(--warning-text)]">
           <Info aria-hidden="true" className="mt-0.5 size-4 shrink-0" />

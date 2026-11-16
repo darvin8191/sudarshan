@@ -90,6 +90,102 @@ def brought(capital: dict) -> list[dict]:
     return [step for step in capital["set_off"] if step["step"] == "brought_forward"]
 
 
+# ---- the lots against the holdings, and what the paper cannot count -----------------------------
+def marks(pack: dict) -> list[bool]:
+    """The "to check" mark of every sale of the paper, whichever list it is in."""
+    lists = ("schedule", "needs_fmv", "unknown_cost", "exempt_buybacks")
+    return [sale["to_check"] for key in lists for sale in pack["capital_gains"][key]]
+
+
+def test_the_paper_checks_its_lots_against_the_holdings_and_marks_the_shares_sales(ctx):
+    """Design p7 4.3. The year's history sells 10 of the share on 27 Oct. With 25 entered as
+    bought before the records the lots hold 25 - 10 = 15; Upstox held 40 at the close of
+    12 Nov (the last record two days or more before the trades were read on the 14th). 15 is
+    not 40: the paper says so first among its notes, carries the check and marks the share's
+    sale "to check". Old code compared nothing: no ``lot_check`` and no mark."""
+    pack = call(ctx, "tax_get")
+    assert pack["lot_check"]["state"] == "waiting"  # no closing record to compare with yet
+    assert marks(pack) == [False]
+    call(ctx, "tax_input_set", kind="opening_lot", request_id="lot-1",
+         row=lot(ctx, qty_u=25 * U, cost_paise=3_750_000))  # fmt: skip
+    lines = [{"instrument_key": f"NSE_EQ|{ISIN}", "qty": 40 * U}]
+    ctx.store.write(OWNER, lambda tx: tx.upstox_eod_put(20261112, {"read_at": NOW}, lines, NOW))
+    pack = call(ctx, "tax_get")
+    check = pack["lot_check"]
+    assert (check["state"], check["day"], check["account_id"]) == ("ok", 20261112, ctx.upstox_id)
+    assert [(r["isin"], r["held_qty_u"], r["lots_qty_u"]) for r in check["rows"]] == [
+        (ISIN, 40 * U, 15 * U)
+    ]
+    assert check["words"].startswith("Lots and holdings differ for 1 share: ")
+    assert "40 held, 15 in lots. Compared at the close of 12 Nov 2026." in check["words"]
+    assert pack["notes"][0] == f"{check['words']} Sales of these shares are marked to check."
+    assert marks(pack) == [True]
+    text = call(ctx, "tax_csv", schedule="capital_gains")["text"]
+    head, sale = text.splitlines()[3], text.splitlines()[4]
+    assert head.endswith(",To check: lots and holdings differ") and sale.endswith(",To check")
+    # 15 held: 25 - 10 = 15 in the lots, so they agree, and nothing is marked.
+    ctx.store.write(
+        OWNER,
+        lambda tx: tx.upstox_eod_put(20261112, {"read_at": NOW}, [{**lines[0], "qty": 15 * U}],
+                                     NOW),
+    )  # fmt: skip
+    pack = call(ctx, "tax_get")
+    assert (pack["lot_check"]["rows"], pack["lot_check"]["words"]) == ([], None)
+    assert marks(pack) == [False]
+    assert not pack["notes"][0].startswith("Lots and holdings differ")
+
+
+def test_the_paper_says_why_it_counts_no_dividend_and_lists_what_it_could_not_count(ctx):
+    """v0.13.0 review H1. The paper is on while Upstox's dividends are not read at all (the
+    insights switch is off): its dividends total of nothing used to stand without a word, as
+    "No dividend is recorded for this financial year." in the Tax pack."""
+    switched_off = (
+        "This paper counts no dividends yet: SUDARSHAN reads them from Upstox's corporate "
+        "actions only once the dividends view is switched on in a later release. Take the "
+        "year's dividends from your bank statements or Form 26AS."
+    )
+    pack = call(ctx, "tax_get")
+    assert pack["dividends"]["note"] == switched_off and switched_off in pack["notes"]
+    assert (pack["dividends"]["uncounted"], pack["dividends"]["uncounted_count"]) == ([], 0)
+    assert switched_off in call(ctx, "tax_csv", schedule="dividends")["text"]
+    assert call(ctx, "tax_pack")["dividends"]["note"] == switched_off  # the journal's Tax pack
+    # Switched on, before the first night's read.
+    ctx.settings = dataclasses.replace(ctx.settings, insights=True)
+    assert call(ctx, "tax_get")["dividends"]["note"] == (
+        "This paper counts no dividends yet: SUDARSHAN reads Upstox's corporate actions for the "
+        "first time tonight after 23:45, and the dividends of what you held follow."
+    )
+
+    # A night has read the list: a dividend of July, months before any closing record.
+    def read(tx):
+        from sudarshan.portfolio import corpactions, dividends
+
+        row = {"isin": ISIN, "kind": "dividend", "ex_day": 20260715, "amount_u": 200_000,
+               "ratio_num": None, "ratio_den": None, "details": []}  # fmt: skip
+        tx.ca_event_put({**row, "raw_hash": corpactions.event_hash(row)}, NOW)
+        tx.job_put("corporate_actions", 20261113, "ok", "1 of 1 instruments read", NOW)
+        return dividends.sync(tx, 20261114, NOW)
+
+    assert ctx.store.write(OWNER, read) == 1
+    pack = call(ctx, "tax_get")
+    block = pack["dividends"]
+    assert (block["note"], block["uncounted_count"], block["total_paise"]) == (None, 1, 0)
+    (left,) = block["uncounted"]
+    assert (left["isin"], left["ex_day"]) == (ISIN, 20260715)
+    assert left["words"].startswith("No holdings record reaches the day before this ex-date")
+    assert pack["notes"][-1] == (
+        f"1 dividend of {pack['fy_label']} could not be counted and is in no total; it is "
+        "listed under Dividends with its date."
+    )
+    text = call(ctx, "tax_csv", schedule="dividends")["text"]
+    assert "Not counted,1" in text and f"{ISIN}," in text and "2026-07-15" in text
+    # Switched off again with a line already made: the paper never says it counts none.
+    ctx.settings = dataclasses.replace(ctx.settings, insights=False)
+    assert call(ctx, "tax_get")["dividends"]["note"].startswith(
+        "The dividends view is switched off, so no dividend after it was switched off is read"
+    )
+
+
 # ---- tax_get -----------------------------------------------------------------------------------
 def test_the_paper_is_the_cores_pack_of_the_year_and_the_owner_by_default(ctx):
     pack = call(ctx, "tax_get")

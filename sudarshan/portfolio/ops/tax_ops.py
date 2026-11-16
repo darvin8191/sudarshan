@@ -33,7 +33,8 @@ from sudarshan.tax.model import Carry
 from sudarshan.tax.pack import build_pack
 from sudarshan.tax.units import day_text, fy_label, rupees
 
-from .. import dividends, reports, tax_adapter
+from .. import corpactions, dividends, lotcheck, reports, tax_adapter
+from ..config import switch_on
 from ..core.days import day_of_instant, financial_year, is_day
 from ..core.kinds import (
     CARRY_BUCKETS,
@@ -226,13 +227,42 @@ def _chain(years: list, reading: bool = False) -> dict:
     return pack
 
 
-def _with_dividends(store, pack: dict) -> dict:
+def _with_dividends(store, pack: dict, today: int, insights: bool) -> dict:
     """The year's dividends of the taxpayer's accounts that count (``dividends.for_pack``),
-    with the buyback's receipt the core worked out beside them."""
+    with the buyback's receipt the core worked out beside them. What the paper cannot count is
+    said in its notes too, so every form of the paper (the phone, the CSV, the PDF and the
+    journal's Tax pack) carries it; ``insights`` is whether Upstox's dividends are read at all."""
     buyback = pack["dividends"]["buyback_paise"]
-    pack["dividends"] = store.read(
-        OWNER, lambda tx: dividends.for_pack(tx, pack["fy"], pack["taxpayer"], buyback)
+    block = pack["dividends"] = store.read(
+        OWNER,
+        lambda tx: dividends.for_pack(
+            tx, pack["fy"], pack["taxpayer"], buyback, today, insights=insights
+        ),
     )
+    if block["uncounted_count"]:
+        n = block["uncounted_count"]
+        one = n == 1
+        pack["notes"].append(
+            f"{n} {'dividend' if one else 'dividends'} of {pack['fy_label']} could not be "
+            f"counted and {'is' if one else 'are'} in no total; {'it is' if one else 'each is'} "
+            "listed under Dividends with its date."
+        )
+    if block.get("note"):
+        pack["notes"].append(block["note"])
+    return pack
+
+
+def _checked(pack: dict, check: dict) -> dict:
+    """The tax lots against the Upstox holdings (``lotcheck.check``; design p7 4.3): the paper
+    carries the check, says a difference first among its notes, and marks every sale of a share
+    that differs "to check" (the Upstox account's only: the lots compared are its own)."""
+    differ = {row["isin"] for row in check["rows"]}
+    for key in SALE_LISTS:
+        for row in pack["capital_gains"][key]:
+            row["to_check"] = row["isin"] in differ and row["account"] == check["account_id"]
+    pack["lot_check"] = check
+    if check["words"]:
+        pack["notes"].insert(0, f"{check['words']} Sales of these shares are marked to check.")
     return pack
 
 
@@ -242,19 +272,9 @@ SALE_LISTS = ("schedule", "needs_fmv", "unknown_cost", "exempt_buybacks")
 
 def _share_names(tx) -> dict[str, str]:
     """A name for each ISIN: the holding's own (under each ISIN it has had), else the scrip name
-    of Upstox's trade history."""
-    names = {
-        r["isin"]: r["scrip_name"]
-        for record in tx.report_list("trades")
-        for r in (record.get("payload") or {}).get("rows") or []
-        if r.get("isin") and r.get("scrip_name")
-    }
-    assets = {a["id"]: a["name"] for a in tx.rows("asset") if a.get("name")}
-    for alias in tx.rows("asset_alias", "id", kind="isin"):
-        if alias["asset_id"] in assets:
-            names[alias["value"]] = assets[alias["asset_id"]]
-    names.update({a["isin"]: a["name"] for a in tx.rows("asset") if a.get("isin") and a["name"]})
-    return names
+    of Upstox's trade history. One rule for the paper, the calendar and the dividends
+    (``corpactions.share_names``)."""
+    return corpactions.share_names(tx)
 
 
 def _named(pack: dict, names: dict[str, str]) -> dict:
@@ -271,11 +291,15 @@ def _named(pack: dict, names: dict[str, str]) -> dict:
     return pack
 
 
-def _paper(store, member: int | None, fy: int, today: int, now: int, reading: bool) -> dict:
-    years, names = store.read(
-        OWNER, lambda tx: (_gather(tx, member, fy, today, now), _share_names(tx))
-    )
-    return _with_dividends(store, _named(_chain(years, reading), names))
+def _paper(store, member: int | None, fy: int, today: int, now: int, reading: bool,
+           insights: bool) -> dict:  # fmt: skip
+    def run(tx):
+        return (_gather(tx, member, fy, today, now), _share_names(tx),
+                lotcheck.check(tx, today, now))  # fmt: skip
+
+    years, names, check = store.read(OWNER, run)
+    pack = _checked(_named(_chain(years, reading), names), check)
+    return _with_dividends(store, pack, today, insights)
 
 
 def _reading(ctx, fy: int) -> bool:
@@ -419,8 +443,8 @@ def _remove(tx, kind: str, row_id: int, version: int) -> dict:
 async def tax_get(ctx, message):
     store, today = need(ctx), _today(ctx)
     fy, member, now = _year(message, today), maybe_whole(message, "member"), ctx.clock()
-    reading = _reading(ctx, fy)
-    return await answer(lambda: _paper(store, member, fy, today, now, reading))
+    reading, insights = _reading(ctx, fy), switch_on(ctx, "insights")
+    return await answer(lambda: _paper(store, member, fy, today, now, reading, insights))
 
 
 @op("tax_pack")
@@ -539,7 +563,8 @@ def _gains(pack: dict, names: dict, accounts: dict) -> list[list[Any]]:
     capital = pack["capital_gains"]
     rows = [["Sale day", "ISIN", "Name", "Account", "Bought", "Quantity", "Received", "Sale value",
              "Cost", "Expenses", "Gain", "Term", "Rate %", "Status", "31 Jan 2018 price used",
-             "Expenses shared from the year's charges", "Buyback"]]  # fmt: skip
+             "Expenses shared from the year's charges", "Buyback",
+             "To check: lots and holdings differ"]]  # fmt: skip
     every = (*capital["schedule"], *capital["needs_fmv"], *capital["unknown_cost"],
              *capital["exempt_buybacks"])  # fmt: skip
     for g in sorted(every, key=lambda g: (g["sale_day"], g["isin"], g["acquired_day"] or 0)):
@@ -550,6 +575,7 @@ def _gains(pack: dict, names: dict, accounts: dict) -> list[list[Any]]:
             _money(g["expenses_paise"]), _money(g["gain_paise"]), TERMS.get(g["term"], ""),
             _num(g["rate_bp"], 2), STATUS[g["status"]], "Yes" if g["fmv_used"] else "No",
             "Yes" if g["allocated"] else "No", BUYBACK.get(g["buyback"], ""),
+            "To check" if g.get("to_check") else "",
         ])  # fmt: skip
     tax = capital["indicative_tax"]
     return rows + [[]] + [[label, _money(paise)] for label, paise in (
@@ -630,6 +656,13 @@ def _dividends(pack: dict, names: dict, accounts: dict) -> list[list[Any]]:
         )
     if block.get("unconfirmed_count"):
         rows.append(["Lines not confirmed yet, counted as expected", block["unconfirmed_count"]])
+    if block.get("note"):
+        rows += [[], [block["note"]]]
+    if block.get("uncounted"):
+        rows += [[], ["Not counted", block["uncounted_count"]], ["Payer ISIN", "Name", "Ex-date",
+                                                                   "Why"]]  # fmt: skip
+        rows += [[u["isin"], u.get("name") or names.get(u["isin"], ""), _iso(u["ex_day"]),
+                  f"{u['words']}."] for u in block["uncounted"]]  # fmt: skip
     return rows
 
 
@@ -645,13 +678,14 @@ def _labels(tx, taxpayer: int) -> tuple[str, dict, dict]:
     return member.get("name") or "", _share_names(tx), accounts
 
 
-def _paper_file(store, member, fy: int, schedule: str, today: int, now: int) -> dict:
+def _paper_file(store, member, fy: int, schedule: str, today: int, now: int,
+                insights: bool) -> dict:  # fmt: skip
     def run(tx):
         years = _gather(tx, member, fy, today, now)
-        return years, _labels(tx, years[-1].taxpayer)
+        return years, _labels(tx, years[-1].taxpayer), lotcheck.check(tx, today, now)
 
-    years, (who, names, accounts) = store.read(OWNER, run)
-    pack = _with_dividends(store, _chain(years))
+    years, (who, names, accounts), check = store.read(OWNER, run)
+    pack = _with_dividends(store, _checked(_chain(years), check), today, insights)
     title = f"{HEADER} · Tax working paper · {pack['fy_label']} · {who}"
     if pack["running"]:
         title += f" · year to date, as of {day_text(pack['as_of_day'])}"
@@ -700,7 +734,8 @@ async def tax_csv(ctx, message):
     schedule = message.get("schedule")
     if schedule not in TAX_SCHEDULES:
         raise ApiError(400, "bad_request", "Choose a schedule to download.", "schedule")
-    return await answer(lambda: _paper_file(store, member, fy, schedule, today, now))
+    insights = switch_on(ctx, "insights")
+    return await answer(lambda: _paper_file(store, member, fy, schedule, today, now, insights))
 
 
 @op("report_csv")

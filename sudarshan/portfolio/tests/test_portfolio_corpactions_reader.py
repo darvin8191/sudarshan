@@ -223,12 +223,115 @@ def test_an_answer_that_cannot_be_read_changes_nothing(tmp_path, answer):
 
 @night
 async def test_an_instrument_upstox_does_not_know_is_asked_again_in_a_week_not_every_night(n):
+    """A 404 (Upstox has nothing under the ISIN) and a 200 with an empty list are the only
+    "nothing listed" there is."""
     n.hold()
-    assert await n.read_one(HELD, NOW) == "none"
+    assert await n.read_one(HELD, NOW) == "none"  # the fake answers 404
     read = n.reads()[HELD]
     assert (read["state"], read["read_at"], read["note"]) == ("none", NOW, ca.WORDS["none"])
     assert await n.reader.plan(NOW + 6 * DAY_MS) == []
     assert await n.reader.plan(NOW + 7 * DAY_MS) == [HELD]
+    n.upstox.answers[HELD] = []
+    assert await n.read_one(HELD, NOW + 7 * DAY_MS) == "none"
+    assert n.reads()[HELD]["read_at"] == NOW + 7 * DAY_MS
+
+
+# ---- a refusal is a failed read, never "nothing listed" (review H2) ------------------------------
+@night
+async def test_a_refusal_or_a_turned_down_request_is_never_kept_as_nothing_listed(n):
+    """Fails on the old code, which answered ``none`` for every status but 200 and wrote
+    "Upstox lists no corporate actions for this instrument." for a 403 and a 400 alike. A 403
+    ends the night and writes nothing; any other request turned down (a 400 for one ISIN) is a
+    failed read of that instrument, marked as tried, never as read."""
+    n.hold()
+    n.upstox.answers[HELD] = 403
+    assert await n.read_one(HELD, NOW) == "refused"
+    assert "refused" in ca.STOPS and n.reads() == {}
+    for status in (400, 422):
+        n.upstox.answers[HELD] = status
+        assert await n.read_one(HELD, NOW) == "rejected"
+        read = n.reads()[HELD]
+        assert (read["state"], read["read_at"], read["note"]) == (
+            "failed", None, ca.WORDS["rejected"])  # fmt: skip
+
+
+@night
+async def test_a_night_of_refusals_fails_and_says_why_and_stores_nothing_as_read(n):
+    """The reviewer's probe: every instrument answers 403. Old code: status ``ok`` and
+    "0 of 1 instruments read, 1 with nothing listed, 0 not read"."""
+    n.hold()
+    n.upstox.answers[HELD] = 403
+    n.rig.now = NIGHT
+    assert await ca.corporate_actions_step(n.svc, NIGHT) == "failed"
+    row = n.read(lambda tx: tx.job_get("corporate_actions", TODAY))
+    assert row["status"] == "failed"
+    assert row["detail"].startswith("0 of 1 instruments read, 0 with nothing listed, 0 not read")
+    assert ca.WORDS["refused"] in row["detail"]
+    assert n.reads() == {} and n.upstox.asked == [HELD]  # the first refusal ended the run
+    refused = ("Upstox did not allow SUDARSHAN to read its list of events with the read-only "
+               "token.")  # fmt: skip
+    # Asked the same evening, after the run of 23:45: "tonight", and the next try tomorrow.
+    assert n.read(lambda tx: ca.read_status(tx, TODAY)) == {
+        "state": "failed", "night": TODAY,
+        "words": f"Upstox's list could not be read tonight. {refused} SUDARSHAN tries again "
+        "tomorrow night after 23:45."}  # fmt: skip
+    assert n.read(lambda tx: ca.read_status(tx, TODAY + 1))["words"] == (
+        f"Upstox's list could not be read last night. {refused} SUDARSHAN tries again tonight "
+        "after 23:45.")  # fmt: skip
+    # Three nights on, the sentence names the night instead of "last night".
+    late = n.read(lambda tx: ca.read_status(tx, TODAY + 3))["words"]
+    assert late.startswith("Upstox's list could not be read on 26 Oct 2026. ")
+
+
+@night
+async def test_a_failed_read_keeps_the_last_good_one_and_goes_last_in_the_rotation(n):
+    isins = [f"INE000{letter}01010" for letter in "FGH"]
+    n.reader._held_now = lambda: [{"isin": isin} for isin in isins]
+    n.upstox.answers.update({isins[0]: 400, isins[1]: [SAMPLE], isins[2]: []})
+    status, note = await n.reader.run(NIGHT)
+    # One of three read with events, one with a clean empty list, one turned down: the night
+    # read something, so it has not failed, and its note counts the one not read.
+    assert (status, note) == ("ok", "1 of 3 instruments read, 1 with nothing listed, 1 not read")
+    assert {k: v["state"] for k, v in n.reads().items()} == dict(
+        zip(isins, ("failed", "ok", "none"), strict=True)
+    )
+    # The next night: the one that failed is asked again, after any never asked.
+    n.reader._held_now = lambda: [{"isin": isin} for isin in [*isins, "INE000J01010"]]
+    assert await n.reader.plan(NIGHT + DAY_MS) == ["INE000J01010", isins[0]]
+    # A read that once succeeded is not thrown away by a later failure.
+    n.upstox.answers[isins[1]] = 400
+    assert await n.read_one(isins[1], NIGHT + DAY_MS) == "rejected"
+    assert n.reads()[isins[1]]["state"] == "ok"
+
+
+@night
+async def test_three_turned_down_requests_in_a_row_end_the_run(n):
+    isins = [f"INE000{letter}01010" for letter in "FGHJ"]
+    n.reader._held_now = lambda: [{"isin": isin} for isin in isins]
+    n.upstox.answers.update(dict.fromkeys(isins, 400))
+    status, note = await n.reader.run(NIGHT)
+    assert status == "failed" and note.endswith(ca.WORDS["rejected"])
+    assert len(n.upstox.asked) == ca.SILENT_STOP
+
+
+# ---- before the first read (review M1) ----------------------------------------------------------
+@night
+async def test_before_the_first_night_the_status_says_when_the_first_read_is(n):
+    """Old code had no such answer: the phone showed "Upstox has not listed upcoming events
+    yet" and Rs 0.00 on a store nothing had ever been read into."""
+    assert n.read(lambda tx: ca.read_status(tx, TODAY)) == {
+        "state": "never", "night": None,
+        "words": "SUDARSHAN reads Upstox's corporate actions for the first time tonight after "
+        "23:45. Nothing is listed until then."}  # fmt: skip
+    n.hold()
+    n.upstox.answers[HELD] = [SAMPLE]
+    n.rig.now = NIGHT
+    assert await ca.corporate_actions_step(n.svc, NIGHT) == "ok"
+    assert n.read(lambda tx: ca.read_status(tx, TODAY + 1)) == {
+        "state": "ok",
+        "night": TODAY,
+        "words": None,
+    }
 
 
 @night

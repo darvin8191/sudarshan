@@ -177,6 +177,52 @@ def identity(event: Mapping[str, Any]) -> str:
     return "|".join((event["isin"], event["kind"], str(event["ex_day"]), amount, ratio, sort))
 
 
+# ---- one event per company and ex-date (review H3) -------------------------------------------
+#: A relisting with a corrected ex-date is still the same event when the two days are this near
+#: and the ratio says the same thing.
+TWIN_DAYS = 7
+
+
+def same_ratio(one: tuple[int | None, int | None], other: tuple[int | None, int | None]) -> bool:
+    """Whether two ratios as written say the same thing: equal as fractions (``1:5`` and
+    ``2:10``), or one the other way round of the other (``1:5`` and ``10:2``: a face value of 10
+    made 2 is one share made five). Upstox does not say which side is which, so both count."""
+    if None in one or None in other or 0 in one or 0 in other:
+        return False
+    return one[0] * other[1] == one[1] * other[0] or one[0] * other[0] == one[1] * other[1]
+
+
+def twins(one: Mapping[str, Any], other: Mapping[str, Any]) -> bool:
+    """Whether two stored bonus or split rows are one event listed twice: the same share and
+    kind on the same ex-date (whatever each ratio says: a company does not split twice in a
+    day), or on ex-dates within ``TWIN_DAYS`` with ratios that say the same thing (a corrected
+    date). The hash of a row changes with every rewording; the owner's decision must not."""
+    if (one["isin"], one["kind"]) != (other["isin"], other["kind"]) or one["kind"] not in LOT_KINDS:
+        return False
+    if one["ex_day"] == other["ex_day"]:
+        return True
+    near = abs(days_between(one["ex_day"], other["ex_day"])) <= TWIN_DAYS
+    return near and same_ratio(
+        (one["ratio_num"], one["ratio_den"]), (other["ratio_num"], other["ratio_den"])
+    )
+
+
+def groups(events: list[Mapping[str, Any]]) -> list[list[Mapping[str, Any]]]:
+    """The bonus and split rows as events: each list is one event with every wording of it, in
+    the order given. A row joins the first event it is a twin of any wording of."""
+    found: list[list[Mapping[str, Any]]] = []
+    for event in events:
+        if event["kind"] not in LOT_KINDS:
+            continue
+        for group in found:
+            if any(twins(event, other) for other in group):
+                group.append(event)
+                break
+        else:
+            found.append([event])
+    return found
+
+
 def readings(kind: str, first: int | None, second: int | None) -> list[tuple[int, int]]:
     """The ways a bonus's or a split's ratio can be read as ``(num, den)``, the proposed one
     first; one reading when both numbers are the same, none when there is no ratio or the kind
@@ -233,14 +279,22 @@ EVE_REACH_DAYS = 7
 
 def effect(kind: str, held_qty_u: int, num: int, den: int) -> dict[str, Any]:
     """What ``held_qty_u`` becomes under a reading: the quantity added, the quantity after, and
-    whether part of a share is left over (the company usually pays that in cash)."""
+    whether part of a share is left over (the company usually pays that in cash). A bonus on
+    whole shares brings whole shares only, as the company credits them and as the tax lots keep
+    them (``sudarshan.tax.lots``); ``left_qty_u`` is the part of a share it leaves out. A split
+    keeps its fraction, as the ledger does."""
+    if kind == "bonus" and held_qty_u % QTY_SCALE == 0:
+        exact = held_qty_u * num // den  # 10^-6 of a share; anything smaller is dropped
+        added = exact // QTY_SCALE * QTY_SCALE
+        return {"added_qty_u": added, "after_qty_u": held_qty_u + added,
+                "fraction": added * den != held_qty_u * num, "left_qty_u": exact - added}  # fmt: skip
     if kind == "bonus":
         added = round_div(held_qty_u * num, den)
     else:
         added = round_div(held_qty_u * num, den) - held_qty_u
     after = held_qty_u + added
     whole = held_qty_u * num % den == 0 and after % QTY_SCALE == 0
-    return {"added_qty_u": added, "after_qty_u": after, "fraction": not whole}
+    return {"added_qty_u": added, "after_qty_u": after, "fraction": not whole, "left_qty_u": 0}
 
 
 def sentence(kind: str, first: int, second: int, num: int, den: int, held_qty_u: int | None) -> str:
@@ -260,7 +314,12 @@ def sentence(kind: str, first: int, second: int, num: int, den: int, held_qty_u:
         text = f"you held {held}, you get {quantity(done['added_qty_u'])} more, {after} in all"
     else:
         text = f"you held {held}, they become {after}"
-    left = " This leaves part of a share, which a company usually pays in cash." * done["fraction"]
+    left = ""
+    if done["fraction"] and done["left_qty_u"]:
+        left = (f" {quantity(done['left_qty_u'])} of a share is left over, which a company "
+                "usually pays in cash.")  # fmt: skip
+    elif done["fraction"]:
+        left = " This leaves part of a share, which a company usually pays in cash."
     return f"{label}: {text}. Is that right?{left}"
 
 

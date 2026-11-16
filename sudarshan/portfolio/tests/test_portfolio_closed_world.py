@@ -63,7 +63,7 @@ STRUCTURAL = frozenset(
         "day", "days", "at", "now", "read_at", "as_of", "as_of_day", "as_of_ms", "due_at",
         "resolved_at", "price_day", "valuation_day", "first_flow_day", "nav_day", "ex_day",
         "acquired_day", "credited_day", "gone_at", "expires_at", "from", "to", "fy", "fy_label",
-        "loss_fy",
+        "loss_fy", "night", "record_day",
         "auction_from", "auction_until", "auction_close",
         # states, flags and versions
         "state", "status", "detail", "version", "schema_version", "service_version",
@@ -79,7 +79,11 @@ STRUCTURAL = frozenset(
         "value", "layout", "spec", "defaults", "widgets", "columns", "sort", "group", "filters",
         "classes", "views", "loose_loans", "inputs", "sources", "opening_lots", "fmvs", "carries",
         "day_overrides", "trade_marks", "settings", "events", "to_confirm", "reads", "decisions",
-        "details", "not_computed_sales",
+        "details", "not_computed_sales", "read_status", "lot_check", "uncounted",
+        # where a quantity is from, and flags and counts of rows that carry no figure
+        "held_from", "to_check", "left_out_count", "unrecorded_count", "uncounted_count",
+        # the change to a decision a lot check offers (an event id, a version and a ratio)
+        "fix",
     }
 )  # fmt: skip
 

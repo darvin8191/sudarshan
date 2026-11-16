@@ -24,6 +24,16 @@ def fraction_left(kind: str, isin: str, day_text: str) -> str:
     )
 
 
+def bonus_part_left(isin: str, day_text: str, left_qty_u: int) -> str:
+    """A bonus on whole shares that does not come out whole: the lots take the whole shares."""
+    part = f"{left_qty_u:06d}".rstrip("0")
+    return (
+        f"The bonus of {isin} on {day_text} leaves 0.{part} of a share over. The lots hold "
+        "the whole shares only; a company usually pays the rest in cash, which this paper does "
+        "not count: check your bank entry for it."
+    )
+
+
 def audit_above_digital(limit: str) -> str:
     return (
         f"Turnover is above {limit}: a tax audit applies to exchange trading above this. "
