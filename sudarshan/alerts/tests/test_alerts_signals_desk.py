@@ -111,7 +111,9 @@ def test_items_are_taken_once_and_sent_in_the_signals_lane(quick, store):
 
 
 def test_merged_over_five_seconds_one_message_per_reading(quick, monkeypatch):
-    monkeypatch.setattr(signals_desk, "MERGE_S", 0.3)
+    """Both relays are taken before the sender runs, so the merge never races; the window is
+    long beside the check inside it, so a slow runner cannot send before the check."""
+    monkeypatch.setattr(signals_desk, "MERGE_S", 1.5)
 
     async def scenario(store):
         sender = Sender()
@@ -123,9 +125,9 @@ def test_merged_over_five_seconds_one_message_per_reading(quick, monkeypatch):
                 [change(2, from_label="FII distribution", to_label="FII panic"),
                  change(3, instrument="BANKNIFTY")],
             ))  # fmt: skip
-            await asyncio.sleep(0.15)
+            await asyncio.sleep(0.2)
             assert sender.texts == []  # still inside the merge of the first
-            await wait_until(lambda: len(sender.texts) == 2, 3)
+            await wait_until(lambda: len(sender.texts) == 2, 5)
         finally:
             await cancel_and_wait(task)
         lines = [text.split("\n")[1] for text in sender.texts]
