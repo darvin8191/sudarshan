@@ -123,7 +123,7 @@ async def test_a_dividend_from_before_the_first_closing_record_is_listed_as_not_
     assert totals["uncounted_count"] == 1
     assert answer_misses(data) == set()
     # The working paper's block says how many it could not count, and lists them.
-    block = n.read(lambda tx: dividends.for_pack(tx, 2026, data["member_id"]))
+    block = n.read(lambda tx: dividends.for_pack(tx, 2026, data["member_id"], today=TODAY))
     assert (block["total_paise"], block["uncounted_count"]) == (2200 * RUPEE, 1)
     assert block["uncounted"] == [
         {"isin": UPSTOX, "name": None, "ex_day": 20260715, "words": left["words"]}
@@ -185,6 +185,36 @@ async def test_the_year_says_when_the_first_read_is_and_refuses_a_year_before_th
         "Dividends are worked out from the financial year 2020-21 on. Choose a later year."
     )
     assert (await n.rig.call("dividends", fy=2020))["status"] == "success"
+
+
+@scenario
+async def test_the_papers_block_says_why_it_counts_no_dividend(n):
+    """v0.13.0 review H1: the working paper's block of a year nothing was read for, before the
+    first read, after a failed night, and with the insights switch off (v0.13.0 itself)."""
+    data = await year(n)
+    block = n.read(lambda tx: dividends.for_pack(tx, 2026, data["member_id"], today=TODAY))
+    assert block["note"] == (
+        "This paper counts no dividends yet: SUDARSHAN reads Upstox's corporate actions for the "
+        "first time tonight after 23:45, and the dividends of what you held follow."
+    )
+    # v0.13.0, insights switched off: nothing is ever read, and the paper says where to look.
+    off = n.read(lambda tx: dividends.for_pack(tx, 2026, data["member_id"], today=TODAY,
+                                               insights=False))  # fmt: skip
+    assert off["note"] == (
+        "This paper counts no dividends yet: SUDARSHAN reads them from Upstox's corporate "
+        "actions only once the dividends view is switched on in a later release. Take the "
+        "year's dividends from your bank statements or Form 26AS."
+    )
+    # After a failed night, that night's sentence, after a word on what it means here.
+    n.svc.store.write(OWNER, lambda tx: tx.job_put("corporate_actions", TODAY - 1, "failed",
+                                                   f"0 of 1 read. {ca.WORDS['refused']}", NOW))  # fmt: skip
+    failed = n.read(lambda tx: dividends.for_pack(tx, 2026, data["member_id"], today=TODAY))
+    assert failed["note"] == (
+        "Dividends may be missing here. Upstox's list could not be read last night. Upstox did "
+        "not allow SUDARSHAN to read its list of events with the read-only token. SUDARSHAN "
+        "tries again tonight after 23:45."
+    )
+    assert n.read(lambda tx: dividends.for_pack(tx, 2019, 1))["total_paise"] == 0
 
 
 @scenario

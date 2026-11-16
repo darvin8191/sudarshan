@@ -219,17 +219,48 @@ def report(tx: Tx, fy: int, member_id: int, now: int, held_now: list[dict] | Non
             "read_status": corpactions.read_status(tx, today)}  # fmt: skip
 
 
-def for_pack(tx: Tx, fy: int, member_id: int, buyback_paise: int = 0) -> dict[str, Any]:
+#: What the working paper says of its dividends when it cannot count them all (v0.13.0 review
+#: H1): the insights switch is off, so Upstox's list is never read; it was never read yet; or the
+#: last night's read failed (that night's own sentence follows).
+PAPER_OFF = (
+    "This paper counts no dividends yet: SUDARSHAN reads them from Upstox's corporate actions "
+    "only once the dividends view is switched on in a later release. Take the year's dividends "
+    "from your bank statements or Form 26AS."
+)
+PAPER_NOT_READ = (
+    "This paper counts no dividends yet: SUDARSHAN reads Upstox's corporate actions for the "
+    "first time tonight after 23:45, and the dividends of what you held follow."
+)
+PAPER_PAUSED = (
+    "The dividends view is switched off, so no dividend after it was switched off is read from "
+    "Upstox. Take any later ones from your bank statements or Form 26AS."
+)
+PAPER_FAILED = "Dividends may be missing here."
+
+
+def for_pack(tx: Tx, fy: int, member_id: int, buyback_paise: int = 0, today: int | None = None,
+             insights: bool = True) -> dict[str, Any]:  # fmt: skip
     """For the tax working paper (``tax_ops``): the pack's ``dividends`` block of the taxpayer's
     accounts that count for tax, with a buyback's receipt (the pack's own figure) beside the
     payers. A line still expected counts at its expected amount; ``unconfirmed_count`` says so.
-    The dividends it could not count are listed (``uncounted``)."""
+    The dividends it could not count are listed (``uncounted``), and ``note`` says why a total
+    of nothing is not "none": the insights switch is off (``insights``), the list was never read
+    yet, or the last night failed."""
     counted = {a["id"] for a in tx.tax_accounts(member_id) if a["tax_mode"] != "none"}
     if fy < rules.first_year():
         of_year = rules.no_year()
     else:
         of_year = _year(tx, fy, member_id, counted)
-    return rules.block(of_year, buyback_paise)
+    block = rules.block(of_year, buyback_paise)
+    if not insights:
+        block["note"] = PAPER_PAUSED if block["by_payer"] or block["uncounted"] else PAPER_OFF
+        return block
+    status = corpactions.read_status(tx, today) if today is not None else None
+    if status is not None and status["state"] == "never":
+        block["note"] = PAPER_NOT_READ
+    elif status is not None and status["state"] == "failed":
+        block["note"] = f"{PAPER_FAILED} {status['words']}"
+    return block
 
 
 def set_line(tx: Tx, line_id: int, args: dict[str, Any], today: int, now: int) -> dict[str, Any]:

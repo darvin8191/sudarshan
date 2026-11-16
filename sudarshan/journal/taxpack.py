@@ -292,7 +292,27 @@ def dividend_blocks(d: Mapping[str, Any] | None) -> tuple[D.Block, ...]:
     payers = d.get("by_payer") or ()
     buyback = int(d.get("buyback_paise") or 0)
     out: list[D.Block] = [D.Heading("Dividends")]
+    # What the paper could not count is said before any total (v0.13.0 review H1): a list
+    # never read, a failed night, and each dividend with no record of what was held.
+    said: list[D.Block] = []
+    if d.get("note"):
+        said.append(D.Paragraph((str(d["note"]),)))
+    uncounted = [u for u in d.get("uncounted") or () if isinstance(u, Mapping)]
+    if uncounted:
+        said.append(D.Paragraph((
+            f"{words.plural(len(uncounted), 'dividend')} could not be counted and "
+            f"{'is' if len(uncounted) == 1 else 'are'} in no total below:",
+        )))  # fmt: skip
+        said.append(D.Table(
+            (D.Column("Company", 3.0), D.Column("Ex-date", 1.4), D.Column("Not counted", 6.1)),
+            tuple((str(u.get("name") or u.get("isin") or ""),
+                   day_text(u["ex_day"]) if u.get("ex_day") else "-",
+                   f"{u.get('words') or ''}.") for u in uncounted),
+        ))  # fmt: skip
+    out += said
     if not payers and not buyback:
+        if said:
+            return tuple(out)
         return (*out, D.Paragraph(("No dividend is recorded for this financial year.",)))
     if payers:
         out.append(D.Table(
@@ -385,6 +405,12 @@ def pack_lines(pack: Mapping[str, Any]) -> list[str]:
         f"{words.rupees(b['speculative']['net_paise'], signed=True)}",
     ]
     dividends = pack.get("dividends")
-    if isinstance(dividends, Mapping) and dividends.get("total_paise"):
-        lines.append(f"Dividends: {rs(dividends['total_paise'])}")
+    if isinstance(dividends, Mapping):
+        # Never a total that hides what it could not count (v0.13.0 review H1).
+        left = int(dividends.get("uncounted_count") or 0)
+        more = f"; {words.plural(left, 'more dividend')} not counted" if left else ""
+        if dividends.get("total_paise"):
+            lines.append(f"Dividends: {rs(dividends['total_paise'])}{more}")
+        elif left or dividends.get("note"):
+            lines.append("Dividends: none counted in this pack; its Dividends section says why")
     return lines

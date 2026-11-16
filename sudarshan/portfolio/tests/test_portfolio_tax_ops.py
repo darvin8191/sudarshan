@@ -135,6 +135,57 @@ def test_the_paper_checks_its_lots_against_the_holdings_and_marks_the_shares_sal
     assert not pack["notes"][0].startswith("Lots and holdings differ")
 
 
+def test_the_paper_says_why_it_counts_no_dividend_and_lists_what_it_could_not_count(ctx):
+    """v0.13.0 review H1. The paper is on while Upstox's dividends are not read at all (the
+    insights switch is off): its dividends total of nothing used to stand without a word, as
+    "No dividend is recorded for this financial year." in the Tax pack."""
+    switched_off = (
+        "This paper counts no dividends yet: SUDARSHAN reads them from Upstox's corporate "
+        "actions only once the dividends view is switched on in a later release. Take the "
+        "year's dividends from your bank statements or Form 26AS."
+    )
+    pack = call(ctx, "tax_get")
+    assert pack["dividends"]["note"] == switched_off and switched_off in pack["notes"]
+    assert (pack["dividends"]["uncounted"], pack["dividends"]["uncounted_count"]) == ([], 0)
+    assert switched_off in call(ctx, "tax_csv", schedule="dividends")["text"]
+    assert call(ctx, "tax_pack")["dividends"]["note"] == switched_off  # the journal's Tax pack
+    # Switched on, before the first night's read.
+    ctx.settings = dataclasses.replace(ctx.settings, insights=True)
+    assert call(ctx, "tax_get")["dividends"]["note"] == (
+        "This paper counts no dividends yet: SUDARSHAN reads Upstox's corporate actions for the "
+        "first time tonight after 23:45, and the dividends of what you held follow."
+    )
+
+    # A night has read the list: a dividend of July, months before any closing record.
+    def read(tx):
+        from sudarshan.portfolio import corpactions, dividends
+
+        row = {"isin": ISIN, "kind": "dividend", "ex_day": 20260715, "amount_u": 200_000,
+               "ratio_num": None, "ratio_den": None, "details": []}  # fmt: skip
+        tx.ca_event_put({**row, "raw_hash": corpactions.event_hash(row)}, NOW)
+        tx.job_put("corporate_actions", 20261113, "ok", "1 of 1 instruments read", NOW)
+        return dividends.sync(tx, 20261114, NOW)
+
+    assert ctx.store.write(OWNER, read) == 1
+    pack = call(ctx, "tax_get")
+    block = pack["dividends"]
+    assert (block["note"], block["uncounted_count"], block["total_paise"]) == (None, 1, 0)
+    (left,) = block["uncounted"]
+    assert (left["isin"], left["ex_day"]) == (ISIN, 20260715)
+    assert left["words"].startswith("No holdings record reaches the day before this ex-date")
+    assert pack["notes"][-1] == (
+        f"1 dividend of {pack['fy_label']} could not be counted and is in no total; it is "
+        "listed under Dividends with its date."
+    )
+    text = call(ctx, "tax_csv", schedule="dividends")["text"]
+    assert "Not counted,1" in text and f"{ISIN}," in text and "2026-07-15" in text
+    # Switched off again with a line already made: the paper never says it counts none.
+    ctx.settings = dataclasses.replace(ctx.settings, insights=False)
+    assert call(ctx, "tax_get")["dividends"]["note"].startswith(
+        "The dividends view is switched off, so no dividend after it was switched off is read"
+    )
+
+
 # ---- tax_get -----------------------------------------------------------------------------------
 def test_the_paper_is_the_cores_pack_of_the_year_and_the_owner_by_default(ctx):
     pack = call(ctx, "tax_get")
