@@ -409,6 +409,8 @@ def screen_row(
             al.Policy.of(row["spec"].get("alerts")), paused=bool(state.get("alerts_paused"))
         ),
         "alerts_paused": bool(state.get("alerts_paused")),
+        # runs that raised an alert he has not looked at (GA7.6); opening the screen clears them
+        "unseen_alerts": tx.alerts_unseen().get(row["id"], 0),
         "updated_at": row["updated_at"],
     }
 
@@ -1002,9 +1004,31 @@ async def today(ctx, args: Mapping[str, Any]) -> dict[str, Any]:
         return {
             "screens": screens,
             "recent": recent[:20],
-            # Not counted yet: the screener keeps no "seen" mark per alert, so the card never shows it.
-            "unseen_alerts": 0,
+            # runs that raised an alert and were not opened since, of the screens still there
+            "unseen_alerts": sum(n for sid, n in tx.alerts_unseen().items() if sid in names),
             "session": session,
         }
 
     return _translate(lambda: store.read(OWNER, read))
+
+
+@op("alerts_seen")
+async def alerts_seen(ctx, args: Mapping[str, Any]) -> dict[str, Any]:
+    """The owner opened his alerts (GA7.6): a screen's (``screen_id``) or every screen's, up to
+    the run he was shown (``through``), so an alert that came after stays new. Answers how many
+    were marked and how many are still not looked at."""
+    screen_id = _int(args, "screen_id", required=False)
+    through = _int(args, "through", required=False)
+    now = ctx.clock()
+    store = _store(ctx)
+
+    def mark(tx: Tx):
+        if screen_id is not None and tx.screen(screen_id) is None:
+            raise NotFound()
+        seen = tx.alerts_seen(now, screen_id, through)
+        names = {r["id"] for r in tx.screens()}
+        left = sum(n for sid, n in tx.alerts_unseen().items() if sid in names)
+        return {"seen": seen, "unseen_alerts": left}
+
+    return _translate(lambda: store.write(OWNER, mark))
+

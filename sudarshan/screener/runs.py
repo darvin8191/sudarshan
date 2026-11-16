@@ -397,6 +397,7 @@ def record(
     marks["alerts"] = words.told_words(decision, policy)
     tx.run_finish(run["id"], marks, **counts)
     if decision.tell:
+        tx.run_tell(run["id"])  # an alert not looked at yet, for the Dashboard card (GA7.6)
         tx.mark_told(
             screen["id"],
             due.key.session,
@@ -436,7 +437,7 @@ def record(
         tx.outbox_add(
             "push",
             run_key,
-            _push(screen, run, due, counts, applied.changes, marks),
+            {**_push(screen, run, due, counts, applied.changes, marks), "alert": decision.tell},
             now,
         )
     return Report(

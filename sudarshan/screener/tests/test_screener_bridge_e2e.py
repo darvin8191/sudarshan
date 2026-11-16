@@ -345,8 +345,14 @@ def test_the_owner_flow_end_to_end(world):
     assert (
         today["screens"][0]["matches"] == 2
         and today["recent"][0]["kind"] == "entered"
-        and today["unseen_alerts"] == 0
+        and today["unseen_alerts"] >= 1
+    ), "the run that raised an alert is one the owner has not looked at (GA7.6)"
+    # he opens the screen: its alerts are looked at, through the bridge's own route
+    seen = data_of(
+        client.post(f"{PREFIX}/alerts/seen", json={"screen_id": screen_id}, headers=headers)
     )
+    assert seen["seen"] == today["unseen_alerts"] and seen["unseen_alerts"] == 0
+    assert data_of(client.get(f"{PREFIX}/today", headers=JSON))["unseen_alerts"] == 0
     presets = data_of(client.get(f"{PREFIX}/presets", headers=JSON))["presets"]
     assert len(presets) >= 8 and all(
         {"key", "name", "about", "usable", "where", "spec", "reason"} <= set(p) for p in presets

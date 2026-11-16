@@ -15,11 +15,17 @@ Schema 1 is frozen: its SQL never changes, and a later change is a new step. Eve
 table carries ``principal`` (``'owner'`` in this release) so a family read-only layer later adds
 principals and no columns (6.5). Step 2 adds a sealed bar's running volume and last trade time
 to ``bar_today`` (release review HIGH-1). Step 3 lets a pause name one instrument (re-review
-MEDIUM-1). Step 4 adds the dashboard and its widgets (M9.16, dashboards design 3.3).
+MEDIUM-1). Step 4 adds the dashboard and its widgets (M9.16, dashboards design 3.3). Step 5 lets
+a run say that it raised an alert and when the owner looked at it (M3.8, gap audit GA7.6).
+
+The steps are also what ``upgrade/migrate_sudarshan_screener.py`` applies (and reports with
+``--status``) when the owner upgrades with ``upgrade/migrate_all.py``: one set of steps, two ways
+to run them, and the second never runs while the service holds the file.
 """
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Sequence
 
 from sqlalchemy.engine import Connection, Engine
@@ -319,7 +325,45 @@ def _v4(conn: Connection) -> None:
         conn.exec_driver_sql(statement)
 
 
-STEPS: Sequence[Step] = ((1, _v1), (2, _v2), (3, _v3), (4, _v4))
+#: What the History tab says of a run that raised an alert (words.told_words): how the runs
+#: recorded before step 5 are told apart.
+ALERT_RAISED = "Alert raised"
+
+
+def _v5(conn: Connection) -> None:
+    """A run that raised an alert says so (``alerted``), and keeps when the owner looked at it
+    (``alert_seen_at``, epoch ms; NULL is not looked at yet): the count of alerts not looked at
+    on the Dashboard card, which had nothing to count from.
+
+    The runs already recorded are filled in from what each says of itself, not from a default:
+    a run whose alert line reads "Alert raised: ..." did raise one (a digest that was dropped
+    had that line replaced, and is not one). Each of those is taken as looked at, at the time of
+    the run: the card never counted them, and the owner's first sight of the count is not every
+    alert of the last hundred days. Run again on a file that has the columns, it changes no row
+    that is already marked."""
+    add_column(conn, "run", "alerted", "INTEGER NOT NULL DEFAULT 0")
+    add_column(conn, "run", "alert_seen_at", "INTEGER")
+    found = conn.exec_driver_sql(
+        "SELECT id, marks, ran_at FROM run WHERE alerted = 0 AND alert_seen_at IS NULL "
+        "AND marks LIKE '%' || ? || '%'",
+        (ALERT_RAISED,),
+    ).fetchall()
+    for run_id, marks, ran_at in found:
+        try:
+            line = (json.loads(marks) or {}).get("alerts")
+        except (TypeError, ValueError, AttributeError):
+            continue
+        if isinstance(line, str) and line.startswith(ALERT_RAISED):
+            conn.exec_driver_sql(
+                "UPDATE run SET alerted = 1, alert_seen_at = ? WHERE id = ?", (ran_at, run_id)
+            )
+    conn.exec_driver_sql(
+        "CREATE INDEX IF NOT EXISTS run_alert_new ON run (principal, screen_id) "
+        "WHERE alerted = 1 AND alert_seen_at IS NULL"
+    )
+
+
+STEPS: Sequence[Step] = ((1, _v1), (2, _v2), (3, _v3), (4, _v4), (5, _v5))
 LATEST = STEPS[-1][0]
 
 

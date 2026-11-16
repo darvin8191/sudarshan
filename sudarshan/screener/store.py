@@ -75,7 +75,7 @@ OUTBOX_MAX_PENDING = 1_000
 #: Columns that hold JSON text; the store converts at the boundary.
 JSON_COLUMNS = frozenset({"spec", "marks", "values_json", "payload", "sort_by", "value_clauses"})
 FLAG_COLUMNS = frozenset(
-    {"shared", "alerts_paused", "pinned", "added_by_screener", "in_list", "cas"}
+    {"shared", "alerts_paused", "pinned", "added_by_screener", "in_list", "cas", "alerted"}
 )
 #: Never leave the store: who owns a row, and the client's retry key.
 HIDDEN_COLUMNS = ("principal", "request_id")
@@ -793,9 +793,41 @@ class Tx:
         self.conn.execute(
             update(t)
             .where(t.c.id == found["id"], self._mine(t))
-            .values(**self._in({"marks": marks}))
+            .values(alerted=0, **self._in({"marks": marks}))  # no alert went: none to look at
         )
         return True
+
+    # ---- alerts not looked at (M3.8, GA7.6) ----
+    def run_tell(self, run_id: int) -> None:
+        """The run raised an alert: it counts as not looked at until the owner opens it."""
+        t = self._t("run")
+        self.conn.execute(
+            update(t).where(t.c.id == run_id, self._mine(t)).values(alerted=1, alert_seen_at=None)
+        )
+
+    def alerts_unseen(self) -> dict[int, int]:
+        """Per screen, the runs that raised an alert the owner has not looked at."""
+        t = self._t("run")
+        found = self.conn.execute(
+            select(t.c.screen_id, func.count())
+            .where(t.c.alerted == 1, t.c.alert_seen_at.is_(None), self._mine(t))
+            .group_by(t.c.screen_id)
+        )
+        return {int(row[0]): int(row[1]) for row in found}
+
+    def alerts_seen(
+        self, now: int, screen_id: int | None = None, through: int | None = None
+    ) -> int:
+        """Mark alerts looked at: one screen's or every screen's, up to run ``through`` when
+        given (the newest run the page was showing, so one that came after stays new). The
+        number marked; an alert already looked at keeps its own time."""
+        t = self._t("run")
+        query = update(t).where(t.c.alerted == 1, t.c.alert_seen_at.is_(None), self._mine(t))
+        if screen_id is not None:
+            query = query.where(t.c.screen_id == screen_id)
+        if through is not None:
+            query = query.where(t.c.id <= through)
+        return int(self.conn.execute(query.values(alert_seen_at=now)).rowcount or 0)
 
     def run_mark(self, run_id: int, status: str) -> None:
         if status not in RUN_STATUSES:

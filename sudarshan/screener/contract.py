@@ -126,6 +126,8 @@ OPS = (
     OpSpec("presets", "GET", "/presets", "read"),
     OpSpec("universes", "GET", "/universes", "read"),
     OpSpec("today", "GET", "/today", "read"),
+    # The owner opened his alerts (M3.8, GA7.6): ``{screen_id?, through?}``.
+    OpSpec("alerts_seen", "POST", "/alerts/seen", "write"),
     # The dashboard (M9.16): a widget is addressed by its screen and its kind, never by an id.
     OpSpec("dashboard", "GET", "/dashboard", "read"),
     OpSpec("widget", "GET", "/dashboard/widgets/<id>", "read", query=(("kind", "str"),)),
