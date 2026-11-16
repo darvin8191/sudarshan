@@ -301,3 +301,92 @@ def test_a_strategy_exit_held_for_its_size_is_refused_in_the_run_s_words(
     assert (kept.held, kept.error) == (True, TRIED[shared])
     # and the memory itself still holds the shared words, for a scalping close of it
     assert surface_exits.kept_refusal("live", *POSITION, "SELL")[1]["message"] == shared
+
+
+# ---- the scalping terminal ---------------------------------------------------------------------
+# A refused Close sends nothing more by itself. With a stop loss or target set on the position,
+# the server's risk monitor (services/scalping_risk_monitor_service.py) sends its own exit when
+# one is reached and tries again every few seconds while it stays due: a limit order left in the
+# app could then fill beside it, so only then does the close get the retrying caller's words.
+MONITOR_KEY = f"NFO:{X}:MIS"
+
+
+@pytest.fixture
+def scalping(monkeypatch):
+    import blueprints.scalping as scalping
+    from services import scalping_risk_monitor_service as monitor
+
+    sent = []
+
+    def place_order(order_data, api_key, auth_token, broker):
+        sent.append(int(order_data["quantity"]))
+        return True, {"status": "success", "orderid": "261027000001"}, 200
+
+    monkeypatch.setattr("services.place_order_service.place_order", place_order)
+    monkeypatch.setattr(scalping, "_is_derivative", lambda exchange: False)  # no symbol master
+    monkeypatch.setattr(scalping, "_current_mode", lambda: "live")
+    monkeypatch.setattr(
+        surface_exits, "upstox_book", lambda *a: surface_exits.Book(orders_read=False)
+    )
+    states: dict[str, dict] = {}
+    monkeypatch.setattr(monitor.get_scalping_risk_monitor(), "_states", states)
+    scalping.sent, scalping.stops = sent, states
+    yield scalping
+    del scalping.sent, scalping.stops
+
+
+def _scalping_close(scalping):
+    return scalping._reducing_exit(X, "NFO", "MIS", "SELL", 65, "tok", "upstox", "key")
+
+
+def test_a_scalping_close_with_no_stop_set_keeps_the_shared_words(scalping):
+    ok, body, status = _scalping_close(scalping)
+    assert (ok, status, scalping.sent, body["message"]) == (False, 424, [], ORDERS_NOT_READ)
+
+
+@pytest.mark.parametrize(
+    "stop",
+    [{"initial_sl": 90.0}, {"current_sl": 95.5, "trailing_enabled": True}, {"target": 150.0}],
+)
+def test_a_scalping_close_with_a_stop_or_target_set_says_how_to_close_by_hand(scalping, stop):
+    scalping.stops[MONITOR_KEY] = {"symbol": X, "exchange": "NFO", "product": "MIS",
+                                   "mode": "live", **stop}  # fmt: skip
+    ok, body, status = _scalping_close(scalping)
+    assert (ok, status, scalping.sent, body["message"]) == (False, 424, [], ORDERS_NOT_READ_TRIED)
+
+
+@pytest.mark.parametrize(
+    ("key", "stop"),
+    [
+        (MONITOR_KEY, {"mode": "analyze", "initial_sl": 90.0}),  # the sandbox's stop
+        ("NFO:NIFTY27OCT2626000CE:MIS", {"mode": "live", "initial_sl": 90.0}),  # another one
+        (f"NFO:{X}:NRML", {"mode": "live", "initial_sl": 90.0}),  # another product
+        (MONITOR_KEY, {"mode": "live", "target": 0}),  # nothing set
+    ],
+)
+def test_a_stop_that_cannot_send_this_exit_changes_nothing(scalping, key, stop):
+    scalping.stops[key] = stop
+    _ok, body, _status = _scalping_close(scalping)
+    assert body["message"] == ORDERS_NOT_READ
+
+
+def test_a_scalping_close_that_goes_is_answered_as_before_with_a_stop_set(scalping, monkeypatch):
+    scalping.stops[MONITOR_KEY] = {"mode": "live", "initial_sl": 90.0}
+    monkeypatch.setattr(surface_exits, "upstox_book", lambda *a: surface_exits.Book(held=65))
+    assert _scalping_close(scalping) == (
+        True,
+        {"status": "success", "orderid": "261027000001"},
+        200,
+    )
+    assert scalping.sent == [65]
+
+
+def test_the_monitor_s_answer_never_breaks_a_close(scalping, monkeypatch):
+    from services import scalping_risk_monitor_service as monitor
+
+    def broken(*args):
+        raise RuntimeError("monitor gone")
+
+    monkeypatch.setattr(monitor.get_scalping_risk_monitor(), "watches", broken)
+    _ok, body, status = _scalping_close(scalping)
+    assert (status, body["message"]) == (424, ORDERS_NOT_READ)
