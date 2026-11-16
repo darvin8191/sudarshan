@@ -100,7 +100,9 @@ def test_the_records_list_says_whose_record_counts():
     text = " ".join(_section(SECTIONS[4]).split())
     assert "The statements Upstox issues are the record the regulator and the tax office" in text
     assert "a question for your CA" in text
-    for name in ("`journal.db`", "`logs.db`", "`sudarshan_risk.db`"):
+    # The order log is `order_logs` in openalgo.db (database/apilog_db.py reads DATABASE_URL);
+    # logs.db holds the request traffic, which is not the order record (GA5.4).
+    for name in ("`journal.db`", "`db/openalgo.db`", "`sudarshan_risk.db`"):
         assert name in text, name
 
 

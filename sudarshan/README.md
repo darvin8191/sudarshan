@@ -755,6 +755,8 @@ deploy tool installs both with the release). Nothing needs setting up for it.
 | it looks at | it tells you when | when you are told |
 |---|---|---|
 | each SUDARSHAN service: price feed, alerts, portfolio, screener, family view, journal | one has not answered for two looks in a row (about 4 minutes) | at once |
+| the TRINETRA reader (`sudarshan-signals`), which runs whether its view is switched on or off | while the view is on: it has not answered for two looks in a row. While the view is off it is fine as long as it answers, and its silence is not told | at once, while the view is on |
+| the Upstox read-only token (the Analytics Token), as the portfolio service found it at its own check: once a day, at the service's first start that day. The watch asks Upstox nothing and never sees the token | Upstox did not accept the token at that check; or the check at the last start got no answer at all (the result is then stale) | a refusal at once; a check that got no answer after the market closes |
 | the Upstox login | from 08:58 on a trading day there is no login for today; later in the day, order updates have stopped arriving for 4 minutes | at once |
 | the price feed's connection to Upstox | not connected for 4 minutes while the market is open | at once |
 | the instrument list | it was not refreshed today by 09:00 on a trading day | at once |
@@ -769,6 +771,13 @@ deploy tool installs both with the release). Nothing needs setting up for it.
 | Historify's downloaded history | it has reached 3 GB | after the market closes |
 | shown only, on the System page and in the Sunday summary: the nightly backup's age and its offsite copy, operating-system updates waiting, a restart the system asks for | never a notice of their own: the backup job tells its own late night, and updates are applied by you, by hand, on a non-trading day | - |
 
+- **The Analytics Token's line.** A refusal says to open the Upstox developer page (My Apps)
+  and see whether the token is still there and active, and not to create a new one before you
+  have looked: a new token ends the old one for everything else that uses it. After the token
+  file on the server is replaced the line reads "not checked yet" until the portfolio service
+  next starts on a new day; the old token's result is never shown for the new one. The check
+  runs when the portfolio service starts, so on a server that runs for weeks without an install
+  the line shows an old date: the System page says when it was.
 - **Once per cause.** A failure is told once and its recovery once, however long it lasts. A
   service that was never set up on this server (the family view before its set-up) is not a fault.
 - **While a release is being installed** the watch stands aside: the deploy tool stops and starts
@@ -1528,14 +1537,75 @@ Each April, for the year just ended:
 | bank statements and every transfer to and from the broker | your bank, Upstox | you |
 | the strategy behind each automated order: the TradingView alert's name and the Pine script as it was | TradingView; the order's strategy name in the journal | you: export the scripts with the year |
 | every fill, paired into trades, with charges; the monthly statements and the tax pack | the journal (`journal.db`, the Reports page) | SUDARSHAN, for ever; download the tax pack and the year's statements |
-| every order request and the broker's answer | OpenAlgo's `logs.db` | SUDARSHAN, for ever |
-| what the risk layer refused, and the kill switch's history | `sudarshan_risk.db` (Settings > Risk > History) | SUDARSHAN, for ever |
-| market alerts that fired | the alerts' history | SUDARSHAN |
-| one full archive of the server from just after the year's end, with the year's Tax pack and March's charges in it | the nightly backup: the first complete archive made from 4 April on, and its offsite copy under a name starting `sudarshan-fy-` ("Nightly backups") | SUDARSHAN, for 8 years on the server and in the bucket (once both delete rules carry the prefix filter of step 3); a copy with the year's papers costs nothing |
+| every order request and the broker's answer | OpenAlgo's order log (`order_logs` in `db/openalgo.db`) | SUDARSHAN, for ever |
+| what the risk layer refused, and the kill switch's history | `sudarshan_risk.db` (Settings > Risk > History) | SUDARSHAN, for 90 days: the year's records pack holds what was still there when it was built |
+| market alerts that fired | the alerts' history | SUDARSHAN, through the financial year and until the end of the April after it |
+| one full archive of the server from just after the year's end, with the year's Tax pack, its records pack and March's charges in it | the nightly backup: the first complete archive made from 4 April on, and its offsite copy under a name starting `sudarshan-fy-` ("Nightly backups") | SUDARSHAN, for 8 years on the server and in the bucket (once both delete rules carry the prefix filter of step 3); a copy with the year's papers costs nothing |
 | installs, rollbacks, backup failures, restore drills, family sign-ins and every notice the watch told | the server diary, `/var/lib/sudarshan-watch/log/<year>.jsonl` ("Watching the server"), which the nightly backup takes | SUDARSHAN, for 8 years |
 
-A later release adds one records pack a year (the journal's statements with the order, risk and
-alert history as files).
+### The records pack (one zip a year)
+
+On 1 April at 07:00, and again on 4 April at 07:00 once the year's last charges have arrived,
+the journal builds the Tax pack and, straight after it, the **records pack** for the year just
+ended. It is one zip in the Journal's Reports, "Records pack", and "Build the records pack now"
+on that page builds it at any time (for the year running, to today). It is not sent to
+Telegram: download it from Reports. The first backup of 4 April runs at 16:30, after it, so the
+archive kept 8 years holds it. It follows the Tax pack's switch in the report settings: with
+the Tax pack off, neither is built.
+
+| file | what it holds |
+|---|---|
+| `00-read-first.pdf` | one page: SUDARSHAN's books are your working record and Upstox's statements are the record the tax office and the regulator recognise; what each file covers; and the checklist of what you add yourself (Upstox's contract notes, ledger, tradebook, P&L and tax statements; your bank's statements with every transfer to and from Upstox; the TradingView alert names and scripts) |
+| `SUDARSHAN_Tax-pack_FY….pdf` | the year's Tax pack as Reports keeps it (left out, with a line saying so, when none was built) |
+| `trades.csv` | the journal's closed trades of the year, with charges |
+| `orders.csv` | every request that placed, changed or cancelled an order and what was answered, live and sandbox. Never the API key |
+| `risk-history.csv` | orders the risk layer refused, the kill switch, the days a daily loss limit was reached. The risk layer keeps 90 days of refusals, so until that changes this file starts in January |
+| `alerts.csv` | the market alerts that fired, and where each was sent |
+| `assistant-calls.csv` | the AI assistant's calls. The assistant's own tools are not built yet, so the file holds its header only |
+| `server-diary.jsonl` | every server notice of the year |
+
+Each file says on the first page how many rows it holds and from which day to which, so a
+store that keeps less than a year shows it there. A store this server does not have (alerts
+never switched on) gives its file with the header alone. The page downloads a pack of up to
+about 5 MB; a larger one says so and is copied from the server's backups.
+
+## What is kept, and for how long (M18.12)
+
+Each store keeps its own limit. This table states the limit the code enforces today; where a
+setting changes it, the setting is named. "For ever" means nothing in the code removes it.
+
+| store | what | kept for | set where |
+|---|---|---|---|
+| `db/openalgo.db` | users, keys, tokens, settings; the order log (`order_logs`, `analyzer_logs`) | for ever | OpenAlgo; nothing removes order log rows |
+| `db/sudarshan_watchlists.db`, `db/sudarshan_charts.db` | your watchlists; your chart layouts and drawings | for ever | - |
+| `db/sudarshan_automation.db` | strategies and their links for ever; the lines of alerts that arrived from TradingView | 90 days, and at most 20,000 lines for one strategy | `sudarshan/automation/store.py` |
+| `db/logs.db` | requests to the app (traffic) | 30 days, cleared when OpenAlgo starts | `TRAFFIC_LOG_RETENTION_DAYS` |
+| `db/latency.db` | timings: an order's timings for ever; every other request's 7 days | 7 days (orders: for ever) | OpenAlgo |
+| `db/health.db` | health samples | 7 days | `HEALTH_RETENTION_DAYS` |
+| `log/` | OpenAlgo's log files; `log/errors.jsonl` | 14 days; the newest 1,000 errors, cut when OpenAlgo starts | `LOG_RETENTION` |
+| `db/historify.duckdb` | market history you download | no limit; the watch warns from 3 GB and you delete on the Historify page | - |
+| `db/sudarshan_risk.db` | risk limits, the kill switch's state, the days a daily loss limit was reached | for ever | - |
+| `db/sudarshan_risk.db`, history | orders refused, kill switch and settings changes | 90 days | `sudarshan/guard/store.py` |
+| `db/sudarshan-vault/` | sealed sign-in details | for ever; the list of auto-login tries 30 days | `sudarshan/vault/store.py` |
+| feed recording (`/var/lib/sudarshan-feed/ticks`) | every tick, compressed | 7 days, and at most 1,024 MB a day | `SUDARSHAN_FEED_RECORD_KEEP_DAYS`, `SUDARSHAN_FEED_RECORD_MAX_MB` |
+| feed snapshot | the last tick of each instrument | 30 days after nothing follows it | `sudarshan/feed/service.py` |
+| `alerts.db` | which order alerts and messages were sent | 7 days; server notices and ended TRINETRA messages 60 days | `sudarshan/alerts/store.py` |
+| `market.db` | alert definitions | for ever | - |
+| `market.db`, history | market alerts that fired, where each was sent, and pauses | 100 days (never under 90), and never less than the financial year and the April after it: about 13 months at most | `SUDARSHAN_MARKET_ALERTS_KEEP_DAYS` |
+| `market.db`, baselines | volume baselines | 10 days | `sudarshan/alerts/market/store.py` |
+| `screener.db` | screens and watchlist memberships | for ever | - |
+| `screener.db`, runs | each run and its matches; the values behind a run; messages sent | runs 100 days (never under 90); values 7 days; sent messages 2 days | `SUDARSHAN_SCREENER_KEEP_DAYS` |
+| `portfolio.db` | entries, closing records, Upstox's reports as read, job rows | for ever (no rule removes job rows) | - |
+| `journal.db` | fills, trades, notes, every report and its file (the Tax pack and the records pack among them) | for ever; the job log 400 days | `sudarshan/journal/jobs/catchup.py` |
+| `family.db` | members, the audit | for ever; ended sign-ins 90 days; sent messages 7 days; instrument names 30 days | `sudarshan/family/` |
+| `signals.db` | TRINETRA's timeline, alerts and marks | for ever; the documents as received 30 days; daily counters 40 days | `sudarshan/signals/store.py` |
+| notice files (`events.jsonl`) | what each producer told | the newest 200 lines each | `sudarshan/ops/events.py` |
+| server diary | every notice, one file a year | 8 years | `sudarshan/ops/watch/diary.py` |
+| backups | the nightly archives | 30 daily, 12 monthly, one for each of 8 financial years, inside a 10 GB cap | `SUDARSHAN_BACKUP_KEEP_DAILY`, `_KEEP_MONTHLY`, `_KEEP_YEARLY`, `SUDARSHAN_BACKUP_MAX_GB` |
+| the system's journal | every service's output | the system's own limit, shared with everything else on the server | not SUDARSHAN's to set |
+
+The watch tells you when the disk has under 15 GB free (a warning) or under 5 GB (a failure),
+and the Sunday summary carries the sizes.
 
 ## The AI assistant (M17)
 
