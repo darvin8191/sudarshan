@@ -1,6 +1,12 @@
 """``charges_reconcile``: the journal's estimate of charges against Upstox's own, month by month
 for a financial year (P7 J4, M7.42; design p7 4.6 and 8). Behind ``SUDARSHAN_TAX``.
 
+``charges_estimate`` (B6, M5.10): the order ticket's "Charges est." line. One order as the ticket
+holds it (exchange, symbol, side, quantity, price, product) priced on today's rate card as one
+executed order on the owner's plan, the same ``core/charges.py`` the trade sheet uses. Read only:
+nothing is written and nothing is read of Upstox. It is an entry point to nothing: no order is
+placed, changed or checked here.
+
 For each month of the year up to the one running, and each of Upstox's segments the journal holds
 live orders of in it: the estimate is the sum of those orders' estimates (the same
 ``core/charges.py`` the trade sheet uses, on the plan in the settings), the actual is the month's
@@ -22,12 +28,12 @@ from typing import Any
 from .. import actual
 from ..core import charges as charges_core
 from ..core import kinds, reconcile
-from ..core.money import ist_day
+from ..core.money import ist_day, u_to_paise
 from ..errors import ApiError
 from ..jobs.charges import financial_year, month_due
 from ..schedule import schedule_for
 from . import op
-from .common import OWNER, need, whole, work
+from .common import ASK, OWNER, choice, need, text, whole, work
 from .settings_ops import rate_card
 
 SWITCHED_OFF = (
@@ -135,3 +141,65 @@ async def charges_reconcile(ctx, args):
     fy = whole(args, "fy", low=2000, high=this, default=this)
     sched = schedule_for(ctx)
     return await work(lambda: store.read(OWNER, lambda tx: reconcile_year(tx, fy, today, sched)))
+
+
+#: The largest order the ticket's line prices: far above any freeze quantity or price.
+TICKET_MAX_QTY = 10_000_000
+TICKET_MAX_PRICE_U = 10**12
+#: The surface the ticket's order goes out on: OpenAlgo's own, an API order to Upstox.
+TICKET_SURFACE = "app"
+EXCHANGE_CHARS = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZ_")
+
+
+def ticket_order(args: dict[str, Any]) -> dict[str, Any]:
+    """The order as the ticket holds it, each field checked; a bad one is the usual sentence."""
+    exchange = text(args, "exchange", limit=16).upper()
+    if not exchange or not set(exchange) <= EXCHANGE_CHARS:
+        raise ApiError(400, "bad_request", ASK, "exchange")
+    symbol = text(args, "symbol", limit=60)
+    if not symbol:
+        raise ApiError(400, "bad_request", ASK, "symbol")
+    return {
+        "exchange": exchange,
+        "symbol": symbol.upper(),
+        "action": choice(args, "action", kinds.ACTIONS),
+        "qty": whole(args, "quantity", low=1, high=TICKET_MAX_QTY),
+        "price_u": whole(args, "price_u", low=1, high=TICKET_MAX_PRICE_U),
+        "product": choice(args, "product", kinds.INTRADAY_PRODUCTS + kinds.CARRY_PRODUCTS),
+    }
+
+
+def ticket_estimate(order: dict[str, Any], day: int, plan: str) -> dict[str, Any]:
+    """One order priced on the card of ``day`` as one executed order on ``plan``. A delivery
+    sale names Upstox's depository charge, which the card has no row for."""
+    fill = {**order, "order_id": "ticket", "day": day, "surface": TICKET_SURFACE}
+    priced = charges_core.estimate([fill], plan)
+    segment = charges_core.segment_of(order["exchange"], order["symbol"], order["product"])
+    left_out = []
+    if segment == "equity_delivery" and order["action"] == "SELL":
+        left_out.append(actual.PART_LABELS["dp"])
+    return {
+        "segment": segment,
+        "modelled": priced["modelled"],
+        "plan": plan,
+        "parts": priced["parts"],
+        "turnover_paise": u_to_paise(order["qty"] * order["price_u"]),
+        "day": day,
+        "rate_card": rate_card(day, plan),
+        "left_out": left_out,
+    }
+
+
+def plan_of(settings: dict[str, Any]) -> str:
+    """The owner's brokerage plan from the settings; the card's default for anything else."""
+    plan = settings.get("charges_plan") or charges_core.DEFAULT_PLAN
+    return plan if plan in kinds.CHARGE_PLANS else charges_core.DEFAULT_PLAN
+
+
+@op("charges_estimate")
+async def charges_estimate(ctx, args):
+    store = need(ctx)
+    order = ticket_order(args)
+    today = ist_day(ctx.clock())
+    plan = await work(lambda: store.read(OWNER, lambda tx: plan_of(tx.settings())))
+    return ticket_estimate(order, today, plan)

@@ -757,6 +757,7 @@ protected     /sudarshan/family/api/signin_reset                                
 protected     /sudarshan/family/api/signin_unlock                                       sudarshan_family.signin_unlock
 protected     /sudarshan/family/api/state                                               sudarshan_family.state
 protected     /sudarshan/journal/api/analytics                                          sudarshan_journal.analytics
+protected     /sudarshan/journal/api/charges/estimate                                   sudarshan_journal.charges_estimate
 protected     /sudarshan/journal/api/charges/reconcile                                  sudarshan_journal.charges_reconcile
 protected     /sudarshan/journal/api/playbooks                                          sudarshan_journal.playbook_create
 protected     /sudarshan/journal/api/playbooks                                          sudarshan_journal.playbooks_list

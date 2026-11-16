@@ -112,7 +112,7 @@ def test_every_op_of_the_table_has_its_route():
         "state", "trips", "trip_get", "trip_update", "tags_list", "tag_create", "tag_update",
         "playbooks_list", "playbook_create", "playbook_update", "analytics", "reports_list",
         "report_get", "report_file", "report_build", "settings_get", "settings_set",
-        "reconcile_now", "charges_reconcile",
+        "reconcile_now", "charges_reconcile", "charges_estimate",
     }  # fmt: skip
 
 
@@ -247,6 +247,22 @@ def test_query_values_are_read_as_the_table_says(bridge, journal):
         ("analytics", {"period": "month", "expiry": "only", "playbook": 2}),
         ("reports_list", {"kind": "eod", "limit": 20}),
     ]
+
+
+def test_the_tickets_estimate_carries_the_order_as_the_ticket_holds_it(bridge, journal):
+    """B6: the order ticket's charges line is a read; quantity and price go as whole numbers and
+    nothing else of the page's query is sent."""
+    as_owner(bridge)
+    query = ("exchange=NFO&symbol=NIFTY24NOV2625000CE&action=SELL&quantity=65&price_u=1312000"
+             "&product=MIS&pricetype=LIMIT")  # fmt: skip
+    response = bridge.get(f"{PREFIX}/charges/estimate?{query}", headers=JSON)
+    assert response.status_code == 200
+    assert journal.calls == [("charges_estimate", {
+        "exchange": "NFO", "symbol": "NIFTY24NOV2625000CE", "action": "SELL", "quantity": 65,
+        "price_u": 1312000, "product": "MIS",
+    })]  # fmt: skip
+    response = bridge.get(f"{PREFIX}/charges/estimate?quantity=6.5&price_u=1", headers=JSON)
+    assert response.status_code == 400 and len(journal.calls) == 1
 
 
 @pytest.mark.parametrize("query", ["limit=ten", "tag=1.5", "strategy=" + "x" * 201])

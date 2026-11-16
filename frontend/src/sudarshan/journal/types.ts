@@ -85,6 +85,7 @@ export const OP_NAMES = [
   'settings_set',
   'reconcile_now',
   'charges_reconcile',
+  'charges_estimate',
   'delivery',
   'family_day',
   'nudge',
@@ -456,6 +457,17 @@ export interface ChargesReconcile {
   rate_card: RateCard
 }
 
+export interface OrderCharges {
+  segment: ChargeSegment
+  modelled: boolean
+  plan: ChargePlan
+  parts: ChargeParts
+  turnover_paise: number
+  day: number
+  rate_card: RateCard
+  left_out: string[]
+}
+
 export interface Analytics {
   metrics: Metrics
   hold: HoldBucketRow[]
@@ -732,6 +744,7 @@ export const OPS: readonly OpSpec[] = [
   { name: 'settings_set', method: 'PUT', route: '/settings', cls: 'write' },
   { name: 'reconcile_now', method: 'POST', route: '/reconcile', cls: 'reconcile' },
   { name: 'charges_reconcile', method: 'GET', route: '/charges/reconcile', cls: 'read' },
+  { name: 'charges_estimate', method: 'GET', route: '/charges/estimate', cls: 'read' },
 ]
 
 export type OpName = (typeof OP_NAMES)[number]
@@ -855,6 +868,15 @@ export interface ChargesReconcileReq {
   fy?: number
 }
 
+export interface ChargesEstimateReq {
+  exchange: string
+  symbol: string
+  action: Action
+  quantity: number
+  price_u: number
+  product: string
+}
+
 export interface DeliveryReq {
   report_id: number
   channel: string
@@ -892,6 +914,7 @@ export interface JournalOps {
   settings_set: { req: SettingsSetReq; res: Done }
   reconcile_now: { req: ReconcileNowReq; res: Done }
   charges_reconcile: { req: ChargesReconcileReq; res: ChargesReconcile }
+  charges_estimate: { req: ChargesEstimateReq; res: OrderCharges }
   delivery: { req: DeliveryReq; res: Done }
   family_day: { req: FamilyDayReq; res: FamilyCounts }
   nudge: { req: NudgeReq; res: Done }

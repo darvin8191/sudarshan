@@ -54,6 +54,11 @@ export interface OverlayMarker {
   price?: number
   /** A few characters beside the mark. */
   text?: string
+  /**
+   * The glyph: an arrow (the default) or a triangle, which the journal's trade
+   * markers use (M14.8). Either points up under a buy and down over a sell.
+   */
+  shape?: 'arrow' | 'triangle'
 }
 
 /** What `setOverlays` takes: a half left out is left as it is. */

@@ -314,8 +314,9 @@ def test_a_full_nonce_book_answers_busy():
 # ---- the switch and the ops -------------------------------------------------------------------
 def test_switched_off_every_op_answers_off_and_does_nothing():
     async def scenario(base, calls):
-        for name, purpose in (("state", "api"), ("trips", "api"), ("nudge", "nudge"),
-                              ("report_get", "delivery"), ("family_day", "family")):  # fmt: skip
+        for name, purpose in (("state", "api"), ("trips", "api"), ("charges_estimate", "api"),
+                              ("nudge", "nudge"), ("report_get", "delivery"),
+                              ("family_day", "family")):  # fmt: skip
             answer = await post(base, name, sealed(name, purpose))
             assert answer.status_code == 200, name
             assert answer.json() == {

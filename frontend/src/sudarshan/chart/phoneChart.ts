@@ -91,6 +91,14 @@ export { WAKE_RECONNECT_MS }
 /** Bars in view when a chart opens: enough candles to read a trend at phone width. */
 export const PHONE_VISIBLE_BARS = 70
 
+/**
+ * The candles pane's empty band above and below, as a share of its height:
+ * the engine's own 10%, and while marks are laid over the candles (M14.8)
+ * enough for a triangle and its letter beyond the highest and lowest candle.
+ */
+export const PLAIN_ROOM = 0.1
+export const MARK_ROOM = 0.2
+
 /** An index is quoted, never traded: no book, no volume, LTP mode. */
 export function isQuoteOnly(exchange: string): boolean {
   return exchange.endsWith('_INDEX')
@@ -240,6 +248,8 @@ export class PhoneChart {
   private lineYs: readonly LineY[] = []
   private layoutQueued = false
   private readonly layoutListeners = new Set<() => void>()
+  /** Who hears that a load drew its history (M14.8: the trade markers). */
+  private readonly loadListeners = new Set<(interval: string) => void>()
   /** History as the candle clock repairs it: never read while the page is hidden. */
   private readonly whenShown = {
     bars: () => this.data.bars(),
@@ -384,6 +394,8 @@ export class PhoneChart {
     if (!same || !this.subscribed) this.subscribe(symbol, exchange)
     this.syncCountdown()
     if (!same) void this.firstQuote(symbol, exchange, ticket)
+    if (!failure && bars.length)
+      for (const listener of [...this.loadListeners]) listener(this.interval)
   }
 
   /**
@@ -583,6 +595,28 @@ export class PhoneChart {
     }
   }
 
+  /**
+   * Hear when a load has drawn its history (M14.8), with the interval it
+   * loaded ('1m', 'D'). A load that failed or found nothing says nothing.
+   */
+  readonly onLoaded = (listener: (interval: string) => void): (() => void) => {
+    this.loadListeners.add(listener)
+    return () => {
+      this.loadListeners.delete(listener)
+    }
+  }
+
+  /** The candles as loaded, their times in UTC seconds, oldest first (M14.8). */
+  barTimes(): number[] {
+    return this.bars.map((bar) => bar.time)
+  }
+
+  /** Show the candles from index `from` to `to` of `barTimes()` (M14.8). */
+  showBars(range: { from: number; to: number }): void {
+    if (this.destroyed || !this.bars.length) return
+    this.chart.setVisibleLogicalRange(range)
+  }
+
   /** The lines and marks as they are now, on the chart as it is now. */
   private applyOverlays(): void {
     const chart = this.chart
@@ -606,6 +640,9 @@ export class PhoneChart {
     if (this.overlays.markers.length || this.markerLayer) {
       this.markerLayer ??= this.price.createMarkers(() => this.bars)
       this.markerLayer.setMarkers(this.overlays.markers.map(markerLook))
+      // A mark over the highest candle or under the lowest needs room in the pane (M14.8).
+      const room = this.overlays.markers.length ? MARK_ROOM : PLAIN_ROOM
+      this.price.priceScale().setOptions({ marginTop: room, marginBottom: room })
     }
     this.measureOverlays()
   }
@@ -1477,9 +1514,14 @@ function lineLook(line: OverlayLine) {
   }
 }
 
-/** A mark at a bar: an arrow up under a buy, down over a sell, in the side's colour. */
+/**
+ * A mark at a bar: an arrow up under a buy, down over a sell, in the side's
+ * colour. A triangle (the trade markers, M14.8) is drawn a size up, so its
+ * letter and price read on a phone outdoors.
+ */
 function markerLook(marker: OverlayMarker) {
   const buy = marker.side === 'BUY'
+  const triangle = marker.shape === 'triangle'
   return {
     id: marker.id,
     time: marker.time,
@@ -1490,8 +1532,14 @@ function markerLook(marker: OverlayMarker) {
           : ('aboveBar' as const)
         : ('atPrice' as const),
     ...(marker.price === undefined ? {} : { price: marker.price }),
-    shape: buy ? ('arrowUp' as const) : ('arrowDown' as const),
-    size: 'small' as const,
+    shape: triangle
+      ? buy
+        ? ('triangleUp' as const)
+        : ('triangleDown' as const)
+      : buy
+        ? ('arrowUp' as const)
+        : ('arrowDown' as const),
+    size: triangle ? ('medium' as const) : ('small' as const),
     color: resolveCssColor(`var(${buy ? '--buy-solid' : '--sell-solid'})`),
     ...(marker.text ? { text: marker.text } : {}),
   }

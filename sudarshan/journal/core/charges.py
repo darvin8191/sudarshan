@@ -12,10 +12,12 @@ report replaces it (next release).
   half-up.
 * ``RATE_CARD`` holds dated rows: for a day, the row with the greatest ``from_day`` not after it
   applies; a fill dated before a row's first date uses the earliest row. Brokerage rows carry a
-  plan column. The owner's plan is Upstox Plus at Rs 30 an executed order, for every order
-  whatever its surface (cross-design Y23: how Plus meets the Rs 10 API-order offer is not
-  confirmed, and overstating charges never reads better than the truth). The ``standard`` plan
-  is kept for the case where the owner changes plan, and carries the surface split.
+  plan column. The owner's plan is Upstox Plus at ``PLUS_ORDER_PAISE`` (Rs 30) an executed order,
+  for every order whatever its surface (cross-design Y23, owner decision 7, still open: how Plus
+  meets the Rs 10 API-order offer is not confirmed, and overstating charges never reads better
+  than the truth). That figure is one setting: a later Rs 10 is a change of that value alone,
+  which the card's Plus row and its edition follow. The ``standard`` plan is kept for the case
+  where the owner changes plan, and carries the surface split.
 * BSE, currency, commodity and any segment without a row are NOT MODELLED: the estimate says so
   and charges nothing, rather than guess.
 * An order shared by two trades (a reversal: SELL 130 against a long of 65 closes it and opens a
@@ -55,8 +57,16 @@ PARTS = ("brokerage", "stt", "exchange", "sebi", "stamp", "gst")
 CARD_START = 20240401
 #: The day F&O STT rose in 2024 (the rates before it are the card's first rows).
 STT_2024 = 20241001
-#: The card as shipped: the day its rates were read, and its edition (bump it with any row below).
-CARD_VERSION = "2026-11-14.2"
+#: Owner decision 7 (cross-design Y23), still open: what one executed order costs on his Upstox
+#: Plus plan, in paise. Rs 30 for every order until he confirms, and every estimate says "est.";
+#: if Upstox's Rs 10 API-order offer applies to him, that is a change of this one value.
+PLUS_ORDER_PAISE = 3000
+_PLUS_RUPEES, _PLUS_PAISE = divmod(PLUS_ORDER_PAISE, 100)
+#: The card as shipped: the day its rates were read, its edition (bump it with any row below), and
+#: what a Plus order is priced at, so a change of that one setting names a new card by itself.
+CARD_VERSION = (
+    f"2026-11-14.2, Plus Rs {_PLUS_RUPEES}{f'.{_PLUS_PAISE:02d}' if _PLUS_PAISE else ''} an order"
+)
 
 
 def _rate(text: str) -> Fraction:
@@ -119,7 +129,7 @@ RATE_CARD: tuple[Row, ...] = (
 # to verify: Plus is listed by Upstox as "up to Rs 30 per order"; the Rs 10 API offer for the
 # standard plan until 31 Dec 2026 is the design's figure and is not on the page.
 BROKERAGE_CARD: tuple[BrokerageRow, ...] = (
-    BrokerageRow(CARD_START, "plus", "any", 3000),
+    BrokerageRow(CARD_START, "plus", "any", PLUS_ORDER_PAISE),
     BrokerageRow(CARD_START, "standard", "app", 2000),
     BrokerageRow(CARD_START, "standard", "api", 1000),
     BrokerageRow(20270101, "standard", "api", 2000),

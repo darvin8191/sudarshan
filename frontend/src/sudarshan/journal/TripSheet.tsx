@@ -20,6 +20,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router'
 import { cn } from '@/lib/utils'
 import { istTime } from '@/sudarshan/books/time'
+import { tripChartPath } from '@/sudarshan/chart/tripMarkers' // SUDARSHAN M14.8
 import { Signed } from '@/sudarshan/portfolio/Signed'
 import { BottomSheet } from '@/sudarshan/watchlist/BottomSheet'
 import { describe } from '@/sudarshan/watchlist/rows'
@@ -1038,8 +1039,9 @@ export function TripSheet({
             onSave={() => void save()}
             onReopen={() => void detail.refetch()}
           />
+          {/* SUDARSHAN M14.8: the phone chart with this trade's fills marked. */}
           <Link
-            to={`/chart/${encodeURIComponent(trip.exchange)}/${encodeURIComponent(trip.symbol)}`}
+            to={tripChartPath(trip)}
             className="inline-flex min-h-12 items-center justify-center gap-2 rounded-[0.875rem] border border-input bg-card px-4 text-[0.9375rem] font-semibold hover:bg-accent"
           >
             <ChartCandlestick aria-hidden="true" className="size-4" />

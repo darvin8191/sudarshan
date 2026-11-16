@@ -177,6 +177,7 @@ OP_NAMES = (
     "settings_set",
     "reconcile_now",
     "charges_reconcile",
+    "charges_estimate",
     "delivery",
     "family_day",
     "nudge",
@@ -291,6 +292,12 @@ RECORDS = {
     # the owner should know of the whole answer (the journal's first fill, nothing traded).
     "ChargesReconcile": "fy:int, fy_label:string, running:bool, months:ReconcileMonth[], "
     "year:ReconcileYear, note:string|null, rate_card:RateCard",
+    # The estimate of one order as the ticket holds it (B6, M5.10): priced on the card of
+    # ``day`` as one executed order on the owner's plan; ``modelled`` false (and every part 0)
+    # for a segment the card does not cover, which the ticket says in words, never as 0.00;
+    # ``left_out``: the labels of what Upstox may charge on it that the card has no row for.
+    "OrderCharges": "segment:ChargeSegment, modelled:bool, plan:ChargePlan, parts:ChargeParts, "
+    "turnover_paise:int, day:int, rate_card:RateCard, left_out:string[]",
     "Analytics": "metrics:Metrics, hold:HoldBucketRow[], calendar:Calendar, equity:Equity, "
     "heat:HeatCell[], by_strategy:BlockRow[], by_tag:BlockRow[], by_playbook:BlockRow[], "
     "expiry:ExpirySplit, beta:Beta|null",
@@ -466,6 +473,10 @@ OPS = (
     # ``fy``: the year the financial year starts in (2026 for FY 2026-27); this year when absent.
     OpSpec("charges_reconcile", "GET", "/charges/reconcile", "read", "fy?:int",
            "ChargesReconcile"),
+    # The order ticket's line (B6): read only, the order as the ticket holds it.
+    OpSpec("charges_estimate", "GET", "/charges/estimate", "read",
+           "exchange:string, symbol:string, action:Action, quantity:int, price_u:int, "
+           "product:string", "OrderCharges"),
 )  # fmt: skip
 #: Ops that no route of the bridge carries: the alerts desk, the family service and the alerts'
 #: nudge call them. A nudge's three fields sit in the seal itself, beside ``op`` (alerts/nudge.py).

@@ -31,6 +31,8 @@ import { useThemeStore } from '@/stores/themeStore'
 import { QuoteStatus } from '@/sudarshan/books/QuoteStatus'
 // SUDARSHAN M20.7: the kill switch's line on the ticket.
 import { KillSwitchNote } from '@/sudarshan/risk/RiskBanner'
+// SUDARSHAN B6 (M5.10): the journal's charges estimate for the order; it changes nothing sent.
+import { ChargesLine } from '@/sudarshan/ticket/ChargesLine'
 // SUDARSHAN B5 (M5.9): the margin the order needs and the funds available; it holds nothing back.
 import { MarginLine } from '@/sudarshan/ticket/MarginLine'
 import { SettlementLine } from '@/sudarshan/ticket/SettlementLine'
@@ -825,6 +827,21 @@ export function PlaceOrderDialog({
           <MarginLine
             apiKey={apiKey}
             sandbox={sandbox}
+            order={{
+              symbol,
+              exchange: exchange_,
+              action: formAction,
+              quantity: formQuantity,
+              pricetype: formPriceType,
+              product: formProduct,
+              price: formPrice,
+              triggerPrice: formTriggerPrice,
+            }}
+          />
+
+          {/* SUDARSHAN B6 (M5.10): read on open and on change; a tap shows the parts. */}
+          <ChargesLine
+            ltp={mergedData.ltp}
             order={{
               symbol,
               exchange: exchange_,
