@@ -196,6 +196,50 @@ def first_exit_unconfirmed(position: Position, at: float, order: bool = False) -
     )
 
 
+# ---- closing by hand while SUDARSHAN may still send the exit (v0.15.0 verify V1) -------------
+#: The books count only a MARKET order as an exit on its way (``surface_exits.sized``): one placed
+#: in Upstox's app is seen and nothing more is sent, but a LIMIT close left waiting there is not,
+#: so an exit SUDARSHAN sends later could fill beside it and reverse the position.
+_BY_MARKET_ORDER = (
+    "close it in the Upstox app with a market order; SUDARSHAN then sends nothing. Do not leave a "
+    "limit order waiting there: SUDARSHAN's exit can still go, and both would fill."
+)
+#: How a message says to close by hand when SUDARSHAN may still send the exit itself.
+CLOSE_BY_HAND = f"If you want out now, {_BY_MARKET_ORDER}"
+
+#: How the books' refusals end when they send the trader to the Upstox app: as they are for a
+#: surface that sends nothing more after a refusal (the app's Exit, Exit all, a scalping close
+#: with no stop set). ``while_tried`` gives a surface that may send the exit later its own words.
+_CLOSE_OR_TRY_AGAIN = "Close it from the Upstox app, or try again in a minute."
+_CLOSE_OR_CHECK = (
+    "Close it from the Upstox app, or check Positions and Orders and try again in a minute."
+)
+_IF_NOT_THERE_CLOSE = (
+    "if that exit is not there and the position is still open, close it from the Upstox app."
+)
+_WHILE_TRIED = {
+    _CLOSE_OR_TRY_AGAIN: f"Try again in a minute. {CLOSE_BY_HAND}",
+    _CLOSE_OR_CHECK: f"Check Positions and Orders and try again in a minute. {CLOSE_BY_HAND}",
+    _IF_NOT_THERE_CLOSE: (
+        f"if that exit is not there and the position is still open, {_BY_MARKET_ORDER}"
+    ),
+}
+
+
+def while_tried(said: str) -> str:
+    """``said`` as told by a surface that may send the exit itself after this refusal: a strategy
+    run, which keeps the leg managed (its stop, target, square-off and a pending stop try again),
+    or a scalping close on a position with a stop or target set (v0.15.0 verify V1b).
+
+    A refusal that sends the trader to the Upstox app then says how to close there without a
+    second fill. Any other sentence comes back as it came, and the shared sentence is never
+    changed for its other callers (the kill switch matches ``exit_not_sized`` word for word)."""
+    for ends, tried in _WHILE_TRIED.items():
+        if said.endswith(ends):
+            return said[: -len(ends)] + tried
+    return said
+
+
 def close_not_confirmed(position: Position, at: float, order: bool = False) -> str:
     """Why no exit was sent for a position whose earlier close (sent at ``at``) was one a surface
     sized from its own book and Upstox's answer to it named no order (a timeout, say): it may have
@@ -211,8 +255,7 @@ def close_not_confirmed(position: Position, at: float, order: bool = False) -> s
     return (
         f"The earlier exit for {name} (sent {clock(at)}) is not confirmed: it may have gone "
         "through, and Upstox's positions can take a minute to show it, so no exit was sent. Check "
-        "Orders: if that exit is not there and the position is still open, close it from the "
-        "Upstox app."
+        f"Orders: {_IF_NOT_THERE_CLOSE}"
     )
 
 
@@ -242,13 +285,11 @@ def exit_not_sized(position: Position, orders_read: bool = True, order: bool = F
     if not orders_read:
         return (
             "Upstox did not send your orders in time, so SUDARSHAN could not confirm how much "
-            f"you hold in {name} and sent no exit. Close it from the Upstox app, or try again in "
-            "a minute."
+            f"you hold in {name} and sent no exit. {_CLOSE_OR_TRY_AGAIN}"
         )
     return (
         f"SUDARSHAN could not work out how much you hold in {name} from Upstox's positions and "
-        "orders, and sent no exit. Close it from the Upstox app, or check Positions and Orders "
-        "and try again in a minute."
+        f"orders, and sent no exit. {_CLOSE_OR_CHECK}"
     )
 
 
@@ -257,8 +298,7 @@ def positions_not_read(position: Position) -> str:
     is held could not be confirmed (sudarshan.books.surface_exits)."""
     return (
         "Upstox did not send your positions in time, so SUDARSHAN could not confirm how much you "
-        f"hold in {trader_name(position)} and sent no exit. Close it from the Upstox app, or try "
-        "again in a minute."
+        f"hold in {trader_name(position)} and sent no exit. {_CLOSE_OR_TRY_AGAIN}"
     )
 
 

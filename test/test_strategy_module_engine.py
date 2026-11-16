@@ -1644,3 +1644,80 @@ def test_a_hold_is_noted_before_its_claim_is_released(api_key, held_exit_message
         "Exit NOT sent (Live)",
         "Exit sent (Live)",
     ]
+
+
+# ---------------------------------------------------------------------------
+# SUDARSHAN M6.9 (v0.15.0 verify V1b): a run's refusal says how to close by hand
+# ---------------------------------------------------------------------------
+
+_ORDERS_NOT_READ_IN_THE_RUN_S_WORDS = (
+    "Upstox did not send your orders in time, so SUDARSHAN could not confirm how much you hold "
+    "in NIFTY 24000 CE and sent no exit. Try again in a minute. If you want out now, close it in "
+    "the Upstox app with a market order; SUDARSHAN then sends nothing. Do not leave a limit order "
+    "waiting there: SUDARSHAN's exit can still go, and both would fill."
+)
+
+
+@pytest.fixture
+def books_that_cannot_confirm_the_size(monkeypatch):
+    """A live run's exit through its real dispatch (sudarshan/books/surface_exits.py): Upstox's
+    positions answer and its order list does not, so the size is not confirmed and nothing is
+    sent. Every broker call is faked: nothing here reaches a network."""
+    from services import place_order_service
+    from services.strategy_module.order_dispatch import OrderStatusResult
+    from sudarshan.books import surface_exits
+
+    sent = []
+
+    def place(*args, **kwargs):
+        sent.append(args)
+        return True, {"status": "success", "orderid": "261027000001"}, 200
+
+    monkeypatch.setattr(
+        engine.order_dispatch, "resolve_live_auth", lambda key: ("t", "upstox", None)
+    )
+    monkeypatch.setattr(place_order_service, "place_order_with_auth", place)
+    monkeypatch.setattr(
+        surface_exits, "upstox_book", lambda *a: surface_exits.Book(orders_read=False)
+    )
+    monkeypatch.setattr(
+        engine.order_dispatch, "cancel_order", lambda **k: DispatchResult(ok=False, error="faked")
+    )
+    monkeypatch.setattr(
+        engine.order_dispatch,
+        "fetch_order_status",
+        lambda **k: OrderStatusResult(ok=False, error="faked"),
+    )
+    return sent
+
+
+def _live_run():
+    sid = _make()
+    assert store.set_live_enabled(sid, USER, True)[0]
+    run_id = _start(sid, mode="live").run_id
+    engine.apply_fill(run_id, 1, 100.0, is_entry=True)
+    return sid, run_id
+
+
+def test_a_close_leg_refused_for_its_size_says_how_to_close_by_hand(
+    api_key, held_exit_messages, books_that_cannot_confirm_the_size
+):
+    # Before V1b: "Close it from the Upstox app, or try again in a minute." while the leg stayed
+    # managed. A LIMIT close left resting there is not seen by the books, so the run's next exit
+    # went at market and both filled. The app's own Exit keeps the shared sentence.
+    _sid, run_id = _live_run()
+    for _ in range(2):  # a fresh read, then the answer repeated from the 2 s memory
+        result = engine.close_leg(run_id, 1, USER)
+        assert result["ok"] is False
+        assert result["error"] == f"Exit refused: {_ORDERS_NOT_READ_IN_THE_RUN_S_WORDS}"
+    assert books_that_cannot_confirm_the_size == []
+
+
+def test_a_stop_refused_for_its_size_says_how_to_close_by_hand(
+    api_key, held_exit_messages, books_that_cannot_confirm_the_size
+):
+    _sid, run_id = _live_run()
+    result = engine.stop_run(run_id, USER, reason="manual")
+    assert result["ok"] is False and result["stop_pending"] is True
+    assert [each["error"] for each in result["exits"]] == [_ORDERS_NOT_READ_IN_THE_RUN_S_WORDS]
+    assert books_that_cannot_confirm_the_size == []

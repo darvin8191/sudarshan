@@ -323,10 +323,9 @@ def test_the_shipped_list_on_a_fresh_install(tmp_path):
     assert after["SUDARSHAN_GTT_PROTECT"] == "sandbox"  # M5.6: Protect in the sandbox first
     assert after["SUDARSHAN_TAX"] == "on"  # M7.27: the tax working paper is switched on
     assert after["SUDARSHAN_PORTFOLIO_INSIGHTS"] == "on"  # M7.36: insights, a release after tax
+    assert after["SUDARSHAN_PORTFOLIO_GOALS"] == "on"  # M7.34, M7.40: goals, a release after that
     assert after["SUDARSHAN_SIGNALS"] == "off"  # M13: the TRINETRA view ships off
     assert after["SUDARSHAN_CHARTS_SYNC"] == "off"  # M4.18: charts across devices ship off
-    for later in LATER_SWITCHES:  # goals stay off in code: no line, no key
-        assert later not in after
     assert after["OPENALGO_MCP_READ_ONLY"] == "1"  # M17.9: the assistant's three settings
     assert after["MCP_OAUTH_WRITE_SCOPE_ENABLED"] == "False"
     assert after["MCP_OAUTH_REQUIRE_APPROVAL"] == "True"
@@ -342,6 +341,7 @@ def test_the_shipped_list_on_a_fresh_install(tmp_path):
         "SUDARSHAN_JOURNAL",
         "SUDARSHAN_TAX",
         "SUDARSHAN_PORTFOLIO_INSIGHTS",
+        "SUDARSHAN_PORTFOLIO_GOALS",
         "SUDARSHAN_SIGNALS",
         "SUDARSHAN_CHARTS_SYNC",
         "MAX_WEBSOCKET_CONNECTIONS",
@@ -436,11 +436,11 @@ def test_the_journal_switch_has_no_old_value_so_an_owners_off_stays(tmp_path, ow
     assert "SUDARSHAN_JOURNAL left alone: the owner chose its value" in out
 
 
-#: The switches of the same phase that this release leaves off (design p7 2.4: one a release).
-#: v0.13.0 switched the tax paper on; v0.14.0 switches insights on; goals stay off.
-LATER_SWITCHES = ("SUDARSHAN_PORTFOLIO_GOALS",)
+#: The switches of the same phase that a release leaves off (design p7 2.4: one a release).
+#: v0.13.0 switched the tax paper on, v0.14.0 insights and v0.15.0 goals: none is left.
+LATER_SWITCHES: tuple[str, ...] = ()
 #: The switches of the phase the shipped list sets, in the order it lists them.
-PHASE_ON = ("SUDARSHAN_TAX", "SUDARSHAN_PORTFOLIO_INSIGHTS")
+PHASE_ON = ("SUDARSHAN_TAX", "SUDARSHAN_PORTFOLIO_INSIGHTS", "SUDARSHAN_PORTFOLIO_GOALS")
 
 
 def _shipped_words() -> list[list[str]]:
@@ -451,43 +451,70 @@ def _shipped_words() -> list[list[str]]:
     ]
 
 
-def test_the_release_switches_tax_and_insights_on_and_leaves_goals_alone(tmp_path):
-    """A server on a release before these switches: its .env holds what that release's list wrote
-    and names neither. This list adds the tax line and the insights line at the end, in that
-    order, and nothing else. It does not name goals, so they stay off in code. An owner's own
-    value for goals stays too."""
-    words = _shipped_words()
-    assert [w for w in words if w[0] in PHASE_ON] == [[key, "on"] for key in PHASE_ON]
-    assert not [w for w in words if w[0] in LATER_SWITCHES]
-    earlier = b"".join(
+def _list_without(*keys: str) -> bytes:
+    """The shipped list as an earlier release wrote it: without the lines of these keys."""
+    return b"".join(
         line + b"\n"
         for line in SHIPPED_LIST.read_bytes().split(b"\n")
-        if not line.startswith(tuple(key.encode() for key in PHASE_ON))
+        if not line.startswith(tuple(key.encode() for key in keys))
     )
+
+
+def test_the_release_switches_tax_insights_and_goals_on(tmp_path):
+    """A server on a release before these switches: its .env holds what that release's list wrote
+    and names none of the three. This list adds the tax line, the insights line and the goals
+    line at the end, in that order, and nothing else. No switch of the phase is left for a later
+    release."""
+    words = _shipped_words()
+    assert [w for w in words if w[0] in PHASE_ON] == [[key, "on"] for key in PHASE_ON]
+    assert not LATER_SWITCHES
+    earlier = _list_without(*PHASE_ON)
     before, _ = _applied(tmp_path / "earlier", (REPO / ".sample.env").read_bytes(), earlier)
     assert not set(PHASE_ON) & set(_read_by_openalgo(before))
     env, out = _applied(tmp_path / "now", before, SHIPPED_LIST.read_bytes())
     after = _read_by_openalgo(env)
     assert env.startswith(before), "every earlier line stays byte for byte"
-    assert env[len(before) :] == b"SUDARSHAN_TAX='on'\nSUDARSHAN_PORTFOLIO_INSIGHTS='on'\n"
-    assert all(after[key] == "on" for key in PHASE_ON) and not set(LATER_SWITCHES) & set(after)
-    chosen = before + b"SUDARSHAN_PORTFOLIO_GOALS='on'\n"
-    kept, _ = _applied(tmp_path / "chosen", chosen, SHIPPED_LIST.read_bytes())
-    assert _read_by_openalgo(kept)["SUDARSHAN_PORTFOLIO_GOALS"] == "on"
-
-
-def test_a_server_on_the_tax_release_gains_only_the_insights_line(tmp_path):
-    """v0.13.0's list had the tax line and no insights line: this one adds exactly one line."""
-    earlier = b"".join(
-        line + b"\n"
-        for line in SHIPPED_LIST.read_bytes().split(b"\n")
-        if not line.startswith(b"SUDARSHAN_PORTFOLIO_INSIGHTS")
+    assert env[len(before) :] == (
+        b"SUDARSHAN_TAX='on'\nSUDARSHAN_PORTFOLIO_INSIGHTS='on'\nSUDARSHAN_PORTFOLIO_GOALS='on'\n"
     )
+    assert all(after[key] == "on" for key in PHASE_ON)
+    chosen = before + b"SUDARSHAN_PORTFOLIO_GOALS='off'\n"
+    kept, _ = _applied(tmp_path / "chosen", chosen, SHIPPED_LIST.read_bytes())
+    assert _read_by_openalgo(kept)["SUDARSHAN_PORTFOLIO_GOALS"] == "off"
+
+
+def test_a_server_on_the_tax_release_gains_the_insights_and_goals_lines(tmp_path):
+    """v0.13.0's list had the tax line and neither later line: this one adds exactly those two."""
+    earlier = _list_without("SUDARSHAN_PORTFOLIO_INSIGHTS", "SUDARSHAN_PORTFOLIO_GOALS")
     before, _ = _applied(tmp_path / "earlier", (REPO / ".sample.env").read_bytes(), earlier)
     assert _read_by_openalgo(before)["SUDARSHAN_TAX"] == "on"
     env, _ = _applied(tmp_path / "now", before, SHIPPED_LIST.read_bytes())
     assert env.startswith(before), "every earlier line stays byte for byte"
-    assert env[len(before) :] == b"SUDARSHAN_PORTFOLIO_INSIGHTS='on'\n"
+    assert env[len(before) :] == (
+        b"SUDARSHAN_PORTFOLIO_INSIGHTS='on'\nSUDARSHAN_PORTFOLIO_GOALS='on'\n"
+    )
+
+
+def test_a_server_on_the_insights_release_gains_only_the_goals_line(tmp_path):
+    """v0.14.0's list had the tax and insights lines and no goals line: this one adds exactly one
+    line, and changes no other."""
+    earlier = _list_without("SUDARSHAN_PORTFOLIO_GOALS")
+    before, _ = _applied(tmp_path / "earlier", (REPO / ".sample.env").read_bytes(), earlier)
+    read = _read_by_openalgo(before)
+    assert read["SUDARSHAN_TAX"] == "on" and read["SUDARSHAN_PORTFOLIO_INSIGHTS"] == "on"
+    assert "SUDARSHAN_PORTFOLIO_GOALS" not in read
+    env, _ = _applied(tmp_path / "now", before, SHIPPED_LIST.read_bytes())
+    assert env.startswith(before), "every earlier line stays byte for byte"
+    assert env[len(before) :] == b"SUDARSHAN_PORTFOLIO_GOALS='on'\n"
+
+
+@pytest.mark.parametrize("owners", [b"off", b"'off'", b"0"])
+def test_the_goals_switch_has_no_old_value_so_an_owners_off_stays(tmp_path, owners):
+    original = b"APP_KEY='k'\nSUDARSHAN_PORTFOLIO_GOALS=" + owners + b"\n"
+    env, out = _applied(tmp_path, original, SHIPPED_LIST.read_bytes())
+    assert env.startswith(original), "the owner's line stays byte for byte"
+    assert _read_by_openalgo(env)["SUDARSHAN_PORTFOLIO_GOALS"] == owners.decode().strip("'")
+    assert "SUDARSHAN_PORTFOLIO_GOALS left alone: the owner chose its value" in out
 
 
 @pytest.mark.parametrize("owners", [b"off", b"'off'", b"0"])
