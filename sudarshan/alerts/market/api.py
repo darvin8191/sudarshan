@@ -58,14 +58,14 @@ OPS_PREFIX = "/v1/"
 #: M13.10 (AL2): TRINETRA's changes come from sudarshan-signals sealed under their own purpose
 #: (sudarshan/alerts/signals/v1), principal sudarshan-signals, at most 16 KiB (the signal
 #: contract's numbers). This op opens only with that key and is answered by the signals desk
-#: (``relay``), market alerts on or off.
+#: (``relay``), market alerts on or off. It is not in OPS, which are the market desk's ops.
 RELAY_OP = signals_contract.RELAY_OP
 RELAY_PRINCIPAL = signals_contract.PRINCIPALS["relay"]
 RELAY_MAX = signals_contract.SEAL_LIMITS["relay"]
 OPS = frozenset(
     {"state", "create", "update", "delete", "events", "events_since", "prefs_get", "prefs_set",
      "test", "screener_digest", "group_sync", "group_add", "group_edit", "group_pause",
-     "group_resume", "group_delete", RELAY_OP}
+     "group_resume", "group_delete"}
 )  # fmt: skip
 #: The screener's digests come sealed under their own purpose (sudarshan/alerts/screener-digest/v1,
 #: cross-design X9): this op opens only with that key, the others only with the bridge's.
@@ -239,11 +239,11 @@ class MarketApi:
             base = self.base_health() if self.base_health is not None else {}
             return {**base, **self.desk.health()}
         op = path[len(OPS_PREFIX) :] if path.startswith(OPS_PREFIX) else None
-        if op not in OPS:
+        if op not in OPS and op != RELAY_OP:
             raise ApiError(404, "not_found", "not found")
         if method != "POST":
             raise ApiError(405, "method", "method not allowed")
-        if op == RELAY_OP:  # M13.10 (AL2): TRINETRA's changes, for the signals desk
+        if op == RELAY_OP:  # M13.10 (AL2): TRINETRA's changes, never the market desk's
             return {"status": "success", "data": await self._relay(body)}
         message = self._open(op, body)
         if message.get("principal") != OWNER:
