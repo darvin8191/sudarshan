@@ -225,6 +225,45 @@ def test_a_closing_record_whose_holdings_were_not_read_is_never_compared(ctx):
     assert call(ctx, "tax_get")["lot_check"]["state"] == "waiting"
 
 
+def test_with_the_calendar_switched_off_the_check_offers_no_tap(ctx):
+    """v0.14.0 verification L5. A release rolled back after a bonus was confirmed the wrong way
+    round: 30 held before the 1:2 bonus of 9 Oct, applied as 2 new for every 1 held, so the lots
+    say 30 + 60 - 10 = 80 where Upstox holds 30 + 15 - 10 = 35. With the Calendar switched off
+    ``ca_decide`` answers "not ready", so a button would only say that: old code showed it. The
+    sentence still says what was found; switched on again, the tap is offered."""
+    from sudarshan.portfolio import corpactions
+
+    def put(tx):
+        row = {"isin": ISIN, "kind": "bonus", "ex_day": 20261009, "amount_u": None,
+               "ratio_num": 1, "ratio_den": 2, "details": []}  # fmt: skip
+        event = tx.ca_event_put({**row, "raw_hash": corpactions.event_hash(row)}, NOW)[0]
+        decided = {"event_id": event["id"], "scope": "upstox", "state": "applied",
+                   "ratio_num": 2, "ratio_den": 1, "activity_id": None}  # fmt: skip
+        return tx.insert("ca_decision", decided, NOW)
+
+    call(ctx, "tax_input_set", kind="opening_lot", request_id="lot-1",
+         row=lot(ctx, qty_u=30 * U, cost_paise=3_750_000))  # fmt: skip
+    holding(ctx, 20261112, 35)
+    decision = ctx.store.write(OWNER, put)
+    (row,) = call(ctx, "tax_get")["lot_check"]["rows"]
+    assert (row["held_qty_u"], row["lots_qty_u"], row["fix"]) == (35 * U, 80 * U, None)
+    assert row["words"].endswith(
+        "Read the other way round, the lots would say 35: it was likely confirmed the wrong way "
+        "round."
+    )
+    ctx.settings = dataclasses.replace(ctx.settings, insights=True)
+    (row,) = call(ctx, "tax_get")["lot_check"]["rows"]
+    assert row["fix"] == {"event_id": decision["event_id"], "version": decision["version"],
+                          "state": "applied", "ratio_num": 1, "ratio_den": 2}  # fmt: skip
+    # Not decided at all: To confirm is named only while it is there to open.
+    ctx.store.write(OWNER, lambda tx: tx.remove("ca_decision", decision["id"]))
+    (row,) = call(ctx, "tax_get")["lot_check"]["rows"]
+    assert row["words"].endswith("The bonus of 9 Oct 2026 waits for you under To confirm.")
+    ctx.settings = dataclasses.replace(ctx.settings, insights=False)
+    (row,) = call(ctx, "tax_get")["lot_check"]["rows"]
+    assert "To confirm" not in row["words"] and row["fix"] is None
+
+
 def test_a_bonus_still_to_come_is_said_as_coming_and_the_notes_name_the_share(ctx):
     """v0.14.0 verification L4. Two bonuses not confirmed: one of 9 Oct, past, and one of
     5 Dec, still to come on 14 Nov. Old code said of both "A bonus of INE002A01018 ... is not

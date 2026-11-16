@@ -322,8 +322,13 @@ def check(tx: Tx, today: int, now: int, lots: TaxLots | None = None, *, insights
             continue
         done = applied.get(isin)
         fix, late = _fix(lots, isin, day, have, done, isin in twice) if done else (None, False)
-        rows.append(_row(isin, names.get(isin), have, in_lots, purchase, done,
-                         pending.get(isin), left.get(isin), fix, late, insights))  # fmt: skip
+        # With the Calendar switched off (a release rolled back), To confirm is not there and
+        # ``ca_decide`` answers "not ready": the row says what it found and offers no tap
+        # (v0.14.0 verification L5).
+        waits = pending.get(isin) if insights else None
+        row = _row(isin, names.get(isin), have, in_lots, purchase, done, waits,
+                   left.get(isin), fix, late, insights)  # fmt: skip
+        rows.append({**row, "fix": fix if insights else None})
     words = None
     if rows:
         listed = "; ".join(
