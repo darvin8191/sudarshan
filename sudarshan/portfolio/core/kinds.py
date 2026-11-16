@@ -72,6 +72,9 @@ UPSTOX_HISTORY_DAYS = 400
 #: The money features (design p7): goals a member may keep; the trading days beta, correlation and
 #: the risk figures rest on, and the fewest they are shown from; the calendar's reach back and on.
 GOALS_MAX = 20
+#: The largest target a goal may have: Rs 1,000 crore. A larger one is a slip of the finger
+#: (extra zeros), and is refused at save with a sentence.
+GOAL_TARGET_MAX_PAISE = 10**12
 STAT_DAYS = 60
 STAT_MIN_DAYS = 20
 CALENDAR_PAST_DAYS = 90
@@ -666,6 +669,7 @@ SHARED_NUMBERS = {
     "IMPORT_MAX_ROWS": IMPORT_MAX_ROWS,
     "LAYOUT_VERSION": LAYOUT_VERSION,
     "GOALS_MAX": GOALS_MAX,
+    "GOAL_TARGET_MAX_PAISE": GOAL_TARGET_MAX_PAISE,
     "STAT_DAYS": STAT_DAYS,
     "STAT_MIN_DAYS": STAT_MIN_DAYS,
     "CALENDAR_PAST_DAYS": CALENDAR_PAST_DAYS,

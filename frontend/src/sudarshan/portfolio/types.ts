@@ -65,6 +65,7 @@ export const IMPORT_MAX_FILE_BYTES = 900_000
 export const IMPORT_MAX_ROWS = 5_000
 export const LAYOUT_VERSION = 1
 export const GOALS_MAX = 20
+export const GOAL_TARGET_MAX_PAISE = 1_000_000_000_000
 export const STAT_DAYS = 60
 export const STAT_MIN_DAYS = 20
 export const CALENDAR_PAST_DAYS = 90
@@ -2571,6 +2572,10 @@ export interface Goal {
   required_monthly_paise: Paise
   months_left: number
   on_track: boolean
+  /** Linked tabs that have since been deleted: each counts as nothing until it is unlinked. */
+  gone_tab_ids: number[]
+  /** The sentence of a goal whose figures could not be worked out; its figures are then zeros. */
+  problem: string | null
 }
 
 export interface GoalsList {

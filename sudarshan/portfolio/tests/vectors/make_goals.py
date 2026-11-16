@@ -111,7 +111,8 @@ for row in MONTHLY:  # every expected amount is what the fractions above give
         row["rate_bp"])[0], row["id"]  # fmt: skip
 
 # ---- whole months --------------------------------------------------------------------------------
-# (2031 - 2026) x 12 + (3 - 11) = 52, and the 31st is not before the 14th.
+# (2031 - 2026) x 12 + (3 - 11) = 52, and the 31st is not before the 14th. A month is whole on the
+# same day of the month, or on the last day of a month too short to have that day.
 MONTHS = [
     {"id": "MO1", "note": "14 Nov 2026 to 31 Mar 2031: 60 - 8 = 52 (the design's card)",
      "as_of_day": 20261114, "target_day": 20310331, "months": 52},
@@ -127,8 +128,19 @@ MONTHS = [
      "target_day": 20261114, "months": 0},
     {"id": "MO7", "note": "overdue: 0, never below", "as_of_day": 20261114,
      "target_day": 20250101, "months": 0},
-    {"id": "MO8", "note": "31 Jan to 28 Feb: the 28th is before the 31st, so 0; to 31 Mar: 2",
-     "as_of_day": 20270131, "target_day": 20270228, "months": 0},
+    {"id": "MO8", "note": "31 Jan to 28 Feb: the 28th is the last day of its month, so the month "
+     "is whole: 1; to 31 Mar: 2", "as_of_day": 20270131, "target_day": 20270228, "months": 1},
+    {"id": "MO8b", "note": "31 Jan to 27 Feb, a day before the month's end: 0",
+     "as_of_day": 20270131, "target_day": 20270227, "months": 0},
+    {"id": "MO11", "note": "31 Dec 2026 to 30 Jun 2027, month end to month end: 6",
+     "as_of_day": 20261231, "target_day": 20270630, "months": 6},
+    {"id": "MO12", "note": "29 Feb 2028 to 28 Feb 2029, the last day of each February: 12",
+     "as_of_day": 20280229, "target_day": 20290228, "months": 12},
+    {"id": "MO13", "note": "30 Jan to 29 Feb 2028 (a leap year's last day): 1; to 28 Feb 2028, "
+     "a day before the month's end: 0", "as_of_day": 20280130, "target_day": 20280229,
+     "months": 1},
+    {"id": "MO14", "note": "30 Jan to 28 Feb 2028: 0", "as_of_day": 20280130,
+     "target_day": 20280228, "months": 0},
     {"id": "MO9", "note": "31 Jan to 31 Mar: 2", "as_of_day": 20270131, "target_day": 20270331,
      "months": 2},
     {"id": "MO10", "note": "ten years to the day: 120", "as_of_day": 20261114,
