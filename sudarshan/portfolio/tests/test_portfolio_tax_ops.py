@@ -225,6 +225,33 @@ def test_a_closing_record_whose_holdings_were_not_read_is_never_compared(ctx):
     assert call(ctx, "tax_get")["lot_check"]["state"] == "waiting"
 
 
+def test_a_bonus_still_to_come_is_said_as_coming_and_the_notes_name_the_share(ctx):
+    """v0.14.0 verification L4. Two bonuses not confirmed: one of 9 Oct, past, and one of
+    5 Dec, still to come on 14 Nov. Old code said of both "A bonus of INE002A01018 ... is not
+    confirmed ... Confirm it", the second while ``ca_decide`` refuses it as early, and named
+    the share by its ISIN only."""
+    from sudarshan.portfolio import corpactions
+
+    def put(tx):
+        for day in (20261009, 20261205):
+            row = {"isin": ISIN, "kind": "bonus", "ex_day": day, "amount_u": None,
+                   "ratio_num": 1, "ratio_den": 2, "details": []}  # fmt: skip
+            tx.ca_event_put({**row, "raw_hash": corpactions.event_hash(row)}, NOW)
+
+    call(ctx, "tax_input_set", kind="opening_lot", request_id="lot-1",
+         row=lot(ctx, qty_u=30 * U, cost_paise=3_750_000))  # fmt: skip
+    ctx.store.write(OWNER, put)
+    pack = call(ctx, "tax_get")
+    lists = ("schedule", "needs_fmv", "unknown_cost", "exempt_buybacks")
+    (name,) = {sale["name"] for key in lists for sale in pack["capital_gains"][key]}
+    assert name and name != ISIN
+    assert f"A bonus of {name} on 9 Oct 2026 is not confirmed, so the lots were left as they " \
+        "were. Confirm it and the figures follow." in pack["notes"]  # fmt: skip
+    assert f"A bonus of {name} on 5 Dec 2026 is coming. The lots change once you confirm it, " \
+        "on or after that day." in pack["notes"]  # fmt: skip
+    assert not [note for note in pack["notes"] if ISIN in note]
+
+
 def test_the_paper_says_why_it_counts_no_dividend_and_lists_what_it_could_not_count(ctx):
     """v0.13.0 review H1. The paper is on while Upstox's dividends are not read at all (the
     insights switch is off): its dividends total of nothing used to stand without a word, as

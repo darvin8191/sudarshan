@@ -17,6 +17,14 @@ def action_unconfirmed(kind: str, isin: str, day_text: str) -> str:
     )
 
 
+def action_coming(kind: str, isin: str, day_text: str) -> str:
+    """One still to come: it cannot be confirmed before its day (v0.14.0 verification L4)."""
+    return (
+        f"A {ACTION_NOUNS.get(kind, 'corporate action')} of {isin} on {day_text} is coming. "
+        "The lots change once you confirm it, on or after that day."
+    )
+
+
 def fraction_left(kind: str, isin: str, day_text: str) -> str:
     return (
         f"The {ACTION_NOUNS.get(kind, 'corporate action')} of {isin} on {day_text} leaves part "

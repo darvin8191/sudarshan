@@ -268,6 +268,8 @@ def _checked(pack: dict, check: dict) -> dict:
 
 #: The lists of the pack whose rows are sales of a share or a fund, each named by its ISIN.
 SALE_LISTS = ("schedule", "needs_fmv", "unknown_cost", "exempt_buybacks")
+#: An ISIN as a word of a sentence.
+ISIN_WORD = re.compile(r"\bIN[A-Z0-9]{10}\b")
 
 
 def _share_names(tx) -> dict[str, str]:
@@ -279,10 +281,17 @@ def _share_names(tx) -> dict[str, str]:
 
 def _named(pack: dict, names: dict[str, str]) -> dict:
     """Each sale of the pack with its share's name beside the ISIN (None where no record names
-    it; the ISIN is always kept). The core knows a share by its ISIN only."""
+    it; the ISIN is always kept). The core knows a share by its ISIN only, so its notes ("A
+    bonus of <ISIN> on ...") name the share too, where a record names it (v0.14.0 verification
+    L4)."""
     for key in SALE_LISTS:
         for row in pack["capital_gains"][key]:
             row["name"] = names.get(row["isin"])
+    if "notes" in pack:
+        pack["notes"] = [
+            ISIN_WORD.sub(lambda found: names.get(found.group(0), found.group(0)), note)
+            for note in pack["notes"]
+        ]
     # A sale the paper does not compute (an ETF, a REIT, a bond) is named too: an ISIN alone
     # does not say what was sold. A derivative's instrument is its contract and names itself.
     for row in pack.get("not_computed_sales") or ():
