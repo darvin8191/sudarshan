@@ -8,8 +8,10 @@ entry, a second one goes beside it.
 
 The Automation intake asks for more: while its call runs, an order that only adds is sized as one
 that reduces is, from the rows corrected by the order book's fills (``sudarshan.books.fills``),
-and when that cannot be worked out nothing is sent. No other caller is changed, and an order
-without the mark still makes no order book read.
+and when that cannot be worked out nothing is sent. No other caller's add is changed, and an
+order without the mark that adds, as the row says, still makes no order book read. (One to a
+size the row already shows is read for since M6.9 GA1.2, and never sent on that read without
+``SUDARSHAN_REVERSAL_FROM_FILLS``: sudarshan/books/lag_flag.py.)
 
 The mark is a context variable, never a field of the order: nothing an alert, an API caller or a
 stored row carries can set it, and no event, log line or journal entry has to have it taken out.

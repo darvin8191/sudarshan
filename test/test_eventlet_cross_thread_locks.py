@@ -584,3 +584,90 @@ def test_real_threading_sleep_is_the_unpatched_one():
         """
     )
     assert "OK" in result.stdout, result.stderr
+
+
+def test_a_surface_close_sized_from_a_real_thread_never_stalls_the_hub():
+    """SUDARSHAN M6.9 (GA1.1): a scalping or strategy close claims its position, reads Upstox's
+    two books and remembers a refusal for its size (sudarshan/books/surface_exits.py). A close
+    can come from a request's greenlet while another comes from a real OS thread, so the claims
+    and the kept refusals sit under real locks held for dict work only, never across the read
+    or the order. A real thread's close is answered while a greenlet's close is still at the
+    broker, and the hub keeps running through both.
+    """
+    result = run(
+        """
+        from sudarshan.books import exit_guard, surface_exits
+
+        assert contend(exit_guard.EXITS._lock), "the claims' lock blocked a real thread"
+        assert contend(surface_exits.REFUSALS._lock), "the kept refusals' lock blocked one"
+
+        POSITION = ("NFO", "NIFTY27OCT2625900CE", "MIS")
+        held = {"quantity": 65}
+        sent = []
+        ticks = []
+        stop = []
+
+        def ticker():
+            while not stop:
+                ticks.append(time.monotonic())
+                eventlet.sleep(0.01)
+
+        def read_book(exchange, symbol, product, side):
+            return surface_exits.Book(held=held["quantity"])
+
+        def close(wait):
+            def send():
+                wait()  # the broker call
+                sent.append(65)
+                held["quantity"] = 0  # the order book shows the fill at once
+                return True, {"status": "success", "orderid": "261027000001"}, 200
+
+            return surface_exits.exit_once(
+                "live", *POSITION, send, side="SELL", quantity=65,
+                read_book=read_book, resize=lambda quantity: None,
+            )
+
+        eventlet.spawn(ticker)
+        green = eventlet.spawn(close, lambda: eventlet.sleep(0.5))
+        eventlet.sleep(0.1)  # the greenlet's close is at the broker, holding its claim
+
+        answers = []
+
+        def real_thread_side():
+            started = time.monotonic()
+            answers.append((close(lambda: None), time.monotonic() - started))
+            answers.append((close(lambda: None), time.monotonic() - started))
+
+        thread = _orig.Thread(target=real_thread_side, daemon=True)
+        before = len(ticks)
+        thread.start()
+        deadline = time.monotonic() + 5
+        while thread.is_alive() and time.monotonic() < deadline:
+            eventlet.sleep(0.02)
+        assert not thread.is_alive(), "the real thread's close never returned"
+        (first, took), (second, _total) = answers
+        assert took < 0.3, f"the real thread waited {took:.2f}s behind the greenlet's close"
+        assert first[0] is False and "already on its way" in first[1]["message"], first
+        assert second[0] is False and surface_exits.held(second[1], second[2]), second
+
+        ok, _body, _status = green.wait()
+        assert ok and sent == [65]
+        assert len(ticks) - before >= 20, "the hub stalled while the closes ran"
+
+        # Afterwards the books show the position closed: both worlds are told so, and the
+        # refusal the greenlet kept is the one the real thread reads.
+        exit_guard.EXITS = exit_guard.ExitsInFlight()
+        flat = close(lambda: None)
+        assert flat[0] is False and flat[2] == 409 and sent == [65], flat
+        seen = []
+        again = _orig.Thread(target=lambda: seen.append(close(lambda: None)), daemon=True)
+        again.start()
+        deadline = time.monotonic() + 5
+        while again.is_alive() and time.monotonic() < deadline:
+            eventlet.sleep(0.02)
+        assert seen == [flat] and sent == [65], seen
+        stop.append(1)
+        print("OK")
+        """
+    )
+    assert "OK" in result.stdout, result.stdout + result.stderr
