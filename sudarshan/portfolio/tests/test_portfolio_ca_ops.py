@@ -151,6 +151,7 @@ async def test_a_bonus_is_proposed_on_the_owners_quantity_and_changes_no_lot_unt
         "scope": "upstox", "held_qty_u": 100 * U, "ratio_num": 1, "ratio_den": 2,
         "words": "Bonus 1:2: you held 100, you get 50 more, 150 in all. Is that right?",
         "added_qty_u": 50 * U, "after_qty_u": 150 * U, "fraction": False, "left_qty_u": 0,
+        "held_from": "record",
         "other": {
             "ratio_num": 2, "ratio_den": 1,
             "words": "Bonus 1:2: you held 100, you get 200 more, 300 in all. Is that right?",
@@ -249,26 +250,48 @@ async def test_a_dividend_or_an_event_to_come_is_never_confirmed(n):
 
 # ---- which holdings an event waits for ---------------------------------------------------------
 @scenario
-async def test_the_upstox_account_is_asked_only_where_it_held_or_may_have_held_the_share(n):
+async def test_the_upstox_account_is_asked_only_where_a_record_shows_it_held_the_share(n):
+    """Review M3. Old code asked about every bonus and split since 1 Apr 2024 of any share of
+    the account, with no quantity ("Split 1:10: every 1 share becomes 10. Is that right?")."""
     record(n, 20261019, **{UPSTOX: 100})  # holds UPSTOX; the record shows none of TRADED
-    not_held = event(n, "bonus", ratio=(1, 1), isin=TRADED)
+    event(n, "bonus", ratio=(1, 1), isin=TRADED)
     assert await waiting(n) == []  # the record says it was not held: nothing to confirm
-    # An ex-date no closing record reaches: asked only for a share of the account, inside the
-    # years its reports reach, and then without an example.
-    rows = [{"isin": TRADED, "segment": "EQ"}]
-    n.svc.store.write(
-        OWNER, lambda tx: tx.report_put("trades", 2025, "EQ", "ok", NOW, None, {"rows": rows}, NOW)
-    )
-    old = event(n, "bonus", ex_day=20250910, ratio=(1, 2), isin=TRADED)
+    # A split of UPSTOX in July 2024, which no closing record reaches: until the year's share
+    # trades are read in full nothing can tell what was held then, so it is not asked yet,
+    # only counted.
+    event(n, "split", ex_day=20240705, ratio=(1, 10))
+    data = (await n.rig.call("ca_list"))["data"]
+    assert (data["to_confirm"], data["left_out_count"]) == ([], 1)
+    # The reviewer's probe: 40 of TRADED bought on 5 Oct 2026; a split of July 2024, long
+    # before. The lots of the trade history hold nothing then (0 bought before 5 Jul 2024), so
+    # applying it would change no lot: it is not asked, and the lots now say the same of
+    # UPSTOX's split, so nothing is left out either.
+    history(n, (20261005, "BUY", 40), isin=TRADED)
+    event(n, "split", ex_day=20240705, ratio=(1, 10), isin=TRADED)
     event(n, "bonus", ex_day=20250910, ratio=(1, 2), isin="INE000Z01019")  # not the account's
     event(n, "split", ex_day=20240328, ratio=(1, 2), isin=TRADED)  # before FY 2024-25
-    found = await waiting(n)
-    assert [(e["id"], len(e["expected"])) for e in found] == [(old, 1)]
-    side = found[0]["expected"][0]
-    assert (side["held_qty_u"], side["words"]) == (
-        None, "Bonus 1:2: 1 new share for every 2 held. Is that right?")  # fmt: skip
-    assert "after_qty_u" not in side and not_held != old
+    data = (await n.rig.call("ca_list"))["data"]
+    assert (data["to_confirm"], data["left_out_count"]) == ([], 0)
     assert ca.reach_from(TODAY) == 20240401
+
+
+@scenario
+async def test_a_share_held_through_a_split_before_the_first_record_is_asked_with_its_quantity(n):
+    """Review M3, the other half: 60 bought on 10 Jun 2026 and 15 more on 1 Jul, 5 sold on
+    8 Jul; a split with the ex-date 15 Jul 2026, three months before the first closing record
+    (19 Oct). The lots hold 60 + 15 - 5 = 70 on 14 Jul, so the card says 70, never "no
+    quantity", and a purchase on the ex-date itself (20 more) does not count."""
+    history(n, (20260610, "BUY", 60), (20260701, "BUY", 15), (20260708, "SELL", 5),
+            (20260715, "BUY", 20))  # fmt: skip
+    record(n, 20261019, **{UPSTOX: 370})
+    event(n, "split", ex_day=20260715, ratio=(1, 5))
+    data = (await n.rig.call("ca_list"))["data"]
+    (one,) = data["to_confirm"]
+    (side,) = one["expected"]
+    assert (side["held_qty_u"], side["held_from"]) == (70 * U, "trades")
+    assert side["words"] == "Split 1:5: you held 70, they become 350. Is that right?"
+    assert data["left_out_count"] == 0
+    assert one["name"] == "PROBE LTD"  # review M2: a share held only at Upstox has its name
 
 
 # ---- one event per company and ex-date (review H3) -----------------------------------------------
@@ -586,7 +609,7 @@ async def test_the_list_answers_the_contracts_shape_and_no_key_is_unaccounted_fo
     event(n, "bonus", ratio=(1, 2))
     n.svc.store.write(OWNER, lambda tx: tx.ca_read_put(UPSTOX, NOW, "ok", None))
     data = (await n.rig.call("ca_list"))["data"]
-    assert set(data) == {"events", "to_confirm", "reads", "lot_check"}
+    assert set(data) == {"events", "to_confirm", "reads", "left_out_count", "lot_check"}
     assert set(data["events"][0]) == {"id", "isin", "name", "kind", "ex_day", "amount_u",
                                       "ratio_num", "ratio_den", "details", "read_at", "gone_at",
                                       "decisions"}  # fmt: skip

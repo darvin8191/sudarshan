@@ -436,6 +436,12 @@ class Holdings:
             self._lots = lotcheck.TaxLots(self.tx, self.today, self.now or 0)
         return self._lots
 
+    def upstox_from_trades(self, isin: str, ex_day: int) -> int | None:
+        """Where no closing record reaches the eve of ``ex_day``: the quantity the tax lots hold
+        then, from Upstox's trade history and the purchases entered (the same lots a bonus or a
+        split would change). None when the year's trades are not read in full."""
+        return self.lots().qty(isin, add_days(ex_day, -1))
+
     def moves(self, tab_id: int) -> dict[tuple[int, int], list[tuple[int, int]]]:
         """``(account, asset) -> [(day, quantity change)]`` of a tab's ledger."""
         if tab_id not in self._moves:
@@ -521,17 +527,25 @@ def reach_from(today: int) -> int:
 
 
 def waiting(tx: Tx, event: dict[str, Any], holdings: Holdings, decided: set[str],
-            upstox: set[str]) -> list[dict[str, Any]]:  # fmt: skip
-    """The holdings an event still waits for the owner's tap on. The Upstox account: when it
-    held the share the day before, or, where no closing record reaches that day, when the share
-    is one of the account's and the event is inside the years its reports reach. A tab: when it
-    held the share the day before and has no entry for the event yet."""
-    out, today = [], holdings.today
+            upstox: set[str]) -> tuple[list[dict[str, Any]], bool]:  # fmt: skip
+    """The holdings an event still waits for the owner's tap on, and whether the Upstox account
+    was left out because nothing can tell yet whether it held the share (review M3).
+
+    The Upstox account: only when it held the share the day before, by its closing record or,
+    where no record reaches that day, by the tax lots of its trade history; the quantity is
+    always shown. A tab: when it held the share the day before and has no entry for the event
+    yet. A share the records show was not held on the day is not asked about: applying the
+    event would change no lot. Left out (counted, not asked) is only the case where no record
+    reaches the day and the lots cannot say yet (the year's share trades are not read in full)."""
+    out, left_out, today = [], False, holdings.today
     if UPSTOX_SCOPE not in decided:
-        held = holdings.upstox(event["isin"], event["ex_day"])
-        unknown = held is None and event["isin"] in upstox and event["ex_day"] >= reach_from(today)
-        if held or unknown:
-            out.append(_expected(event, UPSTOX_SCOPE, held))
+        held, source = holdings.upstox(event["isin"], event["ex_day"]), "record"
+        if held is None and event["isin"] in upstox:
+            held, source = holdings.upstox_from_trades(event["isin"], event["ex_day"]), "trades"
+        if held:
+            out.append(_expected(event, UPSTOX_SCOPE, held, held_from=source))
+        elif held is None and event["isin"] in upstox and event["ex_day"] >= reach_from(today):
+            left_out = True
     for tab in holdings.tabs:
         scope = f"tab:{tab['id']}"
         held_by = holdings.tab(tab["id"], event["isin"], event["ex_day"])
@@ -543,7 +557,7 @@ def waiting(tx: Tx, event: dict[str, Any], holdings: Holdings, decided: set[str]
             event, scope, sum(held_by.values()), tab_id=tab["id"], name=tab["name"],
             entries=_entries(event, asset_id, held_by, ways[0] if ways else None),
         ))  # fmt: skip
-    return out
+    return out, left_out and not out
 
 
 def _shown(event: dict[str, Any], holdings: Holdings, decisions: list[dict]) -> dict[str, Any]:
@@ -581,22 +595,26 @@ def listing(tx: Tx, today: int, *, scope: str | None = None, from_day: int, to_d
 
     An event is one per company and ex-date, however often Upstox rewords it (``core.groups``):
     a decision made on one wording stands for every other, so a relisted event is never asked a
-    second time. ``lot_check`` is the tax lots against the Upstox holdings (``lotcheck.check``)."""
+    second time. ``left_out_count`` is how many bonuses and splits of the account's shares are
+    not asked about yet because nothing can tell whether the share was held on their day (no
+    closing record reaches it and the year's share trades are not read in full); ``lot_check``
+    is the tax lots against the Upstox holdings (``lotcheck.check``)."""
     from . import lotcheck
 
     holdings, upstox = Holdings(tx, today, held_now, now), upstox_isins(tx, held_now)
     decided = decisions(tx)
     by_event = {key: [r for r in rows if scope in (None, r["scope"])]
                 for key, rows in decided.items()}  # fmt: skip
-    to_confirm = []
+    to_confirm, left_out = [], 0
     for group in core.groups(tx.ca_events(to_day=today, gone=True)):
         live = [event for event in group if event["gone_at"] is None]
         if not live:
             continue
         event = live[-1]  # the wording Upstox lists now
         done = {row["scope"] for one in group for row in decided.get(one["id"], ())}
-        found = [w for w in waiting(tx, event, holdings, done, upstox)
-                 if scope in (None, w["scope"])]  # fmt: skip
+        found, unseen = waiting(tx, event, holdings, done, upstox)
+        found = [w for w in found if scope in (None, w["scope"])]
+        left_out += unseen
         if found:
             shown = _shown(event, holdings, by_event.get(event["id"], []))
             to_confirm.append({**shown, "expected": found})
@@ -604,6 +622,7 @@ def listing(tx: Tx, today: int, *, scope: str | None = None, from_day: int, to_d
     return {
         "events": [_shown(e, holdings, by_event.get(e["id"], [])) for e in events],
         "to_confirm": to_confirm,
+        "left_out_count": left_out,
         "reads": tx.ca_reads(),
         "lot_check": lotcheck.check(tx, today, now or 0, holdings.lots()),
     }
