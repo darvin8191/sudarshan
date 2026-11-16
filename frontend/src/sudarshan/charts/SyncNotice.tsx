@@ -36,7 +36,7 @@ export function SyncNotice({ board = chartSyncNotices }: { board?: NoticeBoard }
         </span>
         <button
           type="button"
-          aria-label="Close this message"
+          aria-label="Dismiss this note"
           onClick={() => board.clear(notice.id)}
           className="inline-flex size-12 shrink-0 items-center justify-center rounded-full hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >

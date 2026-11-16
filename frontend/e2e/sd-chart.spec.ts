@@ -1350,7 +1350,7 @@ for (const [layout, viewport] of [
       await expect(strip).toContainText('The drawings on SBIN from this phone are saved.')
       await page.screenshot({ path: info.outputPath('sync-kept.png') })
       await checkScreen(page)
-      await strip.getByRole('button', { name: 'Close this message' }).click()
+      await strip.getByRole('button', { name: 'Dismiss this note' }).click()
       await expect(strip).toHaveCount(0)
     })
   })

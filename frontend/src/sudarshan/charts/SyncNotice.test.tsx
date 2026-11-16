@@ -40,7 +40,7 @@ describe('the sync strip', () => {
     board.post({ id: 'a', tone: 'local', text: 'First again.' })
     render(<SyncNotice board={board} />)
     expect(screen.getByRole('status')).toHaveTextContent('On this phone only: First again.')
-    const close = screen.getByRole('button', { name: 'Close this message' })
+    const close = screen.getByRole('button', { name: 'Dismiss this note' })
     expect(close.className).toContain('size-12')
     fireEvent.click(close)
     expect(screen.getByRole('status')).toHaveTextContent('Saved: Second.')
