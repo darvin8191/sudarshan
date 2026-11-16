@@ -50,8 +50,18 @@ EXPECTED = [
 ]  # fmt: skip
 
 
-def line(isin, fy, expected, state="expected", credited=None, tds=None):
-    return {"isin": isin, "fy": fy, "state": state, "expected_paise": expected * RUPEE,
+NO_RECORD = (
+    "No holdings record reaches the day before this ex-date, so the amount is not known: "
+    "confirm what reached your bank on the Dividends card"
+)
+NO_AMOUNT = (
+    "Upstox lists no amount for this dividend, so it is not known: confirm what reached your "
+    "bank on the Dividends card"
+)
+
+
+def line(isin, fy, expected, state="expected", credited=None, tds=None, **more):
+    return {**more, "isin": isin, "fy": fy, "state": state, "expected_paise": expected * RUPEE,
             "credited_paise": None if credited is None else credited * RUPEE,
             "tds_paise": None if tds is None else tds * RUPEE}  # fmt: skip
 
@@ -62,9 +72,11 @@ def payer(isin, expected, confirmed, total, likely, tds, unconfirmed, lines):
             "unconfirmed_count": unconfirmed, "lines": lines}  # fmt: skip
 
 
-def year(case, note, fy, lines, payers, total, tds, unconfirmed, threshold):
+def year(case, note, fy, lines, payers, total, tds, unconfirmed, threshold, uncounted=()):
+    """``uncounted``: the sentence of each line that could not be counted, by ex-date."""
     out = {"payers": payers, "total_paise": total, "tds_expected_paise": tds,
-           "unconfirmed_count": unconfirmed, "tds_threshold_paise": threshold}  # fmt: skip
+           "unconfirmed_count": unconfirmed, "tds_threshold_paise": threshold,
+           "uncounted": list(uncounted), "uncounted_count": len(uncounted)}  # fmt: skip
     return {"id": case, "note": note, "in": {"fy": fy, "lines": lines}, "out": out}
 
 
@@ -93,6 +105,21 @@ YEAR = [
          2026, [line(A, 2025, 50000), line(A, 2026, 2000)],
          [payer(A, 200000, 0, 200000, False, None, 1, 1)], 200000, 0, 1, 1000000),
     year("D-EMPTY", "no dividend lines: nothing, and no flag", 2026, [], [], 0, 0, 0, 1000000),
+    year("D-UNCOUNTED", "review H1: a dividend with no record of what was held (no quantity, "
+         "no amount) and one Upstox lists with no amount (300 held) are in no payer and no "
+         "total, and are not 'unconfirmed': each is listed with why. The counted line of 1,650 "
+         "stands alone. Once the first is confirmed with 1,800 credited and 200 deducted it is "
+         "a line like any other (next case)",
+         2026, [line(A, 2026, 1650, ex_day=20261020, qty_u=300 * 10**6),
+                line(A, 2026, 0, ex_day=20260715, qty_u=0),
+                line(B, 2026, 0, ex_day=20260801, qty_u=300 * 10**6)],
+         [payer(A, 165000, 0, 165000, False, None, 1, 1)], 165000, 0, 1, 1000000,
+         uncounted=[NO_RECORD, NO_AMOUNT]),
+    year("D-UNCOUNTED-CONFIRMED", "the same July line confirmed by the owner: 1,800 + 200 = "
+         "2,000 counted, 1,650 + 2,000 = 3,650 in the year, nothing left uncounted",
+         2026, [line(A, 2026, 1650, ex_day=20261020, qty_u=300 * 10**6),
+                line(A, 2026, 0, "confirmed", 1800, 200, ex_day=20260715, qty_u=0)],
+         [payer(A, 165000, 200000, 365000, False, None, 1, 2)], 365000, 0, 1, 1000000),
 ]  # fmt: skip
 
 FILES = {"dividends.json": {"entitled": ENTITLED, "expected": EXPECTED, "year": YEAR}}

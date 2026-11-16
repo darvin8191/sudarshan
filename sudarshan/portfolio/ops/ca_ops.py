@@ -10,10 +10,12 @@ through the entry form, and ``ca_decide`` only records that it did.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from datetime import timedelta
 from typing import Any
 
 from .. import corpactions, dividends
-from ..core.days import add_days, day_of_instant, financial_year, is_day
+from ..core.days import add_days, day_of_instant, financial_year, from_date, is_day, to_date
 from ..core.kinds import CALENDAR_NEXT_DAYS, CALENDAR_PAST_DAYS
 from ..errors import ApiError
 from . import op
@@ -87,14 +89,31 @@ async def dividends_year(ctx, message):
     if not 2000 <= fy <= financial_year(today):
         raise ApiError(400, "bad_request", ASK)
 
-    held = _held_now(ctx)
+    held, previous = _held_now(ctx), _previous_day(ctx)
 
     def run(tx):
-        dividends.sync(tx, today, now)
+        dividends.sync(tx, today, now, held)
         who = dividends.owner_member(tx) if member is None else member
-        return dividends.report(tx, fy, who, now, held)
+        return dividends.report(tx, fy, who, now, held, previous)
 
     return await answer(lambda: store.write(OWNER, run))
+
+
+def _previous_day(ctx) -> Callable[[int], int | None] | None:
+    """The trading day before a day, by the exchange's calendar (review L4); None without one."""
+    calendar = ctx.ensure_calendar() if hasattr(ctx, "ensure_calendar") else None
+    if calendar is None:
+        return None
+
+    def previous(day: int) -> int | None:
+        when = to_date(day)
+        for _ in range(14):
+            when -= timedelta(days=1)
+            if calendar.is_trading_day(when):
+                return from_date(when)
+        return None
+
+    return previous
 
 
 @op("dividend_set")

@@ -409,16 +409,12 @@ class Holdings:
         self._records: dict[int, dict[str, int]] = {}
         self._moves: dict[int, dict[tuple[int, int], list[tuple[int, int]]]] = {}
         self._lots: Any = None
+        self._traded: dict[str, list[tuple[int, int]]] | None = None
 
     def name(self, isin: str) -> str | None:
         return self.names.get(isin)
 
-    def upstox(self, isin: str, ex_day: int) -> int | None:
-        """The Upstox account's quantity the day before ``ex_day``; None when no closing record
-        can say (``core.eve_record``)."""
-        day = core.eve_record(self.record_days, ex_day, self.today)
-        if day is None:
-            return None
+    def _record(self, day: int) -> dict[str, int]:
         if day not in self._records:
             held: dict[str, int] = {}
             for line in self.tx.rows("upstox_eod_holding", "instrument_key", day=day):
@@ -426,7 +422,13 @@ class Holdings:
                 if key is not None:
                     held[key] = held.get(key, 0) + line["qty"] + (line["t1_qty"] or 0)
             self._records[day] = held
-        return self._records[day].get(isin, 0)
+        return self._records[day]
+
+    def upstox(self, isin: str, ex_day: int) -> int | None:
+        """The Upstox account's quantity the day before ``ex_day``; None when no closing record
+        can say (``core.eve_record``)."""
+        day = core.eve_record(self.record_days, ex_day, self.today)
+        return None if day is None else self._record(day).get(isin, 0)
 
     def lots(self):
         """The Upstox account's tax lots (``lotcheck.TaxLots``), built on first use."""
@@ -441,6 +443,29 @@ class Holdings:
         then, from Upstox's trade history and the purchases entered (the same lots a bonus or a
         split would change). None when the year's trades are not read in full."""
         return self.lots().qty(isin, add_days(ex_day, -1))
+
+    def upstox_maybe(self, isin: str, ex_day: int) -> bool:
+        """Where no closing record reaches the eve of ``ex_day``: whether the records still say
+        the share may have been held then. The first closing record from the ex-date on, taken
+        back by the trades between (what was bought since was not held on the eve; what was
+        sold since was), or a lot in the trade history. Used only to decide whether a dividend
+        is listed as not counted; never for an amount."""
+        after = [day for day in self.record_days if day >= ex_day]
+        if not after:
+            return True  # no record at all: nothing says it was not held
+        if self._traded is None:
+            self._traded = {}
+            for record in self.tx.report_list("trades"):
+                for row in (record.get("payload") or {}).get("rows") or []:
+                    if isinstance(row, dict) and row.get("isin") and row.get("segment") == "EQ":
+                        sign = -1 if row.get("transaction_type") == "SELL" else 1
+                        self._traded.setdefault(row["isin"], []).append(
+                            (row["trade_date"], sign * row["qty_u"])
+                        )
+        since = sum(q for day, q in self._traded.get(isin, ()) if ex_day <= day <= after[0])
+        if self._record(after[0]).get(isin, 0) - since > 0:
+            return True
+        return bool(self.upstox_from_trades(isin, ex_day))
 
     def moves(self, tab_id: int) -> dict[tuple[int, int], list[tuple[int, int]]]:
         """``(account, asset) -> [(day, quantity change)]`` of a tab's ledger."""
@@ -771,12 +796,13 @@ def _sync_dividends(service: Any) -> str:
     from . import dividends
 
     now = service.clock()
+    held = ensure(service)._held_now()
     today = day_of_instant(now)
 
     def run(tx: Tx) -> tuple[int, dict[str, Any]]:
         from . import lotcheck
 
-        return dividends.sync(tx, today, now), lotcheck.check(tx, today, now)
+        return dividends.sync(tx, today, now, held), lotcheck.check(tx, today, now)
 
     changed, check = service.store.write(OWNER, run)
     differ = len(check["rows"])  # the nightly check of the lots against the holdings
@@ -811,9 +837,9 @@ __all__ = [
     "decide",
     "decisions",
     "read_status",
-    "register_jobs",
     "share_names",
     "standing",
+    "register_jobs",
     "upstox_isins",
     "waiting",
 ]
