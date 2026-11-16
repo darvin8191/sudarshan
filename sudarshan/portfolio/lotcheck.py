@@ -65,6 +65,23 @@ UNCHECKED = (
     "SUDARSHAN could not check the tax lots against your Upstox holdings this time. The rest of "
     "this page is not affected, and the check runs again when you open it next."
 )
+#: The same sentences as a file says them (the kept Tax pack, a CSV): of the paper as it was
+#: made, never of a page to open again (v0.13.0 verification N3).
+FILE_WORDS = {
+    WAITING_TRADES: (
+        "The tax lots were not checked against the Upstox holdings for this paper: Upstox's "
+        "share trades of this year were not read in full when it was made."
+    ),
+    WAITING_RECORD: (
+        "The tax lots were not checked against the Upstox holdings for this paper: when it was "
+        "made, no closing record of the Upstox account was there from two days or more before "
+        "its trades were last read."
+    ),
+    UNCHECKED: (
+        "The tax lots could not be checked against the Upstox holdings when this paper was made. "
+        "The rest of the paper is not affected."
+    ),
+}
 
 
 class TaxLots:
