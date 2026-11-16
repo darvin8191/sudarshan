@@ -119,6 +119,37 @@ def test_the_readme_says_how_to_install_the_lines():
         assert phrase in README, phrase
 
 
+def test_the_readme_says_what_intercepting_the_apps_errors_would_do():
+    """v0.13.0 verify N7: with ``proxy_intercept_errors on`` for the site, the lines replace the
+    app's own 502 ("may have been placed") with the page. "Anything the app answers is passed
+    on" is true only without it, so the README says so, that the phone still holds the exit, and
+    how to look for the setting before the lines go in."""
+    section = README.split("## The restart page (M1.17)")[1].split("## Secrets")[0]
+    steps, after = section.split("What the lines do not change:")
+    # In step 2, before the include line is added: where to look, and where to read on.
+    assert "3. Test, then reload" in steps
+    step2 = steps.split("2. Open SUDARSHAN's own site file")[1].split("3. Test, then reload")[0]
+    for phrase in (
+        "Before you add the line, look for one more setting",
+        "sudo grep -n proxy_intercept_errors /etc/nginx/nginx.conf <SUDARSHAN's site file>",
+        'If a line reads `on`, read "When nginx takes over the app\'s errors" below',
+    ):
+        assert phrase in step2, phrase
+    for phrase in (
+        "**When nginx takes over the app's errors.**",
+        "holds only while `proxy_intercept_errors` is off for SUDARSHAN's site, which is nginx's "
+        "own default; SUDARSHAN's lines never turn it on",
+        "nginx replaces the app's own 502 and 504 answers with the restart page as well",
+        "the sentence that the order may have been placed. That sentence is then lost",
+        "The phone still holds the exit or cancel",
+        'read as "no answer came", never as a refusal',
+        "set that line in SUDARSHAN's site to `proxy_intercept_errors off;`",
+    ):
+        assert phrase in after, phrase
+    # The lines themselves never set it.
+    assert "proxy_intercept_errors" not in _directives()
+
+
 def _site(tmp_path: Path, *, family: bool) -> Path:
     """A site of the test's own with the lines installed as the README says, and nothing behind it."""
     snippets = tmp_path / "snippets"

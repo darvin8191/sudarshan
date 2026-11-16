@@ -220,6 +220,30 @@ def test_an_etf_a_reit_and_a_gold_bond_are_printed_as_not_computed_and_every_sal
     assert "..." not in paper, "no name or ISIN is cut short"
 
 
+def test_a_sale_outside_the_paper_prints_what_the_owner_is_told_of_it():
+    """v0.13.0 verify N9: a share entered without its ISIN and an ETF's unit each get their
+    sentence under the table, once for each thing sold; a row with none prints none."""
+    pack = copy.deepcopy(PACK)
+    add = "Add its ISIN in the tab to have it computed."
+    etf = "ETF units are not computed in this release."
+    pack["not_computed_sales"] = [
+        {"instrument": "Acme Industries", "day": 20260810, "amount_paise": 5_000_000, "why": add},
+        {"instrument": "Acme Industries", "day": 20260811, "amount_paise": 1_000_000, "why": add},
+        {"instrument": "INF000D01015", "name": "NIFTY ETF UNITS", "day": 20260812,
+         "amount_paise": 2_000_000, "why": etf},
+        {"instrument": "INE041025011", "day": 20260813, "amount_paise": 3_000_000, "why": None},
+        {"instrument": "IN0020200013", "day": 20260814, "amount_paise": 3_000_000},
+    ]  # fmt: skip
+    lines = [line for b in taxpack.pack_blocks(pack) if isinstance(b, D.Paragraph)
+             for line in b.lines]  # fmt: skip
+    assert lines.count(f"Acme Industries: {add}") == 1
+    assert lines.count(f"NIFTY ETF UNITS (INF000D01015): {etf}") == 1
+    assert not any(line.startswith(("INE041025011:", "IN0020200013:")) for line in lines)
+    span = periods.fy_span(2026, 20270415)
+    text = text_of(periods.fy_pdf(span, "", [], ist_ms(20270415, "07:00:00"), pack))
+    assert add in text and etf in text
+
+
 # ---- the archive keeps the paper it printed ----------------------------------------------------
 def test_an_archived_pack_never_changes_until_it_is_built_again(on):
     """Mutation 15: a rule row or a late trade changes the portfolio's answer; the kept paper
@@ -273,6 +297,94 @@ def test_the_portfolio_down_is_a_sentence_too(on):
     on.portfolio.down = True
     build(on, "fy", period="FY2627")
     assert "could not be read from the portfolio" in kept(on, "fy")["text"]
+
+
+def test_the_build_of_4_april_never_puts_a_pack_without_the_paper_over_one_with_it(on):
+    """v0.13.0 verify N3: the year's pack is built again on 4 April, for the archive kept 8 years.
+    When the paper cannot be read then, the run fails and is asked again, and the pack of 1 April
+    stays whole; once the paper answers, the year is built over with it. A kept pack without the
+    paper is built over whatever the paper says: nothing is lost."""
+    from test_journal_period_reports import at
+
+    from sudarshan.journal.jobs import fypack
+    from sudarshan.journal.schedule import once_a_day
+
+    def job(day):
+        return on.svc.store.read(OWNER, lambda tx: tx.job_get("fy", day))
+
+    async def go():
+        run = [await once_a_day(on.svc, "fy", at(20270401, "07:05"), fypack.fy_job)]
+        first = kept(on, "fy")
+        blob = file_of(on, first)
+        on.portfolio.down = True
+        run.append(await once_a_day(on.svc, "fy", at(20270404, "07:05"), fypack.fy_job))
+        down = kept(on, "fy"), file_of(on, kept(on, "fy")), job(20270404)["detail"]
+        on.svc.settings = dataclasses.replace(on.svc.settings, tax=False)
+        run.append(await once_a_day(on.svc, "fy", at(20270404, "07:25"), fypack.fy_job))
+        off = kept(on, "fy")["built_ms"], job(20270404)["detail"]
+        on.svc.settings = dataclasses.replace(on.svc.settings, tax=True)
+        on.portfolio.down = False
+        later = copy.deepcopy(PACK)
+        later["as_of_ms"] = ist_ms(20270404, "07:45:00")
+        on.portfolio.answers["tax_pack"] = later
+        run.append(await once_a_day(on.svc, "fy", at(20270404, "07:45"), fypack.fy_job))
+        return run, first, blob, down, off, later
+
+    run, first, blob, (held, held_blob, said), off, later = scenario(on, go)
+    assert run == ["ok", "failed", "failed", "late"]
+    assert held["built_ms"] == first["built_ms"] and held["rows"]["tax_pack"] == PACK
+    assert held_blob == blob and said == periods.PAPER_KEPT
+    assert off == (first["built_ms"], periods.PAPER_KEPT_OFF)
+    again = kept(on, "fy")
+    assert again["id"] == first["id"] and again["rows"]["tax_pack"] == later
+    assert "as of 4 Apr 2027, 07:45" in again["text"]
+
+
+def test_a_kept_pack_without_the_paper_waits_on_4_april_for_the_paper(on):
+    """The pack of 1 April was printed without the paper (the portfolio did not answer): the
+    build of 4 April is there to complete it, so it too waits for the paper rather than print a
+    second pack without it; once the paper answers, the year is printed with it."""
+    from test_journal_period_reports import at
+
+    from sudarshan.journal.jobs import fypack
+    from sudarshan.journal.schedule import once_a_day
+
+    on.portfolio.down = True
+
+    async def go():
+        run = [await once_a_day(on.svc, "fy", at(20270401, "07:05"), fypack.fy_job)]
+        made = kept(on, "fy")["built_ms"]
+        run.append(await once_a_day(on.svc, "fy", at(20270404, "07:05"), fypack.fy_job))
+        waited = kept(on, "fy")["built_ms"]
+        on.portfolio.down = False
+        run.append(await once_a_day(on.svc, "fy", at(20270404, "07:25"), fypack.fy_job))
+        return run, made, waited
+
+    run, made, waited = scenario(on, go)
+    assert run == ["ok", "failed", "late"] and waited == made
+    row = kept(on, "fy")
+    assert row["built_ms"] > made and row["rows"]["tax_pack"] == PACK
+
+
+def test_with_the_paper_switched_off_throughout_4_april_builds_as_1_april_did(on):
+    from test_journal_period_reports import at
+
+    from sudarshan.journal.jobs import fypack
+    from sudarshan.journal.schedule import once_a_day
+
+    on.svc.settings = dataclasses.replace(on.svc.settings, tax=False)
+
+    async def go():
+        first = await once_a_day(on.svc, "fy", at(20270401, "07:05"), fypack.fy_job)
+        made = kept(on, "fy")["built_ms"]
+        again = await once_a_day(on.svc, "fy", at(20270404, "07:05"), fypack.fy_job)
+        return first, made, again
+
+    first, made, again = scenario(on, go)
+    assert (first, again) == ("ok", "ok")
+    row = kept(on, "fy")
+    assert row["built_ms"] > made and row["rows"]["tax_pack"] is None
+    assert "is switched off on the server" in row["rows"]["tax_note"]
 
 
 def test_the_family_never_gets_the_paper(on):

@@ -171,6 +171,14 @@ def not_computed_sales(count: int, amount: str) -> str:
     )
 
 
+#: What a sale outside the paper is told, by ``classify.why_not`` (v0.13.0 verify N9). Neither
+#: kind is computed.
+WHY_NOT = {
+    "no_isin": "Add its ISIN in the tab to have it computed.",
+    "etf_unit": "ETF units are not computed in this release.",
+}
+
+
 EXPENSES_ALLOCATED = (
     "Share-market charges are Upstox's total for the year, shared between intraday and "
     "delivery by traded value and over delivery sales by sale value (allocated). STT is "

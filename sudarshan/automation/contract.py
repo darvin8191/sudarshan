@@ -103,6 +103,9 @@ STRATEGY = {
     "held_symbol": "string | null",
     "held_side": "string | null",
     "held_since_ms": "number | null",
+    # said in place of a held contract: an intraday position of an earlier day, closed at its
+    # session's end, until the day's first alert clears the note
+    "held_note": "string | null",
     "alerts_today": "number",
     "last_alert": "AlertLine | null",
     "sandbox_run": "SandboxRun",

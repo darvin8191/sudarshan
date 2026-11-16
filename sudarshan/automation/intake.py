@@ -511,7 +511,7 @@ def _handle(token: str, body: bytes, ip: str, desk: Desk, store, stage: str) -> 
     wait = LOCK_WAIT_S if runtime.gthread_active() else None
     try:
         with LOCKS.hold(strategy.id, timeout=wait):
-            return _claim_and_send(strategy.id, token, alert, row, desk, store, stage)
+            return _claim_and_send(strategy, token, alert, row, desk, store, stage)
     except LockBusy:
         said = words.busy(strategy.name)
         alert_id = store.note_alert(strategy.id, verdict="order_refused", sentence=said, **{
@@ -540,7 +540,8 @@ def _wait_for_a_sibling(strategy_id: int, alert: m.Alert, desk: Desk, store, sta
         waited += rules.CHAIN_STEP_S
 
 
-def _claim_and_send(strategy_id, token, alert, row, desk, store, stage) -> Outcome:
+def _claim_and_send(known: m.Strategy, token, alert, row, desk, store, stage) -> Outcome:
+    strategy_id = known.id
     made: list[Plan] = []
 
     def decide(strategy: m.Strategy, state: m.State) -> dict[str, Any] | None:
@@ -549,6 +550,8 @@ def _claim_and_send(strategy_id, token, alert, row, desk, store, stage) -> Outco
             # What the strategy holds is not known, so nothing that opens, adds or reverses is
             # sent. An exit still goes: sized from the account, it can only close.
             said = words.unsettled(strategy.name, chosen.target)
+            if any(row_.get("unwritten") for row_ in unread):
+                said = words.unsettled_unwritten(strategy.name, chosen.target)
             chosen = _refuse(
                 "order_refused",
                 said,
@@ -582,10 +585,18 @@ def _claim_and_send(strategy_id, token, alert, row, desk, store, stage) -> Outco
     # An earlier alert whose answer was never written is settled first, holding the lock: the
     # rules below must judge this alert on what the strategy holds, not on a note that missed an
     # order.
-    unread = settle(strategy_id, desk, store)
+    unread = settle(strategy_id, desk, store, known)
     # The link is checked again in the same read as the strategy: one replaced while this alert
     # waited for the lock is nobody's now.
-    claimed = store.claim_alert(strategy_id, decide, day, token=token)
+    try:
+        claimed = store.claim_alert(strategy_id, decide, day, token=token)
+    except Exception:
+        # No line could be written, so nothing is sent: an order with no claim could be sent
+        # twice. The owner hears of it now, because the log will not show this alert.
+        logger.exception("Automation: an alert could not be claimed")
+        said = words.not_recorded(known.name)
+        _after(desk, known, "order_refused", said, "not_recorded")
+        return _out(HANDLED, verdict="order_refused", sentence=said)
     if claimed is None or not made:
         _count_refused("token", row.get("ip", ""))
         return _out(UNKNOWN)
@@ -615,9 +626,15 @@ def _claim_and_send(strategy_id, token, alert, row, desk, store, stage) -> Outco
 
 
 def _may_hold(strategy: m.Strategy, state: m.State, unread: list[dict[str, Any]]) -> m.State:
-    """The state an alert is judged on while an earlier alert is unsettled and the books cannot
-    be read: an entry that may have gone is held, as a not confirmed entry is, so this alert's
-    exit goes to its contract. Never written: the books decide once they can be read."""
+    """The state an alert is judged on while an earlier alert is unsettled: never written, the
+    record decides once it can be written or the books can be read.
+
+    An answer this process remembers and could not write says exactly what the state is: it is
+    laid over the note. Otherwise, with the books unread, an entry that may have gone is held, as
+    a not confirmed entry is, so this alert's exit goes to its contract."""
+    for row in unread:
+        if row.get("kept_state"):
+            return replace(state, **row["kept_state"])
     if state.held_symbol:
         return state
     for row in reversed(unread):
@@ -732,9 +749,16 @@ def _send(strategy, state, alert, alert_id, chosen: Plan, row, desk, store) -> O
 #: the order service said. In memory only (at most one per strategy, and there are at most 50
 #: strategies); after a restart the row is settled from the books instead.
 _unrecorded: dict[int, dict[str, Any]] = {}
-#: A row still claimed this long after it arrived, with the books unreadable ever since, is
-#: closed as not confirmed (the longest any hold of the books' lasts).
+#: A row still claimed whose books stayed unreadable this long, counted from the first read that
+#: failed (never from the alert: one failed read long after it says nothing about how long the
+#: books were unread), is closed as not confirmed (the longest any hold of the books' lasts).
 SETTLE_GIVE_UP_MS = 16 * 3600 * 1000
+#: While a row stays unsettled the owner hears of it again after each further day.
+SETTLE_TELL_EVERY_MS = 24 * 3600 * 1000
+#: Per unsettled row (its id): when this process first failed to read the books for it, and the
+#: whole days since the alert the owner was last told of. In memory only, at most 20 rows a
+#: strategy; a restart starts the count again, which can only make the end later.
+_unread_since: dict[int, tuple[int, int]] = {}
 
 
 def _record(strategy: m.Strategy, desk: Desk, store, alert_id: int, **answer: Any) -> None:
@@ -759,27 +783,51 @@ def _record(strategy: m.Strategy, desk: Desk, store, alert_id: int, **answer: An
     _tell(desk, strategy, "unrecorded", said)
 
 
-def settle(strategy_id: int, desk: Desk, store) -> list[dict[str, Any]]:
+def settle(
+    strategy_id: int, desk: Desk, store, known: m.Strategy | None = None
+) -> list[dict[str, Any]]:
     """Settle a strategy's alerts whose answer was never written. Call it holding the strategy's
     lock: no alert of the strategy is being handled then, so every row still ``claimed`` is one
-    whose order's outcome is not on record. Returns the rows still unsettled (the books could
-    not be read): the caller sends nothing that opens until there are none.
+    whose order's outcome is not on record. Returns the rows still unsettled: the caller sends
+    nothing that opens until there are none, and an exit still goes.
 
     An answer this process still remembers is written as it was. Otherwise the account is read,
     never assumed: the contract the alert named and the one the state holds, in the row's own
     pipe. The strategy holds what the account shows, so an option that was bought is on record
     and its exit alert closes it.
+
+    Never raises. A write of its own that fails (the reason the answer was not on record in the
+    first place may still hold) leaves the rows unsettled, tells the owner at once, and lets the
+    alert that asked go on to its own line: it is never dropped with nothing said.
     """
+    pending: list[dict[str, Any]] = []
+    try:
+        return _settle(strategy_id, desk, store, pending)
+    except Exception:
+        logger.exception("Automation: an earlier alert's answer could not be settled")
+    strategy = known or m.Strategy(id=strategy_id, name="A strategy")
+    _tell(desk, strategy, "settle_failed", words.settle_failed(strategy.name))
+    # What was not settled is unread. With nothing known (the rows themselves could not be read)
+    # one row with no contract stands for them, so an entry still waits.
+    return [{**row, "unwritten": True} for row in pending or [{"id": None, "target": 0}]]
+
+
+def _settle(strategy_id: int, desk: Desk, store, pending: list[dict[str, Any]]):
+    """``settle``'s steps. ``pending`` holds, at every moment, the rows not settled yet."""
     with _count_lock:
         kept = _unrecorded.get(strategy_id)
     if kept is not None:
         answer = {key: value for key, value in kept.items() if key != "alert_id"}
-        store.finish_alert(kept["alert_id"], **answer)  # a failure here refuses this alert
+        # Until it is written, this row's own answer says what the strategy holds.
+        pending.append({"id": kept["alert_id"], "kept_state": answer.get("state_values") or {}})
+        store.finish_alert(kept["alert_id"], **answer)
+        pending.clear()
         with _count_lock:
             _unrecorded.pop(strategy_id, None)
     rows = store.unsettled(strategy_id)
     if not rows:
         return []
+    pending[:] = rows
     both = store.both(strategy_id)
     if both is None:
         return []
@@ -790,11 +838,12 @@ def settle(strategy_id: int, desk: Desk, store) -> list[dict[str, Any]]:
     for row in rows:
         found = _read_books(strategy, state, row, desk, api_key) if api_key else None
         if found is None:
-            if now_ms - (row.get("received_ms") or 0) < SETTLE_GIVE_UP_MS:
+            if not _give_up(strategy, row, now_ms, desk):
                 unread.append(row)
                 continue
             said = words.unsettled_gave_up(strategy.name)
             store.finish_alert(row["id"], verdict=rules.NOT_CONFIRMED, sentence=said)
+            _forget(row, pending)
             _after(desk, strategy, rules.NOT_CONFIRMED, said, "unrecorded")
             continue
         values = rules.state_settled(found, row, strategy.kind == m.OPTION, now_ms, state)
@@ -802,9 +851,34 @@ def settle(strategy_id: int, desk: Desk, store) -> list[dict[str, Any]]:
         store.finish_alert(
             row["id"], verdict=rules.NOT_CONFIRMED, sentence=said, state_values=values
         )
+        _forget(row, pending)
         state = replace(state, **values)
         _after(desk, strategy, rules.NOT_CONFIRMED, said, "unrecorded")
     return unread
+
+
+def _forget(row: dict[str, Any], pending: list[dict[str, Any]]) -> None:
+    """A row that is settled: off the list of the unsettled, and its count forgotten."""
+    pending[:] = [other for other in pending if other is not row]
+    with _count_lock:  # in-memory bookkeeping only
+        _unread_since.pop(row["id"], None)
+
+
+def _give_up(strategy: m.Strategy, row: dict[str, Any], now_ms: int, desk: Desk) -> bool:
+    """One more read of the books failed for an unsettled row. Whether to stop waiting for them:
+    only once they have stayed unread for 16 h from the first read that failed. Until then the
+    owner is told each time a further day has gone since the alert."""
+    days = max(0, now_ms - (row.get("received_ms") or now_ms)) // SETTLE_TELL_EVERY_MS
+    with _count_lock:  # in-memory bookkeeping only
+        first_ms, told_days = _unread_since.get(row["id"], (now_ms, 0))
+        _unread_since[row["id"]] = (first_ms, max(told_days, days))
+        while len(_unread_since) > 1024:  # never reached: 20 rows a strategy, 50 strategies
+            _unread_since.pop(next(iter(_unread_since)))
+    if now_ms - first_ms >= SETTLE_GIVE_UP_MS:
+        return True
+    if days > told_days:
+        _tell(desk, strategy, "still_unsettled", words.still_unsettled(strategy.name, int(days)))
+    return False
 
 
 def _read_books(strategy, state, row, desk: Desk, api_key: str):

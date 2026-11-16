@@ -90,6 +90,41 @@ describe('the cards', () => {
     expect(screen.getByText('Sold 2 Jul 2026')).toBeTruthy()
   })
 
+  // v0.13.0 verify N5: each fill of a sale is a row, so one instrument sold twice in a day is two
+  // rows; with one key between them React warned and could drop or repeat one.
+  it('shows two sales of one instrument on one day, each with a key of its own', () => {
+    const said = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const p = pack((x) => {
+      x.not_computed_sales = [
+        { instrument: 'INF000C01017', name: 'Liquid ETF', day: 20260702, amount_paise: 1_00_000 },
+        { instrument: 'INF000C01017', name: 'Liquid ETF', day: 20260702, amount_paise: 2_00_000 },
+      ]
+    })
+    render(<LeftOutCard pack={p} />)
+    expect(screen.getAllByText('Liquid ETF')).toHaveLength(2)
+    expect(screen.getByText('₹1,000.00')).toBeTruthy()
+    expect(screen.getByText('₹2,000.00')).toBeTruthy()
+    const keys = said.mock.calls.filter((call) => String(call[0]).includes('same key'))
+    said.mockRestore()
+    expect(keys).toEqual([])
+  })
+
+  // v0.13.0 verify N9: neither is computed; the owner is told what to do, or what to know.
+  it('says under a sale what the paper says of it, and nothing where it says nothing', () => {
+    const add = 'Add its ISIN in the tab to have it computed.'
+    const etf = 'ETF units are not computed in this release.'
+    const p = pack((x) => {
+      x.not_computed_sales = [
+        { instrument: 'Acme Industries', day: 20260702, amount_paise: 5_00_000, why: add },
+        { instrument: 'INF000D01015', name: 'Nifty ETF', day: 20260703, amount_paise: 1, why: etf },
+        { instrument: 'INE041025011', day: 20260704, amount_paise: 2, why: null },
+      ]
+    })
+    render(<LeftOutCard pack={p} />)
+    expect(screen.getAllByText(add)).toHaveLength(1)
+    expect(screen.getAllByText(etf)).toHaveLength(1)
+  })
+
   it('names a sale outside the paper, with its ISIN under the name; the ISIN alone when unnamed', () => {
     const kinds =
       "ETF units (equity ones too), REIT and InvIT units, gold bonds, government securities, debentures and preference shares: of what trades on the exchange, only a company's equity share is computed. A sale of any other is listed with its value."

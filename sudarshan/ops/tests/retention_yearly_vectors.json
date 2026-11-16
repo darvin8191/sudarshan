@@ -18,12 +18,22 @@
   [
    "2027-04-03 23:59:59",
    null,
-   "the last second before the year's papers are whole"
+   "3 April's last second: the year's papers are not whole yet"
   ],
   [
-   "2027-04-04 00:00:00",
+   "2027-04-04 02:10:00",
+   null,
+   "a run missed at a reboot, made in the night: it holds the Tax pack of 1 April (v0.13.0 verify N3)"
+  ],
+  [
+   "2027-04-04 07:59:59",
+   null,
+   "the last second before the year's papers are whole: the journal builds the Tax pack again at 07:00"
+  ],
+  [
+   "2027-04-04 08:00:00",
    "2026-27",
-   "from 4 April the year's papers are whole"
+   "from 4 April 08:00 the year's papers are whole"
   ],
   [
    "2027-04-04 16:30:02",
@@ -36,7 +46,12 @@
    "the last day of the window"
   ],
   [
-   "2027-07-05 00:00:00",
+   "2027-07-05 07:59:59",
+   "2026-27",
+   "the last second of the window"
+  ],
+  [
+   "2027-07-05 08:00:00",
    null,
    "after the window an archive is no year's archive"
   ],
@@ -51,7 +66,7 @@
    "January belongs to no year's archive: last year's window is long over"
   ],
   [
-   "2100-04-04 00:00:00",
+   "2100-04-04 08:00:00",
    "2099-00",
    "the label keeps two digits"
   ]
@@ -85,6 +100,18 @@
     "20270403-223000"
    ],
    "yearly": {}
+  },
+  {
+   "name": "a run made in the night of 4 April (missed at a reboot) holds the pack of 1 April: the year's is the one after the pack is built again",
+   "archives": [
+    "20270403-223000",
+    "20270404-021000",
+    "20270404-163000",
+    "20270404-223000"
+   ],
+   "yearly": {
+    "2026-27": "20270404-163000"
+   }
   },
   {
    "name": "a partial archive does not count",

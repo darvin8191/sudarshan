@@ -19,7 +19,8 @@ Muhurat session of Sunday 8 November 2026) has its own window and so its own tim
                marked, Upstox's P&L rows (Y22)
     weekly     Sunday 18:00, any week                            the day's end
     monthly    the 1st at 07:00                                  the day's end
-    fy         1 April at 07:00                                  the day's end
+    fy         1 April at 07:00, and again 4 April at 07:00,     the day's end
+               when the year's last charges have arrived
 
 A trading job (brief, eod, check, excursion) is never due on a day without a session (mutation
 target 20). A job missed while the service was down runs at its next start that day and is marked
@@ -58,6 +59,16 @@ JOB_NAMES = TRADING_JOBS + CALENDAR_JOBS
 EXCURSION_AT_MIN = 17 * 60
 CATCHUP_AT_MIN = 22 * 60
 FY_AT = (4, 1, 7 * 60)  # 1 April at 07:00
+#: The year's Tax pack is built again, by the same job, once the year's charges are whole: the
+#: last trading days' actual charges arrive two nights after each (31 March's on 2 April) and
+#: March's own row is asked for at the 22:00 catch-up of 3 April (``jobs/charges.py``
+#: ``MONTH_FROM_DAY``). The pack is frozen as built, so the one of 1 April holds estimates for
+#: those. This build comes an hour before the first moment a backup can be the year's archive
+#: (``sudarshan/ops/retention.py`` ``FY_FROM``, 4 April 08:00; the nightly run is at 16:30), so
+#: the archive kept 8 years holds the complete pack. It never puts a pack without the tax
+#: working paper over one that has it (``periods.build_period``) (v0.13.0 verify N3).
+FY_AGAIN_AT = (4, 4, 7 * 60)  # 4 April at 07:00
+FY_DAYS = (FY_AT, FY_AGAIN_AT)
 #: A run more than this long after its time is "late".
 LATE_AFTER_MS = 5 * MS_PER_MIN
 #: A failed run is asked again this long after it, while its window lasts.
@@ -159,10 +170,10 @@ class JournalSchedule:
                 return None
             return Due(name, key, sessions.epoch_ms(day, minute), midnight)
         if name == "fy":
-            month, mday, minute = FY_AT
-            if (day.month, day.day) != (month, mday):
-                return None
-            return Due(name, key, sessions.epoch_ms(day, minute), midnight)
+            for month, mday, minute in FY_DAYS:
+                if (day.month, day.day) == (month, mday):
+                    return Due(name, key, sessions.epoch_ms(day, minute), midnight)
+            return None
         raise ValueError(f"no such journal job: {name}")
 
 

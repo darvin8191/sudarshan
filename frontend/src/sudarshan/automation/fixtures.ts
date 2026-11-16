@@ -56,6 +56,7 @@ export function strategy(over: Partial<Strategy> = {}): Strategy {
     held_symbol: null,
     held_side: null,
     held_since_ms: null,
+    held_note: null,
     alerts_today: 0,
     last_alert: null,
     sandbox_run: { alerts: 0, sessions: 0, sent: 0, refused: 0 },

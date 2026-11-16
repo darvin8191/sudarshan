@@ -92,6 +92,18 @@ describe('the Automation page', () => {
     expect(stopped.getByText(/Journal is off/)).toBeInTheDocument()
   })
 
+  it('says an intraday position of an earlier day was closed, never that it is held (N8)', async () => {
+    const note =
+      "Holds nothing: NIFTY 24 Nov 25000 CE was intraday and was closed at yesterday's session end. If it is still open, close it in Positions."
+    api.list.mockResolvedValue(listOf([strategy({ held_note: note, last_alert: alertLine() })]))
+    renderBook('/automation', <Automation />)
+    await settle()
+    const card = within(screen.getByTestId('auto-card-1'))
+    expect(card.getByText(note)).toBeInTheDocument()
+    expect(card.queryByText('Holds nothing')).not.toBeInTheDocument()
+    expect(card.queryByText(/in the Sandbox$/)).not.toBeInTheDocument()
+  })
+
   it('never reads on a timer, and shows an alert the moment the server announces it', async () => {
     api.list.mockResolvedValue(listOf([strategy()]))
     renderBook('/automation', <Automation />)

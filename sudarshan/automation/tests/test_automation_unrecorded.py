@@ -9,6 +9,8 @@ from what the account holds. A bought option is never left with nothing on recor
 
 from __future__ import annotations
 
+import threading
+
 import pytest
 from automation_world import NOW, REFUSED_GATE, TV, FakeDesk, indicator_alert
 
@@ -34,8 +36,10 @@ def _fresh(monkeypatch):
     intake._per_link.clear()
     intake._refused.clear()
     intake._unrecorded.clear()
+    intake._unread_since.clear()
     yield
     intake._unrecorded.clear()
+    intake._unread_since.clear()
 
 
 def make(store, form=OPTION):
@@ -182,15 +186,287 @@ def test_while_the_books_cannot_be_read_an_entry_waits_and_an_exit_still_goes(
 
 
 def test_a_row_the_books_never_answered_for_is_closed_after_sixteen_hours(store, desk, monkeypatch):
+    """Sixteen hours of unreadable books, counted from the first read that failed."""
     strategy, token = make(store)
     failing_writes(monkeypatch, store, 2)
     send(store, desk, token, "long")
     intake._unrecorded.clear()
     desk.books_unreadable = True
-    desk.clock = NOW + 16 * 3600 + 1
-    send(store, desk, token, "flat")
+    desk.clock = NOW + 60
+    send(store, desk, token, "short")  # the first read that fails
+    desk.clock = NOW + 60 + 16 * 3600 - 1
+    send(store, desk, token, "short")
+    assert lines(store, strategy.id)[0][0] == "claimed"  # one second short of the end
+    desk.clock = NOW + 60 + 16 * 3600
+    send(store, desk, token, "short")
     verdict, said = lines(store, strategy.id)[0]
     assert verdict == "not_confirmed" and "never recorded" in said
+    assert intake._unread_since == {}
+
+
+# ---- N1: the sixteen hours count from the first failed read, never from the alert -----------------
+
+CARRY = {**OPTION, "product": "NRML"}
+
+
+def test_n1_one_failed_read_long_after_the_alert_does_not_give_up(store, desk, monkeypatch):
+    """The verifier's probe turned round. A carry option strategy: the entry's answer is lost,
+    the server restarts, no alert comes for 16 h, and then the books fail once. The row stays
+    unsettled (an entry waits, with its sentence), and the next good read settles it to the
+    option held, so the flat alert closes it."""
+    strategy, token = make(store, CARRY)
+    failing_writes(monkeypatch, store, 2)
+    send(store, desk, token, "long")
+    assert desk.position(CE, product="NRML") == 65
+    intake._unrecorded.clear()  # a restart
+    desk.clock = NOW + 16 * 3600 + 60  # the next morning; the contract has not expired
+    desk.books_unreadable = True  # one read fails
+    refused = send(store, desk, token, "short")
+    assert refused.verdict == "order_refused" and "Positions could not be read" in refused.sentence
+    assert lines(store, strategy.id)[0][0] == "claimed"  # not given up
+    assert not any("never recorded" in said for _verdict, said in lines(store, strategy.id))
+    assert store.state(strategy.id).held_symbol is None and len(desk.placed) == 1
+    desk.books_unreadable = False  # and every later one works
+    desk.clock += 60
+    assert send(store, desk, token, "flat").verdict == "sent"
+    rows = lines(store, strategy.id)
+    assert rows[0][0] == "not_confirmed" and "holds long NIFTY 17 Nov 25000 CE" in rows[0][1]
+    assert desk.position(CE, product="NRML") == 0 and not any(desk.positions.values())
+    assert intake._unread_since == {}
+
+
+def test_n1_an_exit_still_goes_on_that_one_failed_read(store, desk, monkeypatch):
+    strategy, token = make(store, CARRY)
+    failing_writes(monkeypatch, store, 2)
+    send(store, desk, token, "long")
+    intake._unrecorded.clear()
+    desk.clock = NOW + 16 * 3600 + 60
+    desk.books_unreadable = True
+    assert send(store, desk, token, "flat").verdict == "sent"  # to the contract the row names
+    assert desk.position(CE, product="NRML") == 0
+    assert lines(store, strategy.id)[0][0] == "claimed"
+
+
+def test_n1_the_owner_is_told_again_when_a_further_day_has_gone(store, desk, monkeypatch):
+    strategy, token = make(store, {**FUTURE, "product": "NRML"})
+    failing_writes(monkeypatch, store, 2)
+    send(store, desk, token, "long")
+    intake._unrecorded.clear()
+    desk.told.clear()
+    desk.books_unreadable = True
+
+    def still(at):
+        desk.clock = NOW + at
+        send(store, desk, token, "flat")  # an exit: it goes, and by itself tells nobody
+        return [said for _id, reason, said in desk.told if reason == "still_unsettled"]
+
+    assert still(23 * 3600) == []  # not a day yet
+    assert len(still(25 * 3600)) == 1 and "from a day ago" in desk.told[-1][2]
+    assert len(still(26 * 3600)) == 1  # the same day: said once
+    assert lines(store, strategy.id)[0][0] == "claimed"  # 3 h of failed reads: far from the end
+    intake._unread_since.clear()  # a restart: the count of failed reads starts again
+    assert len(still(49 * 3600)) == 2 and "from 2 days ago" in desk.told[-1][2]
+    assert lines(store, strategy.id)[0][0] == "claimed"
+
+
+class FailsOnce(FakeDesk):
+    """The books cannot be read exactly once, whoever asks first."""
+
+    def __init__(self, *args):
+        super().__init__(*args)
+        self.failures, self._count = 1, threading.Lock()
+
+    def held_quantity(self, exchange, symbol, product, api_key, analyze):
+        with self._count:
+            fail, self.failures = self.failures > 0, self.failures - 1
+        if fail:
+            self.book_reads.append((analyze, exchange, symbol, product))
+            return None
+        return super().held_quantity(exchange, symbol, product, api_key, analyze)
+
+
+def together(calls):
+    """Run the calls from threads released by one barrier; what each returned, by name."""
+    barrier, out = threading.Barrier(len(calls)), {}
+
+    def run(name, call):
+        barrier.wait(10)
+        out[name] = call()
+
+    threads = [threading.Thread(target=run, args=item, daemon=True) for item in calls.items()]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(30)
+    assert len(out) == len(calls)
+    return out
+
+
+@pytest.mark.parametrize("round_", range(6))
+def test_n1_barrier_three_alerts_past_sixteen_hours_and_one_failed_read(
+    store, monkeypatch, round_
+):
+    """Three alerts released together, 16 h after an answer was lost; the books fail for the
+    first of them only. Whichever is first, nothing is given up, the row is settled by a later
+    read, and the option is never left in the account with nothing on record to close it."""
+    desk = FailsOnce()
+    strategy, token = make(store, CARRY)
+    failing_writes(monkeypatch, store, 2)
+    send(store, desk, token, "long")
+    intake._unrecorded.clear()  # a restart: the books decide
+    desk.clock = NOW + 16 * 3600 + 60
+    out = together({
+        "flat": lambda: send(store, desk, token, "flat", ago=1.0),
+        "flat2": lambda: send(store, desk, token, "flat", ago=2.0),
+        "long": lambda: send(store, desk, token, "long", ago=3.0),
+    })  # fmt: skip
+    rows = lines(store, strategy.id)
+    assert all(got.verdict for got in out.values())
+    assert not any("never recorded" in said for _verdict, said in rows), rows
+    assert "claimed" not in [verdict for verdict, _said in rows], rows
+    held = desk.position(CE, product="NRML")
+    assert held in (0, 65)
+    assert (store.state(strategy.id).held_symbol == CE) == (held == 65)  # never orphaned
+    assert len(desk.book_reads) >= 2 and intake._unread_since == {}
+
+
+# ---- N2: a settle whose own write fails ----------------------------------------------------------
+
+
+def test_n2_a_settle_that_cannot_write_tells_the_owner_and_the_exit_still_goes(
+    store, desk, monkeypatch
+):
+    """The verifier's probe turned round: the write fails a third time, at the flat alert's
+    settle. The owner is told at once, the exit has its own line, and it closes the option."""
+    strategy, token = make(store)
+    failing_writes(monkeypatch, store, 3)  # the two tries, and settle's own
+    send(store, desk, token, "long")
+    before = len(store.alerts(strategy.id))
+    desk.told.clear()
+    desk.clock = NOW + 600
+    got = send(store, desk, token, "flat")
+    assert got.verdict == "sent" and got.alert_id is not None
+    assert len(store.alerts(strategy.id)) == before + 1  # the exit alert has its line
+    assert desk.told == [(
+        strategy.id,
+        "settle_failed",
+        "OPT: the result of an earlier alert could still not be recorded. Until it is, OPT "
+        "sends no new entry; an exit alert still goes. Check Positions and Orders.",
+    )]  # fmt: skip
+    assert desk.placed[-1]["symbol"] == CE and desk.position(CE) == 0
+    assert desk.book_reads == []  # judged on the answer still remembered, not on a late book
+    assert store.state(strategy.id).held_symbol is None
+    # the earlier row is settled from the books at the next alert, and the strategy goes on
+    desk.clock = NOW + 660
+    assert send(store, desk, token, "long").verdict == "sent"
+    assert [verdict for verdict, _said in lines(store, strategy.id)] == [
+        "not_confirmed", "sent", "sent",
+    ]  # fmt: skip
+
+
+def test_n2_an_entry_is_refused_with_its_sentence_while_the_answer_cannot_be_written(
+    store, desk, monkeypatch
+):
+    strategy, token = make(store)
+    failing_writes(monkeypatch, store, 3)
+    send(store, desk, token, "long")
+    desk.clock = NOW + 600
+    got = send(store, desk, token, "short")
+    assert got.verdict == "order_refused" and got.alert_id is not None
+    assert got.sentence == (
+        "OPT: the result of an earlier alert could still not be recorded, so this sell alert was "
+        "not sent. Check Positions and Orders."
+    )
+    assert len(desk.placed) == 1 and desk.position(CE) == 65  # nothing opened, nothing closed
+    assert "settle_failed" in [reason for _id, reason, _said in desk.told]
+    # the write works again: the remembered answer is written, and the reversal goes
+    desk.clock = NOW + 660
+    assert send(store, desk, token, "short").verdict == "sent"
+    assert (desk.position(CE), desk.position(PE)) == (0, 65)
+    assert lines(store, strategy.id)[0] == ("sent", "OPT: order sent to buy 65 NIFTY 17 Nov 25000 CE.")
+
+
+def test_n2_the_exit_goes_to_what_the_remembered_answer_says_is_held(store, desk, monkeypatch):
+    """A two-step went and its answer was lost: the note still names the call, the account holds
+    the put. With the write failing again, the flat alert's exit goes to the put."""
+    strategy, token = make(store)
+    assert send(store, desk, token, "long").verdict == "sent"
+    failing_writes(monkeypatch, store, 3)
+    desk.clock = NOW + 60
+    send(store, desk, token, "short")
+    assert (desk.position(CE), desk.position(PE)) == (0, 65)
+    assert store.state(strategy.id).held_symbol == CE  # the note missed the two orders
+    desk.clock = NOW + 120
+    assert send(store, desk, token, "flat").verdict == "sent"
+    assert desk.placed[-1]["symbol"] == PE and not any(desk.positions.values())
+
+
+def test_n2_rows_that_cannot_even_be_read_refuse_an_entry_and_tell_the_owner(
+    store, desk, monkeypatch
+):
+    strategy, token = make(store)
+
+    def broken(strategy_id):
+        raise RuntimeError("database disk image is malformed")
+
+    monkeypatch.setattr(store, "unsettled", broken)
+    got = send(store, desk, token, "long")
+    assert got.verdict == "order_refused" and "could still not be recorded" in got.sentence
+    assert desk.placed == [] and [reason for _id, reason, _said in desk.told] == [
+        "settle_failed", "unrecorded",
+    ]  # fmt: skip
+    assert lines(store, strategy.id)[0][0] == "order_refused"  # the alert has its line
+
+
+def test_n2_an_alert_that_cannot_be_claimed_sends_nothing_and_the_owner_is_told(
+    store, desk, monkeypatch
+):
+    strategy, token = make(store)
+
+    def broken(*args, **kwargs):
+        raise RuntimeError("database is locked")
+
+    monkeypatch.setattr(store, "claim_alert", broken)
+    got = send(store, desk, token, "long")
+    assert got.status == 200 and got.body["message"] == "handled"
+    assert got.verdict == "order_refused" and desk.placed == []
+    assert desk.told == [(
+        strategy.id,
+        "not_recorded",
+        "OPT: an alert arrived but SUDARSHAN could not record it, so nothing was sent for it. If "
+        "the chart and your position now differ, set the position by hand.",
+    )]  # fmt: skip
+
+
+@pytest.mark.parametrize("round_", range(6))
+def test_n2_barrier_three_alerts_and_a_settle_that_cannot_write(store, monkeypatch, round_):
+    """Three alerts released together after a lost answer; the write fails once more, for the
+    settle of whichever alert is first. Every alert gets its own line and a verdict, the owner
+    is told, no entry goes on a note that missed an order, and at most one option is open."""
+    desk = FakeDesk()
+    strategy, token = make(store)
+    failing_writes(monkeypatch, store, 3)
+    send(store, desk, token, "long")
+    before = len(store.alerts(strategy.id))
+    desk.clock = NOW + 600
+    out = together({
+        "flat": lambda: send(store, desk, token, "flat", ago=1.0),
+        "flat2": lambda: send(store, desk, token, "flat", ago=2.0),
+        "short": lambda: send(store, desk, token, "short", ago=3.0),
+    })  # fmt: skip
+    assert all(got.verdict and got.alert_id for got in out.values()), out
+    assert len(store.alerts(strategy.id)) == before + 3  # a line each, none dropped
+    assert [reason for _id, reason, _said in desk.told].count("settle_failed") == 1
+    open_ = {key[2]: qty for key, qty in desk.positions.items() if qty}
+    assert len(open_) <= 1 and all(qty == 65 for qty in open_.values())
+    first = min(out.values(), key=lambda got: got.alert_id)
+    if first is out["short"]:  # an entry judged while the answer was unwritten never goes
+        assert first.verdict == "order_refused" and "could still not be recorded" in first.sentence
+    # one more alert: nothing is left unsettled, and the note says what the account holds
+    desk.clock = NOW + 700
+    send(store, desk, token, "flat")
+    assert "claimed" not in [verdict for verdict, _said in lines(store, strategy.id)]
+    assert store.state(strategy.id).held_symbol is None and not any(desk.positions.values())
 
 
 def test_the_two_step_settles_to_the_option_that_was_bought(store, desk, monkeypatch):

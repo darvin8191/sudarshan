@@ -208,8 +208,9 @@ def test_an_etf_a_reit_or_a_gold_bond_in_upstoxs_share_history_is_listed_and_not
     assert [lot.instrument for lot in given.opening] == [ISIN]  # the unit's pair opens no lot
     pack = build_pack(given)
     assert pack["not_computed_sales"] == [
-        {"instrument": isin, "day": 20261027, "amount_paise": 60_000_000}
-    ]
+        {"instrument": isin, "day": 20261027, "amount_paise": 60_000_000,
+         "why": "ETF units are not computed in this release." if isin[:3] == "INF" else None}
+    ]  # fmt: skip
     assert (
         "1 sale of assets outside this working paper (sale value Rs 6,00,000)"
         in (pack["not_computed"][0])

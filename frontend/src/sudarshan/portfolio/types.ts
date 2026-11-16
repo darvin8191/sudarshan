@@ -2008,6 +2008,8 @@ export interface TaxSaleOutside {
   instrument: string
   /** What the ISIN is (an ETF, a REIT, a gold bond), where a record names it; else null or absent. */
   name?: string | null
+  /** What the owner is told of it (add the ISIN; ETF units are not computed), where there is something. */
+  why?: string | null
   day: Day
   amount_paise: Paise
 }

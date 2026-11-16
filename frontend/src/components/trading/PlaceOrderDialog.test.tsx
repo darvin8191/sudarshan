@@ -11,9 +11,9 @@ import { join } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { tradingApi } from '@/api/trading'
 import { noteKillSwitch, resetKillSwitchForTests } from '@/sudarshan/risk/killSwitch'
-import { render, screen, userEvent, waitFor } from '@/test/test-utils'
+import { act, fireEvent, render, screen, userEvent, waitFor } from '@/test/test-utils'
 import { showToast } from '@/utils/toast'
-import { lotsFor, orderLine, PlaceOrderDialog } from './PlaceOrderDialog'
+import { lotsFor, orderLine, PlaceOrderDialog, roundToTick, tickDecimals } from './PlaceOrderDialog'
 
 vi.mock('@/api/trading', async () => {
   const actual = await vi.importActual<typeof import('@/api/trading')>('@/api/trading')
@@ -333,6 +333,167 @@ describe('PlaceOrderDialog on a phone', () => {
         file
       ).toEqual([])
     }
+  })
+})
+
+// SUDARSHAN v0.13.0 verify N1 and N2: one order however Place is pressed, and the line beside it
+// says the price and the exchange the order carries.
+describe('PlaceOrderDialog: one press, and the line is the order', () => {
+  const sbin = {
+    ...nifty,
+    symbol: 'SBIN',
+    exchange: 'NSE',
+    action: 'SELL' as const,
+    quantity: 1,
+    lotSize: 1,
+    product: 'CNC' as const,
+    priceType: 'LIMIT' as const,
+    price: 803,
+  }
+
+  beforeEach(() => {
+    placeOrder.mockReset()
+  })
+
+  it('sends one order for three presses in one task, through a caller route (N1)', async () => {
+    let answer: (value: { orderId: string }) => void = () => {}
+    const place = vi.fn(
+      () =>
+        new Promise<{ orderId: string }>((resolve) => {
+          answer = resolve
+        })
+    )
+    const onSuccess = vi.fn()
+    render(<PlaceOrderDialog {...sbin} place={place} onSuccess={onSuccess} />)
+    const button = screen.getByRole('button', { name: 'Place SELL Order' })
+    await act(async () => {
+      button.click()
+      button.click()
+      button.click()
+    })
+    expect(place).toHaveBeenCalledTimes(1)
+    await act(async () => {
+      answer({ orderId: 'ORD-1' })
+    })
+    expect(onSuccess).toHaveBeenCalledTimes(1)
+  })
+
+  it('sends one order for three presses in one task, through the API (N1)', async () => {
+    placeOrder.mockReturnValue(new Promise(() => {}))
+    render(<PlaceOrderDialog {...sbin} />)
+    const button = screen.getByRole('button', { name: 'Place SELL Order' })
+    await act(async () => {
+      button.click()
+      button.click()
+      button.click()
+    })
+    expect(placeOrder).toHaveBeenCalledTimes(1)
+  })
+
+  it('takes a second order after the first was refused (N1)', async () => {
+    const place = vi.fn().mockRejectedValueOnce(new Error('Refused.')).mockResolvedValue({
+      orderId: 'ORD-2',
+    })
+    render(<PlaceOrderDialog {...sbin} place={place} />)
+    await userEvent.click(screen.getByRole('button', { name: 'Place SELL Order' }))
+    await waitFor(() => expect(place).toHaveBeenCalledTimes(1))
+    await userEvent.click(await screen.findByRole('button', { name: 'Place SELL Order' }))
+    await waitFor(() => expect(place).toHaveBeenCalledTimes(2))
+  })
+
+  it('says a typed price on the tick, and sends that price though the box never blurred (N2)', async () => {
+    const place = vi.fn().mockResolvedValue({ orderId: '1' })
+    render(<PlaceOrderDialog {...sbin} place={place} />)
+    const box = screen.getByRole('spinbutton', { name: 'Price' })
+    // Typed, the box still focused: 803.127 is not a price the exchange takes.
+    fireEvent.change(box, { target: { value: '803.127' } })
+    const line = screen.getByTestId('ticket-summary')
+    expect(line).toHaveTextContent('SELL 1 SBIN · LIMIT 803.15 · CNC')
+    const button = screen.getByRole('button', { name: 'Place SELL Order' })
+    await act(async () => {
+      button.click()
+    })
+    expect(place).toHaveBeenCalledTimes(1)
+    expect(place.mock.calls[0][0]).toMatchObject({ price: 803.15, exchange: 'NSE' })
+  })
+
+  it('names BSE in the line once it is picked in the ticket, and sends the order there (N2)', async () => {
+    const place = vi.fn().mockResolvedValue({ orderId: '1' })
+    render(<PlaceOrderDialog {...sbin} price={803.15} place={place} />)
+    const line = screen.getByTestId('ticket-summary')
+    expect(line).toHaveTextContent('SELL 1 SBIN · LIMIT 803.15 · CNC')
+    await userEvent.click(screen.getByRole('combobox', { name: 'Exchange' }))
+    await userEvent.click(await screen.findByRole('option', { name: 'BSE' }))
+    expect(line).toHaveTextContent('SELL 1 SBIN on BSE · LIMIT 803.15 · CNC')
+    const button = screen.getByRole('button', { name: 'Place SELL Order' })
+    expect(button).toHaveAccessibleDescription('SELL 1 SBIN on BSE · LIMIT 803.15 · CNC')
+    await userEvent.click(button)
+    await waitFor(() => expect(place).toHaveBeenCalledTimes(1))
+    expect(place.mock.calls[0][0]).toMatchObject({ exchange: 'BSE', price: 803.15, symbol: 'SBIN' })
+  })
+
+  it('names BSE in the line for a ticket opened on BSE, and sends the order there (N2)', async () => {
+    const place = vi.fn().mockResolvedValue({ orderId: '1' })
+    render(<PlaceOrderDialog {...sbin} exchange="BSE" price={803.15} place={place} />)
+    expect(screen.getByTestId('ticket-summary')).toHaveTextContent(
+      'SELL 1 SBIN on BSE · LIMIT 803.15 · CNC'
+    )
+    expect(screen.getByRole('button', { name: 'Place SELL Order' })).toHaveAccessibleDescription(
+      'SELL 1 SBIN on BSE · LIMIT 803.15 · CNC'
+    )
+    await userEvent.click(screen.getByRole('button', { name: 'Place SELL Order' }))
+    await waitFor(() => expect(place).toHaveBeenCalledTimes(1))
+    expect(place.mock.calls[0][0]).toMatchObject({ exchange: 'BSE', price: 803.15 })
+  })
+
+  it('words the exchange only when it is not the usual one (N2)', () => {
+    const base = {
+      action: 'SELL' as const,
+      quantity: 1,
+      symbol: 'SBIN',
+      priceType: 'LIMIT' as const,
+      price: 803.127,
+      trigger: 0,
+      product: 'CNC',
+      tickSize: 0.05,
+    }
+    const rest = (exchange?: string, usualExchange?: string) =>
+      orderLine({ ...base, exchange, usualExchange }).rest
+    expect(rest('NSE', 'NSE')).toBe('1 SBIN · LIMIT 803.15 · CNC')
+    expect(rest('BSE', 'NSE')).toBe('1 SBIN on BSE · LIMIT 803.15 · CNC')
+    // A share the ticket opened on BSE is still said: NSE is a share's usual exchange.
+    expect(rest('BSE', 'BSE')).toBe('1 SBIN on BSE · LIMIT 803.15 · CNC')
+    expect(rest('NSE', 'BSE')).toBe('1 SBIN on NSE · LIMIT 803.15 · CNC')
+    expect(rest()).toBe('1 SBIN · LIMIT 803.15 · CNC')
+    // A contract's exchange is its own: never named.
+    expect(
+      orderLine({ ...base, symbol: 'NIFTY28MAR2420800CE', exchange: 'NFO', usualExchange: 'NFO' })
+        .rest
+    ).toBe('1 NIFTY28MAR2420800CE · LIMIT 803.15 · CNC')
+  })
+
+  it('keeps the decimals a tick needs, in the line and in the price (N2)', () => {
+    expect(tickDecimals(0.05)).toBe(2)
+    expect(tickDecimals(1)).toBe(2)
+    expect(tickDecimals(0.0025)).toBe(4)
+    expect(tickDecimals(0)).toBe(2)
+    expect(roundToTick(803.127, 0.05)).toBe(803.15)
+    expect(roundToTick(83.4561, 0.0025)).toBe(83.455)
+    expect(roundToTick(140.95000000000002, 0.05)).toBe(140.95)
+    const line = orderLine({
+      action: 'BUY',
+      quantity: 1000,
+      lots: 1,
+      symbol: 'USDINR26NOVFUT',
+      priceType: 'SL',
+      price: 83.4561,
+      trigger: 83.4474,
+      product: 'NRML',
+      tickSize: 0.0025,
+      exchange: 'CDS',
+      usualExchange: 'CDS',
+    })
+    expect(line.rest).toBe('1,000 (1 lot) USDINR26NOVFUT · SL-L 83.4550, trigger 83.4475 · NRML')
   })
 })
 

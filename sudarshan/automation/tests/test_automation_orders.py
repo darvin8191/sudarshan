@@ -240,6 +240,20 @@ def test_h2_alerts_are_still_ordered_after_one_dated_ahead(store, desk):
     assert send(store, desk, token, indicator_alert("long", NOW)).verdict == "sent"
 
 
+def test_n3_a_server_three_seconds_behind_still_refuses_an_older_exit(store, desk):
+    """The verifier's probe turned round. TradingView's clock is 3 s ahead of the server's. The
+    entry fired at now + 3 leaves its own time as the mark, so an exit fired one second before
+    it, arriving after it, is out of order and the entry stays open. The entry's own exit goes."""
+    strategy, token = make(store)
+    assert send(store, desk, token, indicator_alert("long", NOW + 3)).verdict == "sent"
+    assert store.state(strategy.id).last_fired_s == int(NOW) + 3
+    older = send(store, desk, token, indicator_alert("flat", NOW + 2))
+    assert older.verdict == "out_of_order" and desk.position("NIFTY24NOV26FUT") == 65
+    desk.clock = NOW + 2
+    assert send(store, desk, token, indicator_alert("flat", NOW + 4)).verdict == "sent"
+    assert desk.position("NIFTY24NOV26FUT") == 0
+
+
 @pytest.mark.parametrize("how", ["new link", "stop and start", "stop only"])
 def test_h2_new_link_and_stop_then_start_clear_the_mark(store, desk, how):
     """A row written before the clamp, or a clock that was wrong for a while: the owner's New
