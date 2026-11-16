@@ -90,6 +90,51 @@ def brought(capital: dict) -> list[dict]:
     return [step for step in capital["set_off"] if step["step"] == "brought_forward"]
 
 
+# ---- the lots against the holdings, and what the paper cannot count -----------------------------
+def marks(pack: dict) -> list[bool]:
+    """The "to check" mark of every sale of the paper, whichever list it is in."""
+    lists = ("schedule", "needs_fmv", "unknown_cost", "exempt_buybacks")
+    return [sale["to_check"] for key in lists for sale in pack["capital_gains"][key]]
+
+
+def test_the_paper_checks_its_lots_against_the_holdings_and_marks_the_shares_sales(ctx):
+    """Design p7 4.3. The year's history sells 10 of the share on 27 Oct. With 25 entered as
+    bought before the records the lots hold 25 - 10 = 15; Upstox held 40 at the close of
+    12 Nov (the last record two days or more before the trades were read on the 14th). 15 is
+    not 40: the paper says so first among its notes, carries the check and marks the share's
+    sale "to check". Old code compared nothing: no ``lot_check`` and no mark."""
+    pack = call(ctx, "tax_get")
+    assert pack["lot_check"]["state"] == "waiting"  # no closing record to compare with yet
+    assert marks(pack) == [False]
+    call(ctx, "tax_input_set", kind="opening_lot", request_id="lot-1",
+         row=lot(ctx, qty_u=25 * U, cost_paise=3_750_000))  # fmt: skip
+    lines = [{"instrument_key": f"NSE_EQ|{ISIN}", "qty": 40 * U}]
+    ctx.store.write(OWNER, lambda tx: tx.upstox_eod_put(20261112, {"read_at": NOW}, lines, NOW))
+    pack = call(ctx, "tax_get")
+    check = pack["lot_check"]
+    assert (check["state"], check["day"], check["account_id"]) == ("ok", 20261112, ctx.upstox_id)
+    assert [(r["isin"], r["held_qty_u"], r["lots_qty_u"]) for r in check["rows"]] == [
+        (ISIN, 40 * U, 15 * U)
+    ]
+    assert check["words"].startswith("Lots and holdings differ for 1 share: ")
+    assert "40 held, 15 in lots. Compared at the close of 12 Nov 2026." in check["words"]
+    assert pack["notes"][0] == f"{check['words']} Sales of these shares are marked to check."
+    assert marks(pack) == [True]
+    text = call(ctx, "tax_csv", schedule="capital_gains")["text"]
+    head, sale = text.splitlines()[3], text.splitlines()[4]
+    assert head.endswith(",To check: lots and holdings differ") and sale.endswith(",To check")
+    # 15 held: 25 - 10 = 15 in the lots, so they agree, and nothing is marked.
+    ctx.store.write(
+        OWNER,
+        lambda tx: tx.upstox_eod_put(20261112, {"read_at": NOW}, [{**lines[0], "qty": 15 * U}],
+                                     NOW),
+    )  # fmt: skip
+    pack = call(ctx, "tax_get")
+    assert (pack["lot_check"]["rows"], pack["lot_check"]["words"]) == ([], None)
+    assert marks(pack) == [False]
+    assert not pack["notes"][0].startswith("Lots and holdings differ")
+
+
 # ---- tax_get -----------------------------------------------------------------------------------
 def test_the_paper_is_the_cores_pack_of_the_year_and_the_owner_by_default(ctx):
     pack = call(ctx, "tax_get")

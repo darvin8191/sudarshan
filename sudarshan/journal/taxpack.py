@@ -158,8 +158,10 @@ def _lines(lines: Sequence[str] | None) -> tuple[D.Block, ...]:
 
 def _sale_row(g: Mapping[str, Any], last: D.Cell) -> tuple[D.Cell, ...]:
     bought = g.get("acquired_day")
+    # A share whose lots and Upstox holdings differ (the paper's first note names it).
+    mark = " (to check)" if g.get("to_check") else ""
     return (
-        str(g.get("isin") or ""),
+        f"{g.get('isin') or ''}{mark}",
         qty_text(g.get("qty_u") or 0),
         day_text(bought) if bought else "-",
         day_text(g["sale_day"]),

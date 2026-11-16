@@ -354,6 +354,15 @@ def test_a_year_with_no_dividend_says_so_and_one_dividend_is_one():
     assert taxpack.dividend_blocks(None) == ()
 
 
+def test_a_sale_of_a_share_whose_lots_differ_is_marked_to_check():
+    """Design p7 4.3: the paper's first note names the share; its sales carry the mark."""
+    row = taxpack._sale_row({"isin": "INE000C01012", "qty_u": 10**6, "sale_day": 20260812,
+                             "to_check": True}, "")  # fmt: skip
+    assert row[0] == "INE000C01012 (to check)"
+    assert taxpack._sale_row({"isin": "INE000C01012", "qty_u": 10**6, "sale_day": 20260812},
+                             "")[0] == "INE000C01012"  # fmt: skip
+
+
 def test_each_buyback_is_listed_by_the_rule_of_its_date():
     """K1's three regimes as the pack hands them over: an exempt tender is listed and in no
     total, one taxed as a dividend shows its nil sale value and its loss, and one from 1 April

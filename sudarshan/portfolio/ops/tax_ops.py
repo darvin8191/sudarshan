@@ -33,7 +33,7 @@ from sudarshan.tax.model import Carry
 from sudarshan.tax.pack import build_pack
 from sudarshan.tax.units import day_text, fy_label, rupees
 
-from .. import corpactions, dividends, reports, tax_adapter
+from .. import corpactions, dividends, lotcheck, reports, tax_adapter
 from ..core.days import day_of_instant, financial_year, is_day
 from ..core.kinds import (
     CARRY_BUCKETS,
@@ -236,6 +236,20 @@ def _with_dividends(store, pack: dict) -> dict:
     return pack
 
 
+def _checked(pack: dict, check: dict) -> dict:
+    """The tax lots against the Upstox holdings (``lotcheck.check``; design p7 4.3): the paper
+    carries the check, says a difference first among its notes, and marks every sale of a share
+    that differs "to check" (the Upstox account's only: the lots compared are its own)."""
+    differ = {row["isin"] for row in check["rows"]}
+    for key in SALE_LISTS:
+        for row in pack["capital_gains"][key]:
+            row["to_check"] = row["isin"] in differ and row["account"] == check["account_id"]
+    pack["lot_check"] = check
+    if check["words"]:
+        pack["notes"].insert(0, f"{check['words']} Sales of these shares are marked to check.")
+    return pack
+
+
 #: The lists of the pack whose rows are sales of a share or a fund, each named by its ISIN.
 SALE_LISTS = ("schedule", "needs_fmv", "unknown_cost", "exempt_buybacks")
 
@@ -262,10 +276,12 @@ def _named(pack: dict, names: dict[str, str]) -> dict:
 
 
 def _paper(store, member: int | None, fy: int, today: int, now: int, reading: bool) -> dict:
-    years, names = store.read(
-        OWNER, lambda tx: (_gather(tx, member, fy, today, now), _share_names(tx))
-    )
-    return _with_dividends(store, _named(_chain(years, reading), names))
+    def run(tx):
+        return (_gather(tx, member, fy, today, now), _share_names(tx),
+                lotcheck.check(tx, today, now))  # fmt: skip
+
+    years, names, check = store.read(OWNER, run)
+    return _with_dividends(store, _checked(_named(_chain(years, reading), names), check))
 
 
 def _reading(ctx, fy: int) -> bool:
@@ -529,7 +545,8 @@ def _gains(pack: dict, names: dict, accounts: dict) -> list[list[Any]]:
     capital = pack["capital_gains"]
     rows = [["Sale day", "ISIN", "Name", "Account", "Bought", "Quantity", "Received", "Sale value",
              "Cost", "Expenses", "Gain", "Term", "Rate %", "Status", "31 Jan 2018 price used",
-             "Expenses shared from the year's charges", "Buyback"]]  # fmt: skip
+             "Expenses shared from the year's charges", "Buyback",
+             "To check: lots and holdings differ"]]  # fmt: skip
     every = (*capital["schedule"], *capital["needs_fmv"], *capital["unknown_cost"],
              *capital["exempt_buybacks"])  # fmt: skip
     for g in sorted(every, key=lambda g: (g["sale_day"], g["isin"], g["acquired_day"] or 0)):
@@ -540,6 +557,7 @@ def _gains(pack: dict, names: dict, accounts: dict) -> list[list[Any]]:
             _money(g["expenses_paise"]), _money(g["gain_paise"]), TERMS.get(g["term"], ""),
             _num(g["rate_bp"], 2), STATUS[g["status"]], "Yes" if g["fmv_used"] else "No",
             "Yes" if g["allocated"] else "No", BUYBACK.get(g["buyback"], ""),
+            "To check" if g.get("to_check") else "",
         ])  # fmt: skip
     tax = capital["indicative_tax"]
     return rows + [[]] + [[label, _money(paise)] for label, paise in (
@@ -638,10 +656,10 @@ def _labels(tx, taxpayer: int) -> tuple[str, dict, dict]:
 def _paper_file(store, member, fy: int, schedule: str, today: int, now: int) -> dict:
     def run(tx):
         years = _gather(tx, member, fy, today, now)
-        return years, _labels(tx, years[-1].taxpayer)
+        return years, _labels(tx, years[-1].taxpayer), lotcheck.check(tx, today, now)
 
-    years, (who, names, accounts) = store.read(OWNER, run)
-    pack = _with_dividends(store, _chain(years))
+    years, (who, names, accounts), check = store.read(OWNER, run)
+    pack = _with_dividends(store, _checked(_chain(years), check))
     title = f"{HEADER} · Tax working paper · {pack['fy_label']} · {who}"
     if pack["running"]:
         title += f" · year to date, as of {day_text(pack['as_of_day'])}"
