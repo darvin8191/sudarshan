@@ -527,16 +527,24 @@ async def test_the_check_waits_for_the_trades_and_counts_shares_with_no_purchase
     assert (check["state"], check["rows"]) == ("waiting", [])
     assert check["words"].startswith("The check of the tax lots against your Upstox holdings "
                                      "waits for a closing record")  # fmt: skip
-    # UPSTOX: 60 bought in the records, 100 held: 40 are from before them, and the sentence
-    # says where to add them. TRADED: held, never bought in the records, no bonus or split
-    # decided: not a mismatch, counted in one figure.
+    # UPSTOX: 60 bought in the records, 100 held. A bonus or a split Upstox has not listed is
+    # the likelier cause, so it is named first and sent to the Calendar, never to a purchase
+    # (v0.13.0 verification H1); a purchase only before the trades read begin, and those begin
+    # on 1 Apr 2026, so the two earlier years Upstox keeps are read first. Old code: "If you
+    # bought the rest before 1 Apr 2024 ... add that purchase", a day whose years were never
+    # read. TRADED: held, never bought in the records, no bonus or split decided: not a
+    # mismatch, counted in one figure.
     history(n, (20260610, "BUY", 60))
     check = await check_of(n)
     (row,) = check["rows"]
     assert (row["isin"], row["held_qty_u"], row["lots_qty_u"]) == (UPSTOX, 100 * U, 60 * U)
     assert row["words"] == (
-        "PROBE LTD: Upstox holds 100 and the lots say 60. If you bought the rest before "
-        "1 Apr 2024 or moved it in from another account, add that purchase under Tax, Inputs."
+        "PROBE LTD: Upstox holds 100 and the lots say 60. If the company gave a bonus or split "
+        "its shares since you bought, confirm it in the Calendar; do not add a purchase for it. "
+        "SUDARSHAN has read Upstox's trades from 1 Apr 2026 only: read FY 2024-25 and "
+        "FY 2025-26 on the Upstox tab's Trades view first. Then add a purchase under Tax, "
+        "Inputs only for shares bought before the first day read, or moved in from another "
+        "account."
     )
     assert (row["fix"], check["unrecorded_count"]) == (None, 1)
 

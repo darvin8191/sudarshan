@@ -650,7 +650,7 @@ def listing(tx: Tx, today: int, *, scope: str | None = None, from_day: int, to_d
         "left_out_count": left_out,
         "reads": tx.ca_reads(),
         "read_status": read_status(tx, today),
-        "lot_check": lotcheck.check(tx, today, now or 0, holdings.lots()),
+        "lot_check": lotcheck.check(tx, today, now or 0, holdings.lots(), insights=True),
     }
 
 
@@ -802,7 +802,8 @@ def _sync_dividends(service: Any) -> str:
     def run(tx: Tx) -> tuple[int, dict[str, Any]]:
         from . import lotcheck
 
-        return dividends.sync(tx, today, now, held), lotcheck.check(tx, today, now)
+        # The night runs only with the Calendar switched on.
+        return dividends.sync(tx, today, now, held), lotcheck.check(tx, today, now, insights=True)
 
     changed, check = service.store.write(OWNER, run)
     differ = len(check["rows"])  # the nightly check of the lots against the holdings

@@ -135,6 +135,54 @@ def test_the_paper_checks_its_lots_against_the_holdings_and_marks_the_shares_sal
     assert not pack["notes"][0].startswith("Lots and holdings differ")
 
 
+def test_the_check_names_a_bonus_or_split_first_and_never_a_day_that_is_not_read(ctx):
+    """v0.13.0 verification H1, its probe. 25 entered as bought before the records and 10 sold
+    on 27 Oct: 15 in the lots. Upstox holds 30 after a 1:1 bonus, which no lot counts while the
+    Calendar is switched off. Old code: "If you bought the rest before 1 Apr 2024 or moved it
+    in from another account, add that purchase under Tax, Inputs.", a purchase with a made-up
+    cost for the bonus shares, before a day of years nobody read."""
+    call(ctx, "tax_input_set", kind="opening_lot", request_id="lot-1",
+         row=lot(ctx, qty_u=25 * U, cost_paise=3_750_000))  # fmt: skip
+    lines = [{"instrument_key": f"NSE_EQ|{ISIN}", "qty": 30 * U}]
+    ctx.store.write(OWNER, lambda tx: tx.upstox_eod_put(20261112, {"read_at": NOW}, lines, NOW))
+    later = (
+        "If the company gave a bonus or split its shares since you bought, do nothing: that is "
+        "confirmed in the Calendar in a later release."
+    )
+
+    def words() -> str:
+        (row,) = call(ctx, "tax_get")["lot_check"]["rows"]
+        assert (row["held_qty_u"], row["lots_qty_u"], row["fix"]) == (30 * U, 15 * U, None)
+        head = f"{row['name']}: Upstox holds 30 and the lots say 15. "
+        assert row["words"].startswith(head)
+        return row["words"][len(head) :]
+
+    # Only this year's trades are read: the two earlier years Upstox keeps are read first.
+    assert words() == (
+        f"{later} SUDARSHAN has read Upstox's trades from 1 Apr 2026 only: read FY 2024-25 and "
+        "FY 2025-26 on the Upstox tab's Trades view first. Then add a purchase under Tax, Inputs "
+        "only for shares bought before the first day read, or moved in from another account."
+    )
+    loss_last_year(ctx)  # FY 2025-26 read in full
+    assert words().endswith(
+        "from 1 Apr 2025 only: read FY 2024-25 on the Upstox tab's Trades view first. Then add "
+        "a purchase under Tax, Inputs only for shares bought before the first day read, or moved "
+        "in from another account."
+    )
+    ctx.store.write(OWNER, lambda tx: tx.report_put("trades", 2024, "EQ", "ok", NOW, None,
+                                                    {"rows": []}, NOW))  # fmt: skip
+    assert words() == (
+        f"{later} Add a purchase under Tax, Inputs only for shares bought before 1 Apr 2024, "
+        "where the trades SUDARSHAN has read begin, or moved in from another account."
+    )
+    # The Calendar switched on: a bonus or a split is confirmed there.
+    ctx.settings = dataclasses.replace(ctx.settings, insights=True)
+    assert words().startswith(
+        "If the company gave a bonus or split its shares since you bought, confirm it in the "
+        "Calendar; do not add a purchase for it. Add a purchase under Tax, Inputs only for "
+    )
+
+
 def test_the_paper_says_why_it_counts_no_dividend_and_lists_what_it_could_not_count(ctx):
     """v0.13.0 review H1. The paper is on while Upstox's dividends are not read at all (the
     insights switch is off): its dividends total of nothing used to stand without a word, as
