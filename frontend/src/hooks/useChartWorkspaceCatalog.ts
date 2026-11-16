@@ -5,6 +5,8 @@ import {
   WorkspaceRepository,
 } from 'openalgo-charts/workspace'
 import { useCallback, useEffect, useRef, useState } from 'react'
+// SUDARSHAN M4.18: the server keeps the copy of record of the catalogue when it is switched on.
+import { storageNotice, syncedWorkspaceStorage } from '@/sudarshan/charts/workspaceStorage'
 
 export interface ChartWorkspaceCatalogState {
   catalog: WorkspaceCatalog | null
@@ -32,7 +34,8 @@ interface View {
 
 function browserStorage(): IndexedDbWorkspaceStorage {
   if (!window.indexedDB) throw new Error('Browser workspace storage is unavailable')
-  return createIndexedDbWorkspaceStorage(window.indexedDB)
+  // SUDARSHAN M4.18: this browser's storage stays as it was, with the server settled around it.
+  return syncedWorkspaceStorage(createIndexedDbWorkspaceStorage(window.indexedDB))
 }
 
 const sessionError = () =>
@@ -66,7 +69,7 @@ export function useChartWorkspaceCatalog(
             ? previous.catalog
             : catalog,
         loading: false,
-        error: null,
+        error: storageNotice(owner.storage), // SUDARSHAN M4.18: which copy was kept, in words
       }))
     },
     [owns]
