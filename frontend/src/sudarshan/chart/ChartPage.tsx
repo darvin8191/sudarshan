@@ -62,6 +62,7 @@ import { formatPercent, formatPrice, formatRupees } from '@/sudarshan/dashboard/
 import { useNow } from '@/sudarshan/dashboard/hooks'
 import { LiveLine } from '@/sudarshan/dashboard/LiveLine'
 import { TREND_TEXT, TrendArrow } from '@/sudarshan/dashboard/Trend'
+import { RegimeChip, regimeInstrument } from '@/sudarshan/signals' // SUDARSHAN M13.4
 import { ticketProduct } from '@/sudarshan/ticket/productPref'
 import { BottomSheet } from '@/sudarshan/watchlist/BottomSheet'
 import { useOpenGuard } from '@/sudarshan/watchlist/openGuard'
@@ -724,6 +725,8 @@ const ChartScreen = memo(function ChartScreen({
             closesAt={closesAt}
             openInterest={hasOpenInterest(exchange) ? { prev: prevOi } : null}
           />
+          {/* SUDARSHAN M13.4: TRINETRA's regime of the charted index (nothing otherwise). */}
+          <RegimeChip instrument={regimeInstrument(symbol, exchange)} />
           {!quoteOnly && (
             <DepthStrip
               prices={prices}
