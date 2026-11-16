@@ -1436,7 +1436,12 @@ def test_a_size_hold_writes_one_event_and_tells_the_owner_once(api_key, held_exi
     held = _held_events(sid)[0]
     assert held["severity"] == "critical"
     assert held["message"].startswith("Exit NOT sent for leg 1 (BUY 75 NIFTY 24000 CE): SUDARSHAN")
-    assert "Close the position in the Upstox app" in held["message"]
+    # v0.15.0 verify V1: how to get out by hand without being reversed
+    assert held["message"].endswith(
+        "If you want out now, close it in the Upstox app with a market order; SUDARSHAN then "
+        "sends nothing. Do not leave a limit order waiting there: SUDARSHAN's exit can still "
+        "go, and both would fill."
+    )
     assert held_exit_messages[0].startswith(
         "Exit NOT sent (Live)\nStrategy: Engine test\nLeg 1: BUY 75 NIFTY 24000 CE\n"
         "The stop loss fired, but the exit was not sent because SUDARSHAN could not confirm"
@@ -1574,3 +1579,68 @@ def test_a_broker_refusal_of_a_stop_is_still_written_every_time(api_key, held_ex
     kinds = [e["kind"] for e in store.list_events(sid)]
     assert kinds.count("run_stop_failed") == 2 and kinds.count("leg_exit_rejected") == 2
     assert held_exit_messages == []
+
+
+@pytest.mark.parametrize("held_by", ["dispatch", "memo"])
+def test_a_hold_is_noted_before_its_claim_is_released(api_key, held_exit_messages, held_by):
+    # SUDARSHAN M6.9 (v0.15.0 verify V4). Thread A's exit is held, by a fresh read or by the 2 s
+    # memo. The moment A releases the leg's claim, thread B claims it, sends its exit and tells
+    # "Exit sent", while A is still inside the release: the barrier makes the race happen on
+    # every run. Before V4, A noted its hold after the release, as a first hold: "Exit NOT
+    # sent" was told after the exit had gone, and nothing followed it.
+    import threading  # here, not at the top: the BDD docs anchor to this file's line numbers
+
+    sid = _make()
+    run_id = _start(sid).run_id
+    engine.apply_fill(run_id, 1, 100.0, is_entry=True)
+    strategy = store.strategy_to_dict(store.get_strategy(sid, USER))
+    released, b_done, outcomes = threading.Event(), threading.Event(), {}
+    real_release = state.release_leg_exit
+
+    def is_a():
+        return threading.current_thread().name == "A"
+
+    def dispatch(**kwargs):
+        return _size_hold() if is_a() else DispatchResult(ok=True, broker_order_id="B", response={})
+
+    def kept(mode, order):
+        return _size_hold() if held_by == "memo" and is_a() else None
+
+    def release(run, leg_id, claim):
+        freed = real_release(run, leg_id, claim)
+        if is_a():
+            released.set()
+            assert b_done.wait(10), "B did not claim, send and tell while A was in the release"
+        return freed
+
+    def exit_as(name):
+        def body():
+            try:
+                if name == "B":
+                    assert released.wait(10)
+                outcomes[name] = engine._exit_legs(
+                    run_id, strategy, [1], "exit_sl", "live", "k", USER
+                )
+            finally:
+                if name == "B":
+                    b_done.set()
+                store.db_session.remove()
+
+        return threading.Thread(target=body, name=name)
+
+    with (
+        patch.object(engine.order_dispatch, "dispatch_order", side_effect=dispatch),
+        patch.object(engine.order_dispatch, "kept_hold", side_effect=kept),
+        patch.object(engine.state, "release_leg_exit", side_effect=release),
+    ):
+        workers = [exit_as("B"), exit_as("A")]
+        for each in workers:
+            each.start()
+        for each in workers:
+            each.join(30)
+
+    assert outcomes["A"][0]["ok"] is False and outcomes["B"][0]["ok"] is True
+    assert [text.split("\n")[0] for text in held_exit_messages] == [
+        "Exit NOT sent (Live)",
+        "Exit sent (Live)",
+    ]

@@ -738,11 +738,15 @@ def _place(
     # SUDARSHAN M6.9 (O1): the same refusal for this exit's size was given moments ago and
     # would only be repeated; no order row and no event are written for it, as on the batch
     # path (engine._exit_legs). The caller releases the exit claim, as for any held exit.
+    # SUDARSHAN M6.9 (v0.15.0 verify V4, V5): a hold is noted here, before the caller releases
+    # the claim, so an exit another thread sends once it is free is never told before it; and
+    # it is kept by the position the exit closes, so a flipped leg's two sides are told apart.
+    hold_ref = leg.get("position_ref") or exit_owner
     kept = order_dispatch.kept_hold(mode, order) if exiting else None
     if kept is not None:
         from sudarshan.books import held_exits
 
-        held_exits.held(run_id, leg["leg_id"], kind, order, kept)
+        held_exits.held(run_id, leg["leg_id"], kind, order, kept, ref=hold_ref)
         return _Placement(ok=False, error=kept.error, exit_claim_id=exit_claim_id)
 
     # Durable intent before the broker is called, exactly as the batch path
@@ -882,7 +886,7 @@ def _place(
         # when the size cannot be confirmed (sudarshan/books/held_exits.py).
         from sudarshan.books import held_exits
 
-        note = held_exits.held(run_id, leg["leg_id"], kind, order, result)
+        note = held_exits.held(run_id, leg["leg_id"], kind, order, result, ref=hold_ref)
         kind, severity, written = "leg_exit_held", note.severity, note.event
         said = note.message or f"{said} held, to be sent again: {result.error}"
     else:
@@ -890,7 +894,7 @@ def _place(
         if exiting and result.ok and mode == "live":  # SUDARSHAN M6.9 (O1)
             from sudarshan.books import held_exits
 
-            said += held_exits.sent(run_id, leg["leg_id"], order, result)
+            said += held_exits.sent(run_id, leg["leg_id"], order, result, ref=hold_ref)
         kind = "leg_exit_placed" if exiting else "leg_entry_placed"
         said += "" if result.ok else f" rejected: {result.error}"
         severity = "info" if result.ok else "warn"

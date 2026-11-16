@@ -39,6 +39,7 @@ export function WorkspaceMenu({
   loading,
   pending,
   error,
+  keptOnServer,
   run,
   reload,
   activeId,
@@ -133,8 +134,11 @@ export function WorkspaceMenu({
         <DialogHeader>
           <DialogTitle>Chart workspaces</DialogTitle>
           <DialogDescription>
-            Save the complete chart grid for your account in this browser. Export a workspace to
-            share its chart configuration.
+            {/* SUDARSHAN M4.18 (review M3): where the layouts are actually kept. */}
+            {keptOnServer
+              ? 'Save the complete chart grid for your account. Layouts are kept on the server, so your other devices open the same ones.'
+              : 'Save the complete chart grid for your account in this browser.'}{' '}
+            Export a workspace to share its chart configuration.
           </DialogDescription>
         </DialogHeader>
         <p className="text-sm">

@@ -1289,6 +1289,9 @@ def _exit_legs(
             strategy_name=strategy.get("name", ""),
             pricetype=order_dispatch.EXIT_PRICETYPE,
         )
+        # SUDARSHAN M6.9 (v0.15.0 verify V5): what the owner is told of a held exit is kept by
+        # the position it closes, so a flipped leg's old side and new side are told apart.
+        hold_ref = leg.get("position_ref") or exit_owner
         # SUDARSHAN M6.9 (O1): the same refusal for this exit's size was given moments ago and
         # would only be repeated, with no read and no send. No order row and no event are
         # written for it; the claim is released as for any held dispatch, the leg stays
@@ -1297,11 +1300,14 @@ def _exit_legs(
         if kept is not None:
             from sudarshan.books import held_exits
 
+            # SUDARSHAN M6.9 (v0.15.0 verify V4): noted while the claim is still held. Once it
+            # is released another thread may claim, send and tell "Exit sent", and this hold
+            # must never be told after that. held() never raises, so the release always runs.
+            held_exits.held(run_id, leg["leg_id"], kind, order, kept, ref=hold_ref)
             if exit_owner == "superseded":
                 state.release_superseded_exit(run_id, leg["leg_id"], leg.get("claim_token"))
             else:
                 state.release_leg_exit(run_id, leg["leg_id"], leg.get("exit_claim_token"))
-            held_exits.held(run_id, leg["leg_id"], kind, order, kept)
             outcomes.append(
                 {
                     "leg_id": leg["leg_id"],
@@ -1424,6 +1430,15 @@ def _exit_legs(
         if row_id is not None:
             _record_acknowledgement(row_id, result, strategy["id"], user_id, run_id, leg["leg_id"])
 
+        # SUDARSHAN M6.9 (v0.15.0 verify V4): a hold is noted before the claim below is
+        # released, so an exit another thread sends once the claim is free is never told before
+        # this hold is. held() never raises, so the release below always runs.
+        hold_note = None
+        if not result.ok and getattr(result, "held", False):
+            from sudarshan.books import held_exits
+
+            hold_note = held_exits.held(run_id, leg["leg_id"], kind, order, result, ref=hold_ref)
+
         if not result.ok:
             # Release the claim so a later attempt is not mistaken for a
             # duplicate and skipped for the rest of the session.
@@ -1458,11 +1473,9 @@ def _exit_legs(
             if mode == "live":
                 from sudarshan.books import held_exits
 
-                said += held_exits.sent(run_id, leg["leg_id"], order, result)
-        elif getattr(result, "held", False):
-            from sudarshan.books import held_exits
-
-            note = held_exits.held(run_id, leg["leg_id"], kind, order, result)
+                said += held_exits.sent(run_id, leg["leg_id"], order, result, ref=hold_ref)
+        elif hold_note is not None:
+            note = hold_note
             quiet = not note.event
             kind_said, said, severity = (
                 "leg_exit_held",

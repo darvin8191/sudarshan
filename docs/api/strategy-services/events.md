@@ -142,15 +142,21 @@ next exit signal sends it again. It is not a rejection: `leg_exit_rejected` stay
 for an exit the broker or the pipe refused on the batch path (the signal path
 records that refusal as `leg_exit_placed`, its message ending in "rejected").
 
-A hold writes one `leg_exit_held` row for the leg, not one for every tick it is
-tried again. When the hold is for a size the broker's books could not confirm, the
-row is `critical`, says to close the position in the broker's app, and the owner is
-told on Telegram: once at first, again at most once a minute while it lasts, and
-once when the exit goes (that `leg_exit_placed` message ends "it had been held
-N min"). When the books answer that the account holds no position for the leg, the
-row says so, once. An answer only repeated from the 2 s memory of a size refusal
-writes no order row and no event, and a stop tried again while its exits are held
-does not write `run_stop_requested` or `run_stop_failed` again.
+A hold writes one `leg_exit_held` row for the position, not one for every tick it
+is tried again; after a signal flip the old side and the new side of one leg are
+held, and told, apart. When the hold is for a size the broker's books could not
+confirm, the row is `critical` and says how to get out by hand: close it in the
+broker's app with a market order, which the books see, so nothing more is sent;
+never leave a limit order waiting there, because the books do not count it as an
+exit on its way and both could fill. The owner is told on Telegram once at first,
+again each minute for the first 5 minutes, each 5 minutes until 30 and each 15
+after that while it lasts, and once when the exit goes (that `leg_exit_placed`
+message ends "it had been held N min"). When the books answer that the account
+holds no position for the leg, the row says so, once, and a read that fails after
+that tells nothing more until the books show a position again. An answer only
+repeated from the 2 s memory of a size refusal writes no order row and no event,
+and a stop tried again while its exits are held does not write
+`run_stop_requested` or `run_stop_failed` again.
 
 `leg_expiry_fallback` is written at `warn` severity, before the entry goes out, when the chain did not list the expiry rank the leg asked for and a nearer one was used. A `next_week` leg trading the current week is a different trade from the one that was configured, so it is said out loud rather than inferred from the symbol afterwards.
 
