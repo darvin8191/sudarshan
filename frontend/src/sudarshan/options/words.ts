@@ -1,9 +1,11 @@
 /**
- * The words and figures of the options screen (M11.1), free of React. Numbers are en-IN; open
- * interest is said in lakh and crore, as a trader reads it.
+ * The words and figures of the options screen (M11.1), free of React. Numbers follow Display
+ * settings' grouping (M20.3): Indian by default, with open interest in lakh and crore, as a
+ * trader reads it; international, with millions and billions.
  */
 import { formatAmount } from '@/sudarshan/dashboard/format'
 import { istDay } from '@/sudarshan/dashboard/live'
+import { numberGrouping } from '@/sudarshan/dashboard/numberStyle'
 
 const SHORT_DAY = new Intl.DateTimeFormat('en-IN', {
   timeZone: 'UTC',
@@ -37,9 +39,18 @@ export function expirySpeech(expiry: string, now: number): string {
   return `${expiryDay(expiry)}, ${when}`
 }
 
-/** Open interest in lakh and crore: "42.1 L", "1.12 Cr"; below a lakh, the number itself. */
+/**
+ * Open interest in lakh and crore: "42.1 L", "1.12 Cr"; below a lakh, the number itself. In
+ * international grouping: "4.21 M", "1.12 B", and thousands from a lakh up ("320 k").
+ */
 export function oiWords(value: number): string {
   const size = Math.abs(value)
+  if (numberGrouping() === 'international') {
+    if (size >= 1e9) return `${formatAmount(size / 1e9, 2)} B`
+    if (size >= 1e6) return `${formatAmount(size / 1e6, 2)} M`
+    if (size >= 1e5) return `${formatAmount(size / 1e3, 0)} k`
+    return formatAmount(size, 0)
+  }
   if (size >= 1e7) return `${formatAmount(size / 1e7, 2)} Cr`
   if (size >= 1e5) return `${formatAmount(size / 1e5, 1)} L`
   return formatAmount(size, 0)

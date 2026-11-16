@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
+import { groupedNumber } from '@/sudarshan/dashboard/format'
 import { PhraseInput } from './PhraseInput'
 import { RISK_AUDIT_KEY, RISK_STATUS_KEY } from './parts'
 import { PHRASE_FORGOTTEN, PHRASE_HINT } from './phrase'
@@ -47,7 +48,7 @@ export function paceWords(perSecond: number | null): { said: string; warn: boole
   }
 }
 
-const wholeRupees = new Intl.NumberFormat('en-IN', {
+const wholeRupees = groupedNumber({
   style: 'currency',
   currency: 'INR',
   maximumFractionDigits: 0,

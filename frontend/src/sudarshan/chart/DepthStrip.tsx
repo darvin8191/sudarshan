@@ -12,11 +12,11 @@ import { ChevronRight } from 'lucide-react'
 import type { DepthLevel, MarketDepth } from 'openalgo-charts'
 import { useSyncExternalStore } from 'react'
 import { cn } from '@/lib/utils'
-import { formatPrice } from '@/sudarshan/dashboard/format'
+import { formatPrice, groupedNumber } from '@/sudarshan/dashboard/format'
 import { BottomSheet } from '@/sudarshan/watchlist/BottomSheet'
 import type { PriceStore } from './prices'
 
-const quantity = new Intl.NumberFormat('en-IN')
+const quantity = groupedNumber()
 
 /** A level that holds an order: the proxy pads an empty one with zeros. */
 const real = (level: DepthLevel | undefined): level is DepthLevel =>

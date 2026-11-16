@@ -1,15 +1,16 @@
 import { CalendarClock, Lock, Minus, TrendingDown, TrendingUp, TriangleAlert } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import type { DailyStatus, RiskStatus } from '@/api/risk'
+import { groupedNumber } from '@/sudarshan/dashboard/format'
 import { clockOf } from './parts'
 
-const rupees = new Intl.NumberFormat('en-IN', {
+const rupees = groupedNumber({
   style: 'currency',
   currency: 'INR',
   minimumFractionDigits: 2,
   maximumFractionDigits: 2,
 })
-const wholeRupees = new Intl.NumberFormat('en-IN', {
+const wholeRupees = groupedNumber({
   style: 'currency',
   currency: 'INR',
   maximumFractionDigits: 0,

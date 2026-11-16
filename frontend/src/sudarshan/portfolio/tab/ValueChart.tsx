@@ -4,6 +4,7 @@
 // stroke (solid and dashed) and are named under the chart, never told by colour alone. Today's
 // point follows the live value from the Overview, as the figures above it do.
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { formatNumber } from '@/sudarshan/dashboard/format'
 import type { Day, PerformanceReport } from '../types'
 import { rupeesText } from './format'
 import { chartDay, withToday } from './performance'
@@ -79,7 +80,7 @@ export function ValueChart({
           rightPriceScale: { borderColor: CHART_COLOURS.edge },
           timeScale: { borderColor: CHART_COLOURS.edge, timeVisible: false },
           localization: {
-            priceFormatter: (v: number) => new Intl.NumberFormat('en-IN').format(Math.round(v)),
+            priceFormatter: (v: number) => formatNumber(Math.round(v)),
           },
         })
         const putIn = chart.addSeries(LineSeries, {

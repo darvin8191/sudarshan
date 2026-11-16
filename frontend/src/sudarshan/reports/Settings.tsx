@@ -1,6 +1,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Check, LoaderCircle, RefreshCw } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
+import { formatNumber, groupedNumber } from '@/sudarshan/dashboard/format'
 import { journalData, problemOf, WORDS } from '../journal/api'
 import { Problem } from '../journal/parts'
 import { parseRupees, riskText } from '../journal/sheetForm'
@@ -20,14 +21,14 @@ const CARD = 'rounded-[1.125rem] border bg-card px-4 py-3 shadow-[var(--shadow-c
 const BUTTON =
   'inline-flex min-h-12 items-center justify-center gap-2 rounded-[0.875rem] border border-input bg-card px-4 text-[0.9375rem] font-semibold outline-none hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-60'
 
-const GROUPED = new Intl.NumberFormat('en-IN', { maximumFractionDigits: 2 })
+const GROUPED = groupedNumber({ maximumFractionDigits: 2 })
 
-/** The capital as the field starts from it, in en-IN digits (review L2): 5,00,000 or 1,250.50. */
+/** The capital as the field starts from it, grouped as Display settings ask (review L2, M20.3): 5,00,000 or 1,250.50. */
 export function capitalText(paise: number | null): string {
   if (paise === null) return ''
   const text = riskText(paise)
   return text.includes('.')
-    ? new Intl.NumberFormat('en-IN', { minimumFractionDigits: 2 }).format(paise / 100)
+    ? formatNumber(paise / 100, { minimumFractionDigits: 2 })
     : GROUPED.format(paise / 100)
 }
 

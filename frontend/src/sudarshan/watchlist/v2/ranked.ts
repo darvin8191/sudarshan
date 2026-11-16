@@ -1,3 +1,4 @@
+import { formatNumber } from '@/sudarshan/dashboard/format'
 import { describe } from '../rows'
 import type { RankAsset, RankCategory, RankSource } from './types'
 
@@ -134,6 +135,6 @@ export const underlyingOf = (symbol: string, exchange: string) =>
 export function shortName(symbol: string, exchange: string): string {
   const title = describe(symbol, exchange).title
   return title.replace(/ (\d{4,})( [CP]E)$/, (_, strike: string, right: string) => {
-    return ` ${Number(strike).toLocaleString('en-IN')}${right}`
+    return ` ${formatNumber(Number(strike))}${right}`
   })
 }

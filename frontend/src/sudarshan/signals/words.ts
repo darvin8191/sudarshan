@@ -3,6 +3,7 @@
 // sudarshan/signals/contract.py); this file fills them by the README's rules (section 4, "Times in
 // words", and section 5), so a header worked out again on the phone reads as the service's own.
 // Pure: nothing here reads a clock, the network or the page.
+import { groupedNumber, type NumberText } from '@/sudarshan/dashboard/format'
 import {
   AGE_WORDS,
   BIAS_WORDS,
@@ -233,13 +234,13 @@ const LEVEL_NAMES: ReadonlyArray<[keyof Levels, string]> = [
   ['target', 'Target'],
 ]
 
-const priceFormats = new Map<number, Intl.NumberFormat>()
+const priceFormats = new Map<number, NumberText>()
 /** An index level in Indian grouping: 25,900 or 25,912.35. */
 export function levelWords(value: number): string {
   const decimals = Number.isInteger(value) ? 0 : 2
   let format = priceFormats.get(decimals)
   if (!format) {
-    format = new Intl.NumberFormat('en-IN', {
+    format = groupedNumber({
       minimumFractionDigits: decimals,
       maximumFractionDigits: decimals,
     })

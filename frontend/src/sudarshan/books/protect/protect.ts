@@ -1,3 +1,4 @@
+import { groupedNumber } from '@/sudarshan/dashboard/format'
 import type { GttOrder, Holding } from '@/types/trading'
 
 /**
@@ -60,11 +61,11 @@ export function protectsOf(holding: Held, gtts: readonly GttOrder[]): Protect[] 
   return found
 }
 
-const NUMBER = new Intl.NumberFormat('en-IN', {
+const NUMBER = groupedNumber({
   minimumFractionDigits: 2,
   maximumFractionDigits: 2,
 })
-const UNITS = new Intl.NumberFormat('en-IN')
+const UNITS = groupedNumber()
 
 /** The card's line: "Protected: sell 50 at 1,240.00". */
 export function protectedLine(protect: Protect): string {

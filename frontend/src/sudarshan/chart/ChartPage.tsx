@@ -59,7 +59,12 @@ import { AlertFormSheet, toastAlertSet } from '@/sudarshan/alerts/AlertForm' // 
 import { isCovered } from '@/sudarshan/alerts/words'
 import { addProduct } from '@/sudarshan/books/cards/PositionCards'
 import { SyncNotice } from '@/sudarshan/charts/SyncNotice' // SUDARSHAN M4.18
-import { formatPercent, formatPrice, formatRupees } from '@/sudarshan/dashboard/format'
+import {
+  formatPercent,
+  formatPrice,
+  formatRupees,
+  groupedNumber,
+} from '@/sudarshan/dashboard/format'
 import { useNow } from '@/sudarshan/dashboard/hooks'
 import { LiveLine } from '@/sudarshan/dashboard/LiveLine'
 import { TREND_TEXT, TrendArrow } from '@/sudarshan/dashboard/Trend'
@@ -146,7 +151,8 @@ const barDay = new Intl.DateTimeFormat('en-IN', {
   month: 'short',
   year: 'numeric',
 })
-const compact = new Intl.NumberFormat('en-IN', { notation: 'compact', maximumFractionDigits: 2 })
+// SUDARSHAN M20.3: lakh and crore, or millions, as Display settings ask.
+const compact = groupedNumber({ notation: 'compact', maximumFractionDigits: 2 })
 
 const closesStamp = new Intl.DateTimeFormat('en-IN', {
   timeZone: 'Asia/Kolkata',
