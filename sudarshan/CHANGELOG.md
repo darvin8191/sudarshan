@@ -228,6 +228,9 @@ Nothing below changes anything until you switch it on, and none of it is promise
   said do not switch on (the Goals view redrew without end and a tap then failed), a fix round,
   and a re-check that said yes; the one import fault the re-check found was fixed after it and has
   no review of its own.
+- **A new check on every change.** Upstream's own tests for the strategy module, the scalping
+  terminal and the Upstox order code now run on every SUDARSHAN check, along with the tests that
+  prove the app stays responsive under the default web server. Nothing for you to do.
 - **A held strategy exit that lasts** still writes one order row about every 2 seconds in the
   run's order list while SUDARSHAN keeps trying: about 11,000 rows in a full session for one leg.
 - **Several legs held at once** send one Telegram message each.
