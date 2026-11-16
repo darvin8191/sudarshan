@@ -81,12 +81,9 @@ _DUE = {
 _DUE_OTHER = "An exit was due"
 
 #: V1. A market close in the app is seen by the books and nothing more is sent; a limit order
-#: left there is not counted as an exit on its way, so SUDARSHAN's exit could fill as well.
-CLOSE_IN_UPSTOX = (
-    "If you want out now, close it in the Upstox app with a market order; SUDARSHAN then sends "
-    "nothing. Do not leave a limit order waiting there: SUDARSHAN's exit can still go, and both "
-    "would fill."
-)
+#: left there is not counted as an exit on its way, so SUDARSHAN's exit could fill as well. One
+#: source with the books' own refusals as a run says them (exit_guard.while_tried, V1b).
+CLOSE_IN_UPSTOX = exit_guard.CLOSE_BY_HAND
 NO_POSITION_SAID = "Upstox shows no position for this leg"
 RUN_STILL_LISTS = "The run still shows the leg as open; check Positions in the Upstox app."
 

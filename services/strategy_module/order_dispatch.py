@@ -221,6 +221,7 @@ def kept_hold(mode: str, order: dict[str, Any]) -> DispatchResult | None:
         kept = surface_exits.kept_refusal(
             "live", order.get("exchange"), order.get("symbol"), order.get("product"),
             order.get("action"),
+            tries_again=True,  # SUDARSHAN M6.9 (v0.15.0 verify V1b): as in _dispatch_live
         )  # fmt: skip
         if kept is None or not surface_exits.held(kept[1], kept[2]):
             return None
@@ -428,6 +429,10 @@ def _dispatch_live(api_key: str, order: dict[str, Any], closes: bool = False) ->
                 quantity=order.get("quantity"),
                 read_book=surface_exits.book_reader(None, auth_token, broker),
                 resize=resize,
+                # SUDARSHAN M6.9 (v0.15.0 verify V1b): the run keeps the leg managed and tries
+                # a refused exit again, so a refusal that sends the trader to the Upstox app says
+                # to close there with a market order, never a limit order left waiting. Words only.
+                tries_again=True,
             )
             if not ok and surface_exits.held(response, _status):
                 result = _normalise(ok, response)
