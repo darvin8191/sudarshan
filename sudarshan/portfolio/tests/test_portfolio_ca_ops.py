@@ -17,6 +17,7 @@ from test_portfolio_purposes import FAM, JOURNAL, JRN
 
 from sudarshan.autologin.handoff import seal
 from sudarshan.portfolio import corpactions as ca
+from sudarshan.portfolio import lotcheck as ca_lotcheck
 from sudarshan.portfolio import store as store_module
 from sudarshan.portfolio.core import kinds
 from sudarshan.tax import lots as tax_lots
@@ -497,6 +498,29 @@ async def test_holdings_as_before_a_split_are_said_as_not_credited_and_nothing_i
     assert (await check_of(n))["rows"] == []
     # Both still applied: the bonus lot at nil cost, each lot split into five.
     assert lots_after(n)[0] == [(20260610, 500, 1_000_000), (20260810, 500, 0)]
+
+
+@scenario
+async def test_two_real_bonuses_months_apart_are_not_one_counted_twice(n):
+    """v0.14.0 verification N2, its probe. 100 bought in June. A 1:1 bonus on 3 Aug, applied
+    and credited (200 on 8 Oct); another 1:1 bonus on 9 Oct, applied, its shares not credited
+    yet on the 21st. Old code took any second applied bonus for the same one listed twice and
+    offered "Take this one out of my lots". Two applied events count as one counted twice only
+    when they are of one kind and ratio with ex-dates within 60 days: here the row says Upstox
+    may not have credited the new shares yet, and offers nothing."""
+    history(n, (20260610, "BUY", 100))
+    record(n, 20260801, **{UPSTOX: 100})
+    record(n, 20261008, **{UPSTOX: 200})
+    record(n, 20261021, **{UPSTOX: 200})
+    for day in (20260803, 20261009):
+        bonus = event(n, "bonus", ex_day=day, ratio=(1, 1))
+        done = await n.rig.call("ca_decide", id=bonus, scope="upstox", state="applied",
+                                ratio_num=1, ratio_den=1)  # fmt: skip
+        assert done["status"] == "success"
+    (row,) = (await check_of(n))["rows"]
+    assert (row["held_qty_u"], row["lots_qty_u"], row["fix"]) == (200 * U, 400 * U, None)
+    assert "Upstox may not have credited the new shares yet" in row["words"]
+    assert ca_lotcheck.TWICE_DAYS == 60
 
 
 @scenario

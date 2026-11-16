@@ -23,9 +23,10 @@ share's sales "to check".
 * **The one fix it can prove.** Where an applied bonus or split explains a difference, and its
   other reading would make the lots and the holdings agree, the row carries that change
   (``fix``): the phone offers it as one tap through ``ca_decide``. Leaving it out is offered
-  only where another applied event of the same kind could be the same one counted twice:
-  holdings equal to the lots without it are otherwise what a late credit of the new shares, or
-  a sale not yet in Upstox's trade history, looks like, and the row says so.
+  only where another applied event could be the same one counted twice (the same kind and
+  ratio, ex-dates within ``TWICE_DAYS``): holdings equal to the lots without it are otherwise
+  what a late credit of the new shares, or a sale not yet in Upstox's trade history, looks
+  like, and the row says so.
 * **Only what the paper computes.** An ETF, a bond or a fund has no lots here and is passed over.
 """
 
@@ -192,13 +193,11 @@ def _actions(tx: Tx, up_to: int) -> tuple[dict, dict, dict, set[str], set[str]]:
     gets it, the decision and the event decided: the likelier mistake when one was applied twice),
     the last one still waiting, the last one he left out of the lots (dated as Upstox lists it
     now, with the event the decision was made on), the shares with one in the
-    ``core.EVE_REACH_DAYS`` up to the day, and the shares where
-    another event of the same kind as the last one applied is applied too (the only way one
-    event can be counted twice: Upstox listed it again, too far apart to be known as the
-    same)."""
+    ``core.EVE_REACH_DAYS`` up to the day, and the shares where the last one applied may have
+    been counted twice (``_twice``)."""
     decided = corpactions.decisions(tx)
     applied: dict[str, tuple[dict, dict, dict]] = {}
-    kinds: dict[str, list[str]] = {}
+    every: dict[str, list[tuple[dict, dict]]] = {}
     pending: dict[str, dict] = {}
     left: dict[str, tuple[int, dict, int]] = {}
     recent: set[str] = set()
@@ -211,7 +210,7 @@ def _actions(tx: Tx, up_to: int) -> tuple[dict, dict, dict, set[str], set[str]]:
             event = next(e for e in group if e["id"] == row["event_id"])
             dated = live[-1] if live else event  # dated as accepted_actions dates it
             action = core.action_row(dated, row["ratio_num"], row["ratio_den"], True)
-            kinds.setdefault(event["isin"], []).append(event["kind"])
+            every.setdefault(event["isin"], []).append((action, row))
             if event["isin"] not in applied or applied[event["isin"]][1]["id"] < row["id"]:
                 applied[event["isin"]] = (action, row, event)
         elif row is not None:
@@ -220,9 +219,27 @@ def _actions(tx: Tx, up_to: int) -> tuple[dict, dict, dict, set[str], set[str]]:
                 left[event["isin"]] = (row["id"], live[-1] if live else event, event["id"])
         elif live:
             pending[live[-1]["isin"]] = live[-1]
-    twice = {isin for isin, (_, _, event) in applied.items()
-             if kinds[isin].count(event["kind"]) > 1}  # fmt: skip
+    twice = {isin for isin, (action, row, _) in applied.items()
+             if _twice(action, row, every[isin])}  # fmt: skip
     return applied, pending, {isin: (e, made) for isin, (_, e, made) in left.items()}, recent, twice
+
+
+#: Two applied events this near each other (days) may be one event Upstox listed twice.
+TWICE_DAYS = 60
+
+
+def _twice(action: dict, row: dict, every: list[tuple[dict, dict]]) -> bool:
+    """Whether another applied event of the share could be the same one as ``action``, counted
+    twice: the same kind, applied at the same ratio, with ex-dates within ``TWICE_DAYS``
+    (Upstox listed it again, too far apart to be known as the same). Two real bonuses of one
+    share months apart are not that (v0.14.0 verification N2)."""
+    return any(
+        other_row["id"] != row["id"]
+        and other["kind"] == action["kind"]
+        and other_row["ratio_num"] * row["ratio_den"] == row["ratio_num"] * other_row["ratio_den"]
+        and abs(days_between(other["ex_day"], action["ex_day"])) <= TWICE_DAYS
+        for other, other_row in every
+    )
 
 
 def _fix(lots: TaxLots, isin: str, day: int, held: int, applied: tuple,
