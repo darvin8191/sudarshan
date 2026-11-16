@@ -1436,7 +1436,12 @@ def test_a_size_hold_writes_one_event_and_tells_the_owner_once(api_key, held_exi
     held = _held_events(sid)[0]
     assert held["severity"] == "critical"
     assert held["message"].startswith("Exit NOT sent for leg 1 (BUY 75 NIFTY 24000 CE): SUDARSHAN")
-    assert "Close the position in the Upstox app" in held["message"]
+    # v0.15.0 verify V1: how to get out by hand without being reversed
+    assert held["message"].endswith(
+        "If you want out now, close it in the Upstox app with a market order; SUDARSHAN then "
+        "sends nothing. Do not leave a limit order waiting there: SUDARSHAN's exit can still "
+        "go, and both would fill."
+    )
     assert held_exit_messages[0].startswith(
         "Exit NOT sent (Live)\nStrategy: Engine test\nLeg 1: BUY 75 NIFTY 24000 CE\n"
         "The stop loss fired, but the exit was not sent because SUDARSHAN could not confirm"
@@ -1574,3 +1579,4 @@ def test_a_broker_refusal_of_a_stop_is_still_written_every_time(api_key, held_ex
     kinds = [e["kind"] for e in store.list_events(sid)]
     assert kinds.count("run_stop_failed") == 2 and kinds.count("leg_exit_rejected") == 2
     assert held_exit_messages == []
+
