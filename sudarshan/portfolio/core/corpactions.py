@@ -233,14 +233,22 @@ EVE_REACH_DAYS = 7
 
 def effect(kind: str, held_qty_u: int, num: int, den: int) -> dict[str, Any]:
     """What ``held_qty_u`` becomes under a reading: the quantity added, the quantity after, and
-    whether part of a share is left over (the company usually pays that in cash)."""
+    whether part of a share is left over (the company usually pays that in cash). A bonus on
+    whole shares brings whole shares only, as the company credits them and as the tax lots keep
+    them (``sudarshan.tax.lots``); ``left_qty_u`` is the part of a share it leaves out. A split
+    keeps its fraction, as the ledger does."""
+    if kind == "bonus" and held_qty_u % QTY_SCALE == 0:
+        exact = held_qty_u * num // den  # 10^-6 of a share; anything smaller is dropped
+        added = exact // QTY_SCALE * QTY_SCALE
+        return {"added_qty_u": added, "after_qty_u": held_qty_u + added,
+                "fraction": added * den != held_qty_u * num, "left_qty_u": exact - added}  # fmt: skip
     if kind == "bonus":
         added = round_div(held_qty_u * num, den)
     else:
         added = round_div(held_qty_u * num, den) - held_qty_u
     after = held_qty_u + added
     whole = held_qty_u * num % den == 0 and after % QTY_SCALE == 0
-    return {"added_qty_u": added, "after_qty_u": after, "fraction": not whole}
+    return {"added_qty_u": added, "after_qty_u": after, "fraction": not whole, "left_qty_u": 0}
 
 
 def sentence(kind: str, first: int, second: int, num: int, den: int, held_qty_u: int | None) -> str:
@@ -260,7 +268,12 @@ def sentence(kind: str, first: int, second: int, num: int, den: int, held_qty_u:
         text = f"you held {held}, you get {quantity(done['added_qty_u'])} more, {after} in all"
     else:
         text = f"you held {held}, they become {after}"
-    left = " This leaves part of a share, which a company usually pays in cash." * done["fraction"]
+    left = ""
+    if done["fraction"] and done["left_qty_u"]:
+        left = (f" {quantity(done['left_qty_u'])} of a share is left over, which a company "
+                "usually pays in cash.")  # fmt: skip
+    elif done["fraction"]:
+        left = " This leaves part of a share, which a company usually pays in cash."
     return f"{label}: {text}. Is that right?{left}"
 
 

@@ -134,11 +134,12 @@ async def test_a_bonus_is_proposed_on_the_owners_quantity_and_changes_no_lot_unt
     assert side == {
         "scope": "upstox", "held_qty_u": 100 * U, "ratio_num": 1, "ratio_den": 2,
         "words": "Bonus 1:2: you held 100, you get 50 more, 150 in all. Is that right?",
-        "added_qty_u": 50 * U, "after_qty_u": 150 * U, "fraction": False,
+        "added_qty_u": 50 * U, "after_qty_u": 150 * U, "fraction": False, "left_qty_u": 0,
         "other": {
             "ratio_num": 2, "ratio_den": 1,
             "words": "Bonus 1:2: you held 100, you get 200 more, 300 in all. Is that right?",
             "added_qty_u": 200 * U, "after_qty_u": 300 * U, "fraction": False,
+            "left_qty_u": 0,
         },
     }  # fmt: skip
     # Not decided: the tax core is handed the proposed reading as not accepted, and adds nothing.
