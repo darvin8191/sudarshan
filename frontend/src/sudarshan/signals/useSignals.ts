@@ -124,7 +124,9 @@ export function useSignals(moments?: (state: State, now: number) => number[]): S
     queryKey: STATE_KEY,
     queryFn: ({ signal }) => readState(client, signal),
     retry,
-    staleTime: 30_000,
+    // Switched off is read once per visit (review L7): never again on a return to the app or
+    // on another screen that shows the view. Try again still asks. On, a reading is fresh 30 s.
+    staleTime: (shown) => (shown.state.data?.kind === 'off' ? Number.POSITIVE_INFINITY : 30_000),
   })
   const view = query.data
   // The room is joined unless the view is known to be off: a service that comes back pushes.

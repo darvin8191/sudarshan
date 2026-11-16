@@ -74,12 +74,22 @@ const CODES = new Set<string>([
 /** How long an answer is waited for, in ms: a 5 MB layout on a slow line takes a while. */
 const READ_WAIT = 10_000
 const WRITE_WAIT = 30_000
-/** A switch read as off (or not read) is asked again after this long, on the next save or read. */
+/**
+ * A switch that could not be read (no answer) is asked again after this long, on the next save
+ * or read. One the server answered is kept for the visit: off is asked once, not every few
+ * minutes (review L2), and is read again when the app is next opened.
+ */
 const ASK_AGAIN_MS = 5 * 60_000
 
 export interface ChartsApi {
   /** Whether the server keeps chart documents now: false when it is switched off or not known. */
   enabled(): Promise<boolean>
+  /**
+   * The switch as this visit knows it, without asking: true or false once the server answered,
+   * null before that or while a read that got no answer is due again. A screen that must show
+   * its own copy at once reads this instead of waiting for `enabled()`.
+   */
+  state?(): boolean | null
   read(kind: DocKind, key: string, have?: number): Promise<ReadResult>
   write(kind: DocKind, key: string, base: number, body: unknown): Promise<WriteResult>
 }
@@ -112,8 +122,8 @@ function problemOf(status: number, body: unknown): Problem {
 }
 
 export function chartsApi(fetchImpl: Fetch = (input, init) => fetch(input, init)): ChartsApi {
-  /** The switch as last read, and when; null before it is read. */
-  let known: { on: boolean; at: number } | null = null
+  /** The switch as last read, when, and whether the server answered; null before it is read. */
+  let known: { on: boolean; at: number; answered: boolean } | null = null
   let asking: Promise<boolean> | null = null
 
   async function send(
@@ -144,7 +154,7 @@ export function chartsApi(fetchImpl: Fetch = (input, init) => fetch(input, init)
 
   /** The answer's code was `off`: the switch is off now, whatever the state said. */
   const noteOff = (problem: Problem) => {
-    if (problem.code === 'off') known = { on: false, at: Date.now() }
+    if (problem.code === 'off') known = { on: false, at: Date.now(), answered: true }
     return problem
   }
 
@@ -153,21 +163,28 @@ export function chartsApi(fetchImpl: Fetch = (input, init) => fetch(input, init)
       const { body } = await send(`${CHARTS_API}/state`, { method: 'GET' }, READ_WAIT)
       const data = (body as { status?: unknown; data?: { enabled?: unknown } } | null) ?? null
       const on = data?.status === 'ok' && data.data?.enabled === true
-      known = { on, at: Date.now() }
+      // The bridge's own envelope is an answer; anything else (a proxy's page) is none.
+      const answered = data?.status === 'ok' && typeof data.data?.enabled === 'boolean'
+      known = { on, at: Date.now(), answered }
       return on
     } catch {
-      known = { on: false, at: Date.now() }
+      known = { on: false, at: Date.now(), answered: false }
       return false
     }
   }
+  const settled = () => known !== null && (known.answered || Date.now() - known.at < ASK_AGAIN_MS)
 
   return {
     async enabled() {
-      if (known && (known.on || Date.now() - known.at < ASK_AGAIN_MS)) return known.on
+      if (known && settled()) return known.on
       asking ??= ask().finally(() => {
         asking = null
       })
       return asking
+    },
+
+    state() {
+      return known?.answered ? known.on : null
     },
 
     async read(kind, key, have) {

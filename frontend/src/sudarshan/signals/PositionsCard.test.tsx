@@ -73,9 +73,12 @@ describe('your positions against the regime', () => {
     expect(row).toHaveAttribute('data-stance', 'against')
     expect(row).toHaveTextContent('(calls bought, puts sold)')
     expect(row).toHaveTextContent('The regime readsbearish(FII distribution, confidence 0.71)')
-    expect(
-      within(row).getByText('Against the regime').closest('p')?.querySelector('svg')
-    ).not.toBeNull()
+    const against = within(row).getByText('Against the regime').closest('p') as HTMLElement
+    expect(against.querySelector('svg')).not.toBeNull()
+    // Review L5: a reading, never advice. Plain ink and a neutral mark, as "With the regime" has.
+    expect(against.className).toContain('var(--text-primary)')
+    expect(against.className).not.toContain('warning')
+    expect(against.querySelector('svg')?.getAttribute('class')).not.toContain('triangle-alert')
     expect(getPositions).toHaveBeenCalledWith('key')
 
     const bank = screen.getByText('You are short BANKNIFTY.').closest('li') as HTMLElement

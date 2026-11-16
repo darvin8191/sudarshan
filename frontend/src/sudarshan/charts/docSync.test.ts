@@ -314,3 +314,102 @@ it('imports nothing from the chart engine, so the phone chart never loads a tier
     expect(text, name).not.toMatch(/from 'openalgo-charts/)
   }
 })
+
+// Review v0.15.0 M2: this phone's copy outlives a reload, or Android discarding the app, until
+// the owner puts it back or dismisses the note.
+describe('the copy kept aside after a conflict', () => {
+  const ASIDE = `sudarshan-charts-aside:drawings:${KEY}`
+
+  /** A phone whose drawings and another device's both changed: the conflict is on the board. */
+  async function conflicted() {
+    const first = phone()
+    first.state.local = text('a')
+    await first.sync.pull()
+    first.server.saves(doc('a', 'theirs'))
+    first.state.local = text('a', 'mine')
+    await first.sync.pull()
+    expect(first.board.latest()?.tone).toBe('conflict')
+    expect(first.state.local).toBe(text('a', 'theirs'))
+    return first
+  }
+  /** The app again after a reload: the same storage and server, nothing in memory. */
+  function reopened(before: Awaited<ReturnType<typeof conflicted>>) {
+    const again = phone(before.server, before.storage, new NoticeBoard())
+    again.state.local = before.state.local
+    return again
+  }
+
+  it('is in the phone’s own storage, under a key of its own', async () => {
+    const { storage } = await conflicted()
+    expect(storage.items.get(ASIDE)).toBe(text('a', 'mine'))
+  })
+
+  it('comes back after a reload with its sentence, and is put back when asked', async () => {
+    const before = await conflicted()
+    const again = reopened(before)
+    expect(again.board.latest()).toBeNull()
+    await again.sync.pull()
+    const notice = again.board.latest()
+    expect(notice?.tone).toBe('conflict')
+    expect(notice?.text).toContain('changed on another device')
+    expect(notice?.action?.label).toBe('Use this phone’s copy')
+    notice?.action?.run()
+    await settled()
+    expect(again.state.local).toBe(text('a', 'mine'))
+    expect(again.server.docs.get(KEY)?.body).toEqual(doc('a', 'mine'))
+    expect(again.storage.items.has(ASIDE)).toBe(false)
+    expect(again.board.latest()?.tone).toBe('kept')
+  })
+
+  it('comes back even with the switch off since, so the copy can still be put back', async () => {
+    const before = await conflicted()
+    before.server.on = false
+    const again = reopened(before)
+    await again.sync.pull()
+    expect(again.board.latest()?.action?.label).toBe('Use this phone’s copy')
+  })
+
+  it('is cleared when the owner dismisses the note, and does not come back', async () => {
+    const before = await conflicted()
+    before.board.dismiss(`drawings:${KEY}`)
+    expect(before.board.latest()).toBeNull()
+    expect(before.storage.items.has(ASIDE)).toBe(false)
+    expect(before.sync.busy).toBe(false)
+    const again = reopened(before)
+    await again.sync.pull()
+    expect(again.board.latest()).toBeNull()
+    expect(again.state.local).toBe(text('a', 'theirs'))
+  })
+
+  it('stays in memory when the phone’s storage refuses, and nothing throws', async () => {
+    const storage = memoryStorage()
+    const refusing = {
+      ...storage,
+      setItem: (k: string, v: string) => {
+        if (k.startsWith('sudarshan-charts-aside:')) throw new Error('quota')
+        storage.setItem(k, v)
+      },
+      removeItem: () => {
+        throw new Error('blocked')
+      },
+    }
+    const first = phone(new FakeServer(), refusing)
+    first.state.local = text('a')
+    await first.sync.pull()
+    first.server.saves(doc('a', 'theirs'))
+    first.state.local = text('a', 'mine')
+    await first.sync.pull()
+    expect(first.sync.busy).toBe(true)
+    first.board.latest()?.action?.run()
+    await settled()
+    expect(first.state.local).toBe(text('a', 'mine'))
+  })
+
+  it('a kept copy that is not a document is never brought back', async () => {
+    const first = phone()
+    first.storage.items.set(ASIDE, '{broken')
+    first.state.local = text('a')
+    await first.sync.pull()
+    expect(first.board.latest()).toBeNull()
+  })
+})

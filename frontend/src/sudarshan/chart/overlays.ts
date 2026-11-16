@@ -55,10 +55,13 @@ export interface OverlayMarker {
   /** A few characters beside the mark. */
   text?: string
   /**
-   * The glyph: an arrow (the default) or a triangle, which the journal's trade
-   * markers use (M14.8). Either points up under a buy and down over a sell.
+   * The glyph: an arrow (the default), or a tag, which the journal's trade
+   * markers use (M14.8): a filled plate holding `text`, with a point up at a
+   * buy's candle and down at a sell's, at one size whatever the zoom.
    */
-  shape?: 'arrow' | 'triangle'
+  shape?: 'arrow' | 'tag'
+  /** A tag's text where the candles are too narrow to hold `text` (the letter alone). */
+  short?: string
 }
 
 /** What `setOverlays` takes: a half left out is left as it is. */
