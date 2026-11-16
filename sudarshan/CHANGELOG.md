@@ -5,6 +5,255 @@ publish. The owner publishes each release on GitHub. The server's deploy timer t
 outside 08:30-16:00 IST on trading days (09:00-15:45 until v0.3.1), keeps backups, and rolls
 back if the app does not come up healthy.
 
+## v0.14.0 (16 Nov 2026)
+
+Two things. **Automation, in the Sandbox only:** a TradingView strategy's alerts reach SUDARSHAN
+through a link of its own, with no API key in TradingView, and each alert becomes at most one order
+(`SUDARSHAN_AUTOMATION` is set to `sandbox`). Every strategy trades in the Sandbox, whatever mode
+the app is in, and Live cannot be chosen. **Live automation waits for a later release,** after the
+release that moves the risk guard to Live orders and after its drill. With it comes **Protect**, one
+sell order on a holding, **in the Sandbox only** (`SUDARSHAN_GTT_PROTECT` is set to `sandbox`).
+**And this release switches the Calendar, dividends and Risk on**
+(`SUDARSHAN_PORTFOLIO_INSIGHTS` is set to `on`): they read and work figures out, and a bonus or
+split changes your tax lots only when you confirm it. Goals and the PDF exports stay off. It
+includes everything in v0.13.0. **Publish only after v0.13.0 has installed and run one trading
+day.**
+
+### What changes for you from the day you install it
+- **A new menu entry, Automation, under Automate.** It is empty until you make a strategy. Nothing
+  changes for the TradingView alerts you run today: an alert that carries your API key works as
+  before. The TradingView page now points strategies to Automation.
+- **Portfolio gains Calendar and Risk, and the Tax view's Dividends card comes on.** Calendar and
+  Dividends are empty until the first read, that night after 23:45. Until then the Calendar says
+  when that read is.
+- **Protect appears on a holding's sheet in Analyze mode,** and nowhere in Live.
+- **Until the nginx lines below are installed,** Telegram reminds you once per release that the
+  alert links can be reached from any address. It is a reminder: it never stops an install.
+- **A stock option or stock future in its expiry week** says, in the order ticket and on the
+  position's card, that it is settled by delivery if held to expiry. An index contract never does.
+- **The wide Trades, Positions, Holdings and GTT tables** use the phone cards' colours, each with a
+  word, a sign or an arrow.
+- **A GTT change that the Sandbox refuses** now shows its reason. Before, it read "not confirmed".
+- **The install makes Automation's own file** and adds three lines to the app's settings (below).
+
+### What Automation does, in the Sandbox
+- **A link per strategy.** The alert message carries no secret; the link is the secret, and the
+  server keeps only a fingerprint of it. Keep a link as private as a password. "New link" ends the
+  old one.
+- **Every alert says where the strategy should be after it** (long, short or flat). The same alert
+  delivered twice is handled once. An alert older than the newest one applied is not applied. A
+  late alert (30 seconds, yours to set per strategy) that would open, add or reverse is not sent; a
+  late exit still goes.
+- **The size is yours:** fixed lots or shares, or the chart's own position size times your
+  multiplier, up to your cap, always in whole lots.
+- **A strategy can trade options, and then it only buys.** A long alert buys a call, a short alert
+  buys a put, a flat alert sells what was bought. You choose the expiry (nearest, next, this month)
+  and the strike (at the money, or 1 to 10 strikes in or out). Turning the other way is two orders:
+  the held option's sale first, and the new one only if that sale was placed. Placed is not filled:
+  the log says to check both in Orders. On expiry day an intraday entry takes the expiring contract
+  and says "expires today"; a carry strategy takes the next expiry from the morning.
+- **A strategy only closes what it opened.** A flat alert while it holds nothing sends nothing, so
+  it never closes a position you opened yourself. An exit goes to the contract that was entered.
+- **An intraday strategy starts each day holding nothing.** Its first alert of the day says that
+  yesterday's position was closed before the session ended, and an option strategy then picks
+  today's strike. The page never shows yesterday's intraday position as held.
+- **One switch per strategy:** Start; Stop, where its exit alerts still go; and Stop everything.
+  `/auto` on Telegram lists, stops and starts a strategy from your own chat.
+- **If an order went and SUDARSHAN could not record the result,** you are told at once on Telegram.
+  The next alert reads the strategy's position again before anything is sent. While that cannot be
+  read, no new entry is sent and an exit still goes; you are told again each further day.
+- **The page:** a card per strategy with what it holds and its last alert; a Log; a Check sheet
+  that says what a pasted alert message would send, and sends nothing; a line when an Active
+  strategy has had no alert for 3 trading days; and "Other automation on this server", which lists
+  a running Python script. The alert log keeps 90 days.
+- **TradingView's own addresses are never put on the ban list by the app's automatic bans.** A ban
+  you set by hand still works, and the page says when one is in the way.
+- **Built for Live, and doing nothing yet:** a Live strategy's new entry is sized from what Upstox's
+  orders show was filled, not only from its positions list, which can run up to a minute late.
+
+### What Protect does, in Analyze mode
+- **On a holding's sheet: "sell these shares if the price falls to X"** (or rises to X). One GTT,
+  for shares held for delivery, one per holding, never on futures or options. In this release it
+  always goes to the Sandbox, whatever mode the app is in when it arrives.
+- **The side you confirm is the side that is placed.** If the price has already reached your price,
+  Protect is not placed and says why. It takes a price at least 0.5% from the last price.
+- **It places a limit order at your price when the price is reached,** so in a fast fall it may not
+  fill. Change and Remove are on the same sheet; Sell on a protected holding asks about the Protect
+  first; the kill switch cancels it with every other GTT.
+
+### What the Calendar, Dividends and Risk do
+- **Calendar:** dividends, bonus issues, splits and rights issues of your shares, 90 days back and
+  180 ahead, read from Upstox every night after 23:45, never in market hours. After a night Upstox
+  refused, it says so and when SUDARSHAN tries again. Rights issues are only listed.
+- **To confirm:** a bonus or split never changes your lots by itself. It is asked about only where
+  you held the share on its day, with your quantity and a button for the other way round. One you
+  already decided is never asked again, however Upstox lists it later.
+- **Confirmed:** every bonus and split you confirmed for the Upstox account is listed under
+  Confirmed in the Calendar, whatever its date and even when Upstox no longer lists it. "Change
+  what I confirmed" there offers the same choices To confirm did.
+- **Check:** every night the tax lots are compared with your Upstox holdings. Where the lots would
+  agree with your holdings if a bonus or split were read the other way round, SUDARSHAN offers that
+  as one tap. It never offers to remove one unless the same event was applied twice (two applied
+  bonuses or splits of one share, at the same ratio, within 60 days of each other). Where holdings
+  still show the quantity from before a bonus or split, it says Upstox may not have credited the
+  new shares yet, and offers nothing. A Check row whose reading neither way agrees, or that names
+  one you left out, leads to Confirmed. The Check card now says: confirm a bonus or split in the
+  Calendar; do not add a purchase for it.
+- **Dividends (in Tax):** the amount expected on what you held the day before the ex-date.
+  "Credited" is only what you confirm from your bank. A dividend from before SUDARSHAN kept your
+  closing record (October 2026) is listed under "Not counted", in no total, until you confirm it.
+  A company likely to deduct tax (over Rs 10,000 from it in the year) is flagged, with about how
+  much.
+- **Risk:** largest fall, volatility, Sharpe, Sortino, Calmar, concentration (15% a holding, 35% a
+  sector, yours to change), overlap between tabs and an emergency-fund check, on your own tabs. The
+  concentration bars move with prices, and a bar never reads across your limit.
+- **The tax paper** now names bonuses and splits you have not confirmed, says one still to come is
+  coming, and names shares in its notes.
+- **A share Upstox will not list events for** no longer makes the night read as failed. It is
+  retried each night after the others; its events stay missing until Upstox answers.
+- **Family members see none of this.**
+
+### What you must do
+- **Nothing when you publish.** The install adds `SUDARSHAN_AUTOMATION='sandbox'`,
+  `SUDARSHAN_GTT_PROTECT='sandbox'` and `SUDARSHAN_PORTFOLIO_INSIGHTS='on'` to the app's settings. A
+  value of your own for any of them is kept: set one to `off` and it stays off through later
+  releases.
+- **Once, on the server, before your first strategy.** Outside market hours, in this order; stop at
+  the first step that does not show what it should. The lines to paste are in `sudarshan/README.md`
+  under "The fence around the alert links" and "Automation: TradingView alerts".
+  1. **The nginx lines that fence the alert links:** two files to copy, one include line in
+     SUDARSHAN's own site, then `sudo nginx -t && sudo systemctl reload nginx`. You should see
+     "test is successful"; and from a phone browser, your address followed by
+     `/strategy/webhook/x` shows nginx's plain "404 Not Found". From then on only TradingView's
+     four sender addresses reach an alert link.
+  2. **The presence check:** after each install the deploy looks for those lines by itself. You
+     should see no more reminder on Telegram from the next release on.
+  3. **`TRUST_PROXY_HEADERS` on, with its three header-clearing lines,** as the README gives them,
+     and only with step 1 done. Without it the app sees every alert as coming from the server
+     itself and refuses it; the Automation page says so when that has happened.
+  4. **Order mode Auto.** Automation does not use Semi-Auto and says so.
+- **A link per strategy.** Automation, New strategy: it starts in the Sandbox, Stopped. Copy its
+  message and its link. Paste the message into Check with sample values and read what it would
+  send. In TradingView, on the strategy's chart: add an alert on the strategy, order fills only,
+  the message as copied, the link as the webhook address. Then Start. Use the message exactly as
+  the page gives it.
+- **Do not make a new API key yet.** One new key, once, comes with the Live release.
+- **In Analyze mode, once each.** Nothing here reaches Upstox.
+  - One real alert arrives, and its sender in the log is one of TradingView's four, never the
+    server itself.
+  - A future strategy: long (one sandbox order, the card shows Long 65); the same alert again
+    ("already handled", no second order); flat (closes); flat again with a new time ("holds no
+    position of its own. Nothing to send."); long, then short one second later (one reversal,
+    short 65).
+  - Your own position is left alone: with the strategy holding nothing, buy the same contract by
+    hand in the Sandbox and send a flat alert. Nothing is sent and your position stays.
+  - The order mode: with a strategy Active, switch to Semi-Auto and send a long alert. It is
+    refused with its sentence and nothing is in the Action Center. Switch back to Auto.
+  - A wrong time: one flat alert with its time set a day ahead says the time is ahead of the
+    server's clock; a normal long alert after it is applied.
+  - The switch: Stop with a position held, then a flat alert closes it. Stop everything: an alert
+    is ignored and said once. New link: the old link stops working.
+  - The kill switch on: a long alert is refused with its sentence and a flat alert closes. Off
+    again. `/auto` on Telegram lists and stops a strategy.
+  - An option strategy, intraday, across two days. Day 1: long buys the call; a short alert sells
+    the call, then buys the put, and the line says both were placed. Leave the put into the close.
+    Day 2: the first long alert says yesterday's position was closed and buys today's call, one
+    order.
+  - An option strategy on an expiry Tuesday: an entry at 10:00 says "expires today"; an entry in
+    the last 15 minutes is refused (from 15:25 until 6 Dec; from 15:15 on Tue 8 Dec); an entry
+    after the stop buys next week's contract.
+  - Scaled size: scale in, reach the cap (refused with its sentence), a part lot (refused), scale
+    out, reverse, exit.
+  - Protect (Holdings; buy for delivery in the Sandbox a day earlier): set at 2% below, and the
+    card says Protected; Change; Remove; set again; a second one is refused; Sell asks about the
+    Protect. Then type a price below the last price, open the question and wait for the price to
+    fall through it before you tap: Protect is not placed and says why. Kill switch on: the Protect
+    is cancelled and counted.
+  - A stock option's ticket in its expiry week shows the delivery line and a NIFTY option's does
+    not. Trades, Positions, Holdings and the GTT tab on a wide screen.
+- **One TradingView strategy end to end,** on a 1-minute chart, for at least three sessions (one an
+  expiry day if it trades options): each evening every fill in TradingView's list has its line in
+  the strategy's Log. Read every line that is not "sent" or "nothing to send", and note how late
+  the alerts arrive.
+- **The night the release installs, and the next morning:**
+  - that evening the Calendar says when its first read is;
+  - the morning after, the Calendar is not empty and lists events to come. If it says the night
+    failed, read why; tell the next work session if it fails a second night;
+  - tell the next work session to read the night's note in the portfolio's log: how many shares
+    were read, and how many "not read";
+  - one bonus or split you remember, under To confirm: its sentence must give the quantity the
+    Upstox app shows today. If it does not, tap the other way round;
+  - each share on the Check card against the Upstox app. For a recent split, look whether the
+    Upstox app shows the share under a new ISIN (see "not modelled" below);
+  - under Confirmed, on one you confirmed that day whose date is more than 90 days old: "Change
+    what I confirmed", then "Keep it as it is";
+  - one dividend you received: quantity times rupees a share against your bank entry;
+  - one company above Rs 10,000: the tax deducted against Form 26AS;
+  - Risk says it covers your own tabs. Set your monthly expenses there for the emergency-fund line.
+
+### What is refused now that used to be accepted
+- **Once the nginx lines are installed:** any sender other than TradingView's four addresses to
+  the strategy module's and Flow's webhook addresses, and Chartink's webhook for everyone. An alert
+  larger than 8 KiB, and more than 2 a second from one address. If you send alerts to those
+  addresses from anywhere else, they stop.
+- **A second decision on a bonus or split already applied,** with a sentence saying it would count
+  it twice. Change it under Confirmed instead.
+- **A GTT whose strategy name is "Protect"** is taken as a Protect and goes to the Sandbox in this
+  release. Do not use that name for a GTT of your own.
+- **Of the new parts, each with its sentence:** a flat alert while the strategy holds nothing; a
+  late alert that would open; an alert dated more than 5 seconds ahead of the server's clock; a
+  size that is not whole lots or is above your cap; a new option in a contract's last 15 minutes;
+  a second strategy on the same contract and product; a strategy on a commodity; Live for a
+  strategy; an alert while the order mode is Semi-Auto; a second Protect on a holding; a Protect
+  whose price is already reached.
+
+### Still to check, or not modelled
+- **Nothing of Automation or Protect has been seen in a browser or run on your server.** The
+  builders ran them against the Sandbox in a throwaway copy. An intraday option strategy could not
+  be run there; your two-day check above is its first run.
+- **Reviews.** Automation and Protect had a review, a fix round and a second review, which said:
+  publish at the Sandbox stage, yes. The five small fixes made after it have no review of their
+  own. The Calendar, Dividends and Risk had a review, a second review and a re-check; the last
+  correction (the Confirmed section) has no review of its own.
+- **Automation does not check market hours.** An alert on a Saturday or after the close is sent to
+  the Sandbox.
+- **An order the exchange rejects after Upstox accepted it is not noticed by the strategy.** If an
+  exit is rejected, close the position yourself: a later flat alert sends nothing for it. The order
+  alert tells you.
+- **A missed alert is not replayed,** a held position is never rolled to the next contract, every
+  automation order is a market order, and a strategy never sells an option it does not hold.
+- **While a strategy holds a position, your own trades in the same contract and product are part
+  of it:** its next alert will "correct" them. And after an order whose result was lost, the
+  strategy reads the account: a position you opened by hand in that contract and product is then
+  taken as its own, and its exit closes it. Use another product, or do not trade that contract by
+  hand.
+- **A stock's future, and BSE derivatives, are not known by their chart name yet:** such a strategy
+  names its underlying. An intraday position is taken as closed at the first alert of a later day,
+  not at a clock time.
+- **If the result of an order was never recorded and your positions stay unreadable for 16 hours,**
+  the alert is closed as not confirmed and you are told: check Positions yourself.
+- **A strategy cannot be deleted** (50 at most). The alert log is trimmed only when you open the
+  Automation page.
+- **The Sandbox fills a market order at once and its positions never lag,** so this rehearsal
+  cannot show how late Upstox's positions run. That is checked on the first Live day, at one lot.
+- **Protect:** Remove follows the app's mode at the moment it is sent, so remove a Protect in
+  Analyze mode, where it was set. A GTT that fires at Upstox is not seen by the risk guard, which
+  is why Protect is for delivery shares only.
+- **Not modelled in the Calendar and the Check:** a split that gives the share a new ISIN (the usual
+  face-value split) cannot be joined to the old ISIN yet. The Check card keeps the old ISIN with
+  lots and no holding, and a sale under the new ISIN has no purchase record and is left out of the
+  totals: give your CA the original purchase date and cost. A ratio Upstox corrects after you
+  confirmed is not offered again. A relisted dividend with a corrected amount could count twice if
+  you had confirmed the old line. A consolidation that leaves part of a share is flagged with no
+  fix. Shares bought on margin (MTF) may show as differing. Whether the 15:55 closing record
+  includes that day's trades is not verified.
+- **Not modelled in Risk and Dividends:** the Upstox portfolio is not in Risk; a holding with a
+  typed value counts as unchanged between entries, so such a tab looks steadier; a fund counts as
+  one holding; results dates and watchlist shares are not in the Calendar; a split's leftover part
+  of a share stays in the lots. Risk figures need 60 trading days, and Sharpe, Sortino and Calmar a
+  year.
+- **Not in this release:** Live automation, Protect in Live, goals and the PDF exports.
+
 ## v0.13.0 (16 Nov 2026)
 
 A large release in four parts: the tax working paper with Upstox's own charges; new phone screens
