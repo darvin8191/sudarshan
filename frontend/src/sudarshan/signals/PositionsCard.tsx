@@ -3,8 +3,11 @@
 // book, read again by the books' rules: after a fill, on a reconnect, on coming back, every 45 s
 // while F&O is open), so nothing about his positions is sent anywhere. Per index: where he stands
 // (stance.ts), the regime's bias beside it, and "With the regime" or "Against the regime", each
-// with its icon. Direction only: sizes are not weighed.
+// with its icon. Direction only: sizes are not weighed. A stance is a reading, never advice:
+// "Against the regime" is written in the same plain ink as "With the regime", with a neutral
+// mark, never a warning sign or the warning colour (review v0.15.0 L5).
 import {
+  ArrowLeftRight,
   CircleCheck,
   CircleHelp,
   CircleMinus,
@@ -44,7 +47,7 @@ import { confidenceWords, type FreshNow } from './words'
 
 const STANCE_ICON: Record<Stance, typeof CircleCheck> = {
   with: CircleCheck,
-  against: TriangleAlert,
+  against: ArrowLeftRight,
   mixed: Shuffle,
   neutral: Scale,
   none: CircleMinus,
@@ -53,7 +56,7 @@ const STANCE_ICON: Record<Stance, typeof CircleCheck> = {
 
 const STANCE_TONE: Record<Stance, string> = {
   with: 'text-[color:var(--text-primary)]',
-  against: 'text-[color:var(--warning-text)]',
+  against: 'text-[color:var(--text-primary)]',
   mixed: 'text-[color:var(--text-primary)]',
   neutral: 'text-[color:var(--text-primary)]',
   none: 'text-[color:var(--text-secondary)]',
