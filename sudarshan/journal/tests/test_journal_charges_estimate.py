@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import types
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -145,3 +146,23 @@ def test_a_plan_the_card_does_not_know_is_priced_on_the_default():
     assert plan_of({"charges_plan": "gold"}) == charges_core.DEFAULT_PLAN
     assert plan_of({}) == charges_core.DEFAULT_PLAN
     assert plan_of({"charges_plan": "standard"}) == "standard"
+
+
+def test_the_plus_brokerage_is_one_setting():
+    """Owner decision 7 (still open): Rs 30 an executed order on Plus, every surface, until he
+    confirms. A later Rs 10 is a change of PLUS_ORDER_PAISE alone: the card's Plus row and its
+    edition are built from it, so the ticket, the trade sheet and the Reports page all follow."""
+    assert charges_core.PLUS_ORDER_PAISE == 3000
+    for surface in ("app", "api", "telegram", "upstox_app", None):
+        assert charges_core.brokerage_paise("plus", surface, 20261116) == 3000
+    assert charges_core.CARD_VERSION == "2026-11-14.2, Plus Rs 30 an order"
+    source = Path(charges_core.__file__).read_text(encoding="utf-8")
+    assert source.count("PLUS_ORDER_PAISE = 3000\n") == 1
+    changed = types.ModuleType("charges_at_rs_10")
+    exec(compile(source.replace("PLUS_ORDER_PAISE = 3000\n", "PLUS_ORDER_PAISE = 1000\n"),
+                 "charges_at_rs_10", "exec"), changed.__dict__)  # fmt: skip
+    for surface in ("app", "api", "upstox_app", None):
+        assert changed.brokerage_paise("plus", surface, 20261116) == 1000
+    assert changed.CARD_VERSION == "2026-11-14.2, Plus Rs 10 an order"
+    order = {**VEC["G2"]["args"], "qty": 65, "order_id": "t", "day": 20261116, "surface": "app"}
+    assert changed.estimate([order])["parts"]["total_paise"] == 2818  # G10's Rs 10 figures
