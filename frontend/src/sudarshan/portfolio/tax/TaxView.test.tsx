@@ -177,7 +177,7 @@ describe('the view', () => {
 
   it('puts the check of the lots against the holdings above the heads and marks its sales', async () => {
     const words =
-      'Invented Industries Ltd: Upstox holds 100 and the lots say 60. If you bought the rest before 1 Apr 2024 or moved it in from another account, add that purchase under Tax, Inputs.'
+      'Invented Industries Ltd: Upstox holds 100 and the lots say 60. If the company gave a bonus or split its shares since you bought, do nothing: that is confirmed in the Calendar in a later release. Add a purchase under Tax, Inputs only for shares bought before 1 Apr 2024, where the trades SUDARSHAN has read begin, or moved in from another account.'
     show(
       pack((x) => {
         x.lot_check = {
@@ -194,6 +194,7 @@ describe('the view', () => {
               ex_day: null,
               words,
               fix: null,
+              event_id: null,
             },
           ],
           unrecorded_count: 0,
