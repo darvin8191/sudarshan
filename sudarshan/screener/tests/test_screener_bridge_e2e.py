@@ -185,6 +185,9 @@ def test_the_owner_flow_end_to_end(world):
     assert results["run"]["matches"] == 2 and results["not_checked"] == {
         "count": 1,
         "reasons": ["Not checked: no price from Upstox yet"],
+        "groups": [
+            {"reason": "Not checked: no price from Upstox yet", "count": 1, "symbols": ["CCC"]}
+        ],
     }
     rows = results["rows"]
     assert [r["symbol"] for r in rows] == ["AAA", "BBB"]

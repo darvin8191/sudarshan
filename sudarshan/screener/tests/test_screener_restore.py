@@ -22,6 +22,7 @@ from test_screener_universe import master as master_fixture  # noqa: F401  (the 
 from sudarshan.alerts.market.feedlink import HEALTH
 from sudarshan.screener import candles, config, words
 from sudarshan.screener import store as store_module
+from sudarshan.screener.runs import NOT_CHECKED_KEY
 from sudarshan.screener.runtime import LiveSource
 from sudarshan.screener.store import OWNER, ScreenerStore
 from sudarshan.screener.types import DAY as DAY_TF
@@ -234,12 +235,13 @@ def test_minutes_missed_while_stopped_are_not_judged_as_a_whole_candle(world):
     runs = store.read(OWNER, lambda tx: tx.runs_page(screen["id"], None, 50))
     late = next(r for r in runs if r["candle_end"] == ms(DAY1, "10:15"))
     values = store.read(OWNER, lambda tx: tx.run_values(late["id"]))
-    assert "_not_checked" in values.get(RELIANCE, {}), (
+    groups = values.get(NOT_CHECKED_KEY, {}).get("groups") or []
+    assert any("RELIANCE" in g["symbols"] for g in groups), (
         "a candle with minutes the service never saw is judged whole (and told)"
     )
-    assert values[RELIANCE]["_not_checked"] == (
+    assert [g["reason"] for g in groups if "RELIANCE" in g["symbols"]] == [
         "Not checked: prices did not reach the screener during the 10:00 candle"
-    )
+    ]
     assert late["matched"] == 0 and "checked late at 10:20 after a restart" in words.mark_words(
         late["marks"]
     )

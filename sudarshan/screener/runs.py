@@ -15,6 +15,12 @@ same either way. A run with no instrument to judge (an empty universe, or one no
 records the members the screen holds as not checked and changes nothing else: "not checked" is
 never "missed", so a gap in the data never empties the owner's list.
 
+Not-checked instruments are kept compact (GA7.4): one ``run_value`` row a run
+(``NOT_CHECKED_KEY``) holds them grouped by their reason in words, each group with its count and
+its first few names, and no ``run_change`` row is written for them. A run of 200 instruments
+warming up is then one row, not 400, at every candle close. Rows written before stay readable
+(``not_checked_of``).
+
 Rewind (3.8): the session's first run of a screen records every match as ``in``; later runs record
 differences, so the page replays them.
 """
@@ -36,6 +42,14 @@ from .store import OWNER, Tx, VersionConflict
 from .types import HIT, MISS, NO_FEED, NOT_CHECKED, Outcome, Plan, Why
 
 SLICE = 25
+#: The ``run_value`` row of a run's not-checked instruments, grouped (no instrument key has a "*").
+NOT_CHECKED_KEY = "*not_checked"
+#: The names a group keeps; its count carries the rest.
+GROUP_NAMES = 5
+#: The groups a run keeps: past them the smallest are counted together, so the row stays small
+#: however many reasons a run has.
+GROUPS_KEPT = 12
+OTHER_REASONS = "Not checked: other reasons"
 #: Membership rows of a screen without a target watchlist live under this list id.
 NO_LIST = 0
 
@@ -179,6 +193,66 @@ def hit_values(item: Judged) -> dict[str, Any]:
     }
 
 
+def not_checked_groups(found: Iterable[tuple[str, str]]) -> list[dict[str, Any]]:
+    """(symbol, reason in words) pairs as groups, the largest first: ``reason``, ``count`` and
+    the first ``GROUP_NAMES`` symbols in name order."""
+    names: dict[str, list[str]] = {}
+    for symbol, reason in found:
+        names.setdefault(reason, []).append(symbol)
+    groups = [
+        {"reason": reason, "count": len(symbols), "symbols": sorted(symbols)[:GROUP_NAMES]}
+        for reason, symbols in names.items()
+    ]
+    groups.sort(key=lambda g: (-g["count"], g["reason"]))
+    if len(groups) > GROUPS_KEPT:  # many reasons of a few instruments each: the rest as one
+        rest = groups[GROUPS_KEPT - 1 :]
+        folded = sorted(symbol for g in rest for symbol in names[g["reason"]])
+        groups[GROUPS_KEPT - 1 :] = [
+            {"reason": OTHER_REASONS, "count": len(folded), "symbols": folded[:GROUP_NAMES]}
+        ]
+    return groups
+
+
+def judged_groups(judged: Iterable[Judged]) -> list[dict[str, Any]]:
+    """The not-checked instruments of a run, grouped by their reason in words."""
+    return not_checked_groups(
+        (j.member.symbol, words.not_checked_words(j.outcome.why))
+        for j in judged
+        if j.outcome.kind == NOT_CHECKED
+    )
+
+
+def not_checked_of(
+    run: Mapping[str, Any] | None,
+    changes: Iterable[Mapping[str, Any]],
+    values: Mapping[str, Any],
+) -> dict[str, Any]:
+    """What a run could not judge, for the page: ``count``, ``reasons`` (the groups' own, at most
+    ``words.REASONS_SHOWN``) and ``groups``. Read from the run's grouped row; from the rows of a
+    run recorded before the groups (one change and one value an instrument), grouped the same
+    way; and once the values are gone (7 days), the run's own count with no reason."""
+    kept = values.get(NOT_CHECKED_KEY)
+    if isinstance(kept, Mapping) and isinstance(kept.get("groups"), list):
+        groups = [dict(g) for g in kept["groups"]]
+    else:
+        groups = not_checked_groups(
+            (c["symbol"], text)
+            for c in changes
+            if c["change"] == "not_checked"
+            and isinstance(text := (values.get(c["key"]) or {}).get("_not_checked"), str)
+        )
+    count = sum(g["count"] for g in groups)
+    if not count:
+        count = sum(1 for c in changes if c["change"] == "not_checked") or int(
+            (run or {}).get("not_checked") or 0
+        )
+    return {
+        "count": count,
+        "reasons": [g["reason"] for g in groups[: words.REASONS_SHOWN]],
+        "groups": groups,
+    }
+
+
 def _changes(
     judged: Sequence[Judged],
     applied: mem.Applied,
@@ -186,14 +260,13 @@ def _changes(
     first_run: bool,
     order: str = "desc",
 ) -> list[dict[str, Any]]:
-    """The run_change rows: in, out and not_checked per instrument, ranked for the page."""
+    """The run_change rows: in and out per instrument, ranked for the page. An instrument not
+    checked gets no row (its group is in the run's values) and is never an "out"."""
     out: dict[str, dict[str, Any]] = {}
     ranked = {item.member.key: index for index, item in enumerate(ranked_hits(judged, order))}
     for item in judged:
         key, kind = item.member.key, item.outcome.kind
-        if kind == NOT_CHECKED:
-            out[key] = _change(item.member, "not_checked", None)
-        elif kind == HIT and first_run:
+        if kind == HIT and first_run:
             out[key] = _change(item.member, "in", ranked.get(key))
     members = {item.member.key: item.member for item in judged}
     for change in applied.changes:
@@ -288,12 +361,12 @@ def record(
 
     changes = _changes(judged, applied, rows, first_run, order)
     tx.run_changes_put(run["id"], changes)
-    values: dict[str, dict[str, Any]] = {}
-    for j in judged:
-        if j.outcome.kind == HIT:
-            values[j.member.key] = hit_values(j)
-        elif j.outcome.kind == NOT_CHECKED:
-            values[j.member.key] = {"_not_checked": words.not_checked_words(j.outcome.why)}
+    values: dict[str, dict[str, Any]] = {
+        j.member.key: hit_values(j) for j in judged if j.outcome.kind == HIT
+    }
+    groups = judged_groups(judged)
+    if groups:
+        values[NOT_CHECKED_KEY] = {"groups": groups}
     tx.run_values_put(run["id"], values)
 
     counts = {
@@ -439,14 +512,9 @@ def _not_loaded(
         for r in tx.memberships(screen_id=screen["id"], list_id=list_id)
         if r["status"] in (mem.ACTIVE, mem.MISSING)
     ]
-    tx.run_changes_put(
-        run["id"],
-        [
-            _change(Member(r["key"], r["symbol"], r["exchange"], ""), "not_checked", None)
-            for r in held
-        ],
-    )
-    tx.run_values_put(run["id"], {r["key"]: {"_not_checked": words.NOT_LOADED} for r in held})
+    if held:
+        groups = not_checked_groups((r["symbol"], words.NOT_LOADED) for r in held)
+        tx.run_values_put(run["id"], {NOT_CHECKED_KEY: {"groups": groups}})
     counts = {"matched": 0, "entered": 0, "exited": 0, "missing": 0, "not_checked": len(held)}
     marks = words.run_marks(late_at=now if due.late else None, not_loaded=True)
     tx.run_finish(run["id"], marks, **counts)
@@ -475,6 +543,8 @@ def _first_of_session(tx: Tx, screen_id: int, run_id: int, session: int) -> bool
 
 
 __all__ = [
+    "GROUP_NAMES",
+    "NOT_CHECKED_KEY",
     "NO_LIST",
     "SLICE",
     "Judged",
@@ -483,6 +553,9 @@ __all__ = [
     "Source",
     "evaluate",
     "hit_values",
+    "judged_groups",
+    "not_checked_groups",
+    "not_checked_of",
     "ranked_hits",
     "record",
 ]

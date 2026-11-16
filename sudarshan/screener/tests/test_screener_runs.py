@@ -17,7 +17,7 @@ from sudarshan.screener import digests, spec
 from sudarshan.screener import scheduler as sch
 from sudarshan.screener import store as store_module
 from sudarshan.screener.engine import Context, Subject
-from sudarshan.screener.runs import Judged, Member, evaluate, record
+from sudarshan.screener.runs import NOT_CHECKED_KEY, Judged, Member, evaluate, record
 from sudarshan.screener.store import OWNER, ScreenerStore, Tx
 from sudarshan.screener.types import HIT, MISS, NOT_CHECKED, Outcome
 from sudarshan.vault import ALERTS_SCREENER_DIGEST_INFO, fernet_for
@@ -153,12 +153,17 @@ def test_the_first_run_records_the_whole_set_enters_members_and_tells_once(opene
     )
     changes = opened.read(OWNER, lambda tx: tx.run_changes(report.run_id))
     assert [(c["key"], c["change"], c["rank"]) for c in changes] == [
-        ("NSE_EQ|C", "not_checked", None), ("NSE_EQ|A", "in", 0), ("NSE_EQ|B", "in", 1),
+        ("NSE_EQ|A", "in", 0), ("NSE_EQ|B", "in", 1),
     ]  # fmt: skip
     values = opened.read(OWNER, lambda tx: tx.run_values(report.run_id))
-    assert set(values) == {"NSE_EQ|A", "NSE_EQ|B", "NSE_EQ|C"}
+    assert set(values) == {"NSE_EQ|A", "NSE_EQ|B", NOT_CHECKED_KEY}
     assert values["NSE_EQ|A"]["c1"]["l"] == "120.00" and values["NSE_EQ|A"]["_ltp"] == 12000
-    assert values["NSE_EQ|C"] == {"_not_checked": "Not checked: no price from Upstox yet"}
+    # not checked: one grouped row a run, no row an instrument (GA7.4)
+    assert values[NOT_CHECKED_KEY] == {
+        "groups": [
+            {"reason": "Not checked: no price from Upstox yet", "count": 1, "symbols": ["CCC"]}
+        ]
+    }
     rows = opened.read(OWNER, lambda tx: tx.memberships(screen_id=screen["id"], list_id=7))
     assert {r["key"]: (r["status"], r["entry_price"], r["first_seen_run"]) for r in rows} == {
         "NSE_EQ|A": ("active", 12000, report.run_id), "NSE_EQ|B": ("active", 11000, report.run_id),
@@ -191,10 +196,7 @@ def test_later_runs_record_differences_a_miss_then_an_exit_and_nothing_new_is_no
     )
     assert (second.matched, second.missing, second.exited, second.told) == (1, 1, 0, False)
     changes = opened.read(OWNER, lambda tx: tx.run_changes(second.run_id))
-    assert [(c["key"], c["change"]) for c in changes] == [
-        ("NSE_EQ|B", "out"),
-        ("NSE_EQ|C", "not_checked"),
-    ], "differences only"
+    assert [(c["key"], c["change"]) for c in changes] == [("NSE_EQ|B", "out")], "differences only"
     assert (
         opened.read(OWNER, lambda tx: tx.run(second.run_id))["marks"]["alerts"]
         == "No alert: nothing new"
@@ -210,7 +212,7 @@ def test_later_runs_record_differences_a_miss_then_an_exit_and_nothing_new_is_no
     assert rows["NSE_EQ|B"]["status"] == "exited" and rows["NSE_EQ|B"]["exited_at"] is not None
     assert rows["NSE_EQ|A"]["hits"] == 3
     third_changes = opened.read(OWNER, lambda tx: tx.run_changes(third.run_id))
-    assert [c["change"] for c in third_changes] == ["not_checked"], "B was already out at the miss"
+    assert third_changes == [], "B was already out at the miss"
     # A matches again: nothing new, so no digest; the first run's digest is the only one
     digests_rows = opened.read(
         OWNER, lambda tx: [r for r in tx.outbox_due(NOW + 10**7, 100) if r["kind"] == "digest"]

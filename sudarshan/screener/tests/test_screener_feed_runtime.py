@@ -17,6 +17,7 @@ from test_screener_universe import master as master_fixture  # noqa: F401  (the 
 from sudarshan.alerts.market.feedlink import HEALTH
 from sudarshan.screener import config, runner, spec
 from sudarshan.screener import store as store_module
+from sudarshan.screener.runs import NOT_CHECKED_KEY
 from sudarshan.screener.runtime import LiveSource
 from sudarshan.screener.store import OWNER, ScreenerStore, Tx
 
@@ -155,6 +156,13 @@ def test_frames_become_sealed_bars_a_live_subject_and_a_run(world):
         "count": 1,
         # SBIN is past the key limit (1 here): it says so, never "no price from Upstox yet" (LOW-6)
         "reasons": ["Not checked: past the 1 instrument the screener can follow tick by tick"],
+        "groups": [
+            {
+                "reason": "Not checked: past the 1 instrument the screener can follow tick by tick",
+                "count": 1,
+                "symbols": ["SBIN"],
+            }
+        ],
     }
     early = asyncio.run(source.preview(plan, spec.check(SPEC), ms(DAY, "09:20")))
     assert early["count"] == 0 and early["label"].startswith("No candle has closed")
@@ -245,7 +253,8 @@ def test_a_screen_needing_more_candles_than_a_day_holds_says_it_waits_for_histor
     asyncio.run(made.tick())
     run = store.read(OWNER, lambda tx: tx.runs_page(screen["id"], None, 1))[0]
     values = store.read(OWNER, lambda tx: tx.run_values(run["id"]))
-    reason = values.get(RELIANCE, {}).get("_not_checked")
+    groups = values.get(NOT_CHECKED_KEY, {}).get("groups") or [{}]
+    reason = groups[0].get("reason") if "RELIANCE" in groups[0].get("symbols", ()) else None
     assert reason == (
         "Not checked: needs 151 candles of 15 minutes; a day gives 25, and history before today "
         "waits for its download (not set up yet)"

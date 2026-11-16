@@ -35,6 +35,7 @@ from . import alerting as al
 from . import catalog as cat
 from . import membership as mem
 from . import presets, scheduler, spec, words
+from . import runs as runs_module
 from .contract import EVENT_STATE, MEMBERSHIP_ACTIONS, SCREEN_ACTIONS, WORDS
 from .operand import SpecError
 from .ops import ApiError, op
@@ -319,7 +320,7 @@ def result_rows(
     value_clauses: Sequence[str] | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """(rows, not_checked) of a run: every instrument that matched, best ranked first, with its
-    membership chip; the not-checked count and its reasons."""
+    membership chip; the not-checked count, its reasons and its groups (runs.not_checked_of)."""
     grace = mem.Grace.of((stored.get("target") or {}).get("grace"))
     order = (stored.get("rank") or {}).get("order", "desc")
     by_key = {m["key"]: m for m in members}
@@ -366,15 +367,7 @@ def result_rows(
                 "change_pct": _change_pct(found.get("_ltp"), found.get("_cp")),
             }
         )
-    reasons = []
-    count = 0
-    for change in changes:
-        if change["change"] == "not_checked":
-            count += 1
-            text = (values.get(change["key"]) or {}).get("_not_checked")
-            if isinstance(text, str) and text not in reasons:
-                reasons.append(text)
-    return rows, {"count": count, "reasons": reasons[: words.REASONS_SHOWN]}
+    return rows, runs_module.not_checked_of(run, changes, values)
 
 
 def screen_row(
@@ -818,7 +811,11 @@ def _match_set(tx: Tx, run: Mapping[str, Any], values: Mapping[str, Any]) -> lis
     """A past run's whole match set as "in" rows (MEDIUM-1): from its values while they are
     kept (every match has its own), else replayed from the day's first run, which records every
     match, and the later runs' changes up to this one."""
-    hits = {k: v for k, v in values.items() if "_not_checked" not in v}
+    hits = {
+        k: v
+        for k, v in values.items()
+        if k != runs_module.NOT_CHECKED_KEY and "_not_checked" not in v
+    }
     if hits and all("_symbol" in v for v in hits.values()):
         return [
             {"key": k, "symbol": v["_symbol"], "exchange": v["_exchange"], "change": "in"}

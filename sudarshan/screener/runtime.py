@@ -317,26 +317,11 @@ class LiveSource:
                 "rank": i,
             }
             for i, j in enumerate(hits)
-        ] + [
-            {
-                "key": j.member.key,
-                "symbol": j.member.symbol,
-                "exchange": j.member.exchange,
-                "change": "not_checked",
-                "rank": None,
-            }
-            for j in judged
-            if j.outcome.kind == "not_checked"
         ]
-        values = {
-            j.member.key: (
-                runs.hit_values(j)
-                if j.outcome.kind == "hit"
-                else {"_not_checked": words.not_checked_words(j.outcome.why)}
-            )
-            for j in judged
-            if j.outcome.kind in ("hit", "not_checked")
-        }
+        values = {j.member.key: runs.hit_values(j) for j in judged if j.outcome.kind == "hit"}
+        groups = runs.judged_groups(judged)  # grouped by reason, as a run keeps them (GA7.4)
+        if groups:
+            values[runs.NOT_CHECKED_KEY] = {"groups": groups}
         rows, not_checked = screen_ops.result_rows(
             stored, stored.get("name", ""), None, changes, values, [], now
         )
