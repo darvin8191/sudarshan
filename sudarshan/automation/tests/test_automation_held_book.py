@@ -227,8 +227,12 @@ def test_the_desk_reads_upstoxs_positions_with_the_owners_session(monkeypatch):
         return True, {"status": "success", "data": ROWS}, 200
 
     monkeypatch.setattr(positionbook, "get_positionbook", book)
-    got = Desk().held_book("live", "NFO", "NIFTY24NOV26FUT", "MIS")
+    desk = Desk()
+    got = desk.held_book("live", "NFO", "NIFTY24NOV26FUT", "MIS")
     assert got["quantity"] == -65 and asked == [{"auth_token": "session", "broker": "upstox"}]
+    # A second Live strategy on the same page: the positions are read once for the page.
+    assert desk.held_book("live", "NFO", "NIFTY24NOV26FUT", "NRML")["quantity"] == 130
+    assert len(asked) == 1
 
     monkeypatch.setattr(positionbook, "get_positionbook", lambda **k: (False, {}, 500))
     assert Desk().held_book("live", "NFO", "NIFTY24NOV26FUT", "MIS") is None

@@ -410,8 +410,9 @@ class Desk:
         """The held contract's row in the book of the strategy's own mode, for the card's P&L
         line (M12.1, GA10.4); ``None`` when it cannot be read. Only reads, and only what a page
         read may: the sandbox's own row as last priced (no quote is fetched, nothing written),
-        or Upstox's positions through OpenAlgo's position book with the owner's session. The
-        page moves the P&L with the ticks from there."""
+        or Upstox's positions through OpenAlgo's position book with the owner's session, read
+        once for the whole page however many Live strategies hold something (a desk lives for
+        one request). The page moves the P&L with the ticks from there."""
         api_key = self.api_key()
         if not api_key:
             return None
@@ -427,19 +428,33 @@ class Desk:
                     user_id=user_id, symbol=symbol, exchange=exchange, product=product
                 ).first()
                 return sandbox_book_row(row, int(self.now() * 1000))
-            token, broker = self.broker_session(api_key)
-            if token is None:
+            read = self.__dict__.get("_positions_read")
+            if read is None:
+                read = self.__dict__["_positions_read"] = self._read_positions(api_key)
+            if read is False:
                 return None
-            from services.positionbook_service import get_positionbook
-
-            ok, answer, _status = get_positionbook(auth_token=token, broker=broker)
-            if not ok or not isinstance(answer, dict):
-                return None
-            rows = answer.get("data") or []
-            return positions_book_row(rows, exchange, symbol, product, int(self.now() * 1000))
+            rows, read_ms = read
+            return positions_book_row(rows, exchange, symbol, product, read_ms)
         except Exception:
             logger.exception("Automation: the held position's book could not be read")
             return None
+
+    def _read_positions(self, api_key: str) -> tuple[list[Any], int] | bool:
+        """Upstox's positions as OpenAlgo maps them, with when they were read; False when they
+        could not be (kept, so the other strategies of the page do not ask again)."""
+        token, broker = self.broker_session(api_key)
+        if token is None:
+            return False
+        from services.positionbook_service import get_positionbook
+
+        try:
+            ok, answer, _status = get_positionbook(auth_token=token, broker=broker)
+        except Exception:
+            logger.exception("Automation: Upstox's positions could not be read")
+            return False
+        if not ok or not isinstance(answer, dict):
+            return False
+        return list(answer.get("data") or []), int(self.now() * 1000)
 
     def place(self, order: dict[str, Any], api_key: str, analyze: bool) -> tuple[bool, Any, int]:
         """One smart order, in the pipe the caller decided. Every claim, hold, sizing rule and the
