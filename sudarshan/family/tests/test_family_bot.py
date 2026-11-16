@@ -697,8 +697,54 @@ def test_the_bot_leaves_no_descriptor_or_task_behind(tmp_path, monkeypatch):
                 await asyncio.sleep(0.2)
                 assert count() <= before + 2, (before, count())
             await watch.aassert_clean()
+            # The local Telegram's own handler of the long poll the bot dropped when it stopped
+            # may still be closing its side (see TelegramServer.settled): it is the test's task,
+            # not the bot's, so it is waited for, never counted.
+            assert await server.settled()
             leftover = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
             assert leftover == []
+        finally:
+            await server.close()
+
+    run(go())
+
+
+def test_the_local_telegram_s_own_handler_outlives_a_client_that_left():
+    """The race behind a red CI shard (run 43861301546): a client that drops its long poll
+    leaves the local Telegram's handler for that connection running for a moment. Counted at
+    once it reads as a task the bot left behind; ``settled`` waits it out."""
+
+    async def go():
+        fake = FakeTelegram(new_token())
+        polling, answer_now = asyncio.Event(), asyncio.Event()
+        answer = fake.answer
+
+        async def held_poll(path, content):  # the poll ends when the test says, not on a clock
+            polling.set()
+            await answer_now.wait()
+            return await answer(path, content)
+
+        fake.answer = held_poll
+        server = TelegramServer(fake)
+        await server.start()
+        try:
+            reader, writer = await asyncio.open_connection("127.0.0.1", server.port)
+            body = b'{"offset": 0}'
+            writer.write(
+                f"POST /bot{fake.token}/getUpdates HTTP/1.1\r\nContent-Length: {len(body)}"
+                "\r\n\r\n".encode() + body
+            )
+            await writer.drain()
+            await asyncio.wait_for(polling.wait(), 5)  # the server is in its poll
+            writer.close()  # the bot stops: its side is gone at once
+            await writer.wait_closed()
+            others = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
+            assert len(others) == 1 and others[0] in server.serving  # the defect: still running
+            assert await server.settled(within=0.05) is False  # and it says so while it runs
+            answer_now.set()
+            assert await server.settled()
+            assert [t for t in asyncio.all_tasks() if t is not asyncio.current_task()] == []
+            assert server.serving == set()
         finally:
             await server.close()
 
