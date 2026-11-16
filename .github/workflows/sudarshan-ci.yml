@@ -38,6 +38,64 @@ jobs:
       - run: npm run build
       - run: npm run test:run
 
+  # The phone and tablet screens in a real browser (gap audit GA12.1): every frontend/e2e/sd-*.spec.ts
+  # in headless Chromium, against the production build, at the sizes each spec sets (360 x 800,
+  # 800 x 360 on its side, the tablet sizes). Each spec answers its own requests and plays the
+  # market-data socket, and the browser resolves no host name (frontend/playwright.sd.config.ts),
+  # so nothing reaches a backend. Chromium is the build of the Playwright version
+  # package-lock.json holds. The cost runs skip here: they belong to a quiet machine.
+  # frontend/README.md, "The phone specs", says how to run the same thing on your own machine.
+  phone-specs:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - name: Chromium for the installed Playwright (headless only)
+        run: npx playwright install --with-deps --only-shell chromium
+      # A page whose own fonts are refused falls back to system-ui, and the app bar's checks
+      # "before the fonts arrive" measure that face. On an Android phone it is Roboto. Ubuntu's,
+      # DejaVu Sans, is wider than any face a phone falls back to: with it SUDARSHAN overran its
+      # room by under a pixel at 320 and 360 px.
+      - name: Roboto for system-ui, as on an Android phone
+        run: |
+          sudo apt-get install -y -qq fonts-roboto
+          mkdir -p ~/.config/fontconfig
+          cat > ~/.config/fontconfig/fonts.conf <<'EOF'
+          <?xml version="1.0"?>
+          <!DOCTYPE fontconfig SYSTEM "urn:fontconfig:fonts.dtd">
+          <fontconfig>
+            <alias binding="strong"><family>system-ui</family><prefer><family>Roboto</family></prefer></alias>
+            <alias binding="strong"><family>ui-sans-serif</family><prefer><family>Roboto</family></prefer></alias>
+            <alias binding="strong"><family>sans-serif</family><prefer><family>Roboto</family></prefer></alias>
+          </fontconfig>
+          EOF
+          fc-match system-ui
+      # The bundle only: the frontend job checks the types.
+      - run: npx vite build
+      - name: The phone specs (e2e/sd-*.spec.ts)
+        run: npx playwright test -c playwright.sd.config.ts
+        env:
+          SD_PREVIEW: "1"
+      - name: Keep the report and traces of a failed run
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: phone-specs-report
+          path: |
+            frontend/playwright-report
+            frontend/test-results
+          retention-days: 7
+          if-no-files-found: ignore
+
   # The service tests in four shards side by side (sudarshan/tests/ci_shards.py splits them by file):
   # one job had grown past 20 minutes once watchlists v2 was in.
   backend:

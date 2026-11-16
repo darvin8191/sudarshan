@@ -18,7 +18,7 @@ import json
 import os
 import sqlite3
 import zipfile
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 
 import pytest
 from render_pdfread import read_pdf
@@ -443,6 +443,17 @@ def test_the_same_records_make_the_same_bytes_and_nothing_is_written_or_left_ope
     for folder in (settings.openalgo_db.parent, settings.watch_dir / "log"):
         now_there = {p.name: (p.stat().st_size, p.stat().st_mtime_ns) for p in folder.iterdir()}
         assert now_there == seen[str(folder)]  # read, never written; no side file made
+
+
+def test_the_first_page_is_dated_by_the_pack_not_the_clock(year, book):  # noqa: F811
+    # fpdf2 writes the clock's second as a PDF's creation date unless told one, so two packs of
+    # the same records built either side of a second were other bytes: the test above failed in
+    # CI when its two builds did that.
+    span, now = periods.fy_span(2026, 20270404), at(20270404, "07:05")
+    with zipfile.ZipFile(io.BytesIO(fypack.assemble(year.svc, span, now, True)[0])) as pack:
+        page = pack.read(fypack.READ_FIRST)
+    stamp = datetime.fromtimestamp(now / 1000, tz=UTC).strftime("%Y%m%d%H%M%S")
+    assert f"/CreationDate (D:{stamp}Z)".encode() in page
 
 
 def test_a_pack_too_large_for_the_page_says_where_it_is(year, book, monkeypatch):  # noqa: F811

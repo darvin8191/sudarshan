@@ -535,8 +535,10 @@ test.describe('a trade on the phone chart (M14.8)', () => {
     await open(page, '/chart/NSE/SBIN?trip=9')
     await expect.poll(() => caught.history.at(-1)).toBe('1m')
     await page.clock.runFor(1_000)
-    await expect.poll(() => inked(page, SELL_INK)).toBe(0)
-    expect(await inked(page, BUY_INK)).toBeGreaterThan(20)
+    // The open trade's buy is marked once the chart has painted it, and no sell is, so "no sell"
+    // is read only after something has been painted.
+    await expect.poll(() => inked(page, BUY_INK)).toBeGreaterThan(20)
+    expect(await inked(page, SELL_INK)).toBe(0)
     const reads = () => caught.journal.filter((op) => op === '/trips/9').length
     const before = reads()
     // Nothing is read on a timer: ten minutes pass with no order and no read.

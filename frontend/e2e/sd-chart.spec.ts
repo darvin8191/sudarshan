@@ -213,6 +213,8 @@ async function serve(
       })
     )
   )
+  // The owner's own chart indicators, which OpenAlgo lists from strategies/indicators: none here.
+  await page.route('**/custom-indicators/**', (route) => route.fulfill(json([])))
   if (fixture.clock === 'shifted') await page.addInitScript(shiftDate, fixture.now)
   else await page.clock.install({ time: fixture.now })
   // The app's own push connection (order updates), long-polling: a handshake,
@@ -555,7 +557,10 @@ async function settled(page: Page, opened: Locator) {
 async function holdAt(page: Page, x: number, y: number) {
   const touch = await page.context().newCDPSession(page)
   await touch.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] })
+  // The hold is a timer the press starts (`HOLD_MS`): the step runs it, and the finger stays
+  // down until the reading is up, however late the press reached the page.
   await page.clock.runFor(600)
+  await expect(page.getByTestId('chart-readout')).toBeVisible()
   await touch.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
   await touch.detach()
 }
@@ -588,13 +593,13 @@ test.use({
 
 test.describe('the phone chart at 360 x 800', () => {
   test('in a market that is open, ticks arriving; a held price offers Buy and Sell at it', async ({ page }, info) => {
-    const { proxy } = await serve(page, { now: ist(10, 0, 30) })
+    const served = await serve(page, { now: ist(10, 0, 30) })
     await open(page)
     await expect(page.getByRole('button', { name: 'BUY' })).toBeEnabled()
     // Before the first tick, no word says the prices are live.
     await expect(page.getByText('Real-time', { exact: true })).toHaveCount(0)
     await page.clock.runFor(500)
-    await tick(page, proxy(), ist(10, 0, 31), 6)
+    await tick(page, await socketOpened(served), ist(10, 0, 31), 6)
     await expect(price(page).locator('[data-feed]')).toHaveText('Real-time')
     await expect(page.getByTestId('chart-change')).toHaveText(/^[+−]₹[\d,.]+ \([+−][\d.]+%\)$/)
     await expect(page.getByTestId('chart-change').locator('[data-direction]')).toHaveCount(1)
@@ -609,11 +614,11 @@ test.describe('the phone chart at 360 x 800', () => {
   })
 
   test('Sell at a held price: the ticket shows the whole order without scrolling (review H1, M1, M2)', async ({ page }, info) => {
-    const { proxy } = await serve(page, { now: ist(10, 0, 30) })
+    const served = await serve(page, { now: ist(10, 0, 30) })
     await open(page)
     await expect(page.getByRole('button', { name: 'BUY' })).toBeEnabled()
     await page.clock.runFor(500)
-    await tick(page, proxy(), ist(10, 0, 31), 6)
+    await tick(page, await socketOpened(served), ist(10, 0, 31), 6)
     const surface = (await page.getByTestId('chart-surface').boundingBox()) as DOMRect
     await holdAt(page, surface.x + surface.width * 0.5, surface.y + surface.height * 0.55)
     const sell = page.getByRole('button', { name: /^Sell at [\d,]+\.\d{2}$/ })
@@ -675,22 +680,24 @@ test.describe('the phone chart at 360 x 800', () => {
   })
 
   test('reconnecting when the stream drops, then Real-time again with the next ticks', async ({ page }, info) => {
-    const { proxy, sockets } = await serve(page, { now: ist(10, 0, 30) })
+    const served = await serve(page, { now: ist(10, 0, 30) })
     await open(page)
     await page.clock.runFor(500)
-    await tick(page, proxy(), ist(10, 0, 31), 3)
+    const first = await socketOpened(served)
+    await tick(page, first, ist(10, 0, 31), 3)
     await expect(price(page).locator('[data-feed]')).toHaveText('Real-time')
-    await proxy().close()
+    await first.close()
     await page.clock.runFor(200)
     await checkFresh(page, /^Reconnecting/)
     await expect(page.getByTestId('depth-strip')).toHaveAttribute('aria-label', /Reconnecting: the book is not current/)
     await page.screenshot({ path: info.outputPath('reconnecting.png') })
     await checkScreen(page)
-    // The socket is opened again on its own, and the ticks bring the word back.
-    for (let i = 0; i < 30 && sockets() < 2; i++) await page.clock.runFor(500)
-    expect(sockets(), 'a new socket after the drop').toBe(2)
+    // The stream client opens a new socket within a second of the page's clock, and the ticks
+    // bring the word back.
+    await page.clock.runFor(1_000)
+    await expect.poll(served.sockets, { message: 'a new socket after the drop' }).toBe(2)
     await page.clock.runFor(500)
-    await tick(page, proxy(), await page.evaluate(() => Date.now()), 3)
+    await tick(page, served.proxy(), await page.evaluate(() => Date.now()), 3)
     await expect(price(page).locator('[data-feed]')).toHaveText('Real-time')
   })
 
@@ -732,10 +739,10 @@ test.describe('the phone chart at 360 x 800', () => {
 
   test('a contract: open interest and its change, and the book strip and sheet', async ({ page }, info) => {
     const contract = { symbol: 'NIFTY27OCT2625900CE', exchange: 'NFO', oi: 1_206_500 }
-    const { proxy } = await serve(page, { now: ist(10, 0, 30) })
+    const served = await serve(page, { now: ist(10, 0, 30) })
     await open(page, `/chart/${contract.exchange}/${contract.symbol}`)
     await page.clock.runFor(500)
-    await tick(page, proxy(), ist(10, 0, 31), 4, 1000, contract)
+    await tick(page, await socketOpened(served), ist(10, 0, 31), 4, 1000, contract)
     await expect(page.getByTestId('chart-oi')).toContainText('since yesterday')
     await expect(page.getByTestId('depth-strip')).toContainText('Bid')
     await page.screenshot({ path: info.outputPath('contract.png') })
@@ -769,13 +776,13 @@ test.describe('the phone chart on its side, 800 x 360', () => {
   test.use({ viewport: { width: 800, height: 360 } })
 
   test('one strip, the chart the rest; Buy at a held price opens the ticket at it', async ({ page }, info) => {
-    const { proxy } = await serve(page, { now: ist(10, 0, 30) })
+    const served = await serve(page, { now: ist(10, 0, 30) })
     await open(page)
     const strip = page.getByTestId('chart-strip')
     await expect(strip.getByRole('button', { name: 'BUY' })).toBeEnabled()
     await expect(page.getByText('Real-time', { exact: true })).toHaveCount(0)
     await page.clock.runFor(500)
-    await tick(page, proxy(), ist(10, 0, 31), 6)
+    await tick(page, await socketOpened(served), ist(10, 0, 31), 6)
     await expect(strip.locator('[data-feed]')).toHaveText('Real-time')
     await expect(strip.getByTestId('chart-change')).toHaveText(/^[+−]₹[\d,.]+ \([+−][\d.]+%\)$/)
     // The strip is the 48 dp the design gives it, and the chart takes the rest of the height.
@@ -926,10 +933,11 @@ for (const [layout, viewport] of [
     test.use({ viewport })
 
     test('a position, its stop and an alert as lines with words; Exit and Add from the position', async ({ page }, info) => {
-      const { proxy, sent } = await serve(page, { now: ist(10, 0, 30), books: BOOKS })
+      const served = await serve(page, { now: ist(10, 0, 30), books: BOOKS })
+      const { sent } = served
       await open(page)
       await page.clock.runFor(500)
-      await tick(page, proxy(), ist(10, 0, 31), 4)
+      await tick(page, await socketOpened(served), ist(10, 0, 31), 4)
       const lines = page.getByTestId('chart-lines')
       // Every line says its side or what it is in words, and each kind has its own mark.
       await expect(lines.locator('[data-line]')).toHaveCount(3)
@@ -975,10 +983,11 @@ for (const [layout, viewport] of [
     })
 
     test('Modify and Cancel from an order line, each sent once', async ({ page }, info) => {
-      const { proxy, sent } = await serve(page, { now: ist(10, 0, 30), books: BOOKS })
+      const served = await serve(page, { now: ist(10, 0, 30), books: BOOKS })
+      const { sent } = served
       await open(page)
       await page.clock.runFor(500)
-      await tick(page, proxy(), ist(10, 0, 31), 2)
+      await tick(page, await socketOpened(served), ist(10, 0, 31), 2)
       // The stop's trigger and limit are half a rupee apart: one target, and a list to pick from.
       await label(page, /SELL 10 SL trigger/).click()
       const sheet = page.getByRole('dialog', { name: SYMBOL })
@@ -1028,10 +1037,10 @@ for (const [layout, viewport] of [
     })
 
     test('in Analyze mode the sheet says its orders go to the sandbox', async ({ page }, info) => {
-      const { proxy } = await serve(page, { now: ist(10, 0, 30), books: BOOKS, analyze: true })
+      const served = await serve(page, { now: ist(10, 0, 30), books: BOOKS, analyze: true })
       await open(page)
       await page.clock.runFor(500)
-      await tick(page, proxy(), ist(10, 0, 31), 2)
+      await tick(page, await socketOpened(served), ist(10, 0, 31), 2)
       const sheet = await openLine(page, /Buy 10 @/)
       await expect(sheet.getByRole('button', { name: /^Exit/ })).toContainText('Sell 10 in the sandbox')
       await expect(sheet.getByRole('button', { name: /^Add/ })).toContainText('in the sandbox')
@@ -1062,10 +1071,10 @@ for (const [layout, viewport] of [
     test.use({ viewport })
 
     test('a level by one tap, a trend line by two, Undo, and both kept for the instrument', async ({ page }, info) => {
-      const { proxy } = await serve(page, { now: ist(10, 0, 30) })
+      const served = await serve(page, { now: ist(10, 0, 30) })
       await open(page)
       await page.clock.runFor(500)
-      await tick(page, proxy(), ist(10, 0, 31), 2)
+      await tick(page, await socketOpened(served), ist(10, 0, 31), 2)
       await page.getByRole('button', { name: 'Draw' }).click()
       const row = page.getByTestId('draw-row')
       await expect(row.getByRole('button')).toHaveCount(7)
@@ -1140,6 +1149,12 @@ for (const [layout, viewport] of [
 ] as const) {
   test.describe(`the cost run ${layout}`, () => {
     test.use({ viewport })
+    // It times frames by the wall clock, which a shared CI runner cannot hold steady (it fails
+    // there with no studies at all, as the header says). SD_COST_RUN=1 runs it all the same.
+    test.skip(
+      !!process.env.CI && !process.env.SD_COST_RUN,
+      'the cost run times frames by the wall clock: run it on your own machine, on a production build'
+    )
 
     test(`${COST_STUDIES.length} studies on a one-minute chart, ticks every 250 ms, the CPU four times slower`, async ({ page }, info) => {
       test.setTimeout(120_000)
@@ -1302,7 +1317,7 @@ test.describe('charts across devices on the phone chart, 360 x 800 (M4.18)', () 
     await tick(page, await socketOpened(served), ist(10, 0, 31), 2)
     await drawLevel(page)
     await page.clock.runFor(1_000)
-    expect(calls.length).toBeGreaterThan(0) // it asked, and was refused
+    await expect.poll(() => calls.length).toBeGreaterThan(0) // it asked, and was refused
     await expect(page.getByTestId('chart-sync-notice')).toHaveCount(0)
     await checkScreen(page)
   })
@@ -1353,6 +1368,9 @@ for (const [layout, viewport] of [
       await strip.getByRole('button', { name: 'Use this phone’s copy' }).click()
       await page.clock.runFor(500)
       await expect.poll(() => savedPrices(page)).toEqual([806, 812])
+      // The copy is put back on the phone before it is sent, and the strip says saved only once
+      // the server has answered the write: the write is read after that.
+      await expect(strip).toContainText('The drawings on SBIN from this phone are saved.')
       const put = calls.find((call) => call.method === 'PUT')
       expect(put?.body?.base).toBe(1_794_000_000_002)
       expect(
@@ -1360,7 +1378,6 @@ for (const [layout, viewport] of [
           .map((d) => d.points[0].price)
           .sort()
       ).toEqual([806, 812])
-      await expect(strip).toContainText('The drawings on SBIN from this phone are saved.')
       await page.screenshot({ path: info.outputPath('sync-kept.png') })
       await checkScreen(page)
       await strip.getByRole('button', { name: 'Dismiss this note' }).click()

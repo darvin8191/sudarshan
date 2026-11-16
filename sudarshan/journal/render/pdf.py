@@ -14,6 +14,7 @@ from __future__ import annotations
 import io
 import re
 from collections.abc import Sequence
+from datetime import UTC, datetime
 
 from fpdf import FPDF
 from fpdf.drawing import DeviceRGB
@@ -385,9 +386,15 @@ class _Report(FPDF):
                 raise TypeError(f"unknown block {type(block).__name__}")
 
 
-def render_pdf(report: D.ReportDoc) -> bytes:
-    """The report as PDF bytes."""
+def render_pdf(report: D.ReportDoc, created_ms: int | None = None) -> bytes:
+    """The report as PDF bytes.
+
+    `created_ms` (epoch milliseconds) is written as the PDF's creation date. Without it fpdf2
+    writes the clock's second, so the same report rendered a second later is other bytes.
+    """
     pdf = _Report(report)
+    if created_ms is not None:
+        pdf.set_creation_date(datetime.fromtimestamp(created_ms / 1000, tz=UTC))
     pdf.body()
     pdf.stamp_footers()
     return bytes(pdf.output())

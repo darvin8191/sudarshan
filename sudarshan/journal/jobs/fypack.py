@@ -419,10 +419,12 @@ def first_page(span: Span, parts: list[Part], tax_pack: bool, now: int) -> bytes
         D.Heading(ADD_HEADING),
         D.Paragraph((*CHECKLIST, KEEP_LINE)),
     )
+    # Dated by the pack, not the clock: the same records make the same bytes.
     return render_pdf(
         D.ReportDoc(
             RECORDS, span.key, kinds.REPORT_TITLES[RECORDS], span.label, built_label(now), blocks
-        )
+        ),
+        created_ms=now,
     )
 
 
