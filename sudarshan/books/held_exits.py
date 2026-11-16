@@ -5,9 +5,11 @@ Since GA1.1 a strategy exit whose size Upstox's books cannot confirm is held, no
 module each try wrote an order row, a ``leg_exit_held`` event and a push to the page, while the
 trader, away from the run's Events tab, was told nothing.
 
-One record per leg of a run, kept while the leg keeps being held:
+One record per position of a leg of a run, kept while it keeps being held. A signal flip leaves
+the old side and the new one under one leg id, so the position the exit closes is part of the
+key (v0.15.0 verify V5):
 
-- The first hold of a leg writes one event. Later holds of the same leg write none.
+- The first hold of a position writes one event. Later holds of it write none.
 - The first hold for a size that could not be confirmed is logged at critical and told to the
   owner on Telegram; while it lasts he is told again, less often the longer it lasts (V2): each
   minute for the first 5 minutes, each 5 minutes until 30, then each 15.
@@ -44,7 +46,7 @@ from utils.logging import get_logger
 
 logger = get_logger(__name__)
 
-#: The shortest time between two Telegram messages about one leg's unconfirmed size (V2),
+#: The shortest time between two Telegram messages about one position's unconfirmed size (V2),
 #: by how long the hold had lasted when he was last told: under 5 minutes, a minute; under 30,
 #: 5 minutes; after that, 15 minutes.
 REMIND = ((300.0, 60.0), (1800.0, 300.0))
@@ -118,7 +120,7 @@ class Note:
 
 
 class Holds:
-    """The legs being held, by ``(run id, leg id)``. No I/O; the clock is passed in."""
+    """The exits being held, by ``(run id, leg id, position)``. No I/O; the clock is passed in."""
 
     def __init__(self) -> None:
         self._lock = real_threading.Lock()
@@ -294,13 +296,25 @@ def _why(result: Any) -> str:
     return str(response.get("why") or "") if isinstance(response, dict) else ""
 
 
-def held(run_id: object, leg_id: object, kind: str, order: dict[str, Any], result: Any) -> Said:
+def held(
+    run_id: object,
+    leg_id: object,
+    kind: str,
+    order: dict[str, Any],
+    result: Any,
+    ref: object = None,
+) -> Said:
     """One held Live exit of a run's leg (a dispatch marked ``held``, or the kept refusal the
-    engine found before it wrote a row). Tells the owner when the rules above say so."""
+    engine found before it wrote a row). Tells the owner when the rules above say so.
+
+    ``ref`` names the position the exit closes (its position reference, else its owner), so
+    the old and the new side of a flipped leg are told apart (V5). The caller notes the hold
+    before it releases its exit claim (V4), so no exit of this position can go, and be told as
+    sent, between its refusal and this record."""
     try:
         why = _why(result)
         sentence = str(getattr(result, "error", "") or "")
-        note = HOLDS.note((run_id, leg_id), why, time.monotonic())
+        note = HOLDS.note((run_id, leg_id, ref), why, time.monotonic())
         if note.tell == FIRST:
             logger.critical(
                 f"Live exit NOT sent for run {run_id} leg {leg_id} ({_what(order)}): its size "
@@ -326,12 +340,14 @@ def held(run_id: object, leg_id: object, kind: str, order: dict[str, Any], resul
         return Said()
 
 
-def sent(run_id: object, leg_id: object, order: dict[str, Any], result: Any) -> str:
+def sent(
+    run_id: object, leg_id: object, order: dict[str, Any], result: Any, ref: object = None
+) -> str:
     """A Live exit of a run's leg went. Ends its hold; when the owner had been told the size was
     not confirmed he is told once that it went, and the words to add to the event are returned
     ("" otherwise)."""
     try:
-        minutes = HOLDS.clear((run_id, leg_id), time.monotonic())
+        minutes = HOLDS.clear((run_id, leg_id, ref), time.monotonic())
         if minutes is None:
             return ""
         response = getattr(result, "response", None)

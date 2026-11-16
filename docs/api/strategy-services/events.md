@@ -142,9 +142,10 @@ next exit signal sends it again. It is not a rejection: `leg_exit_rejected` stay
 for an exit the broker or the pipe refused on the batch path (the signal path
 records that refusal as `leg_exit_placed`, its message ending in "rejected").
 
-A hold writes one `leg_exit_held` row for the leg, not one for every tick it is
-tried again. When the hold is for a size the broker's books could not confirm, the
-row is `critical` and says how to get out by hand: close it in the
+A hold writes one `leg_exit_held` row for the position, not one for every tick it
+is tried again; after a signal flip the old side and the new side of one leg are
+held, and told, apart. When the hold is for a size the broker's books could not
+confirm, the row is `critical` and says how to get out by hand: close it in the
 broker's app with a market order, which the books see, so nothing more is sent;
 never leave a limit order waiting there, because the books do not count it as an
 exit on its way and both could fill. The owner is told on Telegram once at first,

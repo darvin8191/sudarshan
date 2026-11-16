@@ -409,6 +409,39 @@ def test_v3_an_exit_that_goes_after_no_position_is_told(held_exit_messages, cloc
     assert said == [["Exit NOT sent (Live)"], ["Exit sent (Live)"]]
 
 
+# ---- V5: one record for each position of a leg -------------------------------------------------
+def test_v5_a_flipped_leg_s_two_sides_are_told_apart(held_exit_messages, clock):
+    """After a signal flip the old side and the new side share a leg id. Before: one record for
+    both, so the new side's exit going said "Exit sent ... held for 2 min" of an exit that was
+    never held, and ended the old side's hold."""
+    old = {**ORDER, "action": "SELL"}  # the old long, still held: its exit is held
+    new = {**ORDER, "action": "BUY"}  # the new short
+    held_exits.held(7, 1, "exit_sl", old, _result("unconfirmed"), ref="old-long")
+    clock[0] += 125
+    assert held_exits.sent(7, 1, new, SimpleNamespace(ok=True, response={}), ref="new-short") == ""
+    assert len(held_exit_messages) == 1 and "Leg 1: SELL 65" in held_exit_messages[0]
+    assert held_exits.run_is_held(7)  # the old side is still held, and still reminded
+    held_exits.held(7, 1, "exit_sl", old, _result("unconfirmed"), ref="old-long")
+    assert held_exit_messages[1].startswith("Exit still NOT sent (Live), 2 min now")
+    assert "Leg 1: SELL 65" in held_exit_messages[1]
+    # the new side's own hold is its own first hold, with its own event
+    said = held_exits.held(7, 1, "exit_sl", new, _result("unconfirmed"), ref="new-short")
+    assert said.event and "Leg 1: BUY 65" in held_exit_messages[2]
+    assert held_exit_messages[2].startswith("Exit NOT sent (Live)")
+    clock[0] += 5
+    assert held_exits.sent(7, 1, old, SimpleNamespace(ok=True, response={}), ref="old-long")
+    assert held_exit_messages[3].startswith("Exit sent (Live)")
+    assert "Leg 1: SELL 65" in held_exit_messages[3] and "held for 2 min" in held_exit_messages[3]
+    assert held_exits.run_is_held(7) and len(held_exits.HOLDS) == 1
+
+
+def test_v5_a_wait_on_the_new_side_is_not_swallowed_by_the_old_side_s_record():
+    holds = Holds()
+    assert holds.note((7, 1, "old-long"), "unconfirmed", 0.0) == Note(event=True, tell=FIRST)
+    assert holds.note((7, 1, "new-short"), "working", 30.0) == Note(event=True)
+    assert holds.note((7, 1, "old-long"), "working", 31.0) == Note()
+
+
 def test_a_failure_to_tell_never_reaches_the_engine(monkeypatch):
     def broken(text):
         raise RuntimeError("telegram is down")
