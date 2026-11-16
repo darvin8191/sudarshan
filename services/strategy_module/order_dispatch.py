@@ -366,10 +366,14 @@ def _dispatch_live(api_key: str, order: dict[str, Any], closes: bool = False) ->
 
     original = dict(order)
     original["apikey"] = api_key
+    resized: dict[str, Any] = {}  # SUDARSHAN M6.9 (GA1.1): a smaller quantity for an exit
+
+    def resize(held: int) -> None:  # SUDARSHAN M6.9 (GA1.1)
+        resized["quantity"] = original["quantity"] = str(int(held))
 
     def send():
         return place_order_with_auth(
-            dict(order),
+            {**order, **resized},  # SUDARSHAN M6.9 (GA1.1)
             auth_token,
             broker,
             original,
@@ -390,10 +394,15 @@ def _dispatch_live(api_key: str, order: dict[str, Any], closes: bool = False) ->
                 order.get("symbol"),
                 order.get("product"),
                 send,
-                lambda: surface_exits.upstox_statuses(auth_token, broker),
                 # An exit that may have reached the broker without naming its order is held
                 # until the order book settles it: the next is sized from the run's own book.
                 side=order.get("action"),
+                # SUDARSHAN M6.9 (GA1.1): sized against exits still filling, from Upstox's
+                # positions corrected by its order book's fills; never more than the leg asks.
+                # A refusal is a hold, as above: the claim is released and the leg stays managed.
+                quantity=order.get("quantity"),
+                read_book=surface_exits.book_reader(None, auth_token, broker),
+                resize=resize,
             )
             if not ok and surface_exits.held(response, _status):
                 result = _normalise(ok, response)

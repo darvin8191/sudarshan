@@ -1837,7 +1837,8 @@ ring_skipped() {   # $1 = a service: 0 when its last start was skipped because a
 # not depend on the ring.
 ring_port() { case "$1" in sudarshan-feed.service) echo 5580 ;; sudarshan-alerts.service) echo 5582 ;;
               sudarshan-portfolio.service) echo 5583 ;; sudarshan-screener.service) echo 5584 ;;
-              sudarshan-family.service) echo 5585 ;; sudarshan-journal.service) echo 5586 ;; *) echo "" ;; esac; }
+              sudarshan-family.service) echo 5585 ;; sudarshan-journal.service) echo 5586 ;;
+              sudarshan-signals.service) echo 5588 ;; *) echo "" ;; esac; }
 ring_health() {   # $1 = sudarshan-<service>.service
     (
         set +eEu; trap - ERR

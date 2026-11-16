@@ -126,6 +126,20 @@ def _act(book: dict, action: Action, isin: str, out: LotBook) -> None:
                 lot.qty_u, after = target - after, target
                 if action.ex_day <= fmv_day:
                     lot.basis_qty_u = lot.qty_u
+        elif action.kind == "BONUS" and held % WHOLE == 0:
+            # A company credits whole shares and pays the rest in cash: the lot holds what the
+            # demat account gets, so the lots can be checked against the holdings; the part of
+            # a share left over is said in a note for the owner, never kept and never rounded up.
+            exact = held * action.num // action.den
+            extra = exact // WHOLE * WHOLE
+            if extra:
+                lots.append(_Held(action.ex_day, extra, 0, "bonus", extra))
+            if extra * action.den != held * action.num:
+                out.fractions.append((*scope, action.ex_day, action.kind, held + extra))
+                out.notes.append(
+                    words.bonus_part_left(isin, day_text(action.ex_day), exact - extra)
+                )
+            continue
         elif action.kind == "BONUS":
             extra = round_div(held * action.num, action.den)
             lots.append(_Held(action.ex_day, extra, 0, "bonus", extra))

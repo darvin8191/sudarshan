@@ -119,6 +119,17 @@ def _named(row: Mapping[str, Any], key: str) -> str:
     return f"{name} ({isin})" if name and name != isin else isin
 
 
+def _whys(rows: Sequence[Any]) -> list[str]:
+    """What the pack says of a sale outside the paper (a share entered without its ISIN, an
+    ETF's unit), once for each thing sold, under the table: a table cell is one line."""
+    said: dict[tuple[str, str], None] = {}
+    for row in rows:
+        why = row.get("why") if isinstance(row, Mapping) else None
+        if isinstance(why, str) and why.strip():
+            said[(_named(row, "instrument"), why.strip())] = None
+    return [f"{what}: {why}" for what, why in said]
+
+
 def _names(rows: Sequence[Mapping[str, Any]]) -> tuple[D.Block, ...]:
     """The name of each ISIN in the sale tables, one a line, under them: a table cell is one
     line and is cut where it does not fit, and a paragraph is not."""
@@ -158,8 +169,10 @@ def _lines(lines: Sequence[str] | None) -> tuple[D.Block, ...]:
 
 def _sale_row(g: Mapping[str, Any], last: D.Cell) -> tuple[D.Cell, ...]:
     bought = g.get("acquired_day")
+    # A share whose lots and Upstox holdings differ (the paper's first note names it).
+    mark = " (to check)" if g.get("to_check") else ""
     return (
-        str(g.get("isin") or ""),
+        f"{g.get('isin') or ''}{mark}",
         qty_text(g.get("qty_u") or 0),
         day_text(bought) if bought else "-",
         day_text(g["sale_day"]),
@@ -290,7 +303,27 @@ def dividend_blocks(d: Mapping[str, Any] | None) -> tuple[D.Block, ...]:
     payers = d.get("by_payer") or ()
     buyback = int(d.get("buyback_paise") or 0)
     out: list[D.Block] = [D.Heading("Dividends")]
+    # What the paper could not count is said before any total (v0.13.0 review H1): a list
+    # never read, a failed night, and each dividend with no record of what was held.
+    said: list[D.Block] = []
+    if d.get("note"):
+        said.append(D.Paragraph((str(d["note"]),)))
+    uncounted = [u for u in d.get("uncounted") or () if isinstance(u, Mapping)]
+    if uncounted:
+        said.append(D.Paragraph((
+            f"{words.plural(len(uncounted), 'dividend')} could not be counted and "
+            f"{'is' if len(uncounted) == 1 else 'are'} in no total below:",
+        )))  # fmt: skip
+        said.append(D.Table(
+            (D.Column("Company", 3.0), D.Column("Ex-date", 1.4), D.Column("Not counted", 6.1)),
+            tuple((str(u.get("name") or u.get("isin") or ""),
+                   day_text(u["ex_day"]) if u.get("ex_day") else "-",
+                   f"{u.get('words') or ''}.") for u in uncounted),
+        ))  # fmt: skip
+    out += said
     if not payers and not buyback:
+        if said:
+            return tuple(out)
         return (*out, D.Paragraph(("No dividend is recorded for this financial year.",)))
     if payers:
         out.append(D.Table(
@@ -364,6 +397,7 @@ def pack_blocks(pack: Mapping[str, Any]) -> tuple[D.Block, ...]:
                    day_text(r["day"]) if r.get("day") else "-", rs(r.get("amount_paise")))
                   for r in outside if isinstance(r, Mapping)),
         ))  # fmt: skip
+        out += _lines(_whys(outside))
     notes = _lines(pack.get("notes"))
     if notes:
         out += [D.Heading("Notes"), *notes]
@@ -383,6 +417,12 @@ def pack_lines(pack: Mapping[str, Any]) -> list[str]:
         f"{words.rupees(b['speculative']['net_paise'], signed=True)}",
     ]
     dividends = pack.get("dividends")
-    if isinstance(dividends, Mapping) and dividends.get("total_paise"):
-        lines.append(f"Dividends: {rs(dividends['total_paise'])}")
+    if isinstance(dividends, Mapping):
+        # Never a total that hides what it could not count (v0.13.0 review H1).
+        left = int(dividends.get("uncounted_count") or 0)
+        more = f"; {words.plural(left, 'more dividend')} not counted" if left else ""
+        if dividends.get("total_paise"):
+            lines.append(f"Dividends: {rs(dividends['total_paise'])}{more}")
+        elif left or dividends.get("note"):
+            lines.append("Dividends: none counted in this pack; its Dividends section says why")
     return lines

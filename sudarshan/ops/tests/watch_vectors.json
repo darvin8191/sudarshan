@@ -925,6 +925,107 @@
    "level": "unread"
   },
   {
+   "name": "no name for two days in a row: a warning, with its cause (v0.13.0 verify N6)",
+   "check": "certificate",
+   "readings": {
+    "now": 1800172800,
+    "cert_hours_left": "no_name"
+   },
+   "memory": {
+    "unjudged_since": 1800000000
+   },
+   "level": "warning",
+   "facts": {
+    "cause": "no_name"
+   },
+   "keep": {
+    "unjudged_since": 1800000000
+   }
+  },
+  {
+   "name": "another site's certificate for two days in a row: a warning too",
+   "check": "certificate",
+   "readings": {
+    "now": 1800172860,
+    "cert_hours_left": "other_site"
+   },
+   "memory": {
+    "unjudged_since": 1800000000
+   },
+   "level": "warning",
+   "facts": {
+    "cause": "other_site"
+   },
+   "keep": {
+    "unjudged_since": 1800000000
+   }
+  },
+  {
+   "name": "a minute short of two days is still unread",
+   "check": "certificate",
+   "readings": {
+    "now": 1800172740,
+    "cert_hours_left": "no_name"
+   },
+   "memory": {
+    "unjudged_since": 1800000000
+   },
+   "level": "unread",
+   "facts": {
+    "cause": "no_name"
+   },
+   "keep": {
+    "unjudged_since": 1800000000
+   }
+  },
+  {
+   "name": "the first look with no name starts the count",
+   "check": "certificate",
+   "readings": {
+    "now": 1800000000,
+    "cert_hours_left": "no_name"
+   },
+   "memory": {},
+   "level": "unread",
+   "facts": {
+    "cause": "no_name"
+   },
+   "keep": {
+    "unjudged_since": 1800000000
+   }
+  },
+  {
+   "name": "a look that failed keeps the count as it stands",
+   "check": "certificate",
+   "readings": {
+    "now": 1800086400
+   },
+   "memory": {
+    "unjudged_since": 1800000000
+   },
+   "level": "unread",
+   "facts": {},
+   "keep": {
+    "unjudged_since": 1800000000
+   }
+  },
+  {
+   "name": "a certificate judged again ends the count",
+   "check": "certificate",
+   "readings": {
+    "now": 1800259200,
+    "cert_hours_left": 900.0
+   },
+   "memory": {
+    "unjudged_since": 1800000000
+   },
+   "level": "fine",
+   "facts": {
+    "hours": "900"
+   },
+   "keep": {}
+  },
+  {
    "name": "locks hold and it is off",
    "check": "posture_locks",
    "readings": {

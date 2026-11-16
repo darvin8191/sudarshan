@@ -122,6 +122,7 @@ class TelegramServer:
     def __init__(self, fake: FakeTelegram):
         self.fake, self.server = fake, None
         self.port = 0
+        self.serving: set[asyncio.Task] = set()  # this server's own handlers still running
 
     async def start(self) -> int:
         self.server = await asyncio.start_server(self._serve, "127.0.0.1", 0)
@@ -137,7 +138,26 @@ class TelegramServer:
             with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(self.server.wait_closed(), 2)
 
+    async def settled(self, within: float = 2.0) -> bool:
+        """Wait until every connection this server is answering has been answered and closed.
+
+        A client that stops mid long poll (the bot, when its service stops) drops its side at
+        once; this server's handler for that connection is a task of the same loop that still
+        has its 0.05 s poll, its write and its close to finish. A test that counts the loop's
+        tasks right after the stop counted that handler, or not, by how the loop happened to be
+        scheduled. Wait here first, then count: what is left is the code under test's.
+        """
+        pending = [task for task in self.serving if task is not asyncio.current_task()]
+        if not pending:
+            return True
+        _done, still = await asyncio.wait(pending, timeout=within)
+        return not still
+
     async def _serve(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        task = asyncio.current_task()
+        if task is not None:
+            self.serving.add(task)
+            task.add_done_callback(self.serving.discard)
         try:
             head = await reader.readuntil(b"\r\n\r\n")
             lines = head.decode("latin-1").split("\r\n")

@@ -19,10 +19,20 @@ vi.mock('../api', async (importOriginal) => ({
 
 import { createQueryClient } from '@/app/providers'
 import { PortfolioError } from '../api'
-import type { CaEvent, CaExpected, CalendarReport, CalendarRow, TabInfo } from '../types'
-import { CALENDAR_OFF, CalendarView, NO_FUTURE } from './CalendarView'
+import type {
+  CaEvent,
+  CaExpected,
+  CaList,
+  CalendarReport,
+  CalendarRow,
+  LotCheck,
+  LotCheckRow,
+  TabInfo,
+} from '../types'
+import { CALENDAR_OFF, CalendarView, leftOutWords, NO_FUTURE } from './CalendarView'
 import { entriesFor, typedRatio, wayOf } from './confirm'
 import { factText, holdText } from './format'
+import { fixLabel } from './LotCheckCard'
 
 const TAB = { id: 4, name: 'Long term', version: 11 } as TabInfo
 const UPSTOX: CaExpected = {
@@ -83,6 +93,7 @@ const CALENDAR: CalendarReport = {
   from: 20260816,
   to: 20270513,
   listed_future: true,
+  read_status: { state: 'ok', night: 20261113, words: null },
   calendar: [
     row({}),
     row({
@@ -105,10 +116,27 @@ const CALENDAR: CalendarReport = {
   ],
 }
 
+const NO_CHECK: LotCheck = {
+  state: 'ok',
+  account_id: 1,
+  day: 20261113,
+  words: null,
+  rows: [],
+  unrecorded_count: 0,
+}
+const LIST: CaList = {
+  events: [],
+  to_confirm: [],
+  left_out_count: 0,
+  reads: [],
+  read_status: { state: 'ok', night: 20261113, words: null },
+  lot_check: NO_CHECK,
+}
+
 function serve(over: Record<string, unknown> = {}) {
   const answers: Record<string, unknown> = {
     calendar: CALENDAR,
-    ca_list: { events: [], to_confirm: [BONUS], reads: [] },
+    ca_list: { ...LIST, to_confirm: [BONUS] },
     ca_decide: { id: 1 },
     activity_create: {
       activity: null,
@@ -268,7 +296,7 @@ describe('to confirm', () => {
 
 describe('the calendar', () => {
   it('lists what is coming and the last 90 days by month, each with kind, fact, holding and check', async () => {
-    serve({ ca_list: { events: [], to_confirm: [], reads: [] } })
+    serve({ ca_list: LIST })
     show()
     const coming = within(await screen.findByRole('region', { name: 'Coming up' }))
     expect(coming.getByText('December 2026')).toBeTruthy()
@@ -287,7 +315,7 @@ describe('the calendar', () => {
 
   it('says so when Upstox lists no future events, and when nothing is listed at all', async () => {
     serve({
-      ca_list: { events: [], to_confirm: [], reads: [] },
+      ca_list: LIST,
       calendar: { ...CALENDAR, listed_future: false, calendar: [] },
     })
     show()
@@ -300,5 +328,169 @@ describe('the calendar', () => {
     show()
     expect(await screen.findByText(CALENDAR_OFF)).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull()
+  })
+})
+
+// v0.14.0 review H2, H3, M1, M3: what the list says before it was read, after a failed night, of
+// what it leaves out, and when the lots and the holdings differ.
+describe('before the first read, and after a failed night', () => {
+  const EMPTY = { ...CALENDAR, listed_future: false, calendar: [] }
+
+  it('says when the first read is: no banner that Upstox lists nothing, no empty-list sentence', async () => {
+    const words =
+      "SUDARSHAN reads Upstox's corporate actions for the first time tonight after 23:45. Nothing is listed until then."
+    serve({
+      calendar: { ...EMPTY, read_status: { state: 'never', night: null, words } },
+      ca_list: { ...LIST, read_status: { state: 'never', night: null, words } },
+    })
+    show()
+    expect(await screen.findByText(words)).toBeInTheDocument()
+    expect(screen.queryByText(NO_FUTURE)).toBeNull()
+    expect(screen.queryByText(/No dividend, bonus, split or rights issue is listed/)).toBeNull()
+  })
+
+  it('says the list could not be read last night, in the service’s words, never "has not listed"', async () => {
+    const words =
+      "Upstox's list could not be read last night. Upstox did not allow SUDARSHAN to read its list of events with the read-only token. SUDARSHAN tries again tonight after 23:45."
+    serve({ calendar: { ...EMPTY, read_status: { state: 'failed', night: 20261113, words } } })
+    show()
+    expect(await screen.findByText(words)).toBeInTheDocument()
+    expect(screen.queryByText(NO_FUTURE)).toBeNull()
+    expect(screen.queryByText(/is listed for what you hold/)).toBeNull()
+  })
+
+  it('keeps the banner and the empty sentence for a list that was read and is empty', async () => {
+    serve({ calendar: EMPTY, ca_list: LIST })
+    show()
+    expect(await screen.findByText(NO_FUTURE)).toBeInTheDocument()
+    expect(
+      screen.getByText(/No dividend, bonus, split or rights issue is listed/)
+    ).toBeInTheDocument()
+  })
+})
+
+describe('what is left out, and the check', () => {
+  it('counts the bonuses and splits it cannot ask about yet, and says why', async () => {
+    expect(leftOutWords(1)).toBe(
+      '1 earlier bonus or split is not asked about yet: SUDARSHAN cannot tell what you held on its date until Upstox’s share trades are read in full.'
+    )
+    serve({ ca_list: { ...LIST, left_out_count: 3 } })
+    show()
+    expect(
+      await screen.findByText(
+        '3 earlier bonuses or splits are not asked about yet: SUDARSHAN cannot tell what you held on their dates until Upstox’s share trades are read in full.'
+      )
+    ).toBeInTheDocument()
+  })
+
+  it('says where a quantity comes from when no holdings record reaches the date', async () => {
+    serve({
+      ca_list: {
+        ...LIST,
+        to_confirm: [{ ...BONUS, expected: [{ ...UPSTOX, held_from: 'trades' }] }],
+      },
+    })
+    show()
+    expect(
+      await screen.findByText(
+        'Quantity from Upstox’s trade history: no holdings record reaches this date.'
+      )
+    ).toBeInTheDocument()
+  })
+
+  const TWICE: LotCheckRow = {
+    isin: 'INE000A01010',
+    name: 'Alpha Industries',
+    held_qty_u: 500_000_000,
+    lots_qty_u: 2_500_000_000,
+    ex_day: 20260928,
+    words:
+      'Alpha Industries: after the split of 28 Sep 2026 the lots say 2,500 and Upstox holds 500. Without it the lots would say 500: it may have been counted twice.',
+    fix: { event_id: 41, version: 1, state: 'dismissed', ratio_num: null, ratio_den: null },
+  }
+  const differ = (rows: LotCheckRow[]) => ({
+    ca_list: {
+      ...LIST,
+      lot_check: { ...NO_CHECK, day: 20261021, words: 'Lots and holdings differ.', rows },
+    },
+  })
+
+  it('shows a Check card naming the share and both figures when lots and holdings differ', async () => {
+    serve(differ([TWICE]))
+    show()
+    const card = await screen.findByRole('region', { name: 'Check' })
+    expect(within(card).getByText(TWICE.words)).toBeInTheDocument()
+    expect(
+      within(card).getByText(/differ for 1 share, compared at the close of 21 Oct 2026/)
+    ).toBeInTheDocument()
+  })
+
+  it('offers the one change the service proved, sends it from the decision’s version, then reads again', async () => {
+    const user = userEvent.setup()
+    serve(differ([TWICE]))
+    show()
+    const card = await screen.findByRole('region', { name: 'Check' })
+    const before = calls('ca_list').length
+    await user.click(within(card).getByRole('button', { name: 'Take this one out of my lots' }))
+    await waitFor(() => expect(calls('ca_decide')).toHaveLength(1))
+    expect(calls('ca_decide')[0]).toEqual({
+      id: 41,
+      scope: 'upstox',
+      state: 'dismissed',
+      ratio_num: 1,
+      ratio_den: 1,
+      version: 1,
+    })
+    await waitFor(() => expect(calls('ca_list').length).toBeGreaterThan(before))
+  })
+
+  it('turns a wrong-way split round, and offers nothing where no change makes the two agree', async () => {
+    const user = userEvent.setup()
+    const wrong: LotCheckRow = {
+      ...TWICE,
+      isin: 'INE000B01011',
+      fix: { event_id: 42, version: 3, state: 'applied', ratio_num: 5, ratio_den: 1 },
+    }
+    const none: LotCheckRow = { ...TWICE, isin: 'INE000C01012', name: 'Gamma Ltd', fix: null }
+    expect(fixLabel(wrong)).toBe('Apply it the other way round')
+    expect(fixLabel(none)).toBeNull()
+    serve(differ([wrong, none]))
+    show()
+    const card = await screen.findByRole('region', { name: 'Check' })
+    expect(within(card).getAllByRole('button')).toHaveLength(1)
+    await user.click(within(card).getByRole('button', { name: 'Apply it the other way round' }))
+    await waitFor(() => expect(calls('ca_decide')).toHaveLength(1))
+    expect(calls('ca_decide')[0]).toMatchObject({
+      id: 42,
+      state: 'applied',
+      ratio_num: 5,
+      ratio_den: 1,
+      version: 3,
+    })
+  })
+
+  it('says the service’s sentence when the change is refused, and reads nothing again', async () => {
+    const user = userEvent.setup()
+    serve({
+      ...differ([TWICE]),
+      ca_decide: new PortfolioError({
+        code: 'version_conflict',
+        message: 'This was changed elsewhere. Reload the page.',
+        entryId: null,
+      }),
+    })
+    show()
+    const card = await screen.findByRole('region', { name: 'Check' })
+    await user.click(within(card).getByRole('button', { name: 'Take this one out of my lots' }))
+    expect((await within(card).findByRole('alert')).textContent).toBe(
+      'This was changed elsewhere. Reload the page.'
+    )
+  })
+
+  it('shows no Check card while the lots and the holdings agree', async () => {
+    serve({ ca_list: LIST })
+    show()
+    await screen.findByText('Coming up')
+    expect(screen.queryByRole('region', { name: 'Check' })).toBeNull()
   })
 })

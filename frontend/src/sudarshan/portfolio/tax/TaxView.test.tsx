@@ -175,6 +175,62 @@ describe('the view', () => {
     expect(within(third).getByText(/^INE/).className).toContain('font-semibold')
   })
 
+  it('puts the check of the lots against the holdings above the heads and marks its sales', async () => {
+    const words =
+      'Invented Industries Ltd: Upstox holds 100 and the lots say 60. If you bought the rest before 1 Apr 2024 or moved it in from another account, add that purchase under Tax, Inputs.'
+    show(
+      pack((x) => {
+        x.lot_check = {
+          state: 'ok',
+          account_id: 1,
+          day: 20261112,
+          words: 'Lots and holdings differ for 1 share.',
+          rows: [
+            {
+              isin: 'INE000A01010',
+              name: 'Invented Industries Ltd',
+              held_qty_u: 100_000_000,
+              lots_qty_u: 60_000_000,
+              ex_day: null,
+              words,
+              fix: null,
+            },
+          ],
+          unrecorded_count: 0,
+        }
+        x.capital_gains.schedule[0].to_check = true
+      })
+    )
+    const card = await screen.findByRole('region', { name: 'Check' })
+    expect(within(card).getByText(words)).toBeInTheDocument()
+    expect(within(card).queryByRole('button')).toBeNull() // nothing the service could prove
+    const sales = screen.getByRole('button', { name: /Every sale of the year \(3\)/ })
+    expect(card.compareDocumentPosition(sales) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    await userEvent.click(sales)
+    const [first, second] = within(await screen.findByRole('dialog')).getAllByRole('listitem')
+    const mark = 'To check: the tax lots and your Upstox holdings differ for this share.'
+    expect(within(first).getByText(mark)).toBeTruthy()
+    expect(within(second).queryByText(mark)).toBeNull()
+  })
+
+  it('shows no Check card while the lots and the holdings agree, or the check waits', async () => {
+    show(
+      pack((x) => {
+        x.lot_check = {
+          state: 'waiting',
+          account_id: 1,
+          day: null,
+          words:
+            "The check of the tax lots against your Upstox holdings waits until Upstox's share trades of this year are read in full.",
+          rows: [],
+          unrecorded_count: 0,
+        }
+      })
+    )
+    await screen.findByRole('button', { name: /Every sale of the year \(3\)/ })
+    expect(screen.queryByRole('region', { name: 'Check' })).toBeNull()
+  })
+
   it('lists a sale left out of the totals with its reason', async () => {
     show(
       pack((x) => {

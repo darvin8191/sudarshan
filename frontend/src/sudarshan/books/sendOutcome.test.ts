@@ -31,6 +31,16 @@ describe('a send that threw', () => {
     }
   })
 
+  it('reads the rate limit on an exit or cancel as a refusal, with its sentence (verify N4)', () => {
+    // What the orders routes answer when the limit stops a send: the app's JSON under 429.
+    const limited = answered(429, {
+      status: 'error',
+      message: 'Too many tries. Wait a moment, then try again.',
+    })
+    expect(thrownOutcome(limited)).toBe('refused')
+    expect(refusalReason(limited)).toBe('Too many tries. Wait a moment, then try again.')
+  })
+
   it('never reads a 4xx that is not the app’s own answer as a refusal (review M2)', () => {
     // A web server whose error page is missing answers 404 for the app's "bad gateway" while
     // the app restarts: the exit may have gone, and a refusal would release its hold.

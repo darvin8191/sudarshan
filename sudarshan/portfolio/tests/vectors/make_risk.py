@@ -256,8 +256,27 @@ CONCENTRATION = [
     {"id": "N5", "note": "nothing held: no bars, no figure, no flag", "holdings": [],
      "max_holding_pct": "15.0000", "max_sector_pct": "35.0000",
      "expect": {"holdings": [], "sectors": [], "untagged_pct": None, "flags": []}},
+    # Review L2: half up, 15.0040 would read "15% ... above your 15% limit". A share above its
+    # limit is said as at least a hundredth above it; Q, far above, is rounded as ever (85).
+    {"id": "N6", "note": "1,500.40 of 10,000 is 15.0040%, above 15%: said as 15.01, never 15; "
+     "8,499.60 is 84.9960%, said as 85; both in Auto, 100%, not above a 100% limit",
+     "holdings": [["P", "P", 150_040, "Auto"], ["Q", "Q", 849_960, "Auto"]],
+     "max_holding_pct": "15.0000", "max_sector_pct": "100.0000",
+     "expect": {"holdings": [bar("Q", "84.9960", True), bar("P", "15.0040", True)],
+                "sectors": [bar("Auto", "100.0000")], "untagged_pct": "0.0000",
+                "flags": ["Q is 85% of what is held here, above your 15% limit.",
+                          "P is 15.01% of what is held here, above your 15% limit."]}},
+    {"id": "N7", "note": "15,000.01 of 1,00,000 is 15.00001%: its own text is 15.0000, yet it "
+     "is above 15% (the test is exact), so it is said as 15.01; Q 84.99999% reads 85.0000",
+     "holdings": [["P", "P", 1_500_001, "Auto"], ["Q", "Q", 8_499_999, "Auto"]],
+     "max_holding_pct": "15.0000", "max_sector_pct": "100.0000",
+     "expect": {"holdings": [bar("Q", "85.0000", True), bar("P", "15.0000", True)],
+                "sectors": [bar("Auto", "100.0000")], "untagged_pct": "0.0000",
+                "flags": ["Q is 85% of what is held here, above your 15% limit.",
+                          "P is 15.01% of what is held here, above your 15% limit."]}},
 ]
 assert 225_650 + 774_350 == 1_000_000
+assert 150_040 + 849_960 == 1_000_000 and 1_500_001 + 8_499_999 == 10_000_000
 
 # ---- concentration from a tab's rows (the phone's live bars) -------------------------------------
 # The risk op sends the rows its concentration was worked out from; the phone prices them from
@@ -369,6 +388,13 @@ EMERGENCY = [
      "monthly_expenses_paise": 4_000_000, "months_target": 3,
      "expect": {"months": "0.0000", "target_months": 3,
                 "note": "Covers 0 months of your expenses; your target is 3."}},
+    # Review L2: half up, 5.999975 is 6.0000 and the note read "Covers 6 months ...; your
+    # target is 6". Below the target the figure stays below it: 5.9999, said as 5.99.
+    {"id": "E6", "note": "2,39,999 / 40,000 = 5.999975 months, below the target of 6: sent as "
+     "5.9999 and said as 5.99, never 6", "liquid_paise": 23_999_900,
+     "monthly_expenses_paise": 4_000_000, "months_target": 6,
+     "expect": {"months": "5.9999", "target_months": 6,
+                "note": "Covers 5.99 months of your expenses; your target is 6."}},
 ]
 
 # ---- several tabs as one -----------------------------------------------------------------------

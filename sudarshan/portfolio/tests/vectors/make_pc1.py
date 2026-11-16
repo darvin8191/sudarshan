@@ -178,8 +178,12 @@ EFFECTS = [
      "in": ["bonus", 100 * U, 1, 1], "out": [100 * U, 200 * U, False]},
     {"id": "E-BONUS-3-2", "why": "bonus 3 for 2 on 10: 10 x 3 / 2 = 15 more, 25 in all",
      "in": ["bonus", 10 * U, 3, 2], "out": [15 * U, 25 * U, False]},
-    {"id": "E-BONUS-ODD", "why": "bonus 1 for 2 on 5: 2.5 more: half a share is left over",
-     "in": ["bonus", 5 * U, 1, 2], "out": [2_500_000, 7_500_000, True]},
+    {"id": "E-BONUS-ODD", "why": "bonus 1 for 2 on 5: 5 / 2 = 2.5, so 2 whole shares more, 7 in "
+     "all, and half a share is left over (review L3: whole shares, as the company credits them)",
+     "in": ["bonus", 5 * U, 1, 2], "out": [2 * U, 7 * U, True]},
+    {"id": "E-BONUS-THIRD", "why": "bonus 1 for 3 on 100: 100 / 3 = 33.33, so 33 more, 133 in "
+     "all, a third of a share left over (the reviewer's case: 33.333333 was kept before)",
+     "in": ["bonus", 100 * U, 1, 3], "out": [33 * U, 133 * U, True]},
     {"id": "E-SPLIT", "why": "split every 1 into 5 on 100: 500, which is 400 more",
      "in": ["split", 100 * U, 5, 1], "out": [400 * U, 500 * U, False]},
     {"id": "E-CONSOLIDATE", "why": "every 5 become 1 on 100: 20, which is 80 fewer",
@@ -197,8 +201,11 @@ SENTENCES = [
     {"id": "S-SPLIT", "in": ["split", 1, 5, 5, 1, 1250 * U],
      "out": "Split 1:5: you held 1,250, they become 6,250. Is that right?"},
     {"id": "S-ODD", "in": ["bonus", 1, 2, 1, 2, 5 * U],
-     "out": "Bonus 1:2: you held 5, you get 2.5 more, 7.5 in all. Is that right? This leaves "
-            "part of a share, which a company usually pays in cash."},
+     "out": "Bonus 1:2: you held 5, you get 2 more, 7 in all. Is that right? 0.5 of a share "
+            "is left over, which a company usually pays in cash."},
+    {"id": "S-THIRD", "in": ["bonus", 1, 3, 1, 3, 100 * U],
+     "out": "Bonus 1:3: you held 100, you get 33 more, 133 in all. Is that right? 0.333333 of a "
+            "share is left over, which a company usually pays in cash."},
     {"id": "S-BONUS-NO-QTY", "in": ["bonus", 1, 2, 1, 2, None],
      "out": "Bonus 1:2: 1 new share for every 2 held. Is that right?"},
     {"id": "S-BONUS-NO-QTY-OTHER", "in": ["bonus", 1, 2, 2, 1, None],

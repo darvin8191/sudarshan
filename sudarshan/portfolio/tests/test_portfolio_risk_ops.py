@@ -140,7 +140,11 @@ async def test_a_new_tab_has_no_figure_yet_and_every_tile_says_why(rig):
     assert figures["emergency"] == {
         "months": None, "target_months": 6, "note": "Set your monthly expenses to check this"
     }  # fmt: skip
-    assert list(data) == ["tab_id", "as_of_day", "basis", "risk", "live"]
+    assert list(data) == ["tab_id", "as_of_day", "basis", "words", "risk", "live"]
+    # Review M4: the answer says what it leaves out. Old code said nothing of the Upstox tab.
+    assert data["words"] == [
+        "Risk is worked out on your own tabs; the Upstox portfolio is not included yet."
+    ]
     assert data["live"]["rows"] == []
     assert list(figures) == ["days", "drawdown", "volatility", "sharpe", "sortino", "calmar",
                              "concentration", "overlap", "emergency"]  # fmt: skip
@@ -260,6 +264,14 @@ async def test_overlap_the_emergency_fund_and_every_tab_together(rig):
     old = next(t for t in rig.book.tabs(OWNER) if t["id"] == shelved["id"])
     rig.book.tab_update(OWNER, shelved["id"], old["version"], {"archived": True}, now=NOW)
     await rig.call("settings_set", version=0, values={"monthly_expenses_paise": 200_000})
+    # Review L1: Long term holds two typed values (the gold bar and the plot), every tab of
+    # his together four (gold, plot, deposit, savings account; the archived tab is not asked).
+    said = (await rig.call("risk", tab=rig.tab["id"]))["data"]["words"]
+    assert said[1] == (
+        "2 holdings here have typed values; days without a new value count as no change, so "
+        "the swings read steadier."
+    )
+    assert (await rig.call("risk"))["data"]["words"][1].startswith("4 holdings here have typed")
 
     got = (await rig.call("risk", tab=rig.tab["id"]))["data"]["risk"]
     # Gold is worth 6,000 a unit in both tabs: 60% here, and 6,000 of 9,000 = 66.67% there.

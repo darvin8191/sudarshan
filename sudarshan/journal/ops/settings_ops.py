@@ -30,7 +30,7 @@ from ..core import charges, kinds
 from ..core.money import ist_day, to_date
 from ..errors import ApiError
 from ..reports import clock_text
-from ..schedule import FY_AT, schedule_for
+from ..schedule import FY_AGAIN_AT, FY_AT, schedule_for
 from ..views import done
 from . import op
 from .common import OWNER, choice, flag, need, whole, work
@@ -107,7 +107,8 @@ def report_times(service: Any, today: int) -> dict[str, Any]:
         "check": clock_text(plan.check_at(day)) if trading else None,
         "weekly": f"{WEEKDAY_NAMES[weekday]} {_hhmm(weekly_min)}",
         "monthly": f"the {_ordinal(mday)} at {_hhmm(monthly_min)}",
-        "fy": f"{fy_day} {MONTH_NAMES[month - 1]} {_hhmm(fy_min)}",
+        "fy": f"{fy_day} {MONTH_NAMES[month - 1]} {_hhmm(fy_min)}, and again "
+        f"{FY_AGAIN_AT[1]} {MONTH_NAMES[FY_AGAIN_AT[0] - 1]} {_hhmm(FY_AGAIN_AT[2])}",
     }
 
 
