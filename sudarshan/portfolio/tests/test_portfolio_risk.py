@@ -188,3 +188,33 @@ def test_the_sentences_say_two_decimals_half_up_and_whole_numbers_whole():
     assert words.risk_untagged("0.0049") == "Untagged: 0%; tag them to check sectors."
     assert words.risk_basis(20261113) == "On closing values up to 13 Nov 2026."
     assert words.risk_days_more(60, 18).endswith("42 more to go.")
+
+
+def test_a_sentence_never_contradicts_itself_at_the_edge_of_rounding():
+    """Review L2. Rs 2,39,999 over Rs 40,000 a month is 5.999975 months, below the target of 6:
+    half up it was sent as "6.0000" and read "Covers 6 months of your expenses; your target is
+    6." A 15.004% holding against a 15% limit read "is 15% of what is held here, above your 15%
+    limit." Only at that edge is a figure rounded otherwise: below the target it stays below it,
+    above the limit a hundredth above it at least. Every other figure is half up, as before."""
+    months = risk.emergency(23_999_900, 4_000_000, 6)
+    assert months["months"] == "5.9999"  # never the 6.0000 half up would send
+    assert months["note"] == "Covers 5.99 months of your expenses; your target is 6."
+    assert risk.emergency(24_000_000, 4_000_000, 6)["note"] == (
+        "Covers 6 months of your expenses: at or above your target of 6."
+    )
+    assert words.risk_over("X Ltd", "15.0040", "15.0000", sector=False) == (
+        "X Ltd is 15.01% of what is held here, above your 15% limit."
+    )
+    assert words.risk_over("X Ltd", "22.5650", "15.0000", sector=False).startswith(
+        "X Ltd is 22.57% of"  # 22.565 rounds up either way
+    )
+    assert words.risk_over("Banks", "35.0001", "35.0000", sector=True) == (
+        "The sector Banks is 35.01% of what is held here, above your 35% limit."
+    )
+    assert words.risk_over("Alpha Ltd", "52.6315", "15.0000", sector=False) == (
+        "Alpha Ltd is 52.63% of what is held here, above your 15% limit."  # half up, as ever
+    )
+    assert words.risk_months("4.9960", 6, False) == (
+        "Covers 5 months of your expenses; your target is 6."  # below 6 even rounded
+    )
+    assert words.risk_typed(1).startswith("1 holding here has a typed value; ")

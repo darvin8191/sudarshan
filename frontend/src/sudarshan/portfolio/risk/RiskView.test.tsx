@@ -27,7 +27,15 @@ vi.mock('@/sudarshan/watchlist/openGuard', () => ({
 import { createQueryClient } from '@/app/providers'
 import { PortfolioError } from '../api'
 import type { OwnerSettings, RiskReport, TabInfo } from '../types'
-import { fallWords, RISK_OFF, RiskView, statText } from './RiskView'
+import {
+  fallWords,
+  monthsText,
+  RISK_NO_TAB,
+  RISK_OFF,
+  RISK_OWN_TABS,
+  RiskView,
+  statText,
+} from './RiskView'
 import { formOf, valuesOf } from './SettingsSheet'
 
 const TABS = [
@@ -271,5 +279,76 @@ describe('risk settings', () => {
     const sheet = within(await screen.findByRole('dialog'))
     await userEvent.click(await sheet.findByRole('button', { name: 'Save' }))
     expect((await sheet.findByRole('alert')).textContent).toMatch(/between 0% and 50%/)
+  })
+})
+
+// v0.14.0 review M4, L1, L2: what the view leaves out, said on the view.
+describe('what risk covers', () => {
+  const view = (tabs: TabInfo[]) =>
+    render(
+      <QueryClientProvider client={createQueryClient()}>
+        <RiskView tabs={tabs} />
+      </QueryClientProvider>
+    )
+  const UPSTOX_TAB = { id: 1, name: 'Upstox', version: 1, system: true, kind: 'upstox' } as TabInfo
+
+  it('says it is the owner’s own tabs only, and never offers the Upstox tab', async () => {
+    api.risk.mockResolvedValue({ enabled: true, data: REPORT })
+    view([UPSTOX_TAB, ...TABS])
+    expect(await screen.findByText(RISK_OWN_TABS)).toBeInTheDocument()
+    expect(RISK_OWN_TABS).toBe(
+      'Risk is worked out on your own tabs; the Upstox portfolio is not included yet.'
+    )
+    const picker = await screen.findByRole('combobox', { name: 'Tab' })
+    expect(within(picker).queryByRole('option', { name: 'Upstox' })).toBeNull()
+    expect(within(picker).getByRole('option', { name: 'Long term' })).toBeInTheDocument()
+  })
+
+  it('with no tab of his own says how to start one, asks the service nothing and shows no countdown', async () => {
+    api.risk.mockResolvedValue({ enabled: true, data: REPORT })
+    view([UPSTOX_TAB])
+    expect(await screen.findByText(RISK_NO_TAB)).toBeInTheDocument()
+    expect(screen.getByText(RISK_OWN_TABS)).toBeInTheDocument()
+    expect(screen.queryByText(/more to go/)).toBeNull()
+    expect(screen.queryByRole('combobox', { name: 'Tab' })).toBeNull()
+    expect(api.risk).not.toHaveBeenCalled()
+  })
+
+  it('says beside the swings that typed values count as no change between two values', async () => {
+    const typed =
+      '3 holdings here have typed values; days without a new value count as no change, so the swings read steadier.'
+    api.risk.mockResolvedValue({
+      enabled: true,
+      data: { ...REPORT, words: [RISK_OWN_TABS, typed] },
+    })
+    view(TABS)
+    const swings = await screen.findByRole('region', { name: 'Swings and ratios' })
+    expect(within(swings).getByText(typed)).toBeInTheDocument()
+    expect(within(swings).queryByText(RISK_OWN_TABS)).toBeNull() // said once, under the title
+  })
+
+  it('keeps months below the target below it, and rounds every other figure as ever', () => {
+    expect(monthsText(5.9999, 6)).toBe('5.9') // half up would read 6.0 against a target of 6
+    expect(monthsText(5.96, 6)).toBe('5.9')
+    expect(monthsText(4.96, 6)).toBe('5.0') // below 6 either way: rounded as ever
+    expect(monthsText(6.04, 6)).toBe('6.0') // at or above the target
+    expect(monthsText(7.5, 6)).toBe('7.5')
+  })
+
+  it('shows 5.999975 months as 5.9, never 6.0 against 6', async () => {
+    api.risk.mockResolvedValue({
+      enabled: true,
+      data: {
+        ...REPORT,
+        risk: {
+          ...REPORT.risk,
+          emergency: { months: '5.9999', target_months: 6, note: null },
+        },
+      },
+    })
+    view(TABS)
+    const fund = await screen.findByRole('region', { name: 'Emergency fund' })
+    expect(within(fund).getByText('5.9 months')).toBeInTheDocument()
+    expect(within(fund).queryByText('6.0 months')).toBeNull()
   })
 })
