@@ -95,10 +95,27 @@ export const PHONE_VISIBLE_BARS = 70
 /**
  * The candles pane's empty band above and below, as a share of its height:
  * the engine's own 10%, and while marks are laid over the candles (M14.8)
- * enough for a triangle and its letter beyond the highest and lowest candle.
+ * enough for a tag and its letter beyond the highest and lowest candle.
  */
 export const PLAIN_ROOM = 0.1
 export const MARK_ROOM = 0.2
+
+/** A trade tag's letters, in CSS px: the same at every zoom, readable outdoors (review L4). */
+export const TAG_FONT_PX = 12
+/** How far a tag's middle sits from its candle's low or high, and half the square a tap finds it in. */
+const TAG_OFFSET_PX = 14
+const TAG_REACH_PX = 24
+
+/** About how wide a tag is with `text` in it: wide enough never to underestimate. */
+export function tagWidth(text: string): number {
+  return Math.ceil(text.length * TAG_FONT_PX * 0.62) + 10
+}
+
+/** A tag's words at this candle width: its full text only where one candle holds it. */
+export function tagText(marker: OverlayMarker, spacing: number): string | undefined {
+  if (marker.shape !== 'tag' || marker.short === undefined || !marker.text) return marker.text
+  return tagWidth(marker.text) <= spacing ? marker.text : marker.short
+}
 
 /** An index is quoted, never traded: no book, no volume, LTP mode. */
 export function isQuoteOnly(exchange: string): boolean {
@@ -251,6 +268,12 @@ export class PhoneChart {
   private readonly layoutListeners = new Set<() => void>()
   /** Who hears that a load drew its history (M14.8: the trade markers). */
   private readonly loadListeners = new Set<(interval: string) => void>()
+  /** Who hears that the candles held changed: a new one opened, or older ones were read in. */
+  private readonly barsListeners = new Set<() => void>()
+  /** Which tags are written short, as last laid: laid again when a zoom changes it. */
+  private tagsShort = ''
+  /** The load of the candles shown has told its listeners. */
+  private toldLoaded = false
   /** History as the candle clock repairs it: never read while the page is hidden. */
   private readonly whenShown = {
     bars: () => this.data.bars(),
@@ -349,6 +372,7 @@ export class PhoneChart {
     this.sym = { symbol, exchange }
     this.interval = apiInterval(chip)
     this.bars = []
+    this.toldLoaded = false
     const label = intervalLabel(this.interval)
     this.setLoad({ kind: 'loading', symbol, interval: label })
     this.drawings.detach()
@@ -395,8 +419,10 @@ export class PhoneChart {
     if (!same || !this.subscribed) this.subscribe(symbol, exchange)
     this.syncCountdown()
     if (!same) void this.firstQuote(symbol, exchange, ticket)
-    if (!failure && bars.length)
+    if (!failure && bars.length) {
+      this.toldLoaded = true
       for (const listener of [...this.loadListeners]) listener(this.interval)
+    }
   }
 
   /**
@@ -607,6 +633,45 @@ export class PhoneChart {
     }
   }
 
+  /**
+   * Hear when the candles held changed after a load: a new candle opened, or
+   * history brought more. A mark waiting for its own candle is laid then.
+   */
+  readonly onBars = (listener: () => void): (() => void) => {
+    this.barsListeners.add(listener)
+    return () => {
+      this.barsListeners.delete(listener)
+    }
+  }
+
+  private tellBars(): void {
+    if (!this.toldLoaded) return // the load itself tells its listeners, with its interval
+    for (const listener of [...this.barsListeners]) listener()
+  }
+
+  /**
+   * The mark within a finger of a point of the chart (its own pixels), or
+   * null: a tag is small, so a tap anywhere in the 48 px square around it
+   * finds it, and the nearest wins.
+   */
+  markerAt(x: number, y: number): string | null {
+    let best: { id: string; far: number } | null = null
+    for (const marker of this.overlays.markers) {
+      const index = this.bars.findIndex((bar) => bar.time === marker.time)
+      if (index < 0) continue
+      const bar = this.bars[index]
+      const buy = marker.side === 'BUY'
+      const edge = this.chart.priceToCoordinate(marker.price ?? (buy ? bar.low : bar.high), 0)
+      if (edge === null || !Number.isFinite(edge)) continue
+      const dx = Math.abs(x - this.chart.timeScale.indexToX(index))
+      const dy = Math.abs(y - (edge + (buy ? TAG_OFFSET_PX : -TAG_OFFSET_PX)))
+      if (dx > TAG_REACH_PX || dy > TAG_REACH_PX) continue
+      const far = Math.hypot(dx, dy)
+      if (!best || far < best.far) best = { id: marker.id, far }
+    }
+    return best?.id ?? null
+  }
+
   /** The candles as loaded, their times in UTC seconds, oldest first (M14.8). */
   barTimes(): number[] {
     return this.bars.map((bar) => bar.time)
@@ -640,7 +705,9 @@ export class PhoneChart {
     }
     if (this.overlays.markers.length || this.markerLayer) {
       this.markerLayer ??= this.price.createMarkers(() => this.bars)
-      this.markerLayer.setMarkers(this.overlays.markers.map(markerLook))
+      const spacing = this.chart.timeScale.barSpacing
+      this.tagsShort = this.shortTags(spacing)
+      this.markerLayer.setMarkers(this.overlays.markers.map((mark) => markerLook(mark, spacing)))
       // A mark over the highest candle or under the lowest needs room in the pane (M14.8).
       const room = this.overlays.markers.length ? MARK_ROOM : PLAIN_ROOM
       this.price.priceScale().setOptions({ marginTop: room, marginBottom: room })
@@ -648,17 +715,29 @@ export class PhoneChart {
     this.measureOverlays()
   }
 
+  /** Which tags are written short at this candle width: one character a mark. */
+  private shortTags(spacing: number): string {
+    return this.overlays.markers
+      .map((mark) => (tagText(mark, spacing) === mark.text ? '0' : '1'))
+      .join('')
+  }
+
   /**
-   * Read each line's y again and tell the labels when one moved. Asked after
-   * every paint of the candles' pane (the tap below), a microtask later, so
-   * nothing is measured while the engine is drawing.
+   * Read each line's y again and tell the labels when one moved, and lay the
+   * marks again when a zoom changed which tags have room for their price.
+   * Asked after every paint of the candles' pane (the tap below), a microtask
+   * later, so nothing is measured or set while the engine is drawing.
    */
   private queueOverlayLayout(): void {
-    if (this.layoutQueued || !this.overlays.lines.length) return
+    if (this.layoutQueued) return
+    if (!this.overlays.lines.length && !this.overlays.markers.length) return
     this.layoutQueued = true
     queueMicrotask(() => {
       this.layoutQueued = false
-      if (!this.destroyed) this.measureOverlays()
+      if (this.destroyed) return
+      if (this.markerLayer && this.shortTags(this.chart.timeScale.barSpacing) !== this.tagsShort)
+        this.applyOverlays()
+      else this.measureOverlays()
     })
   }
 
@@ -1141,6 +1220,7 @@ export class PhoneChart {
     const inserted = next.length - this.bars.length
     this.bars = next
     this.draw()
+    if (inserted !== 0) this.tellBars()
     if (snapshot.reason === 'prepend' && before && inserted > 0)
       this.chart.setVisibleLogicalRange({ from: before.from + inserted, to: before.to + inserted })
   }
@@ -1442,6 +1522,7 @@ export class PhoneChart {
     else this.drawBar(update.bar)
     // A new bar may be the session's last, which the countdown must not overshoot.
     if (update.isNew) this.syncCountdown()
+    if (update.isNew || redraw) this.tellBars()
   }
 
   private startFallback(): void {
@@ -1516,13 +1597,16 @@ function lineLook(line: OverlayLine) {
 }
 
 /**
- * A mark at a bar: an arrow up under a buy, down over a sell, in the side's
- * colour. A triangle (the trade markers, M14.8) is drawn a size up, so its
- * letter and price read on a phone outdoors.
+ * A mark at a bar, in the side's colour: an arrow up under a buy, down over a
+ * sell; or a tag (the trade markers, M14.8), a filled plate with its letter
+ * and a point at the candle. A glyph shrinks with the candles and a tag does
+ * not, so its letter reads on 1-minute candles on a phone outdoors; its price
+ * is written only where one candle is wide enough to hold it (review L4).
  */
-function markerLook(marker: OverlayMarker) {
+function markerLook(marker: OverlayMarker, spacing: number) {
   const buy = marker.side === 'BUY'
-  const triangle = marker.shape === 'triangle'
+  const tag = marker.shape === 'tag' && !!marker.text
+  const text = tagText(marker, spacing)
   return {
     id: marker.id,
     time: marker.time,
@@ -1533,16 +1617,17 @@ function markerLook(marker: OverlayMarker) {
           : ('aboveBar' as const)
         : ('atPrice' as const),
     ...(marker.price === undefined ? {} : { price: marker.price }),
-    shape: triangle
+    shape: tag
       ? buy
-        ? ('triangleUp' as const)
-        : ('triangleDown' as const)
+        ? ('labelUp' as const)
+        : ('labelDown' as const)
       : buy
         ? ('arrowUp' as const)
         : ('arrowDown' as const),
-    size: triangle ? ('medium' as const) : ('small' as const),
+    size: tag ? ('medium' as const) : ('small' as const),
     color: resolveCssColor(`var(${buy ? '--buy-solid' : '--sell-solid'})`),
-    ...(marker.text ? { text: marker.text } : {}),
+    ...(tag ? { fontSize: TAG_FONT_PX, bold: true } : {}),
+    ...(text ? { text } : {}),
   }
 }
 

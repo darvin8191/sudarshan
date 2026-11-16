@@ -43,6 +43,10 @@ The surface keeps its own claims (the strategy module's ``claim_leg_exit`` is un
 refusal here is a refused dispatch, which releases that claim as any other refusal does, and the
 leg stays open and managed). The sandbox is left alone: its book shows an exit the moment it is
 placed.
+
+A surface that may send the exit itself after a refusal passes ``tries_again`` (``worded``): a
+refusal that sends the trader to the Upstox app then says to close there with a market order,
+never a limit order left waiting, because SUDARSHAN's own exit can still go and both would fill.
 """
 
 from __future__ import annotations
@@ -113,6 +117,23 @@ def _held_answer(said: str, status: int = 409, why: str = "") -> Answer:
     return False, body, status
 
 
+def worded(answer: Answer, tries_again: bool = False) -> Answer:
+    """``answer`` in the words of the surface it goes to (v0.15.0 verify V1b).
+
+    As it came for a surface that sends nothing more after a refusal. For one that may send the
+    exit itself afterwards (``tries_again``: a strategy run, a scalping close with a stop or
+    target set), a refusal of ``exit_once``'s own that sends the trader to the Upstox app says
+    how to close there without a second fill (``exit_guard.while_tried``). Only the words change:
+    the memory of a refusal (``REFUSALS``) keeps the shared words, for every surface alike.
+    """
+    ok, response, status = answer
+    if not tries_again or ok or not isinstance(response, dict) or response.get(HELD) is not True:
+        return answer
+    said = str(response.get("message") or "")
+    tried = exit_guard.while_tried(said)
+    return answer if tried == said else (ok, {**response, "message": tried}, status)
+
+
 @dataclass(frozen=True)
 class Book:
     """Upstox's two books as one close needs them: the positions rows read first, the order book
@@ -175,16 +196,23 @@ REFUSALS = _Refusals()
 
 
 def kept_refusal(
-    book: str, exchange: object, symbol: object, product: object, side: object
+    book: str,
+    exchange: object,
+    symbol: object,
+    product: object,
+    side: object,
+    *,
+    tries_again: bool = False,
 ) -> Answer | None:
     """The sizing refusal ``exit_once`` would answer from its memory, without a read and without
     a send; None when it would read the books. For a surface that writes a row before each
     dispatch (the strategy module): a close tried again on every tick then writes nothing while
-    the answer is only being repeated."""
+    the answer is only being repeated. ``tries_again``: in that surface's words (``worded``)."""
     if book != "live":
         return None
     position = exit_guard.position_of(exchange, symbol, product)
-    return REFUSALS.get((book, position, str(side or "").strip().upper()))
+    kept = REFUSALS.get((book, position, str(side or "").strip().upper()))
+    return None if kept is None else worded(kept, tries_again)
 
 
 def closable(side: object, held_now: int) -> int:
@@ -381,6 +409,7 @@ def exit_once(
     quantity: object = None,
     read_book: BookReader | None = None,
     resize: Callable[[int], None] | None = None,
+    tries_again: bool = False,
 ) -> Answer:
     """Send one exit of a position that its surface sized itself, one at a time per position.
 
@@ -402,6 +431,9 @@ def exit_once(
             sent when the quantity cannot be confirmed held, and never more than is held.
         resize: Sets the order ``send`` places to a smaller quantity; called before ``send`` when
             less is held than the surface asked for. Without it such a close sends nothing.
+        tries_again: True for a surface that tries a refused exit again by itself (the strategy
+            module keeps the leg managed): its refusals are said in its own words (``worded``).
+            What is sent, read, claimed and kept is the same either way.
 
     Returns:
         ``send``'s own answer (with ``sent_quantity`` when it was made smaller); or
@@ -414,7 +446,7 @@ def exit_once(
     with exit_guard.EXITS.one(book, position) as busy:
         if busy:
             logger.warning(f"Exit for {position[1]} not sent: an exit for it is on its way")
-            return _held_answer(busy, why=BUSY)
+            return worded(_held_answer(busy, why=BUSY), tries_again)
         send_quantity = None
         if read_book is None:
             if position in exit_guard.EXITS.placed_lately(book):
@@ -422,12 +454,12 @@ def exit_once(
                 said = exit_guard.EXITS.hold_verdict(book, position, read)
                 if said:
                     logger.warning(f"Exit for {position[1]} not sent: an earlier exit is not ended")
-                    return _held_answer(said, why=EARLIER)
+                    return worded(_held_answer(said, why=EARLIER), tries_again)
         else:
             key = (book, position, str(side or "").strip().upper())
             kept = REFUSALS.get(key)
             if kept is not None:
-                return kept
+                return worded(kept, tries_again)
             try:
                 read = read_book(exchange, symbol, product, side)
             except Exception:
@@ -437,14 +469,15 @@ def exit_once(
                 said = exit_guard.EXITS.hold_verdict(book, position, read.statuses)
                 if said:
                     logger.warning(f"Exit for {position[1]} not sent: an earlier exit is not ended")
-                    return _held_answer(said, why=EARLIER)
+                    return worded(_held_answer(said, why=EARLIER), tries_again)
             if read.sized:
                 send_quantity, refusal = sized(position, side, quantity, read)
                 if refusal is None and send_quantity != int(quantity) and resize is None:
                     refusal = (exit_guard.exit_not_sized(position), 424, UNCONFIRMED)
                 if refusal is not None:
                     logger.warning(f"Exit for {position[1]} not sent: its size is not confirmed")
-                    return REFUSALS.keep(key, _held_answer(*refusal))
+                    # The memory keeps the shared words; each surface gets its own on the way out.
+                    return worded(REFUSALS.keep(key, _held_answer(*refusal)), tries_again)
                 if send_quantity != int(quantity):
                     logger.warning(
                         f"Exit for {position[1]} made smaller: {send_quantity} is held, "

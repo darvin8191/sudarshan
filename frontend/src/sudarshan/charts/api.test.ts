@@ -45,15 +45,33 @@ describe('the switch', () => {
     expect(net.calls.map((c) => c.path)).toEqual([`${CHARTS_API}/state`])
   })
 
-  it('read as off, or not read at all, is asked again only after five minutes', async () => {
-    const net = fakeFetch({ [`${CHARTS_API}/state`]: [OFF, new TypeError('offline'), ON] })
+  // Review L2: an answered off is kept for the visit; only a read with no answer is tried again.
+  it('answered off is asked once for the visit, never again every few minutes', async () => {
+    const net = fakeFetch({ [`${CHARTS_API}/state`]: [OFF, ON] })
+    const api = chartsApi(net.fn)
+    expect(api.state?.()).toBeNull()
+    await expect(api.enabled()).resolves.toBe(false)
+    expect(api.state?.()).toBe(false)
+    vi.advanceTimersByTime(60 * 60_000)
+    await expect(api.enabled()).resolves.toBe(false)
+    expect(net.calls).toHaveLength(1)
+  })
+
+  it('not read at all is off for now, not known, and asked again after five minutes', async () => {
+    const net = fakeFetch({
+      [`${CHARTS_API}/state`]: [new TypeError('offline'), { status: 502, text: '<html>' }, ON],
+    })
     const api = chartsApi(net.fn)
     await expect(api.enabled()).resolves.toBe(false)
+    expect(api.state?.()).toBeNull()
     await expect(api.enabled()).resolves.toBe(false)
+    expect(net.calls).toHaveLength(1)
     vi.advanceTimersByTime(5 * 60_000)
-    await expect(api.enabled()).resolves.toBe(false) // no answer: off for now
+    await expect(api.enabled()).resolves.toBe(false) // a proxy's page is no answer either
+    expect(api.state?.()).toBeNull()
     vi.advanceTimersByTime(5 * 60_000)
     await expect(api.enabled()).resolves.toBe(true)
+    expect(api.state?.()).toBe(true)
     expect(net.calls).toHaveLength(3)
   })
 
@@ -65,6 +83,7 @@ describe('the switch', () => {
     const read = await api.read('drawings', 'NSE:SBIN')
     expect(read).toEqual({ ok: false, problem: { code: 'off', message: 'Switched off.' } })
     await expect(api.enabled()).resolves.toBe(false)
+    expect(api.state?.()).toBe(false)
   })
 
   it('asks with the page’s own session and never a cached answer', async () => {

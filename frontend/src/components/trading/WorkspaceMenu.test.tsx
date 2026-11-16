@@ -35,9 +35,11 @@ const payload = {
     },
   ],
 }
-function harness(failWrite = false, transitionPending = false) {
+function harness(failWrite = false, transitionPending = false, onServer = false) {
   let value: WorkspaceCatalog | null = null
   const storage: IndexedDbWorkspaceStorage = {
+    // SUDARSHAN M4.18: a storage that says the server keeps the layouts.
+    ...(onServer ? { serverKeeps: () => true } : {}),
     async read() {
       return structuredClone(value)
     },
@@ -95,6 +97,25 @@ async function open() {
 afterEach(() => vi.restoreAllMocks())
 
 describe('named workspace menu', () => {
+  // SUDARSHAN M4.18 (review M3): the dialog says where the layouts are actually kept.
+  it('says the layouts are in this browser while the server does not keep them', async () => {
+    harness()
+    await open()
+    expect(screen.getByRole('dialog')).toHaveTextContent(
+      'Save the complete chart grid for your account in this browser.'
+    )
+  })
+  it('says the layouts are kept on the server once it keeps them', async () => {
+    harness(false, false, true)
+    await open()
+    const dialog = screen.getByRole('dialog')
+    await waitFor(() =>
+      expect(dialog).toHaveTextContent(
+        'Layouts are kept on the server, so your other devices open the same ones.'
+      )
+    )
+    expect(dialog).not.toHaveTextContent('in this browser')
+  })
   it('keeps cancellation accessible inside the modal while chart loading blocks other actions', async () => {
     const host = harness(false, true),
       user = await open()

@@ -7,6 +7,11 @@
  *   repository sees anything, and a write is sent on after it has landed here. So the tier's own
  *   revision checks, conflicts between two tabs included, work exactly as before.
  * - **Switched off, offline or refused**, this is the IndexedDB storage and nothing more.
+ * - **The terminal never waits for the switch** (review L2). While this visit has not heard the
+ *   server's answer, a load gives this browser's catalogue at once and a save lands here at once;
+ *   the switch is asked in the background. Only a browser that saw the switch on at its last
+ *   visit waits for the answer, because there the server's copy is the one to open. When a late
+ *   answer says on, `whenServerKeeps` listeners hear it and the hook loads again to settle.
  * - **A record per catalogue** (`sudarshan-charts-sync:workspace:<key>`) holds the server's
  *   revision, this browser's revision and the time at their last agreement.
  *   - The server moved and nothing changed here: its catalogue is written here as the next one.
@@ -41,9 +46,15 @@ const SAID: ReadonlySet<Problem['code']> = new Set([
 export interface SyncedWorkspaceStorage extends IndexedDbWorkspaceStorage {
   /** What to tell the owner about the last settle, once; null when there is nothing to say. */
   notice(): string | null
+  /** Whether the server keeps the layouts, as far as this visit knows: where they are saved. */
+  serverKeeps(): boolean
+  /** Hear a switch found on after a load already gave this browser's copy; returns the undo. */
+  whenServerKeeps(listener: () => void): () => void
 }
 
 type Store = Pick<Storage, 'getItem' | 'setItem'>
+/** Whether this browser saw the switch on when it last heard the server's answer. */
+const SEEN_ON_KEY = 'sudarshan-charts-sync:seen-on'
 type Saved = WorkspaceDocument | IndicatorTemplateDocument
 interface Agreement {
   s: number
@@ -121,6 +132,51 @@ export function syncedWorkspaceStorage(
   const storage = options.storage === undefined ? localStore() : options.storage
   const now = options.now ?? Date.now
   let pending: string | null = null
+  const late = new Set<() => void>()
+
+  const seenOn = () => {
+    try {
+      return storage?.getItem(SEEN_ON_KEY) === '1'
+    } catch {
+      return false
+    }
+  }
+  const remember = (on: boolean) => {
+    try {
+      if (seenOn() !== on) storage?.setItem(SEEN_ON_KEY, on ? '1' : '0')
+    } catch {
+      /* storage full or blocked: asked the slow way never, the quick way always */
+    }
+  }
+  /**
+   * The switch without waiting, where that is safe: the visit's own answer; else null (ask and
+   * wait) for a client that cannot say, or for a browser that last saw it on.
+   */
+  function quick(): boolean | null {
+    if (!api.state) return null
+    const known = api.state()
+    if (known !== null) {
+      remember(known)
+      return known
+    }
+    if (seenOn()) return null
+    // Not known, and off when last heard: this browser's copy now, the answer afterwards.
+    void api.enabled().then(
+      (on) => {
+        if (api.state?.() !== null) remember(on)
+        if (on) for (const listener of [...late]) listener()
+      },
+      () => {}
+    )
+    return false
+  }
+  async function on(): Promise<boolean> {
+    const known = quick()
+    if (known !== null) return known
+    const answer = await api.enabled()
+    if (!api.state || api.state() !== null) remember(answer)
+    return answer
+  }
 
   const keyOf = (namespace: string) => encodeURIComponent(namespace)
   function record(key: string): Agreement | null {
@@ -212,7 +268,7 @@ export function syncedWorkspaceStorage(
     async read(namespace) {
       const raw = await local.read(namespace)
       try {
-        if (!(await api.enabled())) return raw
+        if (!(await on())) return raw
         return await settle(namespace, raw)
       } catch {
         return local.read(namespace) // the server never fails a load: this browser's copy
@@ -221,7 +277,7 @@ export function syncedWorkspaceStorage(
     async write(namespace, catalog, expectedRevision, writeOptions) {
       await local.write(namespace, catalog, expectedRevision, writeOptions)
       try {
-        if (!(await api.enabled())) return
+        if (!(await on())) return
         await send(keyOf(namespace), record(keyOf(namespace))?.s ?? 0, catalog)
       } catch {
         /* landed here; sent again with the next save or load */
@@ -233,6 +289,13 @@ export function syncedWorkspaceStorage(
       pending = null
       return said
     },
+    serverKeeps: () => (api.state ? api.state() === true : seenOn()),
+    whenServerKeeps(listener) {
+      late.add(listener)
+      return () => {
+        late.delete(listener)
+      }
+    },
   }
 }
 
@@ -240,4 +303,16 @@ export function syncedWorkspaceStorage(
 export function storageNotice(storage: unknown): string | null {
   const notice = (storage as Partial<SyncedWorkspaceStorage> | null)?.notice
   return typeof notice === 'function' ? notice.call(storage) : null
+}
+
+/** Whether a storage keeps the layouts on the server now (any other storage: this browser). */
+export function storageOnServer(storage: unknown): boolean {
+  const keeps = (storage as Partial<SyncedWorkspaceStorage> | null)?.serverKeeps
+  return typeof keeps === 'function' ? keeps.call(storage) === true : false
+}
+
+/** Hear a storage find its switch on after a load; the undo (any other storage: nothing). */
+export function whenStorageOnServer(storage: unknown, listener: () => void): () => void {
+  const hear = (storage as Partial<SyncedWorkspaceStorage> | null)?.whenServerKeeps
+  return typeof hear === 'function' ? hear.call(storage, listener) : () => {}
 }
