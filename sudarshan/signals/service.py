@@ -175,6 +175,8 @@ class Service:
         #: moved, so /health never waits for SQLite.
         self.today: dict[str, int] = {}
         self._today_day = None
+        #: When a document of a newer format than this release reads was last seen.
+        self.newer_format_ms: int | None = None
 
     # ---- what the ops and /health see ----------------------------------------------------------
     @property
@@ -265,6 +267,7 @@ class Service:
         self.current = await self.store.call(self.store.current)
         self.last = await self.store.call(self.store.last)
         self.prefs = await self.store.call(self.store.settings)
+        self.newer_format_ms = await self.store.call(self.store.meta_get, "newer_format_ms")
 
     async def _serve_api(self) -> None:
         """Bind the port; while it is taken say so and try again every minute; then hold it."""
@@ -395,6 +398,7 @@ class Service:
             store.record(found.name, received_ms=now, size=found.size, verdict="newer_format",
                          written_ms=found.written_ms, counter="newer_format")  # fmt: skip
             store.meta_set("newer_format_ms", now)
+            self.newer_format_ms = now
             box.keep(found)
             self._warn("newer", "TRINETRA publishes a newer format (version %d) than this release "
                        "reads; the files are left for a later release", got.v)  # fmt: skip
