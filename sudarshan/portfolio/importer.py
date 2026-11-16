@@ -268,29 +268,41 @@ def _read(
         if asset["id"] in holdings and not asset["symbol"]:
             named.setdefault(_plain_name(asset["name"]), []).append(asset["id"])
 
-    def resolve(symbol: str, exchange: str, isin: str) -> int | None:
-        found = book_asset("symbol", symbol) or book_asset("isin", isin)
-        own = named.get(_plain_name(symbol), []) if symbol.strip() else []
-        if found is not None:
-            if own and found not in own and not exchange.strip() and not isin.strip():
-                # A row that could mean either is not guessed: the ledger would be another one.
-                raise RowProblem(NAME_AND_SYMBOL.format(name=words.shown(symbol)))
-            return found
-        if len(own) > 1:
-            raise RowProblem(NAME_TWICE.format(name=words.shown(symbol)))
-        if own:
-            return own[0]
+    def listing_of(symbol: str, exchange: str):
+        """What the master contract calls the symbol, or None (an unreadable one knows nothing)."""
         if resolver is None or not symbol.strip():
             return None
-        # Not in the book by name: the master contract may know the symbol's ISIN, and the book
-        # may hold that ISIN (an old one kept as an alias) under another symbol.
         for place in (exchange.strip().upper(),) if exchange.strip() else ("NSE", "BSE"):
             try:
                 listing = resolver.find(symbol, place)
             except Exception:  # an unreadable master contract only means "not found"
                 return None
-            if listing is not None and listing.isin:
-                return book_asset("isin", listing.isin)
+            if listing is not None:
+                return listing
+        return None
+
+    def resolve(symbol: str, exchange: str, isin: str) -> int | None:
+        found = book_asset("symbol", symbol) or book_asset("isin", isin)
+        # A name is tried only for a row that says nothing else: an exchange or an ISIN means a
+        # listed share, whatever the owner has called a holding of his own.
+        bare = bool(symbol.strip()) and not exchange.strip() and not isin.strip()
+        own = named.get(_plain_name(symbol), []) if bare else []
+        if found is not None:
+            if own and found not in own:
+                # A row that could mean either is not guessed: the ledger would be another one.
+                raise RowProblem(NAME_AND_SYMBOL.format(name=words.shown(symbol)))
+            return found
+        listing = listing_of(symbol, exchange)
+        if own:
+            if listing is not None:  # the share is not in the book yet, and still it is one
+                raise RowProblem(NAME_AND_SYMBOL.format(name=words.shown(symbol)))
+            if len(own) > 1:
+                raise RowProblem(NAME_TWICE.format(name=words.shown(symbol)))
+            return own[0]
+        # Not in the book by name: the master contract may know the symbol's ISIN, and the book
+        # may hold that ISIN (an old one kept as an alias) under another symbol.
+        if listing is not None and listing.isin:
+            return book_asset("isin", listing.isin)
         return None
 
     rows = tx.entries(tab_id)

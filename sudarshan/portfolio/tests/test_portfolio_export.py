@@ -500,3 +500,33 @@ async def test_the_entries_on_paper_carry_the_note(rig):
     names = {a["id"]: a["name"] for a in rig.book.accounts(OWNER)}
     sheet = export.entries({"id": 1, "name": "T", "name_alt": None}, [], names, {}, NOW)
     assert sheet.notes == (export.ENTRIES_NOTE,)
+
+
+@scenario_of
+async def test_a_row_for_a_listed_share_never_lands_on_a_typed_holding_of_its_name(rig):
+    """Re-check N1: with a typed holding named "TCS" and the listed TCS not yet in the list, a
+    row BUY,TCS was booked to the typed holding, even when it carried the exchange or an ISIN."""
+    on(rig)
+    typed = rig.book.asset_create(OWNER, "g-1", "manual", now=NOW, name="TCS", asset_class="other")
+    rig.book.asset_create(OWNER, "g-2", "manual", now=NOW, name="Gold bar", asset_class="gold")
+    head = "date,action,symbol,exchange,isin,quantity,price,amount,account\r\n"
+    rows = (
+        "2026-10-01,BUY,TCS,,,1,100,100,Zerodha\r\n"  # the instrument list knows TCS too
+        "2026-10-01,BUY,TCS,NSE,,1,100,100,Zerodha\r\n"  # an exchange: a listed share
+        "2026-10-01,BUY,TCS,,INE467B01029,1,100,100,Zerodha\r\n"  # an ISIN: a listed share
+        "2026-10-01,BUY,Gold bar,NSE,,1,100,100,Zerodha\r\n"  # a name is no exchange's symbol
+        "2026-10-01,BUY,Gold bar,,,1,100,100,Zerodha\r\n"
+    )
+    shown = (await rig.preview(head + rows))["data"]
+    said = {row["row"]: row["words"] for row in shown["rows"] if row["status"] == "bad"}
+    landed = {row["row"]: row["entry"]["asset_id"] for row in shown["rows"]
+              if row["status"] == "new"}  # fmt: skip
+    assert typed["id"] not in landed.values(), shown
+    assert said[2] == (
+        "Row 2: TCS is both a listed symbol and a holding you named yourself. Add the "
+        "exchange (NSE or BSE) to the row for the listed one, or rename your own holding."
+    )
+    not_listed = "is not in today's instrument list. Check the symbol."
+    assert said[3] == f"Row 3: TCS {not_listed}" and said[4] == f"Row 4: TCS {not_listed}"
+    assert said[5] == f"Row 5: Gold bar {not_listed}"
+    assert list(landed) == [6] and (shown["rows_new"], shown["rows_bad"]) == (1, 4)
