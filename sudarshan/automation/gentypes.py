@@ -65,6 +65,7 @@ def render() -> str:
         "Strategy": c.STRATEGY,
         "AlertLine": c.ALERT,
         "SandboxRun": c.SANDBOX_RUN,
+        "HeldBook": c.HELD_BOOK,
         "AlertMessages": c.ALERT_MESSAGES,
         "OtherAutomation": c.OTHER,
         "AutomationEvent": c.EVENT_FIELDS,

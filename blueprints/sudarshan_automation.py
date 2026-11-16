@@ -166,7 +166,7 @@ def _one(strategy, store_, desk, **more):
     return jsonify(
         {
             "status": "success",
-            "strategy": control.view(strategy, store_, now_ms),
+            "strategy": control.view(strategy, store_, now_ms, book=desk.held_book),
             "messages": messages.for_strategy(strategy),
             **more,
         }

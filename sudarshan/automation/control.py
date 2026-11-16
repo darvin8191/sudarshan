@@ -297,11 +297,15 @@ def alert_line(row: dict[str, Any], name: str, now_ms: int) -> dict[str, Any]:
     return line
 
 
-def view(strategy: m.Strategy, store: AutomationStore, now_ms: int, trading=None) -> dict[str, Any]:
+def view(
+    strategy: m.Strategy, store: AutomationStore, now_ms: int, trading=None, book=None
+) -> dict[str, Any]:
     """One strategy as the page reads it (contract.STRATEGY). Never a token or its hash.
 
     ``trading`` says whether the market traded on a date; with it, an Active strategy that has
     had no alert since it last heard one (or since it was started) carries the trading days gone.
+    ``book`` reads the held contract's row in the book of the strategy's mode (``Desk.held_book``,
+    GA10.4); asked only while something is held, and only reads.
     """
     state, held_note = held_today(strategy, store.state(strategy.id), now_ms)
     last = store.last_alert(strategy.id)
@@ -323,7 +327,12 @@ def view(strategy: m.Strategy, store: AutomationStore, now_ms: int, trading=None
         last_alert=alert_line(last, strategy.name, now_ms) if last else None,
         sandbox_run=store.sandbox_run(strategy.id),
         quiet_days=quiet,
+        held_book=None,
     )
+    if book is not None and state.held_symbol and state.held_exchange:
+        out["held_book"] = book(
+            strategy.mode, state.held_exchange, state.held_symbol, strategy.product
+        )
     return out
 
 
@@ -370,7 +379,8 @@ def listing(*, desk: Desk | None = None, store: AutomationStore | None = None) -
         "kill_switch_on": desk.kill_switch_on(),
         "notes": notes,
         "strategies": [
-            view(strategy, store, now_ms, desk.trading_day) for strategy in store.strategies()
+            view(strategy, store, now_ms, desk.trading_day, desk.held_book)
+            for strategy in store.strategies()
         ],
     }
 
