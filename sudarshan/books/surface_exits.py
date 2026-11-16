@@ -92,8 +92,25 @@ def held(response: Any, status: int) -> bool:
     return status in (409, 424) and isinstance(response, dict) and response.get(HELD) is True
 
 
-def _held_answer(said: str, status: int = 409) -> Answer:
-    return False, {"status": "error", "message": said, "nothing_sent": True, HELD: True}, status
+#: Why ``exit_once`` sent nothing, as ``why`` in its answer (``sudarshan.books.held_exits`` reads
+#: it to decide what the trader is told): another exit is being placed; an earlier one is not
+#: seen ended; a market order works on the closing side; the size could not be confirmed; and
+#: what the books say when they do answer: nothing held, held the other way, held in another
+#: product.
+BUSY, EARLIER, WORKING = "busy", "earlier", "working"
+UNCONFIRMED, NO_POSITION, OTHER_WAY, ELSEWHERE = (
+    "unconfirmed",
+    "no_position",
+    "other_way",
+    "elsewhere",
+)
+
+
+def _held_answer(said: str, status: int = 409, why: str = "") -> Answer:
+    body = {"status": "error", "message": said, "nothing_sent": True, HELD: True}
+    if why:
+        body["why"] = why
+    return False, body, status
 
 
 @dataclass(frozen=True)
@@ -157,6 +174,19 @@ class _Refusals:
 REFUSALS = _Refusals()
 
 
+def kept_refusal(
+    book: str, exchange: object, symbol: object, product: object, side: object
+) -> Answer | None:
+    """The sizing refusal ``exit_once`` would answer from its memory, without a read and without
+    a send; None when it would read the books. For a surface that writes a row before each
+    dispatch (the strategy module): a close tried again on every tick then writes nothing while
+    the answer is only being repeated."""
+    if book != "live":
+        return None
+    position = exit_guard.position_of(exchange, symbol, product)
+    return REFUSALS.get((book, position, str(side or "").strip().upper()))
+
+
 def closable(side: object, held_now: int) -> int:
     """How much of ``held_now`` (signed) an order on ``side`` closes: a SELL closes a long, a BUY
     a short; 0 when the position is flat or held the way the order would add to."""
@@ -172,19 +202,19 @@ def sized(position: tuple[str, str, str], side: object, quantity: object, book: 
     """What one close may send, from Upstox's books. Performs no I/O.
 
     Returns:
-        ``(quantity to send, None)``; or ``(0, (sentence, status))`` when nothing is sent. The
-        quantity is never more than the surface asked for.
+        ``(quantity to send, None)``; or ``(0, (sentence, status, why))`` when nothing is sent.
+        The quantity is never more than the surface asked for.
     """
     try:
         asked = int(quantity)
     except (TypeError, ValueError):
         asked = 0
     if not book.positions_read:
-        return 0, (exit_guard.positions_not_read(position), 424)
+        return 0, (exit_guard.positions_not_read(position), 424, UNCONFIRMED)
     if book.held is None or asked <= 0:
-        return 0, (exit_guard.exit_not_sized(position, book.orders_read), 424)
+        return 0, (exit_guard.exit_not_sized(position, book.orders_read), 424, UNCONFIRMED)
     if book.working:
-        return 0, (exit_guard.market_exit_working(position, list(book.working)), 409)
+        return 0, (exit_guard.market_exit_working(position, list(book.working)), 409, WORKING)
     left = closable(side, book.held)
     if left:
         return min(asked, left), None
@@ -195,8 +225,9 @@ def sized(position: tuple[str, str, str], side: object, quantity: object, book: 
         if held_there and (held_there > 0) == closing
     }
     if other and not book.held:
-        return 0, (exit_guard.held_in_another_product(position, other), 409)
-    return 0, (exit_guard.nothing_left_to_close(position, book.held), 409)
+        return 0, (exit_guard.held_in_another_product(position, other), 409, ELSEWHERE)
+    why = OTHER_WAY if book.held else NO_POSITION
+    return 0, (exit_guard.nothing_left_to_close(position, book.held), 409, why)
 
 
 def not_confirmed(answer: Answer) -> Answer:
@@ -383,7 +414,7 @@ def exit_once(
     with exit_guard.EXITS.one(book, position) as busy:
         if busy:
             logger.warning(f"Exit for {position[1]} not sent: an exit for it is on its way")
-            return _held_answer(busy)
+            return _held_answer(busy, why=BUSY)
         send_quantity = None
         if read_book is None:
             if position in exit_guard.EXITS.placed_lately(book):
@@ -391,7 +422,7 @@ def exit_once(
                 said = exit_guard.EXITS.hold_verdict(book, position, read)
                 if said:
                     logger.warning(f"Exit for {position[1]} not sent: an earlier exit is not ended")
-                    return _held_answer(said)
+                    return _held_answer(said, why=EARLIER)
         else:
             key = (book, position, str(side or "").strip().upper())
             kept = REFUSALS.get(key)
@@ -406,11 +437,11 @@ def exit_once(
                 said = exit_guard.EXITS.hold_verdict(book, position, read.statuses)
                 if said:
                     logger.warning(f"Exit for {position[1]} not sent: an earlier exit is not ended")
-                    return _held_answer(said)
+                    return _held_answer(said, why=EARLIER)
             if read.sized:
                 send_quantity, refusal = sized(position, side, quantity, read)
                 if refusal is None and send_quantity != int(quantity) and resize is None:
-                    refusal = (exit_guard.exit_not_sized(position), 424)
+                    refusal = (exit_guard.exit_not_sized(position), 424, UNCONFIRMED)
                 if refusal is not None:
                     logger.warning(f"Exit for {position[1]} not sent: its size is not confirmed")
                     return REFUSALS.keep(key, _held_answer(*refusal))
