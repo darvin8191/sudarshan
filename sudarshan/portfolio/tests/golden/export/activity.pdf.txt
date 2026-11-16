@@ -16,4 +16,8 @@ DateTypeHoldingAccountQuantityPriceAmountCharges
 15 Sep 2026SellGold barZerodha1₹1,25,000.00₹200.00
 1 Oct 2026SellPlotZerodha1₹4,70,000.00
 2 Oct 2026FeeZerodha₹590.00
+Notes
+The entries CSV reads back through Import into a tab of this portfolio. It holds entries only: a holding you named yourself
+(gold, a plot, a deposit) must already be in your list under the same name, and the values you typed for it, loans and drafts are
+not in the file.
 Exported from SUDARSHAN. As of 26 Oct 2026, 13:03 IST.Page 1 of 1

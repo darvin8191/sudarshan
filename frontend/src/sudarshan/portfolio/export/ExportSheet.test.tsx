@@ -20,7 +20,7 @@ vi.mock('@/sudarshan/watchlist/openGuard', () => ({
 
 import { PortfolioError } from '../api'
 import type { TabInfo } from '../types'
-import { choices, EXPORTS_OFF, ExportSheet, WHOLE_TAB } from './ExportSheet'
+import { choices, ENTRIES_NOTE, EXPORTS_OFF, ExportSheet, WHOLE_TAB } from './ExportSheet'
 
 const TAB = { id: 4, name: 'Long term', version: 1 } as TabInfo
 const CSV = { filename: 'SUDARSHAN_Portfolio_Long-term_income_2026-11-14.csv', text: 'a' }
@@ -43,6 +43,16 @@ describe('what is offered', () => {
 })
 
 describe('the sheet', () => {
+  it('says under Entries what the file brings back and what it does not, and nowhere claims more', async () => {
+    // Review M4: gold, a plot and typed values were promised back and were refused by name.
+    render(<ExportSheet open onClose={() => {}} tab={TAB} on />)
+    expect(screen.queryByText(ENTRIES_NOTE)).toBeNull() // Holdings is chosen first
+    await userEvent.click(screen.getByRole('button', { name: 'Entries' }))
+    expect(screen.getByText(ENTRIES_NOTE)).toBeTruthy()
+    expect(ENTRIES_NOTE).toMatch(/values you typed for it, loans and drafts are not in the file/)
+    expect(document.body.textContent).not.toMatch(/same ledger/)
+  })
+
   it('downloads the view and format chosen, hands the file to the phone and closes', async () => {
     const close = vi.fn()
     render(<ExportSheet open onClose={close} tab={TAB} on />)

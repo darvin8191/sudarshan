@@ -476,7 +476,22 @@ the file, and answers the counts, the problem rows first in words, and the tab v
 drops a preview, or removes a committed import's rows if the tab stays valid (otherwise it is
 refused and names the entry that depends on them). A row's duplicate key is the format's own id,
 else a hash of its content plus its occurrence number in the file. `export_csv` writes the same
-generic format, so that exporting and importing into an empty tab gives the same ledger.
+generic format, so that exporting a tab and importing the file into an empty tab of the same
+portfolio gives the same entries, for every kind of holding a tab allows: a listed share is
+written and read by its symbol, exchange and ISIN, and a holding with no symbol (gold, a plot, a
+deposit, a fund kept without an ISIN) by its name.
+
+What the entries file does not bring back, because it holds entries and nothing else:
+
+- **The holdings themselves.** A row naming a holding the book does not have is refused by name
+  ("... is not in today's instrument list"). Into another portfolio (a new server, say), a holding
+  the owner named himself must first be added to the list under the same name.
+- **The values typed for a holding** (its price points) and **loans**. In the same portfolio they
+  are still there, since a holding is shared by every tab; they are not in the file.
+- **Drafts**, and the **breakdown of an entry's charges** (the total is written).
+- **A name that could mean two things.** A holding named exactly like a listed symbol that is
+  also in the list, on a row with no exchange and no ISIN, is refused with a sentence; so is a
+  name two of the owner's holdings share (a fund and a typed holding, or two funds). Rename one.
 
 ## Ledger, valuation, performance, allocation, imports
 

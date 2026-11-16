@@ -6,7 +6,8 @@ SUDARSHAN, light look. Nothing of the renderer is changed; this module only impo
 (``journal/render/doc.py`` and ``pdf.py``).
 
 Never colour alone: a gain or a loss is printed with its sign and has a filled box beside it
-with its word (PROFIT, LOSS, FLAT); every other sum of money is plain ink, with a true minus
+with its word (PROFIT, LOSS, FLAT); a holding with no price yet has no result to print, so its
+gain reads "no price" and has no box; every other sum of money is plain ink, with a true minus
 when it is below zero. A percentage is printed to two decimals; the CSV keeps all four. A
 table's Note column is printed as whole sentences under the table, never cut to a cell's width.
 The renderer cuts a cell that is wider than its column and ends it with "...": the columns
@@ -76,8 +77,11 @@ def _cells(row: tuple, keep: list[int], chips: set[int], bold: bool = False) -> 
         cell = row[at]
         if at == 0 and isinstance(cell, str):
             cell = _title(cell)  # "XIRR %" is a row's label too; its value says the percent
-        gain = isinstance(cell, export.Gain) and cell.paise is not None
-        out.append(D.Money(cell.paise) if gain else D.Ink(text_of(cell), bold))
+        gain = isinstance(cell, export.Gain) and cell.paise is not None and not cell.unpriced
+        if isinstance(cell, export.Gain) and cell.unpriced:
+            out.append(D.Ink(export.WORDS["no_price"], bold))
+        else:
+            out.append(D.Money(cell.paise) if gain else D.Ink(text_of(cell), bold))
         if at in chips:
             out.append(D.Chip(D.Money(cell.paise).result) if gain else "")
     return tuple(out)
