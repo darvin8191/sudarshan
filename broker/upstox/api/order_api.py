@@ -683,7 +683,7 @@ def place_smartorder_api(data, auth):
                     # It takes no claim, so it is never refused for being busy; only when the
                     # corrected figure shows that it reduces or crosses the position is it
                     # claimed, checked and held below, as any such order is. A call without the
-                    # mark (every other caller) makes no order book read, as before.
+                    # mark (every other caller) that adds makes no order book read, as before.
                     rows = _position_rows(symbol, exchange, auth)
                     orders = _read_order_rows(auth, exit_guard.EXIT_ORDERS_READ_S)
                     add_held = _held_products(rows, symbol, exchange, orders)
