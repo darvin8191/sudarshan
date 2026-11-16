@@ -61,11 +61,20 @@ def event(n, kind, ex_day=EX, ratio=None, isin=UPSTOX, amount_u=None) -> int:
 
 
 def record(n, day, **held) -> None:
-    """The Upstox account's closing record of a day: ``isin=shares``."""
+    """The Upstox account's closing record of a day: ``isin=shares``, at Rs 100 a share, with
+    its holdings' value beside the lines as the 15:55 record writes it."""
     lines = [
         {"instrument_key": f"NSE_EQ|{isin}", "qty": shares * U} for isin, shares in held.items()
     ]
-    n.svc.store.write(OWNER, lambda tx: tx.upstox_eod_put(day, {"read_at": NOW}, lines, NOW))
+    head = {"read_at": NOW, "holdings_value_paise": sum(held.values()) * 10_000}
+    n.svc.store.write(OWNER, lambda tx: tx.upstox_eod_put(day, head, lines, NOW))
+
+
+def partly_read(n, day) -> None:
+    """A closing record whose holdings could not be read: its positions answered, so the day
+    has a record with no holding lines and no holdings' value (eod.py: "partly read")."""
+    head = {"read_at": NOW, "holdings_value_paise": None, "positions_pnl_paise": 0}
+    n.svc.store.write(OWNER, lambda tx: tx.upstox_eod_put(day, head, [], NOW))
 
 
 def history(n, *trades, isin=UPSTOX, read_at=NOW) -> None:

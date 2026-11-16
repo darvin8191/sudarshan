@@ -188,7 +188,7 @@ def _mark_records(tx: Tx, of_year: dict[str, Any], today: int, previous_day) -> 
     upstox = next((a for a in tx.rows("account") if a["kind"] == "upstox"), None)
     if upstox is None or previous_day is None:
         return
-    record_days = [row["day"] for row in tx.rows("upstox_eod", "day")]
+    record_days = corpactions.holdings_days(tx)
     for line in [ln for payer in of_year["payers"] for ln in payer["lines"]]:
         if line["account_id"] != upstox["id"] or line["state"] != "expected":
             continue

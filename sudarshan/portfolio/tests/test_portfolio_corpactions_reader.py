@@ -133,7 +133,7 @@ async def test_the_instruments_are_what_is_held_and_what_was_traded(n):
                             isin="INE000D01013", name="Never bought")  # fmt: skip
 
     def seed(tx):
-        tx.upstox_eod_put(TODAY, {"read_at": NOW}, [
+        tx.upstox_eod_put(TODAY, {"read_at": NOW, "holdings_value_paise": 50_000}, [
             {"instrument_key": f"NSE_EQ|{UPSTOX}", "qty": 5_000_000},
             {"instrument_key": "NSE_INDEX|Nifty 50", "qty": 1},
         ], NOW)  # fmt: skip
@@ -141,6 +141,11 @@ async def test_the_instruments_are_what_is_held_and_what_was_traded(n):
         tx.report_put("trades", 2026, "EQ", "ok", NOW, None, {"rows": rows}, NOW)
 
     n.svc.store.write(OWNER, seed)
+    assert n.read(ca.known_isins) == {HELD, UPSTOX, TRADED}
+    # A later record whose holdings could not be read (no lines, no holdings' value) is no
+    # holdings record: the share held is still read (v0.13.0 verification M2).
+    partly = {"read_at": NOW, "holdings_value_paise": None, "positions_pnl_paise": 0}
+    n.svc.store.write(OWNER, lambda tx: tx.upstox_eod_put(TODAY + 1, partly, [], NOW))
     assert n.read(ca.known_isins) == {HELD, UPSTOX, TRADED}
     held_now = [{"isin": "INE000E01014"}, {"isin": None}]
     assert n.read(lambda tx: ca.known_isins(tx, held_now)) == {HELD, UPSTOX, TRADED, "INE000E01014"}

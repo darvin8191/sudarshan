@@ -105,11 +105,20 @@ def event_hash(event: dict[str, Any]) -> str:
     return hashlib.sha256(core.identity(event).encode("utf-8")).hexdigest()
 
 
+def holdings_days(tx: Tx) -> list[int]:
+    """The days of the Upstox account's closing records that hold its holdings, oldest first.
+    A record whose holdings could not be read (only its positions or its funds answered, so
+    ``holdings_value_paise`` is null and it has no holding lines) is not a holdings record: read
+    as one, it would say that the account held nothing that day (v0.13.0 verification M2)."""
+    return [row["day"] for row in tx.rows("upstox_eod", "day")
+            if row["holdings_value_paise"] is not None]  # fmt: skip
+
+
 def upstox_isins(tx: Tx, held_now: list[dict[str, Any]] | None = None) -> set[str]:
     """The ISINs of the Upstox account: held at its last closing record or at the last read of
     its holdings, or in its trade history."""
     found = {row.get("isin") for row in held_now or ()}
-    days = [row["day"] for row in tx.rows("upstox_eod", "day")]
+    days = holdings_days(tx)
     if days:
         lines = tx.rows("upstox_eod_holding", "instrument_key", day=days[-1])
         found |= {isin_of_key(line["instrument_key"]) for line in lines}
@@ -404,7 +413,7 @@ class Holdings:
         self.tx, self.today, self.now = tx, today, now
         self.assets = {a["isin"]: a for a in tx.rows("asset", kind="listed") if a["isin"]}
         self.tabs = [t for t in tx.rows("tab") if not t["system"] and not t["archived"]]
-        self.record_days = [row["day"] for row in tx.rows("upstox_eod", "day")]
+        self.record_days = holdings_days(tx)
         self.names = share_names(tx, held_now)
         self._records: dict[int, dict[str, int]] = {}
         self._moves: dict[int, dict[tuple[int, int], list[tuple[int, int]]]] = {}

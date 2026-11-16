@@ -269,7 +269,7 @@ def check(tx: Tx, today: int, now: int, lots: TaxLots | None = None, *, insights
     if not lots.ready or lots.read_at is None:
         return {**out, "state": "waiting", "words": WAITING_TRADES}
     last = add_days(day_of_instant(lots.read_at), -SETTLE_DAYS)
-    days = [row["day"] for row in tx.rows("upstox_eod", "day") if row["day"] <= last]
+    days = [day for day in corpactions.holdings_days(tx) if day <= last]
     if not days:
         return {**out, "state": "waiting", "words": WAITING_RECORD}
     day = days[-1]

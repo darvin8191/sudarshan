@@ -97,6 +97,16 @@ def marks(pack: dict) -> list[bool]:
     return [sale["to_check"] for key in lists for sale in pack["capital_gains"][key]]
 
 
+def holding(ctx, day: int, shares: int | None) -> None:
+    """The Upstox account's closing record of a day holding ``shares`` of the share, its
+    holdings' value beside the line as the 15:55 record writes it. None: a record whose
+    holdings could not be read (only its positions answered: no line and no value)."""
+    lines = [] if shares is None else [{"instrument_key": f"NSE_EQ|{ISIN}", "qty": shares * U}]
+    head = {"read_at": NOW, "positions_pnl_paise": 0,
+            "holdings_value_paise": None if shares is None else shares * 150_000}  # fmt: skip
+    ctx.store.write(OWNER, lambda tx: tx.upstox_eod_put(day, head, lines, NOW))
+
+
 def test_the_paper_checks_its_lots_against_the_holdings_and_marks_the_shares_sales(ctx):
     """Design p7 4.3. The year's history sells 10 of the share on 27 Oct. With 25 entered as
     bought before the records the lots hold 25 - 10 = 15; Upstox held 40 at the close of
@@ -108,8 +118,7 @@ def test_the_paper_checks_its_lots_against_the_holdings_and_marks_the_shares_sal
     assert marks(pack) == [False]
     call(ctx, "tax_input_set", kind="opening_lot", request_id="lot-1",
          row=lot(ctx, qty_u=25 * U, cost_paise=3_750_000))  # fmt: skip
-    lines = [{"instrument_key": f"NSE_EQ|{ISIN}", "qty": 40 * U}]
-    ctx.store.write(OWNER, lambda tx: tx.upstox_eod_put(20261112, {"read_at": NOW}, lines, NOW))
+    holding(ctx, 20261112, 40)
     pack = call(ctx, "tax_get")
     check = pack["lot_check"]
     assert (check["state"], check["day"], check["account_id"]) == ("ok", 20261112, ctx.upstox_id)
@@ -124,11 +133,7 @@ def test_the_paper_checks_its_lots_against_the_holdings_and_marks_the_shares_sal
     head, sale = text.splitlines()[3], text.splitlines()[4]
     assert head.endswith(",To check: lots and holdings differ") and sale.endswith(",To check")
     # 15 held: 25 - 10 = 15 in the lots, so they agree, and nothing is marked.
-    ctx.store.write(
-        OWNER,
-        lambda tx: tx.upstox_eod_put(20261112, {"read_at": NOW}, [{**lines[0], "qty": 15 * U}],
-                                     NOW),
-    )  # fmt: skip
+    holding(ctx, 20261112, 15)
     pack = call(ctx, "tax_get")
     assert (pack["lot_check"]["rows"], pack["lot_check"]["words"]) == ([], None)
     assert marks(pack) == [False]
@@ -143,8 +148,7 @@ def test_the_check_names_a_bonus_or_split_first_and_never_a_day_that_is_not_read
     cost for the bonus shares, before a day of years nobody read."""
     call(ctx, "tax_input_set", kind="opening_lot", request_id="lot-1",
          row=lot(ctx, qty_u=25 * U, cost_paise=3_750_000))  # fmt: skip
-    lines = [{"instrument_key": f"NSE_EQ|{ISIN}", "qty": 30 * U}]
-    ctx.store.write(OWNER, lambda tx: tx.upstox_eod_put(20261112, {"read_at": NOW}, lines, NOW))
+    holding(ctx, 20261112, 30)
     later = (
         "If the company gave a bonus or split its shares since you bought, do nothing: that is "
         "confirmed in the Calendar in a later release."
@@ -190,8 +194,7 @@ def test_the_check_is_carried_only_on_the_paper_of_the_upstox_accounts_member(ct
     the paper and the CSV that go to that member's CA."""
     call(ctx, "tax_input_set", kind="opening_lot", request_id="lot-1",
          row=lot(ctx, qty_u=25 * U, cost_paise=3_750_000))  # fmt: skip
-    lines = [{"instrument_key": f"NSE_EQ|{ISIN}", "qty": 40 * U}]
-    ctx.store.write(OWNER, lambda tx: tx.upstox_eod_put(20261112, {"read_at": NOW}, lines, NOW))
+    holding(ctx, 20261112, 40)
     assert len(call(ctx, "tax_get")["lot_check"]["rows"]) == 1  # the owner's paper
     other = ctx.store.write(OWNER, lambda tx: tx.insert("member", {"name": "B"}, NOW))["id"]
     pack = call(ctx, "tax_get", member=other)
@@ -201,6 +204,25 @@ def test_the_check_is_carried_only_on_the_paper_of_the_upstox_accounts_member(ct
     assert not [note for note in pack["notes"] if note.startswith("Lots and holdings differ")]
     text = call(ctx, "tax_csv", schedule="capital_gains", member=other)["text"]
     assert not [line for line in text.splitlines() if line.endswith(",To check")]
+
+
+def test_a_closing_record_whose_holdings_were_not_read_is_never_compared(ctx):
+    """v0.13.0 verification M2, its probe. The record of 12 Nov read the positions but not the
+    holdings: no line, no holdings' value. Old code took it for the day compared, as holding
+    nothing: "Upstox holds 0 and the lots say 15. A sale, a transfer out or a bonus or split may
+    be missing", that note first in the paper and every sale of the share marked to check. It
+    is no holdings record: the record of 11 Nov, holding the 15 the lots say, is compared."""
+    call(ctx, "tax_input_set", kind="opening_lot", request_id="lot-1",
+         row=lot(ctx, qty_u=25 * U, cost_paise=3_750_000))  # fmt: skip
+    holding(ctx, 20261111, 15)
+    holding(ctx, 20261112, None)
+    pack = call(ctx, "tax_get")
+    check = pack["lot_check"]
+    assert (check["state"], check["day"], check["rows"]) == ("ok", 20261111, [])
+    assert marks(pack) == [False]
+    # With no record of holdings two days before the trades were read, it waits for one.
+    holding(ctx, 20261111, None)
+    assert call(ctx, "tax_get")["lot_check"]["state"] == "waiting"
 
 
 def test_the_paper_says_why_it_counts_no_dividend_and_lists_what_it_could_not_count(ctx):
