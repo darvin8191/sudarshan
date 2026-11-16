@@ -8,7 +8,11 @@ The readings (a dict; a value of None, or a key that is missing, means "could no
     ist_minute        minutes since midnight in India
     ist_date          today's date in India, YYYY-MM-DD
     window_open       whether the price feed's own market window is open (trading day and hours)
-    health            {service: its /health answer as a dict, or None when it did not answer}
+    health            {service: its /health answer as a dict, or None when it did not answer};
+                      the portfolio's carries ``portfolio_state.analytics_token``, the result of
+                      its own daily check of the Upstox Analytics Token: {"state": ok, failed
+                      or unknown, "at": seconds or None, "changed": true when the token file is
+                      not the one checked, "missed_at": a later check that got no answer}
     enabled           {service: whether its unit is enabled on this server}
     openalgo          whether OpenAlgo answered a public read
     master_date       the date in India of the last instrument list download ("" when never)
@@ -150,6 +154,47 @@ def feed(readings: Mapping, memory: Mapping) -> Result:
     misses = _misses(memory, answer["state"] != "connected")
     level = FAILING if misses >= MISSES_TO_FAIL else FINE
     return Result("feed", level, {"minutes": str(misses * RUN_EVERY_MIN)}, {"misses": misses})
+
+
+TOKEN_STATES = ("ok", "failed", "unknown")
+
+
+def _seconds(value) -> int | None:
+    whole = isinstance(value, int) and not isinstance(value, bool) and value > 0
+    return value if whole else None
+
+
+def analytics_token(readings: Mapping, memory: Mapping) -> Result:
+    """The Upstox Analytics Token, as the portfolio's own daily check found it (M13.12). The
+    watch asks Upstox nothing and never sees the token: it reads a state and a time from the
+    portfolio's ``/health``.
+
+    Failing when Upstox refused the token at that check. A warning (``missed``: the result is
+    stale) when a later check, at the service's last start, got no answer at all. Unread, with
+    the cause, when nothing can be said: no check has answered yet (``never``), or the token
+    file was changed after the check (``changed``), so the old token's result is not this
+    one's. Off while the portfolio is switched off: nothing checks the token then."""
+    answer = (readings.get("health") or {}).get("portfolio")
+    state = answer.get("portfolio_state") if isinstance(answer, Mapping) else None
+    if not isinstance(state, Mapping):
+        return Result("analytics_token", UNREAD)
+    if state.get("enabled") is False:
+        return Result("analytics_token", OFF)
+    token = state.get("analytics_token")
+    if not isinstance(token, Mapping) or token.get("state") not in TOKEN_STATES:
+        return Result("analytics_token", UNREAD)
+    at, missed = _seconds(token.get("at")), _seconds(token.get("missed_at"))
+    facts = {} if at is None else {"when": str(at)}
+    if token["state"] == "failed":
+        return Result("analytics_token", FAILING, facts)
+    if missed is not None:
+        return Result(
+            "analytics_token", WARNING, {**facts, "cause": "missed", "tried": str(missed)}
+        )
+    if token["state"] == "ok":
+        return Result("analytics_token", FINE, facts)
+    cause = "changed" if token.get("changed") is True else "never"
+    return Result("analytics_token", UNREAD, {**facts, "cause": cause})
 
 
 def instrument_list(readings: Mapping, memory: Mapping) -> Result:
@@ -412,6 +457,7 @@ def run_checks(readings: Mapping, memories: Mapping[str, Mapping]) -> list[Resul
         ("openalgo", openalgo),
         ("login", login),
         ("feed", feed),
+        ("analytics_token", analytics_token),
         ("instrument_list", instrument_list),
         ("disk", disk),
         ("memory", memory_free),

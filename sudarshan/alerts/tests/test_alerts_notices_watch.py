@@ -128,6 +128,40 @@ def test_a_fact_that_is_not_plain_is_left_out_and_an_unknown_check_says_nothing(
         assert notices.batch_lines([event(kind, "service_other")], T0) == []
 
 
+def test_the_analytics_token_says_what_failed_and_what_to_do_next():
+    """GA5.1 (M13.12): the portfolio's own daily check, told through the watch. The words name
+    the Upstox page to open and warn against making a new token; they never show the token."""
+    morning = str(int(ist(2026, 11, 16, 8, 36).timestamp()))
+    friday = str(int(ist(2026, 11, 13, 8, 36).timestamp()))
+    assert said("watch_failing", "analytics_token", when=morning) == (
+        "Upstox did not accept SUDARSHAN's read-only token (the Analytics Token) when it was "
+        "checked at 08:36 IST. Prices, the Portfolio page and the family view read Upstox with "
+        "it.\n"
+        "Open the Upstox developer page (My Apps) and see whether the token is still there and "
+        "active. Do not create a new token before you have looked: a new one ends the old one "
+        "for everything else that uses it, your other trading system included."
+    )
+    assert "checked. Prices" in said("watch_failing", "analytics_token", when="<b>now</b>")
+    assert said("watch_warning", "analytics_token", cause="missed", when=friday, tried=morning) == (
+        "SUDARSHAN could not check its read-only Upstox token (the Analytics Token) when the "
+        "portfolio service started at 08:36 IST: Upstox gave no answer, or the token's file on "
+        "the server could not be read. The last check that Upstox answered was at 13 Nov 08:36 "
+        "IST.\n"
+        "If the Portfolio page shows your Upstox holdings, the token is working and nothing is "
+        "needed. If it does not, open the System page and have the server looked at."
+    )
+    never = said("watch_warning", "analytics_token", cause="missed", tried=morning)
+    assert "No check has been answered yet." in never
+    assert said("watch_fine", "analytics_token", was="failing", when=morning) == (
+        "Upstox accepts SUDARSHAN's read-only token (the Analytics Token): checked at 08:36 IST."
+    )
+    assert said("watch_fine", "analytics_token", was="warning").endswith("checked again.")
+    # A refusal is told in market hours too; the stale check waits for the close.
+    assert notices._at_once(event("watch_failing", "analytics_token"))
+    assert not notices._at_once(event("watch_warning", "analytics_token"))
+    assert checks.told_by({"check": "analytics_token", "facts": {}})
+
+
 def _every_sentence() -> list[str]:
     out = []
     for name in (*(f"service_{n}" for n in checks.SERVICES), "feed", "instrument_list"):
@@ -143,6 +177,10 @@ def _every_sentence() -> list[str]:
     out += [said("watch_warning", "certificate", cause=c) for c in ("no_name", "other_site")]
     out.append(said("watch_fine", "certificate", was="warning"))
     out += [said("watch_fine", name, was="failing") for name in ("login", "disk", "certificate")]
+    checked = str(int(ist(2026, 11, 16, 8, 36).timestamp()))
+    out.append(said("watch_failing", "analytics_token", when=checked))
+    out.append(said("watch_warning", "analytics_token", cause="missed", tried=checked))
+    out.append(said("watch_fine", "analytics_token", was="failing", when=checked))
     return out
 
 

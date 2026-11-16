@@ -466,6 +466,21 @@ def _began(event: Event, now: datetime) -> str:
     return _when(event.at - back, now)
 
 
+#: The Analytics Token is one token for more than SUDARSHAN (README, the secrets table): the
+#: owner is told before he reaches for "Generate" on Upstox's page.
+TOKEN_SHARED = (
+    "Do not create a new token before you have looked: a new one ends the old one for "
+    "everything else that uses it, your other trading system included."
+)
+_EPOCH = re.compile(r"[1-9][0-9]{8,10}")
+
+
+def _checked(event: Event, now: datetime, fact: str = "when") -> str:
+    """ " at 08:36" (or " on 14 Nov at 08:36") for a check's own time, "" when it names none."""
+    at = event.fact(fact)
+    return f" at {_when(int(at), now)}" if _EPOCH.fullmatch(at) else ""
+
+
 def _watch_failing(event: Event, now: datetime) -> list[str]:
     check = event.fact("check")
     if check.startswith("service_") and check[8:] in _SERVICES:
@@ -489,6 +504,14 @@ def _watch_failing(event: Event, now: datetime) -> list[str]:
             f"The price feed has not been connected to Upstox since {_began(event, now)}. "
             "Prices on your screens are not Real-time and market alerts are stopped. It "
             f"reconnects by itself; if this message comes again, {LOOK}."
+        ]
+    if check == "analytics_token":
+        return [
+            "Upstox did not accept SUDARSHAN's read-only token (the Analytics Token) when it "
+            f"was checked{_checked(event, now)}. Prices, the Portfolio page and the family view "
+            "read Upstox with it.",
+            f"Open the Upstox developer page (My Apps) and see whether the token is still "
+            f"there and active. {TOKEN_SHARED}",
         ]
     if check == "instrument_list":
         return [
@@ -575,6 +598,20 @@ def _watch_warning(event: Event, now: datetime) -> list[str]:
             "One of SUDARSHAN's services is listening on the network, not only inside the "
             f"server. Nothing has stopped; {LOOK}."
         ]
+    if check == "analytics_token":
+        last = _checked(event, now)
+        known = (
+            f"The last check that Upstox answered was{last}."
+            if last
+            else "No check has been answered yet."
+        )
+        return [
+            "SUDARSHAN could not check its read-only Upstox token (the Analytics Token) when "
+            f"the portfolio service started{_checked(event, now, 'tried')}: Upstox gave no "
+            f"answer, or the token's file on the server could not be read. {known}",
+            "If the Portfolio page shows your Upstox holdings, the token is working and "
+            f"nothing is needed. If it does not, {LOOK}.",
+        ]
     if check == "certificate":
         # The certificate has not been judged for two days (v0.13.0 verify N6): no address for
         # the app is known to the watch, or the web server answers it with another site's.
@@ -637,6 +674,11 @@ def _watch_fine(event: Event, now: datetime) -> list[str]:
     if check == "certificate" and event.fact("was") == "warning":
         # Its only warning is "not checked": nothing was renewed, it is judged again.
         return ["SUDARSHAN's security certificate is being checked again."]
+    if check == "analytics_token":
+        return [
+            "Upstox accepts SUDARSHAN's read-only token (the Analytics Token): checked"
+            f"{_checked(event, now) or ' again'}."
+        ]
     return {
         "login": [f"Upstox is connected again since {at}: order updates are arriving."],
         "feed": [f"The price feed is connected to Upstox again since {at}."],
@@ -658,6 +700,7 @@ _CHECK_WORDS = {
     "openalgo": "OpenAlgo",
     "login": "Upstox login",
     "feed": "price feed's connection",
+    "analytics_token": "Upstox read-only token",
     "instrument_list": "instrument list",
     "disk": "disk space",
     "memory": "memory",

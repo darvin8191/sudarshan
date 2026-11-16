@@ -1679,6 +1679,278 @@
    "readings": {},
    "memory": {},
    "level": "unread"
+  },
+  {
+   "name": "the token Upstox took at the daily check is fine",
+   "check": "analytics_token",
+   "readings": {
+    "health": {
+     "portfolio": {
+      "service": "sudarshan-portfolio",
+      "portfolio_state": {
+       "enabled": true,
+       "state": "running",
+       "analytics_token": {
+        "state": "ok",
+        "at": 1793770000
+       }
+      }
+     }
+    }
+   },
+   "memory": {},
+   "level": "fine",
+   "facts": {
+    "when": "1793770000"
+   }
+  },
+  {
+   "name": "the token Upstox refused at the daily check is failing",
+   "check": "analytics_token",
+   "readings": {
+    "health": {
+     "portfolio": {
+      "service": "sudarshan-portfolio",
+      "portfolio_state": {
+       "enabled": true,
+       "state": "running",
+       "analytics_token": {
+        "state": "failed",
+        "at": 1793770000
+       }
+      }
+     }
+    }
+   },
+   "memory": {},
+   "level": "failing",
+   "facts": {
+    "when": "1793770000"
+   }
+  },
+  {
+   "name": "refused, and a later check missed: still failing, the refusal is what is known",
+   "check": "analytics_token",
+   "readings": {
+    "health": {
+     "portfolio": {
+      "service": "sudarshan-portfolio",
+      "portfolio_state": {
+       "enabled": true,
+       "state": "running",
+       "analytics_token": {
+        "state": "failed",
+        "at": 1793770000,
+        "missed_at": 1793856400
+       }
+      }
+     }
+    }
+   },
+   "memory": {},
+   "level": "failing",
+   "facts": {
+    "when": "1793770000"
+   }
+  },
+  {
+   "name": "stale: the check at the last start got no answer",
+   "check": "analytics_token",
+   "readings": {
+    "health": {
+     "portfolio": {
+      "service": "sudarshan-portfolio",
+      "portfolio_state": {
+       "enabled": true,
+       "state": "running",
+       "analytics_token": {
+        "state": "ok",
+        "at": 1793770000,
+        "missed_at": 1793856400
+       }
+      }
+     }
+    }
+   },
+   "memory": {},
+   "level": "warning",
+   "facts": {
+    "when": "1793770000",
+    "cause": "missed",
+    "tried": "1793856400"
+   }
+  },
+  {
+   "name": "stale: no check has ever answered and the last one got no answer",
+   "check": "analytics_token",
+   "readings": {
+    "health": {
+     "portfolio": {
+      "service": "sudarshan-portfolio",
+      "portfolio_state": {
+       "enabled": true,
+       "state": "running",
+       "analytics_token": {
+        "state": "unknown",
+        "at": null,
+        "missed_at": 1793770000
+       }
+      }
+     }
+    }
+   },
+   "memory": {},
+   "level": "warning",
+   "facts": {
+    "cause": "missed",
+    "tried": "1793770000"
+   }
+  },
+  {
+   "name": "no check has answered yet: unread, never a fault",
+   "check": "analytics_token",
+   "readings": {
+    "health": {
+     "portfolio": {
+      "service": "sudarshan-portfolio",
+      "portfolio_state": {
+       "enabled": true,
+       "state": "running",
+       "analytics_token": {
+        "state": "unknown",
+        "at": null
+       }
+      }
+     }
+    }
+   },
+   "memory": {},
+   "level": "unread",
+   "facts": {
+    "cause": "never"
+   }
+  },
+  {
+   "name": "the token file was changed after the check: unread, not the old token's result",
+   "check": "analytics_token",
+   "readings": {
+    "health": {
+     "portfolio": {
+      "service": "sudarshan-portfolio",
+      "portfolio_state": {
+       "enabled": true,
+       "state": "running",
+       "analytics_token": {
+        "state": "unknown",
+        "at": 1793770000,
+        "changed": true
+       }
+      }
+     }
+    }
+   },
+   "memory": {},
+   "level": "unread",
+   "facts": {
+    "when": "1793770000",
+    "cause": "changed"
+   }
+  },
+  {
+   "name": "the portfolio is switched off: nothing checks the token",
+   "check": "analytics_token",
+   "readings": {
+    "health": {
+     "portfolio": {
+      "service": "sudarshan-portfolio",
+      "portfolio_state": {
+       "enabled": false,
+       "state": "running",
+       "analytics_token": {
+        "state": "unknown",
+        "at": null
+       }
+      }
+     }
+    }
+   },
+   "memory": {},
+   "level": "off",
+   "facts": {}
+  },
+  {
+   "name": "a release that does not publish the check yet: unread",
+   "check": "analytics_token",
+   "readings": {
+    "health": {
+     "portfolio": {
+      "service": "sudarshan-portfolio",
+      "portfolio_state": {
+       "enabled": true,
+       "state": "running"
+      }
+     }
+    }
+   },
+   "memory": {},
+   "level": "unread",
+   "facts": {}
+  },
+  {
+   "name": "the portfolio did not answer: unread (its own check tells the silence)",
+   "check": "analytics_token",
+   "readings": {
+    "health": {
+     "portfolio": null
+    }
+   },
+   "memory": {},
+   "level": "unread",
+   "facts": {}
+  },
+  {
+   "name": "a state the watch does not know is unread, never fine",
+   "check": "analytics_token",
+   "readings": {
+    "health": {
+     "portfolio": {
+      "service": "sudarshan-portfolio",
+      "portfolio_state": {
+       "enabled": true,
+       "state": "running",
+       "analytics_token": {
+        "state": "valid",
+        "at": 1793770000
+       }
+      }
+     }
+    }
+   },
+   "memory": {},
+   "level": "unread",
+   "facts": {}
+  },
+  {
+   "name": "a time that is not a whole number is left out of the facts",
+   "check": "analytics_token",
+   "readings": {
+    "health": {
+     "portfolio": {
+      "service": "sudarshan-portfolio",
+      "portfolio_state": {
+       "enabled": true,
+       "state": "running",
+       "analytics_token": {
+        "state": "ok",
+        "at": "today"
+       }
+      }
+     }
+    }
+   },
+   "memory": {},
+   "level": "fine",
+   "facts": {}
   }
  ],
  "sequences": [
@@ -1934,6 +2206,161 @@
       }
      },
      null
+    ]
+   ]
+  },
+  {
+   "name": "the token is refused, replaced on the server, then checked again: told once each way",
+   "check": "analytics_token",
+   "memory": {},
+   "runs": [
+    [
+     {
+      "health": {
+       "portfolio": {
+        "service": "sudarshan-portfolio",
+        "portfolio_state": {
+         "enabled": true,
+         "state": "running",
+         "analytics_token": {
+          "state": "ok",
+          "at": 1793770000
+         }
+        }
+       }
+      }
+     },
+     null
+    ],
+    [
+     {
+      "health": {
+       "portfolio": {
+        "service": "sudarshan-portfolio",
+        "portfolio_state": {
+         "enabled": true,
+         "state": "running",
+         "analytics_token": {
+          "state": "failed",
+          "at": 1793856400
+         }
+        }
+       }
+      }
+     },
+     [
+      "failing",
+      "fine"
+     ]
+    ],
+    [
+     {
+      "health": {
+       "portfolio": {
+        "service": "sudarshan-portfolio",
+        "portfolio_state": {
+         "enabled": true,
+         "state": "running",
+         "analytics_token": {
+          "state": "failed",
+          "at": 1793856400
+         }
+        }
+       }
+      }
+     },
+     null
+    ],
+    [
+     {
+      "health": {
+       "portfolio": {
+        "service": "sudarshan-portfolio",
+        "portfolio_state": {
+         "enabled": true,
+         "state": "running",
+         "analytics_token": {
+          "state": "unknown",
+          "at": 1793856400,
+          "changed": true
+         }
+        }
+       }
+      }
+     },
+     null
+    ],
+    [
+     {
+      "health": {
+       "portfolio": null
+      }
+     },
+     null
+    ],
+    [
+     {
+      "health": {
+       "portfolio": {
+        "service": "sudarshan-portfolio",
+        "portfolio_state": {
+         "enabled": true,
+         "state": "running",
+         "analytics_token": {
+          "state": "ok",
+          "at": 1793942800
+         }
+        }
+       }
+      }
+     },
+     [
+      "fine",
+      "failing"
+     ]
+    ],
+    [
+     {
+      "health": {
+       "portfolio": {
+        "service": "sudarshan-portfolio",
+        "portfolio_state": {
+         "enabled": true,
+         "state": "running",
+         "analytics_token": {
+          "state": "ok",
+          "at": 1793942800,
+          "missed_at": 1794029200
+         }
+        }
+       }
+      }
+     },
+     [
+      "warning",
+      "fine"
+     ]
+    ],
+    [
+     {
+      "health": {
+       "portfolio": {
+        "service": "sudarshan-portfolio",
+        "portfolio_state": {
+         "enabled": true,
+         "state": "running",
+         "analytics_token": {
+          "state": "ok",
+          "at": 1794115600
+         }
+        }
+       }
+      }
+     },
+     [
+      "fine",
+      "warning"
+     ]
     ]
    ]
   }

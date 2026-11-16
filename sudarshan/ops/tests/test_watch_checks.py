@@ -59,7 +59,7 @@ def test_every_check_has_vectors_for_each_level_it_can_give():
         assert family in COUNTED or levels & {"warning", "failing"}, family
     names = {result.name for result in checks.run_checks({}, {})}
     assert names == {f"service_{n}" for n in checks.SERVICES} | {
-        "openalgo", "login", "feed", "instrument_list", "disk", "memory", "certificate",
+        "openalgo", "login", "feed", "analytics_token", "instrument_list", "disk", "memory", "certificate",
         "posture_locks", "posture_debug", "posture_modes", "posture_ports", "posture_reboot",
         "posture_updates", "assistant", "telegram_links", "backup", "drill", "historify",
     }  # fmt: skip

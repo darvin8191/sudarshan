@@ -68,6 +68,7 @@ CHECK_WORDS = {
     "openalgo": "OpenAlgo",
     "login": "Upstox login",
     "feed": "price feed's connection",
+    "analytics_token": "Upstox read-only token",
     "instrument_list": "instrument list",
     "disk": "disk space",
     "memory": "memory",
