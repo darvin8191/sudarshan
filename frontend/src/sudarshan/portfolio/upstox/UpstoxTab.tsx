@@ -1,4 +1,5 @@
-// SUDARSHAN M7.1-M7.4: the Upstox tab, read-only. Holdings, Positions, Funds and History, each
+// SUDARSHAN M7.1-M7.4, M7.15: the Upstox tab, read-only. Holdings, Positions, Funds, Allocation,
+// Performance and History, each
 // read by the service from Upstox on the Analytics Token and moved only by ticks between reads.
 import { useQuery } from '@tanstack/react-query'
 import { FlaskConical, LoaderCircle, RefreshCw, TriangleAlert } from 'lucide-react'
@@ -16,13 +17,15 @@ import { Segments, UPSTOX_LABELS } from '../StubViews'
 import { SECONDARY } from '../sheets/TabFields'
 import { PORTFOLIO_KEY } from '../tab/ActivityTab'
 import { UPSTOX_VIEWS, type UpstoxView } from '../usePortfolioOverlay'
+import { AllocationView } from './AllocationView'
 import { FundsView } from './FundsView'
 import { HistoryView } from './HistoryView'
 import { HoldingsView } from './HoldingsView'
+import { PerformanceView } from './PerformanceView'
 import { PositionsView } from './PositionsView'
 import { CARD } from './parts'
 import { PnlView, TradesView } from './ReportsView'
-import { useUpstoxBook } from './useUpstoxBook'
+import { type BookView, useUpstoxBook } from './useUpstoxBook'
 import { useUpstoxLive } from './useUpstoxLive'
 
 export const ANALYZE_WORDS = 'Your real Upstox account. Analyze-mode orders are not in it.'
@@ -60,7 +63,7 @@ function BookPart({
   marketOpen,
   anyOpen,
 }: {
-  view: Exclude<UpstoxView, 'history' | 'trades' | 'pnl'>
+  view: BookView
   marketOpen: (exchange: string) => boolean | null
   anyOpen: () => boolean | null
 }) {
@@ -90,6 +93,80 @@ function BookPart({
         <PositionsView positions={book.positions} mtf={book.mtf} live={live} />
       )}
       {view === 'funds' && <FundsView part={book.funds} />}
+    </>
+  )
+}
+
+/** One of the service's own answers for the Upstox tab, read when the view opens. */
+function useUpstoxAnswer<Op extends 'upstox_allocation' | 'upstox_performance'>(
+  op: Op,
+  key: readonly unknown[],
+  enabled = true
+) {
+  return useQuery({
+    queryKey: [...PORTFOLIO_KEY, op, ...key],
+    queryFn: async () => {
+      const result = await portfolioCall(op)
+      if (!result.enabled) {
+        throw new PortfolioError({ code: 'unavailable', message: result.message, entryId: null })
+      }
+      return result.data
+    },
+    retry: false,
+    refetchOnWindowFocus: false,
+    enabled,
+  })
+}
+
+/**
+ * M7.15: Allocation and Performance. Both stand on the holdings the Holdings view reads (the
+ * same query, the same re-sync and the same ticks), so their value is real-time while ticks
+ * arrive; the classes and the return are the service's own answers.
+ */
+function ParityPart({
+  view,
+  marketOpen,
+  anyOpen,
+}: {
+  view: 'allocation' | 'performance'
+  marketOpen: (exchange: string) => boolean | null
+  anyOpen: () => boolean | null
+}) {
+  const query = useUpstoxBook('holdings', anyOpen)
+  const part = query.data?.holdings
+  const live = useUpstoxLive({
+    holdings: part?.data ?? [],
+    positions: [],
+    marketOpen,
+  })
+  // The classes are asked again when the set of holdings changes: a share bought since is
+  // classified by the service, not left to look unclassified.
+  const held = (part?.data ?? [])
+    .map((row) => row.instrument_key)
+    .sort()
+    .join(',')
+  const classes = useUpstoxAnswer('upstox_allocation', [held], view === 'allocation' && !!part)
+  const report = useUpstoxAnswer('upstox_performance', [], view === 'performance')
+  if (view === 'performance') {
+    if (report.isPending) return <Waiting />
+    if (report.isError) return <Failed error={report.error} retry={() => report.refetch()} />
+    return <PerformanceView report={report.data} part={part} live={live} />
+  }
+  if (query.isPending) return <Waiting />
+  if (query.isError && !part) return <Failed error={query.error} retry={() => query.refetch()} />
+  return (
+    <>
+      {classes.isError && (
+        <div className="mb-3">
+          <Failed error={classes.error} retry={() => classes.refetch()} />
+        </div>
+      )}
+      <AllocationView
+        part={part}
+        allocation={classes.data}
+        reading={classes.isPending}
+        live={live}
+      />
     </>
   )
 }
@@ -139,6 +216,8 @@ export function UpstoxTab({
         <TradesView />
       ) : view === 'pnl' ? (
         <PnlView />
+      ) : view === 'allocation' || view === 'performance' ? (
+        <ParityPart key={view} view={view} marketOpen={isOpen} anyOpen={anyOpen} />
       ) : (
         <BookPart key={view} view={view} marketOpen={isOpen} anyOpen={anyOpen} />
       )}

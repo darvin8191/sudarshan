@@ -1,4 +1,5 @@
 import { CalendarDays, type LucideIcon, Receipt, ShieldCheck, Target } from 'lucide-react'
+import { useEffect, useRef } from 'react'
 import { cn } from '@/lib/utils'
 import { type SwitchName, WORDS } from './types'
 import { CUSTOM_VIEWS, type CustomView, UPSTOX_VIEWS, type UpstoxView } from './usePortfolioOverlay'
@@ -7,6 +8,8 @@ export const UPSTOX_LABELS: Record<UpstoxView, string> = {
   holdings: 'Holdings',
   positions: 'Positions',
   funds: 'Funds',
+  allocation: 'Allocation',
+  performance: 'Performance',
   history: 'History',
   trades: 'Trades',
   pnl: 'P&L',
@@ -24,6 +27,7 @@ export const STUB_WORDS: Record<UpstoxView | CustomView, string> = {
     'Every holding with its quantity, average price, price now, today’s change and profit or loss.',
   positions: 'Your open positions in Upstox, for reading only. Orders are placed in Positions.',
   funds: 'Your Upstox funds, line by line, with the time they were read.',
+  allocation: 'Your Upstox holdings by class and by sector, as bars.',
   history: 'The value of your Upstox account against what you put in, then the last 10 days.',
   trades: 'Every trade Upstox lists for a financial year, with its date, side, quantity and price.',
   pnl: 'Your realised profit or loss for a financial year, trade by trade, with the charges.',
@@ -47,11 +51,18 @@ export function Segments<V extends string>({
   value: V
   onChange: (view: V) => void
 }) {
+  // The row scrolls sideways on a phone: the part shown is always brought into sight.
+  const shown = useRef<HTMLButtonElement | null>(null)
+  // biome-ignore lint/correctness/useExhaustiveDependencies: it follows the part shown
+  useEffect(() => {
+    shown.current?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
+  }, [value])
   return (
     <div role="tablist" aria-label="Parts of this tab" className="flex gap-1.5 overflow-x-auto">
       {views.map((view) => (
         <button
           key={view}
+          ref={value === view ? shown : undefined}
           type="button"
           role="tab"
           aria-selected={value === view}

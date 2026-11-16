@@ -144,12 +144,62 @@ def allocate(
                 bar = bars.setdefault(key, [label, 0, set()])
                 bar[1] += value
                 bar[2].add(facts.asset_id)
+    return _rows(bars, total)
+
+
+def _rows(bars: Mapping[str, list], total: int) -> list[AllocationRow]:
+    """The bars as rows, each with its share of ``total``, largest first."""
     found = [
         AllocationRow(key, label, value, pct(value, total) if total else format_pct(0), len(assets))
         for key, (label, value, assets) in bars.items()
     ]
     found.sort(key=lambda bar: (-bar.value_paise, bar.label, bar.key))
     return found
+
+
+#: The kinds of bar the Upstox book has (M7.15): it is one account of one member, and its
+#: holdings carry the class and the sector of the owner's own assets, nothing else.
+BOOK_BY = ("class", "sector")
+
+
+class BookLine(NamedTuple):
+    """One holding of the Upstox book: what it is worth, and the class and sector the owner has
+    given the same share in his own tabs. None is a share he has not classified: it is never
+    guessed from the share's name or its exchange."""
+
+    key: str
+    value_paise: int
+    asset_class: str | None = None
+    sector: str | None = None
+
+
+def allocate_book(by: str, lines: Iterable[BookLine]) -> list[AllocationRow]:
+    """The bars of the Upstox book by class or by sector, by the rules of ``allocate``: the same
+    shares of the whole, the same order, and a holding with no class or no sector in a bar of its
+    own with the key ``""`` that says so in words."""
+    if by not in BOOK_BY:
+        raise ValueError(f"no allocation of the Upstox book by {by!r}")
+    total = 0
+    bars: dict[str, list] = {}
+    for line in lines:
+        if line.asset_class is not None and line.asset_class not in ASSET_CLASSES:
+            raise ValueError(f"no such class: {line.asset_class!r}")
+        total += line.value_paise
+        if by == "class":
+            known = line.asset_class
+            key, label = (known, ASSET_CLASS_LABELS[known]) if known else ("", words.NOT_CLASSIFIED)
+        else:
+            key, label = (line.sector, line.sector) if line.sector else ("", words.NO_SECTOR)
+        bar = bars.setdefault(key, [label, 0, set()])
+        bar[1] += line.value_paise
+        bar[2].add(line.key)
+    return _rows(bars, total)
+
+
+def allocate_book_all(lines: Iterable[BookLine]) -> dict[str, list[dict]]:
+    """Both kinds of bar of the Upstox book (types.ts ``UpstoxAllocation.allocation``)."""
+    held = list(lines)
+    return {by: [bar.as_dict() for bar in allocate_book(by, held)] for by in BOOK_BY}
 
 
 def allocate_all(

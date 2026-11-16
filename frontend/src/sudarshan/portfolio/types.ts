@@ -476,6 +476,14 @@ export const OPS: readonly OpSpec[] = [
     cls: 'upstox',
     query: [['limit', 'int']],
   },
+  {
+    name: 'upstox_allocation',
+    method: 'GET',
+    route: '/upstox/allocation',
+    cls: 'upstox',
+    query: [['max_age', 'int']],
+  },
+  { name: 'upstox_performance', method: 'GET', route: '/upstox/performance', cls: 'upstox' },
   { name: 'report_years', method: 'GET', route: '/reports/years', cls: 'upstox' },
   {
     name: 'report_trades',
@@ -1349,6 +1357,72 @@ export interface UpstoxHistory {
   note: string | null
 }
 
+// ---- the Upstox tab's parity views (M7.15) ----
+
+/** The class and the sector the owner gave a holding's share in his own tabs; null where he
+ *  has given none (never guessed). */
+export interface UpstoxHoldingClass {
+  instrument_key: string
+  asset_class: AssetClass | null
+  sector: string | null
+}
+
+/** The Upstox holdings by class and by sector. The bars are worked out at the prices of the
+ *  read; the phone moves them with ticks from `classes` and the holdings it already reads. */
+export interface UpstoxAllocation {
+  state: PartState
+  read_at: EpochMs | null
+  /** The reader's sentence for a part that is slow, refused or closed; else, when some
+   *  holdings have no class or sector, the sentence that says so. */
+  note: string | null
+  classes: UpstoxHoldingClass[]
+  /** null when the holdings could not be read at all. A bar with the key "" holds what is
+   *  not classified. */
+  allocation: Record<'class' | 'sector', AllocationRow[]> | null
+}
+
+/** The money figures of the counted shares, then the time-weighted return of all the
+ *  holdings and the same money in each index. */
+export interface UpstoxReturn {
+  /** The closing record the shares are valued at. */
+  valuation_day: Day
+  first_flow_day: Day | null
+  value_paise: Paise
+  money_in_paise: Paise
+  money_out_paise: Paise
+  fee_paise: Paise
+  net_put_in_paise: Paise
+  total_gain_paise: Paise
+  absolute_return_pct: Pct | null
+  xirr: XirrFigure
+  twr: TwrFigure
+  benchmarks: BenchmarkFigure[]
+}
+
+/** Units held with no purchase in the trade history read: not counted, never cost 0. */
+export interface UpstoxUncounted {
+  isin: string
+  symbol: string | null
+  name: string
+  qty_u: QtyU
+  value_paise: Paise
+}
+
+export interface UpstoxPerformance {
+  /** `waiting`: the trades or a closing record are not there yet; `note` says which. */
+  state: 'ok' | 'waiting'
+  note: string | null
+  /** The first day of the trade history the figures are worked out from. */
+  from: Day | null
+  /** When the closing record valued was read. */
+  read_at: EpochMs | null
+  data: UpstoxReturn | null
+  uncounted: UpstoxUncounted[]
+  uncounted_value_paise: Paise
+  /** What is counted and what is not, in sentences. */
+  words: string[]
+}
+
 // ---- state, summary and health ----
 
 export interface JobState {
@@ -1600,6 +1674,11 @@ export interface ViewUpdateArgs extends Targets, Versioned {
 export interface UpstoxBookArgs {
   parts?: UpstoxPartName[]
   /** Seconds: a part read more recently than this is answered from memory. */
+  max_age?: number
+}
+
+export interface UpstoxAllocationArgs {
+  /** Seconds, as for the book. */
   max_age?: number
 }
 
@@ -2687,6 +2766,8 @@ export interface PortfolioOps {
   view_delete: { args: Targets & Versioned; data: Deleted }
   upstox_book: { args: UpstoxBookArgs; data: UpstoxBook }
   upstox_history: { args: UpstoxHistoryArgs; data: UpstoxHistory }
+  upstox_allocation: { args: UpstoxAllocationArgs; data: UpstoxAllocation }
+  upstox_performance: { args: NoArgs; data: UpstoxPerformance }
   report_years: { args: NoArgs; data: ReportYears }
   report_trades: { args: ReportArgs; data: TradesReport }
   report_pnl: { args: ReportArgs; data: PnlReport }

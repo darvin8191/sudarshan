@@ -20,7 +20,7 @@ export const INDEX_WAITING =
   'NIFTY 50 and NIFTY 500 history is still being collected, a little each day, so that it never slows your live prices. The comparison appears when it is ready.'
 
 /** A rate with its sign and arrow as well as its colour. */
-function Rate({ pct }: { pct: string }) {
+export function Rate({ pct }: { pct: string }) {
   const n = pctNumber(pct)
   if (n === null) return null
   const direction = directionOf(n)
@@ -50,7 +50,15 @@ function Figure({
   )
 }
 
-function Benchmark({ b, report }: { b: BenchmarkFigure; report: PerformanceReport }) {
+/** One index beside the tab: the same money in it, its yearly return and its move since the TWR
+ *  began. The Upstox tab's Performance view (M7.15) draws the same rows from its own report. */
+export function Benchmark({
+  b,
+  report,
+}: {
+  b: BenchmarkFigure
+  report: Pick<PerformanceReport, 'value_paise' | 'twr'>
+}) {
   const has = b.xirr_pct !== null || b.twr_pct !== null || b.value_paise !== null
   return (
     <li className="flex flex-col gap-1 border-t border-[color:var(--divider)] pt-2 first:border-t-0 first:pt-0">

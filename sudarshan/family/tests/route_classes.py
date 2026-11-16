@@ -835,7 +835,9 @@ protected     /sudarshan/portfolio/api/tax/inputs                               
 protected     /sudarshan/portfolio/api/tax/inputs                                       sudarshan_portfolio.tax_inputs
 protected     /sudarshan/portfolio/api/tax/inputs/<int:id>                              sudarshan_portfolio.tax_input_delete
 protected     /sudarshan/portfolio/api/upstox                                           sudarshan_portfolio.upstox_book
+protected     /sudarshan/portfolio/api/upstox/allocation                                sudarshan_portfolio.upstox_allocation
 protected     /sudarshan/portfolio/api/upstox/history                                   sudarshan_portfolio.upstox_history
+protected     /sudarshan/portfolio/api/upstox/performance                               sudarshan_portfolio.upstox_performance
 protected     /sudarshan/portfolio/api/views/<int:id>                                   sudarshan_portfolio.view_delete
 protected     /sudarshan/portfolio/api/views/<int:id>                                   sudarshan_portfolio.view_update
 protected     /sudarshan/risk/audit                                                     sudarshan_risk_bp.audit
