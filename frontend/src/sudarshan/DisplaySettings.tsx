@@ -9,6 +9,7 @@ import {
   useMarketSoundMuted,
   useOrderSoundMuted,
 } from './books/chime'
+import { formatCompact, formatRupees } from './dashboard/format'
 import {
   INDEX_CHOICES,
   INDEX_REFUSED,
@@ -16,6 +17,7 @@ import {
   setDashboardIndex,
   useDashboardIndices,
 } from './dashboard/indexChoice'
+import { setNumberGrouping, useNumberGrouping } from './dashboard/numberStyle'
 import { setPortfolioCard, usePortfolioCard } from './dashboard/portfolioCard'
 import { setCvdMode, useCvdMode } from './display'
 
@@ -32,6 +34,7 @@ export function DisplaySettings() {
   const soundMuted = useOrderSoundMuted()
   const marketMuted = useMarketSoundMuted()
   const portfolioCard = usePortfolioCard()
+  const grouping = useNumberGrouping()
 
   return (
     <Card>
@@ -103,6 +106,17 @@ export function DisplaySettings() {
           words="A card with the Upstox account and your pinned portfolio tabs, each with its value, today and overall gain, moving with the ticks. Shown beside the Holdings card for now. This device only."
           on={portfolioCard}
           onChange={setPortfolioCard}
+        />
+
+        {/* SUDARSHAN M20.3: Indian grouping unless this is on. The preview is drawn by the shared
+            formatter, so it changes the moment the switch does. */}
+        <SoundRow
+          id="sd-number-grouping"
+          rowId="number-grouping"
+          title="International number grouping"
+          words={`Off: figures are grouped the Indian way, 12,34,567.89, with L (lakh) and Cr (crore) in short figures. On: 1,234,567.89, with M and B. Now: ${formatRupees(1234567.89)} and ${formatCompact(1234567.89)}. This device only. Messages the server writes, such as alerts and Telegram, keep the Indian way.`}
+          on={grouping === 'international'}
+          onChange={(on) => setNumberGrouping(on ? 'international' : 'indian')}
         />
 
         <IndexChoices />

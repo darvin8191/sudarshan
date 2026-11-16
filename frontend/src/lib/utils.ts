@@ -1,5 +1,7 @@
 import { type ClassValue, clsx } from 'clsx'
 import { twMerge } from 'tailwind-merge'
+// SUDARSHAN M20.3: rupees grouped the way Display settings ask (Indian unless changed).
+import { numberLocale } from '@/sudarshan/dashboard/numberStyle'
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
@@ -37,7 +39,7 @@ export function makeFormatCurrency(broker?: string | null): (value: number) => s
           currency: 'USD',
           minimumFractionDigits: 2,
         }).format(value)
-      : new Intl.NumberFormat('en-IN', {
+      : new Intl.NumberFormat(numberLocale(), {
           style: 'currency',
           currency: 'INR',
           minimumFractionDigits: 2,
