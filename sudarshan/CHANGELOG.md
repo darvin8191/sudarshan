@@ -5,7 +5,7 @@ publish. The owner publishes each release on GitHub. The server's deploy timer t
 outside 08:30-16:00 IST on trading days (09:00-15:45 until v0.3.1), keeps backups, and rolls
 back if the app does not come up healthy.
 
-## v0.13.0 (15 Nov 2026)
+## v0.13.0 (16 Nov 2026)
 
 A large release in four parts: the tax working paper with Upstox's own charges; new phone screens
 (the option chain and its Straddle, chart tools, lines and drawings, a fuller dashboard, the order
@@ -25,6 +25,18 @@ in v0.12.0. **Publish only after v0.12.0 has installed and run one trading day.*
   charges. **Inputs** takes what Upstox cannot know: 31 Jan 2018 prices, purchases from before
   Upstox's records, buyback tenders, your reading of four rules the law leaves open, and "Not for
   tax" for an account of your own tabs. Each shows what it changes before you save.
+- **A Check card in the Tax view.** The paper compares its tax lots with your Upstox holdings and
+  names any share whose quantities differ, with both figures and the day compared; that share's
+  sales are marked "to check" in the paper, its CSV and the Tax pack. If the company gave a bonus or
+  split its shares since you bought, do nothing: that is confirmed in the Calendar in a later
+  release. Add a purchase under Tax, Inputs only for shares you bought before the years SUDARSHAN
+  has read, or moved in from another account; the card names the first day read and which earlier
+  years to read first. It shows only on the paper of the member who owns the Upstox account, and a
+  day whose 15:55 record could not read the holdings is never used. While the check waits for
+  Upstox's trades or for a closing record, the paper's first note says so.
+- **The paper counts no dividends yet, and says so.** Until a later release reads them from Upstox,
+  the paper, its CSV and the Tax pack tell you to take the year's dividends from your bank
+  statements or Form 26AS, in place of an empty section that would read as none received.
 - **Portfolio views that follow the switches still off.** Calendar, Risk and Goals are not shown
   at all. The Dividends card in the Tax view says it is switched off. "Export this tab" opens and
   offers the entries as CSV only, and says the other views and the PDF are switched off. A value of
@@ -33,7 +45,9 @@ in v0.12.0. **Publish only after v0.12.0 has installed and run one trading day.*
   read "actual", with "Show the parts" for brokerage, STT, GST and the rest, and its net follows.
   The journal reads them at 22:00 and works back through earlier days a few each night. The Tax
   view's "Estimate against actual" compares the two by month and marks a month that differs by more
-  than 5%. The Tax pack now prints the working paper; one already in the archive does not change.
+  than 5%. The Tax pack now prints the working paper. The year's pack is built on 1 April and
+  again by itself on 4 April at 07:00, once March's charges are in; if the paper cannot be read
+  then, it keeps the pack it has and tries again. Any other pack in the archive does not change.
 - **Options (new, Menu, under Trade).** The option chain for NIFTY, BANKNIFTY, SENSEX and F&O
   stocks on the phone: Chain, OI, IV and Straddle tabs, moving with ticks for 20 strikes either side
   of the money; far strikes show the time of their figures. Tap a call or a put for the strike
@@ -49,18 +63,20 @@ in v0.12.0. **Publish only after v0.12.0 has installed and run one trading day.*
   position's P&L moving with every tick: tap a label to Exit or Add, Modify or Cancel, Edit or
   Delete. Hold the chart for "Buy at" and "Sell at" that price. Draw a level, trend line, ray,
   rectangle, Fib retracement, note or ruler; drawings are kept for each instrument on that phone.
-- **The Dashboard.** A status row: the market's session in words (tap it for each exchange's
-  hours), an expiry chip for an index expiry today or on the next trading day, and a chip when the
-  Upstox login has lapsed or the master contract is not ready. With the login lapsed the page still reads and
-  offers Reconnect, in place of the whole-page "session expired". The P&L card lists up to five open
-  positions and says when the broker was read. The index strip shows NIFTY 50, NIFTY BANK, INDIA VIX
-  and SENSEX; choose one to six in Profile, Display. An "Alerts today" card; Shortcuts and a System
-  list in place of Quick Access. The menu lists every page under Trade, Analyse, Automate and
-  System, and on a phone Trading opens the phone chart.
+- **The Dashboard.** A status row: the market's session in words (tap it for each exchange's hours),
+  an expiry chip for an index expiry today or on the next trading day, and a chip when the Upstox
+  login has lapsed or the master contract is not ready. With the login lapsed the page still reads
+  and offers Reconnect, in place of the whole-page "session expired". The P&L card lists up to five
+  open positions and says when the broker was read. The index strip shows NIFTY 50, NIFTY BANK,
+  INDIA VIX and SENSEX; choose one to six in Profile, Display. An "Alerts today" card; Shortcuts and
+  a System list in place of Quick Access. The menu lists every page under Trade, Analyse, Automate
+  and System, and on a phone Trading opens the phone chart.
 - **The order ticket at phone size.** Side, quantity, order type, product, price and trigger come
   first, and the whole order is said in one line beside Place ("SELL 1 SBIN · LIMIT 803.00 · CNC"),
-  so the price is on screen when you press it. Buttons and pickers are full thumb size; Buy is blue
-  and Sell red-orange, each with its word. New in it: a margin line ("Margin needed · available")
+  so the price is on screen when you press it. That line is the order as sent: the price on the
+  instrument's tick, and "on BSE" when it goes to BSE. One order is sent however quickly Place is
+  pressed. Buttons and pickers are full thumb size; Buy is blue and Sell red-orange, each with its
+  word. New in it: a margin line ("Margin needed · available")
   and a folded "Size by risk" that works out the quantity from a sum to risk and a stop.
 - **Orders on the phone.** GTTs as cards with Modify and Cancel. Repeat on an order, which opens the
   ticket in that order's own product. Export on Orders, Trades, Positions and Holdings. Trades
@@ -70,19 +86,20 @@ in v0.12.0. **Publish only after v0.12.0 has installed and run one trading day.*
   backups, the last restore test, the safety settings, AI connections and Telegram links.
   "Disconnect the assistant" on it ends every AI connection at once.
 - **The server watches itself.** Every 2 minutes, and it tells you on Telegram once when something
-  stops and once when it is back: a SUDARSHAN service not answering, no Upstox login by 08:58,
-  order updates or the price feed stopped, the instrument list not refreshed by 09:00, the disk
-  under 5 GB, the certificate under 48 hours. Warnings (disk under 15 GB, low memory, a safety
-  setting not as it should be) wait for the close. You are told at once when an AI connection is
+  stops and once when it is back: a SUDARSHAN service not answering, no Upstox login by 08:58, order
+  updates or the price feed stopped, the instrument list not refreshed by 09:00, the disk under 5
+  GB, the certificate under 48 hours. Warnings (disk under 15 GB, low memory, a safety setting not
+  as it should be) wait for the close. If the server cannot check SUDARSHAN's own certificate for
+  two days you are told once, with the line to add. You are told at once when an AI connection is
   approved or a Telegram account is linked to or unlinked from your bot. It only reads: it never
   restarts or changes anything. One summary every Sunday from 18:00, and a diary of every server
   notice kept 8 years.
 - **Backups test themselves.** On the first Sunday of each month at 11:00 the newest backup is read
   back, every database and the vault opened, and the result sent to Telegram; nothing is restored
-  over live files. One backup a year, the first made from 4 April, is kept 8 years with the year's
-  Tax pack and March's charges in it. If its offsite upload fails it is sent again each night, and
-  the System page says so until it has gone. An install on a day without trading runs one extra
-  restore test, with its message.
+  over live files. One backup a year, the first made from 08:00 on 4 April (normally that day's
+  16:30 backup), is kept 8 years with the year's rebuilt Tax pack and March's charges in it. If its
+  offsite upload fails it is sent again each night, and the System page says so until it has gone.
+  An install on a day without trading runs one extra restore test, with its message.
 - **The AI assistant, locked to read-only.** It stays off. If you ever turn Remote MCP on, no tool
   that places, changes or cancels an order exists, the right to trade is never offered, and an AI
   app waits for your approval. With settings that would allow orders the app starts without the
@@ -90,7 +107,8 @@ in v0.12.0. **Publish only after v0.12.0 has installed and run one trading day.*
   Disconnect end its access at once, not after 15 minutes.
 - **An order whose answer from Upstox is lost** is said as "may have been placed: check the order
   book", never as failed. On the phone, an exit or a cancel answered by anything but the app itself
-  (the web server's page during a restart, say) reads "no answer came" and keeps its hold.
+  (the web server's page during a restart, say) reads "no answer came" and keeps its hold. One
+  stopped by the app's own limit on requests says "Too many tries. Wait a moment, then try again."
 - **Smaller things.** In Analyze mode the top bar no longer makes the page wider than the phone,
   and SUDARSHAN is never cut short. /trading opens each candle on time after a sleep, and a new pane
   of a grid opens on the chart you were on. With the screen off, the watchlist, the books and the
@@ -108,15 +126,15 @@ in v0.12.0. **Publish only after v0.12.0 has installed and run one trading day.*
 - **Once, on the server, in this order.** Outside market hours; stop at the first step that does
   not show what it should. The lines to paste are in `sudarshan/README.md` under the heading named
   in each step.
-  1. **The watch's check** ("Watching the server"): from the app folder,
-     `sudo -u sudarshan .venv/bin/python -m sudarshan.ops.watch --check`. You should see 26 lines,
-     one per check, each `fine`, `warning`, `failing`, `unread` or `off`. The line `certificate
-     site` must say `set` with your app's address, and `certificate` must say `fine`; if it says
-     `unknown`, add the one line the README names. Then stop the screener
-     (`sudo systemctl stop sudarshan-screener`), wait for the Telegram message, start it again and
-     wait for the second. Open Menu, System: "Nothing needs you." or a count, and "looked at" within
-     the last 2 minutes. If it says the watch has not reported after ten minutes, tell the next work
-     session.
+  1. **The watch's check** ("Watching the server"): from the app folder, `sudo -u sudarshan
+     .venv/bin/python -m sudarshan.ops.watch --check`. You should see 26 lines, one per check, each
+     `fine`, `warning`, `failing`, `unread` or `off`. The line `certificate site` must say `set`
+     with your app's address, and `certificate` must say `fine`; if it says `unknown`, add the one
+     line the README names to `/etc/sudarshan/watch.env`. Until this is right the certificate is not
+     checked (the System page then reads "Not being checked"). Then stop the screener (`sudo
+     systemctl stop sudarshan-screener`), wait for the Telegram message, start it again and wait for
+     the second. Open Menu, System: "Nothing needs you." or a count, and "looked at" within the last
+     2 minutes. If it says the watch has not reported after ten minutes, tell the next work session.
   2. **The restore test, by hand** ("The restore drill"): from the app folder,
      `sudo -u sudarshan .venv/bin/python -m sudarshan.ops.drill` (on a trading day, after the close,
      add the newest file under `/var/lib/sudarshan-backup/archive/`). You should see one line,
@@ -126,18 +144,21 @@ in v0.12.0. **Publish only after v0.12.0 has installed and run one trading day.*
      after saving your Upstox sign-in details on the Auto login page. `FAILED:` names the cause.
   3. **The bucket's delete rules, before 4 April** ("Setting up the offsite copy", step 3): in the
      OCI console add the object name filter, Include by prefix, `sudarshan-backup-` to both rules.
-     Without it the year's backup is deleted after about 60 days like a nightly copy.
+     You should see the filter on both rules. Without it the year's backup is deleted after about
+     60 days like a nightly copy.
   4. **The timers:** `systemctl list-timers 'sudarshan-*'` lists `sudarshan-watch.timer` (every 2
      minutes) and `sudarshan-drill.timer` (next on the first Sunday of the month, 11:00).
   5. **An outside heartbeat, if you want one** ("The outside heartbeat", 7 steps, about ten
      minutes): an outside service tells you when the whole server or OpenAlgo is silent, which
      nothing on the server can. You make the account yourself. You should see its check up within 2
      minutes, and the watch's check ending with the heartbeat line saying `set`.
-  6. **The restart page's nginx lines** ("The restart page"): one file to copy and one include
-     line in SUDARSHAN's own site, then `sudo nginx -t` and `sudo systemctl reload nginx`. The page
-     is inside the lines, so no page file can go missing and "restarting" can never read as "not
-     found". You should see, at the next install, any page say it is restarting and become the app
-     by itself.
+  6. **The restart page's nginx lines** ("The restart page"): first the README's one look for
+     `proxy_intercept_errors`, which must print nothing or only `off` (with it on, the app's own
+     "may have been placed" sentence would be replaced by the restart page; the phone still holds
+     the exit). Then one file to copy and one include line in SUDARSHAN's own site, then
+     `sudo nginx -t` and `sudo systemctl reload nginx`. The page is inside the lines, so no page
+     file can go missing and "restarting" can never read as "not found". You should see, at the
+     next install, any page say it is restarting and become the app by itself.
   7. **The assistant's nginx lines, only if you decide to use it** ("nginx lines for the AI
      assistant"), before you turn Remote MCP on: two files, one include line, test, reload, then
      the check, whose every line starts `ok`. Until then skip this.
@@ -160,6 +181,9 @@ in v0.12.0. **Publish only after v0.12.0 has installed and run one trading day.*
     A GTT card: Modify, then Cancel.
   - Any ticket: the margin line changes with the quantity; "Size by risk" sets a quantity. Open a
     ticket from the chart, reload the page: no ticket comes back.
+  - A share's ticket from "Sell at": type a price with three decimals (803.127); the line beside
+    Place reads the tick's price (803.15). Pick BSE under Exchange: the line says "on BSE". Press
+    Place twice quickly: Orders shows one order, on BSE at 803.15.
 - **In market hours, with no order:**
   - lock the phone 10 minutes on Options and on a 1m chart; each is back to "Real-time" within a
     second or two, and the new candle opens within a second of the minute;
@@ -175,6 +199,18 @@ in v0.12.0. **Publish only after v0.12.0 has installed and run one trading day.*
   capital gains, F&O figures and charges with Upstox's own tax P&L. Two nights after a trading day,
   add up "Show the parts" over one day's trades against that day's contract notes. If every trade
   still says "est." after a week, Upstox does not give charges by day: say so.
+  - If a Check card shows: compare each share it names with the Upstox app, and recall whether it
+    had a bonus or split since you bought. Add nothing for those. Another family member's paper
+    has no Check card.
+  - "Sales outside this paper": a share you entered by hand without its ISIN reads "Add its ISIN in
+    the tab to have it computed."; an ETF reads "ETF units are not computed in this release."
+  - The dividends note is in the CSV and the Tax pack. Journal, Reports, Settings shows the Tax
+    pack as "1 April 07:00, and again 4 April 07:00".
+  - Early December: "Estimate against actual" says November is not compared, and no November trade
+    reads "actual, for the month".
+  - 4 April 2027: Reports shows the year's Tax pack built that morning, and the System page names
+    that day's backup as the year's. **Give your CA that pack,** from Reports: the copy sent on
+    Telegram on 1 April has estimates for the charges of the year's last days.
 
 ### What is refused now that used to be accepted
 - **A sale of anything in the share market that is not a company's equity share** is no longer
@@ -199,11 +235,20 @@ in v0.12.0. **Publish only after v0.12.0 has installed and run one trading day.*
 ### Still to check, or not modelled
 - **Nothing here has been seen on a real phone or run on your server.** The screens were measured
   in a test browser at 360 x 800 and 800 x 360. Those browser tests are run by hand and are not
-  part of the automatic checks that run on every change. No second review has checked the two fix
-  rounds yet.
+  part of the automatic checks that run on every change.
+- **This release had a second review and a re-check.** The second review found every serious
+  finding of the first reviews fixed, except the hidden-page reading below, which is your decision.
+  A further review of the later tax fixes asked for the Check card's advice to be corrected before
+  publishing; that is done, as said above, and its re-check says: publish, yes.
 - **Equity ETFs are "not computed" in the tax paper,** index ETFs included, because nothing yet
   tells one from a gold or liquid ETF reliably. Bringing them in needs your decision (a dated list
-  you keep, or a tag). The rule for what is a share was not checked against Upstox's live list.
+  you keep, or a tag). A share entered by hand in a tab without its ISIN is not computed either:
+  add the ISIN. The rule for what is a share was not checked against Upstox's live list.
+- **A bonus or split does not reach the tax lots in this release;** it will once you confirm it in
+  the Calendar, in a later one. Until then such a share can show on the Check card, and its sales
+  read "to check". A split that gave the share a new ISIN shows as two entries (the old one with
+  lots and no holding, the new one held with no purchase record). Shares bought on margin (MTF) may
+  show as differing. The Tax view says a difference twice, on the card and in the first note.
 - **The tax paper is a working paper, not a filing.** Several readings of the rules are marked
   for your CA (among them the 31 Jan 2018 price after a later split, how charges are spread, and the
   order losses are set off). Debt funds, unlisted shares and foreign assets are not in it. A
@@ -211,7 +256,12 @@ in v0.12.0. **Publish only after v0.12.0 has installed and run one trading day.*
   only. A sum over about Rs 1 crore is cut with "..." in the Tax pack's PDF.
 - **How Upstox answers charges for a single day is not verified.** If it answers none, the walk
   back through earlier days nearly stops and the month's figures take over from the 3rd of the
-  next month. Exercise STT is never applied: how Upstox records an exercise is unseen.
+  next month. A month that becomes whole only later (a missed day rebuilt afterwards) is not
+  shared out then; its trades keep the estimate. Exercise STT is never applied: how Upstox records
+  an exercise is unseen.
+- **The year's Tax pack rebuilt on 4 April is not sent to Telegram again;** take it from Reports.
+  If the journal is down all of 4 April, the pack is rebuilt within three days, after that day's
+  backup: keep a fresh Tax pack with the year's papers then.
 - **The Chain tab's cost is judged on your phone,** not by a test: the test machine's measure of
   sustained load was not stable, so only the per-moment limits are tested.
 - **While the price feed is down, a hidden page still reads quotes every 5 seconds.** It is kept
@@ -231,14 +281,15 @@ in v0.12.0. **Publish only after v0.12.0 has installed and run one trading day.*
   45 seconds.** Worth a look against Upstox's request limits on a busy day.
 - **The kill switch leaves the assistant alone while the risk guard checks the sandbox only.**
   Until the guard covers Live, use Disconnect on the System page.
-- **What the watch cannot tell you:** OpenAlgo or the whole server down (only the outside
-  heartbeat can); the Analytics Token's daily check; a certificate it could not read (the System
-  page and the check show it, no message is sent). Once in a while its look can make a timed
+- **What the watch cannot tell you:** OpenAlgo or the whole server down (only the outside heartbeat
+  can); the Analytics Token's daily check. A certificate it cannot check is told once, after two
+  days, and not again while the line stays missing. Once in a while its look can make a timed
   install wait one more run, ten minutes.
 - **The restore test proves a backup reads back, not that a new server boots from it.** It never
   touches the bucket or your private key: that is your own test, once a quarter (README).
-- **The year's backup:** a server down from 4 April to 4 July gets none for that year. One made
-  while the offsite copy was not set up, or sent by a command of your own, is not sent again.
+- **The year's backup:** a server down for the three months from 4 April gets none for that year.
+  One made while the offsite copy was not set up, or sent by a command of your own, is not sent
+  again.
 - **The assistant's nginx limit is 2 requests a second.** If the assistant says requests were
   refused once you use it, the limit is too low. The monthly security check on GitHub has not run
   yet; run it once by hand after this release is on the main line and see that its log shows counts
