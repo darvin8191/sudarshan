@@ -132,10 +132,10 @@ has installed and run one trading day.**
 The screener: your own screens over F&O stocks, futures, indices, option strikes or a watchlist,
 checked at every candle close, ranked, fed into a watchlist and told on Telegram. The portfolio
 gains loans on a tab, notes on prices, yield on cost, a dashboard card, and the Upstox trade
-history and P&L. It includes everything in v0.5.2. **Publish it only after v0.5.2 has installed
-and run one trading day. The screener ships switched
-off: publishing this release changes nothing you trade with, and nothing is screened until you
-switch it on after the two checks below.**
+history and P&L. It includes everything in v0.5.2, which was not published on its own, so
+v0.5.2's steps come with this install (the first bullet under "What you must do"). **The screener
+ships switched off: publishing this release changes nothing you trade with, and nothing is
+screened until you switch it on after the two checks below.**
 
 ### What changes for you
 - **The Screener page (menu: Screener), switched off by this release.** While it is off the page
@@ -195,7 +195,15 @@ switch it on after the two checks below.**
     figures shown stay the last complete read until the last step is in.
 
 ### What you must do
-- **Nothing when you publish.** The screener stays off.
+- **v0.5.2's steps, with this install** (v0.5.2 itself was not published; its section below says
+  what each fix does):
+  - on the Telegram page (OpenAlgo, Telegram Bot), remove any linked chat that is not your own;
+  - send /link again only if you regenerated the API key since you linked;
+  - if your risk confirm phrase is still the shipped one, set your own on the Risk page;
+  - after the install, Freeze Quantities shows NIFTY 1800 and BANKNIFTY 900. If it does not, the
+    install rolled back (the server's Telegram notice says so): keep single NIFTY orders within
+    27 lots and BANKNIFTY within 30, and tell me.
+- **Nothing else when you publish.** The screener stays off.
 - **Before switching it on, the replay check on a recorded day, with the screener still off.** After
   a trading day's close, run the commands under "The replay check" in
   `sudarshan/screener/README.md`, the part for the first switch-on. It passes when it prints a line
