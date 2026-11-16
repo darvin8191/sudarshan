@@ -22,29 +22,29 @@ export function SyncNotice({ board = chartSyncNotices }: { board?: NoticeBoard }
   const notice = useSyncExternalStore(board.subscribe, board.latest, board.latest)
   if (!notice) return null
   const { Icon, ink, label } = MARK[notice.tone]
+  // Upright: the words with Dismiss beside them, the action under them. On a wide screen (a phone
+  // on its side) one row: words, action, Dismiss, so the chart keeps its height.
   return (
     <output
       aria-live="polite"
       data-testid="chart-sync-notice"
-      className="flex shrink-0 flex-col border-b bg-card px-3 pt-1 text-sm text-[color:var(--text-primary)]"
+      className="flex shrink-0 flex-wrap items-start border-b bg-card pl-3 text-sm text-[color:var(--text-primary)]"
     >
-      <span className="flex items-start gap-2">
-        <Icon aria-hidden="true" className={`mt-3.5 size-4 shrink-0 ${ink}`} />
-        <span className="min-w-0 flex-1 py-3">
-          <span className="sr-only">{label}: </span>
-          {notice.text}
-        </span>
-        <button
-          type="button"
-          aria-label="Dismiss this note"
-          onClick={() => board.clear(notice.id)}
-          className="inline-flex size-12 shrink-0 items-center justify-center rounded-full hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          <X aria-hidden="true" className="size-4" />
-        </button>
+      <Icon aria-hidden="true" className={`mt-4 size-4 shrink-0 ${ink}`} />
+      <span className="min-w-0 flex-1 basis-0 px-2 py-3">
+        <span className="sr-only">{label}: </span>
+        {notice.text}
       </span>
+      <button
+        type="button"
+        aria-label="Dismiss this note"
+        onClick={() => board.clear(notice.id)}
+        className="inline-flex size-12 shrink-0 items-center justify-center rounded-full text-[color:var(--text-secondary)] hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:order-2"
+      >
+        <X aria-hidden="true" className="size-4" />
+      </button>
       {notice.action && (
-        <span className="flex justify-end pb-1">
+        <span className="flex w-full justify-end pr-1 pb-1 sm:order-1 sm:w-auto sm:pb-0">
           <button
             type="button"
             onClick={notice.action.run}
