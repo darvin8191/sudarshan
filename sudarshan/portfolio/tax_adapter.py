@@ -319,6 +319,17 @@ def _complete_run(records: Mapping[tuple, Mapping], fy: int) -> list[int]:
     return run
 
 
+def read_years(tx, fy: int) -> list[int]:
+    """``_complete_run`` from the records' states alone (their rows are not read): the years
+    whose share trades the lots of ``fy`` are replayed from, newest last; empty when ``fy``
+    itself is not read in full."""
+    run, year = [], fy
+    while tx.count("report_cache", kind="trades", fy=year, segment="EQ", state="ok"):
+        run.insert(0, year)
+        year -= 1
+    return run
+
+
 def inputs(tx, taxpayer: int, fy: int, as_of_day: int, as_of_ms: int) -> PackInputs:
     """Everything the core needs for one taxpayer's year, read in one transaction ``tx``."""
     accounts = {a["id"]: a for a in tx.tax_accounts(taxpayer)}

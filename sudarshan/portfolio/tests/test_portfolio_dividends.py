@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import httpx
 import pytest
-from test_portfolio_ca_ops import event, record, scenario
+from test_portfolio_ca_ops import event, partly_read, record, scenario
 from test_portfolio_closed_world import answer_misses
 from test_portfolio_corpactions_reader import HELD, NIGHT, TRADED, UPSTOX
 from test_portfolio_import_ops import NOW, OWNER
@@ -170,6 +170,22 @@ async def test_a_dividend_with_no_amount_is_listed_not_dropped(n):
     assert (left["qty_u"], left["expected_paise"]) == (300 * U, 0)
     assert left["words"].startswith("Upstox lists no amount for this dividend")
     assert totals["payers"] == [] and totals["total_paise"] == 0
+
+
+@scenario
+async def test_a_closing_record_whose_holdings_were_not_read_never_drops_a_dividend(n):
+    """v0.14.0 verification M2, its probe. On Monday 19 Oct, the eve of the ex-date, the closing
+    record read the positions but not the holdings. Old code read it as holding nothing: no
+    line, and nothing under "Not counted" either (payers 0, uncounted 0), the dividend gone
+    without a word. It is no holdings record: Friday's says 100, and the line names it."""
+    record(n, 20261016, **{UPSTOX: 100})
+    partly_read(n, 20261019)
+    event(n, "dividend", ex_day=20261020, amount_u=55_000)
+    totals = (await year(n))["dividends"]
+    (payer,) = totals["payers"]
+    assert [(ln["qty_u"], ln["expected_paise"], ln["record_day"]) for ln in payer["lines"]] == [
+        (100 * U, 550 * RUPEE, 20261016)]  # fmt: skip
+    assert (totals["uncounted"], totals["total_paise"]) == ([], 550 * RUPEE)
 
 
 # ---- before the first read, and a year too old (review M1, L5) -----------------------------------

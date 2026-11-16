@@ -65,6 +65,7 @@ def build_pack(given: PackInputs) -> dict:
         given.actions,
         given.all_delivery,
         given.aliases,
+        given.as_of_day,
     )
     paired = business.pair(trades, given.settlements, given.as_of_day)
     realised = [r for r in (*paired.realised, *book.intraday) if fy_of(r.close_day) == fy]
