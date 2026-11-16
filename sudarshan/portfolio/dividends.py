@@ -304,17 +304,26 @@ def calendar(tx: Tx, today: int, from_day: int, to_day: int,
     holdings = corpactions.Holdings(tx, today, held_now)
     upstox = next((a for a in tx.rows("account") if a["kind"] == "upstox"), None)
     reads = {r["isin"]: r["read_at"] for r in tx.ca_reads() if r["state"] == "ok"}
+    decided = corpactions.decisions(tx)
+    groups = {e["id"]: group for group in core.groups(tx.ca_events(gone=True)) for e in group}
+    known: set[str] | None = None  # the Upstox account's shares, read only when a row needs them
     rows = []
     for event in tx.ca_events(from_day=from_day, to_day=to_day):
         held = sum(_held(holdings, upstox, event).values())
         pays = event["kind"] == "dividend" and event["amount_u"] is not None and held
+        done = None
+        if event["kind"] in core.LOT_KINDS and corpactions.standing(
+            groups[event["id"]], decided, corpactions.UPSTOX_SCOPE
+        ):
+            known = corpactions.upstox_isins(tx, held_now) if known is None else known
+            done = corpactions.confirmed(holdings, groups[event["id"]], decided, known)
         rows.append({
             "event_id": event["id"], "isin": event["isin"], "name": holdings.name(event["isin"]),
             "kind": event["kind"], "ex_day": event["ex_day"], "amount_u": event["amount_u"],
             "ratio_num": event["ratio_num"], "ratio_den": event["ratio_den"],
             "held_qty_u": held or None,
             "expected_paise": rules.expected_paise(held, event["amount_u"]) if pays else None,
-            "checked_at": reads.get(event["isin"]),
+            "checked_at": reads.get(event["isin"]), "decided": done,
         })  # fmt: skip
     ahead = tx.ca_events(from_day=add_days(today, 1))
     return {"from": from_day, "to": to_day, "listed_future": bool(ahead), "calendar": rows,

@@ -55,6 +55,7 @@ from .core.kinds import CA_DECISIONS, REPORT_YEARS
 from .core.ledger import replay
 from .core.model import BadEntry, Entry, Refusal
 from .core.words import date as day_words
+from .core.words import quantity
 from .store import Invalid, NotFound, Refused, Scope, Tx
 from .upstox import _signature, minute_of_day
 
@@ -741,6 +742,36 @@ def _already(event: dict[str, Any], row: dict[str, Any]) -> str:
            else f"every {den} made {num}")  # fmt: skip
     return (f"This {kind} is already applied ({how}). Upstox lists it again in other words; "
             "applying it again would count it twice.")  # fmt: skip
+
+
+def confirmed(holdings: Holdings, group: list[dict[str, Any]], decided: dict[int, list[dict]],
+              upstox: set[str]) -> dict[str, Any] | None:  # fmt: skip
+    """What the owner confirmed for the Upstox account on a bonus or a split (types.ts
+    ``CaDecided``; v0.14.0 verification M3), None when nothing is: the decision, made on
+    whichever wording of the event, with its version; what it did, in words; and the choices
+    To confirm offered (``expected``), with the same sentences on the quantity held the day
+    before. The Calendar's "Change what I confirmed" sends ``ca_decide`` from that version: a
+    reading taken the wrong way round, or left out when it was right, is never final."""
+    row = standing(group, decided, UPSTOX_SCOPE)
+    if row is None:
+        return None
+    event = next(e for e in group if e["id"] == row["event_id"])
+    held, more = holdings.upstox(event["isin"], event["ex_day"]), {"held_from": "record"}
+    if held is None and event["isin"] in upstox:
+        held = holdings.upstox_from_trades(event["isin"], event["ex_day"])
+        more = {"held_from": "trades"}
+    kind, num, den = event["kind"], row["ratio_num"], row["ratio_den"]
+    if row["state"] != "applied":
+        words = f"You left your lots as they are for this {kind}."
+    else:
+        how = f"{num} new for every {den} held" if kind == "bonus" else f"every {den} made {num}"
+        if held:
+            after = core.effect(kind, held, num, den)["after_qty_u"]
+            how += f": {quantity(held)} became {quantity(after)}"
+        words = f"You applied this {kind} as {how}."
+    choices = _expected(event, UPSTOX_SCOPE, held or None, **(more if held else {}))
+    return {"event_id": event["id"], "version": row["version"], "state": row["state"],
+            "ratio_num": num, "ratio_den": den, "words": words, "expected": choices}  # fmt: skip
 
 
 def accepted_actions(tx: Tx) -> list[dict[str, Any]]:
