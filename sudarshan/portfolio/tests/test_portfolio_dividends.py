@@ -75,6 +75,18 @@ async def test_d1_the_expected_amounts_and_the_likely_tds_of_one_payer(n):
 
 
 @scenario
+async def test_a_payer_held_only_at_upstox_has_its_name(n):
+    """Review M2: names came from the custom tabs' assets only, so a share held only at Upstox
+    read as its ISIN on the Dividends card. The Upstox holding's own name now names it."""
+    d1(n)
+    assert (await year(n))["dividends"]["payers"][0]["name"] is None  # nothing names it yet
+    n.reader._held_now = lambda: [{"isin": UPSTOX, "name": "Probe Industries Limited"}]
+    (payer,) = (await year(n))["dividends"]["payers"]
+    assert payer["name"] == "Probe Industries Limited"
+    assert {line["name"] for line in payer["lines"]} == {"Probe Industries Limited"}
+
+
+@scenario
 async def test_the_tds_flag_is_per_payer_never_on_the_years_total(n):
     """Mutation target 22: the threshold applied to the year's total fails here."""
     record(n, 20260813, **{UPSTOX: 200, TRADED: 200})

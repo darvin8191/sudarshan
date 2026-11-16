@@ -68,6 +68,22 @@ def record(n, day, **held) -> None:
     n.svc.store.write(OWNER, lambda tx: tx.upstox_eod_put(day, {"read_at": NOW}, lines, NOW))
 
 
+def history(n, *trades, isin=UPSTOX, read_at=NOW) -> None:
+    """Upstox's share trades of FY 2026-27, read in full: ``(day, "BUY" | "SELL", shares)`` of
+    one share at Rs 100."""
+    rows = [
+        {"trade_date": day, "trade_id": str(50_000 + i), "exchange": "NSE", "segment": "EQ",
+         "transaction_type": side, "scrip_name": "PROBE LTD", "symbol": "PROBE", "isin": isin,
+         "option_type": None, "strike_price_u": None, "expiry": None, "qty_u": shares * U,
+         "price_u": 1_000_000, "amount_paise": shares * 10_000}
+        for i, (day, side, shares) in enumerate(trades)
+    ]  # fmt: skip
+    n.svc.store.write(
+        OWNER,
+        lambda tx: tx.report_put("trades", 2026, "EQ", "ok", read_at, None, {"rows": rows}, NOW),
+    )
+
+
 def actions(n):
     return n.read(ca.accepted_actions)
 

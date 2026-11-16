@@ -375,20 +375,41 @@ SAY = {
 }
 
 
+def share_names(tx: Tx, held_now: list[dict[str, Any]] | None = None) -> dict[str, str]:
+    """A name for each ISIN: the scrip name of Upstox's trade history, else the name the Upstox
+    holding itself carries (``held_now``), and over both the holding's own in the owner's tabs
+    (under each ISIN it has had). A share held only at Upstox has a name too (review M2)."""
+    names = {
+        r["isin"]: r["scrip_name"]
+        for record in tx.report_list("trades")
+        for r in (record.get("payload") or {}).get("rows") or []
+        if r.get("isin") and r.get("scrip_name")
+    }
+    for row in held_now or ():
+        if row.get("isin") and row.get("name") and row["name"] != row.get("instrument_key"):
+            names[row["isin"]] = row["name"]
+    assets = {a["id"]: a["name"] for a in tx.rows("asset") if a.get("name")}
+    for alias in tx.rows("asset_alias", "id", kind="isin"):
+        if alias["asset_id"] in assets:
+            names[alias["value"]] = assets[alias["asset_id"]]
+    names.update({a["isin"]: a["name"] for a in tx.rows("asset") if a.get("isin") and a["name"]})
+    return names
+
+
 class Holdings:
     """What the Upstox account and each custom tab held the day before a day, read once."""
 
-    def __init__(self, tx: Tx, today: int):
+    def __init__(self, tx: Tx, today: int, held_now: list[dict[str, Any]] | None = None):
         self.tx, self.today = tx, today
         self.assets = {a["isin"]: a for a in tx.rows("asset", kind="listed") if a["isin"]}
         self.tabs = [t for t in tx.rows("tab") if not t["system"] and not t["archived"]]
         self.record_days = [row["day"] for row in tx.rows("upstox_eod", "day")]
+        self.names = share_names(tx, held_now)
         self._records: dict[int, dict[str, int]] = {}
         self._moves: dict[int, dict[tuple[int, int], list[tuple[int, int]]]] = {}
 
     def name(self, isin: str) -> str | None:
-        asset = self.assets.get(isin)
-        return asset["name"] if asset else None
+        return self.names.get(isin)
 
     def upstox(self, isin: str, ex_day: int) -> int | None:
         """The Upstox account's quantity the day before ``ex_day``; None when no closing record
@@ -550,7 +571,7 @@ def listing(tx: Tx, today: int, *, scope: str | None = None, from_day: int, to_d
     An event is one per company and ex-date, however often Upstox rewords it (``core.groups``):
     a decision made on one wording stands for every other, so a relisted event is never asked a
     second time."""
-    holdings, upstox = Holdings(tx, today), upstox_isins(tx, held_now)
+    holdings, upstox = Holdings(tx, today, held_now), upstox_isins(tx, held_now)
     decided = decisions(tx)
     by_event = {key: [r for r in rows if scope in (None, r["scope"])]
                 for key, rows in decided.items()}  # fmt: skip
@@ -746,6 +767,7 @@ __all__ = [
     "decisions",
     "read_status",
     "register_jobs",
+    "share_names",
     "standing",
     "upstox_isins",
     "waiting",

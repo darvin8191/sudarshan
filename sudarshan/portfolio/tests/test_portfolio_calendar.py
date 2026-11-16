@@ -96,6 +96,22 @@ async def test_what_is_held_in_the_upstox_account_and_in_a_tab_adds_up(n):
 
 
 @scenario
+async def test_a_share_held_only_at_upstox_has_its_name(n):
+    """Review M2. Old code took names from the owner's tabs only: an Upstox-only share read as
+    its ISIN in the calendar, in To confirm and in the dividends."""
+    from test_portfolio_ca_ops import history
+
+    record(n, 20261023, **{UPSTOX: 250})
+    event(n, "dividend", 20261110, amount_u=300000)
+    assert (await calendar(n))["calendar"][0]["name"] is None  # nothing names it yet
+    history(n, (20260610, "BUY", 250))  # Upstox's trade history calls it PROBE LTD
+    assert (await calendar(n))["calendar"][0]["name"] == "PROBE LTD"
+    # The holding's own name, as the Upstox account gives it, comes before the scrip name.
+    n.reader._held_now = lambda: [{"isin": UPSTOX, "name": "Probe Industries Limited"}]
+    assert (await calendar(n))["calendar"][0]["name"] == "Probe Industries Limited"
+
+
+@scenario
 async def test_it_says_when_upstox_lists_nothing_to_come(n):
     event(n, "dividend", 20260814, amount_u=55000)
     gone = event(n, "dividend", 20261110, amount_u=300000)

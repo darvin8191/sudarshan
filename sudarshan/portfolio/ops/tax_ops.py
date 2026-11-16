@@ -33,7 +33,7 @@ from sudarshan.tax.model import Carry
 from sudarshan.tax.pack import build_pack
 from sudarshan.tax.units import day_text, fy_label, rupees
 
-from .. import dividends, reports, tax_adapter
+from .. import corpactions, dividends, reports, tax_adapter
 from ..core.days import day_of_instant, financial_year, is_day
 from ..core.kinds import (
     CARRY_BUCKETS,
@@ -242,19 +242,9 @@ SALE_LISTS = ("schedule", "needs_fmv", "unknown_cost", "exempt_buybacks")
 
 def _share_names(tx) -> dict[str, str]:
     """A name for each ISIN: the holding's own (under each ISIN it has had), else the scrip name
-    of Upstox's trade history."""
-    names = {
-        r["isin"]: r["scrip_name"]
-        for record in tx.report_list("trades")
-        for r in (record.get("payload") or {}).get("rows") or []
-        if r.get("isin") and r.get("scrip_name")
-    }
-    assets = {a["id"]: a["name"] for a in tx.rows("asset") if a.get("name")}
-    for alias in tx.rows("asset_alias", "id", kind="isin"):
-        if alias["asset_id"] in assets:
-            names[alias["value"]] = assets[alias["asset_id"]]
-    names.update({a["isin"]: a["name"] for a in tx.rows("asset") if a.get("isin") and a["name"]})
-    return names
+    of Upstox's trade history. One rule for the paper, the calendar and the dividends
+    (``corpactions.share_names``)."""
+    return corpactions.share_names(tx)
 
 
 def _named(pack: dict, names: dict[str, str]) -> dict:

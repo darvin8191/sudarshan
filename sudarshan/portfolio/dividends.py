@@ -143,8 +143,9 @@ def owner_member(tx: Tx) -> int:
     return upstox[0]["member_id"] if upstox else tx.rows("member")[0]["id"]
 
 
-def _year(tx: Tx, fy: int, member_id: int, accounts: set[int] | None = None) -> dict[str, Any]:
-    names = {a["isin"]: a["name"] for a in tx.rows("asset", kind="listed") if a["isin"]}
+def _year(tx: Tx, fy: int, member_id: int, accounts: set[int] | None = None,
+          names: dict[str, str] | None = None) -> dict[str, Any]:  # fmt: skip
+    names = corpactions.share_names(tx) if names is None else names
     lines = [
         {**{key: row[key] for key in LINE_KEYS}, "name": names.get(row["isin"])}
         for row in tx.rows("dividend_line", "ex_day,id", member_id=member_id, fy=fy)
@@ -153,12 +154,15 @@ def _year(tx: Tx, fy: int, member_id: int, accounts: set[int] | None = None) -> 
     return rules.year(lines, fy, names)
 
 
-def report(tx: Tx, fy: int, member_id: int, now: int) -> dict[str, Any]:
+def report(tx: Tx, fy: int, member_id: int, now: int,
+           held_now: list[dict] | None = None) -> dict[str, Any]:  # fmt: skip
     """``dividends``: a taxpayer's lines of a financial year by payer, the totals and the
-    likely-TDS flags (types.ts ``DividendsReport``)."""
+    likely-TDS flags (types.ts ``DividendsReport``). ``held_now`` names a share the Upstox
+    account holds (review M2)."""
     if tx.get("member", member_id) is None:
         raise NotFound()
-    return {"fy": fy, "member_id": member_id, "as_of": now, "dividends": _year(tx, fy, member_id)}
+    of_year = _year(tx, fy, member_id, names=corpactions.share_names(tx, held_now))
+    return {"fy": fy, "member_id": member_id, "as_of": now, "dividends": of_year}
 
 
 def for_pack(tx: Tx, fy: int, member_id: int, buyback_paise: int = 0) -> dict[str, Any]:
@@ -199,12 +203,13 @@ def set_line(tx: Tx, line_id: int, args: dict[str, Any], today: int, now: int) -
     return {key: row[key] for key in LINE_KEYS}
 
 
-def calendar(tx: Tx, today: int, from_day: int, to_day: int) -> dict[str, Any]:
+def calendar(tx: Tx, today: int, from_day: int, to_day: int,
+             held_now: list[dict[str, Any]] | None = None) -> dict[str, Any]:  # fmt: skip
     """``calendar``: the events between two days, each with its public facts and, apart from
     them, what is held (the day before the ex-date; for an event to come, now) and the amount a
     dividend is expected to bring (types.ts ``CalendarReport``). ``listed_future`` is whether
     Upstox lists any event to come at all."""
-    holdings = corpactions.Holdings(tx, today)
+    holdings = corpactions.Holdings(tx, today, held_now)
     upstox = next((a for a in tx.rows("account") if a["kind"] == "upstox"), None)
     reads = {r["isin"]: r["read_at"] for r in tx.ca_reads() if r["state"] == "ok"}
     rows = []

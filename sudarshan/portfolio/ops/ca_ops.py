@@ -87,10 +87,12 @@ async def dividends_year(ctx, message):
     if not 2000 <= fy <= financial_year(today):
         raise ApiError(400, "bad_request", ASK)
 
+    held = _held_now(ctx)
+
     def run(tx):
         dividends.sync(tx, today, now)
         who = dividends.owner_member(tx) if member is None else member
-        return dividends.report(tx, fy, who, now)
+        return dividends.report(tx, fy, who, now, held)
 
     return await answer(lambda: store.write(OWNER, run))
 
@@ -113,6 +115,7 @@ async def calendar(ctx, message):
     store, now = need(ctx), ctx.clock()
     today = day_of_instant(now)
     start, end = _span(message, today)
+    held = _held_now(ctx)
     return await answer(
-        lambda: store.read(OWNER, lambda tx: dividends.calendar(tx, today, start, end))
+        lambda: store.read(OWNER, lambda tx: dividends.calendar(tx, today, start, end, held))
     )
