@@ -245,19 +245,25 @@ def _row(isin: str, name: str | None, held: int, lots: int, purchase: str, appli
     }
 
 
-def check(tx: Tx, today: int, now: int, lots: TaxLots | None = None, *,
-          insights: bool) -> dict[str, Any]:  # fmt: skip
+def check(tx: Tx, today: int, now: int, lots: TaxLots | None = None, *, insights: bool,
+          taxpayer: int | None = None) -> dict[str, Any]:  # fmt: skip
     """``LotCheck`` (types.ts): the shares whose tax lots and Upstox holdings differ.
 
     ``state`` is ``ok`` (compared; ``rows`` may be empty), ``waiting`` (it cannot compare yet,
-    and ``words`` says for what) or ``none`` (no Upstox account that counts by its reports).
-    ``day`` is the closing record compared with. ``words`` is the headline when rows differ:
-    "Lots and holdings differ for 2 shares: ABC 100 held, 90 in lots; ...". ``unrecorded_count``
-    is how many shares are held with no purchase in the records at all. ``insights`` is whether
-    the Calendar, where a bonus or a split is confirmed, is switched on."""
+    and ``words`` says for what) or ``none`` (no Upstox account that counts by its reports, or
+    a ``taxpayer`` who does not own it: the check belongs on its owner's paper only, never on
+    another family member's, which goes to that member's CA). ``day`` is the closing record
+    compared with. ``words`` is the headline when rows differ: "Lots and holdings differ for 2
+    shares: ABC 100 held, 90 in lots; ...". ``unrecorded_count`` is how many shares are held
+    with no purchase in the records at all. ``insights`` is whether the Calendar, where a bonus
+    or a split is confirmed, is switched on."""
+    out: dict[str, Any] = {"state": "none", "account_id": None, "day": None, "words": None,
+                           "rows": [], "unrecorded_count": 0}  # fmt: skip
+    upstox = next((a for a in tx.rows("account") if a["kind"] == "upstox"), None)
+    if taxpayer is not None and (upstox is None or upstox["member_id"] != taxpayer):
+        return out
     lots = lots or TaxLots(tx, today, now)
-    out: dict[str, Any] = {"state": "none", "account_id": lots.account, "day": None,
-                           "words": None, "rows": [], "unrecorded_count": 0}  # fmt: skip
+    out["account_id"] = lots.account
     if lots.account is None:
         return out
     if not lots.ready or lots.read_at is None:

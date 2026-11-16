@@ -294,8 +294,9 @@ def _named(pack: dict, names: dict[str, str]) -> dict:
 def _paper(store, member: int | None, fy: int, today: int, now: int, reading: bool,
            insights: bool) -> dict:  # fmt: skip
     def run(tx):
-        return (_gather(tx, member, fy, today, now), _share_names(tx),
-                lotcheck.check(tx, today, now, insights=insights))  # fmt: skip
+        years = _gather(tx, member, fy, today, now)
+        check = lotcheck.check(tx, today, now, insights=insights, taxpayer=years[-1].taxpayer)
+        return years, _share_names(tx), check
 
     years, names, check = store.read(OWNER, run)
     pack = _checked(_named(_chain(years, reading), names), check)
@@ -682,7 +683,7 @@ def _paper_file(store, member, fy: int, schedule: str, today: int, now: int,
                 insights: bool) -> dict:  # fmt: skip
     def run(tx):
         years = _gather(tx, member, fy, today, now)
-        check = lotcheck.check(tx, today, now, insights=insights)
+        check = lotcheck.check(tx, today, now, insights=insights, taxpayer=years[-1].taxpayer)
         return years, _labels(tx, years[-1].taxpayer), check
 
     years, (who, names, accounts), check = store.read(OWNER, run)

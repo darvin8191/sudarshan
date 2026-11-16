@@ -183,6 +183,26 @@ def test_the_check_names_a_bonus_or_split_first_and_never_a_day_that_is_not_read
     )
 
 
+def test_the_check_is_carried_only_on_the_paper_of_the_upstox_accounts_member(ctx):
+    """v0.13.0 verification M1, its probe. The lots and the holdings compared are the Upstox
+    account's, and its member is the owner. Old code put the owner's row on every taxpayer's
+    paper: another family member's opened with "Lots and holdings differ for 1 share: ...", in
+    the paper and the CSV that go to that member's CA."""
+    call(ctx, "tax_input_set", kind="opening_lot", request_id="lot-1",
+         row=lot(ctx, qty_u=25 * U, cost_paise=3_750_000))  # fmt: skip
+    lines = [{"instrument_key": f"NSE_EQ|{ISIN}", "qty": 40 * U}]
+    ctx.store.write(OWNER, lambda tx: tx.upstox_eod_put(20261112, {"read_at": NOW}, lines, NOW))
+    assert len(call(ctx, "tax_get")["lot_check"]["rows"]) == 1  # the owner's paper
+    other = ctx.store.write(OWNER, lambda tx: tx.insert("member", {"name": "B"}, NOW))["id"]
+    pack = call(ctx, "tax_get", member=other)
+    assert pack["taxpayer"] == other
+    assert pack["lot_check"] == {"state": "none", "account_id": None, "day": None, "words": None,
+                                 "rows": [], "unrecorded_count": 0}  # fmt: skip
+    assert not [note for note in pack["notes"] if note.startswith("Lots and holdings differ")]
+    text = call(ctx, "tax_csv", schedule="capital_gains", member=other)["text"]
+    assert not [line for line in text.splitlines() if line.endswith(",To check")]
+
+
 def test_the_paper_says_why_it_counts_no_dividend_and_lists_what_it_could_not_count(ctx):
     """v0.13.0 review H1. The paper is on while Upstox's dividends are not read at all (the
     insights switch is off): its dividends total of nothing used to stand without a word, as
