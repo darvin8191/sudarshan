@@ -39,6 +39,7 @@ from sudarshan.vault import (
     JOURNAL_FAMILY_INFO,
     JOURNAL_NUDGE_INFO,
     PORTFOLIO_JOURNAL_API_INFO,
+    SIGNALS_JOURNAL_INFO,
     fernet_for,
 )
 
@@ -151,6 +152,7 @@ class Service:
         keys: dict[str, Any],
         *,
         portfolio_key: Any = None,
+        signals_key: Any = None,
         jobs: dict[str, Job] | None = None,
         opener: Callable[[Settings], Any] = open_store,
         closer: Callable[[Any], None] = close_store,
@@ -161,6 +163,8 @@ class Service:
         self.api = JournalApi(self, keys)
         #: The key of the portfolio's journal purpose (cross-design Y4): every account read.
         self.portfolio_key = portfolio_key
+        #: J3: the key of the TRINETRA view's journal purpose (``state``, ``state_at``).
+        self.signals_key = signals_key
         self.store: Any = None
         #: Why the journal is off when the switch is on, in the owner's words.
         self.off_reason: str | None = None
@@ -338,6 +342,7 @@ def main() -> int:
             settings,
             keys_for(pepper),
             portfolio_key=fernet_for(pepper, PORTFOLIO_JOURNAL_API_INFO),
+            signals_key=fernet_for(pepper, SIGNALS_JOURNAL_INFO),
         )
         asyncio.run(_serve(service))
     except Exception:  # a bug: systemd restarts it
