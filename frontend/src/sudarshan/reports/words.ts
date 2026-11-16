@@ -53,7 +53,7 @@ export const DESK_WORDS: Record<DeskState, string | null> = {
     'Whether reports can be sent just now is not known. They are built and kept here either way; check that sudarshan-alerts is running on the server.',
 }
 
-export const KIND_ORDER: ReportKind[] = ['eod', 'brief', 'weekly', 'monthly', 'fy']
+export const KIND_ORDER: ReportKind[] = ['eod', 'brief', 'weekly', 'monthly', 'fy', 'records']
 
 /**
  * The report switches: the field of the server's `times` that says when each is built (the day
@@ -123,6 +123,10 @@ export function deliveryOf(
   report: ReportRow,
   desk: DeskState | undefined
 ): { tone: 'sent' | 'text' | 'not' | 'unknown'; word: string; detail: string | null } {
+  // The year's records pack is a zip: it is kept here to download and never sent to Telegram.
+  if (report.kind === 'records') {
+    return { tone: 'text', word: 'Kept here to download', detail: 'It is not sent to Telegram.' }
+  }
   if (report.status === 'sent') return { tone: 'sent', word: 'Sent', detail: null }
   if (report.status === 'text_only') {
     return {

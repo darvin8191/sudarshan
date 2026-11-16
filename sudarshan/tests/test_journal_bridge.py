@@ -514,6 +514,33 @@ def test_a_csv_keeps_its_type_without_a_charset(bridge, journal):
     assert response.headers["Content-Type"] == "text/csv" and response.data == data
 
 
+def test_the_years_records_pack_downloads_as_a_zip_and_only_when_it_is_one(bridge, journal):
+    """M19.10 (GA5.2): the records pack is the one file the page may download that Telegram is
+    never sent. Its name, type and first bytes must all say zip."""
+    pack, name = b"PK\x03\x04" + b"\x00" * 40, "SUDARSHAN_Records-pack_FY2627.zip"
+    journal.answers["report_file"] = stored(pack, name, "application/zip")
+    as_owner(bridge)
+    response = bridge.get(PREFIX + "/reports/3/file")
+    assert response.status_code == 200 and response.data == pack
+    assert response.headers["Content-Type"] == "application/zip"
+    assert response.headers["Content-Disposition"] == f'attachment; filename="{name}"'
+    assert response.headers["X-Content-Type-Options"] == "nosniff"
+    for answer in (
+        stored(b"<html>not a zip</html>", name, "application/zip"),
+        stored(pack, name, "application/pdf"),
+        stored(pack, "pack.zip.exe", "application/zip"),
+    ):
+        journal.answers["report_file"] = answer
+        refused = bridge.get(PREFIX + "/reports/3/file", headers=JSON)
+        assert error_of(refused) == {"code": "unavailable", "message": WORDS["bad_file"]}
+        assert "Content-Disposition" not in refused.headers
+    # Telegram's own rules do not learn the zip: it is never a file the report desk sends
+    from sudarshan.alerts import report_files
+
+    assert report_files.kind_of(name) is None and report_files.problem(name, pack) == "kind"
+    assert "zip" not in report_files.KINDS and report_files.ZIP.mime not in report_files.MIMES
+
+
 CSV = b"Date,Symbol,Side,Net\n2026-11-09,NIFTY,LONG,812.50\n"
 CSV_NAME = "SUDARSHAN_Monthly-statement_202610.csv"
 

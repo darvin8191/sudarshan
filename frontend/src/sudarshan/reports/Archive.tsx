@@ -10,6 +10,7 @@ import {
   FileSpreadsheet,
   FileText,
   FileType2,
+  FolderArchive,
   LoaderCircle,
   RefreshCw,
   Sunrise,
@@ -40,6 +41,14 @@ const KIND_ICON: Record<ReportKind, ReactNode> = {
   weekly: <CalendarRange aria-hidden="true" className="size-4" />,
   monthly: <CalendarDays aria-hidden="true" className="size-4" />,
   fy: <FileType2 aria-hidden="true" className="size-4" />,
+  records: <FolderArchive aria-hidden="true" className="size-4" />,
+}
+
+/** What a build on request asked for, in the words of the line under the buttons. */
+const ASKED: Partial<Record<ReportKind, string>> = {
+  fy: 'tax pack',
+  monthly: 'monthly statement',
+  records: 'records pack',
 }
 
 const DELIVERY_ICON = {
@@ -184,7 +193,7 @@ function useBuild() {
     []
   )
   const build = useMutation({
-    mutationFn: async (kind: 'fy' | 'monthly') => journalData('report_build', { kind }),
+    mutationFn: async (kind: 'fy' | 'monthly' | 'records') => journalData('report_build', { kind }),
     onSuccess: (_done, kind) => {
       setAsked(kind)
       void queryClient.invalidateQueries({ queryKey: [...REPORTS_KEY, 'list'] })
@@ -209,7 +218,7 @@ export function Archive({ onOpen }: { onOpen: (id: number) => void }) {
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
         <button
           type="button"
           className={BUTTON}
@@ -236,12 +245,24 @@ export function Archive({ onOpen }: { onOpen: (id: number) => void }) {
           )}
           Build this month&rsquo;s statement now
         </button>
+        <button
+          type="button"
+          className={BUTTON}
+          disabled={build.isPending}
+          onClick={() => build.mutate('records')}
+        >
+          {build.isPending && build.variables === 'records' ? (
+            <LoaderCircle aria-hidden="true" className="size-4 animate-spin" />
+          ) : (
+            <FolderArchive aria-hidden="true" className="size-4" />
+          )}
+          Build the records pack now
+        </button>
       </div>
       {build.isError && <Problem>{problemOf(build.error).message}</Problem>}
       {asked && !build.isError && (
         <output className="block text-sm text-[color:var(--text-secondary)]">
-          Asked for the {asked === 'fy' ? 'tax pack' : 'monthly statement'}. It appears below when
-          it is ready.
+          Asked for the {ASKED[asked] ?? 'report'}. It appears below when it is ready.
         </output>
       )}
       {desk && desk !== 'on' && deskWords && (

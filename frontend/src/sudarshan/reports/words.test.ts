@@ -92,6 +92,25 @@ describe('names and periods', () => {
     const statement = report({ kind: 'monthly', period_key: '202610' })
     expect(downloadName(statement, 'csv')).toBe('SUDARSHAN_Monthly_statement_202610.csv')
     expect(downloadName(statement)).toBe('SUDARSHAN_Monthly_statement_202610.pdf')
+    // M19.10: the year's records pack is a zip
+    const pack = report({
+      kind: 'records',
+      period_key: 'FY2627',
+      file_name: 'SUDARSHAN_Records-pack_FY2627.zip',
+      file_mime: 'application/zip',
+    })
+    expect(downloadName(pack)).toBe('SUDARSHAN_Records_pack_FY2627.zip')
+    expect(hasCsv(pack)).toBe(false)
+  })
+
+  it('says the records pack is kept here and never sent, whatever its status', () => {
+    for (const status of ['ready', 'sent', 'not_sent'] as const) {
+      expect(deliveryOf(report({ kind: 'records', status }), 'off')).toEqual({
+        tone: 'text',
+        word: 'Kept here to download',
+        detail: 'It is not sent to Telegram.',
+      })
+    }
   })
 
   it('offers a CSV for the monthly statement only', () => {
