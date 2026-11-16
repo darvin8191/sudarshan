@@ -44,9 +44,15 @@ SUDARSHAN_ORDER_ALERTS=off stops this service and so this desk with it.
 
 from __future__ import annotations
 
+import asyncio
+import json
+import logging
 import math
 import re
-from collections.abc import Callable, Mapping
+import time
+from collections import OrderedDict
+from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -55,7 +61,19 @@ from sudarshan.autologin.schedule import IST
 from sudarshan.signals import contract as c
 
 from .market.api import ApiError
+from .outbox import DROP, RETRY, SENT, SIGNALS, UNCONFIRMED
+from .store import SIGNAL_SENDING, SIGNAL_WAITING, Store
 
+log = logging.getLogger("sudarshan.alerts")
+
+# Timings are module constants so the tests can shrink them.
+MERGE_S = 5.0
+HOLD_S = c.RELAY["hold_ms"] / 1000.0
+POLL_S = 0.2  # a message ready to go looks again this soon while its lane gives way
+RETRY_S = (2.0, 5.0, 10.0, 30.0, 60.0)
+UNCONFIRMED_TRIES = 3
+#: (start, end) in minutes of the day, IST, or None: decision 14 (22:30 to 07:00), built in N1.
+NIGHT_HOURS: tuple[int, int] | None = None
 TEXT_MAX = c.RELAY["text"]
 LABEL_MAX = c.DOC_LIMITS["label"]
 TITLE_MAX = c.DOC_LIMITS["title"]
@@ -67,7 +85,10 @@ MODULE_WORDS = {
     "swing_eod": "end-of-day swing",
     "swing_intraday": "intraday swing",
 }
-#: The relay's answer when it breaks the contract: it reaches sudarshan-signals' log.
+#: The relay's answers that are not the owner's to act on: they reach sudarshan-signals' log.
+STARTING = "The alert service is starting. The changes are sent again in a moment."
+CLOSING = "The alert service is stopping. The changes are sent again once it is back."
+OFF = "Order alerts are switched off on the server, and TRINETRA's changes on Telegram with them."
 BAD = "That relay could not be read; nothing of it was taken."
 
 _PLAIN = str.maketrans({"*": " ", "_": " ", "`": "'", "[": "(", "]": ")", "/": "\u2215"})
@@ -238,3 +259,278 @@ def night_end(at: datetime, hours: tuple[int, int] | None) -> datetime | None:
         return None
     day = local.date() + timedelta(days=1 if start > end and minute >= start else 0)
     return datetime(day.year, day.month, day.day, end // 60, end % 60, tzinfo=IST)
+
+
+# ---- the desk ------------------------------------------------------------------------------------
+def _key_of(kind: str, fields: Mapping[str, Any]) -> str:
+    """A message's place in the queue: one per reading for changes, one per alert."""
+    return f"c:{fields['module']}:{fields['instrument']}" if kind == "change" else fields["id"]
+
+
+@dataclass
+class _Message:
+    """One message waiting: a reading's changes (oldest first) or one alert."""
+
+    kind: str
+    items: list[dict[str, Any]]
+    ids: list[str]
+    first: float  # monotonic: when its first item arrived (the merge counts from here)
+    ready: float  # epoch seconds: from when it may go (the night's end, else its arrival)
+
+
+class SignalsDesk:
+    """Takes relayed items, claims each once, and sends their messages in the signals lane.
+
+    Args:
+        store: The alert record (alerts.db): the once-only rule, and the items while they wait.
+        send: Sends one text; returns SENT, RETRY, UNCONFIRMED or DROP (OpenAlgoTelegram.send).
+        owner_ready: True when the owner's key is loaded, reading it first if need be.
+        clock: The service clock (aware datetimes).
+        pacer: The process's one outbox.Pacer: this desk takes the signals lane's slots.
+    """
+
+    def __init__(
+        self,
+        store: Store,
+        send: Callable[[str], Awaitable[str]],
+        owner_ready: Callable[[], bool],
+        clock: Callable[[], datetime],
+        pacer,
+    ):
+        self.store, self.send, self.owner_ready = store, send, owner_ready
+        self.clock, self.pacer = clock, pacer
+        self._queue: OrderedDict[str, _Message] = OrderedDict()
+        self._wake = asyncio.Event()
+        self._waiting_slot: float | None = None  # the Pacer's time a message began to wait
+        self._sending = self._closing = self._reloaded = False
+        self.stats = dict.fromkeys(
+            ("taken", "known", "sent", "dropped", "skipped", "stale", "unsure"), 0
+        )
+        pacer.set_waiting(SIGNALS, lambda: self._waiting_slot is not None,
+                          since=lambda: self._waiting_slot)  # fmt: skip
+
+    def health(self) -> dict[str, Any]:
+        """Counts only, for /health: nothing TRINETRA wrote."""
+        return {"waiting": sum(len(m.ids) for m in self._queue.values()), **self.stats}
+
+    # ---- the relay (the listener's signals_relay op) ------------------------------------------
+    async def relay(self, message: Mapping[str, Any]) -> dict[str, list[str]]:
+        """Claim the items of one relay and queue their messages; answer the contract's
+        ``RelayAnswer``: ``taken`` (claimed now) and ``known`` (claimed before)."""
+        if self._closing:
+            raise ApiError(503, "busy", CLOSING)
+        self._reload_once()  # what the last run left waiting goes first, and is never doubled
+        items = parse(message.get("args"))
+        now = self.clock()
+        rows = []
+        for kind, fields in items:
+            ready = self._ready(kind, fields, now)
+            rows.append((fields["id"], ready.timestamp(), json.dumps([kind, fields])))
+        taken = set(self.store.claim_signals(rows, now.timestamp()))
+        skipped = []
+        for (kind, fields), (_, ready, _) in zip(items, rows, strict=True):
+            if fields["id"] not in taken:
+                continue
+            if relayed(kind, fields):
+                self._add(kind, fields, ready, time.monotonic())
+            else:
+                skipped.append(fields["id"])
+        if skipped:
+            self.store.set_signals(skipped, "skipped", now.timestamp())
+            self.stats["skipped"] += len(skipped)
+        answer = {
+            "taken": [f["id"] for _, f in items if f["id"] in taken],
+            "known": [f["id"] for _, f in items if f["id"] not in taken],
+        }
+        self.stats["taken"] += len(answer["taken"])
+        self.stats["known"] += len(answer["known"])
+        if answer["taken"]:
+            log.info("TRINETRA: %d item(s) taken for Telegram, %d known before",
+                     len(answer["taken"]), len(answer["known"]))  # fmt: skip
+        return answer
+
+    def _ready(self, kind: str, fields: Mapping[str, Any], now: datetime) -> datetime:
+        if not fields["night"] or (kind == "alert" and fields["level"] == "act"):
+            return now
+        return night_end(now, NIGHT_HOURS) or now
+
+    def _add(self, kind: str, fields: dict[str, Any], ready: float, seen: float) -> None:
+        key = _key_of(kind, fields)
+        held = self._queue.get(key)
+        if held is not None and kind == "change":
+            held.items.append(fields)
+            held.ids.append(fields["id"])
+            held.ready = max(held.ready, ready)
+        else:
+            self._queue[key] = _Message(kind, [fields], [fields["id"]], seen, ready)
+        self._wake.set()
+
+    # ---- sending ----------------------------------------------------------------------------
+    def _reload_once(self) -> None:
+        """``reload`` before the first relay is taken or the first message sent, and only then."""
+        if self._reloaded:
+            return
+        self._reloaded = True
+        try:
+            self.reload()
+        except Exception:
+            log.exception("the TRINETRA changes the last run left waiting could not be read")
+
+    def reload(self) -> int:
+        """At start: the items a stopped run left waiting go out after all (one past its HOLD_S
+        is stale); returns how many were queued again."""
+        now = self.clock().timestamp()
+        due_back = time.monotonic() - MERGE_S  # they have waited their merge already
+        queued = {item_id for message in self._queue.values() for item_id in message.ids}
+        count = 0
+        for item_id, ready, body in self.store.queued_signals(now):
+            if item_id in queued:
+                continue
+            try:
+                kind, fields = json.loads(body)
+                (_, fields), *_ = parse({KINDS[kind][0]: [fields]})
+            except (ValueError, TypeError, KeyError, ApiError):
+                self.store.set_signals([item_id], "dropped", now)
+                continue
+            self._add(kind, fields, ready, due_back)
+            count += 1
+        self._expire()
+        if count:
+            log.info("TRINETRA: %d item(s) left waiting by the last run go to Telegram", count)
+        return count
+
+    async def run(self) -> None:
+        """Send until cancelled or closed: first what the last run left waiting. A failure costs
+        one try, never the service."""
+        self._reload_once()
+        failures = unconfirmed = 0
+        while not self._closing:
+            message, wait = self._due()
+            if message is None:
+                self._wake.clear()
+                try:
+                    await asyncio.wait_for(self._wake.wait(), wait)
+                except TimeoutError:
+                    pass
+                continue
+            if not self.owner_ready():
+                await asyncio.sleep(RETRY_S[min(failures, len(RETRY_S) - 1)])
+                failures += 1
+                continue
+            if not await self._slot(message):
+                continue
+            outcome = await self._send(message)
+            if outcome == SENT:
+                failures = unconfirmed = 0
+                self._end(message, "sent")
+                continue
+            if outcome == DROP:
+                self._end(message, "dropped")
+                log.warning("TRINETRA: a change was not sent: Telegram cannot be reached that way")
+                continue
+            if outcome == UNCONFIRMED:
+                unconfirmed += 1
+                if unconfirmed >= UNCONFIRMED_TRIES:
+                    unconfirmed = 0
+                    self._end(message, "dropped")
+                    log.error("Telegram did not confirm a TRINETRA change after %d tries; it is "
+                              "not sent again", UNCONFIRMED_TRIES)  # fmt: skip
+                    continue
+            self._put_back(message)
+            await asyncio.sleep(RETRY_S[min(failures, len(RETRY_S) - 1)])
+            failures += 1
+
+    async def close(self, timeout: float) -> None:
+        """Nothing new from now; a message on its way gets up to ``timeout`` seconds. What still
+        waits stays claimed in alerts.db and goes after the next start (``reload``)."""
+        self._closing = True
+        self._wake.set()
+        deadline = time.monotonic() + timeout
+        while self._sending and time.monotonic() < deadline:
+            await asyncio.sleep(0.05)
+
+    def _due(self) -> tuple[_Message | None, float | None]:
+        """The first message whose merge has passed and that the night does not hold, else how
+        long until one may be (None: nothing waits)."""
+        self._expire()
+        now_m, now_e = time.monotonic(), self.clock().timestamp()
+        soonest = None
+        for message in self._queue.values():
+            wait = max(0.0, message.first + MERGE_S - now_m, message.ready - now_e)
+            if wait <= 0:
+                return message, 0.0
+            soonest = wait if soonest is None else min(soonest, wait)
+        return None, soonest
+
+    def _expire(self) -> None:
+        """An item past HOLD_S from when it could go is never sent late: it is stale."""
+        now = self.clock().timestamp()
+        for key, message in list(self._queue.items()):
+            if now - message.ready > HOLD_S:
+                del self._queue[key]
+                self.store.set_signals(message.ids, "stale", now)
+                self.stats["stale"] += len(message.ids)
+                log.warning("TRINETRA: %d item(s) could not be sent within %d minutes and are "
+                            "not sent", len(message.ids), HOLD_S // 60)  # fmt: skip
+
+    def _pacer_now(self) -> float:
+        return getattr(self.pacer, "clock", time.monotonic)()
+
+    async def _slot(self, message: _Message) -> bool:
+        """Until the signals lane has a slot (False: the message went stale meanwhile)."""
+        try:
+            while True:
+                self._expire()
+                if self._queue.get(self._key(message)) is not message or self._closing:
+                    return False
+                if self._waiting_slot is None:
+                    self._waiting_slot = self._pacer_now()
+                if self.pacer.blocked(SIGNALS):
+                    await asyncio.sleep(POLL_S)
+                    continue
+                wait = self.pacer.allowed_at(SIGNALS) - self._pacer_now()
+                if wait <= 0:
+                    return True
+                await asyncio.sleep(min(wait, 4 * POLL_S))
+        finally:
+            self._waiting_slot = None
+
+    def _key(self, message: _Message) -> str:
+        return _key_of(message.kind, message.items[0])
+
+    async def _send(self, message: _Message) -> str:
+        """Take it out of the queue, mark it on its way, take the slot, send. No await before
+        the slot is taken: it is still ours."""
+        del self._queue[self._key(message)]
+        now = self.clock()
+        self.store.set_signals(message.ids, SIGNAL_SENDING, now.timestamp())
+        self.pacer.took(SIGNALS)
+        self._sending = True
+        try:
+            return await self.send(compose(message.kind, message.items, now))
+        except asyncio.CancelledError:  # it may have reached Telegram: never sent again
+            self._end(message, "unsure")
+            raise
+        except Exception:
+            log.exception("a TRINETRA change could not be sent")
+            return RETRY
+        finally:
+            self._sending = False
+
+    def _end(self, message: _Message, state: str) -> None:
+        self.store.set_signals(message.ids, state, self.clock().timestamp())
+        self.stats[state] += len(message.ids)
+        if state == "sent":
+            log.info("TRINETRA: told the owner about %d item(s)", len(message.ids))
+
+    def _put_back(self, message: _Message) -> None:
+        """Back to the front: before any newer change of the same reading that came meanwhile."""
+        self.store.set_signals(message.ids, SIGNAL_WAITING, self.clock().timestamp())
+        key = self._key(message)
+        newer = self._queue.pop(key, None)
+        if newer is not None:
+            message.items += newer.items
+            message.ids += newer.ids
+            message.ready = max(message.ready, newer.ready)
+        self._queue[key] = message
+        self._queue.move_to_end(key, last=False)

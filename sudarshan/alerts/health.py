@@ -15,6 +15,10 @@ document with the market fields added (``market_alerts``, ``market_state``, ``al
 the reports waiting and when the last one went to Telegram. Without a desk it says why there is
 none (order alerts switched off, ``SUDARSHAN_JOURNAL=off`` in alerts.env, no key to seal with), or
 ``starting`` before the service has built it. The journal reads it for the Reports page.
+
+``signals_desk`` (M13.10) is the signals desk's counts (``SignalsDesk.health``): items waiting,
+taken, known before, sent, dropped, skipped, stale and unsure; null before the desk is built or
+while order alerts are off. Counts only: nothing TRINETRA wrote.
 """
 
 from __future__ import annotations
@@ -47,6 +51,7 @@ def health_document(service) -> dict:
         "stats": dict(service.stats),
         "telegram": dict(outbox.stats) if outbox is not None else None,
         "report_desk": report_desk_block(service),
+        "signals_desk": signals_desk_block(service),
     }
 
 
@@ -63,3 +68,9 @@ def report_desk_block(service) -> dict:
         "waiting": None,
         "last_delivery_ms": None,
     }
+
+
+def signals_desk_block(service) -> dict | None:
+    """The signals desk's counts (M13.10), or None before it is built or with order alerts off."""
+    desk = getattr(service, "signals", None)
+    return desk.health() if desk is not None else None

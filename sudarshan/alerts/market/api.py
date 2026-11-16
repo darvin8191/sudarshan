@@ -9,7 +9,9 @@ derived from OpenAlgo's pepper (sudarshan.vault.keys.ALERTS_API_INFO), which onl
 can read OpenAlgo's .env can make. A seal lives 60 s, its nonce is accepted once, and it is at most
 64 KiB; the op in the path must be the op inside it. The nonces are kept in a NonceBook that
 answers 503 when full instead of forgetting one still valid (cross-design X9). A seal under any
-other purpose (the screener's digests have their own) never opens here.
+other purpose (the screener's digests have their own) never opens here. TRINETRA's changes
+(``signals_relay``, M13.10) have their own purpose and principal too, at most 16 KiB, and are
+answered by the service's signals desk (alerts/signals_desk.py), market alerts on or off.
 
 stdlib asyncio, as feed/http_api.py: bound to 127.0.0.1 only, one request per connection, a
 request with an Origin header refused (a browser page: CSRF or DNS rebinding), and only the
@@ -33,7 +35,7 @@ import contextlib
 import json
 import logging
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from typing import Any, Protocol
 
 from cryptography.fernet import Fernet
@@ -45,6 +47,7 @@ from sudarshan.autologin.handoff import (
     NoncesFull,
     open_sealed,
 )
+from sudarshan.signals import contract as signals_contract
 
 log = logging.getLogger("sudarshan.alerts.market")
 
@@ -52,10 +55,17 @@ SERVICE = "sudarshan-alerts"
 OWNER = "owner"
 HEALTH_PATH = "/health"
 OPS_PREFIX = "/v1/"
+#: M13.10 (AL2): TRINETRA's changes come from sudarshan-signals sealed under their own purpose
+#: (sudarshan/alerts/signals/v1), principal sudarshan-signals, at most 16 KiB (the signal
+#: contract's numbers). This op opens only with that key and is answered by the signals desk
+#: (``relay``), market alerts on or off.
+RELAY_OP = signals_contract.RELAY_OP
+RELAY_PRINCIPAL = signals_contract.PRINCIPALS["relay"]
+RELAY_MAX = signals_contract.SEAL_LIMITS["relay"]
 OPS = frozenset(
     {"state", "create", "update", "delete", "events", "events_since", "prefs_get", "prefs_set",
      "test", "screener_digest", "group_sync", "group_add", "group_edit", "group_pause",
-     "group_resume", "group_delete"}
+     "group_resume", "group_delete", RELAY_OP}
 )  # fmt: skip
 #: The screener's digests come sealed under their own purpose (sudarshan/alerts/screener-digest/v1,
 #: cross-design X9): this op opens only with that key, the others only with the bridge's.
@@ -84,6 +94,8 @@ WORDS = {
     "principal": "This alert service serves the account owner only.",
     "failed": "The alert service could not do this just now. Try again in a minute.",
     "off": "Market alerts are switched off on the server.",
+    "relay_principal": "Only SUDARSHAN's TRINETRA reader may relay TRINETRA's changes.",
+    "starting": "The alert service is starting. The changes are sent again in a moment.",
 }
 
 
@@ -159,9 +171,13 @@ class MarketApi:
         nonces: NonceBook | None = None,
         max_bytes: int = MAX_SEALED,
         digest_fernet: Fernet | None = None,
+        relay_fernet: Fernet | None = None,
     ):
         self.desk, self.fernet, self.max_bytes = desk, fernet, max_bytes
         self.digest_fernet = digest_fernet
+        # M13.10 (AL2): the relay's key, and what answers it (the service's signals desk)
+        self.relay_fernet = relay_fernet
+        self.relay: Callable[[Mapping[str, Any]], Awaitable[Any]] | None = None
         self.nonces = nonces if nonces is not None else NonceBook(NONCES)
         self.server: asyncio.Server | None = None
         # M18.1/R14: the service's own health document, which /health carries beside the market fields
@@ -227,20 +243,34 @@ class MarketApi:
             raise ApiError(404, "not_found", "not found")
         if method != "POST":
             raise ApiError(405, "method", "method not allowed")
+        if op == RELAY_OP:  # M13.10 (AL2): TRINETRA's changes, for the signals desk
+            return {"status": "success", "data": await self._relay(body)}
         message = self._open(op, body)
         if message.get("principal") != OWNER:
             self._note(op, "principal")
             raise ApiError(403, "principal", WORDS["principal"])
         return {"status": "success", "data": await self.desk.call(op, message)}
 
+    async def _relay(self, body: bytes) -> Any:
+        """M13.10 (AL2): at most 16 KiB, its own key, its own principal, then the signals desk."""
+        if len(body) > RELAY_MAX:
+            raise ApiError(413, "size", "request too large")
+        message = self._open(RELAY_OP, body)
+        if message.get("principal") != RELAY_PRINCIPAL:
+            self._note(RELAY_OP, "principal")
+            raise ApiError(403, "principal", WORDS["relay_principal"])
+        if self.relay is None:
+            raise ApiError(503, "busy", WORDS["starting"])
+        return await self.relay(message)
+
     def _open(self, op: str, body: bytes) -> dict[str, Any]:
-        fernet = self.digest_fernet if op == DIGEST_OP else self.fernet
+        fernet = {DIGEST_OP: self.digest_fernet, RELAY_OP: self.relay_fernet}.get(op, self.fernet)
         if fernet is None:
             self._note(op, "no key for this op")
             raise ApiError(403, "forbidden", WORDS["forbidden"])
+        limit = RELAY_MAX if op == RELAY_OP else self.max_bytes
         try:
-            return open_sealed(fernet, body, op=op, seen=self.nonces,
-                               max_bytes=self.max_bytes)  # fmt: skip
+            return open_sealed(fernet, body, op=op, seen=self.nonces, max_bytes=limit)
         except NoncesFull:
             log.warning("the market alerts' API is refusing requests: too many in the last two "
                         "minutes")  # fmt: skip
