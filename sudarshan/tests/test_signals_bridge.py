@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import socket
+import time
 from pathlib import Path
 
 import httpx
@@ -22,8 +23,10 @@ from signals_bridge_app import (
 )
 
 import blueprints.sudarshan_signals as bp_module
+from sudarshan.autologin.handoff import NonceBook, seal
 from sudarshan.signals import contract
-from sudarshan.vault import SIGNALS_JOURNAL_INFO, fernet_for
+from sudarshan.tests.fdwatch import FdWatch
+from sudarshan.vault import SIGNALS_JOURNAL_INFO, SIGNALS_PUSH_INFO, fernet_for
 from utils.thread_safe_cache import LockedTTLCache
 
 JSON = {"Accept": "application/json"}
@@ -244,3 +247,28 @@ def test_writes_are_limited_to_30_a_minute(signals, monkeypatch):
     finally:
         http.close()
     assert codes[:30] == [200] * 30 and codes[30] == 429
+
+
+def test_forwards_and_pushes_leave_no_descriptor_behind(bridge, signals, monkeypatch):
+    """Reads, the write, the service's push and a read that times out, over and over: every
+    socket closes (the fd-audit's measure: a flat count after many runs)."""
+    monkeypatch.setattr(bp_module, "_push_nonces", NonceBook(256))
+    push_key = fernet_for(os.environ["API_KEY_PEPPER"], SIGNALS_PUSH_INFO)
+    headers = as_owner(bridge)
+    bridge.get(f"{PREFIX}/state", headers=JSON)  # warm-up
+    watch = FdWatch()
+    for n in range(40):
+        assert bridge.get(f"{PREFIX}/timeline?limit=5", headers=JSON).status_code == 200
+        assert bridge.put(f"{PREFIX}/settings", json={"version": n + 1},
+                          headers={**JSON, **headers}).status_code == 200  # fmt: skip
+        pushed = bridge.post(
+            contract.PUSH_PATH, data=seal(push_key, "push", principal="sudarshan-signals", items=[])
+        )
+        assert pushed.status_code == 200
+    monkeypatch.setitem(contract.TIMEOUTS_S, "read", 0.1)
+    signals.delay_s = 0.4
+    for _ in range(5):  # a read that times out, then the health check that words it
+        assert bridge.get(f"{PREFIX}/state", headers=JSON).status_code == 503
+    signals.delay_s = 0.0
+    time.sleep(0.5)  # the slow answers finish on the service's side
+    watch.assert_clean()
