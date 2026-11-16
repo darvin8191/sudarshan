@@ -437,6 +437,16 @@ async function open(page: Page, path = `/chart/${EXCHANGE}/${SYMBOL}`) {
   await page.addStyleTag({ content: '.tsqd-parent-container { display: none !important; }' })
 }
 
+/**
+ * The proxy socket once the page has opened it. The chart opens it only after its two settings
+ * reads come back, in real time whatever the page's clock says, so a test that waited on
+ * something drawn from local storage alone (the indicators button) must wait for the socket too.
+ */
+async function socketOpened(served: { proxy: () => WebSocketRoute; sockets: () => number }) {
+  await expect.poll(served.sockets, { message: 'the page opened the proxy socket' }).toBeGreaterThan(0)
+  return served.proxy()
+}
+
 /** What every phone screen promises, checked in one state of the chart. */
 async function checkScreen(page: Page) {
   const width = await page.evaluate(() => ({
@@ -697,11 +707,11 @@ test.describe('the phone chart at 360 x 800', () => {
 
   test('with the most indicators it takes, two in their own panes, the sheet, search and settings', async ({ page }, info) => {
     await keep(page, { 'sudarshan-chart-studies': FULL })
-    const { proxy } = await serve(page, { now: ist(10, 0, 30) })
+    const served = await serve(page, { now: ist(10, 0, 30) })
     await open(page)
     await expect(page.getByRole('button', { name: `Indicators ${FULL.length} on the chart` })).toBeVisible()
     await page.clock.runFor(500)
-    await tick(page, proxy(), ist(10, 0, 31), 4)
+    await tick(page, await socketOpened(served), ist(10, 0, 31), 4)
     await expect(page.getByTestId('study-legend')).toContainText('RSI')
     await page.screenshot({ path: info.outputPath('full.png') })
     await checkScreen(page)
@@ -803,11 +813,11 @@ test.describe('the phone chart on its side, 800 x 360', () => {
 
   test('with the most indicators it takes, two in their own panes', async ({ page }, info) => {
     await keep(page, { 'sudarshan-chart-studies': FULL })
-    const { proxy } = await serve(page, { now: ist(10, 0, 30) })
+    const served = await serve(page, { now: ist(10, 0, 30) })
     await open(page)
     await expect(page.getByRole('button', { name: `Indicators, ${FULL.length} on the chart` })).toBeVisible()
     await page.clock.runFor(500)
-    await tick(page, proxy(), ist(10, 0, 31), 4)
+    await tick(page, await socketOpened(served), ist(10, 0, 31), 4)
     await expect(page.getByTestId('study-legend')).toContainText('MACD')
     await page.screenshot({ path: info.outputPath('sideways-full.png') })
     await checkScreen(page)
@@ -1259,11 +1269,14 @@ async function drawLevel(page: Page) {
   await page.getByRole('button', { name: 'Draw' }).click()
   const row = page.getByTestId('draw-row')
   await row.getByRole('button', { name: 'Horizontal line' }).click()
+  // The draw tier loads on first use: a tap before the tool is held places nothing.
+  await expect(row.getByRole('status')).toHaveText('Horizontal line: tap the chart to place it.')
   const box = (await page.getByTestId('chart-surface').boundingBox()) as DOMRect
   await page.touchscreen.tap(box.x + box.width * 0.45, box.y + box.height * 0.5)
   await page.clock.runFor(100)
   await expect.poll(() => savedTools(page)).toEqual(['horizontal-line'])
-  await page.getByRole('button', { name: 'Done' }).click()
+  // The level just placed is selected, and its bar has a Done of its own: the row's is the one.
+  await page.getByRole('button', { name: 'Done', exact: true }).click()
 }
 
 test.describe('charts across devices on the phone chart, 360 x 800 (M4.18)', () => {
@@ -1271,10 +1284,10 @@ test.describe('charts across devices on the phone chart, 360 x 800 (M4.18)', () 
 
   test('switched off: no chart document is read or sent, and a drawing stays on this phone', async ({ page }) => {
     const calls = await serveCharts(page, { on: false })
-    const { proxy } = await serve(page, { now: ist(10, 0, 30) })
+    const served = await serve(page, { now: ist(10, 0, 30) })
     await open(page)
     await page.clock.runFor(500)
-    await tick(page, proxy(), ist(10, 0, 31), 2)
+    await tick(page, await socketOpened(served), ist(10, 0, 31), 2)
     await drawLevel(page)
     await page.clock.runFor(1_000)
     expect(calls.filter((call) => call.path.endsWith('/doc'))).toEqual([])
@@ -1283,10 +1296,10 @@ test.describe('charts across devices on the phone chart, 360 x 800 (M4.18)', () 
 
   test('the server cannot be reached: the chart works on this phone’s own copy and says nothing', async ({ page }) => {
     const calls = await serveCharts(page, { on: true, offline: true })
-    const { proxy } = await serve(page, { now: ist(10, 0, 30) })
+    const served = await serve(page, { now: ist(10, 0, 30) })
     await open(page)
     await page.clock.runFor(500)
-    await tick(page, proxy(), ist(10, 0, 31), 2)
+    await tick(page, await socketOpened(served), ist(10, 0, 31), 2)
     await drawLevel(page)
     await page.clock.runFor(1_000)
     expect(calls.length).toBeGreaterThan(0) // it asked, and was refused
@@ -1324,10 +1337,10 @@ for (const [layout, viewport] of [
         ] as const
       )
       const calls = await serveCharts(page, { on: true, doc: tablet, revision: 1_794_000_000_002 })
-      const { proxy } = await serve(page, { now: ist(10, 0, 30) })
+      const served = await serve(page, { now: ist(10, 0, 30) })
       await open(page)
       await page.clock.runFor(500)
-      await tick(page, proxy(), ist(10, 0, 31), 2)
+      await tick(page, await socketOpened(served), ist(10, 0, 31), 2)
 
       const strip = page.getByTestId('chart-sync-notice')
       await expect(strip).toContainText(
