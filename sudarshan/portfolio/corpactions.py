@@ -524,22 +524,44 @@ def _shown(event: dict[str, Any], holdings: Holdings, decisions: list[dict]) -> 
     return shown
 
 
+def decisions(tx: Tx) -> dict[int, list[dict[str, Any]]]:
+    """Every decision of the owner's, by the event it was made on."""
+    found: dict[int, list[dict[str, Any]]] = {}
+    for row in tx.rows("ca_decision"):
+        found.setdefault(row["event_id"], []).append(row)
+    return found
+
+
+def standing(group: list[dict[str, Any]], decided: dict[int, list[dict]], scope: str):
+    """The owner's decision on an event for one holding, whichever wording of the event it was
+    made on: an applied one before a dismissed one, the earliest first. None when undecided."""
+    rows = [row for event in group for row in decided.get(event["id"], ())
+            if row["scope"] == scope]  # fmt: skip
+    rows.sort(key=lambda row: (row["state"] != "applied", row["id"]))
+    return rows[0] if rows else None
+
+
 def listing(tx: Tx, today: int, *, scope: str | None = None, from_day: int, to_day: int,
             held_now: list[dict[str, Any]] | None = None) -> dict[str, Any]:  # fmt: skip
     """``ca_list``: the events between two days with the owner's decisions, the bonuses and
     splits still waiting for his tap (whatever their day, up to today), and when each
-    instrument was last read. ``scope`` narrows the decisions and the waiting list to one."""
+    instrument was last read. ``scope`` narrows the decisions and the waiting list to one.
+
+    An event is one per company and ex-date, however often Upstox rewords it (``core.groups``):
+    a decision made on one wording stands for every other, so a relisted event is never asked a
+    second time."""
     holdings, upstox = Holdings(tx, today), upstox_isins(tx, held_now)
-    by_event: dict[int, list[dict]] = {}
-    for row in tx.rows("ca_decision"):
-        if scope in (None, row["scope"]):
-            by_event.setdefault(row["event_id"], []).append(row)
+    decided = decisions(tx)
+    by_event = {key: [r for r in rows if scope in (None, r["scope"])]
+                for key, rows in decided.items()}  # fmt: skip
     to_confirm = []
-    for event in tx.ca_events(to_day=today):
-        if event["kind"] not in core.LOT_KINDS:
+    for group in core.groups(tx.ca_events(to_day=today, gone=True)):
+        live = [event for event in group if event["gone_at"] is None]
+        if not live:
             continue
-        decided = {row["scope"] for row in tx.rows("ca_decision", event_id=event["id"])}
-        found = [w for w in waiting(tx, event, holdings, decided, upstox)
+        event = live[-1]  # the wording Upstox lists now
+        done = {row["scope"] for one in group for row in decided.get(one["id"], ())}
+        found = [w for w in waiting(tx, event, holdings, done, upstox)
                  if scope in (None, w["scope"])]  # fmt: skip
         if found:
             shown = _shown(event, holdings, by_event.get(event["id"], []))
@@ -607,28 +629,51 @@ def decide(tx: Tx, event_id: int, args: dict[str, Any], today: int, now: int) ->
     request_id = args.get("request_id") if isinstance(args.get("request_id"), str) else None
     if request_id and (again := tx.by_request("ca_decision", request_id)) is not None:
         return again
+    # One event per company and ex-date: a decision made on another wording of this event
+    # stands for it, and is changed there, never made a second time here.
+    group = next(
+        g for g in core.groups(tx.ca_events(gone=True)) if any(e["id"] == event_id for e in g)
+    )
+    earlier = standing(group, decisions(tx), scope)
+    if earlier is not None:
+        raise Refused(_already(event, earlier), reason="decided")
     return tx.insert("ca_decision", {**values, "event_id": event_id, "scope": scope}, now,
                      request_id)  # fmt: skip
 
 
+def _already(event: dict[str, Any], row: dict[str, Any]) -> str:
+    """Why a relisted event is not decided again, with what was decided the first time."""
+    kind = event["kind"]
+    if row["state"] != "applied":
+        return (f"You already left your lots as they are for this {kind}. Upstox lists it "
+                "again in other words; nothing more is needed.")  # fmt: skip
+    num, den = row["ratio_num"], row["ratio_den"]
+    how = (f"{num} new for every {den} held" if kind == "bonus"
+           else f"every {den} made {num}")  # fmt: skip
+    return (f"This {kind} is already applied ({how}). Upstox lists it again in other words; "
+            "applying it again would count it twice.")  # fmt: skip
+
+
 def accepted_actions(tx: Tx) -> list[dict[str, Any]]:
     """For the tax adapter: the Upstox account's bonuses and splits as ``tax.model.Action``
-    rows, in ex-date order. One the owner applied is ``accepted`` with the reading he chose; one
-    he has not decided is passed with the proposed reading and ``accepted`` false, so the tax
-    core changes no lot for it and says so where it would have mattered; one he dismissed, or
-    that has no ratio, is left out."""
-    decided = {row["event_id"]: row for row in tx.rows("ca_decision", scope=UPSTOX_SCOPE)}
+    rows, in ex-date order, one per event however many wordings of it Upstox has listed
+    (``core.groups``; review H3). One the owner applied is ``accepted`` with the reading he
+    chose, once, dated as Upstox lists it now; one he has not decided is passed with the
+    proposed reading and ``accepted`` false, so the tax core changes no lot for it and says so
+    where it would have mattered; one he dismissed, or that has no ratio, is left out."""
+    decided = decisions(tx)
     out = []
-    for event in tx.ca_events(gone=True):
-        if event["kind"] not in core.LOT_KINDS:
-            continue
-        row = decided.get(event["id"])
-        ways = core.readings(event["kind"], event["ratio_num"], event["ratio_den"])
+    for group in core.groups(tx.ca_events(gone=True)):
+        row = standing(group, decided, UPSTOX_SCOPE)
+        live = [event for event in group if event["gone_at"] is None]
         if row is not None and row["state"] == "applied":
+            event = live[-1] if live else next(e for e in group if e["id"] == row["event_id"])
             out.append(core.action_row(event, row["ratio_num"], row["ratio_den"], True))
-        elif row is None and ways and event["gone_at"] is None:
-            out.append(core.action_row(event, *ways[0], False))
-    return out
+        elif row is None and live:
+            ways = core.readings(live[-1]["kind"], live[-1]["ratio_num"], live[-1]["ratio_den"])
+            if ways:
+                out.append(core.action_row(live[-1], *ways[0], False))
+    return sorted(out, key=lambda action: action["ex_day"])
 
 
 def ensure(service: Any) -> CorpActions:
@@ -698,8 +743,10 @@ __all__ = [
     "known_isins",
     "listing",
     "decide",
+    "decisions",
     "read_status",
     "register_jobs",
+    "standing",
     "upstox_isins",
     "waiting",
 ]

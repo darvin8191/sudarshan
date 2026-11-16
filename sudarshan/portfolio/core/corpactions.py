@@ -177,6 +177,52 @@ def identity(event: Mapping[str, Any]) -> str:
     return "|".join((event["isin"], event["kind"], str(event["ex_day"]), amount, ratio, sort))
 
 
+# ---- one event per company and ex-date (review H3) -------------------------------------------
+#: A relisting with a corrected ex-date is still the same event when the two days are this near
+#: and the ratio says the same thing.
+TWIN_DAYS = 7
+
+
+def same_ratio(one: tuple[int | None, int | None], other: tuple[int | None, int | None]) -> bool:
+    """Whether two ratios as written say the same thing: equal as fractions (``1:5`` and
+    ``2:10``), or one the other way round of the other (``1:5`` and ``10:2``: a face value of 10
+    made 2 is one share made five). Upstox does not say which side is which, so both count."""
+    if None in one or None in other or 0 in one or 0 in other:
+        return False
+    return one[0] * other[1] == one[1] * other[0] or one[0] * other[0] == one[1] * other[1]
+
+
+def twins(one: Mapping[str, Any], other: Mapping[str, Any]) -> bool:
+    """Whether two stored bonus or split rows are one event listed twice: the same share and
+    kind on the same ex-date (whatever each ratio says: a company does not split twice in a
+    day), or on ex-dates within ``TWIN_DAYS`` with ratios that say the same thing (a corrected
+    date). The hash of a row changes with every rewording; the owner's decision must not."""
+    if (one["isin"], one["kind"]) != (other["isin"], other["kind"]) or one["kind"] not in LOT_KINDS:
+        return False
+    if one["ex_day"] == other["ex_day"]:
+        return True
+    near = abs(days_between(one["ex_day"], other["ex_day"])) <= TWIN_DAYS
+    return near and same_ratio(
+        (one["ratio_num"], one["ratio_den"]), (other["ratio_num"], other["ratio_den"])
+    )
+
+
+def groups(events: list[Mapping[str, Any]]) -> list[list[Mapping[str, Any]]]:
+    """The bonus and split rows as events: each list is one event with every wording of it, in
+    the order given. A row joins the first event it is a twin of any wording of."""
+    found: list[list[Mapping[str, Any]]] = []
+    for event in events:
+        if event["kind"] not in LOT_KINDS:
+            continue
+        for group in found:
+            if any(twins(event, other) for other in group):
+                group.append(event)
+                break
+        else:
+            found.append([event])
+    return found
+
+
 def readings(kind: str, first: int | None, second: int | None) -> list[tuple[int, int]]:
     """The ways a bonus's or a split's ratio can be read as ``(num, den)``, the proposed one
     first; one reading when both numbers are the same, none when there is no ratio or the kind

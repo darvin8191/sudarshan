@@ -255,6 +255,97 @@ async def test_the_upstox_account_is_asked_only_where_it_held_or_may_have_held_t
     assert ca.reach_from(TODAY) == 20240401
 
 
+# ---- one event per company and ex-date (review H3) -----------------------------------------------
+def relist(n, old_ratio=(1, 5), new_ratio=(10, 2), ex_day=EX) -> int:
+    """Upstox writes the same split in other words: the old row is no longer listed."""
+    row = {"isin": UPSTOX, "kind": "split", "ex_day": ex_day, "amount_u": None, "details": [],
+           "ratio_num": new_ratio[0], "ratio_den": new_ratio[1]}  # fmt: skip
+    row["raw_hash"] = ca.event_hash(row)
+
+    def write(tx):
+        made = tx.ca_event_put(row, NOW + 1)[0]["id"]
+        tx.ca_events_gone(UPSTOX, [row["raw_hash"]], NOW + 1)
+        return made
+
+    return n.svc.store.write(OWNER, write)
+
+
+@scenario
+async def test_a_split_relisted_in_other_words_is_not_asked_and_not_applied_a_second_time(n):
+    """The reviewer's probe. 100 shares; split 1:5 applied as 5 for 1: 100 x 5 = 500. Upstox
+    then lists the same split of the same day as 10:2 (a face value of 10 made 2).
+
+    Old code: "To confirm" showed it again, a second tap was accepted, ``accepted_actions``
+    returned (5, 1) and (10, 2), and the lots held 100 x 5 x 5 = 2,500."""
+    record(n, 20261019, **{UPSTOX: 100})
+    first = event(n, "split", ratio=(1, 5))
+    await n.rig.call("ca_decide", id=first, scope="upstox", state="applied", ratio_num=5,
+                     ratio_den=1)  # fmt: skip
+    assert lots_after(n)[0] == [(20260610, 500, 1_000_000)]
+    second = relist(n)
+    assert await waiting(n) == []  # no second ask
+    assert [(a["num"], a["den"], a["accepted"]) for a in actions(n)] == [(5, 1, True)]
+    # A second tap, forced past the list (an old page, a script), is refused in words.
+    for ratio in ((10, 2), (2, 10)):
+        again = await n.rig.call("ca_decide", id=second, scope="upstox", state="applied",
+                                 ratio_num=ratio[0], ratio_den=ratio[1])  # fmt: skip
+        assert (again["status"], again["code"]) == ("error", "refused"), again
+        assert again["message"] == (
+            "This split is already applied (every 1 made 5). Upstox lists it again in other "
+            "words; applying it again would count it twice."
+        )
+    # Even a second decision row written straight into the store reaches the lots once.
+    n.svc.store.write(
+        OWNER,
+        lambda tx: tx.insert("ca_decision", {"event_id": second, "scope": "upstox",
+                                             "state": "applied", "ratio_num": 10, "ratio_den": 2,
+                                             "activity_id": None}, NOW),
+    )  # fmt: skip
+    assert [(a["num"], a["den"]) for a in actions(n)] == [(5, 1)]
+    assert lots_after(n)[0] == [(20260610, 500, 1_000_000)]  # 100 x 5, not 100 x 5 x 5
+
+
+@scenario
+async def test_a_dismissed_split_relisted_is_not_asked_again_and_a_corrected_date_follows(n):
+    record(n, 20261019, **{UPSTOX: 100})
+    first = event(n, "split", ratio=(1, 5))
+    await n.rig.call("ca_decide", id=first, scope="upstox", state="dismissed", ratio_num=1,
+                     ratio_den=1)  # fmt: skip
+    relist(n, new_ratio=(2, 10))  # 2:10 is 1:5
+    assert await waiting(n) == [] and actions(n) == []
+    # An applied split whose ex-date Upstox corrects by two days (same ratio) is still that
+    # split: applied once, dated as Upstox lists it now.
+    other = event(n, "bonus", ex_day=20261012, ratio=(1, 1))
+    record(n, 20261009, **{UPSTOX: 100})
+    await n.rig.call("ca_decide", id=other, scope="upstox", state="applied", ratio_num=1,
+                     ratio_den=1)  # fmt: skip
+    row = {"isin": UPSTOX, "kind": "bonus", "ex_day": 20261014, "amount_u": None, "details": [],
+           "ratio_num": 1, "ratio_den": 1}  # fmt: skip
+    row["raw_hash"] = ca.event_hash(row)
+    n.svc.store.write(OWNER, lambda tx: (tx.ca_event_put(row, NOW + 1),
+                                         tx.ca_events_gone(UPSTOX, [row["raw_hash"]], NOW + 2)))  # fmt: skip
+    assert [(a["kind"], a["ex_day"], a["accepted"]) for a in actions(n)] == [
+        ("BONUS", 20261014, True)
+    ]
+    assert await waiting(n) == []
+
+
+def test_two_ratios_say_the_same_thing_as_fractions_or_the_other_way_round():
+    """1:5 against: 2:10 (1 x 10 = 5 x 2), 10:2 the other way round (1 x 10 = 5 x 2 crosswise:
+    1 x 10 == 5 x 2), 5:1; never 1:10 (1 x 10 != 5 x 1 and 1 x 1 != 5 x 10) or no ratio."""
+    same = ca.core.same_ratio
+    assert same((1, 5), (2, 10)) and same((1, 5), (10, 2)) and same((1, 5), (5, 1))
+    assert not same((1, 5), (1, 10)) and not same((1, 5), (None, None))
+    a = {"isin": UPSTOX, "kind": "split", "ex_day": 20261020, "ratio_num": 1, "ratio_den": 5}
+    assert ca.core.twins(a, {**a, "ratio_num": 1, "ratio_den": 10})  # one day: one event
+    assert ca.core.twins(a, {**a, "ex_day": 20261027, "ratio_num": 10, "ratio_den": 2})  # 7 days
+    assert not ca.core.twins(a, {**a, "ex_day": 20261028})  # 8 days: another event
+    assert not ca.core.twins(a, {**a, "ex_day": 20261022, "ratio_den": 10})  # another ratio
+    assert not ca.core.twins(a, {**a, "kind": "bonus"}) and not ca.core.twins(
+        a, {**a, "isin": TRADED}
+    )
+
+
 @scenario
 async def test_an_event_upstox_no_longer_lists_is_not_asked_but_an_applied_one_stays(n):
     record(n, 20261019, **{UPSTOX: 100})
