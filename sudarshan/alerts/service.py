@@ -62,6 +62,9 @@ from .reports_desk import (  # M15.7: the journal's reports
     report_desk_for,
 )
 from .resync import Books, BookUnavailable, read_books
+from .signals_desk import OFF as SIGNALS_OFF  # M13.10 (AL2): TRINETRA's changes
+from .signals_desk import STARTING as SIGNALS_STARTING
+from .signals_desk import SignalsDesk
 from .store import DB_FILENAME, Store
 from .window import AlertWindow
 
@@ -140,6 +143,7 @@ class AlertService:
         self.nudges: NudgeSender | None = None  # Y17: "orders changed" to the family and journal
         self.reports: ReportDesk | None = None  # M15.7: the journal's reports, as the journal says
         self.reports_off: str | None = None  # M15.7: why no report desk runs (health.py)
+        self.signals: SignalsDesk | None = None  # M13.10 (AL2): TRINETRA's changes on Telegram
         self.client: httpx.AsyncClient | None = None
         self._stop = asyncio.Event()
         self._state, self._detail = "starting", ""
@@ -191,6 +195,12 @@ class AlertService:
                 pace=LanePace(self.outbox.pacer),
             )
             notices = asyncio.create_task(self.notices.run(), name="order alerts: server notices")
+            # M13.10 (AL2): TRINETRA's changes, relayed by sudarshan-signals to the one listener
+            # (market/api.py), each claimed once in alerts.db and sent in the Pacer's signals lane
+            self.signals = SignalsDesk(
+                self.store, telegram.send, self._owner_ready, self.clock, self.outbox.pacer
+            )
+            signals = asyncio.create_task(self.signals.run(), name="order alerts: TRINETRA")
             # M15.7: delivers while the journal says it is on; None when switched off in
             # alerts.env or unsealable (off_reason says which, on /health)
             self.reports = report_desk_for(self, telegram, client)
@@ -217,6 +227,7 @@ class AlertService:
                 left, *_ = await asyncio.gather(  # M18.x: a notice on its way gets the same grace
                     self.outbox.flush(STOP_FLUSH_S),
                     self.notices.close(STOP_FLUSH_S),
+                    self.signals.close(STOP_FLUSH_S),  # M13.10: what waits goes after a restart
                     *([self.reports.close(STOP_FLUSH_S)] if self.reports else []),  # M15.7
                 )
                 if left:
@@ -224,7 +235,7 @@ class AlertService:
                 if nudger is not None:
                     await self.nudges.close()
                 # A cancel lost in httpx is sent again (M15.7: the report desk's task too).
-                await cancel_and_wait(sender, ticker, notices, nudger, reports)
+                await cancel_and_wait(sender, ticker, notices, nudger, reports, signals)
                 self.store.close()
                 self._set_state("stopped")
 
@@ -232,6 +243,18 @@ class AlertService:
         if not self._stop.is_set():
             log.info("stopping: %s", reason)
             self._stop.set()
+
+    async def signals_relay(self, message) -> dict:
+        """M13.10 (AL2): the one listener's ``signals_relay`` op, answered by the signals desk.
+        With order alerts switched off there is no Telegram path (409); before the desk is built
+        the relay is asked to come again (503), and sudarshan-signals does."""
+        from .market.api import ApiError
+
+        if self.signals is None:
+            if self._state == "off":
+                raise ApiError(409, "off", SIGNALS_OFF)
+            raise ApiError(503, "busy", SIGNALS_STARTING)
+        return await self.signals.relay(message)
 
     async def _sleep(self, seconds: float) -> None:
         """Sleep, returning early when stop() is called."""
@@ -647,6 +670,7 @@ async def _serve(service: AlertService, market=None, api=None, port: int = 0) ->
     loop = asyncio.get_running_loop()
     if api is not None:  # M10.1: the market alerts' sealed local API, before anything else
         api.base_health = lambda: health_document(service)  # M18.1: the one /health
+        api.relay = service.signals_relay  # M13.10 (AL2): TRINETRA's changes, the signals desk
         market, api = await _open_api(api, port, market)
     for sig in (signal.SIGTERM, signal.SIGINT):
         loop.add_signal_handler(sig, _stop, service, market, f"signal {sig.name}")
@@ -734,6 +758,7 @@ def _market_parts(settings, market, db_path, pacer, off):
         ALERTS_API_INFO,
         ALERTS_PUSH_INFO,
         ALERTS_SCREENER_DIGEST_INFO,
+        ALERTS_SIGNALS_INFO,
         WATCHLISTS_INTERNAL_INFO,
         fernet_for,
         pepper_from,
@@ -745,8 +770,10 @@ def _market_parts(settings, market, db_path, pacer, off):
 
     pepper = pepper_from(os.environ)
     fernet = fernet_for(pepper, ALERTS_API_INFO)
+    relay = fernet_for(pepper, ALERTS_SIGNALS_INFO)  # M13.10 (AL2): market alerts on or off
     if market is None:
-        return ReleasedClaims(feed_url_of()), MarketApi(OffDesk(off), fernet), http_port_of()
+        api = MarketApi(OffDesk(off), fernet, relay_fernet=relay)
+        return ReleasedClaims(feed_url_of()), api, http_port_of()
     runtime = MarketRuntime(settings, market, owner_reader=lambda: read_owner(db_path),
                             pacer=pacer, openalgo_db=db_path,
                             push_fernet=fernet_for(pepper, ALERTS_PUSH_INFO),
@@ -754,7 +781,7 @@ def _market_parts(settings, market, db_path, pacer, off):
     digest_fernet = fernet_for(pepper, ALERTS_SCREENER_DIGEST_INFO)
     return (
         runtime,
-        MarketApi(OwnerDesk(runtime), fernet, digest_fernet=digest_fernet),
+        MarketApi(OwnerDesk(runtime), fernet, digest_fernet=digest_fernet, relay_fernet=relay),
         market.http_port,
     )
 

@@ -41,6 +41,7 @@ from .openalgo_ro import RecordsUnavailable, records_for
 from .portfolio import PortfolioUnavailable, link_for
 from .risk_ro import risk_for
 from .schedule import register_job, schedule_for
+from .signals_ro import brief_trinetra
 from .store import Scope
 
 log = logging.getLogger("sudarshan.journal")
@@ -269,7 +270,8 @@ def _holiday_ahead(plan: Any, day: date) -> int | None:
 
 async def brief_inputs(service: Any, day: int, now: int) -> dict[str, Any]:
     """What the brief says, gathered: sessions, expiry, funds, overnight positions, yesterday,
-    the kill switch. A part that cannot be read is said as not read, never guessed."""
+    the kill switch, TRINETRA's readings (J3). A part that cannot be read is said as not read,
+    never guessed."""
     plan = schedule_for(service)
     d = to_date(day)
     cash, fno = _span(plan, d, ("NSE_EQ", "NSE_INDEX")), _span(plan, d, ("NSE_FO",))
@@ -337,6 +339,10 @@ async def brief_inputs(service: Any, day: int, now: int) -> dict[str, Any]:
         }
     risk = await _thread(lambda: risk_for(service).state(day))
     out["kill_switch"] = risk.kill_switch if risk.read else None
+    # J3: TRINETRA's two lines, or its freshness sentence; nothing while the view is off
+    trinetra = await brief_trinetra(service)
+    if trinetra is not None:
+        out["trinetra"] = trinetra
     return out
 
 

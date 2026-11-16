@@ -21,9 +21,9 @@ bot and the family bot build their own from this one class:
 A limit is a number or a function returning one, read each time it is asked, so a test can shrink
 it and an operator's setting can change it. The clock is monotonic seconds.
 
-The owner bot's lanes (``sudarshan/alerts/outbox.py``): orders, market, notices, reports. The
-family bot has one lane and Telegram's own limit, one message a second to a chat (see
-``test_common_pacer.py``).
+The owner bot's lanes (``sudarshan/alerts/outbox.py``): orders, market, signals, notices,
+reports. The family bot has one lane and Telegram's own limit, one message a second to a chat
+(see ``test_common_pacer.py``).
 
 No I/O: the Pacer reads a clock and keeps a minute of start times in memory. Used from one event
 loop; it takes no lock.

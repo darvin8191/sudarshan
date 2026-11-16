@@ -14,6 +14,12 @@ Tables:
     notices one row per notice event (the deploy tool's and the backup job's, notices.py): its id,
             claimed -> sent / dropped / stale. The primary key is the once-only rule; the claim is
             made before the message goes out, and released when it could not be sent.
+    signals one row per TRINETRA change or alert relayed by sudarshan-signals (signals_desk.py,
+            M13.10): its id ("c-<change id>", "a-<alert id>"), queued -> sending -> sent /
+            dropped / skipped / stale, or unsure (a restart found its message on its way). The
+            primary key is the once-only rule: the claim is made when the item arrives, before
+            its message goes out, and is never made again. ``body`` holds the item while it
+            waits, so a restart still sends it; an item that ended keeps none.
 
 Fail open: if the file cannot be opened or written (a full disk, a read-only state directory),
 the service keeps going on a bounded copy in memory of what this run wrote. Alerts are still
@@ -46,10 +52,13 @@ from sqlalchemy import (
     MetaData,
     String,
     Table,
+    Text,
     and_,
     delete,
     func,
+    literal_column,
     select,
+    update,
 )
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import SQLAlchemyError
@@ -66,6 +75,10 @@ KEEP_NOTICES = timedelta(days=60)
 MEMORY_ORDERS = 10_000
 MEMORY_CLAIMS = 50_000
 MEMORY_NOTICES = 2_000
+MEMORY_SIGNALS = 2_000
+#: Where a relayed TRINETRA item stands (signals_desk.py). Only the first two have a body.
+SIGNAL_WAITING, SIGNAL_SENDING = "queued", "sending"
+SIGNAL_ENDED = ("sent", "dropped", "skipped", "stale", "unsure")
 
 metadata = MetaData()
 sent = Table(
@@ -99,6 +112,15 @@ notices = Table(
     Column("state", String(10), nullable=False),
     Column("at", Float, nullable=False, index=True),
 )
+signals = Table(
+    "signals",
+    metadata,
+    Column("item_id", String(80), primary_key=True),
+    Column("state", String(10), nullable=False),
+    Column("at", Float, nullable=False, index=True),  # when the state was written
+    Column("ready", Float, nullable=False),  # from when it may go: its 30 minutes count from here
+    Column("body", Text, nullable=True),
+)
 
 
 @dataclass(frozen=True)
@@ -121,6 +143,8 @@ class _Memory:
         self.claims: OrderedDict[tuple[str, str, int], None] = OrderedDict()
         self.meta: dict[str, float] = {}
         self.notices: OrderedDict[str, tuple[str, float]] = OrderedDict()
+        #: item id -> (state, ready, body): the signals table's copy.
+        self.signals: OrderedDict[str, tuple[str, float, str | None]] = OrderedDict()
 
     def save_order(self, key: str, state: OrderState) -> None:
         self.orders[key] = state
@@ -144,6 +168,13 @@ class _Memory:
         self.notices.move_to_end(event_id)
         while len(self.notices) > MEMORY_NOTICES:
             self.notices.popitem(last=False)
+
+    def set_signal(self, item_id: str, state: str, ready: float, body: str | None) -> None:
+        self.signals[item_id] = (state, ready, body if state in (SIGNAL_WAITING, SIGNAL_SENDING)
+                                 else None)  # fmt: skip
+        self.signals.move_to_end(item_id)
+        while len(self.signals) > MEMORY_SIGNALS:
+            self.signals.popitem(last=False)
 
 
 class _MemoryTx:
@@ -356,6 +387,77 @@ class Store:
         except (OSError, SQLAlchemyError) as exc:
             self._fail(exc)
 
+    # ---- TRINETRA's changes and alerts (signals_desk.py, M13.10) -----------------------------
+    def claim_signals(self, items: Iterable[tuple[str, float, str]], now: float) -> list[str]:
+        """Claim relayed items, each ``(id, ready, body)``, as queued; returns the ids this call
+        claimed. An id the record knows, in any state, is never claimed again."""
+        return [item_id for item_id, ready, body in items
+                if self._claim_signal(item_id, ready, body, now)]  # fmt: skip
+
+    def _claim_signal(self, item_id: str, ready: float, body: str, now: float) -> bool:
+        if self.engine is not None:
+            try:
+                with self.engine.begin() as conn:
+                    stmt = sqlite_insert(signals).values(
+                        item_id=item_id, state=SIGNAL_WAITING, at=now, ready=ready, body=body
+                    )
+                    won = conn.execute(stmt.on_conflict_do_nothing()).rowcount == 1
+            except (OSError, SQLAlchemyError) as exc:
+                self._fail(exc)
+            else:
+                if won:
+                    self.memory.set_signal(item_id, SIGNAL_WAITING, ready, body)
+                return won
+        if item_id in self.memory.signals:
+            return False
+        self.memory.set_signal(item_id, SIGNAL_WAITING, ready, body)
+        return True
+
+    def queued_signals(self, now: float) -> list[tuple[str, float, str]]:
+        """The items waiting, ``(id, ready, body)``, in the order they arrived. One a restart
+        finds on its way may have reached Telegram: it is settled ``unsure`` and never sent."""
+        if self.engine is not None:
+            try:
+                with self.engine.begin() as conn:
+                    conn.execute(
+                        update(signals)
+                        .where(signals.c.state == SIGNAL_SENDING)
+                        .values(state="unsure", at=now, body=None)
+                    )
+                    rows = conn.execute(
+                        select(signals.c.item_id, signals.c.ready, signals.c.body)
+                        .where(signals.c.state == SIGNAL_WAITING)
+                        .order_by(signals.c.at, literal_column("rowid"))  # as they arrived
+                    ).all()
+                for row in rows:  # the copy knows them too, should the file fail later
+                    self.memory.set_signal(row.item_id, SIGNAL_WAITING, row.ready, row.body)
+                return [(row.item_id, row.ready, row.body or "") for row in rows]
+            except (OSError, SQLAlchemyError) as exc:
+                self._fail(exc)
+        for item_id, (state, ready, _body) in list(self.memory.signals.items()):
+            if state == SIGNAL_SENDING:
+                self.memory.set_signal(item_id, "unsure", ready, None)
+        return [(item_id, ready, body or "") for item_id, (state, ready, body)
+                in self.memory.signals.items() if state == SIGNAL_WAITING]  # fmt: skip
+
+    def set_signals(self, item_ids: Iterable[str], state: str, now: float) -> None:
+        """Move these items to ``state``: ``sending`` before their message goes, ``queued`` when
+        it could not go, or how they ended (an ended item keeps no body)."""
+        ids = list(item_ids)
+        keep = state in (SIGNAL_WAITING, SIGNAL_SENDING)
+        for item_id in ids:  # the copy learns every id the file knows, should it fail later
+            held = self.memory.signals.get(item_id)
+            ready, body = (held[1], held[2]) if held is not None else (now, None)
+            self.memory.set_signal(item_id, state, ready, body if keep else None)
+        if self.engine is None or not ids:
+            return
+        values = {"state": state, "at": now} | ({} if keep else {"body": None})
+        try:
+            with self.engine.begin() as conn:
+                conn.execute(update(signals).where(signals.c.item_id.in_(ids)).values(**values))
+        except (OSError, SQLAlchemyError) as exc:
+            self._fail(exc)
+
     def prune(self, now: datetime | None = None) -> int:
         if self.engine is None:
             return 0
@@ -367,6 +469,9 @@ class Store:
                 removed += conn.execute(delete(orders).where(orders.c.at < cutoff)).rowcount
                 old = at - KEEP_NOTICES.total_seconds()
                 removed += conn.execute(delete(notices).where(notices.c.at < old)).rowcount
+                removed += conn.execute(
+                    delete(signals).where(signals.c.at < old, signals.c.state.in_(SIGNAL_ENDED))
+                ).rowcount
         except (OSError, SQLAlchemyError) as exc:
             self._fail(exc)
             return 0

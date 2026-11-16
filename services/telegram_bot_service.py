@@ -931,6 +931,9 @@ class TelegramBotService:
                 self.application.add_handler(CommandHandler("killswitch", self.cmd_killswitch))
                 # SUDARSHAN M12.1: the automation's switch, in the owner's own chat (sudarshan/automation)
                 self.application.add_handler(CommandHandler("auto", self.cmd_auto))
+                # SUDARSHAN M16.1: /server and /trinetra, read-only, in the owner's own chat
+                self.application.add_handler(CommandHandler("server", self.cmd_server))
+                self.application.add_handler(CommandHandler("trinetra", self.cmd_trinetra))
 
                 # Add callback query handler for inline buttons
                 self.application.add_handler(CallbackQueryHandler(self.button_callback))
@@ -1289,6 +1292,8 @@ class TelegramBotService:
 /mode - View or toggle trading mode (Live / Analyze)
 /killswitch on|exit|off STOP: stop all new orders (owner only)
 /auto: your TradingView strategies; /auto stop NAME, /auto start NAME (owner only)
+/server - The server's health checks (owner only)
+/trinetra - TRINETRA's readings (owner only)
 
 *Navigation:*
 /menu - Show interactive menu
@@ -2442,6 +2447,18 @@ class TelegramBotService:
         from sudarshan.automation import telegram as automation_telegram
 
         await automation_telegram.handle(self, update, context)
+
+    async def cmd_server(self, update, context) -> None:
+        """SUDARSHAN M16.1: /server, the server watch's last report; sudarshan/ops/telegram.py."""
+        from sudarshan.ops import telegram as ops_telegram
+
+        await ops_telegram.handle(self, update, context)
+
+    async def cmd_trinetra(self, update, context) -> None:
+        """SUDARSHAN M16.1: /trinetra, TRINETRA's readings; sudarshan/signals/telegram.py."""
+        from sudarshan.signals import telegram as signals_telegram
+
+        await signals_telegram.handle(self, update, context)
 
     async def cmd_stoppython(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /stoppython command — list running Python strategies and stop selected/all"""
