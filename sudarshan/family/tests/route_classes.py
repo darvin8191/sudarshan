@@ -180,6 +180,7 @@ public_shell  /tradebook                             react.react_tradebook
 public_shell  /trading                               react.react_trading
 public_shell  /tradingview                           react.react_tradingview
 public_shell  /traffic                               react.react_traffic
+public_shell  /trinetra                              react.react_trinetra
 public_shell  /volsurface                            react.react_volsurface
 public_shell  /watchlist                             react.react_watchlist
 public_shell  /websocket/order                       react.react_websocket_order
