@@ -21,6 +21,12 @@ Analytics Token, with no static IP). They are public facts, kept in ``ca_event``
 * **Nothing is guessed.** A row that cannot be read is left out and counted in the read's note;
   an answer that is not Upstox's shape changes nothing; an event Upstox no longer lists is marked
   gone and kept, and comes back if it is listed again.
+* **Only a clean answer is a read.** "Nothing listed" is a 200 with an empty list, or a 404 (no
+  such instrument at Upstox), and nothing else. A refusal (403) ends the night: the token is not
+  allowed to read this list. Any other request Upstox turns down (a 400, say, for one ISIN it
+  does not cover) and an answer that cannot be read are failed reads of that instrument, and
+  three in a row end the night. Nothing failed is kept as read, a night that read nothing fails
+  and says why in words (``read_status``), and the phone never shows it as an empty calendar.
 * **Nothing changes a lot here.** A bonus or a split is only stored. It reaches the lots when the
   owner accepts it (``ops/ca_ops.py``).
 """
@@ -71,9 +77,15 @@ SILENT_STOP = 3
 ON_DEMAND_EVERY_MS = 60_000
 ISIN = re.compile(r"IN[A-Z0-9]{10}")
 #: Outcomes that end a run: asking again tonight would only repeat them.
-STOPS = ("slow", "busy", "no_token", "token_refused")
+STOPS = ("slow", "busy", "no_token", "token_refused", "refused")
+#: Outcomes that are a failed read of one instrument: nothing is kept as read.
+FAILED = ("silent", "unreadable", "rejected")
 WORDS = {
     "none": "Upstox lists no corporate actions for this instrument.",
+    "refused": "Upstox did not allow SUDARSHAN to read its list of events with the read-only "
+    "token.",
+    "rejected": "Upstox turned down the request for this share's events.",
+    "unreadable": "Upstox's answer was not in a form SUDARSHAN can read.",
     "slow": "Upstox asked SUDARSHAN to slow down; the rest is read tomorrow night.",
     "busy": "SUDARSHAN has read Upstox as often as it allows for now; the rest is read "
     "tomorrow night.",
@@ -180,8 +192,16 @@ class CorpActions:
         if status >= 500:
             log.warning("Upstox corporate actions answered with a server fault (%d)", status)
             return "silent", None
+        if status == 403:
+            # Design p7 6.4 item 8: whether Fundamentals answers this token from the server is
+            # not known until the first night. A refusal is never "nothing listed".
+            log.warning("Upstox refused to list corporate actions for the read-only token (403)")
+            return "refused", None
+        if status == 404:
+            return "none", None  # Upstox has nothing under this ISIN
         if status != 200:
-            return "none", None
+            log.warning("Upstox turned down a corporate-actions request (%d)", status)
+            return "rejected", None
         try:
             return "ok", json.loads(answer.text, parse_float=Decimal)
         except ValueError:
@@ -189,9 +209,10 @@ class CorpActions:
 
     # ---- one instrument --------------------------------------------------------------------
     async def read_one(self, isin: str, now: int) -> str:
-        """Read one ISIN and keep what it lists. The outcome: ``ok``, ``none`` (Upstox has
-        nothing under this ISIN; asked again in a week), ``unreadable`` or ``silent`` (nothing
-        changed; asked again tomorrow), or one of ``STOPS``."""
+        """Read one ISIN and keep what it lists. The outcome: ``ok`` (a clean answer with events),
+        ``none`` (an empty list, or no such instrument at Upstox; asked again in a week), one of
+        ``FAILED`` (nothing changed; an instrument never read before is marked as tried, asked
+        again the next night after the ones never asked) or one of ``STOPS`` (nothing written)."""
         outcome, payload = await self._call(isin)
         if outcome == "ok":
             try:
@@ -200,11 +221,20 @@ class CorpActions:
                 outcome = "unreadable"
         if outcome == "unreadable":
             log.warning("a corporate-actions answer could not be read; nothing was changed")
-        if outcome not in ("ok", "none"):
+        if outcome in STOPS:
             return outcome
+        # "Nothing listed" is a clean answer with an empty list, and nothing else.
+        empty = outcome == "ok" and not parsed["events"] and not sum(parsed["skipped"].values())
+        outcome = "none" if empty else outcome
 
         def write(tx: Tx) -> None:
-            if outcome == "none":
+            if outcome in FAILED:
+                # The last good read stands; only an instrument with none is marked as tried,
+                # so that the rotation puts it after the ones never asked.
+                if not any(r["isin"] == isin and r["state"] != "failed" for r in tx.ca_reads()):
+                    tx.ca_read_put(isin, None, "failed", WORDS[outcome])
+                return
+            if payload is None:  # no such instrument at Upstox (or not an ISIN: nothing asked)
                 tx.ca_read_put(isin, now, "none", WORDS["none"])
                 return
             listed = []
@@ -214,7 +244,10 @@ class CorpActions:
             tx.ca_events_gone(isin, listed, now)
             left = sum(parsed["skipped"].values())
             note = f"{left} rows could not be read and were left out." if left else None
-            tx.ca_read_put(isin, now, "ok", note)
+            if empty:
+                tx.ca_read_put(isin, now, "none", WORDS["none"])
+            else:
+                tx.ca_read_put(isin, now, "ok", note)
 
         await self._store(lambda store: store.write(OWNER, write))
         return outcome
@@ -232,11 +265,16 @@ class CorpActions:
         today, held = day_of_instant(now), self._held_now()
 
         def look(tx: Tx) -> list[str]:
-            reads = {r["isin"]: r["read_at"] for r in tx.ca_reads()}
+            rows = tx.ca_reads()
+            reads = {r["isin"]: r["read_at"] for r in rows if r["state"] != "failed"}
+            tried = {r["isin"] for r in rows if r["state"] == "failed"}
             days = {k: None if v is None else day_of_instant(v) for k, v in reads.items()}
             soon = tx.ca_events(from_day=today, to_day=add_days(today, core.NEAR_DAYS))
             near = {event["isin"] for event in soon}
-            return core.tonight(sorted(known_isins(tx, held)), days, near, today, MAX_READS)
+            known = known_isins(tx, held)
+            first = core.tonight(sorted(known - tried), days, near, today, MAX_READS)
+            # One that failed before and was never read comes last: it cannot hold up the rest.
+            return (first + sorted(known & tried))[:MAX_READS]
 
         return await self._store(lambda store: store.read(OWNER, look))
 
@@ -250,7 +288,8 @@ class CorpActions:
         """One night's reads. Returns ``(status, note)`` for the job log."""
         todo = await self.plan(now)
         counts = {"ok": 0, "none": 0, "failed": 0}
-        silent, stop = 0, None
+        why: dict[str, int] = {}
+        in_a_row, stop = 0, None
         for isin in todo:
             await self._pace()
             outcome = await self.read_one(isin, self.service.clock())
@@ -258,18 +297,23 @@ class CorpActions:
                 stop = outcome
                 break
             counts[outcome if outcome in counts else "failed"] += 1
-            silent = silent + 1 if outcome == "silent" else 0
-            if silent >= SILENT_STOP:
-                stop = "silent"
+            if outcome in FAILED:
+                why[outcome] = why.get(outcome, 0) + 1
+            in_a_row = in_a_row + 1 if outcome in FAILED else 0
+            if in_a_row >= SILENT_STOP:
+                stop = outcome
                 break
         note = (
             f"{counts['ok']} of {len(todo)} instruments read, {counts['none']} with nothing "
             f"listed, {counts['failed']} not read"
         )
-        if stop is not None:
-            note = f"{note}. {WORDS[stop]}"
-        # ``kinds.JOB_STATUSES``: a night that read nothing of what was due has failed.
-        return ("failed" if todo and not counts["ok"] + counts["none"] else "ok"), note
+        # ``kinds.JOB_STATUSES``: a night that read nothing of what was due has failed, and its
+        # note says why in the words ``read_status`` shows the owner.
+        failed = bool(todo) and not counts["ok"] + counts["none"]
+        reason = stop or (max(sorted(why), key=why.get) if why and failed else None)
+        if reason is not None:
+            note = f"{note}. {WORDS[reason]}"
+        return ("failed" if failed else "ok"), note
 
     # ---- on demand -------------------------------------------------------------------------
     async def read_now(self, isin: str, now: int) -> str:
@@ -283,6 +327,40 @@ class CorpActions:
             return "wait"
         self._asked_at = now
         return await self.read_one(isin, now)
+
+
+# ---- whether the list was read at all (what the phone says before, and after a failed, read) ----
+FIRST_READ = (
+    "SUDARSHAN reads Upstox's corporate actions for the first time tonight after 23:45. Nothing "
+    "is listed until then."
+)
+NOT_READ = "Upstox's list could not be read {night}."
+RETRY = "SUDARSHAN tries again {when} after 23:45."
+
+
+def read_status(tx: Tx, today: int) -> dict[str, Any]:
+    """Whether Upstox's list was ever read, and how the last night went: ``state`` is ``never``
+    (no night has run yet), ``failed`` (the last night read nothing of what was due) or ``ok``;
+    ``words`` is the sentence the phone shows in place of an empty list, None when the last
+    night read. An empty calendar means "nothing listed" only under ``ok``."""
+    runs = [row for row in tx.job_runs() if row["name"] == API]
+    last = runs[-1] if runs else None
+    if last is None:
+        if any(row["state"] != "failed" for row in tx.ca_reads()):  # read on demand only
+            return {"state": "ok", "night": None, "words": None}
+        return {"state": "never", "night": None, "words": FIRST_READ}
+    if last["status"] != "failed":
+        return {"state": "ok", "night": last["day"], "words": None}
+    if last["day"] >= today:  # the run of this very evening, after 23:45
+        night, when = "tonight", "tomorrow night"
+    elif add_days(last["day"], 1) == today:
+        night, when = "last night", "tonight"
+    else:
+        night, when = f"on {day_words(last['day'])}", "tonight"
+    detail = last["detail"] or ""
+    why = next((text for text in WORDS.values() if text in detail), "")
+    parts = (NOT_READ.format(night=night), why, RETRY.format(when=when))
+    return {"state": "failed", "night": last["day"], "words": " ".join(p for p in parts if p)}
 
 
 # ---- what was held, and the owner's decisions (design p7 6.3) -----------------------------------
@@ -620,6 +698,7 @@ __all__ = [
     "known_isins",
     "listing",
     "decide",
+    "read_status",
     "register_jobs",
     "upstox_isins",
     "waiting",
