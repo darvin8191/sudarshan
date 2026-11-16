@@ -14,12 +14,21 @@ reached no answer (no token, no network) is not counted, so the next start tries
 
 The order history is asked for an order id that cannot exist: an answer that is not 401 or 403
 tells that the token may read the endpoint at all; the status is what is logged, never a body.
+
+**What the check found is published** (M13.12, M19.5): ``/health`` carries ``analytics_token``, a
+state and a time and nothing else, for the server's watch and the System page. The result of the
+last check Upstox answered is kept beside the day (``probe-result``), so a restart later that day
+still shows it. No call is added for this: it is the result of the check above. ``failed`` is
+"Upstox refused the token at every read that answered" (401); a read the token may not make
+(403) is not a refused token. A token file that changed after the check has not been checked:
+the state is ``unknown`` until the next check, never the old token's result.
 """
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import logging
 import os
 from pathlib import Path
@@ -28,7 +37,7 @@ from typing import Any
 import httpx
 
 from .core.days import day_of_instant
-from .upstox import API_OF
+from .upstox import API_OF, _signature
 
 log = logging.getLogger("sudarshan.portfolio.probe")
 
@@ -36,6 +45,10 @@ log = logging.getLogger("sudarshan.portfolio.probe")
 DELAY_S = 20.0
 #: The IST day (YYYYMMDD) of the last probe Upstox answered, in the service's state folder.
 DAY_FILE = "probe-day"
+#: The last check Upstox answered: {"at": epoch seconds, "state": "ok" or "failed", "sig": the
+#: token file's time and size then}. Never the token, a status or anything Upstox said.
+RESULT_FILE = "probe-result"
+OK, FAILED, UNKNOWN = "ok", "failed", "unknown"
 PROBES = (
     ("orders", "/v2/order/retrieve-all", {}),
     ("trades", "/v2/order/trades/get-trades-for-day", {}),
@@ -81,34 +94,108 @@ def probed_on(folder: Path) -> int | None:
         return None
 
 
-def note_probed(folder: Path, day: int) -> None:
-    """Record ``day`` as probed. Never raises: a day that cannot be written costs one more probe."""
-    path, tmp = folder / DAY_FILE, folder / f".{DAY_FILE}.new"
+def _write(folder: Path, name: str, text: str) -> bool:
+    """``text`` as the whole of ``folder/name`` (600), or the old file. Never raises."""
+    path, tmp = folder / name, folder / f".{name}.new"
     try:
         fd = os.open(
             tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0), 0o600
         )
         with os.fdopen(fd, "w", encoding="ascii") as handle:
-            handle.write(f"{day}\n")
+            handle.write(text)
         os.replace(tmp, path)
     except OSError as exc:
-        log.debug("the probe's day could not be recorded: %s", exc.strerror)
+        log.debug("the probe's %s could not be recorded: %s", name, exc.strerror)
         with contextlib.suppress(OSError):
             tmp.unlink()
+        return False
+    return True
+
+
+def note_probed(folder: Path, day: int) -> None:
+    """Record ``day`` as probed. Never raises: a day that cannot be written costs one more probe."""
+    _write(folder, DAY_FILE, f"{day}\n")
+
+
+def judged(found: dict[str, int | str]) -> str | None:
+    """What a probe says of the token: ``failed`` when Upstox refused it (401) at every read that
+    answered, ``ok`` when any read answered otherwise, None when none answered."""
+    answered = [status for status in found.values() if isinstance(status, int)]
+    if not answered:
+        return None
+    return FAILED if all(status == 401 for status in answered) else OK
+
+
+def _whole(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def read_result(folder: Path) -> dict[str, Any] | None:
+    """The last answered check as ``note_result`` kept it; None when there is none or the file
+    is cut off or not in that shape (it is then as if no check had been kept)."""
+    try:
+        with open(folder / RESULT_FILE, encoding="ascii") as handle:
+            kept = json.loads(handle.read(4096))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(kept, dict) or kept.get("state") not in (OK, FAILED):
+        return None
+    sig = kept.get("sig")
+    if sig is not None and not (isinstance(sig, list) and len(sig) == 2 and all(map(_whole, sig))):
+        return None
+    if not _whole(kept.get("at")) or kept["at"] <= 0:
+        return None
+    return {"at": kept["at"], "state": kept["state"], "sig": sig}
+
+
+def note_result(folder: Path, result: dict[str, Any]) -> None:
+    """Keep the result of a check Upstox answered. Never raises."""
+    _write(folder, RESULT_FILE, json.dumps(result, separators=(",", ":")) + "\n")
+
+
+def view(result: dict[str, Any] | None, missed_at: int | None, token_file: Path) -> dict[str, Any]:
+    """What ``/health`` says of the token: ``state`` (ok, failed, unknown) and ``at``, the epoch
+    seconds of the last check Upstox answered (None when there was none).
+
+    ``changed`` is there when the token file is not the one that was checked: the state is then
+    unknown, whatever the old token's was. ``missed_at`` is there when a later check got no
+    answer at all (no token file, no network, no budget), so the result is older than the
+    service's last start."""
+    if result is None:
+        shown: dict[str, Any] = {"state": UNKNOWN, "at": None}
+    else:
+        now = _signature(Path(token_file))
+        changed = (None if now is None else list(now)) != result["sig"]
+        shown = {"state": UNKNOWN if changed else result["state"], "at": result["at"]}
+        if changed:
+            shown["changed"] = True
+    if missed_at is not None and (result is None or missed_at > result["at"]):
+        shown["missed_at"] = missed_at
+    return shown
 
 
 async def at_start(service: Any, delay_s: float = DELAY_S) -> dict[str, int | str] | None:
     """The job: a moment after start, the probe, unless Upstox answered one today already (then
-    None). The day is recorded only when Upstox answered at least one of the three."""
-    await asyncio.sleep(delay_s)
+    None). The day is recorded only when Upstox answered at least one of the three, and so is
+    the result ``/health`` shows; what an earlier start found is shown from the first moment."""
     folder = Path(service.settings.state_dir)
+    service.token_check = read_result(folder)
+    await asyncio.sleep(delay_s)
     today = day_of_instant(service.clock())
     if probed_on(folder) == today:
         log.debug("the Analytics Token probe ran today already")
         return None
-    found = await probe(service.ensure_upstox())
-    if any(isinstance(status, int) for status in found.values()):
-        note_probed(folder, today)
+    upstox = service.ensure_upstox()
+    checked = _signature(Path(upstox.token_file))
+    found = await probe(upstox)
+    state, at = judged(found), service.clock() // 1000
+    if state is None:
+        service.token_missed_at = at
+        return found
+    note_probed(folder, today)
+    result = {"at": at, "state": state, "sig": None if checked is None else list(checked)}
+    note_result(folder, result)
+    service.token_check, service.token_missed_at = result, None
     return found
 
 

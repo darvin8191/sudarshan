@@ -390,8 +390,12 @@ def test_health_is_unsealed_names_the_release_and_carries_no_owner_data(tmp_path
             assert body["service"] == "sudarshan-portfolio"
             assert body["release"] == "v9.8.7"
             assert body["state"] == "running"
-            assert set(body["portfolio_state"]) == {"enabled", "state", "store", "jobs"}
+            assert set(body["portfolio_state"]) == {
+                "enabled", "state", "store", "jobs", "analytics_token",
+            }  # fmt: skip
             assert body["portfolio_state"]["store"] == "closed"
+            # GA5.1: the daily token check, before any check: a state and a time, no more.
+            assert body["portfolio_state"]["analytics_token"] == {"state": "unknown", "at": None}
             text = answer.text
             assert PEPPER not in text and "owner" not in text.replace('"owner"', "")
         finally:
