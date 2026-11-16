@@ -596,10 +596,11 @@ def test_a_surface_close_sized_from_a_real_thread_never_stalls_the_hub():
     """
     result = run(
         """
-        from sudarshan.books import exit_guard, surface_exits
+        from sudarshan.books import exit_guard, held_exits, surface_exits
 
         assert contend(exit_guard.EXITS._lock), "the claims' lock blocked a real thread"
         assert contend(surface_exits.REFUSALS._lock), "the kept refusals' lock blocked one"
+        assert contend(held_exits.HOLDS._lock), "the held exits' lock blocked one"  # O1
 
         POSITION = ("NFO", "NIFTY27OCT2625900CE", "MIS")
         held = {"quantity": 65}

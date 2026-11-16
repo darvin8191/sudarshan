@@ -1394,3 +1394,183 @@ def test_synchronous_signal_risk_exit_fill_does_not_end_the_session_run(api_key)
     live = state.get_run_state(run_id)
     assert live is not None
     assert live["legs"]["1"]["status"] == "closed"
+
+
+# ---------------------------------------------------------------------------
+# SUDARSHAN M6.9 (O1): a held exit is said once, not on every tick
+# ---------------------------------------------------------------------------
+
+_NOT_CONFIRMED = (
+    "Upstox did not send your orders in time, so SUDARSHAN could not confirm how much you "
+    "hold in NIFTY 24000 CE and sent no exit."
+)
+
+
+def _size_hold(why="unconfirmed", error=_NOT_CONFIRMED):
+    return DispatchResult(ok=False, error=error, held=True, response={"why": why})
+
+
+def _held_events(sid):
+    return [e for e in store.list_events(sid) if e["kind"] == "leg_exit_held"]
+
+
+def test_a_size_hold_writes_one_event_and_tells_the_owner_once(api_key, held_exit_messages):
+    # Before O1 every tick of a held stop wrote a leg_exit_held row at warn and told nobody.
+    # Now: one critical event that says what to do, one Telegram message, then quiet; and the
+    # exit that finally goes says it had been held, and he is told that too.
+    sid = _make()
+    run_id = _start(sid).run_id
+    engine.apply_fill(run_id, 1, 100.0, is_entry=True)
+    strategy = store.strategy_to_dict(store.get_strategy(sid, USER))
+    answers = [_size_hold()] * 5 + [DispatchResult(ok=True, broker_order_id="SB-X", response={})]
+    calls = iter(answers)
+
+    with patch.object(engine.order_dispatch, "dispatch_order", side_effect=lambda **k: next(calls)):
+        for _ in range(5):
+            outcome = engine._exit_legs(run_id, strategy, [1], "exit_sl", "live", "k", USER)
+            assert outcome[0]["ok"] is False and outcome[0]["error"] == _NOT_CONFIRMED
+        assert len(_held_events(sid)) == 1
+        assert len(held_exit_messages) == 1
+        went = engine._exit_legs(run_id, strategy, [1], "exit_sl", "live", "k", USER)
+
+    held = _held_events(sid)[0]
+    assert held["severity"] == "critical"
+    assert held["message"].startswith("Exit NOT sent for leg 1 (BUY 75 NIFTY 24000 CE): SUDARSHAN")
+    assert "Close the position in the Upstox app" in held["message"]
+    assert held_exit_messages[0].startswith(
+        "Exit NOT sent (Live)\nStrategy: Engine test\nLeg 1: BUY 75 NIFTY 24000 CE\n"
+        "The stop loss fired, but the exit was not sent because SUDARSHAN could not confirm"
+    )
+    assert went[0]["ok"] is True
+    placed = [e for e in store.list_events(sid) if e["kind"] == "leg_exit_placed"]
+    assert placed[-1]["message"].endswith("placed (exit_sl); it had been held under a minute")
+    assert len(held_exit_messages) == 2 and held_exit_messages[1].startswith("Exit sent (Live)")
+
+
+def test_a_held_exit_is_told_again_after_a_minute_and_not_before(api_key, held_exit_messages):
+    from sudarshan.books import held_exits
+
+    sid = _make()
+    run_id = _start(sid).run_id
+    engine.apply_fill(run_id, 1, 100.0, is_entry=True)
+    strategy = store.strategy_to_dict(store.get_strategy(sid, USER))
+    now = [500.0]
+
+    with (
+        patch.object(engine.order_dispatch, "dispatch_order", side_effect=lambda **k: _size_hold()),
+        patch.object(held_exits, "time", SimpleNamespace(monotonic=lambda: now[0])),
+    ):
+        for step, told in ((0, 1), (20, 1), (39, 1), (1, 2), (59, 2), (1, 3)):
+            now[0] += step
+            engine._exit_legs(run_id, strategy, [1], "exit_sl", "live", "k", USER)
+            assert len(held_exit_messages) == told, (now[0], held_exit_messages)
+
+    assert held_exit_messages[1].startswith("Exit still NOT sent (Live), 1 min now")
+    assert len(_held_events(sid)) == 1
+
+
+def test_a_refusal_only_repeated_from_memory_writes_no_order_row_and_no_event(
+    api_key, held_exit_messages
+):
+    # The 2 s memo (sudarshan/books/surface_exits.py): the engine finds the kept answer before
+    # it writes the order row, releases its claim and dispatches nothing.
+    from sudarshan.books import surface_exits
+
+    sid = _make()
+    run_id = _start(sid).run_id
+    engine.apply_fill(run_id, 1, 100.0, is_entry=True)
+    strategy = store.strategy_to_dict(store.get_strategy(sid, USER))
+    key = ("live", ("NFO", "NIFTY28MAY2624000CE", "NRML"), "BUY")
+    surface_exits.REFUSALS.keep(key, surface_exits._held_answer(_NOT_CONFIRMED, 424, "unconfirmed"))
+    rows, events = len(store.list_orders(run_id)), len(store.list_events(sid))
+    dispatched = []
+
+    def never(**kwargs):
+        dispatched.append(kwargs)
+        return DispatchResult(ok=True, broker_order_id="SB-X", response={})
+
+    with patch.object(engine.order_dispatch, "dispatch_order", side_effect=never):
+        for _ in range(50):
+            outcome = engine._exit_legs(run_id, strategy, [1], "exit_sl", "live", "k", USER)
+            assert outcome == [
+                {
+                    "leg_id": 1,
+                    "ok": False,
+                    "error": _NOT_CONFIRMED,
+                    "position_ref": outcome[0]["position_ref"],
+                    "exit_owner": "live",
+                    "quiet": True,
+                }
+            ]
+        assert dispatched == []
+        assert len(store.list_orders(run_id)) == rows
+        assert len(store.list_events(sid)) == events
+        assert len(held_exit_messages) == 1  # the owner is still told, once
+
+        # The claim was released each time: once the memo is gone the exit is dispatched.
+        surface_exits.REFUSALS.clear()
+        went = engine._exit_legs(run_id, strategy, [1], "exit_sl", "live", "k", USER)
+    assert went[0]["ok"] is True and len(dispatched) == 1
+    assert len(store.list_orders(run_id)) == rows + 1
+
+
+def test_a_sandbox_exit_never_asks_for_a_kept_refusal(api_key):
+    assert engine.order_dispatch.kept_hold("sandbox", {"symbol": "X", "exchange": "NFO"}) is None
+
+
+def test_a_leg_the_account_no_longer_holds_is_said_once(api_key, held_exit_messages):
+    sid = _make()
+    run_id = _start(sid).run_id
+    engine.apply_fill(run_id, 1, 100.0, is_entry=True)
+    strategy = store.strategy_to_dict(store.get_strategy(sid, USER))
+    gone = _size_hold("no_position", "Upstox's orders show NIFTY 24000 CE is already closed.")
+
+    with patch.object(engine.order_dispatch, "dispatch_order", side_effect=lambda **k: gone):
+        for _ in range(4):
+            engine._exit_legs(run_id, strategy, [1], "exit_sl", "live", "k", USER)
+
+    held = _held_events(sid)
+    assert len(held) == 1 and held[0]["severity"] == "warn"
+    assert "Upstox shows no position for this leg" in held[0]["message"]
+    assert len(held_exit_messages) == 1
+    assert "Upstox shows no position for this leg" in held_exit_messages[0]
+
+
+def test_a_stop_tried_again_while_its_exits_are_held_is_not_written_again(
+    api_key, held_exit_messages
+):
+    # A strategy-level breach calls stop_run on every tick. Its "stop requested" and "stop
+    # refused" lines are written for the first try, and not again while the hold lasts.
+    sid = _make()
+    run_id = _start(sid).run_id
+    engine.apply_fill(run_id, 1, 100.0, is_entry=True)
+
+    with patch.object(
+        engine.order_dispatch, "dispatch_order", side_effect=lambda **k: _size_hold()
+    ):
+        for _ in range(4):
+            result = engine.stop_run(run_id, USER, reason="overall_sl")
+            assert result["ok"] is False and result["stop_pending"] is True
+
+    kinds = [e["kind"] for e in store.list_events(sid)]
+    assert kinds.count("run_stop_requested") == 1
+    assert kinds.count("run_stop_failed") == 1
+    assert kinds.count("leg_exit_held") == 1
+    assert len(held_exit_messages) == 1
+    assert "The strategy's overall stop loss fired" in held_exit_messages[0]
+
+
+def test_a_broker_refusal_of_a_stop_is_still_written_every_time(api_key, held_exit_messages):
+    # Control: only a hold already said is quiet. A refusal by the broker keeps its records.
+    sid = _make()
+    run_id = _start(sid).run_id
+    engine.apply_fill(run_id, 1, 100.0, is_entry=True)
+    refused = DispatchResult(ok=False, error="Upstox refused it")
+
+    with patch.object(engine.order_dispatch, "dispatch_order", side_effect=lambda **k: refused):
+        engine.stop_run(run_id, USER, reason="manual")
+        engine.stop_run(run_id, USER, reason="manual")
+
+    kinds = [e["kind"] for e in store.list_events(sid)]
+    assert kinds.count("run_stop_failed") == 2 and kinds.count("leg_exit_rejected") == 2
+    assert held_exit_messages == []
