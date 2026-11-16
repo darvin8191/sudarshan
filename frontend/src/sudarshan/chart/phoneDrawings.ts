@@ -18,11 +18,17 @@
  *
  * Framework-agnostic, like the host: the page hears changes through
  * `subscribe` and reads `state`.
+ *
+ * SUDARSHAN M4.18: with the server's switch on, each instrument's drawings are
+ * also settled with the server's copy of record (`sudarshan/charts/docSync.ts`)
+ * under the engine's instrument key: read when the instrument opens, sent after
+ * each change. This phone's storage stays the copy the chart draws from.
  */
 import type { Chart } from 'openalgo-charts'
 import type { DrawingController, DrawingsDocument } from 'openalgo-charts/draw'
 import { resolveCssColor } from '@/lib/trading/chartTheme'
-import { drawingsKey } from '@/lib/trading/drawingScope'
+import { drawingsKey, holdsDrawings } from '@/lib/trading/drawingScope'
+import { documentSync } from '@/sudarshan/charts/docSync'
 
 /** The tools the phone offers, in the row's order; the glyph ids are the engine's own. */
 export const DRAW_TOOLS = [
@@ -54,6 +60,11 @@ const TRANSIENT: ReadonlySet<string> = new Set(['measure'])
 export function phoneDrawingsKey(symbol: string, exchange: string): string | null {
   const key = drawingsKey({ symbol, exchange })
   return key === null ? null : `sudarshan-chart-${key}`
+}
+
+/** M4.18: the server's key for those drawings, the engine's own instrument key (`NSE:INFY`). */
+export function serverDrawingsKey(storageKey: string): string {
+  return storageKey.replace(/^sudarshan-chart-draw:/, '')
 }
 
 function read(key: string | null): string | null {
@@ -111,6 +122,8 @@ export class PhoneDrawings {
   private ctl: DrawingController | null = null
   private value: DrawState = IDLE
   private failed = false
+  /** The server's copy is being put on the chart: its change events are not this phone's. */
+  private applying = false
   private readonly listeners = new Set<() => void>()
   /** A text note was placed and waits for its words. */
   private readonly onNote: (id: string) => void
@@ -139,6 +152,53 @@ export class PhoneDrawings {
     if (this.tier) this.build(chart)
     else if (hasSavedDrawings(symbol, exchange)) void this.ensure()
     this.sync()
+    this.follow(symbol)
+  }
+
+  /** M4.18: settle this instrument's drawings with the server's copy, under the engine's key. */
+  private follow(symbol: string): void {
+    const local = this.key
+    if (local === null) return
+    void documentSync('drawings', serverDrawingsKey(local))
+      .bind({
+        what: `The drawings on ${symbol}`,
+        read: () => read(local),
+        meaningful: holdsDrawings,
+        adopt: (body) => this.adopt(local, body),
+      })
+      .pull()
+  }
+
+  /**
+   * The server's document for the instrument stored under `local`: kept on this
+   * phone, and put on the chart when that instrument is the one on it. The text
+   * now stored, or null when it is not a drawings document.
+   */
+  private adopt(local: string, body: unknown): string | null {
+    if (!Array.isArray((body as { drawings?: unknown } | null)?.drawings)) return null
+    const ctl = this.key === local ? this.ctl : null
+    const tier = this.tier
+    if (ctl && tier) {
+      this.applying = true
+      try {
+        ctl.untracked(() => ctl.fromJSON(tier.migrateDrawings(body)))
+      } catch {
+        return null
+      } finally {
+        this.applying = false
+      }
+      const text = this.store()
+      this.sync()
+      return text
+    }
+    const text = JSON.stringify(body)
+    try {
+      localStorage.setItem(local, text)
+    } catch {
+      return null
+    }
+    if (this.key === local && !tier && holdsDrawings(text)) void this.ensure()
+    return text
   }
 
   /** The chart is going: its controller goes with it. What was drawn is already saved. */
@@ -313,20 +373,31 @@ export class PhoneDrawings {
 
   /** Something on the chart changed: save it for this instrument, and tell the page. */
   private changed(): void {
-    const ctl = this.ctl
-    if (ctl && this.key) {
-      const all = ctl.toJSON()
-      const kept: DrawingsDocument = {
-        ...all,
-        drawings: all.drawings.filter((d) => !TRANSIENT.has(d.tool)),
-      }
-      try {
-        localStorage.setItem(this.key, JSON.stringify(kept))
-      } catch {
-        /* storage is full or blocked: the drawing stays on the chart for this visit */
-      }
-    }
+    if (this.store() !== null && !this.applying) this.syncedChange()
     this.sync()
+  }
+
+  /** M4.18: send this phone's change on to the server's copy, when it keeps one. */
+  private syncedChange(): void {
+    if (this.key) documentSync('drawings', serverDrawingsKey(this.key)).changed()
+  }
+
+  /** The chart's drawings, a ruler left out, saved for this instrument; the text, or null. */
+  private store(): string | null {
+    const ctl = this.ctl
+    if (!ctl || !this.key) return null
+    const all = ctl.toJSON()
+    const kept: DrawingsDocument = {
+      ...all,
+      drawings: all.drawings.filter((d) => !TRANSIENT.has(d.tool)),
+    }
+    const text = JSON.stringify(kept)
+    try {
+      localStorage.setItem(this.key, text)
+      return text
+    } catch {
+      return null /* storage is full or blocked: the drawing stays on the chart for this visit */
+    }
   }
 
   private sync(): void {

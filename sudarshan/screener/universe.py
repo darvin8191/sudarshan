@@ -276,6 +276,29 @@ def index_list(
     return members, missing
 
 
+#: How near the money may come to a window's side before the window is placed again (GA7.1): the
+#: strike nearest the index within this many strikes of the outermost one on that side.
+EDGE = 3
+
+
+def chain_levels(options: Iterable[Listing], underlying: str, today: date) -> list[int]:
+    """The strikes (paise, ascending) of the underlying's nearest expiry not yet past."""
+    rows = [
+        r
+        for r in options
+        if r.underlying == underlying and r.expiry and r.expiry >= today and r.strike
+    ]
+    if not rows:
+        return []
+    expiry = min(r.expiry for r in rows)  # type: ignore[type-var]
+    return sorted({r.strike for r in rows if r.expiry == expiry})  # type: ignore[misc]
+
+
+def money_at(levels: Sequence[int], ltp: int) -> int:
+    """The place in ``levels`` of the strike nearest ``ltp`` (the lower of two equally near)."""
+    return min(range(len(levels)), key=lambda i: (abs(levels[i] - ltp), i))
+
+
 def option_window(
     options: Iterable[Listing], underlying: str, ltp: int, today: date, strikes: int = 10
 ) -> list[Member]:
@@ -290,10 +313,28 @@ def option_window(
     expiry = min(r.expiry for r in rows)  # type: ignore[type-var]
     chain = [r for r in rows if r.expiry == expiry]
     levels = sorted({r.strike for r in chain})  # type: ignore[arg-type]
-    at = min(range(len(levels)), key=lambda i: (abs(levels[i] - ltp), i))
+    at = money_at(levels, ltp)
     window = set(levels[max(0, at - strikes) : at + strikes + 1])
     picked = sorted((r for r in chain if r.strike in window), key=lambda r: (r.strike, r.kind))
     return [_member(r) for r in picked]
+
+
+def near_edge(
+    levels: Sequence[int], low: int, high: int, ltp: int, strikes: int = 10, edge: int = EDGE
+) -> bool:
+    """Whether a window from strike ``low`` to ``high`` (paise) should be placed again around
+    ``ltp``: the strike nearest the index is within ``edge`` strikes of the window's outermost
+    strike on one side (or past it), and the chain has strikes beyond that side to follow. A
+    window placed again has the money ``strikes`` from each side, so with the margin kept under
+    ``strikes`` a price that hovers at the line moves the window once, not at every tick. At the
+    end of the chain there is nothing more to follow and the window stays."""
+    if not levels or low not in levels or high not in levels:
+        return False
+    margin = max(0, min(edge, strikes - 1))
+    at, lo, hi = money_at(levels, ltp), levels.index(low), levels.index(high)
+    if at - lo <= margin and lo > 0:
+        return True
+    return hi - at <= margin and hi < len(levels) - 1
 
 
 def watchlist_members(
@@ -343,6 +384,7 @@ def member_rows(
 
 
 __all__ = [
+    "EDGE",
     "INDEX_SYMBOLS",
     "LISTS_DIR",
     "Listing",
@@ -350,10 +392,13 @@ __all__ = [
     "MasterUnavailable",
     "fno_stocks",
     "futures_of",
+    "chain_levels",
     "index_list",
     "indices",
     "listing_of",
     "member_rows",
+    "money_at",
+    "near_edge",
     "nearest",
     "option_window",
     "read_list",

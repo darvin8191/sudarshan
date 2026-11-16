@@ -58,6 +58,7 @@ import { type PriceAccess, usePriceAccess } from '@/sudarshan/access'
 import { AlertFormSheet, toastAlertSet } from '@/sudarshan/alerts/AlertForm' // SUDARSHAN M10.2
 import { isCovered } from '@/sudarshan/alerts/words'
 import { addProduct } from '@/sudarshan/books/cards/PositionCards'
+import { SyncNotice } from '@/sudarshan/charts/SyncNotice' // SUDARSHAN M4.18
 import { formatPercent, formatPrice, formatRupees } from '@/sudarshan/dashboard/format'
 import { useNow } from '@/sudarshan/dashboard/hooks'
 import { LiveLine } from '@/sudarshan/dashboard/LiveLine'
@@ -125,6 +126,7 @@ import { TripNotice } from './TripNotice'
 import { tripIdOf, useTripMarkers } from './tripMarkers'
 import { useChartBooks, useChartLines } from './useChartLines'
 import { usePhoneSideways } from './usePhoneLayout'
+import { usePhoneSetSync } from './usePhoneSetSync' // SUDARSHAN M4.18
 import { useWakeLock } from './useWakeLock'
 
 /** The order tag the chart's tickets carry, the same as the /trading terminal's. */
@@ -298,6 +300,8 @@ const ChartScreen = memo(function ChartScreen({
   styleNow.current = style
   /** The indicator set (C3), the phone's, for every instrument. */
   const [studies, setStudies] = useState<StudyEntry[]>(() => readStudies())
+  /** M4.18: the set settled with the server's copy; called after each change saved here. */
+  const studiesChanged = usePhoneSetSync(setStudies)
   const [studyNotice, setStudyNotice] = useState<string | null>(null)
   /** Counts the chart's study changes, so the sheet and the legend read them again. */
   const [, setStudyVersion] = useState(0)
@@ -517,8 +521,9 @@ const ChartScreen = memo(function ChartScreen({
       ]
       setStudies(next)
       saveStudies(next)
+      studiesChanged()
     },
-    [owner, studies]
+    [owner, studies, studiesChanged]
   )
 
   /** A study's settings changed (C4), or went back to its defaults (`null`): for every instrument. */
@@ -535,8 +540,9 @@ const ChartScreen = memo(function ChartScreen({
       const next = studies.map((e, i) => (i === index ? { id: e.id, settings } : e))
       setStudies(next)
       saveStudies(next)
+      studiesChanged()
     },
-    [studies]
+    [studies, studiesChanged]
   )
 
   /** The pinned timeframes the broker offers, which are the chips. */
@@ -802,6 +808,7 @@ const ChartScreen = memo(function ChartScreen({
 
       {/* SUDARSHAN M14.8: why the trade is not shown as asked, until dismissed. */}
       {trip.notice && <TripNotice text={trip.notice} onDismiss={trip.dismiss} />}
+      <SyncNotice />
 
       <div
         ref={surface}
@@ -1017,6 +1024,7 @@ const ChartScreen = memo(function ChartScreen({
           const next = studies.filter((_, i) => i !== index)
           setStudies(next)
           saveStudies(next)
+          studiesChanged()
         }}
       />
       <IndicatorSettingsSheet

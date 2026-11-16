@@ -740,6 +740,9 @@ protected     /sudarshan/autologin/status                                       
 protected     /sudarshan/autologin/test                                                 sudarshan_autologin.test_now
 protected     /sudarshan/autologin/totp-secret                                          sudarshan_autologin.clear_totp_secret
 protected     /sudarshan/autologin/totp-secret                                          sudarshan_autologin.set_totp_secret
+protected     /sudarshan/charts/api/doc                                                 sudarshan_charts.doc_get
+protected     /sudarshan/charts/api/doc                                                 sudarshan_charts.doc_put
+protected     /sudarshan/charts/api/state                                               sudarshan_charts.state
 protected     /sudarshan/family/api/audit_list                                          sudarshan_family.audit_list
 protected     /sudarshan/family/api/device_list                                         sudarshan_family.device_list
 protected     /sudarshan/family/api/device_revoke                                       sudarshan_family.device_revoke
@@ -845,6 +848,7 @@ protected     /sudarshan/risk/settings                                          
 protected     /sudarshan/risk/settings                                                  sudarshan_risk_bp.put_settings
 protected     /sudarshan/risk/state                                                     sudarshan_risk_bp.state
 protected     /sudarshan/risk/status                                                    sudarshan_risk_bp.status
+protected     /sudarshan/screener/api/alerts/seen                                       sudarshan_screener.alerts_seen
 protected     /sudarshan/screener/api/dashboard                                         sudarshan_screener.dashboard
 protected     /sudarshan/screener/api/dashboard/order                                   sudarshan_screener.widget_order
 protected     /sudarshan/screener/api/dashboard/widgets                                 sudarshan_screener.widget_add
@@ -856,6 +860,7 @@ protected     /sudarshan/screener/api/membership/<int:id>                       
 protected     /sudarshan/screener/api/presets                                           sudarshan_screener.presets
 protected     /sudarshan/screener/api/preview                                           sudarshan_screener.preview
 protected     /sudarshan/screener/api/runs/<int:id>                                     sudarshan_screener.run
+protected     /sudarshan/screener/api/runs/<int:id>/csv                                 sudarshan_screener.run_csv
 protected     /sudarshan/screener/api/runs/since                                        sudarshan_screener.runs_since
 protected     /sudarshan/screener/api/screens                                           sudarshan_screener.create
 protected     /sudarshan/screener/api/screens/<int:id>                                  sudarshan_screener.delete

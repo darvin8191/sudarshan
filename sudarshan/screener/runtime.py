@@ -28,9 +28,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from collections.abc import Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from datetime import date, datetime
-from typing import Any
+from typing import Any, NamedTuple
 
 import httpx
 
@@ -82,6 +82,15 @@ SEEN = "seen_at"
 #: Universes rebuilt from the master at start and after this moment of the day (the daily
 #: download has landed by then), every day.
 MASTER_AT_MIN = 9 * 60
+#: An option window placed before the session's first minute is over was placed on the last
+#: close, or on a pre-open price: it is placed again this long after the open (09:16), on a
+#: price of the session itself (GA7.1).
+ANCHOR_AFTER_OPEN_MS = 60_000
+#: A window that could not be placed again (the master being downloaded) is tried again after this.
+REANCHOR_RETRY_MS = 60_000
+#: A watchlist a screen looks at is read again before each of its runs, but not twice within
+#: this time: the screens that share a list and a candle close share one read (GA7.2).
+LIST_REREAD_MS = 2_000
 
 
 class FeedLink(alerts_feedlink.FeedLink):
@@ -96,6 +105,21 @@ class FeedLink(alerts_feedlink.FeedLink):
 
     async def drop_claims(self) -> dict:
         return await self._call("DELETE", f"/claims/{CLIENT}")
+
+
+class Anchor(NamedTuple):
+    """Where an option window stands: the chain's strikes, the window's outermost two, and when
+    it was placed (all prices in paise)."""
+
+    levels: tuple[int, ...]
+    low: int
+    high: int
+    at: int
+
+
+def list_mark(items: Sequence[Mapping[str, Any]]) -> tuple:
+    """What a watchlist holds, whatever its order: the instruments a universe is built from."""
+    return tuple(sorted({(str(i["exchange"]).upper(), str(i["symbol"]).upper()) for i in items}))
 
 
 def universe_of(
@@ -130,7 +154,12 @@ def universe_of(
         ltp = (extra or {}).get("ltp")
         rows = master.rows("NFO", ["CE", "PE"])
         listings |= {row.key: row for row in rows}
-        members = universe.option_window(rows, kind_spec["underlying"], ltp, today) if ltp else []
+        strikes = (extra or {}).get("strikes") or 10
+        members = (
+            universe.option_window(rows, kind_spec["underlying"], ltp, today, strikes)
+            if ltp
+            else []
+        )
     elif kind == "watchlist":
         items = (extra or {}).get("items") or []
         members, missing = universe.watchlist_members(items, {"NSE": cash}, today, fno=fno)
@@ -177,6 +206,20 @@ class LiveSource:
         #: Keys the screens follow past the key limit (``max_keys``): not claimed, not judged.
         self._over: frozenset[str] = frozenset()
         self._index_keys: dict[str, str] = {}
+        #: When each key's latest frame came (an option window is placed on a price of the session).
+        self._heard: dict[str, int] = {}
+        #: Each built option window, by universe name (GA7.1).
+        self._anchors: dict[str, Anchor] = {}
+        self._window_specs: dict[str, Mapping[str, Any]] = {}
+        self._reanchor_after = 0
+        #: What each watchlist a universe was built from held, and when it was last read (GA7.2).
+        self._list_marks: dict[int, tuple] = {}
+        self._list_read_at: dict[int, int] = {}
+        #: Reads the owner's lists through the bridge; the feed job sets it.
+        self.lists_reader: (
+            Callable[[Sequence[Mapping[str, Any]]], Awaitable[Mapping[int, Sequence]]] | None
+        ) = None
+        self.counts_extra = {"reanchored": 0, "lists_reread": 0}
         self._master_asked = 0
         self.counts = {"frames": 0, "trades": 0, "sealed": 0, "late": 0}
 
@@ -274,26 +317,11 @@ class LiveSource:
                 "rank": i,
             }
             for i, j in enumerate(hits)
-        ] + [
-            {
-                "key": j.member.key,
-                "symbol": j.member.symbol,
-                "exchange": j.member.exchange,
-                "change": "not_checked",
-                "rank": None,
-            }
-            for j in judged
-            if j.outcome.kind == "not_checked"
         ]
-        values = {
-            j.member.key: (
-                runs.hit_values(j)
-                if j.outcome.kind == "hit"
-                else {"_not_checked": words.not_checked_words(j.outcome.why)}
-            )
-            for j in judged
-            if j.outcome.kind in ("hit", "not_checked")
-        }
+        values = {j.member.key: runs.hit_values(j) for j in judged if j.outcome.kind == "hit"}
+        groups = runs.judged_groups(judged)  # grouped by reason, as a run keeps them (GA7.4)
+        if groups:
+            values[runs.NOT_CHECKED_KEY] = {"groups": groups}
         rows, not_checked = screen_ops.result_rows(
             stored, stored.get("name", ""), None, changes, values, [], now
         )
@@ -344,6 +372,7 @@ class LiveSource:
             "pauses": len(self._pauses) + (1 if self._open_pause is not None else 0),
             "claims": self.claim_words or "ok",
             **self.counts,
+            **self.counts_extra,
         }
 
     # ---- the day --------------------------------------------------------------------------------------
@@ -379,6 +408,7 @@ class LiveSource:
         previous = previous_trading_day(day, self.calendar.is_trading_day)
         self.market = Market(day_key(day), sessions, day_key(previous) if previous else 0)
         self._pauses, self._open_pause, self._open_pause_id, self._last = [], None, None, {}
+        self._heard = {}
         self._gap_rows = {}
         self._rebuild_market(now)
         self._restore(now)
@@ -508,6 +538,7 @@ class LiveSource:
         *,
         reuse: bool = False,
         lists: Mapping[int, Sequence[Mapping[str, Any]]] | None = None,
+        rebuild: frozenset[str] | set[str] = frozenset(),
     ) -> None:
         """The universes the active screens use, from the master; the keys to follow.
 
@@ -521,13 +552,23 @@ class LiveSource:
         ``lists`` are the items of the owner's OpenAlgo lists a watchlist universe names (the feed
         job reads them through the bridge). An option window waits, not built, until its index's
         price has come: the index is followed for it, and ``window_due`` says when to build it
-        (MEDIUM-7)."""
+        (MEDIUM-7).
+
+        ``rebuild`` names universes to read again although they are built (with ``reuse``): an
+        option window to place again (GA7.1; the windows ``stale_windows`` names are added here),
+        a watchlist whose items changed (GA7.2). One that cannot be read again now (the master
+        being downloaded, no price) stays as it was built: placing again never empties it."""
         if self._today is None:
             return
         wanted: dict[str, Mapping[str, Any]] = {}
         for kind_spec in specs:
             wanted.setdefault(_uni_key(kind_spec), kind_spec)
-        found = {n: self._universes[n] for n in wanted if reuse and n in self._universes}
+        again = (set(rebuild) | self.stale_windows(now)) & set(self._universes) if reuse else set()
+        found = {
+            n: self._universes[n]
+            for n in wanted
+            if reuse and n in self._universes and n not in again
+        }
         listings = dict(self._listings) if reuse else {}
         built: dict[str, list[Member]] = {}
         waiting: dict[str, Mapping[str, Any]] = {}
@@ -545,6 +586,7 @@ class LiveSource:
                             waiting[name] = kind_spec  # built once the index's price comes
                             continue
                         extra["ltp"] = int(round(frame["ltp"] * 100))
+                        extra["strikes"] = self.settings.option_strikes
                     elif kind_spec["kind"] == "watchlist":
                         items = (lists or {}).get(int(kind_spec["list_id"]))
                         if items is None:
@@ -555,6 +597,10 @@ class LiveSource:
                     )
                     built[name], self._missing[name] = members, missing
                     listings |= rows
+                    if kind_spec["kind"] == "options":
+                        self._anchor(name, kind_spec, members, rows, now)
+                    elif kind_spec["kind"] == "watchlist":
+                        self._list_marks[int(kind_spec["list_id"])] = list_mark(extra["items"])
                     if missing:
                         log.warning(
                             "%d names of %s are not in the master contract: %s",
@@ -569,9 +615,16 @@ class LiveSource:
                 if not reuse:
                     return
                 built = {}  # the new universes wait for the master; the keys still follow
+        kept = [n for n in again if n in wanted and n not in built]
+        if kept:  # not read again this time: as it was built, and asked again in a while
+            found |= {n: self._universes[n] for n in kept}
+            waiting = {n: s for n, s in waiting.items() if n not in kept}
+            self._reanchor_after = now + REANCHOR_RETRY_MS
         found |= built
         self._universes, self._listings = found, listings
         self._waiting = waiting
+        self._anchors = {n: a for n, a in self._anchors.items() if n in found}
+        self._window_specs = {n: s for n, s in wanted.items() if n in self._anchors}
         keys: list[str] = []
         seen: set[str] = set()
         for spec in wanted.values():  # an option window's index first: its price places the window
@@ -617,6 +670,49 @@ class LiveSource:
         except StoreError:
             log.exception("the universes could not be written to the store")
 
+    def _anchor(self, name, kind_spec, members, rows, now: int) -> None:
+        """Remember where an option window was placed, and say so when it moved."""
+        strikes = sorted({rows[m.key].strike for m in members if rows.get(m.key) is not None})
+        strikes = [s for s in strikes if s is not None]
+        had = self._anchors.pop(name, None)
+        if not strikes:
+            return
+        levels = universe.chain_levels(rows.values(), kind_spec["underlying"], self._today)
+        self._anchors[name] = Anchor(tuple(levels), strikes[0], strikes[-1], now)
+        if had is not None and (had.low, had.high) != (strikes[0], strikes[-1]):
+            self.counts_extra["reanchored"] += 1
+            log.info(
+                "the %s option window moved from %s-%s to %s-%s",
+                kind_spec["underlying"], had.low // 100, had.high // 100,
+                strikes[0] // 100, strikes[-1] // 100,
+            )  # fmt: skip
+
+    def stale_windows(self, now: int) -> set[str]:
+        """The built option windows to place again (GA7.1): one placed before the session's first
+        minute was over, once that minute is over and the index has a price of the session; and
+        one whose index has come within ``universe.EDGE`` strikes of its outermost strike."""
+        if now < self._reanchor_after:
+            return set()
+        opened = self.market.sessions.get("NSE_FO")
+        out: set[str] = set()
+        for name, anchor in self._anchors.items():
+            kind_spec = self._window_specs.get(name)
+            key = self._index_key(kind_spec["underlying"]) if kind_spec else None
+            frame = self._last.get(key) if key is not None else None
+            if not (frame and frame.get("ltp")):
+                continue
+            ltp = int(round(frame["ltp"] * 100))
+            if opened is not None:
+                settled = opened.start + ANCHOR_AFTER_OPEN_MS
+                if anchor.at < settled <= now and self._heard.get(key, 0) >= opened.start:
+                    out.add(name)
+                    continue
+            if universe.near_edge(
+                anchor.levels, anchor.low, anchor.high, ltp, self.settings.option_strikes
+            ):
+                out.add(name)
+        return out
+
     def _index_key(self, underlying: str) -> str | None:
         """The index's own key in the master (``NSE_INDEX|Nifty Bank`` for BANKNIFTY), never a
         guess from the text of a key (MEDIUM-7)."""
@@ -636,12 +732,104 @@ class LiveSource:
         """Whether that universe was built today (an empty one too)."""
         return _uni_key(universe_spec) in self._universes
 
-    def window_due(self) -> bool:
-        """Whether an option window that waited for its index's price can be built now."""
-        return any(
+    def window_due(self, now: int | None = None) -> bool:
+        """Whether an option window that waited for its index's price can be built now, or a
+        built one is to be placed again (``stale_windows``, asked when ``now`` is given)."""
+        if any(
             (frame := self._index_frame(spec["underlying"])) is not None and frame.get("ltp")
             for spec in self._waiting.values()
-        )
+        ):
+            return True
+        return now is not None and bool(self.stale_windows(now))
+
+    # ---- a watchlist universe, read again at each run (GA7.2) -------------------------------------------
+    async def fresh_members(self, universe_spec: Mapping[str, Any], now: int) -> bool:
+        """Before a run: the owner's list read again, and its universe built again when what it
+        holds changed (or it could not be read when the universes were built). An instrument
+        added is followed from now, so its first candle reads "Not checked" as for any
+        instrument first followed after the open; one taken out is let go. A list that cannot
+        be read now stays as it was last read. Whether the universe changed."""
+        if universe_spec.get("kind") != "watchlist" or self.lists_reader is None:
+            return False
+        if self._today is None:
+            return False
+        list_id, name = int(universe_spec["list_id"]), _uni_key(universe_spec)
+        if now - self._list_read_at.get(list_id, -LIST_REREAD_MS) < LIST_REREAD_MS:
+            return False
+        self._list_read_at[list_id] = now
+        try:
+            lists = await self.lists_reader([universe_spec])
+        except Exception:  # noqa: BLE001  (the reader's own failure; the list stays as read)
+            log.warning("the watchlist %s could not be read again before a run", list_id)
+            return False
+        items = lists.get(list_id)
+        if items is None:
+            return False
+        if name in self._universes and list_mark(items) == self._list_marks.get(list_id):
+            return False
+        try:
+            specs = _active_universes(self.store)
+        except StoreError:
+            return False
+        if name not in {_uni_key(s) for s in specs}:
+            return False
+        self.refresh_universes(specs, now, reuse=True, lists={list_id: items}, rebuild={name})
+        self.counts_extra["lists_reread"] += 1
+        await self.claim()
+        return True
+
+    # ---- the key limit, asked before a screen is saved (GA7.3) ----------------------------------------
+    async def keys_with(
+        self, specs: Sequence[Mapping[str, Any]], candidate: Mapping[str, Any] | None = None
+    ) -> int | None:
+        """How many instruments the screener would follow with these universes (the active
+        screens' and, when given, one more screen's): each universe as it is built today, one
+        not built yet read from the master off the loop, an option window not placed yet counted
+        at its full size. None when that cannot be worked out now (the master being downloaded,
+        a list that cannot be read): the save is then not judged on a guess."""
+        if self._today is None:
+            return None
+        wanted: dict[str, Mapping[str, Any]] = {}
+        for kind_spec in [*specs, *([candidate] if candidate is not None else [])]:
+            wanted.setdefault(_uni_key(kind_spec), kind_spec)
+        keys: set[str] = set()
+        for name, kind_spec in wanted.items():
+            kind = kind_spec["kind"]
+            if kind == "options":
+                index_key = self._index_key(kind_spec["underlying"])
+                keys.add(index_key or f"index:{kind_spec['underlying']}")
+            if name in self._universes:
+                keys.update(m.key for m in self._universes[name])
+                continue
+            extra: dict[str, Any] = {}
+            if kind == "options":  # not placed yet: the whole window, a call and a put a strike
+                size = 2 * (2 * self.settings.option_strikes + 1)
+                keys.update(f"{name}:{i}" for i in range(size))
+                continue
+            if kind == "watchlist":
+                if self.lists_reader is None:
+                    return None
+                try:
+                    lists = await self.lists_reader([kind_spec])
+                except Exception:  # noqa: BLE001
+                    return None
+                items = lists.get(int(kind_spec["list_id"]))
+                if items is None:
+                    return None
+                extra["items"] = items
+            try:
+                if hasattr(self.master, "download") and (
+                    (download := self.master.download()) is not None
+                    and download[0] == "downloading"
+                ):
+                    return None
+                members, _rows, _missing = await asyncio.to_thread(
+                    universe_of, kind_spec, self.master, self._today, extra=extra
+                )
+            except (universe.MasterUnavailable, FileNotFoundError):
+                return None
+            keys.update(m.key for m in members)
+        return len(keys)
 
     async def claim(self) -> None:
         """The keys to follow, claimed at the feed as one whole set (it replaces the last one).
@@ -681,6 +869,7 @@ class LiveSource:
             return []
         frame.setdefault("key", topic)
         self._last[topic] = frame
+        self._heard[topic] = now
         tick = self.bars.on_tick(frame, now, self.market)
         if tick.check in ("ok", "auction"):
             self.counts["trades"] += 1
@@ -841,6 +1030,7 @@ async def run_feed(service, *, tick_s: float = TICK_S) -> None:
     source = LiveSource(
         service.store, feed, master, service.settings, service.clock, service.ensure_calendar()
     )
+    source.lists_reader = lambda specs: _watchlists(service, specs)
     service.parts["source"] = source
     service.parts["engine"] = source
     bars_task = None
@@ -856,7 +1046,8 @@ async def run_feed(service, *, tick_s: float = TICK_S) -> None:
             )
             # a screen made, edited, resumed, paused or deleted (HIGH-2), or an option window
             # whose index's price has just come (MEDIUM-7): only what is new is built
-            if full or moved or source.window_due():
+            # ... or a window to place again at 09:16 or near its edge (GA7.1)
+            if full or moved or source.window_due(now):
                 try:
                     specs = _active_universes(service.store)
                 except StoreError:

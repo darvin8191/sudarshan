@@ -122,6 +122,8 @@ export interface ScreenRow {
   alerts?: string
   /** The screen's alerts are paused after a trigger until the owner resumes them. */
   alerts_paused?: boolean
+  /** Runs that raised an alert he has not looked at; opening the screen clears them. */
+  unseen_alerts?: number
 }
 
 export interface ScreenerState {
@@ -182,11 +184,31 @@ export interface RunRow {
   alerts?: string | null
 }
 
+/** Instruments a run could not judge for one reason: how many, and the first few by name. */
+export interface NotCheckedGroup {
+  reason: string
+  count: number
+  symbols: string[]
+}
+
+/** What a run could not judge: never a miss. `reasons` are the groups' own words; an older answer has no `groups`. */
+export interface NotCheckedSet {
+  count: number
+  reasons: string[]
+  groups?: NotCheckedGroup[]
+}
+
+/** A file for the phone to keep, as every export is answered. */
+export interface RunFile {
+  filename: string
+  text: string
+}
+
 export interface Results {
   screen_id: number
   run: RunRow | null
   rows: ResultRow[]
-  not_checked: { count: number; reasons: string[] }
+  not_checked: NotCheckedSet
 }
 
 export interface RunsPage {
@@ -205,7 +227,7 @@ export interface Preview {
   label: string
   count: number
   first: ResultRow[]
-  not_checked: { count: number; reasons: string[] }
+  not_checked: NotCheckedSet
   /** Candles each timeframe needs before the screen is fully ready, by timeframe. */
   needs?: Record<string, number>
 }
@@ -321,7 +343,7 @@ export interface WidgetCard {
   rows_shown: ResultRow[]
   /** Matches past `rows`. */
   more: number
-  not_checked: { count: number; reasons: string[] } | null
+  not_checked: NotCheckedSet | null
   /** Its automatic watchlist. */
   list: { id: number | null; name: string | null; count: number } | null
   /** A count card only. */
@@ -407,6 +429,8 @@ export interface RunPush {
   entered: ResultRow[]
   exited: Array<{ symbol: string; exchange: string }>
   marks: string[]
+  /** The run raised an alert (one more the owner has not looked at). */
+  alert?: boolean
 }
 
 export interface StatePush {

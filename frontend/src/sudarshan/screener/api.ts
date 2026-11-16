@@ -10,6 +10,7 @@ import {
   type Preview,
   type ResultRow,
   type Results,
+  type RunFile,
   type RunRow,
   type RunSet,
   type RunsPage,
@@ -335,6 +336,14 @@ export const screenerApi = {
   universes: () =>
     call<{ universes: UniverseOption[] }>(webClient.get(`${BASE}/universes`, { timeout: READ_MS })),
   today: () => call<Today>(webClient.get(`${BASE}/today`, { timeout: READ_MS })),
+  /** One run's results as a CSV file: its own rows and prices, named in ASCII by the service. */
+  runCsv: (id: number) =>
+    call<RunFile>(webClient.get(`${BASE}/runs/${id}/csv`, { timeout: READ_MS })),
+  /** The owner opened a screen: its alerts up to the run shown are looked at. */
+  alertsSeen: (body: { screen_id?: number; through?: number }) =>
+    call<{ seen: number; unseen_alerts: number }>(
+      webClient.post(`${BASE}/alerts/seen`, body, { timeout: CHANGE_MS })
+    ),
   membership: (query: { list?: number; screen?: number }) =>
     call<{ rows: MemberRow[] }>(
       webClient.get(`${BASE}/membership`, { params: query, timeout: READ_MS })

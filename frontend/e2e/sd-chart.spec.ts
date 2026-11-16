@@ -30,6 +30,7 @@
 import AxeBuilder from '@axe-core/playwright'
 import { expect, type Locator, type Page, test, type WebSocketRoute } from '@playwright/test'
 import { MAX_STUDIES } from '../src/sudarshan/chart/phoneStudies'
+import { textHash } from '../src/sudarshan/charts/docSync'
 import { depthFrame } from '../src/test/tickTape'
 
 test.skip(({ browserName }) => browserName !== 'chromium', 'touch and throttling are Chromium only')
@@ -436,6 +437,16 @@ async function open(page: Page, path = `/chart/${EXCHANGE}/${SYMBOL}`) {
   await page.addStyleTag({ content: '.tsqd-parent-container { display: none !important; }' })
 }
 
+/**
+ * The proxy socket once the page has opened it. The chart opens it only after its two settings
+ * reads come back, in real time whatever the page's clock says, so a test that waited on
+ * something drawn from local storage alone (the indicators button) must wait for the socket too.
+ */
+async function socketOpened(served: { proxy: () => WebSocketRoute; sockets: () => number }) {
+  await expect.poll(served.sockets, { message: 'the page opened the proxy socket' }).toBeGreaterThan(0)
+  return served.proxy()
+}
+
 /** What every phone screen promises, checked in one state of the chart. */
 async function checkScreen(page: Page) {
   const width = await page.evaluate(() => ({
@@ -696,11 +707,11 @@ test.describe('the phone chart at 360 x 800', () => {
 
   test('with the most indicators it takes, two in their own panes, the sheet, search and settings', async ({ page }, info) => {
     await keep(page, { 'sudarshan-chart-studies': FULL })
-    const { proxy } = await serve(page, { now: ist(10, 0, 30) })
+    const served = await serve(page, { now: ist(10, 0, 30) })
     await open(page)
     await expect(page.getByRole('button', { name: `Indicators ${FULL.length} on the chart` })).toBeVisible()
     await page.clock.runFor(500)
-    await tick(page, proxy(), ist(10, 0, 31), 4)
+    await tick(page, await socketOpened(served), ist(10, 0, 31), 4)
     await expect(page.getByTestId('study-legend')).toContainText('RSI')
     await page.screenshot({ path: info.outputPath('full.png') })
     await checkScreen(page)
@@ -802,11 +813,11 @@ test.describe('the phone chart on its side, 800 x 360', () => {
 
   test('with the most indicators it takes, two in their own panes', async ({ page }, info) => {
     await keep(page, { 'sudarshan-chart-studies': FULL })
-    const { proxy } = await serve(page, { now: ist(10, 0, 30) })
+    const served = await serve(page, { now: ist(10, 0, 30) })
     await open(page)
     await expect(page.getByRole('button', { name: `Indicators, ${FULL.length} on the chart` })).toBeVisible()
     await page.clock.runFor(500)
-    await tick(page, proxy(), ist(10, 0, 31), 4)
+    await tick(page, await socketOpened(served), ist(10, 0, 31), 4)
     await expect(page.getByTestId('study-legend')).toContainText('MACD')
     await page.screenshot({ path: info.outputPath('sideways-full.png') })
     await checkScreen(page)
@@ -1190,3 +1201,171 @@ for (const [layout, viewport] of [
     })
   })
 }
+
+/**
+ * M4.18: the chart's documents on the server, answered here and counted. `doc` is the server's
+ * copy of the instrument's drawings at `revision`; a write from that revision is taken, any other
+ * is refused as stale with the server's copy, as the bridge does. `offline` refuses the address.
+ */
+async function serveCharts(
+  page: Page,
+  options: { on: boolean; doc?: unknown; revision?: number; offline?: boolean }
+) {
+  const calls: Array<{ method: string; path: string; body: Record<string, unknown> | null }> = []
+  let revision = options.revision ?? 0
+  let doc = options.doc
+  await page.route('**/sudarshan/charts/api/**', (route) => {
+    const request = route.request()
+    const url = new URL(request.url())
+    const body = request.method() === 'PUT' ? (request.postDataJSON() as Record<string, unknown>) : null
+    calls.push({ method: request.method(), path: url.pathname, body })
+    if (options.offline) return route.abort('connectionfailed')
+    if (url.pathname.endsWith('/state'))
+      return route.fulfill(json({ status: 'ok', data: { enabled: options.on } }))
+    const key = `${EXCHANGE}:${SYMBOL}`
+    const answer = (withBody: boolean) => ({
+      kind: 'drawings',
+      key,
+      revision,
+      updated_ms: 1,
+      ...(withBody ? { body: doc } : {}),
+    })
+    if (request.method() === 'GET') {
+      if (doc === undefined) return route.fulfill(json({ status: 'ok', data: { doc: null } }))
+      return route.fulfill(
+        json({ status: 'ok', data: { doc: answer(url.searchParams.get('have') !== String(revision)) } })
+      )
+    }
+    if (body?.base !== (doc === undefined ? 0 : revision))
+      return route.fulfill({
+        ...json({ status: 'error', code: 'stale', message: 'Changed on another device first.', doc: doc === undefined ? null : answer(true) }),
+        status: 409,
+      })
+    revision += 1
+    doc = body?.body
+    return route.fulfill(json({ status: 'ok', data: { doc: answer(false) } }))
+  })
+  return calls
+}
+
+const level = (price: number, id: string) => ({
+  id,
+  tool: 'horizontal-line',
+  points: [{ time: Math.floor(ist(9, 30) / 1000), price }],
+  style: {},
+  paneIndex: 0,
+  zIndex: 0,
+})
+const savedPrices = (page: Page) =>
+  page.evaluate((key) => {
+    const doc = JSON.parse(localStorage.getItem(key) ?? 'null') as {
+      drawings?: Array<{ points: Array<{ price: number }> }>
+    } | null
+    return (doc?.drawings ?? []).map((drawing) => drawing.points[0].price).sort()
+  }, `sudarshan-chart-draw:${EXCHANGE}:${SYMBOL}`)
+
+/** Place a level with the Draw tools, by one tap, as the owner does. */
+async function drawLevel(page: Page) {
+  await page.getByRole('button', { name: 'Draw' }).click()
+  const row = page.getByTestId('draw-row')
+  await row.getByRole('button', { name: 'Horizontal line' }).click()
+  // The draw tier loads on first use: a tap before the tool is held places nothing.
+  await expect(row.getByRole('status')).toHaveText('Horizontal line: tap the chart to place it.')
+  const box = (await page.getByTestId('chart-surface').boundingBox()) as DOMRect
+  await page.touchscreen.tap(box.x + box.width * 0.45, box.y + box.height * 0.5)
+  await page.clock.runFor(100)
+  await expect.poll(() => savedTools(page)).toEqual(['horizontal-line'])
+  // The level just placed is selected, and its bar has a Done of its own: the row's is the one.
+  await page.getByRole('button', { name: 'Done', exact: true }).click()
+}
+
+test.describe('charts across devices on the phone chart, 360 x 800 (M4.18)', () => {
+  test.use({ viewport: { width: 360, height: 800 } })
+
+  test('switched off: no chart document is read or sent, and a drawing stays on this phone', async ({ page }) => {
+    const calls = await serveCharts(page, { on: false })
+    const served = await serve(page, { now: ist(10, 0, 30) })
+    await open(page)
+    await page.clock.runFor(500)
+    await tick(page, await socketOpened(served), ist(10, 0, 31), 2)
+    await drawLevel(page)
+    await page.clock.runFor(1_000)
+    expect(calls.filter((call) => call.path.endsWith('/doc'))).toEqual([])
+    await expect(page.getByTestId('chart-sync-notice')).toHaveCount(0)
+  })
+
+  test('the server cannot be reached: the chart works on this phone’s own copy and says nothing', async ({ page }) => {
+    const calls = await serveCharts(page, { on: true, offline: true })
+    const served = await serve(page, { now: ist(10, 0, 30) })
+    await open(page)
+    await page.clock.runFor(500)
+    await tick(page, await socketOpened(served), ist(10, 0, 31), 2)
+    await drawLevel(page)
+    await page.clock.runFor(1_000)
+    expect(calls.length).toBeGreaterThan(0) // it asked, and was refused
+    await expect(page.getByTestId('chart-sync-notice')).toHaveCount(0)
+    await checkScreen(page)
+  })
+})
+
+for (const [layout, viewport] of [
+  ['upright', { width: 360, height: 800 }],
+  ['on its side', { width: 800, height: 360 }],
+] as const) {
+  test.describe(`a drawings conflict on the phone chart ${layout}, ${viewport.width} x ${viewport.height} (M4.18)`, () => {
+    test.use({ viewport })
+
+    test('the strip says which copy was kept, and puts this phone’s back when asked', async ({ page }, info) => {
+      // Agreed with the server at one revision; since then this phone added a level offline,
+      // and another device added a different one.
+      const agreed = { version: 2, drawings: [level(812, 'a')] }
+      const phone = { version: 2, drawings: [level(812, 'a'), level(806, 'phone')] }
+      const tablet = { version: 2, drawings: [level(812, 'a'), level(818, 'tablet')] }
+      const key = `${EXCHANGE}:${SYMBOL}`
+      await page.addInitScript(
+        ([storage, record, text, agreedRecord]) => {
+          if (localStorage.getItem('seeded')) return
+          localStorage.setItem('seeded', '1')
+          localStorage.setItem(storage, text)
+          localStorage.setItem(record, agreedRecord)
+        },
+        [
+          `sudarshan-chart-draw:${key}`,
+          `sudarshan-charts-sync:drawings:${key}`,
+          JSON.stringify(phone),
+          JSON.stringify({ r: 1_794_000_000_001, h: textHash(JSON.stringify(agreed)) }),
+        ] as const
+      )
+      const calls = await serveCharts(page, { on: true, doc: tablet, revision: 1_794_000_000_002 })
+      const served = await serve(page, { now: ist(10, 0, 30) })
+      await open(page)
+      await page.clock.runFor(500)
+      await tick(page, await socketOpened(served), ist(10, 0, 31), 2)
+
+      const strip = page.getByTestId('chart-sync-notice')
+      await expect(strip).toContainText(
+        'The drawings on SBIN were changed on another device. That copy is shown; the change made on this phone was not saved.'
+      )
+      await expect.poll(() => savedPrices(page)).toEqual([812, 818])
+      await page.screenshot({ path: info.outputPath('sync-conflict.png') })
+      await checkScreen(page)
+
+      await strip.getByRole('button', { name: 'Use this phone’s copy' }).click()
+      await page.clock.runFor(500)
+      await expect.poll(() => savedPrices(page)).toEqual([806, 812])
+      const put = calls.find((call) => call.method === 'PUT')
+      expect(put?.body?.base).toBe(1_794_000_000_002)
+      expect(
+        ((put?.body?.body as { drawings: Array<{ points: Array<{ price: number }> }> }).drawings ?? [])
+          .map((d) => d.points[0].price)
+          .sort()
+      ).toEqual([806, 812])
+      await expect(strip).toContainText('The drawings on SBIN from this phone are saved.')
+      await page.screenshot({ path: info.outputPath('sync-kept.png') })
+      await checkScreen(page)
+      await strip.getByRole('button', { name: 'Dismiss this note' }).click()
+      await expect(strip).toHaveCount(0)
+    })
+  })
+}
+

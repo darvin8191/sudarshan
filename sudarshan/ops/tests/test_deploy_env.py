@@ -324,6 +324,7 @@ def test_the_shipped_list_on_a_fresh_install(tmp_path):
     assert after["SUDARSHAN_TAX"] == "on"  # M7.27: the tax working paper is switched on
     assert after["SUDARSHAN_PORTFOLIO_INSIGHTS"] == "on"  # M7.36: insights, a release after tax
     assert after["SUDARSHAN_SIGNALS"] == "off"  # M13: the TRINETRA view ships off
+    assert after["SUDARSHAN_CHARTS_SYNC"] == "off"  # M4.18: charts across devices ship off
     for later in LATER_SWITCHES:  # goals stay off in code: no line, no key
         assert later not in after
     assert after["OPENALGO_MCP_READ_ONLY"] == "1"  # M17.9: the assistant's three settings
@@ -342,6 +343,7 @@ def test_the_shipped_list_on_a_fresh_install(tmp_path):
         "SUDARSHAN_TAX",
         "SUDARSHAN_PORTFOLIO_INSIGHTS",
         "SUDARSHAN_SIGNALS",
+        "SUDARSHAN_CHARTS_SYNC",
         "MAX_WEBSOCKET_CONNECTIONS",
         "WEBSOCKET_BROKER_LINGER_SECONDS",
         "SUDARSHAN_RISK_GUARD",
@@ -631,3 +633,17 @@ def test_the_trinetra_switch_ships_off_and_an_owners_value_stays(tmp_path, owner
     assert env.startswith(original), "the owner's line stays byte for byte"
     assert _read_by_openalgo(env)["SUDARSHAN_SIGNALS"] == owners.decode().strip("'")
     assert "SUDARSHAN_SIGNALS left alone: the owner chose its value" in out
+
+
+@pytest.mark.parametrize("owners", [b"on", b"'on'", b"1"])
+def test_the_charts_switch_ships_off_and_an_owners_on_stays(tmp_path, owners):
+    """M4.18: the release writes the switch off where .env does not name it; an owner who turned
+    it on keeps it on through every later deploy, because the line lists no old value."""
+    assert [w for w in _shipped_words() if w[0] == "SUDARSHAN_CHARTS_SYNC"] == [
+        ["SUDARSHAN_CHARTS_SYNC", "off"]
+    ]
+    original = b"APP_KEY='k'\nSUDARSHAN_CHARTS_SYNC=" + owners + b"\n"
+    env, out = _applied(tmp_path, original, SHIPPED_LIST.read_bytes())
+    assert env.startswith(original), "the owner's line stays byte for byte"
+    assert _read_by_openalgo(env)["SUDARSHAN_CHARTS_SYNC"] == owners.decode().strip("'")
+    assert "SUDARSHAN_CHARTS_SYNC left alone: the owner chose its value" in out

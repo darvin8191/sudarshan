@@ -13,8 +13,9 @@ import { Figures, type FigureValues, figuresOf } from '@/sudarshan/watchlist/Wat
 import { ChipMark } from './ChipMark'
 import { dayStart, whenWords } from './cardLine'
 import type { Hearing } from './push'
+import { RunCsv } from './RunCsv'
 import { followedItems } from './resultItems'
-import type { ResultRow, Results as ResultsData, ScreenRow } from './types'
+import type { NotCheckedGroup, ResultRow, Results as ResultsData, ScreenRow } from './types'
 import { WORDS } from './types'
 import { useResults } from './useResults'
 import { warmingNote } from './words'
@@ -194,11 +195,24 @@ function ResultFace({
   )
 }
 
-/** "Not checked (12)": the reasons the screen could not judge some instruments, in the service's words. */
+/** 'RELIANCE, SBIN and 10 more': a group's first names and how many it does not name. */
+export function groupNames(group: NotCheckedGroup): string {
+  const more = group.count - group.symbols.length
+  const names = group.symbols.join(', ')
+  if (more <= 0) return names
+  return names ? `${names} and ${more} more` : `${more} instruments`
+}
+
+/**
+ * "Not checked (12)": the instruments the screen could not judge, grouped by their reason in the
+ * service's words, each group with its count and its first names. Not checked is never a miss:
+ * nothing here left the list.
+ */
 export function NotChecked({ data }: { data: ResultsData['not_checked'] }) {
   const [open, setOpen] = useState(false)
   if (data.count === 0) return null
   const Icon = open ? ChevronUp : ChevronDown
+  const groups = data.groups ?? []
   return (
     <section className="rounded-[1rem] border bg-card shadow-[var(--shadow-card)]">
       <button
@@ -215,9 +229,28 @@ export function NotChecked({ data }: { data: ResultsData['not_checked'] }) {
       </button>
       {open && (
         <ul className="flex flex-col gap-1 border-t px-4 py-2 text-[0.8125rem] font-medium">
-          {data.reasons.map((reason) => (
-            <li key={reason}>{reason}</li>
-          ))}
+          {groups.length > 0
+            ? groups.map((group) => (
+                <li
+                  key={group.reason}
+                  data-not-checked={group.count}
+                  className="flex flex-col gap-0.5 py-1"
+                >
+                  <span className="flex items-start gap-2">
+                    <span className="min-w-8 shrink-0 font-bold">{group.count}</span>
+                    <span className="min-w-0 font-semibold">{group.reason}</span>
+                  </span>
+                  <span className="pl-10 break-words text-[color:var(--text-secondary)]">
+                    {groupNames(group)}
+                  </span>
+                </li>
+              ))
+            : data.reasons.map((reason) => <li key={reason}>{reason}</li>)}
+          {groups.length > 0 && (
+            <li className="pt-1 text-[color:var(--text-secondary)]">
+              Not checked is not a miss: nothing here left the list.
+            </li>
+          )}
           {warmingNote(data.reasons) && (
             <li className="flex items-start gap-1.5 font-semibold text-[color:var(--text-secondary)]">
               <Hourglass aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
@@ -352,6 +385,7 @@ export function Results({
         </section>
       )}
       <NotChecked data={data.not_checked} />
+      {data.run && <RunCsv runId={data.run.id} />}
       {children?.({ row: sheetRow, feed: live.feed, now: live.now })}
     </div>
   )

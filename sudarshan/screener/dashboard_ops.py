@@ -41,6 +41,7 @@ from .screen_ops import (
     _within_limit,
     engine_of,
     next_check,
+    over_keys,
     result_rows,
     run_row,
     sched_screen,
@@ -383,6 +384,21 @@ async def widget_add(ctx, args: Mapping[str, Any]) -> dict[str, Any]:
         if item.waits:
             raise ApiError.of("refused", item.waits)
 
+    # the key limit (GA7.3): a screen that would pass it is added Paused, as for the Active limit
+    over = None
+    if start:
+        held = (
+            None
+            if made
+            else translate(
+                lambda: store.read(OWNER, lambda tx: tx.screen(screen_id)), WORDS["gone"]
+            )
+        )
+        if made or (held is not None and held["status"] == "paused"):
+            over = await over_keys(
+                ctx, (made or held)["spec"]["universe"], None if made else screen_id
+            )
+
     def add(tx: Tx):
         screen = (
             tx.screen_insert(made["name"], made["spec"], made["status"], now)
@@ -397,7 +413,9 @@ async def widget_add(ctx, args: Mapping[str, Any]) -> dict[str, Any]:
         # screen started before it would already be on it
         row = tx.widget_insert(version, {"screen_id": screen["id"], **fields}, now)
         notice = None
-        if start:
+        if start and over is not None and screen["status"] == "paused":
+            notice = words.paused_keys_words(*over)
+        elif start:
             screen, notice = _start(ctx, tx, screen, now)
         return row, _summary(ctx, tx, screen, now), notice
 

@@ -206,7 +206,8 @@ def test_a_watchlist_screen_looks_at_the_owners_list(
                 "a watchlist universe is always empty",
             )
             await reached(lambda: recorded[-1] == ("PUT", CLAIMS, 2), "its keys are not claimed")
-            assert link.reads == [3]
+            # the list is read for the universe, and for the save's key count before it (GA7.3)
+            assert set(link.reads) == {3}
         finally:
             svc.stop("test")
             await task

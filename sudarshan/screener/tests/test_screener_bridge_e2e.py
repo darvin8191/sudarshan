@@ -185,6 +185,9 @@ def test_the_owner_flow_end_to_end(world):
     assert results["run"]["matches"] == 2 and results["not_checked"] == {
         "count": 1,
         "reasons": ["Not checked: no price from Upstox yet"],
+        "groups": [
+            {"reason": "Not checked: no price from Upstox yet", "count": 1, "symbols": ["CCC"]}
+        ],
     }
     rows = results["rows"]
     assert [r["symbol"] for r in rows] == ["AAA", "BBB"]
@@ -342,8 +345,19 @@ def test_the_owner_flow_end_to_end(world):
     assert (
         today["screens"][0]["matches"] == 2
         and today["recent"][0]["kind"] == "entered"
-        and today["unseen_alerts"] == 0
+        and today["unseen_alerts"] >= 1
+    ), "the run that raised an alert is one the owner has not looked at (GA7.6)"
+    # he opens the screen: its alerts are looked at, through the bridge's own route
+    seen = data_of(
+        client.post(f"{PREFIX}/alerts/seen", json={"screen_id": screen_id}, headers=headers)
     )
+    assert seen["seen"] == today["unseen_alerts"] and seen["unseen_alerts"] == 0
+    assert data_of(client.get(f"{PREFIX}/today", headers=JSON))["unseen_alerts"] == 0
+    # and the first run's results as a file, as every export is answered (GA7.5)
+    first_run = data_of(client.get(f"{PREFIX}/screens/{screen_id}/runs", headers=JSON))["runs"][-1]
+    file = data_of(client.get(f"{PREFIX}/runs/{first_run['id']}/csv", headers=JSON))
+    assert file["filename"].startswith("SUDARSHAN_Screener_") and file["filename"].isascii()
+    assert "Rank,Symbol,Exchange" in file["text"]
     presets = data_of(client.get(f"{PREFIX}/presets", headers=JSON))["presets"]
     assert len(presets) >= 8 and all(
         {"key", "name", "about", "usable", "where", "spec", "reason"} <= set(p) for p in presets

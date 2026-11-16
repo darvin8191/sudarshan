@@ -21,7 +21,10 @@ honestly say.
 from __future__ import annotations
 
 import asyncio
+import csv
+import io
 import logging
+import re
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import asdict
 from datetime import datetime
@@ -30,11 +33,13 @@ from typing import Any
 
 from sudarshan.alerts.market.sessions import day_key, epoch_ms, key_day, sessions_of
 from sudarshan.autologin.schedule import IST
+from sudarshan.portfolio.imports.csvutil import BOM, guard
 
 from . import alerting as al
 from . import catalog as cat
 from . import membership as mem
 from . import presets, scheduler, spec, words
+from . import runs as runs_module
 from .contract import EVENT_STATE, MEMBERSHIP_ACTIONS, SCREEN_ACTIONS, WORDS
 from .operand import SpecError
 from .ops import ApiError, op
@@ -319,7 +324,7 @@ def result_rows(
     value_clauses: Sequence[str] | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """(rows, not_checked) of a run: every instrument that matched, best ranked first, with its
-    membership chip; the not-checked count and its reasons."""
+    membership chip; the not-checked count, its reasons and its groups (runs.not_checked_of)."""
     grace = mem.Grace.of((stored.get("target") or {}).get("grace"))
     order = (stored.get("rank") or {}).get("order", "desc")
     by_key = {m["key"]: m for m in members}
@@ -366,15 +371,7 @@ def result_rows(
                 "change_pct": _change_pct(found.get("_ltp"), found.get("_cp")),
             }
         )
-    reasons = []
-    count = 0
-    for change in changes:
-        if change["change"] == "not_checked":
-            count += 1
-            text = (values.get(change["key"]) or {}).get("_not_checked")
-            if isinstance(text, str) and text not in reasons:
-                reasons.append(text)
-    return rows, {"count": count, "reasons": reasons[: words.REASONS_SHOWN]}
+    return rows, runs_module.not_checked_of(run, changes, values)
 
 
 def screen_row(
@@ -416,6 +413,8 @@ def screen_row(
             al.Policy.of(row["spec"].get("alerts")), paused=bool(state.get("alerts_paused"))
         ),
         "alerts_paused": bool(state.get("alerts_paused")),
+        # runs that raised an alert he has not looked at (GA7.6); opening the screen clears them
+        "unseen_alerts": tx.alerts_unseen().get(row["id"], 0),
         "updated_at": row["updated_at"],
     }
 
@@ -530,6 +529,52 @@ def _within_limit(ctx, tx: Tx, screen_id: int | None) -> None:
         )
 
 
+def _same_universe(a: Mapping[str, Any], b: Mapping[str, Any]) -> bool:
+    return {k: v for k, v in a.items() if v is not None} == {
+        k: v for k, v in b.items() if v is not None
+    }
+
+
+async def over_keys(
+    ctx, universe_spec: Mapping[str, Any], screen_id: int | None
+) -> tuple[int, int] | None:
+    """(the instruments the screener would follow, its limit) when a screen on this universe,
+    Active beside the others, would pass ``SUDARSHAN_SCREENER_MAX_KEYS``; None when it would
+    not, when it adds no instrument (another Active screen already looks at the same ones), or
+    when the count cannot be worked out now (no price source in this process, the master being
+    downloaded, a list that cannot be read): a save is never refused on a guess, and a run past
+    the limit still says "Not checked: past the N instruments" (GA7.3)."""
+    source = ctx.parts.get("source")
+    count = getattr(source, "keys_with", None)
+    if not callable(count) or ctx.store is None:
+        return None
+    try:
+        others = ctx.store.read(
+            OWNER,
+            lambda tx: [
+                r["spec"]["universe"]
+                for r in tx.screens()
+                if r["status"] == "active" and r["id"] != screen_id
+            ],
+        )
+        total = await count(others, universe_spec)
+        limit = ctx.settings.max_keys
+        if total is None or total <= limit:
+            return None
+        without = await count(others)
+    except StoreError:
+        return None
+    if without is not None and without >= total:
+        return None
+    return total, limit
+
+
+async def _within_keys(ctx, universe_spec: Mapping[str, Any], screen_id: int | None) -> None:
+    over = await over_keys(ctx, universe_spec, screen_id)
+    if over is not None:
+        raise ApiError.of("refused", words.over_keys_words(*over), "universe")
+
+
 @op("create")
 async def create(ctx, args: Mapping[str, Any]) -> dict[str, Any]:
     stored, _plan = _spec(args.get("spec"))
@@ -543,6 +588,13 @@ async def create(ctx, args: Mapping[str, Any]) -> dict[str, Any]:
         raise ApiError.of("bad_request", WORDS["unreadable"])
     now = ctx.clock()
     store = _store(ctx)
+    if status == "active":
+        # a resend of a save already made is answered with the screen, never refused
+        resent = request_id is not None and _translate(
+            lambda: store.read(OWNER, lambda tx: tx.screen_by_request(request_id))
+        )
+        if not resent:
+            await _within_keys(ctx, stored["universe"], None)
 
     def make(tx: Tx):
         if request_id is not None:
@@ -570,6 +622,20 @@ async def update(ctx, args: Mapping[str, Any]) -> dict[str, Any]:
     stored = _spec(args.get("spec"))[0] if action == "edit" else None
     now = ctx.clock()
     store = _store(ctx)
+    if action in ("edit", "resume"):
+        # the key limit, for a screen that would start following instruments or follow others:
+        # an Active screen whose universe stays as it is adds nothing and is never refused
+        held = _translate(lambda: store.read(OWNER, lambda tx: tx.screen(screen_id)))
+        if held is not None and held["version"] == version:
+            wanted = (stored or held["spec"])["universe"]
+            starts = action == "resume" and held["status"] != "active"
+            moves = (
+                action == "edit"
+                and held["status"] == "active"
+                and not _same_universe(held["spec"]["universe"], wanted)
+            )
+            if starts or moves:
+                await _within_keys(ctx, wanted, screen_id)
 
     def change(tx: Tx):
         before = tx.screen(screen_id)
@@ -751,7 +817,11 @@ def _match_set(tx: Tx, run: Mapping[str, Any], values: Mapping[str, Any]) -> lis
     """A past run's whole match set as "in" rows (MEDIUM-1): from its values while they are
     kept (every match has its own), else replayed from the day's first run, which records every
     match, and the later runs' changes up to this one."""
-    hits = {k: v for k, v in values.items() if "_not_checked" not in v}
+    hits = {
+        k: v
+        for k, v in values.items()
+        if k != runs_module.NOT_CHECKED_KEY and "_not_checked" not in v
+    }
     if hits and all("_symbol" in v for v in hits.values()):
         return [
             {"key": k, "symbol": v["_symbol"], "exchange": v["_exchange"], "change": "in"}
@@ -938,9 +1008,110 @@ async def today(ctx, args: Mapping[str, Any]) -> dict[str, Any]:
         return {
             "screens": screens,
             "recent": recent[:20],
-            # Not counted yet: the screener keeps no "seen" mark per alert, so the card never shows it.
-            "unseen_alerts": 0,
+            # runs that raised an alert and were not opened since, of the screens still there
+            "unseen_alerts": sum(n for sid, n in tx.alerts_unseen().items() if sid in names),
             "session": session,
         }
 
     return _translate(lambda: store.read(OWNER, read))
+
+
+@op("alerts_seen")
+async def alerts_seen(ctx, args: Mapping[str, Any]) -> dict[str, Any]:
+    """The owner opened his alerts (GA7.6): a screen's (``screen_id``) or every screen's, up to
+    the run he was shown (``through``), so an alert that came after stays new. Answers how many
+    were marked and how many are still not looked at."""
+    screen_id = _int(args, "screen_id", required=False)
+    through = _int(args, "through", required=False)
+    now = ctx.clock()
+    store = _store(ctx)
+
+    def mark(tx: Tx):
+        if screen_id is not None and tx.screen(screen_id) is None:
+            raise NotFound()
+        seen = tx.alerts_seen(now, screen_id, through)
+        names = {r["id"] for r in tx.screens()}
+        left = sum(n for sid, n in tx.alerts_unseen().items() if sid in names)
+        return {"seen": seen, "unseen_alerts": left}
+
+    return _translate(lambda: store.write(OWNER, mark))
+
+
+# ---- a run's results as a file (M9.16, GA7.5) ----------------------------------------------------------
+CSV_COLUMNS = ("Rank", "Symbol", "Exchange", "Price at the run", "Change %", "Values", "Candle")
+_NOT_SLUG = re.compile(r"[^A-Za-z0-9]+")
+SLUG_MAX = 24
+
+
+def csv_name(screen_name: str, screen_id: int, at: int) -> str:
+    """``SUDARSHAN_Screener_<screen>_<YYYY-MM-DD>_<HHMM>.csv``: ASCII whatever the screen is
+    called (a name with no Latin letter or digit becomes ``screen<id>``), the candle's close in
+    IST, as the portfolio's exports name theirs."""
+    slug = _NOT_SLUG.sub("-", screen_name or "").strip("-")[:SLUG_MAX].strip("-")
+    moment = datetime.fromtimestamp(at / 1000, IST)
+    return f"SUDARSHAN_Screener_{slug or f'screen{screen_id}'}_{moment:%Y-%m-%d_%H%M}.csv"
+
+
+def _rupees(paise) -> str:
+    if paise.__class__ is not int:
+        return ""
+    return f"{'-' if paise < 0 else ''}{abs(paise) // 100}.{abs(paise) % 100:02d}"
+
+
+def csv_text(
+    name: str, run: Mapping[str, Any], rows: Sequence[Mapping[str, Any]], not_checked: Mapping
+) -> str:
+    """The file: who made it and which run, the matches as the screen ranks them, then what was
+    not checked, grouped. Plain numbers (rupees with two decimals, a percentage without its
+    sign), a text cell that a spreadsheet would run as a formula written as text
+    (``csvutil.guard``), CRLF lines and a byte-order mark, as every SUDARSHAN export."""
+    moment = datetime.fromtimestamp(run["at"] / 1000, IST)
+    lines: list[Sequence[str]] = [
+        ("सुदर्शन SUDARSHAN", "Screener results"),
+        (name, f"{moment:%Y-%m-%d}", f"{run['candle']} candle (IST)"),
+        (),
+        ("Matches", str(run["matches"])),
+        ("Not checked", str(not_checked["count"])),
+        *((mark,) for mark in run["marks"]),
+        (),
+        CSV_COLUMNS,
+    ]
+    for row in rows:
+        change = row["change_pct"]
+        lines.append(
+            (
+                str(row["rank"]),
+                row["symbol"],
+                row["exchange"],
+                _rupees(row["ltp"]),
+                "" if change is None else f"{change:.2f}",
+                row["values"] or "",
+                "forming" if row["forming"] else "closed",
+            )
+        )
+    if not rows:
+        lines.append(("Nothing matched at this check.",))
+    if not_checked["groups"]:
+        lines += [(), ("Not checked", "Instruments", "First names")]
+        lines += [
+            (g["reason"], str(g["count"]), ", ".join(g["symbols"])) for g in not_checked["groups"]
+        ]
+    out = io.StringIO(newline="")
+    csv.writer(out, lineterminator="\r\n").writerows(
+        [[guard(cell) for cell in line] for line in lines]
+    )
+    return BOM + out.getvalue()
+
+
+@op("run_csv")
+async def run_csv(ctx, args: Mapping[str, Any]) -> dict[str, Any]:
+    """One run's results as a file for the phone to keep: ``{filename, text}``. The rows are the
+    run's own (what ``run`` answers): the prices of the run, never the prices now."""
+    found = await run(ctx, args)
+    store = _store(ctx)
+    screen = _translate(lambda: store.read(OWNER, lambda tx: tx.screen(found["screen_id"])))
+    name = screen["name"] if screen else f"Screen {found['screen_id']}"
+    return {
+        "filename": csv_name(name, found["screen_id"], found["run"]["at"]),
+        "text": csv_text(name, found["run"], found["rows"], found["not_checked"]),
+    }

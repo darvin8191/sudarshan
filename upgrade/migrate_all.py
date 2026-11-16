@@ -102,6 +102,11 @@ MIGRATIONS = [
     ("migrate_sudarshan_watchlists.py", "SUDARSHAN Watchlists v2 (sections, follow rows, flags)"),
     # SUDARSHAN M12.1: the automation's own file, db/sudarshan_automation.db
     ("migrate_sudarshan_automation.py", "SUDARSHAN Automation (TradingView alerts)"),
+    # SUDARSHAN M4.18: the chart store, db/sudarshan_charts.db. Listed, not required (as M8.4).
+    ("migrate_sudarshan_charts.py", "SUDARSHAN Chart Documents (drawings, sets, layouts)"),
+    # SUDARSHAN M9: the screener's own file, screener.db in the service's state directory. Listed,
+    # not required: the service migrates it at every start, and this skips while it runs.
+    ("migrate_sudarshan_screener.py", "SUDARSHAN Screener (alerts not looked at)"),
 ]
 
 # Legacy migrations historically used non-zero exits for best-effort warnings,
