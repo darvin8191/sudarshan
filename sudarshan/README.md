@@ -1502,13 +1502,17 @@ pnl - Today's P&L
 quote - A quote: /quote SYMBOL EXCHANGE
 chart - A chart: /chart SYMBOL EXCHANGE
 killswitch - Stop new orders, or resume
+server - The server's health checks
+trinetra - TRINETRA's readings
 menu - Buttons for the above
 help - What the bot can do
 ```
 
 `/closeall`, `/mode`, `/stoppython`, `/link` and `/unlink` work too and are left out of the menu
 on purpose, so they are not one tap away. The bot answers only an account that was linked with
-your API key, and `/killswitch` only in your private chat with it.
+your API key, and `/killswitch`, `/server` and `/trinetra` only in your private chat with it.
+`/server` says what the server watch last saw and `/trinetra` TRINETRA's readings; neither
+changes anything. If the menu was set before they existed, send step 5's list again.
 
 ## Records to keep each year (M19.10)
 
