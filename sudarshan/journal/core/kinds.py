@@ -115,7 +115,7 @@ EXCURSION_SOURCES = ("recording", "candles", "none")
 MOODS = ("planned", "calm", "rushed", "fomo", "revenge", "tired")
 TAG_KINDS = ("mistake", "label")
 TAG_COLOURS = ("brand", "gold", "info", "neutral", "loss")
-REPORT_KINDS = ("brief", "eod", "weekly", "monthly", "fy")
+REPORT_KINDS = ("brief", "eod", "weekly", "monthly", "fy", "records")
 REPORT_STATUSES = ("ready", "sent", "text_only", "not_sent")
 #: ``options_exercise``: an option exercised or assigned (its own STT rate; last, so the first
 #: four stay the traded segments every statutory row covers).
@@ -142,6 +142,7 @@ REPORT_TITLES = {
     "weekly": "Week in review",
     "monthly": "Monthly statement",
     "fy": "Tax pack",
+    "records": "Records pack",
 }
 HOLD_BUCKETS = ("under_5m", "5_30m", "30m_2h", "over_2h", "1_5d", "over_5d")
 HOLD_BUCKET_LABELS = {

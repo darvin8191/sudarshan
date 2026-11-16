@@ -78,7 +78,8 @@ FY_ESTIMATES = (
     "Where Upstox's own charges for a trade are not read yet, its charges here are the "
     "journal's estimate from Upstox's published rates."
 )
-MIME = {"pdf": "application/pdf", "png": "image/png", "csv": "text/csv"}
+MIME = {"pdf": "application/pdf", "png": "image/png", "csv": "text/csv",
+        "zip": "application/zip"}  # fmt: skip
 
 
 class BadPeriod(ValueError):

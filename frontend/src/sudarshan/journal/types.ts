@@ -43,6 +43,7 @@ export const REPORT_TITLES = {
   weekly: 'Week in review',
   monthly: 'Monthly statement',
   fy: 'Tax pack',
+  records: 'Records pack',
 } as const
 
 export const HOLD_BUCKET_LABELS = {
@@ -117,7 +118,7 @@ export type ExcursionSource = 'recording' | 'candles' | 'none'
 export type Mood = 'planned' | 'calm' | 'rushed' | 'fomo' | 'revenge' | 'tired'
 export type TagKind = 'mistake' | 'label'
 export type TagColour = 'brand' | 'gold' | 'info' | 'neutral' | 'loss'
-export type ReportKind = 'brief' | 'eod' | 'weekly' | 'monthly' | 'fy'
+export type ReportKind = 'brief' | 'eod' | 'weekly' | 'monthly' | 'fy' | 'records'
 export type ReportStatus = 'ready' | 'sent' | 'text_only' | 'not_sent'
 export type ChargeSegment =
   | 'options'

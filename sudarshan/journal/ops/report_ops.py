@@ -7,6 +7,8 @@
   renderer keeps a file (the bridge then says the report has no file to download). The week's
   file is its PNG, the month's and the year's a PDF; with ``format = "csv"`` a monthly statement
   answers its CSV in the same four fields (JB9).
+* The records pack (kind ``records``) is a zip; it is built with ``report_build`` like the tax
+  pack, for a financial year, and is never announced to the report desk.
 * A report that is not there is a 404 with a sentence (a bare 404 reads as an op not ready).
 * ``delivery`` is the desk's outcome, ``{report_id, channel, status, reason}``: the report's
   status, and the reason in the owner's words when it was not sent whole.
@@ -36,6 +38,7 @@ BUILT = {
     "weekly": "The week in review is in the archive.",
     "monthly": "The monthly statement is in the archive.",
     "fy": "The tax pack is in the archive.",
+    "records": "The records pack is in the archive.",
 }
 NO_CLOSE = (
     "There is no close for that day in the journal yet: the day report is built at the close."
@@ -124,6 +127,15 @@ async def report_build(ctx, args):
         except BadPeriod as exc:
             raise ApiError(400, "bad_request", str(exc), "period") from None
         report_id = await build_period(ctx, kind, span, now)
+    elif kind == "records":
+        # The year's records pack (M19.10): a financial year such as FY2627, or the one running.
+        from ..jobs.fypack import build_records, records_span
+
+        try:
+            span = records_span(period, today)
+        except BadPeriod as exc:
+            raise ApiError(400, "bad_request", str(exc), "period") from None
+        report_id = await build_records(ctx, span, now)
     else:
         if period is not None and not (period.isdecimal() and len(period) == 8):
             raise ApiError(400, "bad_request", "The period must be a day such as 20261109.",
