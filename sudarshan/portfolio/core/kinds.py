@@ -515,6 +515,9 @@ OPS = (
         query=(("parts", "strs"), ("max_age", "int")),
     ),
     OpSpec("upstox_history", "GET", "/upstox/history", "upstox", query=(("limit", "int"),)),
+    # M7.15, the Upstox-app parity views: the owner's own, never a family op.
+    OpSpec("upstox_allocation", "GET", "/upstox/allocation", "upstox", query=(("max_age", "int"),)),
+    OpSpec("upstox_performance", "GET", "/upstox/performance", "upstox"),
     OpSpec("report_years", "GET", "/reports/years", "upstox"),
     OpSpec(
         "report_trades",

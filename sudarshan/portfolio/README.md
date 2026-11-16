@@ -190,6 +190,8 @@ two types, and a test holds this table, that map and `kinds.py` to each other.
 | `view_delete` | DELETE | `/views/<id>` | write | | `Targets & Versioned` | `Deleted` | |
 | `upstox_book` | GET | `/upstox` | upstox | `parts:strs, max_age:int` | `UpstoxBookArgs` | `UpstoxBook` | reads Upstox |
 | `upstox_history` | GET | `/upstox/history` | upstox | `limit:int` | `UpstoxHistoryArgs` | `UpstoxHistory` | |
+| `upstox_allocation` | GET | `/upstox/allocation` | upstox | `max_age:int` | `UpstoxAllocationArgs` | `UpstoxAllocation` | owner only; holdings from the reader's memory |
+| `upstox_performance` | GET | `/upstox/performance` | upstox | | `NoArgs` | `UpstoxPerformance` | owner only; money from the trade history, value from the closing records |
 | `report_years` | GET | `/reports/years` | upstox | | `NoArgs` | `ReportYears` | |
 | `report_trades` | GET | `/reports/trades` | upstox | `fy:int, segment:str, force:bool` | `ReportArgs` | `TradesReport` | reads Upstox, cached per year |
 | `report_pnl` | GET | `/reports/pnl` | upstox | `fy:int, segment:str, force:bool` | `ReportArgs` | `PnlReport` | reads Upstox, cached per year |

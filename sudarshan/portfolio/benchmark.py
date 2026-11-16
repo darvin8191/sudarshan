@@ -141,6 +141,12 @@ class Backfill:
 
         def plan(tx: Tx):
             dates = [r["trade_date"] for r in tx.rows("activity") if r["status"] == "posted"]
+            # M7.15: the Upstox tab's return puts the same money into the index, so the levels
+            # must reach back to the first share trade Upstox's history holds.
+            for record in tx.report_list("trades"):
+                rows = (record.get("payload") or {}).get("rows") or []
+                if record["segment"] == "EQ" and rows:
+                    dates.append(min(row["trade_date"] for row in rows))
             have = {}
             for key in keys:
                 name = BENCHMARK_OF[key]
@@ -177,7 +183,9 @@ class Backfill:
                     headers={"X-Sudarshan-Client": CLIENT, "X-Sudarshan-Priority": "bulk"},
                 )
                 if answer is None or answer.status_code != 200:
-                    reason = answer.headers.get("x-sudarshan-reason") if answer is not None else None
+                    reason = (
+                        answer.headers.get("x-sudarshan-reason") if answer is not None else None
+                    )
                     if reason == "off":
                         self.say_once("off", WORDS["off"])
                         return "skipped", WORDS["off"]

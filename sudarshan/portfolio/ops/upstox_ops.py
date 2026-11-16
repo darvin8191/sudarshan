@@ -1,4 +1,4 @@
-"""The Upstox tab's two ops (M7.1 to M7.4, design 3.1 and 3.6, 7.2).
+"""The Upstox tab's ops (M7.1 to M7.4, design 3.1 and 3.6, 7.2; M7.15 the parity views).
 
 ``upstox_book`` reads the parts asked for through the reader (single flight, five seconds of
 memory, the service's own budget). ``upstox_history`` reads the closing records the closing job
@@ -216,4 +216,38 @@ async def report_pnl(ctx, message):
     return serialize.out(
         OWNER,
         await reader.report("pnl", fy, segment, force=message.get("force") is True),
+    )
+
+
+# ---- the parity views (M7.15): allocation, and the return from the trade history ------------------
+@op("upstox_allocation")
+async def upstox_allocation(ctx, message):
+    """The holdings by class and by sector. The holdings come from the reader (its memory, its
+    single flight, its budget: the page's own read of the holdings is the same read); the class
+    and sector from the owner's assets. Nothing is guessed for a share he has not classified."""
+    from .. import upstox_views
+
+    store = need(ctx)
+    book = await ctx.ensure_upstox().book(["holdings"], _max_age(message))
+    part = book["holdings"]
+    return await answer(lambda: store.read(OWNER, lambda tx: upstox_views.allocation(tx, part)))
+
+
+@op("upstox_performance")
+async def upstox_performance(ctx, message):
+    """The return of the account's shares: money from Upstox's share trades (the report reader's
+    cache, read through its budget when a year is due, as the Trades view reads it), value from
+    the closing records. It asks Upstox for nothing else."""
+    import asyncio
+
+    from .. import reports, upstox_views
+
+    store = need(ctx)
+    today = day_of_instant(ctx.clock())
+    reader = ctx.ensure_reports()
+    years = [year["fy"] for year in reports.years_of(today)]
+    shown = await asyncio.gather(*(reader.report("trades", fy, "EQ") for fy in years))
+    holidays = getattr(ctx.ensure_prices(), "holidays", tuple)()
+    return await answer(
+        lambda: store.read(OWNER, lambda tx: upstox_views.performance_report(tx, shown, holidays))
     )
