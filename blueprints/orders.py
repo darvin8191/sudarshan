@@ -101,9 +101,11 @@ orders_bp = Blueprint("orders_bp", __name__, url_prefix="/")
 @orders_bp.errorhandler(429)
 def ratelimit_handler(e):
     """Handle rate limit exceeded errors"""
-    return jsonify(
-        {"status": "error", "message": "Rate limit exceeded. Please try again later."}
-    ), 429
+    # SUDARSHAN (v0.13.0 verify N4): the sentence the phone shows for a limited exit or cancel.
+    # The answer stays the app's own JSON with 429, which the phone reads as a refusal.
+    from sudarshan.books.rate_limit import TOO_MANY
+
+    return jsonify({"status": "error", "message": TOO_MANY}), 429
 
 
 def dynamic_import(broker, module_name, function_names):

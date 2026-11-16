@@ -88,6 +88,55 @@ def test_a_check_that_raises_is_unread_and_keeps_its_memory(monkeypatch):
     assert dict(results["openalgo"].keep) == {"misses": 1}
 
 
+def test_a_certificate_unjudged_for_two_days_in_a_row_is_told_once():
+    """v0.13.0 verify N6: no name for the site, or another site's certificate, is unread, and
+    unread tells nobody. Two days of it in a row is a warning with the cause, told once, and
+    told once more when a certificate is judged again."""
+    day, told, memory, moved_at = 24 * 3600, {}, {}, []
+    start = 1_800_000_000
+    for cause in checks.CERT_CAUSES:
+        told, memory, moved_at = {}, {}, []
+        for step in range(0, 3 * day + 1, 120 * 30):  # an hour apart, for three days
+            now = start + step
+            (result,) = [checks.certificate({"now": now, "cert_hours_left": cause}, memory)]
+            memory = dict(result.keep)
+            assert dict(result.facts) == {"cause": cause}
+            want = checks.WARNING if step >= checks.CERT_UNJUDGED_TELL_S else checks.UNREAD
+            assert result.level == want, (cause, step)
+            moved, told = checks.changes([result], told)
+            moved_at += [step for _ in moved]
+            assert all(checks.told_by(change) for change in moved)
+        assert moved_at == [2 * day], "told once, at two days, and not again"
+        assert memory == {"unjudged_since": start}
+        # Judged again: fine, told once, and the count starts over.
+        fine = checks.certificate({"now": start + 4 * day, "cert_hours_left": 900.0}, memory)
+        moved, told = checks.changes([fine], told)
+        assert fine.level == checks.FINE and dict(fine.keep) == {}
+        assert [(m["level"], m["was"]) for m in moved] == [("fine", "warning")]
+
+
+def test_the_two_days_are_in_a_row_and_a_failed_look_does_not_count_or_reset():
+    start, day = 1_800_000_000, 24 * 3600
+    first = checks.certificate({"now": start, "cert_hours_left": "no_name"}, {})
+    # A look that failed (nginx not answering) keeps the count as it stands.
+    blind = checks.certificate({"now": start + day, "cert_hours_left": None}, first.keep)
+    assert blind.level == checks.UNREAD and dict(blind.keep) == {"unjudged_since": start}
+    late = checks.certificate({"now": start + 2 * day, "cert_hours_left": "no_name"}, blind.keep)
+    assert late.level == checks.WARNING
+    # A judged certificate in between ends it: one more day is not two in a row.
+    judged = checks.certificate({"now": start + day, "cert_hours_left": 500.0}, first.keep)
+    again = checks.certificate({"now": start + 2 * day, "cert_hours_left": "no_name"}, judged.keep)
+    assert judged.level == checks.FINE and again.level == checks.UNREAD
+    assert dict(again.keep) == {"unjudged_since": start + 2 * day}
+    # With nothing to count from, or a memory that is not a number, it is unread and never a crash.
+    for memory in ({}, {"unjudged_since": "x"}, {"unjudged_since": True}):
+        assert checks.certificate({"cert_hours_left": "no_name"}, memory).level == checks.UNREAD
+    # A certificate running out is still failing, whatever was counted.
+    assert checks.certificate({"now": start, "cert_hours_left": 3.0}, first.keep).level == (
+        checks.FAILING
+    )
+
+
 def test_unread_and_off_never_change_what_was_told():
     failing = checks.Result("disk", checks.FAILING)
     moved, told = checks.changes([failing], {})
@@ -96,6 +145,17 @@ def test_unread_and_off_never_change_what_was_told():
         moved, told = checks.changes([checks.Result("disk", quiet)], told)
         assert moved == [] and told == {"disk": "failing"}
     assert checks.changes([failing], told) == ([], told)
+
+
+def test_the_readme_says_when_an_unchecked_certificate_is_told():
+    readme = " ".join((HERE.parents[1] / "README.md").read_text(encoding="utf-8").split())
+    assert checks.CERT_UNJUDGED_TELL_S == 2 * 24 * 3600
+    for phrase in (
+        "judged no certificate for two days in a row",
+        "you are told once on Telegram, with the line to add to `/etc/sudarshan/watch.env`",
+        'The System page then reads "Not being checked" beside Security certificate',
+    ):
+        assert phrase in readme, phrase
 
 
 def test_the_ports_are_the_ring_table_of_the_readme():

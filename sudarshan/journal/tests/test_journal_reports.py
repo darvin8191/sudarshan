@@ -302,7 +302,7 @@ def test_settings_carry_the_alerts_the_rate_card_and_the_times(rig, alerts):
     assert got["rate_card"] == {"version": charges.CARD_VERSION, "from_day": 20260401}
     assert got["times"] == {"brief": "08:45", "eod": "15:45", "check": "16:05",
                             "weekly": "Sunday 18:00", "monthly": "the 1st at 07:00",
-                            "fy": "1 April 07:00"}  # fmt: skip
+                            "fy": "1 April 07:00, and again 4 April 07:00"}  # fmt: skip
     alerts.up = False
     assert settings_of(rig)["alerts_on"] is False
 

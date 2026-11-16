@@ -72,7 +72,7 @@ STRUCTURAL = frozenset(
         "loans_hidden", "manual_old_days", "allocate_expenses", "exempt_order", "lt_boundary",
         "turnover_method", "risk_free_bp", "months_target",
         # sentences with no figure in them
-        "missing", "not_computed", "notes", "series_words",
+        "missing", "not_computed", "notes", "series_words", "why",
         # containers: what is under them is judged key by key
         "tabs", "members", "accounts", "jobs", "amfi", "entries", "tab", "live", "upstox",
         "holdings", "positions", "mtf", "data", "rows", "row", "asset", "assets", "aliases",

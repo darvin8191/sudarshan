@@ -1,15 +1,17 @@
 """M18.11, M19.10: the financial-year archive, kept 8 years (P8 6.6, 10.8).
 
-The first complete archive made from 4 April on is the financial year's archive that ended on
-31 March: by then the year's Tax pack and March's charges exist (review M3; an archive of
-31 March's evening held neither). ``retention.plan`` keeps the newest eight of them whatever the daily and monthly counts
-say, and the size cap never takes one: it says ``over_cap`` instead. Its offsite copy goes up
-under a name of its own, so the bucket's rules for the nightly names never expire it.
+The first complete archive made from 4 April 08:00 on is the financial year's archive that ended
+on 31 March: by then March's charges exist and the journal has built the year's Tax pack again
+with them (review M3, v0.13.0 verify N3; an archive of 31 March's evening held neither).
+``retention.plan`` keeps the newest eight of them whatever the daily and monthly counts say, and
+the size cap never takes one: it says ``over_cap`` instead. Its offsite copy goes up under a name
+of its own, so the bucket's rules for the nightly names never expire it.
 """
 
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -127,7 +129,13 @@ def test_the_job_keeps_the_years_archive_and_sends_it_under_its_own_name(tmp_pat
 def test_the_years_archive_is_made_after_the_journals_own_papers():
     """Review M3: the year's archive was 31 March 16:30, about 15 hours before the journal
     builds the year's Tax pack (1 April 07:00) and before March's charges are asked for (from
-    the 3rd). The rule is held to the journal's own timetable, so neither can move alone."""
+    the 3rd). The rule is held to the journal's own timetable, so neither can move alone.
+
+    v0.13.0 verify N3: the pack of 1 April is frozen before those charges arrive, so the journal
+    builds it again on 4 April (``FY_AGAIN_AT``), after they are asked for and before the first
+    moment an archive can be the year's (``FY_FROM``), and the nightly run of that day is the
+    year's: the archive kept 8 years holds the complete pack, even when a run missed at a reboot
+    is made in the night before."""
     from sudarshan.journal import schedule
     from sudarshan.journal.jobs import charges
 
@@ -137,6 +145,18 @@ def test_the_years_archive_is_made_after_the_journals_own_papers():
     pack = datetime(2027, pack_month, pack_day) + timedelta(minutes=pack_minute)
     march_asked = datetime(2027, 4, charges.MONTH_FROM_DAY, 22, 0)  # the 22:00 catch-up
     assert whole > pack and whole > march_asked
+    again_month, again_day, again_minute = schedule.FY_AGAIN_AT
+    again = datetime(2027, again_month, again_day) + timedelta(minutes=again_minute)
+    assert march_asked < again < whole, "built again once the charges are in, before FY_FROM"
+    assert again.hour >= schedule.CATCH_UP_FROM_HOUR, "never in the night (M15.8)"
+    assert (again.month, again.day) == (whole.month, whole.day), "on the archive's own day"
+    assert whole - again >= timedelta(hours=1), "with room for a slow build"
+    timer = (Path(backup.__file__).parent / "systemd" / "sudarshan-backup.timer").read_text()
+    runs = sorted(re.findall(r"OnCalendar=\*-\*-\* (\d\d):(\d\d):\d\d Asia/Kolkata", timer))
+    assert runs, "the backup's times are read from its timer"
+    first_run = whole.replace(hour=int(runs[0][0]), minute=int(runs[0][1]))
+    assert whole <= first_run and fy_label(first_run) == "2026-27", "that day's run is the year's"
+    assert fy_label(again) is None and fy_label(whole - timedelta(seconds=1)) is None
     assert fy_label(pack - timedelta(minutes=1)) is None  # an archive made before the pack
     assert fy_label(pack + timedelta(hours=1)) is None  # the pack alone is not the year
     assert fy_label(march_asked + timedelta(minutes=30)) is None
@@ -145,6 +165,32 @@ def test_the_years_archive_is_made_after_the_journals_own_papers():
     assert retention.FY_WINDOW_DAYS == 92
     assert fy_label(whole + timedelta(days=91, hours=23)) == "2026-27"
     assert fy_label(whole + timedelta(days=92)) is None
+
+
+def test_the_readme_gives_the_years_dates_as_they_are():
+    """v0.13.0 verify N3 and the offsite step: the bucket's filter is needed before the day the
+    year's archive is made (4 April, not 31 March and not "v0.13.1"), and the README says the
+    Tax pack is built again that morning."""
+    from sudarshan.journal import schedule
+
+    text = (Path(backup.__file__).parents[1] / "README.md").read_text(encoding="utf-8")
+    readme = " ".join(text.split())
+    month, day, hour = retention.FY_FROM
+    assert (month, day, hour) == (4, 4, 8) and schedule.FY_AGAIN_AT == (4, 4, 7 * 60)
+    assert "The first complete archive made from 4 April, 08:00 on is the archive" in readme
+    assert "(from 5 July, 08:00) is never taken for it" in readme
+    assert "add it before 4 April, the day the year's archive is made" in readme
+    for stale in ("before v0.13.1", "v0.13.1 without this filter", "before the first 31 March",
+                  "after 4 July"):  # fmt: skip
+        assert stale not in readme, stale
+    for phrase in (
+        "builds the year's Tax pack again by itself on 4 April at 07:00, in the same job",
+        "it never puts a pack without the paper in its place",
+        "The first backup of 4 April runs at 16:30, after it",
+        "the archive kept 8 years holds the complete pack",
+        "give your CA the Tax pack from the Journal's Reports on or after 4 April",
+    ):
+        assert phrase in readme, phrase
 
 
 def _status(settings) -> dict:
