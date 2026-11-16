@@ -21,8 +21,11 @@ share's sales "to check".
   years of trades; a share bought before them and never sold since has no lot at all. Those are
   only counted, unless a bonus or a split was applied to them.
 * **The one fix it can prove.** Where an applied bonus or split explains a difference, and its
-  other reading (or leaving the lots as they were) would make the lots and the holdings agree,
-  the row carries that change (``fix``): the phone offers it as one tap through ``ca_decide``.
+  other reading would make the lots and the holdings agree, the row carries that change
+  (``fix``): the phone offers it as one tap through ``ca_decide``. Leaving it out is offered
+  only where another applied event of the same kind could be the same one counted twice:
+  holdings equal to the lots without it are otherwise what a late credit of the new shares, or
+  a sale not yet in Upstox's trade history, looks like, and the row says so.
 * **Only what the paper computes.** An ETF, a bond or a fund has no lots here and is passed over.
 """
 
@@ -140,14 +143,17 @@ def _record(tx: Tx, day: int) -> dict[str, int]:
     return held
 
 
-def _actions(tx: Tx, up_to: int) -> tuple[dict, dict, set[str]]:
+def _actions(tx: Tx, up_to: int) -> tuple[dict, dict, set[str], set[str]]:
     """The Upstox account's bonuses and splits up to a day, one per event however Upstox worded
     it (``core.groups``): per share, the one the owner applied last (its action as the tax core
     gets it, the decision and the event decided: the likelier mistake when one was applied twice),
-    the last one still waiting, and the shares with one in the ``core.EVE_REACH_DAYS`` up to the
-    day."""
+    the last one still waiting, the shares with one in the ``core.EVE_REACH_DAYS`` up to the day,
+    and the shares where another event of the same kind as the last one applied is applied too
+    (the only way one event can be counted twice: Upstox listed it again, too far apart to be
+    known as the same)."""
     decided = corpactions.decisions(tx)
     applied: dict[str, tuple[dict, dict, dict]] = {}
+    kinds: dict[str, list[str]] = {}
     pending: dict[str, dict] = {}
     recent: set[str] = set()
     for group in core.groups(tx.ca_events(to_day=up_to, gone=True)):
@@ -159,26 +165,37 @@ def _actions(tx: Tx, up_to: int) -> tuple[dict, dict, set[str]]:
             event = next(e for e in group if e["id"] == row["event_id"])
             dated = live[-1] if live else event  # dated as accepted_actions dates it
             action = core.action_row(dated, row["ratio_num"], row["ratio_den"], True)
+            kinds.setdefault(event["isin"], []).append(event["kind"])
             if event["isin"] not in applied or applied[event["isin"]][1]["id"] < row["id"]:
                 applied[event["isin"]] = (action, row, event)
         elif row is None and live:
             pending[live[-1]["isin"]] = live[-1]
-    return applied, pending, recent
+    twice = {isin for isin, (_, _, event) in applied.items()
+             if kinds[isin].count(event["kind"]) > 1}  # fmt: skip
+    return applied, pending, recent, twice
 
 
-def _fix(lots: TaxLots, isin: str, day: int, held: int, applied: tuple) -> dict | None:
-    """The change to an applied action that makes the lots agree with the holdings, if one does:
-    its other reading, else leaving the lots as they were."""
+def _fix(lots: TaxLots, isin: str, day: int, held: int, applied: tuple,
+         twice: bool) -> tuple[dict | None, bool]:  # fmt: skip
+    """The change to an applied action that makes the lots agree with the holdings, if one does,
+    and whether the lots would agree without the action although nothing proves it was counted
+    twice. Its other reading is offered; leaving it out only when another applied event of its
+    kind could be the same one (v0.14.0 verification H2). Otherwise holdings equal to the lots
+    without it are what a late credit of the new shares looks like, or a sale not yet in
+    Upstox's trade history: taking the action out would remove a right one."""
     action, row, event = applied
     ways = core.readings(event["kind"], event["ratio_num"], event["ratio_den"])
     turned = [way for way in ways if way != (row["ratio_num"], row["ratio_den"])]
-    for way in [*turned[:1], None]:
+    for way in turned[:1]:
         if lots.qty_turned(isin, day, action, way) == held:
-            state = "applied" if way is not None else "dismissed"
-            num, den = way if way is not None else (None, None)
-            return {"event_id": event["id"], "version": row["version"], "state": state,
-                    "ratio_num": num, "ratio_den": den}  # fmt: skip
-    return None
+            return {"event_id": event["id"], "version": row["version"], "state": "applied",
+                    "ratio_num": way[0], "ratio_den": way[1]}, False  # fmt: skip
+    if lots.qty_turned(isin, day, action, None) != held:
+        return None, False
+    if not twice:
+        return None, True
+    return {"event_id": event["id"], "version": row["version"], "state": "dismissed",
+            "ratio_num": None, "ratio_den": None}, False  # fmt: skip
 
 
 #: Lots below the holdings: the commoner cause first (v0.13.0 verification H1). A bonus or a split
@@ -210,7 +227,7 @@ def _purchase(lots: TaxLots) -> str:
 
 
 def _row(isin: str, name: str | None, held: int, lots: int, purchase: str, applied, pending,
-         fix: dict | None, insights: bool) -> dict[str, Any]:  # fmt: skip
+         fix: dict | None, late: bool, insights: bool) -> dict[str, Any]:  # fmt: skip
     label, have, said = name or isin, quantity(held), quantity(lots)
     if applied is not None:
         action = applied[0]
@@ -222,6 +239,11 @@ def _row(isin: str, name: str | None, held: int, lots: int, purchase: str, appli
         elif fix is not None:
             words += (f" Without it the lots would say {have}: it may have been counted "
                       "twice.")  # fmt: skip
+        elif late:
+            words += (f" Without it the lots would say {have} too, but Upstox may not have "
+                      "credited the new shares yet, or a sale may not be in its trade history "
+                      "yet. Compare with the Upstox app; this clears by itself once they "
+                      "are.")  # fmt: skip
         else:
             words += (" Neither reading of it makes the two agree: a purchase or a sale may "
                       "be missing from the records.")  # fmt: skip
@@ -274,7 +296,7 @@ def check(tx: Tx, today: int, now: int, lots: TaxLots | None = None, *, insights
         return {**out, "state": "waiting", "words": WAITING_RECORD}
     day = days[-1]
     held = _record(tx, day)
-    applied, pending, recent = _actions(tx, day)
+    applied, pending, recent, twice = _actions(tx, day)
     names = corpactions.share_names(tx)
     purchase = _purchase(lots)
     skip = recent | lots.traded_on(day)
@@ -289,9 +311,9 @@ def check(tx: Tx, today: int, now: int, lots: TaxLots | None = None, *, insights
             unrecorded += 1  # bought before the records reach, or moved in: no lot to compare
             continue
         done = applied.get(isin)
-        fix = _fix(lots, isin, day, have, done) if done is not None else None
+        fix, late = _fix(lots, isin, day, have, done, isin in twice) if done else (None, False)
         rows.append(_row(isin, names.get(isin), have, in_lots, purchase, done,
-                         pending.get(isin), fix, insights))  # fmt: skip
+                         pending.get(isin), fix, late, insights))  # fmt: skip
     words = None
     if rows:
         listed = "; ".join(

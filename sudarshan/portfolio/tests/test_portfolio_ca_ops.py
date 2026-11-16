@@ -461,6 +461,45 @@ async def test_the_lots_are_checked_against_the_holdings_and_a_double_apply_is_c
 
 
 @scenario
+async def test_holdings_as_before_a_split_are_said_as_not_credited_and_nothing_is_taken_out(n):
+    """v0.14.0 verification H2, its probes. Split 1:5 on 9 Oct, applied the right way: the lots
+    say 500. Twelve days on, the record of the 21st still says 100: Upstox has not credited the
+    new shares yet (or 400 were sold on a day its trade history does not hold yet: the same
+    figures). Old code offered "Take this one out of my lots" ("it may have been counted
+    twice"): one tap that removed a right split from the lots. No other split was applied on
+    the share, so nothing is offered, and the row says what to look at. When the new shares
+    arrive the row clears by itself, the split still applied."""
+    history(n, (20260610, "BUY", 100))
+    record(n, 20261008, **{UPSTOX: 100})
+    record(n, 20261021, **{UPSTOX: 100})
+    split = event(n, "split", ex_day=SPLIT_DAY, ratio=(1, 5))
+    await n.rig.call("ca_decide", id=split, scope="upstox", state="applied", ratio_num=5,
+                     ratio_den=1)  # fmt: skip
+    (row,) = (await check_of(n))["rows"]
+    assert (row["held_qty_u"], row["lots_qty_u"], row["fix"]) == (100 * U, 500 * U, None)
+    assert row["words"] == (
+        "PROBE LTD: after the split of 9 Oct 2026 the lots say 500 and Upstox holds 100. Without "
+        "it the lots would say 100 too, but Upstox may not have credited the new shares yet, or a "
+        "sale may not be in its trade history yet. Compare with the Upstox app; this clears by "
+        "itself once they are."
+    )
+    # An applied bonus of August on the same share is another kind of event: still nothing.
+    bonus = event(n, "bonus", ex_day=20260810, ratio=(1, 1))
+    record(n, 20260807, **{UPSTOX: 100})
+    record(n, 20261021, **{UPSTOX: 200})
+    await n.rig.call("ca_decide", id=bonus, scope="upstox", state="applied", ratio_num=1,
+                     ratio_den=1)  # fmt: skip
+    (row,) = (await check_of(n))["rows"]
+    assert (row["held_qty_u"], row["lots_qty_u"], row["fix"]) == (200 * U, 1000 * U, None)
+    # The new shares arrive: trades read on 30 Oct, the record of the 28th holds 1,000.
+    history(n, (20260610, "BUY", 100), read_at=NOW + 4 * 86_400_000)
+    record(n, 20261028, **{UPSTOX: 1000})
+    assert (await check_of(n))["rows"] == []
+    # Both still applied: the bonus lot at nil cost, each lot split into five.
+    assert lots_after(n)[0] == [(20260610, 500, 1_000_000), (20260810, 500, 0)]
+
+
+@scenario
 async def test_a_wrong_way_split_is_caught_with_its_fix_and_like_is_compared_with_like(n):
     """The wrong reading of 1:5 (every 5 made 1): 100 / 5 = 20 in the lots, 500 at Upstox, and
     the other reading, 100 x 5 = 500, makes them agree: the check offers it."""
