@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field, is_dataclass
 
 from . import business, capgains, losses, lots, rules, words
-from .classify import DERIVATIVE_SEGMENTS, NOT_COMPUTED, head_of
+from .classify import DERIVATIVE_SEGMENTS, NOT_COMPUTED, head_of, why_not
 from .model import Settings
 from .units import fy_first, fy_label, fy_last, fy_of, rupees
 
@@ -179,7 +179,8 @@ def build_pack(given: PackInputs) -> dict:
         "charges": {"by_segment": given.charges, "state": given.charges_state},
         "not_computed": not_computed,
         "not_computed_sales": [
-            {"instrument": t.instrument, "day": t.day, "amount_paise": t.amount_paise}
+            {"instrument": t.instrument, "day": t.day, "amount_paise": t.amount_paise,
+             "why": words.WHY_NOT.get(why_not(t))}
             for t in outside
         ],
         "notes": notes,

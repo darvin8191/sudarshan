@@ -95,6 +95,29 @@ def test_the_disk_the_memory_and_the_certificate():
     )
 
 
+def test_a_certificate_nobody_checks_is_told_with_the_line_to_add():
+    """v0.13.0 verify N6: unread tells nobody, so a certificate the watch never judges would
+    run out unannounced. After two days it is a warning, with what to add and where."""
+    for cause, why, fix in (
+        ("no_name", "the watch does not know the app's address",
+         "Add one line to /etc/sudarshan/watch.env on the server: SUDARSHAN_WATCH_CERT_HOST= "),
+        ("other_site", "with another site's certificate",
+         "In /etc/sudarshan/watch.env on the server, set the line SUDARSHAN_WATCH_CERT_HOST= "),
+    ):  # fmt: skip
+        text = said("watch_warning", "certificate", cause=cause, was="fine")
+        assert text.startswith(
+            "SUDARSHAN's security certificate has not been checked for two days: "
+        ), text
+        assert why in text and fix in text
+        assert "Nothing will warn you before it runs out until this is set right." in text
+        assert "followed by the address you open the app at, the name alone" in text
+        assert "<" not in text and "unread" not in text
+    # Judged again: nothing was renewed, and the sentence does not say so.
+    assert said("watch_fine", "certificate", was="warning", hours="900") == (
+        "SUDARSHAN's security certificate is being checked again."
+    )
+
+
 def test_a_fact_that_is_not_plain_is_left_out_and_an_unknown_check_says_nothing():
     text = said("watch_failing", "disk", free_gb="<b>3</b>", cause="space")
     assert text.startswith("The server's disk is almost full. ") and "<" not in text
@@ -117,6 +140,8 @@ def _every_sentence() -> list[str]:
             out.append(said(kind, "disk", free_gb="4.0", cause=cause))
     out += [said("watch_warning", "memory"), said("watch_fine", "memory", was="warning")]
     out += [said("watch_failing", "certificate", hours=h) for h in ("31", "0")]
+    out += [said("watch_warning", "certificate", cause=c) for c in ("no_name", "other_site")]
+    out.append(said("watch_fine", "certificate", was="warning"))
     out += [said("watch_fine", name, was="failing") for name in ("login", "disk", "certificate")]
     return out
 

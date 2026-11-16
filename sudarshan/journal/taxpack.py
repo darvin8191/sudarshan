@@ -119,6 +119,17 @@ def _named(row: Mapping[str, Any], key: str) -> str:
     return f"{name} ({isin})" if name and name != isin else isin
 
 
+def _whys(rows: Sequence[Any]) -> list[str]:
+    """What the pack says of a sale outside the paper (a share entered without its ISIN, an
+    ETF's unit), once for each thing sold, under the table: a table cell is one line."""
+    said: dict[tuple[str, str], None] = {}
+    for row in rows:
+        why = row.get("why") if isinstance(row, Mapping) else None
+        if isinstance(why, str) and why.strip():
+            said[(_named(row, "instrument"), why.strip())] = None
+    return [f"{what}: {why}" for what, why in said]
+
+
 def _names(rows: Sequence[Mapping[str, Any]]) -> tuple[D.Block, ...]:
     """The name of each ISIN in the sale tables, one a line, under them: a table cell is one
     line and is cut where it does not fit, and a paragraph is not."""
@@ -386,6 +397,7 @@ def pack_blocks(pack: Mapping[str, Any]) -> tuple[D.Block, ...]:
                    day_text(r["day"]) if r.get("day") else "-", rs(r.get("amount_paise")))
                   for r in outside if isinstance(r, Mapping)),
         ))  # fmt: skip
+        out += _lines(_whys(outside))
     notes = _lines(pack.get("notes"))
     if notes:
         out += [D.Heading("Notes"), *notes]
