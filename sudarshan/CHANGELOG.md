@@ -27,8 +27,9 @@ day.**
   of one of your own tabs, as CSV or PDF. Family members see no goal and cannot export.
 - **The order ticket shows "Charges est. Rs x"** under the margin line, with the parts on a tap.
   It is always an estimate.
-- **"See on chart" on a trade in the Journal** opens the phone chart with the trade's buys marked
-  B and its sells marked S.
+- **"See on chart" on a trade in the Journal** opens the phone chart with the trade's buys
+  tagged B and its sells tagged S, and the tags follow new fills while the chart is open.
+- **The trading terminal opens your saved layout at once,** even on a slow line.
 - **A new menu entry, TRINETRA, under Analyse.** The page says "The TRINETRA view is switched
   off." The Dashboard and the NIFTY chart look as before.
 - **Two new bot commands in your own chat: `/server` and `/trinetra`.** `/server` says what the
@@ -106,9 +107,18 @@ day.**
   Upstox's contract note has the actual charges. "not read" means the journal did not answer, not
   zero; "not estimated for this exchange" means the card has no rate for it. The line changes
   nothing the ticket sends.
-- **The marks** sit on 1-minute, 5-minute or daily candles, chosen by the trade's length, with
-  the entry price beside the B. A trade older than the loaded history is shown on daily candles
-  with a sentence.
+- **The marks** are small tags, B in blue under a buy's candle and S in red over a sell's, on
+  1-minute, 5-minute or daily candles chosen by the trade's length. They stay the same size
+  whatever the zoom. Tap a tag to see the fill's time, quantity and price; the entry price is
+  written on the chart only where the candles are wide enough.
+- **The marks follow fills.** Exit or add from that chart and the new tag appears within a few
+  seconds, without leaving the chart. They are read again when an order of that instrument
+  changes, when the app's connection comes back and when you return to the page. If that read
+  fails, the chart keeps its marks and says "Marks as of" with the time.
+- **A fill is shown on its own candle only.** Until that candle has loaded the chart says "1 fill
+  is outside the loaded candles." and lays the tag when the candle opens. A trade older than the
+  loaded history is shown on daily candles with a sentence.
+- **Opening the same instrument without a trade** shows no tags and your usual timeframe.
 
 ### What ships switched off, and how you would switch each on
 Nothing below changes anything until you switch it on, and none of it is promised for a date.
@@ -128,7 +138,9 @@ Nothing below changes anything until you switch it on, and none of it is promise
   `client_max_body_size 6m;` for the charts address in SUDARSHAN's own nginx site, test and reload
   nginx, and restart OpenAlgo. Without the nginx line a large set of layouts is refused and the
   device keeps its copy and says so. What it stores is described in `sudarshan/charts/README.md`.
-  Read the section at the end of this stanza before you do.
+  If a drawing was changed on two devices at once, the chart shows the newer copy and says so,
+  with "Use this phone's copy"; that phone's copy is kept through a reload until you use it or
+  dismiss the note. The trading terminal says which layout was kept until you dismiss it.
 - **A reversal back, judged on fills** (`SUDARSHAN_REVERSAL_FROM_FILLS`). With it on, a
   TradingView order that reduces or crosses the position your fills show is sent while Upstox's
   positions still run late, under the same one-at-a-time checks as every reversal. It sends an
@@ -170,8 +182,12 @@ Nothing below changes anything until you switch it on, and none of it is promise
   - Phone chart, BUY: the ticket shows "Charges est. Rs x" under the margin line. Change the
     quantity: "updating", then a new figure. Open the parts. Place once: one order goes to the
     sandbox, as before.
-  - Journal, a trade, "See on chart": B and S marks on its candles. Open the chart's SELL ticket
-    from there: it is the usual ticket.
+  - Journal, an open trade, "See on chart": a blue B tag under the entry candle. Tap it: the
+    sheet shows the time, Bought, the quantity and the price.
+  - From that chart, exit the position with the usual SELL ticket. Within about five seconds a
+    red S tag appears on the exit candle without leaving the chart. It is the ticket you already
+    use, not a new order action.
+  - Open the same instrument from the watchlist: no tags, and your usual timeframe.
 - **Goals and Export, once each.** No order is involved.
   - Add a goal on a tab with listed shares, in market hours: the bar and the amount move with
     prices and the card says "Real-time"; after 15:30 it says "Market closed". Tap the pencil,
@@ -186,10 +202,11 @@ Nothing below changes anything until you switch it on, and none of it is promise
     portfolio: every row is new.
   - On a family member's phone: no Goals, no Export.
 - **TRINETRA, as shipped:** Menu, Analyse, TRINETRA says "The TRINETRA view is switched off." If
-  it says the reader is not answering, tell the next work session. `/trinetra` in your own chat
-  says the same, and the next 08:45 brief has no TRINETRA line.
+  it says the reader is not answering, tell the next work session. Leave the app for a minute
+  and return: still that page, and nothing changes. `/trinetra` in your own chat says the same,
+  and the next 08:45 brief has no TRINETRA line.
 - **Charts, as shipped:** draw a line on the phone chart, leave and come back: it is there. The
-  trading terminal opens its saved layout as before.
+  trading terminal opens its saved layout at once, and Workspaces says "in this browser".
 - **On the first Live day, at one lot.** These are the paths this release changes.
   - Exit a position from the app, then tap Close for it on the scalping terminal while the
     terminal still shows it. You should see "Upstox's orders show ... is already closed ..., so no
@@ -223,8 +240,11 @@ Nothing below changes anything until you switch it on, and none of it is promise
 - **Reviews.** The server review said: publish yes, after one fix (a held Live strategy stop was
   told only in the Events tab, on every tick). The server fix round closed that, cleared two
   faults in the TRINETRA reader's folder handling, and quieted the notice for a leg the account
-  no longer holds. That fix round has no review of its own. The phone review said: publish yes,
-  goals on yes, with no blocker; what it found is in the last section. Goals had a review that
+  no longer holds. The phone review said: publish yes, goals on yes, with no blocker. The phone
+  fix round closed all eleven of its findings: the trade marks (they now follow fills, sit on
+  their own candles and are readable tags), the terminal's wait before it restored a layout, and
+  four faults in the two parts that ship off. Neither fix round has a review of its own; a
+  verifier is checking both, and its verdict is not in this stanza. Goals had a review that
   said do not switch on (the Goals view redrew without end and a tap then failed), a fix round,
   and a re-check that said yes; the one import fault the re-check found was fixed after it and has
   no review of its own.
@@ -248,6 +268,13 @@ Nothing below changes anything until you switch it on, and none of it is promise
 - **Charges:** an estimate only. Brokerage is taken as Rs 30 an order until you confirm your
   plan's rate; the depository charge and some smaller rows are not on the rate card; the card's
   rates are still to be verified against a contract note.
+- **Trade marks:** an open trade's chart opens on its entry; if the entry is more than about 20
+  candles back, the newest candle, where an exit lands, is off screen until you scroll. In
+  analyzer mode, a resting order that the sandbox fills later may show its tag only when you
+  return to the app or open the chart again.
+- **Charts across devices** has not been run in a browser with the switch on beyond the
+  conflict note itself: a phone's set-aside copy surviving a reload is covered by unit tests
+  only.
 - **Goals:** a goal counts a tab's value before its loans. The assumed return is yours, not a
   forecast, and payments are taken at month ends. The percentage is cut, not rounded: 23.19% shows
   as 23.1%, and 100% appears only when the target is reached. Months are whole at a month end: 31
@@ -259,24 +286,6 @@ Nothing below changes anything until you switch it on, and none of it is promise
 - **The screener's changes have not run on your server,** because the screener has never been
   switched on there.
 - **Not in this release:** Live automation and Protect in Live.
-
-### The phone fix round
-PHONE FIX ROUND: to be filled in
-
-This section is rewritten when the phone fix round has merged. Until then, these stand as the phone
-review found them, and the release must not be published with this section in this state.
-- **Trade marks are as of the moment the chart opened.** After an exit or a scale-in made from
-  that chart, leave and open it again to see the new mark. A fill made before the day's first
-  candle has loaded can sit on the previous day's last candle. On 1-minute candles at phone width
-  the triangle is very small; the letter and the price carry the meaning.
-- **With charts across devices still off,** the trading terminal asks the server whether the
-  switch is on before it restores your layout; on a line that hangs this can take up to 10
-  seconds.
-- **Before `SUDARSHAN_CHARTS_SYNC` is switched on:** after a conflict, the copy this phone set
-  aside is kept only until the page closes, and on the trading terminal the sentence that says
-  which layout was kept can be cleared before you see it.
-- **Before `SUDARSHAN_SIGNALS` is switched on:** "Against the regime" on the TRINETRA page is
-  drawn as a warning, which reads as advice.
 
 ## v0.14.0 (16 Nov 2026)
 
