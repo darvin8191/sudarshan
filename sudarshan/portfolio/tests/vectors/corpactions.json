@@ -712,7 +712,7 @@
   },
   {
    "id": "E-BONUS-ODD",
-   "why": "bonus 1 for 2 on 5: 2.5 more: half a share is left over",
+   "why": "bonus 1 for 2 on 5: 5 / 2 = 2.5, so 2 whole shares more, 7 in all, and half a share is left over (review L3: whole shares, as the company credits them)",
    "in": [
     "bonus",
     5000000,
@@ -720,8 +720,23 @@
     2
    ],
    "out": [
-    2500000,
-    7500000,
+    2000000,
+    7000000,
+    true
+   ]
+  },
+  {
+   "id": "E-BONUS-THIRD",
+   "why": "bonus 1 for 3 on 100: 100 / 3 = 33.33, so 33 more, 133 in all, a third of a share left over (the reviewer's case: 33.333333 was kept before)",
+   "in": [
+    "bonus",
+    100000000,
+    1,
+    3
+   ],
+   "out": [
+    33000000,
+    133000000,
     true
    ]
   },
@@ -818,7 +833,19 @@
     2,
     5000000
    ],
-   "out": "Bonus 1:2: you held 5, you get 2.5 more, 7.5 in all. Is that right? This leaves part of a share, which a company usually pays in cash."
+   "out": "Bonus 1:2: you held 5, you get 2 more, 7 in all. Is that right? 0.5 of a share is left over, which a company usually pays in cash."
+  },
+  {
+   "id": "S-THIRD",
+   "in": [
+    "bonus",
+    1,
+    3,
+    1,
+    3,
+    100000000
+   ],
+   "out": "Bonus 1:3: you held 100, you get 33 more, 133 in all. Is that right? 0.333333 of a share is left over, which a company usually pays in cash."
   },
   {
    "id": "S-BONUS-NO-QTY",

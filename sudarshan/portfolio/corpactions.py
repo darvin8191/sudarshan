@@ -21,6 +21,12 @@ Analytics Token, with no static IP). They are public facts, kept in ``ca_event``
 * **Nothing is guessed.** A row that cannot be read is left out and counted in the read's note;
   an answer that is not Upstox's shape changes nothing; an event Upstox no longer lists is marked
   gone and kept, and comes back if it is listed again.
+* **Only a clean answer is a read.** "Nothing listed" is a 200 with an empty list, or a 404 (no
+  such instrument at Upstox), and nothing else. A refusal (403) ends the night: the token is not
+  allowed to read this list. Any other request Upstox turns down (a 400, say, for one ISIN it
+  does not cover) and an answer that cannot be read are failed reads of that instrument, and
+  three in a row end the night. Nothing failed is kept as read, a night that read nothing fails
+  and says why in words (``read_status``), and the phone never shows it as an empty calendar.
 * **Nothing changes a lot here.** A bonus or a split is only stored. It reaches the lots when the
   owner accepts it (``ops/ca_ops.py``).
 """
@@ -71,9 +77,15 @@ SILENT_STOP = 3
 ON_DEMAND_EVERY_MS = 60_000
 ISIN = re.compile(r"IN[A-Z0-9]{10}")
 #: Outcomes that end a run: asking again tonight would only repeat them.
-STOPS = ("slow", "busy", "no_token", "token_refused")
+STOPS = ("slow", "busy", "no_token", "token_refused", "refused")
+#: Outcomes that are a failed read of one instrument: nothing is kept as read.
+FAILED = ("silent", "unreadable", "rejected")
 WORDS = {
     "none": "Upstox lists no corporate actions for this instrument.",
+    "refused": "Upstox did not allow SUDARSHAN to read its list of events with the read-only "
+    "token.",
+    "rejected": "Upstox turned down the request for this share's events.",
+    "unreadable": "Upstox's answer was not in a form SUDARSHAN can read.",
     "slow": "Upstox asked SUDARSHAN to slow down; the rest is read tomorrow night.",
     "busy": "SUDARSHAN has read Upstox as often as it allows for now; the rest is read "
     "tomorrow night.",
@@ -180,8 +192,16 @@ class CorpActions:
         if status >= 500:
             log.warning("Upstox corporate actions answered with a server fault (%d)", status)
             return "silent", None
+        if status == 403:
+            # Design p7 6.4 item 8: whether Fundamentals answers this token from the server is
+            # not known until the first night. A refusal is never "nothing listed".
+            log.warning("Upstox refused to list corporate actions for the read-only token (403)")
+            return "refused", None
+        if status == 404:
+            return "none", None  # Upstox has nothing under this ISIN
         if status != 200:
-            return "none", None
+            log.warning("Upstox turned down a corporate-actions request (%d)", status)
+            return "rejected", None
         try:
             return "ok", json.loads(answer.text, parse_float=Decimal)
         except ValueError:
@@ -189,9 +209,10 @@ class CorpActions:
 
     # ---- one instrument --------------------------------------------------------------------
     async def read_one(self, isin: str, now: int) -> str:
-        """Read one ISIN and keep what it lists. The outcome: ``ok``, ``none`` (Upstox has
-        nothing under this ISIN; asked again in a week), ``unreadable`` or ``silent`` (nothing
-        changed; asked again tomorrow), or one of ``STOPS``."""
+        """Read one ISIN and keep what it lists. The outcome: ``ok`` (a clean answer with events),
+        ``none`` (an empty list, or no such instrument at Upstox; asked again in a week), one of
+        ``FAILED`` (nothing changed; an instrument never read before is marked as tried, asked
+        again the next night after the ones never asked) or one of ``STOPS`` (nothing written)."""
         outcome, payload = await self._call(isin)
         if outcome == "ok":
             try:
@@ -200,11 +221,20 @@ class CorpActions:
                 outcome = "unreadable"
         if outcome == "unreadable":
             log.warning("a corporate-actions answer could not be read; nothing was changed")
-        if outcome not in ("ok", "none"):
+        if outcome in STOPS:
             return outcome
+        # "Nothing listed" is a clean answer with an empty list, and nothing else.
+        empty = outcome == "ok" and not parsed["events"] and not sum(parsed["skipped"].values())
+        outcome = "none" if empty else outcome
 
         def write(tx: Tx) -> None:
-            if outcome == "none":
+            if outcome in FAILED:
+                # The last good read stands; only an instrument with none is marked as tried,
+                # so that the rotation puts it after the ones never asked.
+                if not any(r["isin"] == isin and r["state"] != "failed" for r in tx.ca_reads()):
+                    tx.ca_read_put(isin, None, "failed", WORDS[outcome])
+                return
+            if payload is None:  # no such instrument at Upstox (or not an ISIN: nothing asked)
                 tx.ca_read_put(isin, now, "none", WORDS["none"])
                 return
             listed = []
@@ -214,7 +244,10 @@ class CorpActions:
             tx.ca_events_gone(isin, listed, now)
             left = sum(parsed["skipped"].values())
             note = f"{left} rows could not be read and were left out." if left else None
-            tx.ca_read_put(isin, now, "ok", note)
+            if empty:
+                tx.ca_read_put(isin, now, "none", WORDS["none"])
+            else:
+                tx.ca_read_put(isin, now, "ok", note)
 
         await self._store(lambda store: store.write(OWNER, write))
         return outcome
@@ -232,11 +265,16 @@ class CorpActions:
         today, held = day_of_instant(now), self._held_now()
 
         def look(tx: Tx) -> list[str]:
-            reads = {r["isin"]: r["read_at"] for r in tx.ca_reads()}
+            rows = tx.ca_reads()
+            reads = {r["isin"]: r["read_at"] for r in rows if r["state"] != "failed"}
+            tried = {r["isin"] for r in rows if r["state"] == "failed"}
             days = {k: None if v is None else day_of_instant(v) for k, v in reads.items()}
             soon = tx.ca_events(from_day=today, to_day=add_days(today, core.NEAR_DAYS))
             near = {event["isin"] for event in soon}
-            return core.tonight(sorted(known_isins(tx, held)), days, near, today, MAX_READS)
+            known = known_isins(tx, held)
+            first = core.tonight(sorted(known - tried), days, near, today, MAX_READS)
+            # One that failed before and was never read comes last: it cannot hold up the rest.
+            return (first + sorted(known & tried))[:MAX_READS]
 
         return await self._store(lambda store: store.read(OWNER, look))
 
@@ -250,7 +288,8 @@ class CorpActions:
         """One night's reads. Returns ``(status, note)`` for the job log."""
         todo = await self.plan(now)
         counts = {"ok": 0, "none": 0, "failed": 0}
-        silent, stop = 0, None
+        why: dict[str, int] = {}
+        in_a_row, stop = 0, None
         for isin in todo:
             await self._pace()
             outcome = await self.read_one(isin, self.service.clock())
@@ -258,18 +297,23 @@ class CorpActions:
                 stop = outcome
                 break
             counts[outcome if outcome in counts else "failed"] += 1
-            silent = silent + 1 if outcome == "silent" else 0
-            if silent >= SILENT_STOP:
-                stop = "silent"
+            if outcome in FAILED:
+                why[outcome] = why.get(outcome, 0) + 1
+            in_a_row = in_a_row + 1 if outcome in FAILED else 0
+            if in_a_row >= SILENT_STOP:
+                stop = outcome
                 break
         note = (
             f"{counts['ok']} of {len(todo)} instruments read, {counts['none']} with nothing "
             f"listed, {counts['failed']} not read"
         )
-        if stop is not None:
-            note = f"{note}. {WORDS[stop]}"
-        # ``kinds.JOB_STATUSES``: a night that read nothing of what was due has failed.
-        return ("failed" if todo and not counts["ok"] + counts["none"] else "ok"), note
+        # ``kinds.JOB_STATUSES``: a night that read nothing of what was due has failed, and its
+        # note says why in the words ``read_status`` shows the owner.
+        failed = bool(todo) and not counts["ok"] + counts["none"]
+        reason = stop or (max(sorted(why), key=why.get) if why and failed else None)
+        if reason is not None:
+            note = f"{note}. {WORDS[reason]}"
+        return ("failed" if failed else "ok"), note
 
     # ---- on demand -------------------------------------------------------------------------
     async def read_now(self, isin: str, now: int) -> str:
@@ -285,6 +329,40 @@ class CorpActions:
         return await self.read_one(isin, now)
 
 
+# ---- whether the list was read at all (what the phone says before, and after a failed, read) ----
+FIRST_READ = (
+    "SUDARSHAN reads Upstox's corporate actions for the first time tonight after 23:45. Nothing "
+    "is listed until then."
+)
+NOT_READ = "Upstox's list could not be read {night}."
+RETRY = "SUDARSHAN tries again {when} after 23:45."
+
+
+def read_status(tx: Tx, today: int) -> dict[str, Any]:
+    """Whether Upstox's list was ever read, and how the last night went: ``state`` is ``never``
+    (no night has run yet), ``failed`` (the last night read nothing of what was due) or ``ok``;
+    ``words`` is the sentence the phone shows in place of an empty list, None when the last
+    night read. An empty calendar means "nothing listed" only under ``ok``."""
+    runs = [row for row in tx.job_runs() if row["name"] == API]
+    last = runs[-1] if runs else None
+    if last is None:
+        if any(row["state"] != "failed" for row in tx.ca_reads()):  # read on demand only
+            return {"state": "ok", "night": None, "words": None}
+        return {"state": "never", "night": None, "words": FIRST_READ}
+    if last["status"] != "failed":
+        return {"state": "ok", "night": last["day"], "words": None}
+    if last["day"] >= today:  # the run of this very evening, after 23:45
+        night, when = "tonight", "tomorrow night"
+    elif add_days(last["day"], 1) == today:
+        night, when = "last night", "tonight"
+    else:
+        night, when = f"on {day_words(last['day'])}", "tonight"
+    detail = last["detail"] or ""
+    why = next((text for text in WORDS.values() if text in detail), "")
+    parts = (NOT_READ.format(night=night), why, RETRY.format(when=when))
+    return {"state": "failed", "night": last["day"], "words": " ".join(p for p in parts if p)}
+
+
 # ---- what was held, and the owner's decisions (design p7 6.3) -----------------------------------
 UPSTOX_SCOPE = "upstox"
 RATIO_MAX = 1_000_000
@@ -297,27 +375,46 @@ SAY = {
 }
 
 
+def share_names(tx: Tx, held_now: list[dict[str, Any]] | None = None) -> dict[str, str]:
+    """A name for each ISIN: the scrip name of Upstox's trade history, else the name the Upstox
+    holding itself carries (``held_now``), and over both the holding's own in the owner's tabs
+    (under each ISIN it has had). A share held only at Upstox has a name too (review M2)."""
+    names = {
+        r["isin"]: r["scrip_name"]
+        for record in tx.report_list("trades")
+        for r in (record.get("payload") or {}).get("rows") or []
+        if r.get("isin") and r.get("scrip_name")
+    }
+    for row in held_now or ():
+        if row.get("isin") and row.get("name") and row["name"] != row.get("instrument_key"):
+            names[row["isin"]] = row["name"]
+    assets = {a["id"]: a["name"] for a in tx.rows("asset") if a.get("name")}
+    for alias in tx.rows("asset_alias", "id", kind="isin"):
+        if alias["asset_id"] in assets:
+            names[alias["value"]] = assets[alias["asset_id"]]
+    names.update({a["isin"]: a["name"] for a in tx.rows("asset") if a.get("isin") and a["name"]})
+    return names
+
+
 class Holdings:
     """What the Upstox account and each custom tab held the day before a day, read once."""
 
-    def __init__(self, tx: Tx, today: int):
-        self.tx, self.today = tx, today
+    def __init__(self, tx: Tx, today: int, held_now: list[dict[str, Any]] | None = None,
+                 now: int | None = None):  # fmt: skip
+        self.tx, self.today, self.now = tx, today, now
         self.assets = {a["isin"]: a for a in tx.rows("asset", kind="listed") if a["isin"]}
         self.tabs = [t for t in tx.rows("tab") if not t["system"] and not t["archived"]]
         self.record_days = [row["day"] for row in tx.rows("upstox_eod", "day")]
+        self.names = share_names(tx, held_now)
         self._records: dict[int, dict[str, int]] = {}
         self._moves: dict[int, dict[tuple[int, int], list[tuple[int, int]]]] = {}
+        self._lots: Any = None
+        self._traded: dict[str, list[tuple[int, int]]] | None = None
 
     def name(self, isin: str) -> str | None:
-        asset = self.assets.get(isin)
-        return asset["name"] if asset else None
+        return self.names.get(isin)
 
-    def upstox(self, isin: str, ex_day: int) -> int | None:
-        """The Upstox account's quantity the day before ``ex_day``; None when no closing record
-        can say (``core.eve_record``)."""
-        day = core.eve_record(self.record_days, ex_day, self.today)
-        if day is None:
-            return None
+    def _record(self, day: int) -> dict[str, int]:
         if day not in self._records:
             held: dict[str, int] = {}
             for line in self.tx.rows("upstox_eod_holding", "instrument_key", day=day):
@@ -325,7 +422,50 @@ class Holdings:
                 if key is not None:
                     held[key] = held.get(key, 0) + line["qty"] + (line["t1_qty"] or 0)
             self._records[day] = held
-        return self._records[day].get(isin, 0)
+        return self._records[day]
+
+    def upstox(self, isin: str, ex_day: int) -> int | None:
+        """The Upstox account's quantity the day before ``ex_day``; None when no closing record
+        can say (``core.eve_record``)."""
+        day = core.eve_record(self.record_days, ex_day, self.today)
+        return None if day is None else self._record(day).get(isin, 0)
+
+    def lots(self):
+        """The Upstox account's tax lots (``lotcheck.TaxLots``), built on first use."""
+        if self._lots is None:
+            from . import lotcheck  # it reads the tax adapter, which reads this module
+
+            self._lots = lotcheck.TaxLots(self.tx, self.today, self.now or 0)
+        return self._lots
+
+    def upstox_from_trades(self, isin: str, ex_day: int) -> int | None:
+        """Where no closing record reaches the eve of ``ex_day``: the quantity the tax lots hold
+        then, from Upstox's trade history and the purchases entered (the same lots a bonus or a
+        split would change). None when the year's trades are not read in full."""
+        return self.lots().qty(isin, add_days(ex_day, -1))
+
+    def upstox_maybe(self, isin: str, ex_day: int) -> bool:
+        """Where no closing record reaches the eve of ``ex_day``: whether the records still say
+        the share may have been held then. The first closing record from the ex-date on, taken
+        back by the trades between (what was bought since was not held on the eve; what was
+        sold since was), or a lot in the trade history. Used only to decide whether a dividend
+        is listed as not counted; never for an amount."""
+        after = [day for day in self.record_days if day >= ex_day]
+        if not after:
+            return True  # no record at all: nothing says it was not held
+        if self._traded is None:
+            self._traded = {}
+            for record in self.tx.report_list("trades"):
+                for row in (record.get("payload") or {}).get("rows") or []:
+                    if isinstance(row, dict) and row.get("isin") and row.get("segment") == "EQ":
+                        sign = -1 if row.get("transaction_type") == "SELL" else 1
+                        self._traded.setdefault(row["isin"], []).append(
+                            (row["trade_date"], sign * row["qty_u"])
+                        )
+        since = sum(q for day, q in self._traded.get(isin, ()) if ex_day <= day <= after[0])
+        if self._record(after[0]).get(isin, 0) - since > 0:
+            return True
+        return bool(self.upstox_from_trades(isin, ex_day))
 
     def moves(self, tab_id: int) -> dict[tuple[int, int], list[tuple[int, int]]]:
         """``(account, asset) -> [(day, quantity change)]`` of a tab's ledger."""
@@ -412,17 +552,25 @@ def reach_from(today: int) -> int:
 
 
 def waiting(tx: Tx, event: dict[str, Any], holdings: Holdings, decided: set[str],
-            upstox: set[str]) -> list[dict[str, Any]]:  # fmt: skip
-    """The holdings an event still waits for the owner's tap on. The Upstox account: when it
-    held the share the day before, or, where no closing record reaches that day, when the share
-    is one of the account's and the event is inside the years its reports reach. A tab: when it
-    held the share the day before and has no entry for the event yet."""
-    out, today = [], holdings.today
+            upstox: set[str]) -> tuple[list[dict[str, Any]], bool]:  # fmt: skip
+    """The holdings an event still waits for the owner's tap on, and whether the Upstox account
+    was left out because nothing can tell yet whether it held the share (review M3).
+
+    The Upstox account: only when it held the share the day before, by its closing record or,
+    where no record reaches that day, by the tax lots of its trade history; the quantity is
+    always shown. A tab: when it held the share the day before and has no entry for the event
+    yet. A share the records show was not held on the day is not asked about: applying the
+    event would change no lot. Left out (counted, not asked) is only the case where no record
+    reaches the day and the lots cannot say yet (the year's share trades are not read in full)."""
+    out, left_out, today = [], False, holdings.today
     if UPSTOX_SCOPE not in decided:
-        held = holdings.upstox(event["isin"], event["ex_day"])
-        unknown = held is None and event["isin"] in upstox and event["ex_day"] >= reach_from(today)
-        if held or unknown:
-            out.append(_expected(event, UPSTOX_SCOPE, held))
+        held, source = holdings.upstox(event["isin"], event["ex_day"]), "record"
+        if held is None and event["isin"] in upstox:
+            held, source = holdings.upstox_from_trades(event["isin"], event["ex_day"]), "trades"
+        if held:
+            out.append(_expected(event, UPSTOX_SCOPE, held, held_from=source))
+        elif held is None and event["isin"] in upstox and event["ex_day"] >= reach_from(today):
+            left_out = True
     for tab in holdings.tabs:
         scope = f"tab:{tab['id']}"
         held_by = holdings.tab(tab["id"], event["isin"], event["ex_day"])
@@ -434,7 +582,7 @@ def waiting(tx: Tx, event: dict[str, Any], holdings: Holdings, decided: set[str]
             event, scope, sum(held_by.values()), tab_id=tab["id"], name=tab["name"],
             entries=_entries(event, asset_id, held_by, ways[0] if ways else None),
         ))  # fmt: skip
-    return out
+    return out, left_out and not out
 
 
 def _shown(event: dict[str, Any], holdings: Holdings, decisions: list[dict]) -> dict[str, Any]:
@@ -446,23 +594,52 @@ def _shown(event: dict[str, Any], holdings: Holdings, decisions: list[dict]) -> 
     return shown
 
 
+def decisions(tx: Tx) -> dict[int, list[dict[str, Any]]]:
+    """Every decision of the owner's, by the event it was made on."""
+    found: dict[int, list[dict[str, Any]]] = {}
+    for row in tx.rows("ca_decision"):
+        found.setdefault(row["event_id"], []).append(row)
+    return found
+
+
+def standing(group: list[dict[str, Any]], decided: dict[int, list[dict]], scope: str):
+    """The owner's decision on an event for one holding, whichever wording of the event it was
+    made on: an applied one before a dismissed one, the earliest first. None when undecided."""
+    rows = [row for event in group for row in decided.get(event["id"], ())
+            if row["scope"] == scope]  # fmt: skip
+    rows.sort(key=lambda row: (row["state"] != "applied", row["id"]))
+    return rows[0] if rows else None
+
+
 def listing(tx: Tx, today: int, *, scope: str | None = None, from_day: int, to_day: int,
-            held_now: list[dict[str, Any]] | None = None) -> dict[str, Any]:  # fmt: skip
+            held_now: list[dict[str, Any]] | None = None, now: int | None = None,
+            ) -> dict[str, Any]:  # fmt: skip
     """``ca_list``: the events between two days with the owner's decisions, the bonuses and
     splits still waiting for his tap (whatever their day, up to today), and when each
-    instrument was last read. ``scope`` narrows the decisions and the waiting list to one."""
-    holdings, upstox = Holdings(tx, today), upstox_isins(tx, held_now)
-    by_event: dict[int, list[dict]] = {}
-    for row in tx.rows("ca_decision"):
-        if scope in (None, row["scope"]):
-            by_event.setdefault(row["event_id"], []).append(row)
-    to_confirm = []
-    for event in tx.ca_events(to_day=today):
-        if event["kind"] not in core.LOT_KINDS:
+    instrument was last read. ``scope`` narrows the decisions and the waiting list to one.
+
+    An event is one per company and ex-date, however often Upstox rewords it (``core.groups``):
+    a decision made on one wording stands for every other, so a relisted event is never asked a
+    second time. ``left_out_count`` is how many bonuses and splits of the account's shares are
+    not asked about yet because nothing can tell whether the share was held on their day (no
+    closing record reaches it and the year's share trades are not read in full); ``lot_check``
+    is the tax lots against the Upstox holdings (``lotcheck.check``)."""
+    from . import lotcheck
+
+    holdings, upstox = Holdings(tx, today, held_now, now), upstox_isins(tx, held_now)
+    decided = decisions(tx)
+    by_event = {key: [r for r in rows if scope in (None, r["scope"])]
+                for key, rows in decided.items()}  # fmt: skip
+    to_confirm, left_out = [], 0
+    for group in core.groups(tx.ca_events(to_day=today, gone=True)):
+        live = [event for event in group if event["gone_at"] is None]
+        if not live:
             continue
-        decided = {row["scope"] for row in tx.rows("ca_decision", event_id=event["id"])}
-        found = [w for w in waiting(tx, event, holdings, decided, upstox)
-                 if scope in (None, w["scope"])]  # fmt: skip
+        event = live[-1]  # the wording Upstox lists now
+        done = {row["scope"] for one in group for row in decided.get(one["id"], ())}
+        found, unseen = waiting(tx, event, holdings, done, upstox)
+        found = [w for w in found if scope in (None, w["scope"])]
+        left_out += unseen
         if found:
             shown = _shown(event, holdings, by_event.get(event["id"], []))
             to_confirm.append({**shown, "expected": found})
@@ -470,7 +647,10 @@ def listing(tx: Tx, today: int, *, scope: str | None = None, from_day: int, to_d
     return {
         "events": [_shown(e, holdings, by_event.get(e["id"], [])) for e in events],
         "to_confirm": to_confirm,
+        "left_out_count": left_out,
         "reads": tx.ca_reads(),
+        "read_status": read_status(tx, today),
+        "lot_check": lotcheck.check(tx, today, now or 0, holdings.lots()),
     }
 
 
@@ -529,28 +709,51 @@ def decide(tx: Tx, event_id: int, args: dict[str, Any], today: int, now: int) ->
     request_id = args.get("request_id") if isinstance(args.get("request_id"), str) else None
     if request_id and (again := tx.by_request("ca_decision", request_id)) is not None:
         return again
+    # One event per company and ex-date: a decision made on another wording of this event
+    # stands for it, and is changed there, never made a second time here.
+    group = next(
+        g for g in core.groups(tx.ca_events(gone=True)) if any(e["id"] == event_id for e in g)
+    )
+    earlier = standing(group, decisions(tx), scope)
+    if earlier is not None:
+        raise Refused(_already(event, earlier), reason="decided")
     return tx.insert("ca_decision", {**values, "event_id": event_id, "scope": scope}, now,
                      request_id)  # fmt: skip
 
 
+def _already(event: dict[str, Any], row: dict[str, Any]) -> str:
+    """Why a relisted event is not decided again, with what was decided the first time."""
+    kind = event["kind"]
+    if row["state"] != "applied":
+        return (f"You already left your lots as they are for this {kind}. Upstox lists it "
+                "again in other words; nothing more is needed.")  # fmt: skip
+    num, den = row["ratio_num"], row["ratio_den"]
+    how = (f"{num} new for every {den} held" if kind == "bonus"
+           else f"every {den} made {num}")  # fmt: skip
+    return (f"This {kind} is already applied ({how}). Upstox lists it again in other words; "
+            "applying it again would count it twice.")  # fmt: skip
+
+
 def accepted_actions(tx: Tx) -> list[dict[str, Any]]:
     """For the tax adapter: the Upstox account's bonuses and splits as ``tax.model.Action``
-    rows, in ex-date order. One the owner applied is ``accepted`` with the reading he chose; one
-    he has not decided is passed with the proposed reading and ``accepted`` false, so the tax
-    core changes no lot for it and says so where it would have mattered; one he dismissed, or
-    that has no ratio, is left out."""
-    decided = {row["event_id"]: row for row in tx.rows("ca_decision", scope=UPSTOX_SCOPE)}
+    rows, in ex-date order, one per event however many wordings of it Upstox has listed
+    (``core.groups``; review H3). One the owner applied is ``accepted`` with the reading he
+    chose, once, dated as Upstox lists it now; one he has not decided is passed with the
+    proposed reading and ``accepted`` false, so the tax core changes no lot for it and says so
+    where it would have mattered; one he dismissed, or that has no ratio, is left out."""
+    decided = decisions(tx)
     out = []
-    for event in tx.ca_events(gone=True):
-        if event["kind"] not in core.LOT_KINDS:
-            continue
-        row = decided.get(event["id"])
-        ways = core.readings(event["kind"], event["ratio_num"], event["ratio_den"])
+    for group in core.groups(tx.ca_events(gone=True)):
+        row = standing(group, decided, UPSTOX_SCOPE)
+        live = [event for event in group if event["gone_at"] is None]
         if row is not None and row["state"] == "applied":
+            event = live[-1] if live else next(e for e in group if e["id"] == row["event_id"])
             out.append(core.action_row(event, row["ratio_num"], row["ratio_den"], True))
-        elif row is None and ways and event["gone_at"] is None:
-            out.append(core.action_row(event, *ways[0], False))
-    return out
+        elif row is None and live:
+            ways = core.readings(live[-1]["kind"], live[-1]["ratio_num"], live[-1]["ratio_den"])
+            if ways:
+                out.append(core.action_row(live[-1], *ways[0], False))
+    return sorted(out, key=lambda action: action["ex_day"])
 
 
 def ensure(service: Any) -> CorpActions:
@@ -593,8 +796,20 @@ def _sync_dividends(service: Any) -> str:
     from . import dividends
 
     now = service.clock()
-    changed = service.store.write(OWNER, lambda tx: dividends.sync(tx, day_of_instant(now), now))
-    return f"{changed} dividend lines made or changed"
+    held = ensure(service)._held_now()
+    today = day_of_instant(now)
+
+    def run(tx: Tx) -> tuple[int, dict[str, Any]]:
+        from . import lotcheck
+
+        return dividends.sync(tx, today, now, held), lotcheck.check(tx, today, now)
+
+    changed, check = service.store.write(OWNER, run)
+    differ = len(check["rows"])  # the nightly check of the lots against the holdings
+    said = f"{changed} dividend lines made or changed"
+    if check["state"] == "ok":
+        said += f"; lots and holdings differ for {differ} shares"
+    return said
 
 
 def register_jobs() -> None:
@@ -620,6 +835,10 @@ __all__ = [
     "known_isins",
     "listing",
     "decide",
+    "decisions",
+    "read_status",
+    "share_names",
+    "standing",
     "register_jobs",
     "upstox_isins",
     "waiting",

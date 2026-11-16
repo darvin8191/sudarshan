@@ -19,7 +19,7 @@ the year's dividends and stops there.
 from __future__ import annotations
 
 from . import rules
-from .units import bp_of, fy_first, value_paise
+from .units import bp_of, fy_first, fy_of, value_paise
 
 STATES = ("expected", "confirmed", "not_received")
 
@@ -44,13 +44,52 @@ def counted_paise(line: dict) -> int:
     return 0 if line["state"] == "not_received" else line["expected_paise"]
 
 
+#: Why a dividend could not be counted, as the owner reads it beside the company and the date.
+NO_RECORD = (
+    "No holdings record reaches the day before this ex-date, so the amount is not known: "
+    "confirm what reached your bank on the Dividends card"
+)
+NO_AMOUNT = (
+    "Upstox lists no amount for this dividend, so it is not known: confirm what reached your "
+    "bank on the Dividends card"
+)
+
+
+def uncounted(line: dict) -> str | None:
+    """The sentence of a line that counts for nothing because it cannot be worked out: still
+    expected, with no expected amount. Without a quantity, no record says what was held;
+    with one, the amount a share is missing. None for every line that counts. Once the owner
+    confirms it (or says it was not received) it is a line like any other."""
+    if line["state"] != "expected" or line["expected_paise"]:
+        return None
+    return NO_AMOUNT if line.get("qty_u") else NO_RECORD
+
+
+def first_year() -> int:
+    """The first financial year the threshold rule has a row for; none is worked out before."""
+    return min(fy_of(row[0]) for row in rules.DIVIDEND_TDS)
+
+
+def no_year() -> dict:
+    """``year`` of a year before the first rule row: nothing, and no threshold."""
+    return {"payers": [], "total_paise": 0, "tds_expected_paise": 0, "unconfirmed_count": 0,
+            "tds_threshold_paise": None, "uncounted": [], "uncounted_count": 0}  # fmt: skip
+
+
 def year(lines, fy: int, names: dict | None = None) -> dict:
     """One taxpayer's dividend lines of a financial year, by payer (the ISIN) in ISIN order, with
-    the likely-TDS flag per payer and the year's totals. Lines of other years are passed over."""
+    the likely-TDS flag per payer and the year's totals. Lines of other years are passed over.
+    A line that cannot be counted (``uncounted``) is in no payer and no total: it is listed
+    apart with its sentence, and ``uncounted_count`` says how many there are."""
     rule = rules.at(rules.DIVIDEND_TDS, fy_first(fy))
     payers: dict[str, dict] = {}
+    left_out = []
     for line in lines:
         if line["fy"] != fy:
+            continue
+        why = uncounted(line)
+        if why is not None:
+            left_out.append({**line, "name": (names or {}).get(line["isin"]), "words": why})
             continue
         payer = payers.setdefault(line["isin"], {
             "isin": line["isin"], "name": (names or {}).get(line["isin"]), "lines": [],
@@ -74,13 +113,16 @@ def year(lines, fy: int, names: dict | None = None) -> dict:
         "tds_expected_paise": sum(p["tds_expected_paise"] or 0 for p in found),
         "unconfirmed_count": sum(p["unconfirmed_count"] for p in found),
         "tds_threshold_paise": rule["threshold"],
+        "uncounted": sorted(left_out, key=lambda line: (line["ex_day"], line["isin"])),
+        "uncounted_count": len(left_out),
     }
 
 
 def block(of_year: dict, buyback_paise: int = 0) -> dict:
     """The working paper's dividends block from ``year``'s answer: the payers without their
     lines, and a buyback's receipt taxed as a dividend (the pack's own figure) beside them and
-    inside the total."""
+    inside the total. The dividends that could not be counted are listed with the company, the
+    ex-date and why; ``note`` is for the caller (whether the list was read at all)."""
     keep = ("isin", "name", "expected_paise", "confirmed_paise", "total_paise", "tds_likely")
     return {
         "by_payer": [{key: payer[key] for key in keep} for payer in of_year["payers"]],
@@ -88,4 +130,10 @@ def block(of_year: dict, buyback_paise: int = 0) -> dict:
         "total_paise": of_year["total_paise"] + buyback_paise,
         "tds_expected_paise": of_year["tds_expected_paise"],
         "unconfirmed_count": of_year["unconfirmed_count"],
+        "uncounted": [
+            {key: line.get(key) for key in ("isin", "name", "ex_day", "words")}
+            for line in of_year.get("uncounted", ())
+        ],
+        "uncounted_count": of_year.get("uncounted_count", 0),
+        "note": None,
     }
