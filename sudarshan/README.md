@@ -360,13 +360,29 @@ archive. The newest complete archive is never removed, whatever else is true: a 
 archives cannot push the last good one out.
 
 **One archive per financial year, kept 8 years (M19.10).** The first complete archive made from
-4 April on is the archive of the financial year that ended on 31 March, whatever the counts
-above say; one made more than 92 days later (after 4 July) is never taken for it. It waits those
-four days so that the year's own papers are in it: the journal builds the year's Tax pack on
-1 April at 07:00, Upstox's charges for the last trading days arrive two nights after each, and
-March's charges are read from 3 April. An archive of 31 March's evening would hold none of them. The newest 8 are kept
-(`SUDARSHAN_BACKUP_KEEP_YEARLY`), for the years the tax records must be kept. Its offsite copy is
-uploaded under a name of its own, `sudarshan-fy-2026-27-YYYYMMDD-HHMMSS-<release>.tar.gz.cms`,
+4 April, 08:00 on is the archive of the financial year that ended on 31 March, whatever the
+counts above say: normally the nightly backup of 4 April at 16:30. One made more than 92 days
+later (from 5 July, 08:00) is never taken for it. It waits those four days so that the year's
+own papers are in it: the journal builds the year's Tax pack on 1 April at 07:00, Upstox's
+charges for the last trading days arrive two nights after each, and March's charges are read
+from 3 April. An archive of 31 March's evening would hold none of them.
+
+The Tax pack of 1 April is printed before those last charges arrive, so the journal builds the
+year's Tax pack again by itself on 4 April at 07:00, in the same job, with nothing for you to
+press. If the tax working paper cannot be read just then, it keeps the pack it has and tries
+again every 15 minutes, for up to three days; it never puts a pack without the paper in its
+place. The first backup of 4 April runs at 16:30, after it, so the archive kept 8 years holds
+the complete pack.
+Telegram does not get the new pack a second time, and the copy it got on 1 April has estimates
+for the charges of the year's last days: give your CA the Tax pack from the Journal's Reports
+on or after 4 April. (If the journal was not running at all on 4 April, it builds the pack at
+its next start within three days, and that year's archive may then hold the pack of 1 April:
+build the Tax pack once more from the Journal's Reports and keep that file with the year's
+papers.)
+
+The newest 8 of these archives are kept (`SUDARSHAN_BACKUP_KEEP_YEARLY`), for the years the tax
+records must be kept. A year's archive goes offsite under a name of its own,
+`sudarshan-fy-2026-27-YYYYMMDD-HHMMSS-<release>.tar.gz.cms`,
 so that the bucket's delete rules, which name the nightly prefix (step 3 below), never remove
 it. The System page shows the newest year's archive and its size: eight of them must fit the
 size cap and the bucket.
@@ -472,8 +488,9 @@ empty settings file, with `install`; the settings are written by `sudarshan`, th
    Each has Lifecycle action Delete, Number of days 30 (or what you like, the same in both), the
    State switch on, and under Object name filters one filter of the kind **Include by prefix**
    with the text `sudarshan-backup-` (so the rule deletes the nightly copies only, and never a
-   financial year's archive, whose name starts `sudarshan-fy-`; if you made the two rules before
-   v0.13.1 without this filter, edit both and add it before the first 31 March):
+   financial year's archive, whose name starts `sudarshan-fy-`; if you made the two rules
+   without this filter, edit both and add it before 4 April, the day the year's archive is made
+   and uploaded):
    - Target **Latest version of objects**: after 30 days the newest version of a copy becomes a
      previous version;
    - Target **Previous versions of objects**: a previous version is deleted 30 days after it
@@ -1241,12 +1258,20 @@ sudo -u sudarshan .venv/bin/python -m sudarshan.ops.watch --check
 ```
 
 - The line `certificate site` says `set` and the address it asks by, or `unknown`: then no
-  certificate is checked until the line above is added.
+  certificate is checked until the line above is added. The System page then reads "Not being
+  checked" beside Security certificate, with the reason.
 - The line `certificate` says `fine` with the hours left. `unread cause=no_name` means the
   address is not known; `unread cause=other_site` means nginx answered that address with another
   site's certificate (the address is wrong, or the app's site is not set up in nginx under it).
+  After two days of either it reads `warning` with the same cause.
   (With a number for an address instead of a name, nginx cannot be asked by it and gives its
   first site's certificate: it is judged only when it is issued for that number.)
+
+A certificate that is not checked cannot warn you before it runs out. So when the check has
+judged no certificate for two days in a row, for either of those two reasons, you are told once
+on Telegram, with the line to add to `/etc/sudarshan/watch.env`; and once more, "is being
+checked again", when it is set right. A look that merely failed (nginx not answering for a
+moment) does not count towards the two days and does not end them.
 
 Tests: `sudarshan/ops/tests/test_ops_nginx.py`.
 
@@ -1316,6 +1341,11 @@ folder (`cd /opt/sudarshan/apps/openalgo`):
    If that block already has an `error_page` line naming 502 or 504, take those two numbers out
    of it first, or nginx keeps the older line.
 
+   Before you add the line, look for one more setting, in that same file and in nginx's main
+   file: `sudo grep -n proxy_intercept_errors /etc/nginx/nginx.conf <SUDARSHAN's site file>`.
+   Nothing printed, or only `off`, is as it should be. If a line reads `on`, read "When nginx
+   takes over the app's errors" below before you go on.
+
 3. Test, then reload; never restart. If `nginx -t` reports an error, undo step 2 and stop.
 
    ```
@@ -1330,8 +1360,21 @@ What the lines do not change: the answer keeps its status (a restart never reads
 TradingView or to the app's own order calls), anything the app itself answers is passed on as it
 is, and the family view's API keeps its own "did not answer" sentence. After a release that
 changes the page (the changelog says so), run the `install` line of step 1 again, then step 3:
-the page is part of the lines, so nginx takes it up at the reload. To take the lines out, remove the `include` line, then
-`sudo nginx -t` and `sudo systemctl reload nginx`.
+the page is part of the lines, so nginx takes it up at the reload. To take the lines out, remove
+the `include` line, then `sudo nginx -t` and `sudo systemctl reload nginx`.
+
+**When nginx takes over the app's errors.** "Anything the app itself answers is passed on as it
+is" holds only while `proxy_intercept_errors` is off for SUDARSHAN's site, which is nginx's own
+default; SUDARSHAN's lines never turn it on. With it on (in SUDARSHAN's site, or in nginx's main
+file with no `off` in SUDARSHAN's site), nginx replaces the app's own 502 and 504 answers with
+the restart page as well. The app answers 502 when Upstox took an order without naming it, with
+the sentence that the order may have been placed. That sentence is then lost, on the phone and
+for TradingView, which sees only the gateway error. The phone still holds the exit or cancel: an
+answer that is not the app's own is read as "no answer came", never as a refusal, so its hold
+stays as it does for an answer that never came. To keep the sentence, set that line in
+SUDARSHAN's site to `proxy_intercept_errors off;`, or, when only the main file turns it on, add
+that line inside SUDARSHAN's `server { }` block (none of SUDARSHAN's lines needs it on). Or leave
+the restart lines out.
 
 Tests: `sudarshan/ops/tests/test_ops_restart_page.py`, `frontend/src/sudarshan/pwa/restartPage.test.ts`
 and `frontend/src/sudarshan/pwa/sw.test.ts`.

@@ -567,6 +567,24 @@ def _watch_warning(event: Event, now: datetime) -> list[str]:
             "One of SUDARSHAN's services is listening on the network, not only inside the "
             f"server. Nothing has stopped; {LOOK}."
         ]
+    if check == "certificate":
+        # The certificate has not been judged for two days (v0.13.0 verify N6): no address for
+        # the app is known to the watch, or the web server answers it with another site's.
+        if event.fact("cause") == "other_site":
+            why = (
+                "the web server answers the app's address, as the watch has it, with another "
+                "site's certificate"
+            )
+            fix = "In /etc/sudarshan/watch.env on the server, set the line"
+        else:
+            why = "the watch does not know the app's address"
+            fix = "Add one line to /etc/sudarshan/watch.env on the server:"
+        return [
+            f"SUDARSHAN's security certificate has not been checked for two days: {why}. "
+            "Nothing will warn you before it runs out until this is set right.",
+            f"{fix} SUDARSHAN_WATCH_CERT_HOST= followed by the address you open the app at, "
+            "the name alone with nothing after it.",
+        ]
     if check == "drill":
         days = event.fact("days")
         age = f"{days} days" if _MINUTES.fullmatch(days) else "over 100 days"
@@ -608,6 +626,9 @@ def _watch_fine(event: Event, now: datetime) -> list[str]:
     check, at = event.fact("check"), _when(event.at, now)
     if check.startswith("service_") and check[8:] in _SERVICES:
         return [f"SUDARSHAN's {_SERVICES[check[8:]][0]} is answering again since {at}."]
+    if check == "certificate" and event.fact("was") == "warning":
+        # Its only warning is "not checked": nothing was renewed, it is judged again.
+        return ["SUDARSHAN's security certificate is being checked again."]
     return {
         "login": [f"Upstox is connected again since {at}: order updates are arriving."],
         "feed": [f"The price feed is connected to Upstox again since {at}."],
