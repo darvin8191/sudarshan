@@ -62,13 +62,19 @@ day.**
   sentence names the working order.
 - **If Upstox does not send its orders or positions in time,** or the figures do not add up, no
   close is sent. On the scalping terminal the sentence is on screen (the auto-exit's is in the
-  terminal's log) and says to close from the Upstox app or try again in a minute.
+  terminal's log) and says to close from the Upstox app or try again in a minute. Where SUDARSHAN
+  keeps trying that exit itself (a strategy run's Stop, Close leg or exit alert, and a scalping
+  close when a stop loss or target is set on that position), the sentence says to close in the
+  Upstox app with a market order and never to leave a limit order waiting there.
 - **For a strategy run, you are told on Telegram.** The first time an exit is held because the
   position size could not be confirmed: "Exit NOT sent (Live)", with the strategy, the leg, the
-  instrument and what made the exit due. SUDARSHAN keeps trying. You are told again at most once a
-  minute while it lasts ("Exit still NOT sent (Live), 3 min now") and once when the exit goes
-  ("Exit sent (Live) ... Check Orders for its fill."). Each message says: if you want out now,
-  close it in the Upstox app. The run's Events tab shows the hold once, in red.
+  instrument and what made the exit due. SUDARSHAN keeps trying. While it lasts you are told
+  again ("Exit still NOT sent (Live), 3 min now"): every minute for the first 5 minutes, every 5
+  minutes until 30, then every 15. You are told once when the exit goes ("Exit sent (Live) ...
+  Check Orders for its fill."), even after a gap in the price feed. Each message says: if you
+  want out now, close it in the Upstox app with a market order, and SUDARSHAN then sends nothing;
+  do not leave a limit order waiting there, because SUDARSHAN's exit can still go and both would
+  fill. The run's Events tab shows the hold once, in red.
 - **If Upstox shows no position for a leg the run still lists as open,** you are told that once:
   no exit was sent and none is needed. The run cannot close such a leg; check Positions in the
   Upstox app, then close the run from its page.
@@ -113,8 +119,10 @@ day.**
   written on the chart only where the candles are wide enough.
 - **The marks follow fills.** Exit or add from that chart and the new tag appears within a few
   seconds, without leaving the chart. They are read again when an order of that instrument
-  changes, when the app's connection comes back and when you return to the page. If that read
-  fails, the chart keeps its marks and says "Marks as of" with the time.
+  changes, when the app's connection comes back and when you return to the page; a mark that came
+  due while the phone was locked appears when you come back, and a steady stream of order
+  changes delays a new mark by about 10 seconds at most. If that read fails, the chart keeps its
+  marks and says "Marks as of" with the time.
 - **A fill is shown on its own candle only.** Until that candle has loaded the chart says "1 fill
   is outside the loaded candles." and lays the tag when the candle opens. A trade older than the
   loaded history is shown on daily candles with a sentence.
@@ -243,8 +251,12 @@ Nothing below changes anything until you switch it on, and none of it is promise
   no longer holds. The phone review said: publish yes, goals on yes, with no blocker. The phone
   fix round closed all eleven of its findings: the trade marks (they now follow fills, sit on
   their own candles and are readable tags), the terminal's wait before it restored a layout, and
-  four faults in the two parts that ship off. Neither fix round has a review of its own; a
-  verifier is checking both, and its verdict is not in this stanza. Goals had a review that
+  four faults in the two parts that ship off. A second review checked both fix rounds and said:
+  publish yes, after one change of words (the held-exit message sent you to the Upstox app
+  without saying that a limit order left there could fill beside SUDARSHAN's own exit). Two more
+  small fix rounds made that change, gave the same warning to every other sentence that sends you
+  to the app while SUDARSHAN keeps trying, slowed the reminders and closed seven smaller points;
+  those two rounds have no review of their own. Goals had a review that
   said do not switch on (the Goals view redrew without end and a tap then failed), a fix round,
   and a re-check that said yes; the one import fault the re-check found was fixed after it and has
   no review of its own.
@@ -256,7 +268,7 @@ Nothing below changes anything until you switch it on, and none of it is promise
 - **Several legs held at once** send one Telegram message each.
 - **When a message says to close in the Upstox app, use a market order there.** SUDARSHAN sees a
   market close and then sends nothing; a limit order resting there is not counted as an exit on
-  its way.
+  its way. Only the words warn you of this today; counting such an order is a later change.
 - **A run whose leg the account no longer holds** (two runs on opposite sides of one contract in
   one product, a close made in the Upstox app, an exit made smaller) keeps that leg open and can
   never close it. The account is right; the run is wrong. Close such a run from its page.
