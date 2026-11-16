@@ -2285,6 +2285,7 @@ export interface CaEvent {
 
 export interface CaRead {
   isin: string
+  /** When it was last read; for `failed` (never read), when it was last tried. */
   read_at: EpochMs | null
   state: string
   note: string | null

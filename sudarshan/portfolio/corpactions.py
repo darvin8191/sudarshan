@@ -25,8 +25,15 @@ Analytics Token, with no static IP). They are public facts, kept in ``ca_event``
   such instrument at Upstox), and nothing else. A refusal (403) ends the night: the token is not
   allowed to read this list. Any other request Upstox turns down (a 400, say, for one ISIN it
   does not cover) and an answer that cannot be read are failed reads of that instrument, and
-  three in a row end the night. Nothing failed is kept as read, a night that read nothing fails
-  and says why in words (``read_status``), and the phone never shows it as an empty calendar.
+  three in a row end the night. Nothing failed is kept as read; an instrument never read that
+  failed is tried again each night after the others, the one tried longest ago first.
+* **A night fails only on a stop, or when nothing was read in the rotation week** (v0.14.0
+  verification M5). It has failed when a stop ended it before anything was read (a refusal, a
+  pause, no token, three failed reads in a row of instruments that answered before), or when
+  it read nothing and nothing has been read for ``core.ROTATION_DAYS``. A share that always
+  fails does not fail the night, and behind a good read its failure does not count towards
+  three in a row. A failed night says why in words (``read_status``), and the phone never
+  shows it as an empty calendar.
 * **Nothing changes a lot here.** A bonus or a split is only stored. It reaches the lots when the
   owner accepts it (``ops/ca_ops.py``).
 """
@@ -50,7 +57,7 @@ from sudarshan.tax.dividends import entitled_qty_u
 
 from .budget import PAUSE_S, Budget
 from .core import corpactions as core
-from .core.days import add_days, day_of_instant, financial_year
+from .core.days import add_days, day_of_instant, days_between, financial_year
 from .core.kinds import CA_DECISIONS, REPORT_YEARS
 from .core.ledger import replay
 from .core.model import BadEntry, Entry, Refusal
@@ -221,8 +228,9 @@ class CorpActions:
     async def read_one(self, isin: str, now: int) -> str:
         """Read one ISIN and keep what it lists. The outcome: ``ok`` (a clean answer with events),
         ``none`` (an empty list, or no such instrument at Upstox; asked again in a week), one of
-        ``FAILED`` (nothing changed; an instrument never read before is marked as tried, asked
-        again the next night after the ones never asked) or one of ``STOPS`` (nothing written)."""
+        ``FAILED`` (nothing changed; an instrument never read before is marked as tried, with
+        the time it was tried in ``read_at``, and asked again the next night after the others)
+        or one of ``STOPS`` (nothing written)."""
         outcome, payload = await self._call(isin)
         if outcome == "ok":
             try:
@@ -240,9 +248,10 @@ class CorpActions:
         def write(tx: Tx) -> None:
             if outcome in FAILED:
                 # The last good read stands; only an instrument with none is marked as tried,
-                # so that the rotation puts it after the ones never asked.
+                # with when (never a read: its state says failed), so that the rotation puts it
+                # after the others and the one tried longest ago first.
                 if not any(r["isin"] == isin and r["state"] != "failed" for r in tx.ca_reads()):
-                    tx.ca_read_put(isin, None, "failed", WORDS[outcome])
+                    tx.ca_read_put(isin, now, "failed", WORDS[outcome])
                 return
             if payload is None:  # no such instrument at Upstox (or not an ISIN: nothing asked)
                 tx.ca_read_put(isin, now, "none", WORDS["none"])
@@ -272,19 +281,30 @@ class CorpActions:
         return list(getattr(memory, "data", None) or [])
 
     async def plan(self, now: int) -> list[str]:
+        return (await self._plan(now))[0]
+
+    async def _plan(self, now: int) -> tuple[list[str], set[str], bool]:
+        """Tonight's ISINs, the ones among them that failed before and were never read, and
+        whether anything was read in the rotation week up to tonight."""
         today, held = day_of_instant(now), self._held_now()
 
-        def look(tx: Tx) -> list[str]:
+        def look(tx: Tx) -> tuple[list[str], set[str], bool]:
             rows = tx.ca_reads()
             reads = {r["isin"]: r["read_at"] for r in rows if r["state"] != "failed"}
-            tried = {r["isin"] for r in rows if r["state"] == "failed"}
+            tried = {r["isin"]: r["read_at"] or 0 for r in rows if r["state"] == "failed"}
             days = {k: None if v is None else day_of_instant(v) for k, v in reads.items()}
             soon = tx.ca_events(from_day=today, to_day=add_days(today, core.NEAR_DAYS))
             near = {event["isin"] for event in soon}
             known = known_isins(tx, held)
-            first = core.tonight(sorted(known - tried), days, near, today, MAX_READS)
-            # One that failed before and was never read comes last: it cannot hold up the rest.
-            return (first + sorted(known & tried))[:MAX_READS]
+            first = core.tonight(sorted(known - set(tried)), days, near, today, MAX_READS)
+            # One that failed before and was never read comes last, the one tried longest ago
+            # first: it cannot hold up the rest, and none of them waits behind the others for
+            # ever (v0.14.0 verification M5).
+            again = sorted(known & set(tried), key=lambda isin: (tried[isin], isin))
+            week = any(days_between(day, today) < core.ROTATION_DAYS
+                       for day in days.values() if day is not None)  # fmt: skip
+            todo = (first + again)[:MAX_READS]
+            return todo, set(again) & set(todo), week
 
         return await self._store(lambda store: store.read(OWNER, look))
 
@@ -296,10 +316,10 @@ class CorpActions:
 
     async def run(self, now: int) -> tuple[str, str]:
         """One night's reads. Returns ``(status, note)`` for the job log."""
-        todo = await self.plan(now)
+        todo, again, week = await self._plan(now)
         counts = {"ok": 0, "none": 0, "failed": 0}
         why: dict[str, int] = {}
-        in_a_row, stop = 0, None
+        in_a_row, stop, fresh = 0, None, 0
         for isin in todo:
             await self._pace()
             outcome = await self.read_one(isin, self.service.clock())
@@ -307,9 +327,14 @@ class CorpActions:
                 stop = outcome
                 break
             counts[outcome if outcome in counts else "failed"] += 1
-            if outcome in FAILED:
-                why[outcome] = why.get(outcome, 0) + 1
-            in_a_row = in_a_row + 1 if outcome in FAILED else 0
+            if outcome not in FAILED:
+                in_a_row = 0
+                continue
+            why[outcome] = why.get(outcome, 0) + 1
+            fresh += isin not in again
+            # One that failed before says nothing of Upstox behind a good read tonight.
+            if isin not in again or not counts["ok"] + counts["none"]:
+                in_a_row += 1
             if in_a_row >= SILENT_STOP:
                 stop = outcome
                 break
@@ -317,9 +342,15 @@ class CorpActions:
             f"{counts['ok']} of {len(todo)} instruments read, {counts['none']} with nothing "
             f"listed, {counts['failed']} not read"
         )
-        # ``kinds.JOB_STATUSES``: a night that read nothing of what was due has failed, and its
-        # note says why in the words ``read_status`` shows the owner.
-        failed = bool(todo) and not counts["ok"] + counts["none"]
+        # ``kinds.JOB_STATUSES``: a night that read nothing has failed when a stop ended it, or
+        # an instrument that answered before failed, or nothing was read in the rotation week;
+        # never for the shares that always fail. Its note says why in the words
+        # ``read_status`` shows the owner.
+        failed = (
+            bool(todo)
+            and not counts["ok"] + counts["none"]
+            and (stop in STOPS or fresh > 0 or not week)
+        )
         reason = stop or (max(sorted(why), key=why.get) if why and failed else None)
         if reason is not None:
             note = f"{note}. {WORDS[reason]}"
