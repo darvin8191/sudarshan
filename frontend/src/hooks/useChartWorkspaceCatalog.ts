@@ -6,13 +6,26 @@ import {
 } from 'openalgo-charts/workspace'
 import { useCallback, useEffect, useRef, useState } from 'react'
 // SUDARSHAN M4.18: the server keeps the copy of record of the catalogue when it is switched on.
-import { storageNotice, syncedWorkspaceStorage } from '@/sudarshan/charts/workspaceStorage'
+import {
+  storageNotice,
+  storageOnServer,
+  syncedWorkspaceStorage,
+  whenStorageOnServer,
+} from '@/sudarshan/charts/workspaceStorage'
 
 export interface ChartWorkspaceCatalogState {
   catalog: WorkspaceCatalog | null
   loading: boolean
   pending: boolean
   error: string | null
+  /**
+   * SUDARSHAN M4.18: which copy of the layouts was kept after settling with the server, in
+   * words. Not an error, and it stays until `dismissNotice`: no later save clears it.
+   */
+  notice: string | null
+  dismissNotice(): void
+  /** SUDARSHAN M4.18: the layouts are kept on the server (true) or in this browser (false). */
+  keptOnServer: boolean
   reload(): Promise<void>
   run<T>(operation: (repository: WorkspaceRepository) => Promise<T>): Promise<T>
 }
@@ -30,6 +43,8 @@ interface View {
   loading: boolean
   pending: boolean
   error: string | null
+  notice: string | null
+  keptOnServer: boolean
 }
 
 function browserStorage(): IndexedDbWorkspaceStorage {
@@ -47,6 +62,8 @@ const empty = (account: string | null): View => ({
   loading: account !== null,
   pending: false,
   error: null,
+  notice: null,
+  keptOnServer: false,
 })
 
 /** Each mounted account owns its repository and every pending completion. */
@@ -62,6 +79,10 @@ export function useChartWorkspaceCatalog(
     async (owner: Owner) => {
       const catalog = await owner.repository.load()
       if (!owns(owner)) throw sessionError()
+      // SUDARSHAN M4.18: which copy was kept, in words; a load with nothing to say keeps the
+      // sentence already shown (review M3: the next autosave must not clear it).
+      const said = storageNotice(owner.storage)
+      const keptOnServer = storageOnServer(owner.storage)
       setView((previous) => ({
         ...previous,
         catalog:
@@ -69,7 +90,8 @@ export function useChartWorkspaceCatalog(
             ? previous.catalog
             : catalog,
         loading: false,
-        error: storageNotice(owner.storage), // SUDARSHAN M4.18: which copy was kept, in words
+        notice: said ?? previous.notice,
+        keptOnServer,
       }))
     },
     [owns]
@@ -99,7 +121,13 @@ export function useChartWorkspaceCatalog(
       if (owns(owner))
         setView((previous) => ({ ...previous, loading: false, error: errorMessage(error) }))
     })
+    // SUDARSHAN (review L2): the first load never waits for the server's switch. When its answer
+    // comes later and says on, the catalogue is loaded again so the server's copy is settled.
+    const unhear = whenStorageOnServer(storage, () => {
+      if (owns(owner)) void refresh(owner).catch(() => {})
+    })
     return () => {
+      unhear()
       owner.active = false
       if (ownerRef.current === owner) ownerRef.current = null
       void owner.storage.close().catch(() => {})
@@ -146,6 +174,11 @@ export function useChartWorkspaceCatalog(
     [currentOwner, owns, refresh]
   )
 
+  const dismissNotice = useCallback(
+    () => setView((previous) => (previous.notice ? { ...previous, notice: null } : previous)),
+    []
+  )
+
   // Avoid showing the outgoing account's catalog before its effect cleanup runs.
   const visible = view.account === account ? view : empty(account)
   return {
@@ -153,6 +186,9 @@ export function useChartWorkspaceCatalog(
     loading: visible.loading,
     pending: visible.pending,
     error: visible.error,
+    notice: visible.notice,
+    dismissNotice,
+    keptOnServer: visible.keptOnServer,
     reload,
     run,
   }
