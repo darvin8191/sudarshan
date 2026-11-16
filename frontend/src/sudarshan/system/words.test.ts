@@ -184,6 +184,25 @@ describe('the System page words', () => {
       expect(line(level, { when: at, tried: at })?.detail).not.toMatch(/\b[1-5]\d\d\b|TRINETRA/)
   })
 
+  it('says which way the TRINETRA reader is switched, and never calls off a fault', () => {
+    // v0.15.0 review S2: the reader runs while its view is off, and says so.
+    const line = (level: CheckLevel, facts: Record<string, string> = {}) =>
+      lineOf(check('service_signals', level, facts))
+    expect(line('fine', { view: 'off' })).toEqual({
+      group: 'services',
+      label: 'TRINETRA reader',
+      detail: 'Answering. The TRINETRA view is switched off.',
+    })
+    expect(line('fine', { view: 'on' })?.detail).toBe('Answering.')
+    expect(line('fine', { view: 'not_set_up' })?.detail).toContain('switched on but not set up')
+    expect(line('off', { view: 'off' })?.detail).toBe('The TRINETRA view is switched off.')
+    expect(line('off')?.detail).toBe('Not set up on this server.')
+    expect(line('failing', { service: 'signals', minutes: '4' })?.detail).toBe(
+      'Not answering for 4 minutes. The server restarts it by itself.'
+    )
+    expect(line('fine', { view: '<b>' })?.detail).toBe('Answering.')
+  })
+
   it('says a time in India, with the day when it is not today', () => {
     const now = Date.UTC(2026, 10, 16, 5, 30) // 11:00 in India
     expect(whenOf(Date.UTC(2026, 10, 16, 5, 12) / 1000, now)).toBe('10:42')

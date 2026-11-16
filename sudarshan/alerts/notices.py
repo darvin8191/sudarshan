@@ -450,6 +450,8 @@ _SERVICES = {
     "screener": ("screener", "Screens are not running and their alerts are stopped."),
     "family": ("family view", "Family members cannot open the app."),
     "journal": ("journal", "The Journal and Reports pages are not updating."),
+    # Told only while the view is switched on (the watch's rule): the page is the owner's own.
+    "signals": ("TRINETRA reader", "The TRINETRA page shows no new readings."),
 }
 #: Where the owner looks (M20.8): the System page shows every check the watch makes.
 LOOK = "open the System page and have the server looked at"

@@ -36,6 +36,15 @@ const SERVICES: Record<string, string> = {
   screener: 'Screener',
   family: 'Family view',
   journal: 'Journal',
+  signals: 'TRINETRA reader',
+}
+
+/** A service with a switch of its own says which way it is (the watch's `view` fact). */
+const VIEW: Record<string, string> = {
+  on: 'Answering.',
+  off: 'Answering. The TRINETRA view is switched off.',
+  not_set_up:
+    'Answering. The TRINETRA view is switched on but not set up yet: the TRINETRA page says what is missing.',
 }
 
 const UNREAD = 'Could not be read at the last look.'
@@ -124,10 +133,12 @@ export function lineOf(check: WatchCheck, drill: DrillResult | null = null): Lin
     const detail = unread
       ? UNREAD
       : level === 'off'
-        ? 'Not set up on this server.'
+        ? facts.view === 'off'
+          ? 'The TRINETRA view is switched off.'
+          : 'Not set up on this server.'
         : level === 'failing'
           ? `Not answering${minutes ? ` for ${minutes} minutes` : ''}. The server restarts it by itself.`
-          : 'Answering.'
+          : (VIEW[facts.view ?? ''] ?? 'Answering.')
     return { group: 'services', label, detail }
   }
   switch (name) {

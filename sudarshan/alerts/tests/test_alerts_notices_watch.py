@@ -50,6 +50,19 @@ def test_a_silent_service_names_what_stopped_and_when():
         )
 
 
+def test_the_signals_reader_is_told_by_the_name_of_the_owners_page():
+    """v0.15.0 review S2: the watch knows the reader on 5588. Its silence is told only while
+    the view is on (the checks' vectors); the words name the page the owner opens."""
+    assert said("watch_failing", "service_signals", service="signals", minutes="4") == (
+        "SUDARSHAN's TRINETRA reader stopped answering at 10:38 IST. The TRINETRA page shows "
+        "no new readings. The server restarts it by itself; if this message comes again, open "
+        "the System page and have the server looked at."
+    )
+    assert said("watch_fine", "service_signals", was="failing") == (
+        "SUDARSHAN's TRINETRA reader is answering again since 10:42 IST."
+    )
+
+
 def test_the_login_the_feed_and_the_instrument_list():
     assert said("watch_failing", "login", when="before_open", minutes="4") == (
         "There is no Upstox login for today. Orders, charts and order alerts will not work "
@@ -190,9 +203,11 @@ def test_every_sentence_is_for_a_trader():
     for text in sentences:
         assert not re.search(r"\b[1-5]\d\d\b", text), text
         low = text.lower()
+        # The owner's own page is called TRINETRA; only its reader's two sentences name it.
+        about_the_page = "TRINETRA reader" in text
         for word in ("traceback", "exception", "http", "errno", "systemd", "json", "/health",
                      "127.0.0.1", "timeout", "paper", "trinetra"):  # fmt: skip
-            assert word not in low, (word, text)
+            assert word not in low or (word == "trinetra" and about_the_page), (word, text)
         assert not re.search(r"\b(port|unit|socket|listener)s?\b", low), text
         assert not re.search(r"\barm(ed|ing)?\b", low), text
         assert not re.search(r"\blive\b", low), text

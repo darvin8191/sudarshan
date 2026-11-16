@@ -28,7 +28,7 @@ ALLOWED_PATHS = (
     "/run/reboot-required",  # the operating system's own flag
     "/var/lib/update-notifier/updates-available",  # and its count of updates waiting
 )
-ALLOWED_PORTS = {5000, 5580, 5581, 5582, 5583, 5584, 5585, 5586, 443}
+ALLOWED_PORTS = {5000, 5580, 5581, 5582, 5583, 5584, 5585, 5586, 5588, 443}
 ALLOWED_IMPORTS_OUTSIDE_STDLIB = ("sudarshan.", "cryptography", "sqlalchemy", "database.")
 NEVER_IMPORTED = {"subprocess", "signal", "multiprocessing", "threading", "asyncio", "dbus"}
 

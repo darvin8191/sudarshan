@@ -32,6 +32,7 @@ FINE = {
         "feed": {"state": "connected", "market_window": {"open": True}},
         "alerts": {"state": "connected"},
         **{name: {"state": "running"} for name in ("screener", "family", "journal")},
+        "signals": {"state": "off", "signals": "off"},  # installed and running, switched off
         # GA5.1: the portfolio publishes its own daily check of the Analytics Token.
         "portfolio": {
             "state": "running",

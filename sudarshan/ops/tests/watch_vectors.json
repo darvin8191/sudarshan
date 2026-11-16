@@ -1951,6 +1951,224 @@
    "memory": {},
    "level": "fine",
    "facts": {}
+  },
+  {
+   "name": "switched off and answering is fine: the view being off is no fault",
+   "check": "service_signals",
+   "readings": {
+    "health": {
+     "signals": {
+      "service": "sudarshan-signals",
+      "state": "off",
+      "signals": "off"
+     }
+    },
+    "enabled": {
+     "signals": true
+    }
+   },
+   "memory": {},
+   "level": "fine",
+   "facts": {
+    "view": "off"
+   },
+   "keep": {
+    "seen": 1,
+    "on": 0
+   }
+  },
+  {
+   "name": "switched on and answering is fine",
+   "check": "service_signals",
+   "readings": {
+    "health": {
+     "signals": {
+      "service": "sudarshan-signals",
+      "state": "running",
+      "signals": "on"
+     }
+    },
+    "enabled": {
+     "signals": true
+    }
+   },
+   "memory": {
+    "seen": 1,
+    "on": 0
+   },
+   "level": "fine",
+   "facts": {
+    "view": "on"
+   },
+   "keep": {
+    "seen": 1,
+    "on": 1
+   }
+  },
+  {
+   "name": "switched on but not set up still answers: fine, and the page says which",
+   "check": "service_signals",
+   "readings": {
+    "health": {
+     "signals": {
+      "service": "sudarshan-signals",
+      "state": "running",
+      "signals": "not_set_up"
+     }
+    },
+    "enabled": {
+     "signals": true
+    }
+   },
+   "memory": {
+    "seen": 1,
+    "on": 1
+   },
+   "level": "fine",
+   "facts": {
+    "view": "not_set_up"
+   },
+   "keep": {
+    "seen": 1,
+    "on": 1
+   }
+  },
+  {
+   "name": "silent after it last said off: off, nobody is told",
+   "check": "service_signals",
+   "readings": {
+    "health": {
+     "signals": null
+    },
+    "enabled": {
+     "signals": true
+    }
+   },
+   "memory": {
+    "seen": 1,
+    "on": 0
+   },
+   "level": "off",
+   "facts": {
+    "view": "off"
+   },
+   "keep": {
+    "seen": 1,
+    "on": 0
+   }
+  },
+  {
+   "name": "silent once while on is not yet a failure",
+   "check": "service_signals",
+   "readings": {
+    "health": {
+     "signals": null
+    },
+    "enabled": {
+     "signals": true
+    }
+   },
+   "memory": {
+    "seen": 1,
+    "on": 1
+   },
+   "level": "fine",
+   "facts": {
+    "service": "signals",
+    "minutes": "2"
+   },
+   "keep": {
+    "seen": 1,
+    "misses": 1,
+    "on": 1
+   }
+  },
+  {
+   "name": "silent twice in a row while on fails, like every ring service",
+   "check": "service_signals",
+   "readings": {
+    "health": {
+     "signals": null
+    },
+    "enabled": {
+     "signals": true
+    }
+   },
+   "memory": {
+    "seen": 1,
+    "on": 1,
+    "misses": 1
+   },
+   "level": "failing",
+   "facts": {
+    "service": "signals",
+    "minutes": "4"
+   },
+   "keep": {
+    "seen": 1,
+    "misses": 2,
+    "on": 1
+   }
+  },
+  {
+   "name": "an answer without its switch word is still an answer",
+   "check": "service_signals",
+   "readings": {
+    "health": {
+     "signals": {
+      "service": "sudarshan-signals"
+     }
+    },
+    "enabled": {
+     "signals": true
+    }
+   },
+   "memory": {
+    "seen": 1,
+    "on": 0
+   },
+   "level": "fine",
+   "facts": {},
+   "keep": {
+    "seen": 1,
+    "on": 1
+   }
+  },
+  {
+   "name": "never seen answering is off, not a fault",
+   "check": "service_signals",
+   "readings": {
+    "health": {
+     "signals": null
+    },
+    "enabled": {
+     "signals": true
+    }
+   },
+   "memory": {},
+   "level": "off",
+   "keep": {
+    "seen": 0
+   }
+  },
+  {
+   "name": "not asked at all: unread, and what it last said is kept",
+   "check": "service_signals",
+   "readings": {
+    "health": {},
+    "enabled": {
+     "signals": true
+    }
+   },
+   "memory": {
+    "seen": 1,
+    "on": 0
+   },
+   "level": "unread",
+   "keep": {
+    "seen": 1,
+    "on": 0
+   }
   }
  ],
  "sequences": [
@@ -2361,6 +2579,141 @@
       "fine",
       "warning"
      ]
+    ]
+   ]
+  },
+  {
+   "name": "the signals reader: off and silent tells nobody; on and silent is told once, and its return once",
+   "check": "service_signals",
+   "memory": {},
+   "runs": [
+    [
+     {
+      "health": {
+       "signals": {
+        "service": "sudarshan-signals",
+        "state": "off",
+        "signals": "off"
+       }
+      },
+      "enabled": {
+       "signals": true
+      }
+     },
+     null
+    ],
+    [
+     {
+      "health": {
+       "signals": null
+      },
+      "enabled": {
+       "signals": true
+      }
+     },
+     null
+    ],
+    [
+     {
+      "health": {
+       "signals": null
+      },
+      "enabled": {
+       "signals": true
+      }
+     },
+     null
+    ],
+    [
+     {
+      "health": {
+       "signals": {
+        "service": "sudarshan-signals",
+        "state": "running",
+        "signals": "on"
+       }
+      },
+      "enabled": {
+       "signals": true
+      }
+     },
+     null
+    ],
+    [
+     {
+      "health": {
+       "signals": null
+      },
+      "enabled": {
+       "signals": true
+      }
+     },
+     null
+    ],
+    [
+     {
+      "health": {
+       "signals": null
+      },
+      "enabled": {
+       "signals": true
+      }
+     },
+     [
+      "failing",
+      "fine"
+     ]
+    ],
+    [
+     {
+      "health": {
+       "signals": null
+      },
+      "enabled": {
+       "signals": true
+      }
+     },
+     null
+    ],
+    [
+     {
+      "health": {
+       "signals": {
+        "service": "sudarshan-signals",
+        "state": "off",
+        "signals": "off"
+       }
+      },
+      "enabled": {
+       "signals": true
+      }
+     },
+     [
+      "fine",
+      "failing"
+     ]
+    ],
+    [
+     {
+      "health": {
+       "signals": null
+      },
+      "enabled": {
+       "signals": true
+      }
+     },
+     null
+    ],
+    [
+     {
+      "health": {
+       "signals": null
+      },
+      "enabled": {
+       "signals": true
+      }
+     },
+     null
     ]
    ]
   }

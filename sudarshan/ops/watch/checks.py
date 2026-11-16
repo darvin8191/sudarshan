@@ -56,7 +56,12 @@ SERVICES = {
     "screener": 5584,
     "family": 5585,
     "journal": 5586,
+    "signals": 5588,
 }
+#: A service that runs while its feature is switched off, and says so in its ``/health``:
+#: service -> the key of its answer that holds the switch. Off, it is fine while it answers
+#: (the view being off is the owner's choice) and nobody is told when it does not.
+SWITCH_KEY = {"signals": "signals"}
 RUN_EVERY_MIN = 2  # the timer's period; "two runs in a row" is 4 minutes
 MISSES_TO_FAIL = 2
 LOGIN_FROM_MIN = 8 * 60 + 58  # 08:58: auto-login has had its three tries
@@ -93,20 +98,35 @@ def _misses(memory: Mapping, missed: bool) -> int:
 
 def service(name: str, readings: Mapping, memory: Mapping) -> Result:
     """One ring service's ``/health``: failing after two runs in a row without an answer, for a
-    service that is enabled here and has answered before (one never set up is OFF, not a fault)."""
+    service that is enabled here and has answered before (one never set up is OFF, not a fault).
+
+    A service with a switch of its own (``SWITCH_KEY``) is fine while it answers, on or off, and
+    its answer's word for the switch is a fact for the page. Silent after it last said "off",
+    it is OFF: nothing the owner uses has stopped. Silent after it said anything else, it is
+    checked like every other service."""
     check = f"service_{name}"
     answers, enabled = readings.get("health") or {}, readings.get("enabled") or {}
     seen = int(bool(memory.get("seen")))
-    if isinstance(answers.get(name), Mapping):
-        return Result(check, FINE, keep={"seen": 1})
+    switch = SWITCH_KEY.get(name)
+    answer = answers.get(name)
+    if isinstance(answer, Mapping):
+        if switch is None:
+            return Result(check, FINE, keep={"seen": 1})
+        word = answer.get(switch)
+        off = word == "off"
+        facts = {"view": word} if word in ("on", "off", "not_set_up") else {}
+        return Result(check, FINE, facts, {"seen": 1, "on": 0 if off else 1})
     if enabled.get(name) is False or not seen:
         return Result(check, OFF, keep={"seen": seen})
     if name not in answers:  # not asked at all: the reading itself is missing
         return Result(check, UNREAD, keep={**memory})
+    if switch is not None and memory.get("on") == 0:
+        return Result(check, OFF, {"view": "off"}, {"seen": 1, "on": 0})
     misses = _misses(memory, True)
     level = FAILING if misses >= MISSES_TO_FAIL else FINE
     facts = {"service": name, "minutes": str(misses * RUN_EVERY_MIN)}
-    return Result(check, level, facts, {"seen": 1, "misses": misses})
+    keep = {"seen": 1, "misses": misses} | ({"on": 1} if switch is not None else {})
+    return Result(check, level, facts, keep)
 
 
 def openalgo(readings: Mapping, memory: Mapping) -> Result:
