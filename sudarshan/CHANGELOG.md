@@ -32,7 +32,8 @@ in v0.12.0. **Publish only after v0.12.0 has installed and run one trading day.*
   release. Add a purchase under Tax, Inputs only for shares you bought before the years SUDARSHAN
   has read, or moved in from another account; the card names the first day read and which earlier
   years to read first. It shows only on the paper of the member who owns the Upstox account, and a
-  day whose 15:55 record could not read the holdings is never used.
+  day whose 15:55 record could not read the holdings is never used. While the check waits for
+  Upstox's trades or for a closing record, the paper's first note says so.
 - **The paper counts no dividends yet, and says so.** Until a later release reads them from Upstox,
   the paper, its CSV and the Tax pack tell you to take the year's dividends from your bank
   statements or Form 26AS, in place of an empty section that would read as none received.
@@ -235,11 +236,10 @@ in v0.12.0. **Publish only after v0.12.0 has installed and run one trading day.*
 - **Nothing here has been seen on a real phone or run on your server.** The screens were measured
   in a test browser at 360 x 800 and 800 x 360. Those browser tests are run by hand and are not
   part of the automatic checks that run on every change.
-- **A second review checked the fix rounds** and found every serious finding of the first reviews
-  fixed, except the hidden-page reading below, which is your decision. A third then checked the
-  later tax fixes: it asked for the Check card's advice to be corrected before publishing, which is
-  done, as said above. A short re-check of that last correction was still running when this was
-  written.
+- **This release had a second review and a re-check.** The second review found every serious
+  finding of the first reviews fixed, except the hidden-page reading below, which is your decision.
+  A further review of the later tax fixes asked for the Check card's advice to be corrected before
+  publishing; that is done, as said above, and its re-check says: publish, yes.
 - **Equity ETFs are "not computed" in the tax paper,** index ETFs included, because nothing yet
   tells one from a gold or liquid ETF reliably. Bringing them in needs your decision (a dated list
   you keep, or a tag). A share entered by hand in a tab without its ISIN is not computed either:
