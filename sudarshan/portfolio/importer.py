@@ -10,7 +10,12 @@
   moves one version and the batch becomes ``committed``.
 * **Undo** (``discard`` of a committed batch). Removes the batch's rows if the tab stays valid;
   otherwise it says which entry stands in the way. A batch still at ``preview`` is simply dropped.
-* **Export.** The posted entries of a tab in the generic format (imports/generic.export).
+* **Export.** The posted entries of a tab in the generic format (imports/generic.export). A
+  listed share is written by its symbol, exchange and ISIN; a holding with no symbol (gold, a
+  plot, a deposit, a fund kept without an ISIN) by its name, and it is read back by its name, as
+  long as the book has a holding of that name. What the file does not carry is said in
+  ``export.ENTRIES_NOTE`` and in the README: the list of holdings itself, the values typed for
+  them, loans, drafts and a charges breakdown.
 
 Everything is one store transaction on the store's writer thread, so a check and the write it
 guards see the same rows. No clock: ``now`` arrives by name, in epoch milliseconds.
@@ -29,7 +34,7 @@ from sudarshan.portfolio.core.ledger import replay
 from sudarshan.portfolio.core.model import BadEntry, Entry, Refusal
 from sudarshan.portfolio.imports import generic, zerodha
 from sudarshan.portfolio.imports.csvutil import BadFile
-from sudarshan.portfolio.imports.preview import Context, Preview
+from sudarshan.portfolio.imports.preview import Context, Preview, RowProblem
 from sudarshan.portfolio.store import (
     Invalid,
     NotFound,
@@ -50,7 +55,21 @@ WORDS = {
     "name": "Give the file a name.",
     "nothing": "There is nothing new in this file to add.",
 }
+#: Two sentences of a row (the row's number is put in front of them, as for every row's problem).
+NAME_AND_SYMBOL = (
+    "{name} is both a listed symbol and a holding you named yourself. Add the exchange (NSE or "
+    "BSE) to the row for the listed one, or rename your own holding."
+)
+NAME_TWICE = (
+    "{name} is the name of more than one of your holdings. Rename one of them, then choose the "
+    "file again."
+)
 assert set(FORMATS) == set(IMPORT_FORMATS)
+
+
+def _plain_name(name: str) -> str:
+    """A holding's name as it is compared: without regard to case and spacing."""
+    return " ".join(name.split()).casefold()
 
 
 class Importer:
@@ -242,10 +261,27 @@ def _read(
         alias = tx.find_alias(kind, value.strip().upper()) if value.strip() else None
         return alias["asset_id"] if alias and alias["asset_id"] in holdings else None
 
+    # A holding with no symbol of its own (gold, a plot, a deposit the owner typed; a fund kept
+    # without an ISIN) is written to an export by its name, so it is read back by its name.
+    named: dict[str, list[int]] = {}
+    for asset in tx.rows("asset"):
+        if asset["id"] in holdings and not asset["symbol"]:
+            named.setdefault(_plain_name(asset["name"]), []).append(asset["id"])
+
     def resolve(symbol: str, exchange: str, isin: str) -> int | None:
         found = book_asset("symbol", symbol) or book_asset("isin", isin)
-        if found is not None or resolver is None or not symbol.strip():
+        own = named.get(_plain_name(symbol), []) if symbol.strip() else []
+        if found is not None:
+            if own and found not in own and not exchange.strip() and not isin.strip():
+                # A row that could mean either is not guessed: the ledger would be another one.
+                raise RowProblem(NAME_AND_SYMBOL.format(name=words.shown(symbol)))
             return found
+        if len(own) > 1:
+            raise RowProblem(NAME_TWICE.format(name=words.shown(symbol)))
+        if own:
+            return own[0]
+        if resolver is None or not symbol.strip():
+            return None
         # Not in the book by name: the master contract may know the symbol's ISIN, and the book
         # may hold that ISIN (an old one kept as an alias) under another symbol.
         for place in (exchange.strip().upper(),) if exchange.strip() else ("NSE", "BSE"):

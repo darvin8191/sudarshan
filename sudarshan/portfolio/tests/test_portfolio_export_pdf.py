@@ -11,9 +11,7 @@ import ast
 import base64
 import importlib.util
 import os
-import re
 import sys
-import zlib
 from pathlib import Path
 
 from test_portfolio_export import (  # noqa: F401  (the rig and the invented tab)
@@ -36,27 +34,15 @@ from sudarshan.portfolio.core import words as W
 from sudarshan.portfolio.ops import REGISTRY, export_ops
 
 RENDER = Path(D.__file__).parent
-_spec = importlib.util.spec_from_file_location(
-    "render_pdfread", RENDER.parent / "tests" / "render_pdfread.py"
-)
+# The journal's reader, loaded under a name of this file's own. It is never put in ``sys.modules``
+# as ``render_pdfread`` and nothing in it is replaced: either would hand the journal's own tests,
+# which import it by that name later in the same process, this file's copy (review L7: one of
+# them then failed, in one collection order only).
+_NAME = "portfolio_export_pdfread"
+_spec = importlib.util.spec_from_file_location(_NAME, RENDER.parent / "tests" / "render_pdfread.py")
 pdfread = importlib.util.module_from_spec(_spec)
-sys.modules[_spec.name] = pdfread  # its dataclasses look the module up by name
+sys.modules[_NAME] = pdfread  # its dataclasses look the module up by name
 _spec.loader.exec_module(pdfread)
-
-
-def _stream(obj: bytes) -> bytes | None:
-    """The reader's own ``_stream`` strips line ends off the data, and a compressed stream may
-    end in one of those bytes (a 400-row page here does). This one takes the stream by its
-    /Length, as the format says; the reader is the journal's and is not changed."""
-    start = re.search(rb"stream\r?\n", obj)
-    if not start:
-        return None
-    length = int(re.search(rb"/Length (\d+)", obj[: start.start()]).group(1))
-    raw = obj[start.end() : start.end() + length]
-    return zlib.decompress(raw) if b"/FlateDecode" in obj[: start.start()] else raw
-
-
-pdfread._stream = _stream
 
 MINUS = "−"
 TAB = {"id": 7, "name": "Long term", "name_alt": None}
@@ -182,16 +168,13 @@ async def test_the_holdings_page_says_the_tabs_figures_with_sign_and_word(rig):
     assert said(pdf, "Absolute return") == "+5.12%"  # two decimals of the view's 5.1218
     assert said(pdf, "Loans outstanding") == money(fixed["liabilities_paise"])
     assert said(pdf, "Home loan") == money(20_000_000) + "1 Oct 2026"
-    assert said(pdf, "Reliance Industries") == "Zerodha10" + money(1_001_500) * 2 + gain(
-        0
-    )  # at cost
-    assert word(pdf, "Reliance Industries") == "FLAT" and word(pdf, "Gold bar") == "PROFIT"
+    # Review L5: no price yet, so counted at its cost; that is no result, and has no box.
+    assert said(pdf, "Reliance Industries") == "Zerodha10" + money(1_001_500) * 2 + "no price"
+    assert word(pdf, "Reliance Industries") is None and word(pdf, "Gold bar") == "PROFIT"
     assert "Reliance Industries: No price yet" in lines
     assert "1 holding has no price yet and is counted at its cost." in lines
     # One word in a filled box for every gain on the page, the three big ones' chips included.
-    assert sorted(chips(pdf)) == sorted(
-        ["PROFIT", "PROFIT", "PROFIT", "PROFIT", "FLAT", "PROFIT", "LOSS"]
-    )
+    assert sorted(chips(pdf)) == sorted(["PROFIT", "PROFIT", "PROFIT", "PROFIT", "PROFIT", "LOSS"])
     golden("holdings.pdf.txt", "\n".join(lines) + "\n")
 
 
@@ -276,7 +259,10 @@ def test_a_long_ledger_prints_its_newest_entries_and_says_so():
     sheet = export.entries(TAB, rows, {1: "Bank"}, {}, NOW)
     assert len(sheet.sections[0].rows) == export.PAPER_ENTRIES == 400
     assert sheet.figures[0] == ("Entries", "450")
-    assert sheet.notes == ("The 400 newest of 450 entries. The CSV file has every entry.",)
+    assert sheet.notes == (
+        "The 400 newest of 450 entries. The CSV file has every entry.",
+        export.ENTRIES_NOTE,
+    )
     assert sheet.sections[0].rows[-1][0] == export.Day(20240128)
     pdf = pdfread.read_pdf(export_pdf.pdf_bytes(sheet))
     assert 9 <= len(pdf.pages) <= 14 and sheet.notes[0] in lines_of(pdf)
@@ -354,3 +340,13 @@ def test_making_pdfs_leaves_no_file_open():
     for _ in range(5):
         assert export_pdf.pdf_bytes(sheet).startswith(b"%PDF-")
     assert len(os.listdir("/proc/self/fd")) == before
+
+
+def test_the_journals_pdf_reader_is_left_as_the_journal_wrote_it():
+    """Review L7: this file once put its own copy of the reader in ``sys.modules`` under the
+    journal's name, with one function replaced, for the whole process."""
+    assert pdfread.__name__ == "portfolio_export_pdfread"
+    assert sys.modules.get("render_pdfread") is not pdfread
+    source = (RENDER.parent / "tests" / "render_pdfread.py").read_text(encoding="utf-8")
+    assert pdfread._stream.__code__.co_filename.endswith("render_pdfread.py")
+    assert "def _stream(" in source and pdfread._stream.__module__ == "portfolio_export_pdfread"

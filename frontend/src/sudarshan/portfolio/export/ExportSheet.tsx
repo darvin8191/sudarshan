@@ -22,6 +22,9 @@ export const VIEW_LABELS: Record<ExportView, string> = {
 export const FORMATS = ['csv', 'pdf'] as const
 export type ExportFormat = (typeof FORMATS)[number]
 export const WHOLE_TAB = 'The whole tab is exported, whatever filter the screen shows.'
+/** What the entries file is and is not: the service's own sentence (export.py ENTRIES_NOTE). */
+export const ENTRIES_NOTE =
+  'The entries CSV reads back through Import into a tab of this portfolio. It holds entries only: a holding you named yourself (gold, a plot, a deposit) must already be in your list under the same name, and the values you typed for it, loans and drafts are not in the file.'
 export const EXPORTS_OFF =
   'The other views and the PDF are switched off on the server. They show here once a release switches them on.'
 
@@ -120,6 +123,9 @@ export function ExportSheet({
         />
         {!on && <p className="text-sm text-[color:var(--text-secondary)]">{EXPORTS_OFF}</p>}
         <p className="text-sm text-[color:var(--text-secondary)]">{WHOLE_TAB}</p>
+        {shownView === 'activity' && (
+          <p className="text-sm text-[color:var(--text-secondary)]">{ENTRIES_NOTE}</p>
+        )}
         <ProblemLine problem={send.problem} />
         <button
           type="button"
