@@ -11,7 +11,7 @@ A line (every value is a string, as ``jq --arg`` writes them):
 
     v     "1", the format
     id    the event's id: letters, digits and . _ -, at most 120; a message is sent once per id
-    src   who recorded it: deploy, backup, family, journal or watch
+    src   who recorded it: deploy, backup, family, journal, watch or signals
     kind  what happened (KINDS)
     at    seconds since 1970 when it happened
     run   the events of one run share it; the owner is told one run's facts in one message
@@ -49,8 +49,12 @@ JOURNAL_SPOOL = Path("/var/lib/sudarshan-journal/events.jsonl")
 #: The watch (``ops/watch``, M19.5) records each change of a check's level here, as the sudarshan
 #: user, in its unit's state directory.
 WATCH_SPOOL = Path("/var/lib/sudarshan-watch/events.jsonl")
+#: The TRINETRA view (``sudarshan/signals``, M13) records its notices here, as the sudarshan user in
+#: its unit's state directory: TRINETRA has not published today, stopped publishing, publishes again,
+#: or publishes a newer format (``signals/notices.py``).
+SIGNALS_SPOOL = Path("/var/lib/sudarshan-signals/events.jsonl")
 #: What the notice desk reads. A missing file is normal: the family service may not be on.
-DEFAULT_SPOOLS = (DEPLOY_SPOOL, BACKUP_SPOOL, FAMILY_SPOOL, WATCH_SPOOL)
+DEFAULT_SPOOLS = (DEPLOY_SPOOL, BACKUP_SPOOL, FAMILY_SPOOL, WATCH_SPOOL, SIGNALS_SPOOL)
 #: What a notice can be about. Each has its words in ``sudarshan/alerts/notices.py``, except
 #: ``report`` (src journal): it carries the id of a report, its kind and the sha256 of its file and
 #: no text, and belongs to the report desk, not to the notice desk.
@@ -78,10 +82,14 @@ KINDS = frozenset(
         "watch_summary",
         "drill_passed",
         "drill_failed",
+        "signals_quiet",
+        "signals_stale",
+        "signals_back",
+        "signals_format",
     }
 )
 FORMAT = "1"
-SOURCES = frozenset({"deploy", "backup", "journal", "family", "watch"})
+SOURCES = frozenset({"deploy", "backup", "journal", "family", "watch", "signals"})
 DEFAULT_FILE_MODE = 0o600
 ID = re.compile(r"[A-Za-z0-9._-]{1,120}")
 KEEP_LINES = 200

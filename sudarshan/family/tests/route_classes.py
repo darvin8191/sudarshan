@@ -320,6 +320,7 @@ internal      /sudarshan/autologin/internal/report     sudarshan_autologin.inter
 internal      /sudarshan/family/internal/watchlists    sudarshan_family.internal_watchlists            # sudarshan-family reads the lists the owner shares: sealed, 404 through nginx (P6 B1)
 internal      /sudarshan/screener/internal/push        sudarshan_screener_internal.internal_push       # sudarshan-screener pushes results: sealed, 404 through nginx
 internal      /sudarshan/screener/internal/watchlist   sudarshan_screener_internal.internal_watchlist  # sudarshan-screener reads and fills a watchlist: sealed, 404 through nginx
+internal      /sudarshan/signals/internal/push         sudarshan_signals.internal_push                 # sudarshan-signals pushes the TRINETRA view's updates: sealed, 404 through nginx
 internal      /sudarshan/watchlists/internal/read      sudarshan_watchlists_internal.read              # sudarshan-alerts reads a list's members: sealed, 404 through nginx
 
 # --- protected: the owner's session only ---
@@ -862,6 +863,12 @@ protected     /sudarshan/screener/api/today                                     
 protected     /sudarshan/screener/api/universes                                         sudarshan_screener.universes
 protected     /sudarshan/session/instrument                                             sudarshan_session_bp.instrument
 protected     /sudarshan/session/today                                                  sudarshan_session_bp.today
+protected     /sudarshan/signals/api/changes/<int:id>                                   sudarshan_signals.change_get
+protected     /sudarshan/signals/api/performance                                        sudarshan_signals.performance
+protected     /sudarshan/signals/api/settings                                           sudarshan_signals.settings_get
+protected     /sudarshan/signals/api/settings                                           sudarshan_signals.settings_set
+protected     /sudarshan/signals/api/state                                              sudarshan_signals.state
+protected     /sudarshan/signals/api/timeline                                           sudarshan_signals.timeline
 protected     /sudarshan/system/api/assistant/disconnect                                sudarshan_system.disconnect
 protected     /sudarshan/system/api/status                                              sudarshan_system.status
 protected     /sudarshan/watchlists/api/copy                                            sudarshan_watchlists.copy

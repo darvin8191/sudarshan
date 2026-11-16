@@ -13,6 +13,7 @@ read-only Analytics Token (market data, portfolio reads) — never with an order
 | `screener/` | `sudarshan-screener` | Scheduled scans (1/5/15 min, EOD) over universes (NIFTY 50/100/200/500, F&O list, custom watchlists, option chains) with a rule builder (price action, indicators via TA-Lib, OI build-up classes, IV rank/percentile, PCR, basis, bhavcopy fields). Results feed **membership-table watchlists** (first_seen / last_seen / hits / exited / pinned / score) in OpenAlgo's watchlist DB and raise digest alerts; every run is stored for rewind and forward-return backtests. |
 | `portfolio/` | `sudarshan-portfolio` | Upstox tab (holdings, positions, MTF, funds tree, trade history, trade-wise P&L + charges, GTT, MF, portfolio stream) on the Analytics Token + daily snapshots, dividends from corporate actions, sector tags; and the **custom manual portfolio engine**: activity model (BUY/SELL/DIVIDEND/FEE/INTEREST/TRANSFER/SPLIT/BONUS), any asset, tags, imports (CSV/tradebook), FIFO lots, STCG/LTCG (ITA 2025 sections, "verify with CA"), XIRR/TWR, allocation, goals, custom tab layouts. |
 | `journal/` | `sudarshan-journal` | **The trade journal and reports (M14, M15).** Every fill Upstox reports, paired into trades (long, short, flips split, carried across days), with the journal's figures (win rate, profit factor, expectancy, R, drawdown, calendar, heat map, expiry split, how far each trade went for and against) on the Journal page; and the reports (day report, morning brief, week in review, monthly statement with its CSV, tax pack) built on the journal's own schedule, kept in its archive on the Reports page and delivered on Telegram by `sudarshan-alerts`' report desk. It reads the account only through `sudarshan-portfolio`, prices from `sudarshan-feed` and OpenAlgo's own records read-only; it places no order and reaches nothing off this server. Off until `SUDARSHAN_JOURNAL` is on in OpenAlgo's `.env`, which the release sets (below); `127.0.0.1:5586/health` names the installed release and what it is doing. `journal/README.md` has the rest. |
+| `signals/` | `sudarshan-signals` | **The TRINETRA view (M13).** Reads the readings TRINETRA chooses to publish, from its letterbox only (`/var/spool/sudarshan-signals/in`, set up once with `ops/signals/bootstrap.sh`), keeps them with their timeline in `signals.db` and serves them on 127.0.0.1:5588 to OpenAlgo's bridge and the journal, with how fresh they are. It never opens, asks, restarts or signals anything of TRINETRA's, holds no API key and places no order. Off until the release turns `SUDARSHAN_SIGNALS` on. Docs: `signals/README.md`. |
 | `family/` | `sudarshan-family` | View-only layer for family members: own users/sessions/TOTP, privacy mode, invitations, per-user watchlists/alerts, audit log, viewer UI variants, family Telegram bot. Backed by the Analytics-Token data plane only; every OpenAlgo write/admin/bot route must answer 401/403 to a viewer. |
 | `autologin/` | `sudarshan-autologin` (oneshot + timer) | The daily Upstox login with TOTP + PIN (Upstox's TOTP token API) at 08:35/08:45/08:55 IST on trading days, and "Test now" from the Auto login page. Fetches the token, then hands it to OpenAlgo, which stores it exactly as a manual login does (its in-memory caches only refresh in its own process); never ends a login Upstox still accepts, and pauses after any refusal until the key or PIN is saved again. The one ring process that receives an order-capable token: it passes it to OpenAlgo and never uses it. Result on the page and in Telegram. |
 | `vault/` | (library) | Owner vault `db/sudarshan-vault/sudarshan_vault.db` (directory 700, file 600; the auto-login unit may write only there): small secrets entered on the phone, Fernet under a key derived (HKDF) from OpenAlgo's pepper; write-only over HTTP. Also holds the auto-login status. |
@@ -47,6 +48,7 @@ never a move to another port.
 | 5585 | `sudarshan-family` (P6, not built yet): the family view's one listener: the viewer API and its WebSocket that nginx forwards (`/family/api/`, `/family/ws`), the sealed admin and nudge routes, and `GET /health`. It runs as its own account, `sudarshan-family` |
 | 5586 | `sudarshan-journal`: its sealed local API (OpenAlgo's bridge for the Journal and Reports pages, the alerts' report desk and their nudges), and `GET /health` (the release installed and what the journal is doing, `journal_state`; the one listener, no other port; a taken port is tried again every minute while its jobs carry on) |
 | 5587 | reserved for `sudarshan-protect` (later) |
+| 5588 | `sudarshan-signals`: the TRINETRA view's sealed local API (OpenAlgo's bridge for the TRINETRA page, the journal's reads), and `GET /health` (the release installed, whether the view is switched on and set up, how fresh TRINETRA's readings are, never TRINETRA's text; the one listener, no other port; a taken port is tried again every minute while the letterbox is still read) |
 
 **Sealed routes.** Each has its own key purpose in `sudarshan/vault/keys.py` (HKDF from OpenAlgo's
 pepper; a seal of one purpose never opens another's), a 60 s seal, a nonce accepted once, and a
@@ -68,6 +70,10 @@ nonce that could still be replayed.
 | the alerts' "orders changed" nudge to the journal | `sudarshan/journal/nudge/v1` | 4 KiB |
 | the family service to the journal (P6, counts only) | `sudarshan/journal/family/v1` | 4 KiB |
 | the journal to the portfolio API (account reads only) | `sudarshan/portfolio/api/journal/v1` | 64 KiB |
+| OpenAlgo to the TRINETRA view's API (M13) | `sudarshan/signals/api/v1` | 16 KiB |
+| the journal to the TRINETRA view (`state_at`, `state` only) | `sudarshan/signals/journal/v1` | 4 KiB |
+| the TRINETRA view to OpenAlgo's owner room | `sudarshan/signals/push/v1` | 32 KiB |
+| the TRINETRA view to the alerts' signals desk | `sudarshan/alerts/signals/v1` | 16 KiB |
 
 **Keys on the one feed socket (U9).** Upstox allows ltpc 5,000, full 2,000 and option_greeks
 3,000 keys per connection; once more than one mode is in use the feed reads "combined" as 1,500
@@ -155,6 +161,11 @@ however long the queue is.
 request as switched off until it is, and the alerts' report desk delivers reports only while the
 journal says it is on (the desk reads it from the journal's `/health`). The line has no old value,
 so an owner who sets it to `off` keeps it off through later deploys.
+
+`SUDARSHAN_SIGNALS  off` (M13) ships the TRINETRA view switched off: `sudarshan-signals` reads
+nothing and answers every request as switched off until it is on, and once on it reads nothing
+until the letterbox's set-up has been run ("The TRINETRA view" below). The line has no old
+value, so an owner who turns it on keeps it on through later deploys.
 
 ## NSE calendar lines that ship with a release (M0.1)
 
@@ -1573,3 +1584,34 @@ cannot be added, and then:
   `ssh -N -L 5000:127.0.0.1:5000 <you>@<server>`, with `http://127.0.0.1:5000` as the host.
 
 Tests: `sudarshan/assistant/tests/`, `sudarshan/guard/tests/test_guard_migration.py`.
+
+## The TRINETRA view (M13)
+
+TRINETRA's readings reach SUDARSHAN only through a letterbox: a folder SUDARSHAN owns
+(`/var/spool/sudarshan-signals/in`), into which TRINETRA's operators add one small publisher.
+`sudarshan-signals` (127.0.0.1:5588) reads it once a second, keeps the readings and their
+timeline in `/var/lib/sudarshan-signals/signals.db`, and shows them on your screens with how old
+they are. Nothing of TRINETRA's is ever opened, asked, restarted or changed from here; the whole
+contract, and the page to hand TRINETRA's operators, is `sudarshan/signals/README.md` (section
+1). The view ships **switched off** (`SUDARSHAN_SIGNALS off` in "OpenAlgo settings that ship with
+a release"); while it is on and the set-up below has not been run, the TRINETRA page says
+"TRINETRA is not connected yet" with the line to run.
+
+### The letterbox's one-time set-up (M13.3)
+
+1. Ask TRINETRA's operators which account TRINETRA runs as, and give them section 1 of
+   `sudarshan/signals/README.md`. Their publisher stays behind a switch of their own until they
+   choose.
+2. On the server, in the app's folder:
+   `sudo sudarshan/ops/signals/bootstrap.sh --publisher <that account>`
+   (add `--dry-run` first to see what it would do). It makes the letterbox (owner `sudarshan`,
+   mode 1733) and writes the account's number to `/etc/sudarshan/signals.env`, then says
+   `PASS.` It reads the system's account list for that number and nothing else; it touches
+   nothing of TRINETRA's. Running it again is safe ("Nothing was changed").
+3. Check it as SUDARSHAN's account: `sudo -u sudarshan .venv/bin/python -m sudarshan.signals.check`.
+   It writes one file into the letterbox as an account that is not TRINETRA's and sees it refused,
+   then says `PASS.`
+4. Nothing needs a restart: the service notices the set-up within a minute.
+
+After a server is rebuilt, run step 2 again: the letterbox is a queue and is not backed up
+(`signals.db` is). Tests: `sudarshan/signals/tests/`, `sudarshan/ops/tests/test_signals_bootstrap.py`.

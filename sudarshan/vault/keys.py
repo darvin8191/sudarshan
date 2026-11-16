@@ -62,6 +62,16 @@ JOURNAL_DELIVERY_INFO = b"sudarshan/journal/delivery/v1"
 JOURNAL_NUDGE_INFO = b"sudarshan/journal/nudge/v1"
 #: Seals the family service's read of the journal's counts-only family line (no money field).
 JOURNAL_FAMILY_INFO = b"sudarshan/journal/family/v1"
+#: Seals OpenAlgo's bridge to the TRINETRA view's local API (sudarshan-signals, 127.0.0.1:5588;
+#: M13): the page's reads and its one setting.
+SIGNALS_API_INFO = b"sudarshan/signals/api/v1"
+#: Seals the journal's reads of the TRINETRA view: state_at and state only.
+SIGNALS_JOURNAL_INFO = b"sudarshan/signals/journal/v1"
+#: Seals the TRINETRA view's pushes to OpenAlgo's owner room (sudarshan-signals to OpenAlgo).
+SIGNALS_PUSH_INFO = b"sudarshan/signals/push/v1"
+#: Seals the TRINETRA view's changes for the alerts' signals desk (sudarshan-signals to
+#: sudarshan-alerts): their own purpose, so the alerts API opens no other op under it.
+ALERTS_SIGNALS_INFO = b"sudarshan/alerts/signals/v1"
 #: Every purpose: a key derived for one never opens another's seal (a test holds them apart).
 PURPOSES = (
     VAULT_INFO,
@@ -82,6 +92,10 @@ PURPOSES = (
     JOURNAL_DELIVERY_INFO,
     JOURNAL_NUDGE_INFO,
     JOURNAL_FAMILY_INFO,
+    SIGNALS_API_INFO,
+    SIGNALS_JOURNAL_INFO,
+    SIGNALS_PUSH_INFO,
+    ALERTS_SIGNALS_INFO,
 )
 _FINGERPRINT_LABEL = b"sudarshan/vault/key-fingerprint/v1"
 
