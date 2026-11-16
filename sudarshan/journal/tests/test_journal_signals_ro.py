@@ -237,3 +237,20 @@ def test_the_service_builds_its_reader_with_the_journal_purposes_key(rig):
     built = signals_ro.reader_for(rig.svc)
     assert isinstance(built, SignalsReader) and built.fernet is JOURNAL_KEY
     assert built.url == rig.svc.settings.signals_url == "http://127.0.0.1:5588"
+
+
+def test_fifty_reads_on_the_one_client_leave_no_descriptor_once_closed(signals):
+    from sudarshan.tests.fdwatch import FdWatch
+
+    fake, url = signals
+
+    async def go():
+        watch = FdWatch()
+        reader = SignalsReader(url, JOURNAL_KEY)
+        for _ in range(50):
+            assert (await reader.state())["freshness"]["status"] == "fresh"
+        await reader.aclose()
+        await watch.aassert_clean()
+
+    asyncio.run(go())
+    assert len(fake.asked) == 50

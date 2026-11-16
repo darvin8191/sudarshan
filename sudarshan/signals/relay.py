@@ -55,6 +55,8 @@ BATCH = 50
 TIMEOUT_S = 5.0
 CONNECT_TIMEOUT_S = 1.0
 WARN_EVERY_S = 3600.0
+#: The codes the alerts' listener answers a relay with (market/api.py, signals_desk.py).
+KNOWN_CODES = frozenset({"bad_request", "busy", "off", "forbidden", "principal", "size", "failed"})
 
 _due: weakref.WeakKeyDictionary[Any, asyncio.Event] = weakref.WeakKeyDictionary()
 _keys: dict[str, Fernet] = {}
@@ -156,8 +158,9 @@ async def post(service: Any, key: Fernet, items: list[dict[str, Any]]) -> set[st
     ):
         code = payload.get("code") if isinstance(payload, dict) else None
         said = payload.get("message") if isinstance(payload, dict) else None
-        _warn(f"refused-{code}", "The alert service did not take TRINETRA's changes (%s): %s",
-              code or answer.status_code, said or "no reason given")  # fmt: skip
+        known = code if code in KNOWN_CODES else "other"  # the warning's key space stays small
+        _warn(f"refused-{known}", "The alert service did not take TRINETRA's changes (%s): %s",
+              known, said if isinstance(said, str) else "no reason given")  # fmt: skip
         return None
     have = [*(data.get("taken") or []), *(data.get("known") or [])]
     return {ident for ident in have if isinstance(ident, str)} & {item["id"] for item in items}

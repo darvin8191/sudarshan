@@ -20,7 +20,7 @@ from sudarshan.alerts import outbox, signals_desk
 from sudarshan.alerts.market.api import RELAY_MAX, ApiError, MarketApi, OffDesk
 from sudarshan.alerts.outbox import DROP, ORDERS, RETRY, SENT, SIGNALS, Pacer
 from sudarshan.alerts.service import AlertService
-from sudarshan.alerts.signals_desk import SignalsDesk
+from sudarshan.alerts.signals_desk import SignalsDesk, compose
 from sudarshan.alerts.store import Store
 from sudarshan.autologin.handoff import seal
 from sudarshan.tasks import cancel_and_wait
@@ -469,5 +469,54 @@ def test_the_30_minutes_count_from_the_changes_own_time_not_its_arrival(quick, s
         finally:
             await cancel_and_wait(task)
         assert "BANKNIFTY" in sender.texts[0]
+
+    asyncio.run(scenario())
+
+
+# ---- bounds and descriptors (fd-audit) -----------------------------------------------------------
+
+
+def test_a_burst_past_the_bound_drops_the_oldest_and_a_reading_keeps_two_items(
+    quick, store, monkeypatch
+):
+    monkeypatch.setattr(signals_desk, "MAX_WAITING", 3)
+
+    async def scenario():
+        desk = desk_for(store, Sender())  # no run task: nothing goes, everything waits
+        await desk.relay(relay_message(alerts=[alert(f"a-{n}") for n in range(5)]))
+        assert desk.health()["waiting"] == 3 and desk.stats["dropped"] == 2
+        assert [m.ids for m in desk._queue.values()] == [["a-2"], ["a-3"], ["a-4"]]
+        for n in range(10, 15):
+            await desk.relay(
+                relay_message([change(n, from_label=f"State {n}", to_label=f"State {n + 1}")])
+            )
+        (merged,) = [m for m in desk._queue.values() if m.kind == "change"]
+        assert len(merged.items) == 2 and len(merged.ids) == 5  # every id settles with it
+        line = compose("change", merged.items, AT).split("\n")[1]
+        assert "State 10 → State 15" in line  # from what was first told to the newest
+
+    asyncio.run(scenario())
+
+
+def test_a_hundred_relays_and_sends_leave_no_descriptor_open(quick, tmp_path):
+    from sudarshan.tests.fdwatch import FdWatch
+
+    async def scenario():
+        held = Store(tmp_path / "alerts.db")
+        sender = Sender()
+        desk = desk_for(held, sender)
+        task = await running(desk)
+        watch = FdWatch()
+        try:
+            for n in range(100):
+                await desk.relay(
+                    relay_message([change(n, instrument="NIFTY" if n % 2 else "BANKNIFTY")])
+                )
+            await wait_until(lambda: desk.health()["waiting"] == 0, 10)
+        finally:
+            await cancel_and_wait(task)
+        await watch.aassert_clean()
+        held.close()
+        assert desk.stats["taken"] == 100
 
     asyncio.run(scenario())

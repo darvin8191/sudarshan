@@ -72,6 +72,9 @@ HOLD_S = c.RELAY["hold_ms"] / 1000.0
 POLL_S = 0.2  # a message ready to go looks again this soon while its lane gives way
 RETRY_S = (2.0, 5.0, 10.0, 30.0, 60.0)
 UNCONFIRMED_TRIES = 3
+#: Items waiting at most; past this the oldest message's are not sent (a burst far beyond what
+#: four a minute could tell within HOLD_S), as the other lanes bound theirs.
+MAX_WAITING = 200
 #: (start, end) in minutes of the day, IST, or None: decision 14 (22:30 to 07:00), built in N1.
 NIGHT_HOURS: tuple[int, int] | None = None
 TEXT_MAX = c.RELAY["text"]
@@ -360,12 +363,23 @@ class SignalsDesk:
         key = _key_of(kind, fields)
         held = self._queue.get(key)
         if held is not None and kind == "change":
-            held.items.append(fields)
+            held.items[1:] = [fields]  # the words need the first and the newest; every id settles
             held.ids.append(fields["id"])
             held.ready = max(held.ready, ready)
         else:
             self._queue[key] = _Message(kind, [fields], [fields["id"]], seen, ready)
+        self._bound()
         self._wake.set()
+
+    def _bound(self) -> None:
+        """At most MAX_WAITING items wait: past it the oldest messages are not sent."""
+        waiting = sum(len(m.ids) for m in self._queue.values())
+        while waiting > MAX_WAITING and len(self._queue) > 1:
+            _, oldest = self._queue.popitem(last=False)
+            waiting -= len(oldest.ids)
+            self._end(oldest, "dropped")
+            log.warning("TRINETRA: more changes were waiting than can be told; %d older item(s) "
+                        "are not sent", len(oldest.ids))  # fmt: skip
 
     # ---- sending ----------------------------------------------------------------------------
     def _reload_once(self) -> None:
@@ -531,7 +545,7 @@ class SignalsDesk:
         key = self._key(message)
         newer = self._queue.pop(key, None)
         if newer is not None:
-            message.items += newer.items
+            message.items[1:] = newer.items[-1:]
             message.ids += newer.ids
             message.ready = max(message.ready, newer.ready)
         self._queue[key] = message

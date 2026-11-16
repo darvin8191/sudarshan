@@ -336,3 +336,26 @@ def test_relay_is_attached_at_the_seam_with_one_marked_line(name):
     assert service.HAND_ON[name] is relay.on_batch and service.JOBS[name] is relay.relayer
     tail = Path(service.__file__).read_text().rstrip().split("\n")[-1]
     assert tail.startswith("from sudarshan.signals import relay as _relay") and "AL2" in tail
+
+
+def test_a_hundred_rounds_through_the_real_listener_leave_no_descriptor_open():
+    from sudarshan.tests.fdwatch import FdWatch
+
+    async def scenario():
+        desk = Desk()
+        server, url = await listening(desk.relay)
+        try:
+            watch = FdWatch()
+            for n in range(1, 101):
+                store = Store([change_row(n)], [alert_row(f"x-{n}")])
+                assert await relay.relay_pending(fake_service(store, url)) == 2
+            await watch.aassert_clean()
+        finally:
+            await server.close()
+        assert len(desk.seen) == 200
+
+    asyncio.run(scenario())
+
+
+def test_the_warning_keys_stay_a_small_set_whatever_the_answer():
+    assert relay.KNOWN_CODES >= {"bad_request", "busy", "off", "forbidden", "principal", "size"}
