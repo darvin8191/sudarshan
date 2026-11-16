@@ -562,16 +562,21 @@ def test_quiet_days_counts_trading_days_between_and_never_today():
     assert rules.quiet_days("2020-01-01", "2026-11-19", weekdays) <= 60  # bounded
 
 
-def test_an_active_strategy_says_how_many_trading_days_passed_with_no_alert(store, desk):
+def test_an_active_strategy_says_how_many_trading_days_passed_with_no_alert(
+    store, desk, monkeypatch
+):
     from sudarshan.automation import control, intake
     from sudarshan.automation import model as m
 
+    now_ms = int(desk.clock * 1000)  # Mon 16 Nov 2026
+    # The store stamps the strategy on the desk's clock, not the wall clock: on the wall clock
+    # the count fell by one each real day after 16 Nov (it failed from 00:00 IST on 17 Nov).
+    monkeypatch.setattr(store_mod, "now_ms", lambda: now_ms)
     strategy, token = store.create(contract.clean(FORM))
     strategy = store.set_state(strategy.id, strategy.version, m.ACTIVE)
-    now_ms = int(desk.clock * 1000)  # Mon 16 Nov 2026
     week = 7 * 86_400_000
     seen = control.view(strategy, store, now_ms + week, desk.trading_day)
-    assert seen["quiet_days"] >= 4  # started and never heard from, a week on
+    assert seen["quiet_days"] == 4  # started Mon 16 Nov and never heard from: Tue to Fri
     assert control.view(strategy, store, now_ms + week)["quiet_days"] == 0  # no calendar, no claim
     stopped = store.set_state(strategy.id, None, m.STOPPED)
     assert control.view(stopped, store, now_ms + week, desk.trading_day)["quiet_days"] == 0
