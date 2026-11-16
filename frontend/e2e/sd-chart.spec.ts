@@ -1149,6 +1149,12 @@ for (const [layout, viewport] of [
 ] as const) {
   test.describe(`the cost run ${layout}`, () => {
     test.use({ viewport })
+    // It times frames by the wall clock, which a shared CI runner cannot hold steady (it fails
+    // there with no studies at all, as the header says). SD_COST_RUN=1 runs it all the same.
+    test.skip(
+      !!process.env.CI && !process.env.SD_COST_RUN,
+      'the cost run times frames by the wall clock: run it on your own machine, on a production build'
+    )
 
     test(`${COST_STUDIES.length} studies on a one-minute chart, ticks every 250 ms, the CPU four times slower`, async ({ page }, info) => {
       test.setTimeout(120_000)

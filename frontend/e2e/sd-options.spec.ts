@@ -15,7 +15,8 @@
  * build (`vite build`, then `vite preview`) and is skipped on the dev server, whose React is
  * several times slower. It asserts on each task (none over 50 ms, the 95th percentile under 34 ms)
  * and only reports the share of time the main thread is busy: sustained load is for the owner's
- * phone to judge.
+ * phone to judge. Where CI is set it skips, as the chart's does: a shared runner is not the quiet
+ * machine it is meant for (SD_COST_RUN=1 runs it all the same).
  *
  * Each state asserts: no sideways scroll; every link, button and switch at least 48 x 48 CSS px;
  * the freshness words for the state, and no "Real-time" without ticks; every up or down figure
@@ -422,6 +423,9 @@ async function costRun(
 const isDevServer = (page: Page) =>
   page.evaluate(() => document.querySelector('script[src*="@vite/client"]') !== null)
 
+/** Why the cost runs skip where CI is set. */
+const QUIET_MACHINE = 'the cost runs belong to a quiet machine: run them on your own, on a production build'
+
 test.describe('the options screen at 360 x 800', () => {
   for (const state of STATES) {
     test(state.name, async ({ page }, info) => {
@@ -675,6 +679,7 @@ test.describe('the options screen at 360 x 800', () => {
   })
 
   test('the cost run: 84 instruments at 5 ticks a second for 10 s, by the main thread\'s own CPU time', async ({ page, browser }, info) => {
+    test.skip(!!process.env.CI && !process.env.SD_COST_RUN, QUIET_MACHINE)
     test.slow()
     const { ticks } = await serve(page, OPEN)
     test.skip(await isDevServer(page), 'the cost run measures a production build: vite build, then vite preview')
@@ -684,6 +689,7 @@ test.describe('the options screen at 360 x 800', () => {
   })
 
   test('the cost run on the Straddle tab: the same tape with the computed chart drawing', async ({ page, browser }, info) => {
+    test.skip(!!process.env.CI && !process.env.SD_COST_RUN, QUIET_MACHINE)
     test.slow()
     const { ticks, seen } = await serve(page, OPEN, '/options/NFO/NIFTY?tab=straddle')
     test.skip(await isDevServer(page), 'the cost run measures a production build: vite build, then vite preview')
