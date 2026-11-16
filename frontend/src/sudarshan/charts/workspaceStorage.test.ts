@@ -18,6 +18,8 @@ import { useChartWorkspaceCatalog } from '@/hooks/useChartWorkspaceCatalog'
 import type { ChartsApi, DocKind, Problem, ServerDoc, WriteResult } from './api'
 import { mergeCatalogs, syncedWorkspaceStorage } from './workspaceStorage'
 
+const parsedCatalog = (raw: unknown) => raw as WorkspaceCatalog
+
 const NS = 'oa-trading:alice'
 
 class FakeServer implements ChartsApi {
@@ -321,7 +323,8 @@ describe('what is kept as it is', () => {
 })
 
 describe('the catalogue hook', () => {
-  it('shows which copy was kept where it shows a failure, and clears it on the next load', async () => {
+  // Review M3: the sentence is a notice, not a failure, and stays until the owner dismisses it.
+  it('shows which copy was kept as a notice that the next save does not clear', async () => {
     const server = new FakeServer()
     const laptop = browser(server, 'laptop')
     await laptop.repo.createTemplate('Shared', [])
@@ -342,10 +345,147 @@ describe('the catalogue hook', () => {
       'Made here offline',
       'Shared',
     ])
-    expect(result.current.error).toContain('were kept beside them')
+    expect(result.current.notice).toContain('were kept beside them')
+    expect(result.current.error).toBeNull()
+    // An autosave is a run: it clears a failure, never this sentence. Nor does a load.
+    await act(async () => {
+      await result.current.run((repo) => repo.createTemplate('Saved after', []))
+    })
     await act(async () => {
       await result.current.reload()
     })
-    expect(result.current.error).toBeNull()
+    expect(result.current.notice).toContain('were kept beside them')
+    act(() => result.current.dismissNotice())
+    expect(result.current.notice).toBeNull()
+  })
+
+  it('says where the layouts are kept: this browser while off, the server while on', async () => {
+    const off = new SwitchServer()
+    off.on = false
+    const here = syncedWorkspaceStorage(idb(), { api: off, storage: records() })
+    const hereFactory = () => here
+    const first = renderHook(() => useChartWorkspaceCatalog('alice', hereFactory))
+    await waitFor(() => expect(first.result.current.loading).toBe(false))
+    expect(first.result.current.keptOnServer).toBe(false)
+
+    const on = new SwitchServer()
+    const there = syncedWorkspaceStorage(idb(), { api: on, storage: records() })
+    const thereFactory = () => there
+    const second = renderHook(() => useChartWorkspaceCatalog('alice', thereFactory))
+    await waitFor(() => expect(second.result.current.keptOnServer).toBe(true))
+  })
+})
+
+/** A server whose switch answers when the test lets it, and says what the visit knows so far. */
+class SwitchServer extends FakeServer {
+  asked = 0
+  private known: boolean | null = null
+  private release: (() => void) | null = null
+  /** Hold the answer back, as a line that hangs does. */
+  hang() {
+    const held = new Promise<void>((resolve) => {
+      this.release = resolve
+    })
+    this.held = held
+  }
+  private held: Promise<void> | null = null
+  answer() {
+    this.release?.()
+  }
+  private asking: Promise<boolean> | null = null
+  override async enabled() {
+    if (this.known !== null) return this.known
+    this.asking ??= (async () => {
+      this.asked += 1
+      await this.held
+      this.known = this.on
+      return this.on
+    })()
+    return this.asking
+  }
+  state() {
+    return this.known
+  }
+}
+
+// Review L2: /trading restores this browser's layout at once, whatever the switch's read does.
+describe('a load never waits for the switch', () => {
+  async function saved(local: IndexedDbWorkspaceStorage) {
+    const repo = new WorkspaceRepository(local, NS)
+    await repo.createTemplate('Here already', [])
+  }
+
+  it('gives this browser’s catalogue while the switch’s read hangs, and saves land here', async () => {
+    const server = new SwitchServer()
+    server.on = false
+    server.hang()
+    const local = idb()
+    await saved(local)
+    const storage = syncedWorkspaceStorage(local, { api: server, storage: records() })
+    const repo = new WorkspaceRepository(storage, NS)
+    expect(namesOf(await repo.load())).toEqual(['Here already']) // resolved: nothing was waited for
+    await repo.createTemplate('Made meanwhile', [])
+    expect(namesOf(await repo.load())).toEqual(['Here already', 'Made meanwhile'])
+    expect(server.asked).toBe(1)
+    expect(server.reads).toEqual([])
+    expect(server.writes).toEqual([])
+    server.answer()
+    await Promise.resolve()
+    await repo.load()
+    expect(server.asked).toBe(1) // off: asked once for the visit
+    expect(storage.serverKeeps()).toBe(false)
+  })
+
+  it('a switch found on after the load tells the hook, which settles with the server', async () => {
+    const server = new SwitchServer()
+    const laptop = browser(new FakeServer(), 'laptop')
+    await laptop.repo.createTemplate('Shared', [])
+    server.doc = { revision: 1_794_000_000_500, body: await laptop.local.read(NS) }
+    server.hang()
+    const storage = syncedWorkspaceStorage(idb(), { api: server, storage: records() })
+    const factory = () => storage
+    const { result } = renderHook(() => useChartWorkspaceCatalog('alice', factory))
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.catalog?.templates ?? []).toEqual([])
+    expect(result.current.keptOnServer).toBe(false)
+    await act(async () => {
+      server.answer()
+    })
+    await waitFor(() =>
+      expect(result.current.catalog?.templates.map((t) => t.name)).toEqual(['Shared'])
+    )
+    expect(result.current.keptOnServer).toBe(true)
+  })
+
+  it('a browser that saw the switch on last time waits for the server’s copy, as before', async () => {
+    const server = new SwitchServer()
+    const laptop = browser(new FakeServer(), 'laptop')
+    await laptop.repo.createTemplate('Shared', [])
+    server.doc = { revision: 1_794_000_000_500, body: await laptop.local.read(NS) }
+    const seen = records()
+    // A first visit hears on and remembers it.
+    await syncedWorkspaceStorage(idb(), { api: server, storage: seen }).read(NS)
+    await Promise.resolve()
+    const next = new SwitchServer()
+    next.doc = server.doc
+    const storage = syncedWorkspaceStorage(idb(), { api: next, storage: seen })
+    expect(namesOf(parsedCatalog(await storage.read(NS)))).toEqual(['Shared'])
+  })
+
+  it('never throws when the device’s storage is blocked', async () => {
+    const server = new SwitchServer()
+    server.on = false
+    const blocked = {
+      getItem: () => {
+        throw new Error('blocked')
+      },
+      setItem: () => {
+        throw new Error('blocked')
+      },
+    }
+    const local = idb()
+    await saved(local)
+    const storage = syncedWorkspaceStorage(local, { api: server, storage: blocked })
+    expect(namesOf(parsedCatalog(await storage.read(NS)))).toEqual(['Here already'])
   })
 })

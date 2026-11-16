@@ -1483,6 +1483,16 @@ function TradingWorkspace({ account }: { account: string | null }) {
               {workspaceMessage}
             </p>
           )}
+          {/* SUDARSHAN M4.18 (review M3): which copy of the layouts was kept, in the quiet
+              style of this line, until dismissed. Not an error, and no save clears it. */}
+          {workspaceCatalog.notice && (
+            <output data-workspace-notice className="flex items-center gap-3 px-3 py-1 text-sm">
+              {workspaceCatalog.notice}
+              <Button variant="ghost" size="sm" onClick={workspaceCatalog.dismissNotice}>
+                Dismiss
+              </Button>
+            </output>
+          )}
           {workspace.pending && (
             <output className="flex items-center gap-3 px-3 py-1 text-sm">
               Loading workspace...

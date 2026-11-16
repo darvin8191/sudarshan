@@ -38,7 +38,7 @@ export function SyncNotice({ board = chartSyncNotices }: { board?: NoticeBoard }
       <button
         type="button"
         aria-label="Dismiss this note"
-        onClick={() => board.clear(notice.id)}
+        onClick={() => board.dismiss(notice.id)}
         className="inline-flex size-12 shrink-0 items-center justify-center rounded-full text-[color:var(--text-secondary)] hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:order-2"
       >
         <X aria-hidden="true" className="size-4" />

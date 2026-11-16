@@ -45,4 +45,19 @@ describe('the sync strip', () => {
     fireEvent.click(close)
     expect(screen.getByRole('status')).toHaveTextContent('Saved: Second.')
   })
+
+  // Review M2: whoever posted a sentence hears its dismissal, so a copy kept aside is let go.
+  it('tells the poster when the owner dismisses its sentence, not when its action runs', () => {
+    const board = new NoticeBoard()
+    const dismissed = vi.fn()
+    board.post({ id: 'a', tone: 'conflict', text: 'Changed.', dismissed })
+    render(<SyncNotice board={board} />)
+    board.clear('b')
+    expect(dismissed).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss this note' }))
+    expect(dismissed).toHaveBeenCalledTimes(1)
+    board.post({ id: 'a', tone: 'conflict', text: 'Changed.', dismissed })
+    board.clear('a')
+    expect(dismissed).toHaveBeenCalledTimes(1)
+  })
 })

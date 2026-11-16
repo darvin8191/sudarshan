@@ -198,6 +198,31 @@ describe('named indicator templates', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('local-oscillator')
   })
 
+  // SUDARSHAN M4.18 (review M3): the dialog says where the templates are actually kept.
+  it('says where the templates are kept: this browser, or the server once it keeps them', async () => {
+    const props = {
+      catalog: null,
+      loading: false,
+      pending: false,
+      error: null,
+      notice: null,
+      dismissNotice: vi.fn(),
+      keptOnServer: false,
+      reload: vi.fn(),
+      run: vi.fn(),
+      target: () => null,
+    }
+    const { rerender } = render(<IndicatorTemplates {...props} />)
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Templates', exact: true }))
+    const dialog = screen.getByRole('dialog')
+    expect(dialog).toHaveTextContent('Templates are saved for your account in this browser.')
+    rerender(<IndicatorTemplates {...props} keptOnServer />)
+    expect(dialog).toHaveTextContent(
+      'Templates are kept for your account on the server, so your other devices have them too.'
+    )
+    expect(dialog).not.toHaveTextContent('in this browser')
+  })
+
   it('disables mutations while catalog loading or a write is pending', async () => {
     const props = {
       catalog: null,

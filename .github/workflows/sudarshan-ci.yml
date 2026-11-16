@@ -1,6 +1,8 @@
 # सुदर्शन / SUDARSHAN checks for the `sudarshan` branch.
 # Upstream's ci.yml runs only for `main` (which this fork never pushes to), so the two never overlap.
-# Only our own code is gated here: upstream's test suite is upstream's business.
+# Only our own code is gated here, plus upstream's tests for the upstream code SUDARSHAN changes on
+# the order paths and upstream's eventlet tests (the upstream-orders job). The rest of upstream's
+# test suite is upstream's business.
 name: SUDARSHAN CI
 
 on:
@@ -97,3 +99,46 @@ jobs:
       - run: uv pip install "gunicorn>=25.0,<26" "eventlet==0.41.2"
       - name: Run every gthread migration test file
         run: .venv/bin/python -m pytest test/test_gthread_*.py -o addopts="" --timeout=120 -rs
+
+  # Upstream's own tests for the upstream code SUDARSHAN changes on the order paths (the strategy
+  # module, the scalping terminal, the Upstox order API), and upstream's eventlet tests, which run
+  # eventlet in a subprocess and assert on elapsed time and hub liveness. Upstream's ci.yml runs
+  # only on main, so without this job these files ran on a builder's box and nowhere else (v0.15.0
+  # server review T1). The last step fails if an eventlet test skipped, as upstream's does.
+  upstream-orders:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          python-version: "3.12"
+      - run: uv sync
+      - run: uv pip install "gunicorn>=25.0,<26" "eventlet==0.41.2"
+      - name: The strategy module, scalping and Upstox order tests
+        run: |
+          .venv/bin/python -m pytest test/test_strategy_module_*.py test/test_migrate_strategy_module.py \
+            test/test_scalping_*.py test/test_upstox_*.py -o addopts="" --timeout=300 -q -rs
+      - name: The eventlet tests
+        run: |
+          .venv/bin/python -m pytest \
+            test/test_eventlet_cross_thread_locks.py \
+            test/test_sqlite_lock_cooperative.py \
+            test/test_agent_stream_eventlet.py \
+            test/test_telegram_startup.py \
+            test/test_telegram_startup_isolation.py \
+            test/test_gthread_deploy_eventlet.py \
+            -o addopts="" --timeout=120 -rs --junitxml=eventlet.xml
+      - name: Every eventlet test ran
+        run: |
+          .venv/bin/python - <<'PY'
+          import sys
+          import xml.etree.ElementTree as ET
+          root = ET.parse("eventlet.xml").getroot()
+          suites = [root] if root.tag == "testsuite" else list(root)
+          tests = sum(int(s.get("tests", 0)) for s in suites)
+          skipped = sum(int(s.get("skipped", 0)) for s in suites)
+          print(f"{tests} eventlet tests, {skipped} skipped")
+          sys.exit(1 if tests == 0 or skipped else 0)
+          PY

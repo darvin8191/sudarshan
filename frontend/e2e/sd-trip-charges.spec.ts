@@ -9,7 +9,7 @@
  *   npx playwright test e2e/sd-trip-charges.spec.ts --project=chromium
  * A screenshot of each state is kept for the owner's eye.
  */
-import { expect, type Page, test } from '@playwright/test'
+import { expect, type Page, type Route, test } from '@playwright/test'
 
 test.skip(({ browserName }) => browserName !== 'chromium', 'the chart spec runs on Chromium only')
 test.use({ viewport: { width: 360, height: 800 }, hasTouch: true, isMobile: true })
@@ -175,6 +175,17 @@ const TRADES: Record<number, unknown> = {
   8: trade(8, ist(10, 0, 0, 1), ist(10, 30, 0, 1), 20261001),
 }
 
+/** Trade 9 while it is still open (its entry only), and once its exit is in the journal. */
+const EXITED_9 = trade(9, ist(12, 48, 5), ist(12, 57, 30), 20261020)
+const OPEN_9 = {
+  ...EXITED_9,
+  status: 'open',
+  closed_ms: null,
+  exit_qty: 0,
+  legs: EXITED_9.legs.slice(0, 1),
+  fills: EXITED_9.fills.slice(0, 1),
+}
+
 const ESTIMATE = {
   segment: 'equity_delivery',
   modelled: true,
@@ -199,6 +210,11 @@ interface Fixture {
   journalOff?: boolean
 }
 
+/** What the server pushes over the app's connection, when a test says so. */
+let push: (event: string, frame: unknown) => Promise<void> = async () => {}
+/** Trade 9's exit has reached the journal. */
+let exited9 = false
+
 /** What the test in hand caught: order calls, requests to other hosts, and the journal's ops. */
 let caught = {
   orders: [] as string[],
@@ -210,6 +226,7 @@ let caught = {
 }
 test.beforeEach(() => {
   caught = { orders: [], outside: [], journal: [], history: [], unrouted: [] }
+  exited9 = false
 })
 test.afterEach(() => {
   expect(caught.outside, 'a request to another host').toEqual([])
@@ -233,6 +250,14 @@ async function serve(page: Page, fixture: Fixture = {}) {
   })
   await page.clock.install({ time: NOW })
   let polls = 0
+  /** The long poll the page is waiting on: a push answers it, and the page asks again. */
+  let waiting: Route | null = null
+  push = async (event, frame) => {
+    await expect.poll(() => waiting !== null, 'the page is listening').toBe(true)
+    const route = waiting as Route | null
+    waiting = null
+    await route?.fulfill({ body: `42${JSON.stringify([event, frame])}` })
+  }
   await page.route('**/socket.io/**', async (route) => {
     const url = new URL(route.request().url())
     if (route.request().method() === 'POST') return route.fulfill({ body: 'ok' })
@@ -241,7 +266,12 @@ async function serve(page: Page, fixture: Fixture = {}) {
         body: `0${JSON.stringify({ sid: 's1', upgrades: [], pingInterval: 600_000, pingTimeout: 600_000, maxPayload: 1_000_000 })}`,
       })
     if (polls++ === 0) return route.fulfill({ body: '40{"sid":"n1"}' })
+    waiting = route
   })
+  // Charts across devices (M4.18) ships switched off: the chart asks once and keeps to the phone.
+  await page.route('**/sudarshan/charts/api/state', (route) =>
+    route.fulfill(json({ status: 'ok', data: { enabled: false } }))
+  )
   await page.route('**/auth/session-status*', (route) =>
     route.fulfill(
       json({
@@ -303,6 +333,10 @@ async function serve(page: Page, fixture: Fixture = {}) {
         json({ status: 'success', enabled: false, data: null, message: 'The journal is switched off on the server.' })
       )
     const id = /^\/trips\/(\d+)$/.exec(path)?.[1]
+    if (id === '9')
+      return route.fulfill(
+        json({ status: 'success', enabled: true, data: exited9 ? EXITED_9 : OPEN_9 })
+      )
     if (id && TRADES[Number(id)]) return route.fulfill(json({ status: 'success', enabled: true, data: TRADES[Number(id)] }))
     if (path === '/charges/estimate')
       return route.fulfill(json({ status: 'success', enabled: true, data: ESTIMATE }))
@@ -405,6 +439,43 @@ async function noSidewaysScroll(page: Page) {
   expect(width.scroll, 'no sideways page scroll').toBeLessThanOrEqual(width.client)
 }
 
+/** The D tokens of a buy's and a sell's mark, as the canvas paints them. */
+const BUY_INK = [0x1c, 0x65, 0xc8] as const
+const SELL_INK = [0xd0, 0x2f, 0x14] as const
+
+/** Where the chart's canvases are painted in a colour: the box of those pixels in CSS px, or null. */
+async function tagBox(page: Page, ink: readonly [number, number, number]) {
+  return page.evaluate(([r, g, b]) => {
+    const surface = document.querySelector('[data-testid="chart-surface"]')
+    if (!surface) return null
+    let box: { x0: number; y0: number; x1: number; y1: number; count: number } | null = null
+    for (const canvas of surface.querySelectorAll('canvas')) {
+      const context = canvas.getContext('2d')
+      if (!context || !canvas.width || !canvas.height) continue
+      const rect = canvas.getBoundingClientRect()
+      const scale = canvas.width / rect.width
+      const { data } = context.getImageData(0, 0, canvas.width, canvas.height)
+      for (let y = 0; y < canvas.height; y++)
+        for (let x = 0; x < canvas.width; x++) {
+          const at = (y * canvas.width + x) * 4
+          if (data[at + 3] < 250) continue
+          if (Math.abs(data[at] - r) > 3 || Math.abs(data[at + 1] - g) > 3 || Math.abs(data[at + 2] - b) > 3)
+            continue
+          const px = rect.left + x / scale
+          const py = rect.top + y / scale
+          box = box
+            ? { x0: Math.min(box.x0, px), y0: Math.min(box.y0, py), x1: Math.max(box.x1, px), y1: Math.max(box.y1, py), count: box.count + 1 }
+            : { x0: px, y0: py, x1: px, y1: py, count: 1 }
+        }
+    }
+    return box && { x: box.x0, y: box.y0, width: box.x1 - box.x0, height: box.y1 - box.y0, count: box.count }
+  }, ink)
+}
+
+/** How many pixels of the chart are painted in a colour. */
+const inked = async (page: Page, ink: readonly [number, number, number]) =>
+  (await tagBox(page, ink))?.count ?? 0
+
 const shot = (page: Page, name: string) =>
   page.screenshot({ path: test.info().outputPath(`${name}.png`) })
 
@@ -456,6 +527,79 @@ test.describe('a trade on the phone chart (M14.8)', () => {
     await expect.poll(() => caught.history.length).toBeGreaterThan(0)
     expect(caught.history).not.toContain('1m')
     await shot(page, 'journal-off')
+  })
+
+  // Review v0.15.0, M1: an exit made while the chart is open is marked without leaving it.
+  test('an exit made while the chart is open gets its S when the order update arrives', async ({ page }) => {
+    await serve(page)
+    await open(page, '/chart/NSE/SBIN?trip=9')
+    await expect.poll(() => caught.history.at(-1)).toBe('1m')
+    await page.clock.runFor(1_000)
+    await expect.poll(() => inked(page, SELL_INK)).toBe(0)
+    expect(await inked(page, BUY_INK)).toBeGreaterThan(20)
+    const reads = () => caught.journal.filter((op) => op === '/trips/9').length
+    const before = reads()
+    // Nothing is read on a timer: ten minutes pass with no order and no read.
+    await page.clock.runFor(10 * 60_000)
+    expect(reads()).toBe(before)
+    exited9 = true
+    await push('order_update', { symbol: 'INFY', exchange: 'NSE', order_status: 'complete' })
+    await page.clock.runFor(4_000)
+    expect(reads(), 'another instrument’s order reads nothing').toBe(before)
+    await push('order_update', { symbol: 'SBIN', exchange: 'NSE', action: 'SELL', order_status: 'complete' })
+    await page.clock.runFor(4_000)
+    await expect.poll(reads).toBe(before + 1)
+    // The page's clock is the test's: the chart paints on its next frame.
+    await expect
+      .poll(async () => {
+        await page.clock.runFor(200)
+        return inked(page, SELL_INK)
+      })
+      .toBeGreaterThan(20)
+    await expect(page.getByTestId('trip-notice')).toHaveCount(0)
+    await shot(page, 'exit-marked-while-open')
+  })
+
+  // Review v0.15.0, L4: on 1-minute candles at 360 px a mark is a tag of a readable size with
+  // its letter alone, and a tap on it opens the fill in full.
+  test('a mark is a readable tag on minute candles, and a tap on it opens its fill', async ({ page }) => {
+    await serve(page)
+    await open(page, '/chart/NSE/SBIN?trip=7')
+    await expect.poll(() => caught.history.at(-1)).toBe('1m')
+    await page.clock.runFor(1_000)
+    const tag = await expect
+      .poll(async () => (await tagBox(page, BUY_INK)) !== null)
+      .toBe(true)
+      .then(() => tagBox(page, BUY_INK))
+    // A plate of the letter: at least 12 px each way, and never as wide as the price would be.
+    expect(tag && tag.width >= 12 && tag.height >= 12, JSON.stringify(tag)).toBe(true)
+    expect(tag && tag.width < 40, JSON.stringify(tag)).toBe(true)
+    if (!tag) return
+    // A finger beside the tag still finds it.
+    await page.mouse.click(tag.x + tag.width / 2 + 12, tag.y + tag.height / 2 + 10)
+    await page.clock.runFor(600)
+    const sheet = page.getByRole('dialog')
+    await expect(sheet.getByText('Entry: bought at this candle')).toBeVisible()
+    await expect(sheet.getByTestId('trip-mark-fills')).toHaveText('10:02:05Bought10 at 803.05')
+    await noSidewaysScroll(page)
+    await shot(page, 'mark-fill-sheet')
+  })
+
+  // Review v0.15.0, L6: the same instrument opened without the trade loses the marks.
+  test('the marks go when the chart is opened again without the trade', async ({ page }) => {
+    await serve(page)
+    await open(page, '/chart/NSE/SBIN?trip=7')
+    await expect.poll(() => caught.history.at(-1)).toBe('1m')
+    await page.clock.runFor(1_000)
+    await expect.poll(() => inked(page, BUY_INK)).toBeGreaterThan(20)
+    await page.evaluate(() => {
+      window.history.pushState(window.history.state, '', '/chart/NSE/SBIN')
+      window.dispatchEvent(new PopStateEvent('popstate', { state: window.history.state }))
+    })
+    await expect(page).toHaveURL(/\/chart\/NSE\/SBIN$/)
+    await page.clock.runFor(1_000)
+    await expect.poll(() => inked(page, BUY_INK)).toBe(0)
+    await expect.poll(() => inked(page, SELL_INK)).toBe(0)
   })
 })
 

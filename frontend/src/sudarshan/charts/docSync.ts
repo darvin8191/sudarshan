@@ -13,6 +13,10 @@
  *   replaces. Both changed: the server's copy, written later on another device, is shown; this
  *   phone's is kept aside, and the page says so in words with a way to put this phone's back.
  *   Nothing newer is ever dropped without a sentence.
+ * - **The copy kept aside is in the phone's own storage** (`sudarshan-charts-aside:<kind>:<key>`),
+ *   not only in memory: a reload, or Android discarding the app in a pocket, brings the sentence
+ *   and "Use this phone's copy" back. The key is cleared when the conflict is settled: the copy
+ *   put back, or the note dismissed.
  * - **One write in flight per document**; a change made meanwhile is sent when it returns.
  *
  * Nothing here imports the chart engine: the owner of the document reads, adopts and judges it.
@@ -27,6 +31,8 @@ export interface SyncNotice {
   tone: NoticeTone
   text: string
   action?: { label: string; run: () => void }
+  /** Told when the owner dismisses the sentence (not when its own action settles it). */
+  dismissed?: () => void
 }
 
 /** The sentences the page shows, newest last, one per document. */
@@ -55,6 +61,13 @@ export class NoticeBoard {
     this.tell()
   }
 
+  /** The owner dismissed a sentence: whoever posted it is told, and it goes. */
+  dismiss(id: string): void {
+    const notice = this.items.find((item) => item.id === id)
+    this.clear(id)
+    notice?.dismissed?.()
+  }
+
   private tell(): void {
     for (const listener of [...this.listeners]) listener()
   }
@@ -74,6 +87,8 @@ export function textHash(text: string): string {
 }
 
 const RECORD_PREFIX = 'sudarshan-charts-sync:'
+/** This phone's copy of a document, kept aside after a conflict until the conflict is settled. */
+const ASIDE_PREFIX = 'sudarshan-charts-aside:'
 /** Writes in a row for one document before it waits for the next change: never a hot loop. */
 const MAX_ROUNDS = 4
 /** The server's refusals the page is told about; the rest are passing, and the next change sends again. */
@@ -160,7 +175,9 @@ export class DocSync {
   /** Read the server's copy and settle with this phone's. Never throws. */
   async pull(): Promise<void> {
     try {
-      if (!this.handlers || !(await this.api.enabled())) return
+      if (!this.handlers) return
+      this.recall()
+      if (!(await this.api.enabled())) return
       const rec = this.record()
       const got = await this.api.read(this.kind, this.key, rec?.r)
       if (!got.ok) return this.refused(got.problem)
@@ -189,15 +206,58 @@ export class DocSync {
   /** After a conflict: put this phone's copy back and send it over the server's. */
   async keepMine(): Promise<void> {
     const mine = this.mine
-    this.mine = null
-    this.board.clear(this.id)
-    if (mine === null || !this.handlers) return
+    if (mine === null || !this.handlers) {
+      this.forget()
+      return
+    }
     try {
+      // Kept aside until it is back on this phone: a copy that cannot be put back is not lost.
       if (this.handlers.adopt(JSON.parse(mine)) === null) return
+      this.forget()
       await this.send(this.record()?.r ?? 0, true)
     } catch {
       /* the phone's copy stands */
     }
+  }
+
+  /** The conflict is settled (put back, or dismissed): nothing is kept aside any more. */
+  private forget(): void {
+    this.mine = null
+    this.board.clear(this.id)
+    try {
+      this.storage?.removeItem(ASIDE_PREFIX + this.id)
+    } catch {
+      /* storage blocked: the key is cleared at the next settle */
+    }
+  }
+
+  /** Keep this phone's copy aside, in memory and in the phone's storage, and say so. */
+  private aside(mine: string): void {
+    this.mine = mine
+    try {
+      this.storage?.setItem(ASIDE_PREFIX + this.id, mine)
+    } catch {
+      /* storage full or blocked: kept in memory, for as long as the page lives */
+    }
+    this.board.post({
+      id: this.id,
+      tone: 'conflict',
+      text: `${this.handlers?.what} were changed on another device. That copy is shown; the change made on this phone was not saved.`,
+      action: { label: 'Use this phone’s copy', run: () => void this.keepMine() },
+      dismissed: () => this.forget(),
+    })
+  }
+
+  /** A copy kept aside before a reload: back in hand, with its sentence, until it is settled. */
+  private recall(): void {
+    if (this.mine !== null) return
+    let kept: string | null = null
+    try {
+      kept = this.storage?.getItem(ASIDE_PREFIX + this.id) ?? null
+    } catch {
+      /* storage blocked: nothing to bring back */
+    }
+    if (kept !== null && canonical(kept) !== null) this.aside(kept)
   }
 
   private record(): { r: number; h: string } | null {
@@ -256,13 +316,8 @@ export class DocSync {
   /** Both changed: the server's copy is shown, this phone's kept aside, and the page told. */
   private conflict(server: { revision: number; body?: unknown }, local: string | null): void {
     if (!this.take(server.revision, server.body)) return
-    this.mine = local
-    this.board.post({
-      id: this.id,
-      tone: 'conflict',
-      text: `${this.handlers?.what} were changed on another device. That copy is shown; the change made on this phone was not saved.`,
-      action: { label: 'Use this phone’s copy', run: () => void this.keepMine() },
-    })
+    if (local === null) return
+    this.aside(local)
   }
 
   private send(base: number, putBack = false): Promise<void> {
