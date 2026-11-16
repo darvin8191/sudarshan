@@ -14,7 +14,7 @@ from datetime import timedelta
 import httpx
 import pytest
 from alerts_fakes import ist, wait_until
-from relay_fakes import AT, WORDS_EXAMPLE, alert, change, relay_message
+from relay_fakes import AT, AT_MS, WORDS_EXAMPLE, alert, change, relay_message
 
 from sudarshan.alerts import outbox, signals_desk
 from sudarshan.alerts.market.api import RELAY_MAX, ApiError, MarketApi, OffDesk
@@ -34,6 +34,8 @@ from sudarshan.vault import (
 PEPPER = "p" * 48  # fake, test only
 RELAY_KEY = fernet_for(PEPPER, ALERTS_SIGNALS_INFO)
 NIGHT = (22 * 60 + 30, 7 * 60)
+NIGHT_AT = ist(2026, 11, 16, 23, 30)
+NIGHT_MS = int(NIGHT_AT.timestamp() * 1000)
 
 
 class Sender:
@@ -308,10 +310,10 @@ def test_night_hours_are_off_until_they_are_built(quick, store):
 
     async def scenario():
         sender = Sender()
-        desk = desk_for(store, sender, clock=Now(ist(2026, 11, 16, 23, 30)))
+        desk = desk_for(store, sender, clock=Now(NIGHT_AT))
         task = await running(desk)
         try:
-            await desk.relay(relay_message([change(1, night=True)]))
+            await desk.relay(relay_message([change(1, night=True, at_ms=NIGHT_MS)]))
             await wait_until(lambda: len(sender.texts) == 1, 3)  # at night too
         finally:
             await cancel_and_wait(task)
@@ -323,14 +325,16 @@ def test_with_night_hours_set_all_but_act_alerts_wait_for_the_morning(quick, sto
     monkeypatch.setattr(signals_desk, "NIGHT_HOURS", NIGHT)
 
     async def scenario():
-        clock = Now(ist(2026, 11, 16, 23, 30))
+        clock = Now(NIGHT_AT)
         sender = Sender()
         desk = desk_for(store, sender, clock=clock)
         task = await running(desk)
         try:
             await desk.relay(relay_message(
-                [change(1, night=True), change(2, instrument="BANKNIFTY", night=False)],
-                [alert("a-act", night=True), alert("a-watch", level="watch", night=True)],
+                [change(1, night=True, at_ms=NIGHT_MS),
+                 change(2, instrument="BANKNIFTY", night=False, at_ms=NIGHT_MS)],
+                [alert("a-act", night=True, at_ms=NIGHT_MS),
+                 alert("a-watch", level="watch", night=True, at_ms=NIGHT_MS)],
             ))  # fmt: skip
             await wait_until(lambda: len(sender.texts) == 2, 3)
             await asyncio.sleep(0.2)
@@ -442,5 +446,28 @@ def test_the_service_answers_the_relay_through_its_desk_or_says_why_not(settings
             await off.signals_relay(relay_message([change(1)]))
         assert (refused.value.status, refused.value.code) == (409, "off")
         assert "switched off" in refused.value.message
+
+    asyncio.run(scenario())
+
+
+def test_the_30_minutes_count_from_the_changes_own_time_not_its_arrival(quick, store):
+    """A change sudarshan-signals had to try again for 31 minutes is not told at all: never more
+    than 30 minutes after it happened, however late it reached the desk."""
+
+    async def scenario():
+        clock = Now(AT + timedelta(minutes=31))
+        sender = Sender()
+        desk = desk_for(store, sender, clock=clock)
+        task = await running(desk)
+        try:
+            taken = await desk.relay(relay_message([change(1)]))  # at_ms is AT: 31 minutes ago
+            assert taken["taken"] == ["c-1"]  # claimed all the same: never relayed twice
+            await wait_until(lambda: desk.stats["stale"] == 1, 3)
+            fresh = change(2, instrument="BANKNIFTY", at_ms=AT_MS + 29 * 60_000)
+            await desk.relay(relay_message([fresh]))  # 2 minutes old: it goes
+            await wait_until(lambda: len(sender.texts) == 1, 3)
+        finally:
+            await cancel_and_wait(task)
+        assert "BANKNIFTY" in sender.texts[0]
 
     asyncio.run(scenario())

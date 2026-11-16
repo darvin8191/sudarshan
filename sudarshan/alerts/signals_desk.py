@@ -26,8 +26,8 @@ message, and the words are made here from its fields (``compose``):
   Merged. A message waits MERGE_S after the first change of its reading for the rest of the
         burst; the changes of one (module, instrument) are one message, from the reading the owner
         was last told to the newest (one message per change). Each alert is a message of its own.
-  Never late. An item that cannot go out within HOLD_S of arriving is not sent at all (``stale``);
-        the app's timeline has it.
+  Never late. An item that cannot go out within HOLD_S of its own time (``at_ms``, or its arrival
+        when that is earlier) is not sent at all (``stale``); the app's timeline has it.
   Dropped, as every lane is, when OpenAlgo says its bot is stopped or the owner's chat is not
         linked: never held back for later.
   Only watch and act. An ``info`` alert or a ``lapsed`` change that arrives anyway is claimed and
@@ -350,9 +350,11 @@ class SignalsDesk:
         return answer
 
     def _ready(self, kind: str, fields: Mapping[str, Any], now: datetime) -> datetime:
-        if not fields["night"] or (kind == "alert" and fields["level"] == "act"):
-            return now
-        return night_end(now, NIGHT_HOURS) or now
+        """From when its HOLD_S count: its own time, so a change sudarshan-signals had to try
+        again for a while is still never told late; the night's end when the night holds it."""
+        held = fields["night"] and not (kind == "alert" and fields["level"] == "act")
+        night = night_end(now, NIGHT_HOURS) if held else None
+        return night or min(now, datetime.fromtimestamp(fields["at_ms"] / 1000, IST))
 
     def _add(self, kind: str, fields: dict[str, Any], ready: float, seen: float) -> None:
         key = _key_of(kind, fields)
