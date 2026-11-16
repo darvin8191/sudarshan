@@ -878,8 +878,8 @@ export default function Positions() {
         </div>
       )}
 
-      {/* Stats Cards */}
-      <div className="grid gap-4 md:grid-cols-4">
+      {/* Stats Cards. SUDARSHAN M20.2: two-up with larger text on a phone on its side. */}
+      <div className="sd-stat-grid grid gap-4 md:grid-cols-4">
         <Card>
           <CardHeader className="pb-2">
             <CardDescription>Open Positions</CardDescription>

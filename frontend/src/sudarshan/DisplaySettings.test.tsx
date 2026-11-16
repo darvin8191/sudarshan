@@ -5,6 +5,7 @@ import { setMarketSoundMuted, setOrderSoundMuted } from './books/chime'
 import { DisplaySettings } from './DisplaySettings'
 import { setNumberGrouping } from './dashboard/numberStyle'
 import { setCvdMode } from './display'
+import { setDensity, setTextSize } from './displaySize'
 
 const html = document.documentElement
 
@@ -12,6 +13,8 @@ afterEach(() => {
   vi.restoreAllMocks()
   setCvdMode(false)
   setNumberGrouping('indian')
+  setDensity('comfortable')
+  setTextSize('normal')
   localStorage.clear()
 })
 
@@ -161,5 +164,29 @@ describe('Display settings', () => {
     await user.click(toggle)
     expect(toggle).not.toBeChecked()
     expect(localStorage.getItem('sudarshan-number-grouping')).toBeNull()
+  })
+
+  // SUDARSHAN M20.2 (GA10.1): density and text size, off by default, set on <html> for the
+  // theme's variables and kept on this device only.
+  it.each([
+    ['Compact rows', 'data-density', 'compact', 'sudarshan-density'],
+    ['Larger text', 'data-text', 'large', 'sudarshan-text'],
+  ])('turns %s on and off for this device', async (name, attribute, value, key) => {
+    const user = userEvent.setup()
+    render(<DisplaySettings />)
+    const toggle = screen.getByRole('switch', { name })
+    expect(toggle).not.toBeChecked()
+    expect(html.hasAttribute(attribute)).toBe(false)
+
+    await user.click(toggle)
+    expect(toggle).toBeChecked()
+    expect(html.getAttribute(attribute)).toBe(value)
+    expect(localStorage.getItem(key)).toBe(value)
+    expect(toggle.closest('label')?.className).toContain('min-h-12')
+
+    await user.click(toggle)
+    expect(toggle).not.toBeChecked()
+    expect(html.hasAttribute(attribute)).toBe(false)
+    expect(localStorage.getItem(key)).toBeNull()
   })
 })

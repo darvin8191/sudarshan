@@ -8,3 +8,5 @@ import './fonts.css'
 import './theme.css'
 // Applies the colour-blind preference to <html> before React renders.
 import './display'
+// And the density and text size (M20.2), for the same reason.
+import './displaySize'

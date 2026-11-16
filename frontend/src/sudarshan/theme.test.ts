@@ -372,3 +372,42 @@ describe('SUDARSHAN marks', () => {
     expect(block).not.toMatch(/--mark-/)
   })
 })
+
+// SUDARSHAN M20.2 (GA10.1): density and text size through the theme's variables. Larger text
+// scales the root and so every rem; compact rows keep a 3rem (48 dp) floor; neither touches a
+// colour.
+describe('display density and text size', () => {
+  /** A variable as the first rule written exactly for `selector` sets it. */
+  const variable = (selector: string, name: string) => {
+    const escaped = selector.replace(/[[\]]/g, '\\$&')
+    for (const rule of css.matchAll(new RegExp(`(?:^|\\n)${escaped}\\s*{([^}]*)}`, 'g'))) {
+      const found = new RegExp(`${name}:\\s*([^;]+);`).exec(rule[1])?.[1]?.trim()
+      if (found !== undefined) return found
+    }
+    return undefined
+  }
+  const rem = (text: string | undefined) => Number(text?.replace('rem', ''))
+
+  it('scales the root size by the text variable, 18 px to the rem when larger', () => {
+    expect(css).toMatch(/html\s*{[^}]*font-size:\s*calc\(100% \* var\(--sd-text-scale\)\)/)
+    expect(variable(':root', '--sd-text-scale')).toBe('1')
+    expect(variable(":root[data-text='large']", '--sd-text-scale')).toBe('1.125')
+  })
+
+  it('never lets a compact row under 48 dp', () => {
+    expect(rem(variable(':root', '--sd-row-min'))).toBe(3.5)
+    expect(rem(variable(":root[data-density='compact']", '--sd-row-min'))).toBeGreaterThanOrEqual(3)
+    expect(rem(variable(":root[data-density='compact']", '--sd-row-pad-y'))).toBeLessThan(
+      rem(variable(':root', '--sd-row-pad-y'))
+    )
+  })
+
+  it('changes no colour', () => {
+    for (const selector of [":root[data-text='large']", ":root[data-density='compact']"]) {
+      const escaped = selector.replace(/[[\]]/g, '\\$&')
+      const rule = new RegExp(`${escaped}\\s*{([^}]*)}`).exec(css)?.[1] ?? ''
+      expect(rule).toMatch(/--sd-/)
+      expect(rule).not.toMatch(/color|oklch|#[0-9a-f]{3,6}/i)
+    }
+  })
+})

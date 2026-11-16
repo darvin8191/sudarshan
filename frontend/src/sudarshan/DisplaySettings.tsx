@@ -20,14 +20,16 @@ import {
 import { setNumberGrouping, useNumberGrouping } from './dashboard/numberStyle'
 import { setPortfolioCard, usePortfolioCard } from './dashboard/portfolioCard'
 import { setCvdMode, useCvdMode } from './display'
+import { setDensity, setTextSize, useDensity, useTextSize } from './displaySize'
 
 /**
  * Profile's Display tab, in place of upstream's theme picker. The theme and the
  * accent are stated here rather than offered (light only, one brand accent: a
- * control that cannot change anything is not shown as one). Colour-blind mode
- * and the order and market alert sounds are the settings, all kept on this
- * device only; the preview under colour-blind mode is drawn in the live tokens,
- * so it changes the moment the switch does.
+ * control that cannot change anything is not shown as one). Colour-blind mode,
+ * the order and market alert sounds, number grouping, compact rows and larger
+ * text are the settings, all kept on this device only; the preview under
+ * colour-blind mode is drawn in the live tokens, so it changes the moment the
+ * switch does.
  */
 export function DisplaySettings() {
   const cvd = useCvdMode()
@@ -35,6 +37,8 @@ export function DisplaySettings() {
   const marketMuted = useMarketSoundMuted()
   const portfolioCard = usePortfolioCard()
   const grouping = useNumberGrouping()
+  const density = useDensity()
+  const textSize = useTextSize()
 
   return (
     <Card>
@@ -117,6 +121,25 @@ export function DisplaySettings() {
           words={`Off: figures are grouped the Indian way, 12,34,567.89, with L (lakh) and Cr (crore) in short figures. On: 1,234,567.89, with M and B. Now: ${formatRupees(1234567.89)} and ${formatCompact(1234567.89)}. This device only. Messages the server writes, such as alerts and Telegram, keep the Indian way.`}
           on={grouping === 'international'}
           onChange={(on) => setNumberGrouping(on ? 'international' : 'indian')}
+        />
+
+        {/* SUDARSHAN M20.2 (GA10.1): density and text size, through the theme's variables. */}
+        <SoundRow
+          id="sd-density"
+          rowId="density"
+          title="Compact rows"
+          words="Watchlist rows and the cards in Positions, Orders, Holdings and Trades take less height, so more fit on the screen. Every button stays finger-sized. This device only."
+          on={density === 'compact'}
+          onChange={(on) => setDensity(on ? 'compact' : 'comfortable')}
+        />
+
+        <SoundRow
+          id="sd-text-size"
+          rowId="text-size"
+          title="Larger text"
+          words="Text and figures one size larger everywhere in the app, and the buttons grow with them. This device only."
+          on={textSize === 'large'}
+          onChange={(on) => setTextSize(on ? 'large' : 'normal')}
         />
 
         <IndexChoices />
