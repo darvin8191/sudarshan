@@ -55,6 +55,7 @@ const Automation = lazy(() => import('@/sudarshan/pages/Automation')) // SUDARSH
 const System = lazy(() => import('@/sudarshan/pages/System')) // SUDARSHAN M20.8
 const Journal = lazy(() => import('@/sudarshan/pages/Journal')) // SUDARSHAN M14
 const Reports = lazy(() => import('@/sudarshan/pages/Reports')) // SUDARSHAN M15.10
+const Trinetra = lazy(() => import('@/sudarshan/pages/Trinetra')) // SUDARSHAN M13.7
 
 // SUDARSHAN P6 D2 (M2.7): the family view, a separate shell of view-only screens, and the owner's
 // Family page. The family screens are the viewer's, so they never mount the owner's providers.
@@ -365,6 +366,8 @@ function App() {
                 <Route path="/journal" element={<Journal />} />
                 {/* SUDARSHAN M15.10: the reports archive and settings */}
                 <Route path="/reports" element={<Reports />} />
+                {/* SUDARSHAN M13.7: the TRINETRA view (TRINETRA's published readings, owner only) */}
+                <Route path="/trinetra" element={<Trinetra />} />
                 {/* SUDARSHAN P6 D2: the owner's Family page (members, invites, privacy) */}
                 <Route path="/family-members" element={<FamilyMembers />} />
               </Route>

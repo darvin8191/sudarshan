@@ -252,6 +252,45 @@ def exit_not_sized(position: Position, orders_read: bool = True, order: bool = F
     )
 
 
+def positions_not_read(position: Position) -> str:
+    """Why a scalping or strategy close sent nothing: Upstox's positions did not answer, so what
+    is held could not be confirmed (sudarshan.books.surface_exits)."""
+    return (
+        "Upstox did not send your positions in time, so SUDARSHAN could not confirm how much you "
+        f"hold in {trader_name(position)} and sent no exit. Close it from the Upstox app, or try "
+        "again in a minute."
+    )
+
+
+def nothing_left_to_close(position: Position, held: int = 0) -> str:
+    """Why a scalping or strategy close sent nothing: Upstox's positions corrected by today's
+    fills show the position closed already, or held the other way (``held``, signed), so a close
+    would open or add to a position (sudarshan.books.surface_exits). An earlier exit has filled
+    and the screen, read from Upstox's positions, may not show it yet."""
+    name = trader_name(position)
+    if held:
+        side = "long" if held > 0 else "short"
+        return (
+            f"Upstox's orders show {name} is now {side} {abs(held)} as {position[2]}, so this "
+            "close would add to it and was not sent. Check Positions and Orders."
+        )
+    return (
+        f"Upstox's orders show {name} is already closed as {position[2]}, so no exit was sent. "
+        "Upstox's positions can take a minute to show it. Check Orders and Positions."
+    )
+
+
+def fills_not_shown_yet(position: Position) -> str:
+    """Why an order to a position size that Upstox's positions already show was not sent, and
+    not answered as matched either: today's fills say the position is another size, so the row is
+    behind (a reversal sent back inside the positions' lag)."""
+    return (
+        f"Upstox's positions do not show your latest fills in {trader_name(position)} yet, so "
+        "SUDARSHAN could not tell whether this order is still needed, and it was not sent. Check "
+        "Orders and Positions, then send it again in a minute if the position still needs it."
+    )
+
+
 def unlisted_not_sized(position: Position) -> str:
     """Why Exit all sent no exit for a position the order book shows traded today and held, which
     Upstox's positions do not list yet, when its contract, product or size could not be worked

@@ -10,7 +10,7 @@ from datetime import timedelta
 
 import pytest
 from alerts_fakes import ist
-from signals_fakes import AT, WHY, WORDS_EXAMPLE, alert, change
+from relay_fakes import AT, WHY, WORDS_EXAMPLE, alert, change
 
 from sudarshan.alerts.market.api import ApiError
 from sudarshan.alerts.signals_desk import compose, night_end, parse, plain

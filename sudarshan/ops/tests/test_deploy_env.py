@@ -322,6 +322,7 @@ def test_the_shipped_list_on_a_fresh_install(tmp_path):
     assert after["SUDARSHAN_AUTOMATION"] == "sandbox"  # M12.11: automation in the sandbox first
     assert after["SUDARSHAN_GTT_PROTECT"] == "sandbox"  # M5.6: Protect in the sandbox first
     assert after["SUDARSHAN_TAX"] == "on"  # M7.27: the tax working paper is switched on
+    assert after["SUDARSHAN_SIGNALS"] == "off"  # M13: the TRINETRA view ships off
     for later in LATER_SWITCHES:  # insights and goals stay off in code: no line, no key
         assert later not in after
     assert after["OPENALGO_MCP_READ_ONLY"] == "1"  # M17.9: the assistant's three settings
@@ -338,6 +339,7 @@ def test_the_shipped_list_on_a_fresh_install(tmp_path):
         "SUDARSHAN_WATCHLISTS_V2",
         "SUDARSHAN_JOURNAL",
         "SUDARSHAN_TAX",
+        "SUDARSHAN_SIGNALS",
         "MAX_WEBSOCKET_CONNECTIONS",
         "WEBSOCKET_BROKER_LINGER_SECONDS",
         "SUDARSHAN_RISK_GUARD",
@@ -584,3 +586,19 @@ def test_the_check_option_reports_without_changing(tmp_path, list_code, says):
     assert sorted(p.name for p in state.iterdir()) == ["deploy.lock"]
     assert list((tmp_path / "tmp").iterdir()) == []  # its private copy went with its temp folder
     assert "/v9.9.9/sudarshan/ops/deploy/openalgo-env.conf" in (tmp_path / "curl.log").read_text()
+
+
+@pytest.mark.parametrize("owners", [b"on", b"'on'", b"1"])
+def test_the_trinetra_switch_ships_off_and_an_owners_value_stays(tmp_path, owners):
+    """K3 (M13): the release adds SUDARSHAN_SIGNALS off where .env does not name it; the line has
+    no old value, so an owner who turned the view on keeps it on through every later deploy."""
+    assert [w for w in _shipped_words() if w[0] == "SUDARSHAN_SIGNALS"] == [
+        ["SUDARSHAN_SIGNALS", "off"]
+    ]
+    env, _out = _applied(tmp_path / "fresh", b"APP_KEY='k'\n", SHIPPED_LIST.read_bytes())
+    assert _read_by_openalgo(env)["SUDARSHAN_SIGNALS"] == "off"
+    original = b"APP_KEY='k'\nSUDARSHAN_SIGNALS=" + owners + b"\n"
+    env, out = _applied(tmp_path / "owner", original, SHIPPED_LIST.read_bytes())
+    assert env.startswith(original), "the owner's line stays byte for byte"
+    assert _read_by_openalgo(env)["SUDARSHAN_SIGNALS"] == owners.decode().strip("'")
+    assert "SUDARSHAN_SIGNALS left alone: the owner chose its value" in out

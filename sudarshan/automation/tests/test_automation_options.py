@@ -443,6 +443,79 @@ def test_m3_day_ended_vectors(product, since, today, ended):
     assert symbols.day_ended(product, since_ms, today) is ended
 
 
+# ---- N8: the page reads the same date rule, before the day's first alert -------------------------
+
+
+def _page(store, strategy_id, desk):
+    from sudarshan.automation import control
+
+    return control.view(store.strategy(strategy_id), store, int(desk.now() * 1000))
+
+
+def test_n8_the_page_does_not_show_yesterdays_intraday_contract_as_held(store, desk):
+    """The verifier's probe turned round. Day two, before any alert: the page says the position
+    was closed at yesterday's session end, and holds nothing. The first alert then clears the
+    note itself, and the page shows what was bought today."""
+    desk.clock = at(WED)
+    strategy, token = make(store)
+    assert send(store, desk, token, "long").verdict == "sent"
+    same_day = _page(store, strategy.id, desk)
+    assert (same_day["held_symbol"], same_day["held_note"]) == (YESTERDAY, None)
+    desk.clock = at("2026-11-18 23:59:59")
+    assert _page(store, strategy.id, desk)["held_symbol"] == YESTERDAY  # the same India date
+    _squared_off(desk, "2026-11-19 00:00:00")
+    for when in ("2026-11-19 00:00:00", "2026-11-19 09:20:00"):
+        desk.clock = at(when)
+        page = _page(store, strategy.id, desk)
+        assert [page[key] for key in ("held_exchange", "held_symbol", "held_side",
+                                      "held_since_ms", "last_target")] == [None] * 4 + [0]  # fmt: skip
+        assert page["held_note"] == (
+            "Holds nothing: NIFTY 24 Nov 25000 CE was intraday and was closed at yesterday's "
+            "session end. If it is still open, close it in Positions."
+        )
+    assert store.state(strategy.id).held_symbol == YESTERDAY  # a read writes nothing
+    assert send(store, desk, token, "long").verdict == "sent"
+    page = _page(store, strategy.id, desk)
+    assert (page["held_symbol"], page["held_note"]) == (TODAY, None)
+
+
+def test_n8_after_a_weekend_the_page_does_not_say_yesterday(store, desk):
+    desk.clock = at("2026-11-20 10:00:00")  # a Friday
+    strategy, token = make(store)
+    send(store, desk, token, "long")
+    desk.clock = at("2026-11-23 09:00:00")  # the Monday
+    page = _page(store, strategy.id, desk)
+    assert page["held_symbol"] is None and "closed at its session's end" in page["held_note"]
+
+
+def test_n8_a_carry_strategy_is_shown_as_held_overnight(store, desk):
+    desk.clock = at(WED)
+    strategy, token = make(store, product="NRML")
+    send(store, desk, token, "long")
+    desk.clock = at(THU)
+    page = _page(store, strategy.id, desk)
+    assert (page["held_symbol"], page["held_note"]) == (YESTERDAY, None)
+
+
+def test_n8_an_edit_the_next_day_is_judged_on_what_the_page_shows(store, desk):
+    """The page shows nothing held, so the strategy can be edited; the note is cleared with the
+    edit, under the strategy's lock, so a change to a carry product cannot bring it back."""
+    from sudarshan.automation import control
+
+    desk.clock = at(WED)
+    strategy, token = make(store)
+    send(store, desk, token, "long")
+    current = store.strategy(strategy.id)
+    with pytest.raises(control.Refused):  # the same day: held, so the product cannot change
+        control.update(current.id, current.version, {"product": "NRML"}, desk=desk, store=store)
+    _squared_off(desk)
+    control.update(current.id, current.version, {"product": "NRML"}, desk=desk, store=store)
+    state = store.state(strategy.id)
+    assert (state.held_symbol, state.held_side, state.last_target) == (None, None, 0)
+    got = send(store, desk, token, "flat")
+    assert got.verdict == "no_action" and len(desk.placed) == 1  # nothing sent for the old one
+
+
 def test_l6_a_two_step_whose_exit_found_nothing_to_close_says_only_the_entry(store, desk):
     strategy, token = make(store)
     send(store, desk, token, "long", NOW - 5)

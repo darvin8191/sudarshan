@@ -15,7 +15,7 @@ import { PRIMARY, ProblemLine, SECONDARY } from '../sheets/TabFields'
 import { useSend } from '../sheets/useSend'
 import { PORTFOLIO_KEY } from '../tab/ActivityTab'
 import { dayText, quantityText, rupeesText as rs } from '../tab/format'
-import type { DividendLine, DividendPayer, DividendState } from '../types'
+import type { DividendLine, DividendPayer, DividendState, DividendUncounted } from '../types'
 
 export const DIVIDENDS_KEY = [...PORTFOLIO_KEY, 'dividends'] as const
 export const DIVIDENDS_OFF =
@@ -50,7 +50,12 @@ function ConfirmSheet({
   const { clear } = send
   useEffect(() => {
     if (line === null) return
-    setCredited(rupeesInput(line.credited_paise ?? line.expected_paise))
+    // A dividend that could not be counted has no expected amount to start from.
+    setCredited(
+      line.credited_paise === null && line.expected_paise === 0
+        ? ''
+        : rupeesInput(line.credited_paise ?? line.expected_paise)
+    )
     setTds(line.tds_paise === null ? '' : rupeesInput(line.tds_paise))
     setDay(line.credited_day === null ? '' : dayToInput(line.credited_day))
     clear()
@@ -79,14 +84,19 @@ function ConfirmSheet({
       onOpenChange={(next) => !next && onClose()}
       title={line?.name ?? line?.isin ?? 'Dividend'}
       description={
-        line ? `Ex-date ${dayText(line.ex_day)} · ${quantityText(line.qty_u)} held` : undefined
+        line
+          ? `Ex-date ${dayText(line.ex_day)} · ${line.qty_u > 0 ? `${quantityText(line.qty_u)} held` : 'quantity held not known'}`
+          : undefined
       }
     >
       {line && (
         <div className="flex flex-col gap-3">
           <p className="text-sm text-[color:var(--text-secondary)]">
-            Expected {rs(line.expected_paise)}. Enter what reached your bank and any tax deducted;
-            the dividend counted is the two together.
+            {line.expected_paise > 0 || line.state !== 'expected'
+              ? `Expected ${rs(line.expected_paise)}. `
+              : 'The expected amount is not known. '}
+            Enter what reached your bank and any tax deducted; the dividend counted is the two
+            together.
           </p>
           <Box label="Credited to your bank, in rupees" value={credited} onChange={setCredited} />
           <Box
@@ -167,6 +177,12 @@ function Payer({ payer, onLine }: { payer: DividendPayer; onLine: (line: Dividen
               <span className="text-sm">
                 {dayText(line.ex_day)} · {quantityText(line.qty_u)} held
               </span>
+              {line.record_day !== null && line.record_day !== undefined && (
+                // No record was kept for the day before the ex-date: say which one stands in.
+                <span className="text-xs text-[color:var(--text-tertiary)]">
+                  From the record of {dayText(line.record_day)}
+                </span>
+              )}
               <span className="inline-flex items-center gap-1 text-xs font-semibold text-[color:var(--text-secondary)]">
                 <state.icon aria-hidden="true" className="size-3.5" />
                 {state.word}
@@ -180,6 +196,45 @@ function Payer({ payer, onLine }: { payer: DividendPayer; onLine: (line: Dividen
         )
       })}
     </li>
+  )
+}
+
+/** A dividend that could not be counted: the company, the date and why; a tap confirms it. */
+function NotCounted({
+  lines,
+  onLine,
+}: {
+  lines: readonly DividendUncounted[]
+  onLine: (line: DividendLine) => void
+}) {
+  if (lines.length === 0) return null
+  return (
+    <div className="flex flex-col border-t border-[color:var(--divider)] pt-2">
+      <h3 className="flex items-center gap-1.5 text-sm font-bold text-[color:var(--warning-text)]">
+        <CircleAlert aria-hidden="true" className="size-4 shrink-0" />
+        Not counted ({lines.length})
+      </h3>
+      <ul className="flex flex-col divide-y divide-[color:var(--divider)]">
+        {lines.map((line) => (
+          <li key={line.id}>
+            <button
+              type="button"
+              onClick={() => onLine(line)}
+              aria-label={`${line.name ?? line.isin}, ex-date ${dayText(line.ex_day)}: not counted`}
+              className="flex min-h-12 w-full items-center gap-2 py-1.5 text-left outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+            >
+              <span className="flex min-w-0 flex-1 flex-col">
+                <span className="text-sm font-semibold break-words">
+                  {line.name ?? line.isin} · {dayText(line.ex_day)}
+                </span>
+                <span className="text-xs text-[color:var(--text-secondary)]">{line.words}.</span>
+              </span>
+              <ChevronRight aria-hidden="true" className="size-4 shrink-0" />
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
   )
 }
 
@@ -211,6 +266,11 @@ export function DividendsCard({
   const problem = query.error ? problemOf(query.error) : null
   const off = !on || problem?.code === 'not_ready'
   const year = query.data?.dividends
+  const status = query.data?.read_status
+  const unread = status !== undefined && status.state !== 'ok' && status.words !== null
+  /** Nothing to show, and the list was never read (or last night failed): no bare zero. */
+  const waiting =
+    unread && year !== undefined && year.payers.length === 0 && year.uncounted.length === 0
   return (
     <section aria-label="Dividends" className={`${CARD} flex flex-col gap-2`}>
       <h2 className="text-xs font-semibold text-muted-foreground">Dividends</h2>
@@ -220,8 +280,17 @@ export function DividendsCard({
         <p className="text-sm text-[color:var(--text-secondary)]">{problem.message}</p>
       ) : year === undefined || query.data === undefined ? (
         <p className="text-sm text-[color:var(--text-secondary)]">Reading the year’s dividends.</p>
+      ) : waiting ? (
+        <p role="note" className="text-sm font-semibold text-[color:var(--text-secondary)]">
+          {status?.words}
+        </p>
       ) : (
         <>
+          {unread && (
+            <p role="note" className="text-sm font-semibold text-[color:var(--warning-text)]">
+              {status?.words}
+            </p>
+          )}
           <div className="flex flex-col">
             <span className="sd-display text-[1.75rem] leading-tight font-bold break-words">
               {rs(year.total_paise)}
@@ -229,6 +298,7 @@ export function DividendsCard({
             <span className="text-xs text-[color:var(--text-tertiary)]">
               Dividends of the year: confirmed as paid, the rest as expected
               {year.unconfirmed_count > 0 && ` · ${year.unconfirmed_count} not confirmed yet`}
+              {year.uncounted_count > 0 && ` · ${year.uncounted_count} not counted, listed below`}
             </span>
           </div>
           {year.tds_expected_paise > 0 && (
@@ -237,9 +307,11 @@ export function DividendsCard({
             </p>
           )}
           {year.payers.length === 0 ? (
-            <p className="text-sm text-[color:var(--text-secondary)]">
-              No dividend is listed for what you held in this year.
-            </p>
+            year.uncounted.length === 0 && (
+              <p className="text-sm text-[color:var(--text-secondary)]">
+                No dividend is listed for what you held in this year.
+              </p>
+            )
           ) : (
             <ul className="flex flex-col divide-y divide-[color:var(--divider)]">
               {year.payers.map((payer) => (
@@ -247,6 +319,7 @@ export function DividendsCard({
               ))}
             </ul>
           )}
+          <NotCounted lines={year.uncounted} onLine={setLine} />
           <p className="text-xs text-[color:var(--text-tertiary)]">
             As of {dateTimeOfInstant(query.data.as_of).slice(0, -3)} · from Upstox’s corporate
             actions and your own confirmations

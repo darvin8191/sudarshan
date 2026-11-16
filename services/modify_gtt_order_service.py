@@ -89,9 +89,12 @@ def modify_gtt_order_with_auth(
                 request_data=order_request_data, response_data=response, api_key=api_key,
             ))
         else:
+            # SUDARSHAN N4: no ``exchange=`` here. GTTModifyFailedEvent has no such field, so
+            # the call raised TypeError and a change the sandbox refused answered with the
+            # exception instead of the sandbox's own sentence.
             bus.publish(GTTModifyFailedEvent(
                 mode="analyze", api_type=API_TYPE,
-                symbol=order_data.get("symbol", ""), exchange=order_data.get("exchange", ""),
+                symbol=order_data.get("symbol", ""),
                 trigger_id=trigger_id,
                 error_message=response.get("message", "GTT modify failed"),
                 request_data=order_request_data, response_data=response, api_key=api_key,

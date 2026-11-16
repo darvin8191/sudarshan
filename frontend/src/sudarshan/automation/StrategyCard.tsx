@@ -141,7 +141,7 @@ export function StrategyCard({ strategy, actions }: { strategy: Strategy; action
         <Line label="Now">
           {strategy.held_symbol
             ? `${strategy.held_side === 'short' ? 'Short' : 'Long'} ${contractName(strategy.held_symbol)} ${where}`
-            : 'Holds nothing'}
+            : (strategy.held_note ?? 'Holds nothing')}
         </Line>
         <Line label="Today">
           <DayLine strategy={strategy} />

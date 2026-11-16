@@ -92,7 +92,8 @@ def test_every_word_is_for_a_trader():
         assert not re.search(r"\b[1-5]\d\d\b", text), key
         assert not re.search(r"\b(live|arm|armed|arming)\b", low), key
         assert all(ord(ch) < 0x2000 for ch in text), f"{key}: no emoji or symbols"
-    sentences = {k: v for k, v in c.WORDS.items() if k not in ("fresh", "lapsed", "too_few")}
+    cells = ("fresh", "lapsed", "too_few", "no_direction")  # a header or a table cell
+    sentences = {k: v for k, v in c.WORDS.items() if k not in cells}
     for key, text in sentences.items():
         assert text.endswith("."), key
     # section 3.6, word for word

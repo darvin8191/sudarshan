@@ -46,6 +46,7 @@ describe('menu groups', () => {
       'Portfolio',
       'Journal',
       'Reports',
+      'TRINETRA',
       'Tools',
     ])
     // API Key and Action Center stay side by side, as the profile menu pins them.

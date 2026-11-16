@@ -13,6 +13,7 @@ read-only Analytics Token (market data, portfolio reads) — never with an order
 | `screener/` | `sudarshan-screener` | Scheduled scans (1/5/15 min, EOD) over universes (NIFTY 50/100/200/500, F&O list, custom watchlists, option chains) with a rule builder (price action, indicators via TA-Lib, OI build-up classes, IV rank/percentile, PCR, basis, bhavcopy fields). Results feed **membership-table watchlists** (first_seen / last_seen / hits / exited / pinned / score) in OpenAlgo's watchlist DB and raise digest alerts; every run is stored for rewind and forward-return backtests. |
 | `portfolio/` | `sudarshan-portfolio` | Upstox tab (holdings, positions, MTF, funds tree, trade history, trade-wise P&L + charges, GTT, MF, portfolio stream) on the Analytics Token + daily snapshots, dividends from corporate actions, sector tags; and the **custom manual portfolio engine**: activity model (BUY/SELL/DIVIDEND/FEE/INTEREST/TRANSFER/SPLIT/BONUS), any asset, tags, imports (CSV/tradebook), FIFO lots, STCG/LTCG (ITA 2025 sections, "verify with CA"), XIRR/TWR, allocation, goals, custom tab layouts. |
 | `journal/` | `sudarshan-journal` | **The trade journal and reports (M14, M15).** Every fill Upstox reports, paired into trades (long, short, flips split, carried across days), with the journal's figures (win rate, profit factor, expectancy, R, drawdown, calendar, heat map, expiry split, how far each trade went for and against) on the Journal page; and the reports (day report, morning brief, week in review, monthly statement with its CSV, tax pack) built on the journal's own schedule, kept in its archive on the Reports page and delivered on Telegram by `sudarshan-alerts`' report desk. It reads the account only through `sudarshan-portfolio`, prices from `sudarshan-feed` and OpenAlgo's own records read-only; it places no order and reaches nothing off this server. Off until `SUDARSHAN_JOURNAL` is on in OpenAlgo's `.env`, which the release sets (below); `127.0.0.1:5586/health` names the installed release and what it is doing. `journal/README.md` has the rest. |
+| `signals/` | `sudarshan-signals` | **The TRINETRA view (M13).** Reads the readings TRINETRA chooses to publish, from its letterbox only (`/var/spool/sudarshan-signals/in`, set up once with `ops/signals/bootstrap.sh`), keeps them with their timeline in `signals.db` and serves them on 127.0.0.1:5588 to OpenAlgo's bridge and the journal, with how fresh they are. It never opens, asks, restarts or signals anything of TRINETRA's, holds no API key and places no order. Off until the release turns `SUDARSHAN_SIGNALS` on. Docs: `signals/README.md`. |
 | `family/` | `sudarshan-family` | View-only layer for family members: own users/sessions/TOTP, privacy mode, invitations, per-user watchlists/alerts, audit log, viewer UI variants, family Telegram bot. Backed by the Analytics-Token data plane only; every OpenAlgo write/admin/bot route must answer 401/403 to a viewer. |
 | `autologin/` | `sudarshan-autologin` (oneshot + timer) | The daily Upstox login with TOTP + PIN (Upstox's TOTP token API) at 08:35/08:45/08:55 IST on trading days, and "Test now" from the Auto login page. Fetches the token, then hands it to OpenAlgo, which stores it exactly as a manual login does (its in-memory caches only refresh in its own process); never ends a login Upstox still accepts, and pauses after any refusal until the key or PIN is saved again. The one ring process that receives an order-capable token: it passes it to OpenAlgo and never uses it. Result on the page and in Telegram. |
 | `vault/` | (library) | Owner vault `db/sudarshan-vault/sudarshan_vault.db` (directory 700, file 600; the auto-login unit may write only there): small secrets entered on the phone, Fernet under a key derived (HKDF) from OpenAlgo's pepper; write-only over HTTP. Also holds the auto-login status. |
@@ -47,6 +48,7 @@ never a move to another port.
 | 5585 | `sudarshan-family` (P6, not built yet): the family view's one listener: the viewer API and its WebSocket that nginx forwards (`/family/api/`, `/family/ws`), the sealed admin and nudge routes, and `GET /health`. It runs as its own account, `sudarshan-family` |
 | 5586 | `sudarshan-journal`: its sealed local API (OpenAlgo's bridge for the Journal and Reports pages, the alerts' report desk and their nudges), and `GET /health` (the release installed and what the journal is doing, `journal_state`; the one listener, no other port; a taken port is tried again every minute while its jobs carry on) |
 | 5587 | reserved for `sudarshan-protect` (later) |
+| 5588 | `sudarshan-signals`: the TRINETRA view's sealed local API (OpenAlgo's bridge for the TRINETRA page, the journal's reads), and `GET /health` (the release installed, whether the view is switched on and set up, how fresh TRINETRA's readings are, never TRINETRA's text; the one listener, no other port; a taken port is tried again every minute while the letterbox is still read) |
 
 **Sealed routes.** Each has its own key purpose in `sudarshan/vault/keys.py` (HKDF from OpenAlgo's
 pepper; a seal of one purpose never opens another's), a 60 s seal, a nonce accepted once, and a
@@ -68,6 +70,10 @@ nonce that could still be replayed.
 | the alerts' "orders changed" nudge to the journal | `sudarshan/journal/nudge/v1` | 4 KiB |
 | the family service to the journal (P6, counts only) | `sudarshan/journal/family/v1` | 4 KiB |
 | the journal to the portfolio API (account reads only) | `sudarshan/portfolio/api/journal/v1` | 64 KiB |
+| OpenAlgo to the TRINETRA view's API (M13) | `sudarshan/signals/api/v1` | 16 KiB |
+| the journal to the TRINETRA view (`state_at`, `state` only) | `sudarshan/signals/journal/v1` | 4 KiB |
+| the TRINETRA view to OpenAlgo's owner room | `sudarshan/signals/push/v1` | 32 KiB |
+| the TRINETRA view to the alerts' signals desk | `sudarshan/alerts/signals/v1` | 16 KiB |
 
 **Keys on the one feed socket (U9).** Upstox allows ltpc 5,000, full 2,000 and option_greeks
 3,000 keys per connection; once more than one mode is in use the feed reads "combined" as 1,500
@@ -155,6 +161,11 @@ however long the queue is.
 request as switched off until it is, and the alerts' report desk delivers reports only while the
 journal says it is on (the desk reads it from the journal's `/health`). The line has no old value,
 so an owner who sets it to `off` keeps it off through later deploys.
+
+`SUDARSHAN_SIGNALS  off` (M13) ships the TRINETRA view switched off: `sudarshan-signals` reads
+nothing and answers every request as switched off until it is on, and once on it reads nothing
+until the letterbox's set-up has been run ("The TRINETRA view" below). The line has no old
+value, so an owner who turns it on keeps it on through later deploys.
 
 ## NSE calendar lines that ship with a release (M0.1)
 
@@ -360,13 +371,29 @@ archive. The newest complete archive is never removed, whatever else is true: a 
 archives cannot push the last good one out.
 
 **One archive per financial year, kept 8 years (M19.10).** The first complete archive made from
-4 April on is the archive of the financial year that ended on 31 March, whatever the counts
-above say; one made more than 92 days later (after 4 July) is never taken for it. It waits those
-four days so that the year's own papers are in it: the journal builds the year's Tax pack on
-1 April at 07:00, Upstox's charges for the last trading days arrive two nights after each, and
-March's charges are read from 3 April. An archive of 31 March's evening would hold none of them. The newest 8 are kept
-(`SUDARSHAN_BACKUP_KEEP_YEARLY`), for the years the tax records must be kept. Its offsite copy is
-uploaded under a name of its own, `sudarshan-fy-2026-27-YYYYMMDD-HHMMSS-<release>.tar.gz.cms`,
+4 April, 08:00 on is the archive of the financial year that ended on 31 March, whatever the
+counts above say: normally the nightly backup of 4 April at 16:30. One made more than 92 days
+later (from 5 July, 08:00) is never taken for it. It waits those four days so that the year's
+own papers are in it: the journal builds the year's Tax pack on 1 April at 07:00, Upstox's
+charges for the last trading days arrive two nights after each, and March's charges are read
+from 3 April. An archive of 31 March's evening would hold none of them.
+
+The Tax pack of 1 April is printed before those last charges arrive, so the journal builds the
+year's Tax pack again by itself on 4 April at 07:00, in the same job, with nothing for you to
+press. If the tax working paper cannot be read just then, it keeps the pack it has and tries
+again every 15 minutes, for up to three days; it never puts a pack without the paper in its
+place. The first backup of 4 April runs at 16:30, after it, so the archive kept 8 years holds
+the complete pack.
+Telegram does not get the new pack a second time, and the copy it got on 1 April has estimates
+for the charges of the year's last days: give your CA the Tax pack from the Journal's Reports
+on or after 4 April. (If the journal was not running at all on 4 April, it builds the pack at
+its next start within three days, and that year's archive may then hold the pack of 1 April:
+build the Tax pack once more from the Journal's Reports and keep that file with the year's
+papers.)
+
+The newest 8 of these archives are kept (`SUDARSHAN_BACKUP_KEEP_YEARLY`), for the years the tax
+records must be kept. A year's archive goes offsite under a name of its own,
+`sudarshan-fy-2026-27-YYYYMMDD-HHMMSS-<release>.tar.gz.cms`,
 so that the bucket's delete rules, which name the nightly prefix (step 3 below), never remove
 it. The System page shows the newest year's archive and its size: eight of them must fit the
 size cap and the bucket.
@@ -472,8 +499,9 @@ empty settings file, with `install`; the settings are written by `sudarshan`, th
    Each has Lifecycle action Delete, Number of days 30 (or what you like, the same in both), the
    State switch on, and under Object name filters one filter of the kind **Include by prefix**
    with the text `sudarshan-backup-` (so the rule deletes the nightly copies only, and never a
-   financial year's archive, whose name starts `sudarshan-fy-`; if you made the two rules before
-   v0.13.1 without this filter, edit both and add it before the first 31 March):
+   financial year's archive, whose name starts `sudarshan-fy-`; if you made the two rules
+   without this filter, edit both and add it before 4 April, the day the year's archive is made
+   and uploaded):
    - Target **Latest version of objects**: after 30 days the newest version of a copy becomes a
      previous version;
    - Target **Previous versions of objects**: a previous version is deleted 30 days after it
@@ -967,13 +995,19 @@ positions and fills, and the risk guard all apply as they do to an order you pla
   strategy only closes what it opened**: a flat alert while it holds nothing sends nothing, so it
   never closes a position you opened by hand.
 - **An intraday strategy starts each day holding nothing.** Its position was squared off before
-  the close, so the first alert of a later day says so and picks today's contract.
+  the close, so the first alert of a later day says so and picks today's contract. Until that
+  alert the Automation page and `/auto` say the position was closed at the session's end; they
+  never show it as held.
 - **Sandbox or Live is the strategy's own**, never the app's mode or its order mode. Stopped or
   Active is one switch per strategy; `/auto` on Telegram shows and moves it.
-- **An alert's own time is never trusted ahead of the server's clock.** New link, or Stop and
-  then Start, begins the order of alerts again.
+- **An alert's own time is never trusted more than 5 s ahead of the server's clock.** New link,
+  or Stop and then Start, begins the order of alerts again.
 - **If an order went and its result could not be recorded**, you are told at once on Telegram,
-  and the next alert reads the strategy's position again before anything is sent.
+  and the next alert reads the strategy's position again before anything is sent. While
+  Positions cannot be read, or the result still cannot be recorded, the strategy sends no new
+  entry and says so; an exit alert still goes. You are told again after each further day. Only
+  after Positions has stayed unreadable for 16 hours, counted from the first read that failed,
+  is the alert closed as not confirmed: then check Positions yourself.
 
 `SUDARSHAN_AUTOMATION` in OpenAlgo's `.env` (set by the release, above):
 
@@ -1235,12 +1269,20 @@ sudo -u sudarshan .venv/bin/python -m sudarshan.ops.watch --check
 ```
 
 - The line `certificate site` says `set` and the address it asks by, or `unknown`: then no
-  certificate is checked until the line above is added.
+  certificate is checked until the line above is added. The System page then reads "Not being
+  checked" beside Security certificate, with the reason.
 - The line `certificate` says `fine` with the hours left. `unread cause=no_name` means the
   address is not known; `unread cause=other_site` means nginx answered that address with another
   site's certificate (the address is wrong, or the app's site is not set up in nginx under it).
+  After two days of either it reads `warning` with the same cause.
   (With a number for an address instead of a name, nginx cannot be asked by it and gives its
   first site's certificate: it is judged only when it is issued for that number.)
+
+A certificate that is not checked cannot warn you before it runs out. So when the check has
+judged no certificate for two days in a row, for either of those two reasons, you are told once
+on Telegram, with the line to add to `/etc/sudarshan/watch.env`; and once more, "is being
+checked again", when it is set right. A look that merely failed (nginx not answering for a
+moment) does not count towards the two days and does not end them.
 
 Tests: `sudarshan/ops/tests/test_ops_nginx.py`.
 
@@ -1310,6 +1352,11 @@ folder (`cd /opt/sudarshan/apps/openalgo`):
    If that block already has an `error_page` line naming 502 or 504, take those two numbers out
    of it first, or nginx keeps the older line.
 
+   Before you add the line, look for one more setting, in that same file and in nginx's main
+   file: `sudo grep -n proxy_intercept_errors /etc/nginx/nginx.conf <SUDARSHAN's site file>`.
+   Nothing printed, or only `off`, is as it should be. If a line reads `on`, read "When nginx
+   takes over the app's errors" below before you go on.
+
 3. Test, then reload; never restart. If `nginx -t` reports an error, undo step 2 and stop.
 
    ```
@@ -1324,8 +1371,21 @@ What the lines do not change: the answer keeps its status (a restart never reads
 TradingView or to the app's own order calls), anything the app itself answers is passed on as it
 is, and the family view's API keeps its own "did not answer" sentence. After a release that
 changes the page (the changelog says so), run the `install` line of step 1 again, then step 3:
-the page is part of the lines, so nginx takes it up at the reload. To take the lines out, remove the `include` line, then
-`sudo nginx -t` and `sudo systemctl reload nginx`.
+the page is part of the lines, so nginx takes it up at the reload. To take the lines out, remove
+the `include` line, then `sudo nginx -t` and `sudo systemctl reload nginx`.
+
+**When nginx takes over the app's errors.** "Anything the app itself answers is passed on as it
+is" holds only while `proxy_intercept_errors` is off for SUDARSHAN's site, which is nginx's own
+default; SUDARSHAN's lines never turn it on. With it on (in SUDARSHAN's site, or in nginx's main
+file with no `off` in SUDARSHAN's site), nginx replaces the app's own 502 and 504 answers with
+the restart page as well. The app answers 502 when Upstox took an order without naming it, with
+the sentence that the order may have been placed. That sentence is then lost, on the phone and
+for TradingView, which sees only the gateway error. The phone still holds the exit or cancel: an
+answer that is not the app's own is read as "no answer came", never as a refusal, so its hold
+stays as it does for an answer that never came. To keep the sentence, set that line in
+SUDARSHAN's site to `proxy_intercept_errors off;`, or, when only the main file turns it on, add
+that line inside SUDARSHAN's `server { }` block (none of SUDARSHAN's lines needs it on). Or leave
+the restart lines out.
 
 Tests: `sudarshan/ops/tests/test_ops_restart_page.py`, `frontend/src/sudarshan/pwa/restartPage.test.ts`
 and `frontend/src/sudarshan/pwa/sw.test.ts`.
@@ -1524,3 +1584,34 @@ cannot be added, and then:
   `ssh -N -L 5000:127.0.0.1:5000 <you>@<server>`, with `http://127.0.0.1:5000` as the host.
 
 Tests: `sudarshan/assistant/tests/`, `sudarshan/guard/tests/test_guard_migration.py`.
+
+## The TRINETRA view (M13)
+
+TRINETRA's readings reach SUDARSHAN only through a letterbox: a folder SUDARSHAN owns
+(`/var/spool/sudarshan-signals/in`), into which TRINETRA's operators add one small publisher.
+`sudarshan-signals` (127.0.0.1:5588) reads it once a second, keeps the readings and their
+timeline in `/var/lib/sudarshan-signals/signals.db`, and shows them on your screens with how old
+they are. Nothing of TRINETRA's is ever opened, asked, restarted or changed from here; the whole
+contract, and the page to hand TRINETRA's operators, is `sudarshan/signals/README.md` (section
+1). The view ships **switched off** (`SUDARSHAN_SIGNALS off` in "OpenAlgo settings that ship with
+a release"); while it is on and the set-up below has not been run, the TRINETRA page says
+"TRINETRA is not connected yet" with the line to run.
+
+### The letterbox's one-time set-up (M13.3)
+
+1. Ask TRINETRA's operators which account TRINETRA runs as, and give them section 1 of
+   `sudarshan/signals/README.md`. Their publisher stays behind a switch of their own until they
+   choose.
+2. On the server, in the app's folder:
+   `sudo sudarshan/ops/signals/bootstrap.sh --publisher <that account>`
+   (add `--dry-run` first to see what it would do). It makes the letterbox (owner `sudarshan`,
+   mode 1733) and writes the account's number to `/etc/sudarshan/signals.env`, then says
+   `PASS.` It reads the system's account list for that number and nothing else; it touches
+   nothing of TRINETRA's. Running it again is safe ("Nothing was changed").
+3. Check it as SUDARSHAN's account: `sudo -u sudarshan .venv/bin/python -m sudarshan.signals.check`.
+   It writes one file into the letterbox as an account that is not TRINETRA's and sees it refused,
+   then says `PASS.`
+4. Nothing needs a restart: the service notices the set-up within a minute.
+
+After a server is rebuilt, run step 2 again: the letterbox is a queue and is not backed up
+(`signals.db` is). Tests: `sudarshan/signals/tests/`, `sudarshan/ops/tests/test_signals_bootstrap.py`.

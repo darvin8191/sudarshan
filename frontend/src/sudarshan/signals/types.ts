@@ -120,6 +120,7 @@ export const WORDS = {
     "TRINETRA stopped publishing at {time}. SUDARSHAN cannot restart it; see TRINETRA's own runbook.",
   back_notice: 'TRINETRA is publishing again since {time}.',
   too_few: 'too few cases to judge',
+  no_direction: 'a neutral reading names no direction to score',
   no_scores: 'No scores yet: a change is scored once 5 trading sessions have passed after it.',
   version_conflict:
     "TRINETRA's settings were changed on another screen. Nothing was saved; open them again.",

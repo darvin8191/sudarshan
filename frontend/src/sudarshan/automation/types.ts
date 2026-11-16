@@ -71,6 +71,7 @@ export interface Strategy {
   held_symbol: string | null
   held_side: string | null
   held_since_ms: number | null
+  held_note: string | null
   alerts_today: number
   last_alert: AlertLine | null
   sandbox_run: SandboxRun

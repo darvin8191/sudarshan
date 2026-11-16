@@ -10,6 +10,7 @@ eventlet and the development server it waits, as the smart order's own lock does
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any
 
 from utils import runtime
@@ -79,6 +80,43 @@ def _live_gate(desk: Desk) -> str | None:
     if desk.guard_stage() != "on":
         return words.LIVE_WAITS_FOR_GUARD
     return None
+
+
+#: The state's values once an intraday note of an earlier day is cleared (as intake.plan does).
+_DAY_ENDED = {
+    "held_exchange": None,
+    "held_symbol": None,
+    "held_side": None,
+    "held_since_ms": None,
+    "last_target": 0,
+}
+
+
+def held_today(strategy: m.Strategy, state: m.State, now_ms: int) -> tuple[m.State, str | None]:
+    """The state as a reader should see it now, and what to say when a note was read as ended.
+
+    The date rule is the intake's own (``symbols.day_ended``): an intraday position does not
+    outlive its session, so from the next India date its note names nothing held. The intake
+    clears the note at the day's first alert; until then every read says the same thing the
+    alert will. Nothing is written here."""
+    today = symbols.india_date(now_ms)
+    if not state.held_symbol or not symbols.day_ended(
+        strategy.product, state.held_since_ms, today
+    ):
+        return state, None
+    yesterday = symbols.india_date((state.held_since_ms or 0) + 86_400_000) == today
+    note = words.day_closed(state.held_symbol, yesterday)
+    return replace(state, **_DAY_ENDED), note
+
+
+def _state_today(strategy: m.Strategy, state: m.State, desk: Desk, store) -> m.State:
+    """For a change made holding the strategy's lock: a note the date rule has ended is cleared
+    in the store first, exactly as the day's first alert would clear it, so the change is judged
+    on what the page shows and a later edit of the product cannot bring the note back."""
+    seen, note = held_today(strategy, state, int(desk.now() * 1000))
+    if note is not None:
+        store.write_state(strategy.id, dict(_DAY_ENDED))
+    return seen
 
 
 def _taken(name: str, taken: Taken) -> Refused:
@@ -159,6 +197,7 @@ def set_mode(
         before, state = both
         if before.mode == mode:
             return before
+        state = _state_today(before, state, desk, store)
         if state.held_symbol:
             raise Refused(
                 words.holds_position(
@@ -222,6 +261,8 @@ def update(
         except contract.Refused as refused:
             raise Refused(str(refused), 400) from refused
         moved = {k for k, v in columns.items() if getattr(before, k) != v}
+        if moved - contract.HELD_EDITABLE:
+            state = _state_today(before, state, desk, store)
         if state.held_symbol and moved - contract.HELD_EDITABLE:
             raise Refused(
                 words.holds_position(
@@ -262,7 +303,7 @@ def view(strategy: m.Strategy, store: AutomationStore, now_ms: int, trading=None
     ``trading`` says whether the market traded on a date; with it, an Active strategy that has
     had no alert since it last heard one (or since it was started) carries the trading days gone.
     """
-    state = store.state(strategy.id)
+    state, held_note = held_today(strategy, store.state(strategy.id), now_ms)
     last = store.last_alert(strategy.id)
     quiet = 0
     if trading is not None and strategy.state == m.ACTIVE:
@@ -277,6 +318,7 @@ def view(strategy: m.Strategy, store: AutomationStore, now_ms: int, trading=None
         held_symbol=state.held_symbol,
         held_side=state.held_side,
         held_since_ms=state.held_since_ms,
+        held_note=held_note,
         alerts_today=state.alerts_today,
         last_alert=alert_line(last, strategy.name, now_ms) if last else None,
         sandbox_run=store.sandbox_run(strategy.id),

@@ -90,6 +90,10 @@ FAMILY_AT_ONCE = frozenset(
 #: one and its news (a new AI connection, a Telegram account linked or unlinked); a warning and
 #: the return from a warning wait for the close (``_at_once``).
 AT_ONCE = FAILURES | FAMILY_AT_ONCE | {"watch_failing", "watch_new"}
+#: The TRINETRA view's notices (src signals, M13): TRINETRA silent on a trading day, or stale in
+#: market hours, and its return are told at once (a market reading the owner may be acting on); a
+#: newer format waits for the close.
+AT_ONCE = AT_ONCE | {"signals_quiet", "signals_stale", "signals_back"}
 MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 UNIT = re.compile(r"sudarshan-[a-z0-9-]+\.(?:service|timer)")
 #: The order the facts of one run are told in.
@@ -115,6 +119,10 @@ KIND_ORDER = (
     "drill_failed",
     "drill_passed",
     "watch_summary",
+    "signals_quiet",
+    "signals_stale",
+    "signals_back",
+    "signals_format",
 )
 
 #: Why an install was undone, in the owner's words (the cause only; ``rolled_back`` adds the rest).
@@ -567,6 +575,24 @@ def _watch_warning(event: Event, now: datetime) -> list[str]:
             "One of SUDARSHAN's services is listening on the network, not only inside the "
             f"server. Nothing has stopped; {LOOK}."
         ]
+    if check == "certificate":
+        # The certificate has not been judged for two days (v0.13.0 verify N6): no address for
+        # the app is known to the watch, or the web server answers it with another site's.
+        if event.fact("cause") == "other_site":
+            why = (
+                "the web server answers the app's address, as the watch has it, with another "
+                "site's certificate"
+            )
+            fix = "In /etc/sudarshan/watch.env on the server, set the line"
+        else:
+            why = "the watch does not know the app's address"
+            fix = "Add one line to /etc/sudarshan/watch.env on the server:"
+        return [
+            f"SUDARSHAN's security certificate has not been checked for two days: {why}. "
+            "Nothing will warn you before it runs out until this is set right.",
+            f"{fix} SUDARSHAN_WATCH_CERT_HOST= followed by the address you open the app at, "
+            "the name alone with nothing after it.",
+        ]
     if check == "drill":
         days = event.fact("days")
         age = f"{days} days" if _MINUTES.fullmatch(days) else "over 100 days"
@@ -608,6 +634,9 @@ def _watch_fine(event: Event, now: datetime) -> list[str]:
     check, at = event.fact("check"), _when(event.at, now)
     if check.startswith("service_") and check[8:] in _SERVICES:
         return [f"SUDARSHAN's {_SERVICES[check[8:]][0]} is answering again since {at}."]
+    if check == "certificate" and event.fact("was") == "warning":
+        # Its only warning is "not checked": nothing was renewed, it is judged again.
+        return ["SUDARSHAN's security certificate is being checked again."]
     return {
         "login": [f"Upstox is connected again since {at}: order updates are arriving."],
         "feed": [f"The price feed is connected to Upstox again since {at}."],
@@ -756,6 +785,24 @@ def _drill_failed(event: Event, now: datetime) -> list[str]:
     ]
 
 
+_SECONDS = re.compile(r"[0-9]{9,11}")
+
+
+def _signals(event: Event, now: datetime) -> list[str]:
+    """The TRINETRA view's notices, in its contract's words (sudarshan/signals/contract.py): the
+    same sentences its page shows. ``since`` is the published time of TRINETRA's last reading."""
+    from sudarshan.signals.contract import WORDS as SIGNAL_WORDS
+
+    since = event.fact("since")
+    at = float(since) if _SECONDS.fullmatch(since) else event.at
+    return {
+        "signals_quiet": [SIGNAL_WORDS["not_today"]],
+        "signals_stale": [SIGNAL_WORDS["stale_notice"].format(time=_when(at, now))],
+        "signals_back": [SIGNAL_WORDS["back_notice"].format(time=_when(at, now))],
+        "signals_format": [SIGNAL_WORDS["newer_format"]],
+    }.get(event.kind, [])
+
+
 def _at_once(event: Event) -> bool:
     """Whether a notice goes out in market hours too."""
     if event.kind == "watch_fine":
@@ -781,6 +828,10 @@ _FAMILY_WORDS = {
     "drill_passed": _drill_passed,
     "drill_failed": _drill_failed,
     "watch_summary": _watch_summary,
+    "signals_quiet": _signals,
+    "signals_stale": _signals,
+    "signals_back": _signals,
+    "signals_format": _signals,
 }
 
 

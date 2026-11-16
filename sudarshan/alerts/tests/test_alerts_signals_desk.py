@@ -1,7 +1,7 @@
 """AL2 (M13.10): TRINETRA's changes on the owner's Telegram, the alerts' signals desk.
 
 Against the real outbox Pacer, a real alerts.db in a temporary folder and a fake send: no
-network. Every reading and sentence here is invented (``signals_fakes.py``); the words and the
+network. Every reading and sentence here is invented (``relay_fakes.py``); the words and the
 relay's contract checks are in ``test_alerts_signals_words.py``.
 """
 
@@ -14,7 +14,7 @@ from datetime import timedelta
 import httpx
 import pytest
 from alerts_fakes import ist, wait_until
-from signals_fakes import AT, WORDS_EXAMPLE, alert, change, relay_message
+from relay_fakes import AT, WORDS_EXAMPLE, alert, change, relay_message
 
 from sudarshan.alerts import outbox, signals_desk
 from sudarshan.alerts.market.api import RELAY_MAX, ApiError, MarketApi, OffDesk

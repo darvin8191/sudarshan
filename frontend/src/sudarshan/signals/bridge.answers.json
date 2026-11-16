@@ -1,0 +1,1359 @@
+{
+ "about": "Recorded by sudarshan/tests/test_signals_page_answers.py from OpenAlgo's real bridge in front of the real sudarshan-signals, reading invented documents at a fixed clock. Do not edit by hand: re-record with SUDARSHAN_WRITE_ANSWERS=1.",
+ "now_ms": 1794886500000,
+ "later_ms": 1794887400000,
+ "answers": {
+  "state": {
+   "op": "state",
+   "args": {},
+   "method": "GET",
+   "path": "/sudarshan/signals/api/state",
+   "query": {},
+   "status": 200,
+   "answer": {
+    "data": {
+     "alerts": [
+      {
+       "at_ms": 1794886480000,
+       "id": "invented-0001",
+       "instrument": "NIFTY",
+       "lang": "en",
+       "level": "watch",
+       "module": "regime",
+       "text": "Invented alert text for the tests.",
+       "title": "NIFTY regime turned to FII distribution"
+      }
+     ],
+     "freshness": {
+      "changes_at_ms": 1794886840000,
+      "clock_ok": true,
+      "colour": true,
+      "fresh_until_ms": 1794886840000,
+      "published_ms": 1794886480000,
+      "status": "fresh",
+      "words": "TRINETRA · updated 09:04:40"
+     },
+     "lang": "hi",
+     "notes": [],
+     "now_ms": 1794886500000,
+     "readings": [
+      {
+       "as_of_ms": 1794886479000,
+       "bias": "bear",
+       "confidence": 0.71,
+       "doc_seq": 2,
+       "horizon": "swing",
+       "inputs": [
+        {
+         "name": "FII index futures, net",
+         "value": "-1.2 lakh contracts"
+        },
+        {
+         "name": "Put-call ratio",
+         "value": "0.82"
+        }
+       ],
+       "instrument": "NIFTY",
+       "label": "FII distribution",
+       "lapsed": false,
+       "levels": {
+        "invalid": 26120.0,
+        "target": null,
+        "trigger": 25900.0
+       },
+       "module": "regime",
+       "published_ms": 1794886480000,
+       "quality": "ok",
+       "score": -0.42,
+       "sessions": 1,
+       "since_ms": 1794886440000,
+       "state": "DISTRIBUTION",
+       "valid_until_ms": null,
+       "why": {
+        "en": "Invented: index futures turned net short over three sessions and the put-call ratio fell.\nA close above 26,120 would undo it.",
+        "gu": "Invented: ત્રણ સત્રથી ઇન્ડેક્સ ફ્યુચર્સમાં નેટ શોર્ટ, અને PCR ઘટ્યો.",
+        "hi": "Invented: teen sessions se index futures mein net short, aur PCR gira.\n26,120 ke upar close isko palat dega."
+       }
+      },
+      {
+       "as_of_ms": 1794822599000,
+       "bias": "neutral",
+       "confidence": 0.55,
+       "doc_seq": 2,
+       "horizon": "swing",
+       "inputs": [],
+       "instrument": "BANKNIFTY",
+       "label": "Range-bound",
+       "lapsed": false,
+       "levels": null,
+       "module": "regime",
+       "published_ms": 1794886480000,
+       "quality": "ok",
+       "score": null,
+       "sessions": 4,
+       "since_ms": 1794458400000,
+       "state": "NEUTRAL_RANGE",
+       "valid_until_ms": null,
+       "why": {
+        "en": "Invented: no side has held the index for a week.",
+        "gu": null,
+        "hi": null
+       }
+      },
+      {
+       "as_of_ms": 1794885240000,
+       "bias": "bear",
+       "confidence": 0.62,
+       "doc_seq": 2,
+       "horizon": "open",
+       "inputs": [],
+       "instrument": "NIFTY",
+       "label": "Mild gap down",
+       "lapsed": false,
+       "levels": null,
+       "module": "gap_bias",
+       "published_ms": 1794886480000,
+       "quality": "ok",
+       "score": null,
+       "sessions": 1,
+       "since_ms": 1794885300000,
+       "state": "GAP_DOWN_MILD",
+       "valid_until_ms": 1794887100000,
+       "why": {
+        "en": "Invented: GIFT NIFTY trades below yesterday's close.",
+        "gu": null,
+        "hi": null
+       }
+      },
+      {
+       "as_of_ms": 1794885240000,
+       "bias": "neutral",
+       "confidence": 0.51,
+       "doc_seq": 2,
+       "horizon": "open",
+       "inputs": [],
+       "instrument": "BANKNIFTY",
+       "label": "Flat open",
+       "lapsed": false,
+       "levels": null,
+       "module": "gap_bias",
+       "published_ms": 1794886480000,
+       "quality": "ok",
+       "score": null,
+       "sessions": 1,
+       "since_ms": 1794885300000,
+       "state": "FLAT_OPEN",
+       "valid_until_ms": 1794887100000,
+       "why": {
+        "en": null,
+        "gu": null,
+        "hi": null
+       }
+      },
+      {
+       "as_of_ms": 1794822599000,
+       "bias": "bear",
+       "confidence": 0.58,
+       "doc_seq": 2,
+       "horizon": "swing",
+       "inputs": [],
+       "instrument": "NIFTY",
+       "label": "Swing top forming",
+       "lapsed": false,
+       "levels": {
+        "invalid": 26200.0,
+        "target": 25400.0,
+        "trigger": 25850.0
+       },
+       "module": "swing_eod",
+       "published_ms": 1794886480000,
+       "quality": "ok",
+       "score": null,
+       "sessions": 2,
+       "since_ms": 1794822300000,
+       "state": "TOP_WATCH",
+       "valid_until_ms": null,
+       "why": {
+        "en": "Invented: a lower high on the daily close.",
+        "gu": null,
+        "hi": "Invented: daily close par lower high."
+       }
+      },
+      {
+       "as_of_ms": 1794886479000,
+       "bias": "bull",
+       "confidence": 0.66,
+       "doc_seq": 2,
+       "horizon": "intraday",
+       "inputs": [],
+       "instrument": "BANKNIFTY",
+       "label": "Intraday reversal up",
+       "lapsed": false,
+       "levels": null,
+       "module": "swing_intraday",
+       "published_ms": 1794886480000,
+       "quality": "degraded",
+       "score": null,
+       "sessions": 1,
+       "since_ms": 1794886200000,
+       "state": "REVERSAL_UP",
+       "valid_until_ms": null,
+       "why": {
+        "en": null,
+        "gu": null,
+        "hi": null
+       }
+      },
+      {
+       "as_of_ms": 1794886479000,
+       "bias": "bear",
+       "confidence": null,
+       "doc_seq": 2,
+       "horizon": "intraday",
+       "inputs": [],
+       "instrument": "NIFTY",
+       "label": "Breadth weak",
+       "lapsed": false,
+       "levels": null,
+       "module": "breadth",
+       "published_ms": 1794886480000,
+       "quality": "ok",
+       "score": null,
+       "sessions": null,
+       "since_ms": null,
+       "state": "BROAD_WEAK",
+       "valid_until_ms": null,
+       "why": {
+        "en": null,
+        "gu": null,
+        "hi": null
+       }
+      }
+     ]
+    },
+    "enabled": true,
+    "status": "success"
+   }
+  },
+  "timeline": {
+   "op": "timeline",
+   "args": {
+    "limit": 50
+   },
+   "method": "GET",
+   "path": "/sudarshan/signals/api/timeline",
+   "query": {
+    "limit": "50"
+   },
+   "status": 200,
+   "answer": {
+    "data": {
+     "changes": [
+      {
+       "as_of_ms": 1794886479000,
+       "at_ms": 1794886480000,
+       "bias": "bear",
+       "confidence": null,
+       "from_bias": null,
+       "from_label": null,
+       "from_state": null,
+       "horizon": "intraday",
+       "id": 8,
+       "inputs": [],
+       "instrument": "NIFTY",
+       "kind": "first",
+       "levels": null,
+       "module": "breadth",
+       "quality": "ok",
+       "recorded_ms": 1794886500000,
+       "score": null,
+       "since_ms": null,
+       "to_label": "Breadth weak",
+       "to_state": "BROAD_WEAK",
+       "valid_until_ms": null,
+       "why": {
+        "en": null,
+        "gu": null,
+        "hi": null
+       }
+      },
+      {
+       "as_of_ms": 1794886479000,
+       "at_ms": 1794886480000,
+       "bias": "bull",
+       "confidence": 0.66,
+       "from_bias": null,
+       "from_label": null,
+       "from_state": null,
+       "horizon": "intraday",
+       "id": 7,
+       "inputs": [],
+       "instrument": "BANKNIFTY",
+       "kind": "first",
+       "levels": null,
+       "module": "swing_intraday",
+       "quality": "degraded",
+       "recorded_ms": 1794886500000,
+       "score": null,
+       "since_ms": 1794886200000,
+       "to_label": "Intraday reversal up",
+       "to_state": "REVERSAL_UP",
+       "valid_until_ms": null,
+       "why": {
+        "en": null,
+        "gu": null,
+        "hi": null
+       }
+      },
+      {
+       "as_of_ms": 1794885240000,
+       "at_ms": 1794886480000,
+       "bias": "neutral",
+       "confidence": 0.51,
+       "from_bias": null,
+       "from_label": null,
+       "from_state": null,
+       "horizon": "open",
+       "id": 6,
+       "inputs": [],
+       "instrument": "BANKNIFTY",
+       "kind": "first",
+       "levels": null,
+       "module": "gap_bias",
+       "quality": "ok",
+       "recorded_ms": 1794886500000,
+       "score": null,
+       "since_ms": 1794885300000,
+       "to_label": "Flat open",
+       "to_state": "FLAT_OPEN",
+       "valid_until_ms": 1794887100000,
+       "why": {
+        "en": null,
+        "gu": null,
+        "hi": null
+       }
+      },
+      {
+       "as_of_ms": 1794885240000,
+       "at_ms": 1794886480000,
+       "bias": "bear",
+       "confidence": 0.62,
+       "from_bias": null,
+       "from_label": null,
+       "from_state": null,
+       "horizon": "open",
+       "id": 5,
+       "inputs": [],
+       "instrument": "NIFTY",
+       "kind": "first",
+       "levels": null,
+       "module": "gap_bias",
+       "quality": "ok",
+       "recorded_ms": 1794886500000,
+       "score": null,
+       "since_ms": 1794885300000,
+       "to_label": "Mild gap down",
+       "to_state": "GAP_DOWN_MILD",
+       "valid_until_ms": 1794887100000,
+       "why": {
+        "en": "Invented: GIFT NIFTY trades below yesterday's close.",
+        "gu": null,
+        "hi": null
+       }
+      },
+      {
+       "as_of_ms": 1794886479000,
+       "at_ms": 1794886480000,
+       "bias": "bear",
+       "confidence": 0.71,
+       "from_bias": "bull",
+       "from_label": "FII accumulation",
+       "from_state": "ACCUMULATION",
+       "horizon": "swing",
+       "id": 4,
+       "inputs": [
+        {
+         "name": "FII index futures, net",
+         "value": "-1.2 lakh contracts"
+        },
+        {
+         "name": "Put-call ratio",
+         "value": "0.82"
+        }
+       ],
+       "instrument": "NIFTY",
+       "kind": "state",
+       "levels": {
+        "invalid": 26120.0,
+        "target": null,
+        "trigger": 25900.0
+       },
+       "module": "regime",
+       "quality": "ok",
+       "recorded_ms": 1794886500000,
+       "score": -0.42,
+       "since_ms": 1794886440000,
+       "to_label": "FII distribution",
+       "to_state": "DISTRIBUTION",
+       "valid_until_ms": null,
+       "why": {
+        "en": "Invented: index futures turned net short over three sessions and the put-call ratio fell.\nA close above 26,120 would undo it.",
+        "gu": "Invented: ત્રણ સત્રથી ઇન્ડેક્સ ફ્યુચર્સમાં નેટ શોર્ટ, અને PCR ઘટ્યો.",
+        "hi": "Invented: teen sessions se index futures mein net short, aur PCR gira.\n26,120 ke upar close isko palat dega."
+       }
+      },
+      {
+       "as_of_ms": 1794822599000,
+       "at_ms": 1794822600000,
+       "bias": "bear",
+       "confidence": 0.58,
+       "from_bias": null,
+       "from_label": null,
+       "from_state": null,
+       "horizon": "swing",
+       "id": 3,
+       "inputs": [],
+       "instrument": "NIFTY",
+       "kind": "first",
+       "levels": {
+        "invalid": 26200.0,
+        "target": 25400.0,
+        "trigger": 25850.0
+       },
+       "module": "swing_eod",
+       "quality": "ok",
+       "recorded_ms": 1794886500000,
+       "score": null,
+       "since_ms": 1794822300000,
+       "to_label": "Swing top forming",
+       "to_state": "TOP_WATCH",
+       "valid_until_ms": null,
+       "why": {
+        "en": "Invented: a lower high on the daily close.",
+        "gu": null,
+        "hi": "Invented: daily close par lower high."
+       }
+      },
+      {
+       "as_of_ms": 1794822599000,
+       "at_ms": 1794822600000,
+       "bias": "neutral",
+       "confidence": 0.55,
+       "from_bias": null,
+       "from_label": null,
+       "from_state": null,
+       "horizon": "swing",
+       "id": 2,
+       "inputs": [],
+       "instrument": "BANKNIFTY",
+       "kind": "first",
+       "levels": null,
+       "module": "regime",
+       "quality": "ok",
+       "recorded_ms": 1794886500000,
+       "score": null,
+       "since_ms": 1794458400000,
+       "to_label": "Range-bound",
+       "to_state": "NEUTRAL_RANGE",
+       "valid_until_ms": null,
+       "why": {
+        "en": "Invented: no side has held the index for a week.",
+        "gu": null,
+        "hi": null
+       }
+      },
+      {
+       "as_of_ms": 1794822599000,
+       "at_ms": 1794822600000,
+       "bias": "bull",
+       "confidence": 0.64,
+       "from_bias": null,
+       "from_label": null,
+       "from_state": null,
+       "horizon": "swing",
+       "id": 1,
+       "inputs": [],
+       "instrument": "NIFTY",
+       "kind": "first",
+       "levels": null,
+       "module": "regime",
+       "quality": "ok",
+       "recorded_ms": 1794886500000,
+       "score": 0.35,
+       "since_ms": 1794549600000,
+       "to_label": "FII accumulation",
+       "to_state": "ACCUMULATION",
+       "valid_until_ms": null,
+       "why": {
+        "en": "Invented: index futures net long.",
+        "gu": null,
+        "hi": null
+       }
+      }
+     ],
+     "next_before": null
+    },
+    "enabled": true,
+    "status": "success"
+   }
+  },
+  "timeline_first": {
+   "op": "timeline",
+   "args": {
+    "limit": 3
+   },
+   "method": "GET",
+   "path": "/sudarshan/signals/api/timeline",
+   "query": {
+    "limit": "3"
+   },
+   "status": 200,
+   "answer": {
+    "data": {
+     "changes": [
+      {
+       "as_of_ms": 1794886479000,
+       "at_ms": 1794886480000,
+       "bias": "bear",
+       "confidence": null,
+       "from_bias": null,
+       "from_label": null,
+       "from_state": null,
+       "horizon": "intraday",
+       "id": 8,
+       "inputs": [],
+       "instrument": "NIFTY",
+       "kind": "first",
+       "levels": null,
+       "module": "breadth",
+       "quality": "ok",
+       "recorded_ms": 1794886500000,
+       "score": null,
+       "since_ms": null,
+       "to_label": "Breadth weak",
+       "to_state": "BROAD_WEAK",
+       "valid_until_ms": null,
+       "why": {
+        "en": null,
+        "gu": null,
+        "hi": null
+       }
+      },
+      {
+       "as_of_ms": 1794886479000,
+       "at_ms": 1794886480000,
+       "bias": "bull",
+       "confidence": 0.66,
+       "from_bias": null,
+       "from_label": null,
+       "from_state": null,
+       "horizon": "intraday",
+       "id": 7,
+       "inputs": [],
+       "instrument": "BANKNIFTY",
+       "kind": "first",
+       "levels": null,
+       "module": "swing_intraday",
+       "quality": "degraded",
+       "recorded_ms": 1794886500000,
+       "score": null,
+       "since_ms": 1794886200000,
+       "to_label": "Intraday reversal up",
+       "to_state": "REVERSAL_UP",
+       "valid_until_ms": null,
+       "why": {
+        "en": null,
+        "gu": null,
+        "hi": null
+       }
+      },
+      {
+       "as_of_ms": 1794885240000,
+       "at_ms": 1794886480000,
+       "bias": "neutral",
+       "confidence": 0.51,
+       "from_bias": null,
+       "from_label": null,
+       "from_state": null,
+       "horizon": "open",
+       "id": 6,
+       "inputs": [],
+       "instrument": "BANKNIFTY",
+       "kind": "first",
+       "levels": null,
+       "module": "gap_bias",
+       "quality": "ok",
+       "recorded_ms": 1794886500000,
+       "score": null,
+       "since_ms": 1794885300000,
+       "to_label": "Flat open",
+       "to_state": "FLAT_OPEN",
+       "valid_until_ms": 1794887100000,
+       "why": {
+        "en": null,
+        "gu": null,
+        "hi": null
+       }
+      }
+     ],
+     "next_before": 6
+    },
+    "enabled": true,
+    "status": "success"
+   }
+  },
+  "timeline_older": {
+   "op": "timeline",
+   "args": {
+    "before": 6,
+    "limit": 3
+   },
+   "method": "GET",
+   "path": "/sudarshan/signals/api/timeline",
+   "query": {
+    "before": "6",
+    "limit": "3"
+   },
+   "status": 200,
+   "answer": {
+    "data": {
+     "changes": [
+      {
+       "as_of_ms": 1794885240000,
+       "at_ms": 1794886480000,
+       "bias": "bear",
+       "confidence": 0.62,
+       "from_bias": null,
+       "from_label": null,
+       "from_state": null,
+       "horizon": "open",
+       "id": 5,
+       "inputs": [],
+       "instrument": "NIFTY",
+       "kind": "first",
+       "levels": null,
+       "module": "gap_bias",
+       "quality": "ok",
+       "recorded_ms": 1794886500000,
+       "score": null,
+       "since_ms": 1794885300000,
+       "to_label": "Mild gap down",
+       "to_state": "GAP_DOWN_MILD",
+       "valid_until_ms": 1794887100000,
+       "why": {
+        "en": "Invented: GIFT NIFTY trades below yesterday's close.",
+        "gu": null,
+        "hi": null
+       }
+      },
+      {
+       "as_of_ms": 1794886479000,
+       "at_ms": 1794886480000,
+       "bias": "bear",
+       "confidence": 0.71,
+       "from_bias": "bull",
+       "from_label": "FII accumulation",
+       "from_state": "ACCUMULATION",
+       "horizon": "swing",
+       "id": 4,
+       "inputs": [
+        {
+         "name": "FII index futures, net",
+         "value": "-1.2 lakh contracts"
+        },
+        {
+         "name": "Put-call ratio",
+         "value": "0.82"
+        }
+       ],
+       "instrument": "NIFTY",
+       "kind": "state",
+       "levels": {
+        "invalid": 26120.0,
+        "target": null,
+        "trigger": 25900.0
+       },
+       "module": "regime",
+       "quality": "ok",
+       "recorded_ms": 1794886500000,
+       "score": -0.42,
+       "since_ms": 1794886440000,
+       "to_label": "FII distribution",
+       "to_state": "DISTRIBUTION",
+       "valid_until_ms": null,
+       "why": {
+        "en": "Invented: index futures turned net short over three sessions and the put-call ratio fell.\nA close above 26,120 would undo it.",
+        "gu": "Invented: ત્રણ સત્રથી ઇન્ડેક્સ ફ્યુચર્સમાં નેટ શોર્ટ, અને PCR ઘટ્યો.",
+        "hi": "Invented: teen sessions se index futures mein net short, aur PCR gira.\n26,120 ke upar close isko palat dega."
+       }
+      },
+      {
+       "as_of_ms": 1794822599000,
+       "at_ms": 1794822600000,
+       "bias": "bear",
+       "confidence": 0.58,
+       "from_bias": null,
+       "from_label": null,
+       "from_state": null,
+       "horizon": "swing",
+       "id": 3,
+       "inputs": [],
+       "instrument": "NIFTY",
+       "kind": "first",
+       "levels": {
+        "invalid": 26200.0,
+        "target": 25400.0,
+        "trigger": 25850.0
+       },
+       "module": "swing_eod",
+       "quality": "ok",
+       "recorded_ms": 1794886500000,
+       "score": null,
+       "since_ms": 1794822300000,
+       "to_label": "Swing top forming",
+       "to_state": "TOP_WATCH",
+       "valid_until_ms": null,
+       "why": {
+        "en": "Invented: a lower high on the daily close.",
+        "gu": null,
+        "hi": "Invented: daily close par lower high."
+       }
+      }
+     ],
+     "next_before": 3
+    },
+    "enabled": true,
+    "status": "success"
+   }
+  },
+  "change": {
+   "op": "change_get",
+   "args": {
+    "id": 8
+   },
+   "method": "GET",
+   "path": "/sudarshan/signals/api/changes/8",
+   "query": {},
+   "status": 200,
+   "answer": {
+    "data": {
+     "as_of_ms": 1794886479000,
+     "at_ms": 1794886480000,
+     "bias": "bear",
+     "confidence": null,
+     "from_bias": null,
+     "from_label": null,
+     "from_state": null,
+     "horizon": "intraday",
+     "id": 8,
+     "inputs": [],
+     "instrument": "NIFTY",
+     "kind": "first",
+     "levels": null,
+     "module": "breadth",
+     "quality": "ok",
+     "recorded_ms": 1794886500000,
+     "score": null,
+     "since_ms": null,
+     "to_label": "Breadth weak",
+     "to_state": "BROAD_WEAK",
+     "valid_until_ms": null,
+     "why": {
+      "en": null,
+      "gu": null,
+      "hi": null
+     }
+    },
+    "enabled": true,
+    "status": "success"
+   }
+  },
+  "change_missing": {
+   "op": "change_get",
+   "args": {
+    "id": 9999
+   },
+   "method": "GET",
+   "path": "/sudarshan/signals/api/changes/9999",
+   "query": {},
+   "status": 404,
+   "answer": {
+    "error": {
+     "code": "not_found",
+     "message": "This change is not in TRINETRA's timeline. Open the timeline again."
+    },
+    "status": "error"
+   }
+  },
+  "settings": {
+   "op": "settings_get",
+   "args": {},
+   "method": "GET",
+   "path": "/sudarshan/signals/api/settings",
+   "query": {},
+   "status": 200,
+   "answer": {
+    "data": {
+     "lang": "hi",
+     "night": true,
+     "relay": true,
+     "version": 1
+    },
+    "enabled": true,
+    "status": "success"
+   }
+  },
+  "settings_saved": {
+   "op": "settings_set",
+   "args": {
+    "version": 1,
+    "lang": "gu"
+   },
+   "method": "PUT",
+   "path": "/sudarshan/signals/api/settings",
+   "query": {},
+   "status": 200,
+   "answer": {
+    "data": {
+     "lang": "gu",
+     "night": true,
+     "relay": true,
+     "version": 2
+    },
+    "enabled": true,
+    "status": "success"
+   }
+  },
+  "settings_conflict": {
+   "op": "settings_set",
+   "args": {
+    "version": 1,
+    "lang": "en"
+   },
+   "method": "PUT",
+   "path": "/sudarshan/signals/api/settings",
+   "query": {},
+   "status": 409,
+   "answer": {
+    "error": {
+     "code": "version_conflict",
+     "message": "TRINETRA's settings were changed on another screen. Nothing was saved; open them again."
+    },
+    "status": "error"
+   }
+  },
+  "performance": {
+   "op": "performance",
+   "args": {},
+   "method": "GET",
+   "path": "/sudarshan/signals/api/performance",
+   "query": {},
+   "status": 200,
+   "answer": {
+    "data": {
+     "as_of_day": null,
+     "module": null,
+     "rows": [],
+     "words": "No scores yet: a change is scored once 5 trading sessions have passed after it."
+    },
+    "enabled": true,
+    "status": "success"
+   }
+  },
+  "bad_module": {
+   "op": "timeline",
+   "args": {
+    "module": "NOPE"
+   },
+   "method": "GET",
+   "path": "/sudarshan/signals/api/timeline",
+   "query": {
+    "module": "NOPE"
+   },
+   "status": 400,
+   "answer": {
+    "error": {
+     "code": "bad_request",
+     "field": "module",
+     "message": "Choose one of TRINETRA's readings from the list."
+    },
+    "status": "error"
+   }
+  },
+  "bad_request": {
+   "op": "timeline",
+   "args": {
+    "limit": "ten"
+   },
+   "method": "GET",
+   "path": "/sudarshan/signals/api/timeline",
+   "query": {
+    "limit": "ten"
+   },
+   "status": 400,
+   "answer": {
+    "error": {
+     "code": "bad_request",
+     "message": "That request could not be read. Open the page again, then repeat it."
+    },
+    "status": "error"
+   }
+  },
+  "state_stale": {
+   "op": "state",
+   "args": {},
+   "method": "GET",
+   "path": "/sudarshan/signals/api/state",
+   "query": {},
+   "status": 200,
+   "answer": {
+    "data": {
+     "alerts": [
+      {
+       "at_ms": 1794886480000,
+       "id": "invented-0001",
+       "instrument": "NIFTY",
+       "lang": "en",
+       "level": "watch",
+       "module": "regime",
+       "text": "Invented alert text for the tests.",
+       "title": "NIFTY regime turned to FII distribution"
+      }
+     ],
+     "freshness": {
+      "changes_at_ms": 1794887440000,
+      "clock_ok": true,
+      "colour": true,
+      "fresh_until_ms": 1794886840000,
+      "published_ms": 1794886480000,
+      "status": "stale",
+      "words": "TRINETRA has not published since 09:04. This is its last reading, 15 minutes old."
+     },
+     "lang": "gu",
+     "notes": [],
+     "now_ms": 1794887400000,
+     "readings": [
+      {
+       "as_of_ms": 1794886479000,
+       "bias": "bear",
+       "confidence": 0.71,
+       "doc_seq": 2,
+       "horizon": "swing",
+       "inputs": [
+        {
+         "name": "FII index futures, net",
+         "value": "-1.2 lakh contracts"
+        },
+        {
+         "name": "Put-call ratio",
+         "value": "0.82"
+        }
+       ],
+       "instrument": "NIFTY",
+       "label": "FII distribution",
+       "lapsed": false,
+       "levels": {
+        "invalid": 26120.0,
+        "target": null,
+        "trigger": 25900.0
+       },
+       "module": "regime",
+       "published_ms": 1794886480000,
+       "quality": "ok",
+       "score": -0.42,
+       "sessions": 1,
+       "since_ms": 1794886440000,
+       "state": "DISTRIBUTION",
+       "valid_until_ms": null,
+       "why": {
+        "en": "Invented: index futures turned net short over three sessions and the put-call ratio fell.\nA close above 26,120 would undo it.",
+        "gu": "Invented: ત્રણ સત્રથી ઇન્ડેક્સ ફ્યુચર્સમાં નેટ શોર્ટ, અને PCR ઘટ્યો.",
+        "hi": "Invented: teen sessions se index futures mein net short, aur PCR gira.\n26,120 ke upar close isko palat dega."
+       }
+      },
+      {
+       "as_of_ms": 1794822599000,
+       "bias": "neutral",
+       "confidence": 0.55,
+       "doc_seq": 2,
+       "horizon": "swing",
+       "inputs": [],
+       "instrument": "BANKNIFTY",
+       "label": "Range-bound",
+       "lapsed": false,
+       "levels": null,
+       "module": "regime",
+       "published_ms": 1794886480000,
+       "quality": "ok",
+       "score": null,
+       "sessions": 4,
+       "since_ms": 1794458400000,
+       "state": "NEUTRAL_RANGE",
+       "valid_until_ms": null,
+       "why": {
+        "en": "Invented: no side has held the index for a week.",
+        "gu": null,
+        "hi": null
+       }
+      },
+      {
+       "as_of_ms": 1794885240000,
+       "bias": "bear",
+       "confidence": 0.62,
+       "doc_seq": 2,
+       "horizon": "open",
+       "inputs": [],
+       "instrument": "NIFTY",
+       "label": "Mild gap down",
+       "lapsed": true,
+       "levels": null,
+       "module": "gap_bias",
+       "published_ms": 1794886480000,
+       "quality": "ok",
+       "score": null,
+       "sessions": 1,
+       "since_ms": 1794885300000,
+       "state": "GAP_DOWN_MILD",
+       "valid_until_ms": 1794887100000,
+       "why": {
+        "en": "Invented: GIFT NIFTY trades below yesterday's close.",
+        "gu": null,
+        "hi": null
+       }
+      },
+      {
+       "as_of_ms": 1794885240000,
+       "bias": "neutral",
+       "confidence": 0.51,
+       "doc_seq": 2,
+       "horizon": "open",
+       "inputs": [],
+       "instrument": "BANKNIFTY",
+       "label": "Flat open",
+       "lapsed": true,
+       "levels": null,
+       "module": "gap_bias",
+       "published_ms": 1794886480000,
+       "quality": "ok",
+       "score": null,
+       "sessions": 1,
+       "since_ms": 1794885300000,
+       "state": "FLAT_OPEN",
+       "valid_until_ms": 1794887100000,
+       "why": {
+        "en": null,
+        "gu": null,
+        "hi": null
+       }
+      },
+      {
+       "as_of_ms": 1794822599000,
+       "bias": "bear",
+       "confidence": 0.58,
+       "doc_seq": 2,
+       "horizon": "swing",
+       "inputs": [],
+       "instrument": "NIFTY",
+       "label": "Swing top forming",
+       "lapsed": false,
+       "levels": {
+        "invalid": 26200.0,
+        "target": 25400.0,
+        "trigger": 25850.0
+       },
+       "module": "swing_eod",
+       "published_ms": 1794886480000,
+       "quality": "ok",
+       "score": null,
+       "sessions": 2,
+       "since_ms": 1794822300000,
+       "state": "TOP_WATCH",
+       "valid_until_ms": null,
+       "why": {
+        "en": "Invented: a lower high on the daily close.",
+        "gu": null,
+        "hi": "Invented: daily close par lower high."
+       }
+      },
+      {
+       "as_of_ms": 1794886479000,
+       "bias": "bull",
+       "confidence": 0.66,
+       "doc_seq": 2,
+       "horizon": "intraday",
+       "inputs": [],
+       "instrument": "BANKNIFTY",
+       "label": "Intraday reversal up",
+       "lapsed": false,
+       "levels": null,
+       "module": "swing_intraday",
+       "published_ms": 1794886480000,
+       "quality": "degraded",
+       "score": null,
+       "sessions": 1,
+       "since_ms": 1794886200000,
+       "state": "REVERSAL_UP",
+       "valid_until_ms": null,
+       "why": {
+        "en": null,
+        "gu": null,
+        "hi": null
+       }
+      },
+      {
+       "as_of_ms": 1794886479000,
+       "bias": "bear",
+       "confidence": null,
+       "doc_seq": 2,
+       "horizon": "intraday",
+       "inputs": [],
+       "instrument": "NIFTY",
+       "label": "Breadth weak",
+       "lapsed": false,
+       "levels": null,
+       "module": "breadth",
+       "published_ms": 1794886480000,
+       "quality": "ok",
+       "score": null,
+       "sessions": null,
+       "since_ms": null,
+       "state": "BROAD_WEAK",
+       "valid_until_ms": null,
+       "why": {
+        "en": null,
+        "gu": null,
+        "hi": null
+       }
+      }
+     ]
+    },
+    "enabled": true,
+    "status": "success"
+   }
+  },
+  "unauthorized": {
+   "op": "state",
+   "args": {},
+   "method": "GET",
+   "path": "/sudarshan/signals/api/state",
+   "query": {},
+   "status": 401,
+   "answer": {
+    "error": {
+     "code": "unauthorized",
+     "message": "Your session has ended. Log in again."
+    },
+    "status": "error"
+   }
+  },
+  "forbidden": {
+   "op": "state",
+   "args": {},
+   "method": "GET",
+   "path": "/sudarshan/signals/api/state",
+   "query": {},
+   "status": 403,
+   "answer": {
+    "error": {
+     "code": "forbidden",
+     "message": "Only the account owner can use the TRINETRA view."
+    },
+    "status": "error"
+   }
+  },
+  "not_answering": {
+   "op": "state",
+   "args": {},
+   "method": "GET",
+   "path": "/sudarshan/signals/api/state",
+   "query": {},
+   "status": 503,
+   "answer": {
+    "error": {
+     "code": "unavailable",
+     "message": "SUDARSHAN's TRINETRA reader is not answering."
+    },
+    "status": "error"
+   }
+  },
+  "performance_scored": {
+   "op": "performance",
+   "args": {},
+   "method": "GET",
+   "path": "/sudarshan/signals/api/performance",
+   "query": {},
+   "status": 200,
+   "answer": {
+    "data": {
+     "as_of_day": 20261103,
+     "module": null,
+     "rows": [
+      {
+       "bias": "bull",
+       "cases": 32,
+       "hit_pct": "56.25",
+       "hits": 18,
+       "instrument": "NIFTY",
+       "judged": true,
+       "median_move_pct": "0.18",
+       "module": "regime",
+       "sessions": 1,
+       "words": null
+      },
+      {
+       "bias": "bull",
+       "cases": 32,
+       "hit_pct": "56.25",
+       "hits": 18,
+       "instrument": "NIFTY",
+       "judged": true,
+       "median_move_pct": "0.38",
+       "module": "regime",
+       "sessions": 3,
+       "words": null
+      },
+      {
+       "bias": "bull",
+       "cases": 32,
+       "hit_pct": "56.25",
+       "hits": 18,
+       "instrument": "NIFTY",
+       "judged": true,
+       "median_move_pct": "0.33",
+       "module": "regime",
+       "sessions": 5,
+       "words": null
+      },
+      {
+       "bias": "bear",
+       "cases": 32,
+       "hit_pct": "43.75",
+       "hits": 14,
+       "instrument": "NIFTY",
+       "judged": true,
+       "median_move_pct": "0.16",
+       "module": "regime",
+       "sessions": 1,
+       "words": null
+      },
+      {
+       "bias": "bear",
+       "cases": 32,
+       "hit_pct": "43.75",
+       "hits": 14,
+       "instrument": "NIFTY",
+       "judged": true,
+       "median_move_pct": "0.32",
+       "module": "regime",
+       "sessions": 3,
+       "words": null
+      },
+      {
+       "bias": "bear",
+       "cases": 32,
+       "hit_pct": "43.75",
+       "hits": 14,
+       "instrument": "NIFTY",
+       "judged": true,
+       "median_move_pct": "0.41",
+       "module": "regime",
+       "sessions": 5,
+       "words": null
+      },
+      {
+       "bias": "neutral",
+       "cases": 32,
+       "hit_pct": null,
+       "hits": 0,
+       "instrument": "NIFTY",
+       "judged": false,
+       "median_move_pct": "0.13",
+       "module": "regime",
+       "sessions": 1,
+       "words": "a neutral reading names no direction to score"
+      },
+      {
+       "bias": "neutral",
+       "cases": 32,
+       "hit_pct": null,
+       "hits": 0,
+       "instrument": "NIFTY",
+       "judged": false,
+       "median_move_pct": "0.43",
+       "module": "regime",
+       "sessions": 3,
+       "words": "a neutral reading names no direction to score"
+      },
+      {
+       "bias": "neutral",
+       "cases": 32,
+       "hit_pct": null,
+       "hits": 0,
+       "instrument": "NIFTY",
+       "judged": false,
+       "median_move_pct": "0.37",
+       "module": "regime",
+       "sessions": 5,
+       "words": "a neutral reading names no direction to score"
+      },
+      {
+       "bias": "bull",
+       "cases": 6,
+       "hit_pct": null,
+       "hits": 4,
+       "instrument": "NIFTY",
+       "judged": false,
+       "median_move_pct": null,
+       "module": "gap_bias",
+       "sessions": 0,
+       "words": "too few cases to judge"
+      },
+      {
+       "bias": "bear",
+       "cases": 6,
+       "hit_pct": null,
+       "hits": 4,
+       "instrument": "NIFTY",
+       "judged": false,
+       "median_move_pct": null,
+       "module": "gap_bias",
+       "sessions": 0,
+       "words": "too few cases to judge"
+      }
+     ],
+     "words": null
+    },
+    "enabled": true,
+    "status": "success"
+   }
+  },
+  "off": {
+   "op": "state",
+   "args": {},
+   "method": "GET",
+   "path": "/sudarshan/signals/api/state",
+   "query": {},
+   "status": 200,
+   "answer": {
+    "data": null,
+    "enabled": false,
+    "message": "The TRINETRA view is switched off.",
+    "status": "success"
+   }
+  },
+  "not_set_up": {
+   "op": "state",
+   "args": {},
+   "method": "GET",
+   "path": "/sudarshan/signals/api/state",
+   "query": {},
+   "status": 200,
+   "answer": {
+    "data": null,
+    "enabled": false,
+    "message": "TRINETRA is not connected yet. The letterbox has not been set up on the server; run its set-up line from the README's TRINETRA section.",
+    "status": "success"
+   }
+  }
+ }
+}

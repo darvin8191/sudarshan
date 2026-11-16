@@ -12,6 +12,7 @@ import {
   ClipboardList,
   Code2,
   Database,
+  Eye,
   FileBarChart,
   FileBarChart2,
   FileStack,
@@ -141,6 +142,9 @@ export const profileMenuItems: NavItem[] = [
   // SUDARSHAN M15.10: the reports archive, right after the journal.
   { href: '/reports', label: 'Reports', icon: FileBarChart2, group: 'Analyse' },
   { href: '/holdings', label: 'Holdings', icon: ClipboardList, group: 'Trade' },
+  // SUDARSHAN M13.7: the TRINETRA view, under Analyse after Reports (Holdings keeps its pin after
+  // Reports in the profile list, so it goes here).
+  { href: '/trinetra', label: 'TRINETRA', icon: Eye, group: 'Analyse' },
   { href: '/flow', label: 'Flow Editor', icon: Workflow, group: 'Automate' },
   { href: '/scalping', label: 'Scalping', icon: Zap, group: 'Trade' },
   { href: '/python', label: 'Python Strategies', icon: Code2, group: 'Automate' },

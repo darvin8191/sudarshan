@@ -91,6 +91,8 @@ def chat(store, desk, monkeypatch):
         telegram, "answer", functools.partial(telegram.answer, desk=desk, store=store)
     )
     intake._per_link.clear()
+    # ``/auto`` reads the India date (N8): on a named moment, never the wall clock.
+    monkeypatch.setattr(telegram, "CLOCK", lambda: NOW)
 
     def send(*args, user_id=OWNER_ID, kind="private", bot=None):
         message, bot = Message(), bot or Bot()
@@ -151,6 +153,25 @@ def test_auto_lists_every_strategy_in_one_line_each(chat, store, desk):
         "Second: Stopped · Sandbox · holds nothing · no alert yet",
     ]
     assert chat("status") == chat()
+
+
+def test_n8_auto_never_lists_yesterdays_intraday_contract_as_held(chat, store, desk, monkeypatch):
+    """The date rule of the intake and the page: an intraday position of an earlier India date
+    was closed at its session's end. A carry strategy's line keeps its contract."""
+    strategy, token = make(store)
+    _carry, carry_token = make(store, name="Carry", underlying="BANKNIFTY", product="NRML")
+    intake.handle(token, indicator_alert("long", NOW - 1), TV, desk, store)
+    intake.handle(carry_token, indicator_alert("long", NOW - 1), TV, desk, store)
+    assert chat().splitlines() == [
+        "ORB: Active · Sandbox · long NIFTY 24 Nov FUT · last alert 10:15:02",
+        "Carry: Active · Sandbox · long BANKNIFTY 24 Nov FUT · last alert 10:15:02",
+    ]
+    monkeypatch.setattr(telegram, "CLOCK", lambda: NOW + 86_400)
+    assert chat().splitlines() == [
+        "ORB: Active · Sandbox · holds nothing (NIFTY 24 Nov FUT closed at session end) · last "
+        "alert 10:15:02",
+        "Carry: Active · Sandbox · long BANKNIFTY 24 Nov FUT · last alert 10:15:02",
+    ]
 
 
 def test_stop_stops_new_entries_and_start_starts(chat, store, desk):

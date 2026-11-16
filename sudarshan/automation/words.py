@@ -417,6 +417,50 @@ def unsettled_gave_up(name: str) -> str:
     )
 
 
+def still_unsettled(name: str, days: int) -> str:
+    """A further day has gone and the books still could not be read for an unrecorded alert."""
+    since = "a day" if days <= 1 else f"{days} days"
+    return (
+        f"{name}: the result of an alert from {since} ago is still not recorded, and Positions "
+        f"could not be read. Until it can be, {name} sends no new entry; an exit alert still "
+        "goes. Check Positions and Orders."
+    )
+
+
+def settle_failed(name: str) -> str:
+    """Settling an earlier alert failed in SUDARSHAN's own records, not in the books."""
+    return (
+        f"{name}: the result of an earlier alert could still not be recorded. Until it is, "
+        f"{name} sends no new entry; an exit alert still goes. Check Positions and Orders."
+    )
+
+
+def unsettled_unwritten(name: str, target: int) -> str:
+    """An entry refused while an earlier alert's result could not be written."""
+    return (
+        f"{name}: the result of an earlier alert could still not be recorded, so this "
+        f"{_what(target)} alert was not sent. Check Positions and Orders."
+    )
+
+
+def not_recorded(name: str) -> str:
+    """An alert that could not be written down at all: nothing was sent for it."""
+    return (
+        f"{name}: an alert arrived but SUDARSHAN could not record it, so nothing was sent for "
+        "it. If the chart and your position now differ, set the position by hand."
+    )
+
+
+def day_closed(symbol: str, yesterday: bool) -> str:
+    """The page's line for an intraday position of an earlier day, before the day's first
+    alert clears its note."""
+    when = "yesterday's session end" if yesterday else "its session's end"
+    return (
+        f"Holds nothing: {contract_name(symbol)} was intraday and was closed at {when}. If it "
+        "is still open, close it in Positions."
+    )
+
+
 def _service(said: str) -> str:
     """The order service's own sentence, passed on; never a code or a brace."""
     text = " ".join(str(said or "").split())[:300]

@@ -183,8 +183,9 @@ itself: `off`, `not_set_up`, `letterbox_wrong`, `store_newer`, `store_failed`, a
 - **Port** 127.0.0.1:5588, one HTTP listener: `GET /health` and `POST /v1/<op>`. A taken port is
   said in words and tried again every minute; the service never takes another port.
 - **Store** `signals.db` in `/var/lib/sudarshan-signals` (folder 750, file 640), migrations at
-  start, `python -m sudarshan.signals.migrate --status`. Documents 30 days; the timeline, alerts
-  and marks for ever (a few rows a day).
+  start, `python -m sudarshan.signals.migrate --status`. Documents 30 days; the timeline, alerts,
+  marks and each trading day's index open and close (read from the price feed's snapshot at
+  09:16:30 and 16:20, for the score) for ever (a few rows a day).
 - **`GET /health`** (open on loopback, never TRINETRA's text): `service`, `release`, `version`,
   `state`, `signals` (`on`, `off`, `not_set_up`), `letterbox` (`ok`, `missing`, `wrong`,
   `unknown`), `heard_ms`, `next_by`, `fresh`, `refused_today`, `gaps_today`.

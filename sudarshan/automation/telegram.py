@@ -32,7 +32,7 @@ from utils.logging import get_logger
 from utils.thread_safe_cache import LockedTTLCache
 
 from . import model as m
-from . import words
+from . import symbols, words
 
 logger = get_logger(__name__)
 
@@ -53,6 +53,10 @@ STILL_WORKING = "Still working on it. Check the Automation page in a moment."
 BROKE = "That did not work. Nothing was changed. Try the Automation page."
 
 
+#: The clock ``/auto`` reads the India date from. A test names its own moment.
+CLOCK = time.time
+
+
 def _line(strategy: m.Strategy, state: m.State, last: dict | None) -> str:
     said = {
         m.ACTIVE: "Active",
@@ -61,7 +65,12 @@ def _line(strategy: m.Strategy, state: m.State, last: dict | None) -> str:
     }
     mode = "Live" if strategy.mode == m.LIVE else "Sandbox"
     held = "holds nothing"
-    if state.held_symbol:
+    if state.held_symbol and symbols.day_ended(
+        strategy.product, state.held_since_ms, symbols.india_date(int(CLOCK() * 1000))
+    ):
+        # The page's rule: an intraday position of an earlier day was closed at its session's end.
+        held = f"holds nothing ({words.contract_name(state.held_symbol)} closed at session end)"
+    elif state.held_symbol:
         held = f"{state.held_side} {words.contract_name(state.held_symbol)}"
     alert = "no alert yet"
     if last:

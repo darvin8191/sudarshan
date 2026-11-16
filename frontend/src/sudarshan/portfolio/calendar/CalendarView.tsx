@@ -18,6 +18,7 @@ import { PORTFOLIO_KEY } from '../tab/ActivityTab'
 import { dayText, monthOf } from '../tab/format'
 import type { CalendarRow, TabInfo } from '../types'
 import { checkedText, factText, holdText, KINDS } from './format'
+import { LotCheckCard } from './LotCheckCard'
 import { ToConfirm } from './ToConfirm'
 
 export const CALENDAR_KEY = [...PORTFOLIO_KEY, 'calendar'] as const
@@ -26,6 +27,16 @@ export const CALENDAR_OFF =
   'The calendar of dividends, bonuses and splits is switched off on the server. It opens here once a release switches it on.'
 export const NO_FUTURE =
   'Upstox has not listed upcoming events yet; this list shows the ones already announced.'
+
+/**
+ * Bonuses and splits not asked about yet: no closing record reaches their day, and until the
+ * year's share trades are read in full nothing can tell whether the share was held then.
+ */
+export function leftOutWords(count: number): string {
+  return count === 1
+    ? '1 earlier bonus or split is not asked about yet: SUDARSHAN cannot tell what you held on its date until Upstox’s share trades are read in full.'
+    : `${count} earlier bonuses or splits are not asked about yet: SUDARSHAN cannot tell what you held on their dates until Upstox’s share trades are read in full.`
+}
 
 const CARD = 'rounded-[1.125rem] border bg-card px-4 py-3.5 shadow-[var(--shadow-card)]'
 
@@ -107,6 +118,9 @@ export function CalendarView({ tabs }: { tabs: readonly TabInfo[] }) {
   const failed = calendar.error ?? actions.error
   const problem = failed ? problemOf(failed) : null
   const rows = calendar.data?.calendar ?? []
+  const status = calendar.data?.read_status
+  /** Upstox's list was read: only then does an empty list mean "nothing listed". */
+  const read = status === undefined || status.state === 'ok'
   const coming = rows.filter((r) => r.ex_day >= today).sort((a, b) => a.ex_day - b.ex_day)
   const past = rows.filter((r) => r.ex_day < today).sort((a, b) => b.ex_day - a.ex_day)
   return (
@@ -134,8 +148,30 @@ export function CalendarView({ tabs }: { tabs: readonly TabInfo[] }) {
         </p>
       ) : (
         <>
+          <LotCheckCard check={actions.data.lot_check} onDone={refresh} />
           <ToConfirm events={actions.data.to_confirm} tabs={tabs} onDone={refresh} />
-          {!calendar.data.listed_future && (
+          {actions.data.left_out_count > 0 && (
+            <p className="text-sm text-[color:var(--text-secondary)]">
+              {leftOutWords(actions.data.left_out_count)}
+            </p>
+          )}
+          {status !== undefined && status.state !== 'ok' && status.words !== null && (
+            // Before the first nightly read, or after a failed one: say so, never "nothing
+            // listed" (an empty list means that only once the list was read).
+            <p
+              role="note"
+              className={cn(
+                'flex items-start gap-2 rounded-[0.875rem] border px-3 py-2 text-sm font-semibold',
+                status.state === 'failed'
+                  ? 'border-[color:var(--gold)] bg-[color:var(--gold-tint)] text-[color:var(--warning-text)]'
+                  : 'border-[color:var(--border-strong)] bg-card text-[color:var(--text-secondary)]'
+              )}
+            >
+              <Info aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+              {status.words}
+            </p>
+          )}
+          {read && !calendar.data.listed_future && (
             <p
               role="note"
               className="flex items-start gap-2 rounded-[0.875rem] border border-[color:var(--gold)] bg-[color:var(--gold-tint)] px-3 py-2 text-sm font-semibold text-[color:var(--warning-text)]"
@@ -146,7 +182,7 @@ export function CalendarView({ tabs }: { tabs: readonly TabInfo[] }) {
           )}
           <Months title="Coming up" rows={coming} today={today} />
           <Months title="The last 90 days" rows={past} today={today} />
-          {rows.length === 0 && (
+          {read && rows.length === 0 && (
             <p className={cn(CARD, 'text-sm text-[color:var(--text-secondary)]')}>
               No dividend, bonus, split or rights issue is listed for what you hold, from{' '}
               {dayText(calendar.data.from)} to {dayText(calendar.data.to)}.
