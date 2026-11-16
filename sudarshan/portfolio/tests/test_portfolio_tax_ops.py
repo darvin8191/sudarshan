@@ -315,6 +315,49 @@ def test_the_check_reads_nothing_the_paper_has_read_and_a_fault_in_it_leaves_the
     assert "To check" in call(ctx, "tax_csv", schedule="capital_gains")["text"]  # the CSV too
 
 
+def test_the_kept_tax_pack_says_the_checks_sentences_of_the_paper_as_it_was_made(
+    ctx, monkeypatch
+):
+    """v0.13.0 verification N3. A check that waits, or that could not be made, heads the
+    paper's notes. The journal prints the paper and keeps it whole in the archive, where old
+    code's "The rest of this page is not affected, and the check runs again when you open it
+    next" read wrongly. The pack (``tax_pack``) says each of them of the paper as it was made;
+    the page keeps its own words."""
+    assert call(ctx, "tax_get")["notes"][0] == lotcheck.WAITING_RECORD
+    assert call(ctx, "tax_pack")["notes"][0] == (
+        "The tax lots were not checked against the Upstox holdings for this paper: when it was "
+        "made, no closing record of the Upstox account was there from two days or more before "
+        "its trades were last read."
+    )
+    call(ctx, "tax_input_set", kind="opening_lot", request_id="lot-1",
+         row=lot(ctx, qty_u=25 * U, cost_paise=3_750_000))  # fmt: skip
+    holding(ctx, 20261112, 40)
+
+    def broken(*args, **kwargs):
+        raise RuntimeError("a fault inside the check")
+
+    monkeypatch.setattr(lotcheck, "_actions", broken)
+    assert call(ctx, "tax_get")["notes"][0] == lotcheck.UNCHECKED
+    assert call(ctx, "tax_pack")["notes"][0] == (
+        "The tax lots could not be checked against the Upstox holdings when this paper was made. "
+        "The rest of the paper is not affected."
+    )
+    for schedule in ("capital_gains", "dividends"):
+        text = call(ctx, "tax_csv", schedule=schedule)["text"]
+        assert "this page" not in text and "open it next" not in text
+    monkeypatch.undo()
+    # The year's share trades not read in full: the check waits for them.
+    record = ctx.store.read(OWNER, lambda tx: tx.report_get("trades", 2026, "EQ"))
+    ctx.store.write(OWNER, lambda tx: tx.report_put("trades", 2026, "EQ", "partial", NOW, None,
+                                                    record["payload"], NOW))  # fmt: skip
+    assert lotcheck.WAITING_TRADES in call(ctx, "tax_get")["notes"]
+    assert lotcheck.FILE_WORDS[lotcheck.WAITING_TRADES] in call(ctx, "tax_pack")["notes"]
+    assert lotcheck.FILE_WORDS[lotcheck.WAITING_TRADES] == (
+        "The tax lots were not checked against the Upstox holdings for this paper: Upstox's "
+        "share trades of this year were not read in full when it was made."
+    )
+
+
 def test_a_bonus_still_to_come_is_said_as_coming_and_the_notes_name_the_share(ctx):
     """v0.14.0 verification L4. Two bonuses not confirmed: one of 9 Oct, past, and one of
     5 Dec, still to come on 14 Nov. Old code said of both "A bonus of INE002A01018 ... is not
