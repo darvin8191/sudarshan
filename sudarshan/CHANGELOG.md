@@ -5,6 +5,276 @@ publish. The owner publishes each release on GitHub. The server's deploy timer t
 outside 08:30-16:00 IST on trading days (09:00-15:45 until v0.3.1), keeps backups, and rolls
 back if the app does not come up healthy.
 
+## v0.15.0 (16 Nov 2026)
+
+Four things. **Live closes are sized more carefully:** the scalping terminal's Close, Close all and
+auto-exit, and the strategy module's exits, are now checked against Upstox's orders as well as its
+positions before they are sent, so a close can no longer go out a second time and reverse a
+position while Upstox's positions run late. The price of that care: when Upstox does not answer in
+time, no close is sent, and you are told. **This release switches Goals and the full exports on**
+(`SUDARSHAN_PORTFOLIO_GOALS` is set to `on`): they read and work figures out, and place no order.
+**Two small additions are on:** a charges estimate in the order ticket, and a trade's buys and
+sells marked on the phone chart. **Two larger parts ship switched off:** the TRINETRA view
+(`SUDARSHAN_SIGNALS` is set to `off`) and charts across devices (`SUDARSHAN_CHARTS_SYNC` is set to
+`off`). A third switch, `SUDARSHAN_REVERSAL_FROM_FILLS`, is not written at all, which means off.
+No new order code is on: the two new entry points open the order ticket you already use. It
+includes everything in v0.14.0. **Publish only after v0.14.0 has installed and run one trading
+day.**
+
+### What changes for you from the day you install it
+- **Portfolio gains Goals, and "Export this tab" offers every view.** Goals is empty ("No goal
+  yet") until you add one. Export now offers holdings, entries, performance, allocation and income
+  of one of your own tabs, as CSV or PDF. Family members see no goal and cannot export.
+- **The order ticket shows "Charges est. Rs x"** under the margin line, with the parts on a tap.
+  It is always an estimate.
+- **"See on chart" on a trade in the Journal** opens the phone chart with the trade's buys marked
+  B and its sells marked S.
+- **A new menu entry, TRINETRA, under Analyse.** The page says "The TRINETRA view is switched
+  off." The Dashboard and the NIFTY chart look as before.
+- **Two new bot commands in your own chat: `/server` and `/trinetra`.** `/server` says what the
+  server's health checks last saw. `/trinetra` answers "The TRINETRA view is switched off." Neither
+  changes anything, and neither answers in a group or in a family member's chat.
+- **In Live, a scalping close or a strategy exit can now be held back,** with a sentence that says
+  why (below). In analyzer mode the scalping terminal and the strategy module's sandbox runs work
+  exactly as before.
+- **A Live strategy exit that is held back reaches you on Telegram** (below). This needs your bot
+  started and your account linked, as the order alerts do.
+- **The kill switch's Exit all names every position it left open** ("Still open: NIFTY 25900
+  CE. ...") and never reads as a success over one.
+- **The install** adds the three settings lines below, starts a small idle service for the
+  TRINETRA view (`sudarshan-signals`, which reads nothing while the view is off), moves the
+  screener's own file one step, and makes an empty file for chart documents. The copy the install
+  takes first is the rollback.
+- **The screener stays switched off, as it is.** Its changes in this release (below) show once
+  you switch it on.
+
+### Live closes and exits: what is checked now
+- **Which closes:** in Live, the scalping terminal's Close, Close all and the trailing stop's
+  auto-exit, and every exit of a strategy run (stop loss, target, trailing stop, square-off, an
+  exit alert). The app's own Exit and Exit all already worked this way.
+- **If an earlier exit has already filled** and Upstox's positions do not show it yet, the close
+  is not sent and says so: "Upstox's orders show ... is already closed ..., so no exit was sent."
+  Before this release such a close could go a second time and leave you holding the other side.
+- **If only part of the position is still held,** only that part is closed. Never more than was
+  asked.
+- **If a market order is still working on the closing side,** the close is not sent, and the
+  sentence names the working order.
+- **If Upstox does not send its orders or positions in time,** or the figures do not add up, no
+  close is sent. On the scalping terminal the sentence is on screen (the auto-exit's is in the
+  terminal's log) and says to close from the Upstox app or try again in a minute.
+- **For a strategy run, you are told on Telegram.** The first time an exit is held because the
+  position size could not be confirmed: "Exit NOT sent (Live)", with the strategy, the leg, the
+  instrument and what made the exit due. SUDARSHAN keeps trying. You are told again at most once a
+  minute while it lasts ("Exit still NOT sent (Live), 3 min now") and once when the exit goes
+  ("Exit sent (Live) ... Check Orders for its fill."). Each message says: if you want out now,
+  close it in the Upstox app. The run's Events tab shows the hold once, in red.
+- **If Upstox shows no position for a leg the run still lists as open,** you are told that once:
+  no exit was sent and none is needed. The run cannot close such a leg; check Positions in the
+  Upstox app, then close the run from its page.
+- **A hold that is only a wait for another exit** (one being placed, an earlier one not seen
+  ended, a market order working on the closing side) is one line in the Events tab and no
+  Telegram message.
+- **A TradingView order to a size your positions already show:** when today's fills say the
+  position is a different size, it now answers "Upstox's positions do not show your latest fills
+  in ... yet ... it was not sent", where it used to say no action was needed. Nothing more is sent
+  than before. When Upstox's order list is slow this answer can come up to 4 seconds later, and a
+  following alert for the same symbol waits behind it.
+
+### What Goals and Export do
+- **A goal** is a target, a date and the tabs that count towards it, or an amount you type. Each
+  card shows how far along it is and what to add at each month's end, rounded up to the rupee, at
+  the return you assume (10% a year unless you set another). It says "On track without adding
+  more" when what is there already grows to the target.
+- **A goal on tabs moves with prices** and says "Real-time" while ticks arrive, "Market closed"
+  after the close. A goal that counts only holdings with no live price (gold, a plot) says it does
+  not move during the day. A goal with a typed amount says it does not move with prices.
+- **A goal past its date** says so and what is still to be added; choose a new date to see a
+  monthly amount again. Within its last month it says "less than a month left".
+- **If a tab a goal counts is deleted,** the card says so and the tab counts as nothing until you
+  untick it in the goal. An archived tab still counts.
+- **Export:** always the whole tab, as of that minute. In the PDF every gain or loss has its sign
+  and the word PROFIT, LOSS or FLAT; a holding with no price yet reads "no price".
+- **The entries CSV reads back** through Import into a tab of the same portfolio, now also for
+  gold, property, deposits and other holdings you named yourself. It holds entries only: the list
+  of holdings, the values you typed for them, loans and drafts are not in the file.
+- **Correction to v0.5.0,** which said "Export gives a CSV that reads back to the same entries":
+  until this release that held for listed shares and funds only.
+
+### The charges line and the trade marks
+- **"Charges est. Rs x"** is read when the ticket opens and again shortly after you change the
+  order. It comes from the journal's rate card, with brokerage taken as Rs 30 an executed order.
+  Upstox's contract note has the actual charges. "not read" means the journal did not answer, not
+  zero; "not estimated for this exchange" means the card has no rate for it. The line changes
+  nothing the ticket sends.
+- **The marks** sit on 1-minute, 5-minute or daily candles, chosen by the trade's length, with
+  the entry price beside the B. A trade older than the loaded history is shown on daily candles
+  with a sentence.
+
+### What ships switched off, and how you would switch each on
+Nothing below changes anything until you switch it on, and none of it is promised for a date.
+- **The TRINETRA view** (`SUDARSHAN_SIGNALS`). Once on, TRINETRA hands its readings over by
+  writing small files into a folder only SUDARSHAN reads; SUDARSHAN never opens anything of
+  TRINETRA's. The page then shows the readings for NIFTY and BANKNIFTY with their age, a Why in
+  English, Hinglish or Gujarati, a timeline and a Performance tab; changes reach your bot; the
+  08:45 brief gains two lines. **Do not switch it on with this release:** the server watch does not
+  check the TRINETRA reader yet, so if it stopped nothing would tell you. A later release adds
+  that. The steps, for then, are in `sudarshan/README.md` under "The TRINETRA view" and "The
+  letterbox's one-time set-up"; TRINETRA's operators have a step of their own.
+- **Charts across devices** (`SUDARSHAN_CHARTS_SYNC`). Once on, your phone chart's drawings and
+  indicators and the trading terminal's saved layouts are kept on your server, so every phone and
+  browser you sign in on shows the same ones; each device keeps working on its own copy while it
+  is offline. To switch it on: set the line to `on` in the app's settings ("OpenAlgo settings that
+  ship with a release" in `sudarshan/README.md` says how a value of yours is kept), add
+  `client_max_body_size 6m;` for the charts address in SUDARSHAN's own nginx site, test and reload
+  nginx, and restart OpenAlgo. Without the nginx line a large set of layouts is refused and the
+  device keeps its copy and says so. What it stores is described in `sudarshan/charts/README.md`.
+  Read the section at the end of this stanza before you do.
+- **A reversal back, judged on fills** (`SUDARSHAN_REVERSAL_FROM_FILLS`). With it on, a
+  TradingView order that reduces or crosses the position your fills show is sent while Upstox's
+  positions still run late, under the same one-at-a-time checks as every reversal. It sends an
+  order that is not sent today, so leave it unset until the first Live day's check below has told
+  you how late the positions run. No README section names it yet: ask the next work session to
+  set it with you.
+
+### The screener, once you switch it on
+- An option-strikes screen follows the index through the day: its strikes are placed again at
+  09:16 and whenever the index nears the edge of the strikes being watched.
+- A screen that looks at one of your watchlists picks up what you add or remove at its next check.
+- "Not checked" on a screen's results opens to groups: how many instruments, why, and which. Not
+  checked is never counted as a miss.
+- "Download CSV" under any check's results.
+- The Dashboard's Screener card shows how many screener alerts you have not looked at and on
+  which screen. Opening the screen clears them.
+
+### What you must do
+- **Nothing when you publish.** The install adds `SUDARSHAN_PORTFOLIO_GOALS='on'`,
+  `SUDARSHAN_SIGNALS='off'` and `SUDARSHAN_CHARTS_SYNC='off'` to the app's settings. A value of
+  your own for any of them is kept: set goals to `off` and it stays off through later releases.
+- **Leave `SUDARSHAN_SIGNALS`, `SUDARSHAN_CHARTS_SYNC` and `SUDARSHAN_REVERSAL_FROM_FILLS` as
+  shipped.**
+- **Once, in Telegram:** send BotFather the command list again, so `/server` and `/trinetra` show
+  in the bot's menu. The list is in `sudarshan/README.md` under "The Telegram bot's name and
+  picture", step 5.
+- **Once, check the bot is started and your account linked:** `/killswitch` answers with its
+  status. The held-exit message uses the same path. If the bot is stopped, the Events tab's line
+  is the only notice of a held exit.
+- **In analyzer mode, once each.** Nothing here reaches Upstox, and each of the first three
+  should look exactly as it did before this release.
+  - Scalping terminal: buy one lot of a NIFTY option, tap Close, then Close again and Close all.
+    The first closes it; the next two say there is nothing to close.
+  - Strategy module, a sandbox run with one leg: let its stop fire or close the leg from the
+    page, then stop the run, tapping Stop twice quickly. One exit, the run stops, no "Exit NOT
+    sent" line in Events and no Telegram message about a held exit.
+  - Kill switch with Exit all ticked while one sandbox position is open, then resume. The same
+    report as before.
+  - Phone chart, BUY: the ticket shows "Charges est. Rs x" under the margin line. Change the
+    quantity: "updating", then a new figure. Open the parts. Place once: one order goes to the
+    sandbox, as before.
+  - Journal, a trade, "See on chart": B and S marks on its candles. Open the chart's SELL ticket
+    from there: it is the usual ticket.
+- **Goals and Export, once each.** No order is involved.
+  - Add a goal on a tab with listed shares, in market hours: the bar and the amount move with
+    prices and the card says "Real-time"; after 15:30 it says "Market closed". Tap the pencil,
+    change the date, save. Leave the view open five minutes: the phone stays cool.
+  - One goal by hand: target, months and return into any SIP calculator set to month-end
+    payments. The amount must match to the rupee, rounded up.
+  - Type a target with extra zeros, above Rs 1,000 crore: it is refused with a sentence.
+  - Export Holdings as PDF: Value, Cost and Unrealised gain equal the tab's screen at that
+    minute. Export Performance as CSV into a spreadsheet: Gujarati reads, numbers are numbers, a
+    loss is negative.
+  - Export Entries of a tab holding gold, and import the file into a new empty tab of the same
+    portfolio: every row is new.
+  - On a family member's phone: no Goals, no Export.
+- **TRINETRA, as shipped:** Menu, Analyse, TRINETRA says "The TRINETRA view is switched off." If
+  it says the reader is not answering, tell the next work session. `/trinetra` in your own chat
+  says the same, and the next 08:45 brief has no TRINETRA line.
+- **Charts, as shipped:** draw a line on the phone chart, leave and come back: it is there. The
+  trading terminal opens its saved layout as before.
+- **On the first Live day, at one lot.** These are the paths this release changes.
+  - Exit a position from the app, then tap Close for it on the scalping terminal while the
+    terminal still shows it. You should see "Upstox's orders show ... is already closed ..., so no
+    exit was sent", and Positions stays flat.
+  - Note how long the scalping terminal keeps showing the closed position. That is how late
+    Upstox's positions run, and it decides the reversal switch above.
+  - If you run a Live strategy that day and a stop fires: one exit in Orders, and no "Exit NOT
+    sent" message. If such a message does come, close the position in the Upstox app with a
+    market order and tell the next work session what the message said.
+
+### What is refused now that used to be accepted
+- **In Live, a scalping close or a strategy exit** when Upstox's orders show nothing left to
+  close, when a market order still works on the closing side, or when the size cannot be
+  confirmed. Each with its sentence; nothing is sent.
+- **A TradingView order to a size your positions already show, while today's fills say
+  otherwise:** it is answered as not sent, with the sentence above, where it used to be answered
+  as needing no action. If your alerts' sender treats a refusal as a failure, you will see it
+  there.
+- **A goal's target above Rs 1,000 crore,** when you save.
+- **In an import:** two holdings of one name, by name. A holding you named like a listed symbol
+  is read by its name only on a row with no exchange and no ISIN, and is refused there with a
+  sentence if the symbol is a listed one.
+- **Once the screener is on:** a screen that would take the screener past the 320 instruments it
+  can follow is refused when you save it Active, resume it or change its list, and the sentence
+  says how far over. A ready-made screen added past the limit is added Paused, with the reason.
+
+### Still to check, or not modelled
+- **Nothing in this release has run on your server or in Live.** The builders ran the order paths
+  against a simulated Upstox whose positions run 60 seconds late, and the sandbox in a throwaway
+  copy. The first Live day's checks above are the first real run.
+- **Reviews.** The server review said: publish yes, after one fix (a held Live strategy stop was
+  told only in the Events tab, on every tick). The server fix round closed that, cleared two
+  faults in the TRINETRA reader's folder handling, and quieted the notice for a leg the account
+  no longer holds. That fix round has no review of its own. The phone review said: publish yes,
+  goals on yes, with no blocker; what it found is in the last section. Goals had a review that
+  said do not switch on (the Goals view redrew without end and a tap then failed), a fix round,
+  and a re-check that said yes; the one import fault the re-check found was fixed after it and has
+  no review of its own.
+- **A held strategy exit that lasts** still writes one order row about every 2 seconds in the
+  run's order list while SUDARSHAN keeps trying: about 11,000 rows in a full session for one leg.
+- **Several legs held at once** send one Telegram message each.
+- **When a message says to close in the Upstox app, use a market order there.** SUDARSHAN sees a
+  market close and then sends nothing; a limit order resting there is not counted as an exit on
+  its way.
+- **A run whose leg the account no longer holds** (two runs on opposite sides of one contract in
+  one product, a close made in the Upstox app, an exit made smaller) keeps that leg open and can
+  never close it. The account is right; the run is wrong. Close such a run from its page.
+- **A scalping close within 2 seconds of a "nothing left to close" answer** for the same contract
+  and side gets the same answer without a new read, even if a new entry filled in between. Wait
+  and tap again.
+- **A plain entry order repeated while Upstox's positions run late,** sent from outside the
+  Automation page (an alert that carries your API key, a script), still goes twice.
+- **Charges:** an estimate only. Brokerage is taken as Rs 30 an order until you confirm your
+  plan's rate; the depository charge and some smaller rows are not on the rate card; the card's
+  rates are still to be verified against a contract note.
+- **Goals:** a goal counts a tab's value before its loans. The assumed return is yours, not a
+  forecast, and payments are taken at month ends. The percentage is cut, not rounded: 23.19% shows
+  as 23.1%, and 100% appears only when the target is reached. Months are whole at a month end: 31
+  December to 30 June is 6 months.
+- **Export:** a fresh server does not get your typed holdings from the entries file; add them
+  first under the same names. The PDF lists month-end values and the 400 newest entries; the CSV
+  has all. A tab named only in Gujarati or Hindi is headed "Tab" and its number in the PDF. The
+  Upstox tab has no export here; use Reports.
+- **The screener's changes have not run on your server,** because the screener has never been
+  switched on there.
+- **Not in this release:** Live automation and Protect in Live.
+
+### The phone fix round
+PHONE FIX ROUND: to be filled in
+
+This section is rewritten when the phone fix round has merged. Until then, these stand as the phone
+review found them, and the release must not be published with this section in this state.
+- **Trade marks are as of the moment the chart opened.** After an exit or a scale-in made from
+  that chart, leave and open it again to see the new mark. A fill made before the day's first
+  candle has loaded can sit on the previous day's last candle. On 1-minute candles at phone width
+  the triangle is very small; the letter and the price carry the meaning.
+- **With charts across devices still off,** the trading terminal asks the server whether the
+  switch is on before it restores your layout; on a line that hangs this can take up to 10
+  seconds.
+- **Before `SUDARSHAN_CHARTS_SYNC` is switched on:** after a conflict, the copy this phone set
+  aside is kept only until the page closes, and on the trading terminal the sentence that says
+  which layout was kept can be cleared before you see it.
+- **Before `SUDARSHAN_SIGNALS` is switched on:** "Against the regime" on the TRINETRA page is
+  drawn as a warning, which reads as advice.
+
 ## v0.14.0 (16 Nov 2026)
 
 Two things. **Automation, in the Sandbox only:** a TradingView strategy's alerts reach SUDARSHAN
