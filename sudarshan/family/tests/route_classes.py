@@ -738,6 +738,9 @@ protected     /sudarshan/autologin/status                                       
 protected     /sudarshan/autologin/test                                                 sudarshan_autologin.test_now
 protected     /sudarshan/autologin/totp-secret                                          sudarshan_autologin.clear_totp_secret
 protected     /sudarshan/autologin/totp-secret                                          sudarshan_autologin.set_totp_secret
+protected     /sudarshan/charts/api/doc                                                 sudarshan_charts.doc_get
+protected     /sudarshan/charts/api/doc                                                 sudarshan_charts.doc_put
+protected     /sudarshan/charts/api/state                                               sudarshan_charts.state
 protected     /sudarshan/family/api/audit_list                                          sudarshan_family.audit_list
 protected     /sudarshan/family/api/device_list                                         sudarshan_family.device_list
 protected     /sudarshan/family/api/device_revoke                                       sudarshan_family.device_revoke
