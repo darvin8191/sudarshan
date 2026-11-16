@@ -12,7 +12,7 @@ an order path is how one alert becomes two positions.
 
 from concurrent.futures import ThreadPoolExecutor
 from datetime import time
-from threading import Event
+from threading import Event, Thread, current_thread
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -1212,3 +1212,168 @@ def test_a_signal_exit_held_for_its_size_is_one_event_and_one_message(placed, he
     strategy = store.get_strategy(strategy_id, USER)
     assert signals.handle_signal(strategy, "long_exit", leg_id=1).ok is True
     assert placed[-1]["action"] == "SELL"
+
+
+# SUDARSHAN M6.9 (v0.15.0 verify V4, V5): a held signal exit is noted under its claim, and a
+# flipped leg's two sides are told apart.
+
+
+def _live_run(strategy, flipped=False):
+    """A live run holding leg 1 long, its entry filled. Flipped: the leg is the new short, and
+    the old long still waits under ``superseded`` (its closing order was held or refused)."""
+    run_id = int(store.create_run(strategy.id, "live", "upstox").id)
+    store.set_strategy_status(strategy.id, "running", run_id)
+    side, ref = ("S", "new-short") if flipped else ("B", "long")
+    state.init_run_state(
+        run_id,
+        strategy.id,
+        [{"leg_id": 1, "position": side, "position_ref": ref, "symbol": "RELIANCE",
+          "exchange": "NSE", "quantity": 100}],
+    )  # fmt: skip
+    with state.run_state(run_id) as live:
+        leg = live["legs"]["1"]
+        leg["status"], leg["entry_status"], leg["entry_avg"] = "open", "complete", 100.0
+        if flipped:
+            leg["superseded"] = {
+                "position_ref": "old-long",
+                "entry_order_id": None,
+                "exit_order_id": None,
+                "exit_claim_token": None,
+                "position": "B",
+                "entry_avg": 100.0,
+                "qty": 100,
+            }
+    return run_id
+
+
+_SIZE_HELD = DispatchResult(
+    ok=False, error="could not confirm", held=True, response={"why": "unconfirmed"}
+)
+
+
+def _firsts(messages):
+    return [text.split("\n")[0] for text in messages]
+
+
+@pytest.mark.parametrize("held_by", ["dispatch", "memo"])
+def test_a_held_signal_exit_is_noted_before_its_claim_is_released(
+    placed, held_exit_messages, held_by
+):
+    # V4 on the signal path, pinned: _place notes the hold before _exit releases the claim.
+    # Thread B claims, sends and tells "Exit sent" while thread A is still in the release.
+    strategy = _make()
+    _live_run(strategy)
+    released, b_done, results = Event(), Event(), {}
+    real_release = state.release_leg_exit
+
+    def is_a():
+        return current_thread().name == "A"
+
+    def dispatch(**kwargs):
+        return _SIZE_HELD if is_a() else DispatchResult(ok=True, broker_order_id="B", response={})
+
+    def kept(mode, order):
+        return _SIZE_HELD if held_by == "memo" and is_a() else None
+
+    def release(run, leg_id, claim):
+        freed = real_release(run, leg_id, claim)
+        if is_a():
+            released.set()
+            assert b_done.wait(10), "B did not claim, send and tell while A was in the release"
+        return freed
+
+    def exit_as(name):
+        def body():
+            try:
+                if name == "B":
+                    assert released.wait(10)
+                latest = store.get_strategy(strategy.id, USER)
+                results[name] = signals.handle_signal(latest, "long_exit", leg_id=1)
+            finally:
+                if name == "B":
+                    b_done.set()
+                store.db_session.remove()
+
+        return Thread(target=body, name=name)
+
+    with (
+        patch.object(signals.order_dispatch, "dispatch_order", side_effect=dispatch),
+        patch.object(signals.order_dispatch, "kept_hold", side_effect=kept),
+        patch.object(state, "release_leg_exit", side_effect=release),
+    ):
+        workers = [exit_as("B"), exit_as("A")]
+        for each in workers:
+            each.start()
+        for each in workers:
+            each.join(30)
+
+    assert results["A"].ok is False and results["B"].ok is True
+    assert _firsts(held_exit_messages) == ["Exit NOT sent (Live)", "Exit sent (Live)"]
+
+
+def test_a_stop_on_a_flipped_leg_tells_the_held_old_side_apart_from_the_new(
+    placed, held_exit_messages
+):
+    # V5 through the engine's stop. The old long's exit cannot be sized: held, and told. The
+    # new short's exit waits once behind another exit (an Events line, no message) and goes
+    # on the next tick. Before V5 the two shared one record: the new short going said "Exit
+    # sent ... BUY 100 ... held for 2 min" of an exit never told as held, and the old long's
+    # next hold was a first hold again, so "Exit NOT sent" came twice.
+    from sudarshan.books import held_exits
+
+    strategy = _make()
+    run_id = _live_run(strategy, flipped=True)
+    snapshot = store.strategy_to_dict(store.get_strategy(strategy.id, USER))
+    now, busy = [1000.0], []
+
+    def dispatch(**kwargs):
+        if kwargs["order"]["action"] == "SELL":  # the old long's exit
+            return _SIZE_HELD
+        if not busy:
+            busy.append(1)
+            return DispatchResult(ok=False, error="on its way", held=True, response={"why": "busy"})
+        return DispatchResult(ok=True, broker_order_id="NEW", response={})
+
+    with (
+        patch.object(engine.order_dispatch, "dispatch_order", side_effect=dispatch),
+        patch.object(held_exits, "time", SimpleNamespace(monotonic=lambda: now[0])),
+    ):
+        engine._exit_legs(run_id, snapshot, [1], "exit_sl", "live", "test-key", USER)
+        now[0] += 125
+        engine._exit_legs(run_id, snapshot, [1], "exit_sl", "live", "test-key", USER)
+
+    assert _firsts(held_exit_messages) == [
+        "Exit NOT sent (Live)",
+        "Exit still NOT sent (Live), 2 min now",
+    ]
+    assert all("Leg 1: SELL 100 RELIANCE" in text for text in held_exit_messages)
+
+
+def test_exit_alerts_on_a_flipped_leg_tell_the_held_old_side_apart(placed, held_exit_messages):
+    # V5 on the signal path: a long_exit for the old long is held for its size and told; a
+    # short_exit for the new short goes and owes no message; the old long's exit then goes,
+    # and the message names it and how long it was held.
+    from sudarshan.books import held_exits
+
+    strategy = _make()
+    _live_run(strategy, flipped=True)
+    now = [1000.0]
+
+    def alert(action):
+        return signals.handle_signal(store.get_strategy(strategy.id, USER), action, leg_id=1)
+
+    with patch.object(held_exits, "time", SimpleNamespace(monotonic=lambda: now[0])):
+        with patch.object(signals.order_dispatch, "dispatch_order", return_value=_SIZE_HELD):
+            assert alert("long_exit").ok is False
+        now[0] += 125
+        assert alert("short_exit").ok is True
+        assert len(held_exit_messages) == 1  # the new short's exit was never held
+        assert alert("long_exit").ok is True
+
+    assert _firsts(held_exit_messages) == ["Exit NOT sent (Live)", "Exit sent (Live)"]
+    assert all("Leg 1: SELL 100 RELIANCE" in text for text in held_exit_messages)
+    assert "held for 2 min" in held_exit_messages[1]
+    assert [(order["action"], order["quantity"]) for order in placed] == [
+        ("BUY", "100"),
+        ("SELL", "100"),
+    ]

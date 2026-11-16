@@ -310,6 +310,14 @@ export function frameIsFor(frame: OrderFrame | null | undefined, symbol: string,
 const hidden = () => typeof document !== 'undefined' && document.visibilityState === 'hidden'
 
 /**
+ * The longest a burst of order updates puts off its read, from its first update
+ * (v0.15.0 verify V7): each update waits the journal's moment again, so a
+ * steady stream (a script asking order status every second) would otherwise put
+ * the read off for as long as it lasts.
+ */
+export const BURST_LONGEST_MS = 10_000
+
+/**
  * The trade named in the chart's address, on the chart: read when it opens and
  * again as its orders change, its interval chosen, its marks laid on every
  * load and every new candle, and the view placed on it once a load.
@@ -458,23 +466,28 @@ export function useTripMarkers({
   }, [tripId, symbol, exchange, apply])
 
   // What asks for the trade again: an order event of this instrument (after the moment the
-  // journal takes to record the fill), the app's connection coming back, and a return to the
-  // page that missed either or was away a while. A hidden page reads nothing. Never a timer.
+  // journal takes to record the fill, and at the latest 10 s after the first of a burst), the
+  // app's connection coming back, and a return to the page that missed either or was away a
+  // while. A hidden page reads nothing. Never a timer.
   useEffect(() => {
     if (tripId === null) return
     let missed = false
     let settle: ReturnType<typeof setTimeout> | null = null
+    let burstAt = 0
     const onOrder = (frame?: OrderFrame | null) => {
       if (!frameIsFor(frame, symbol, exchange)) return
       if (hidden()) {
         missed = true
         return
       }
+      const at = Date.now()
       if (settle) clearTimeout(settle)
+      else burstAt = at
+      const wait = Math.max(0, Math.min(AFTER_ORDER_MS, burstAt + BURST_LONGEST_MS - at))
       settle = setTimeout(() => {
         settle = null
         again.current?.()
-      }, AFTER_ORDER_MS)
+      }, wait)
     }
     let connectedBefore = socket?.connected === true
     const onConnect = () => {
@@ -491,6 +504,12 @@ export function useTripMarkers({
     const onVisibility = () => {
       if (hidden()) {
         hiddenAt ??= Date.now()
+        // A read still waiting is not run on a hidden page: it runs on return (verify V6).
+        if (settle) {
+          clearTimeout(settle)
+          settle = null
+          missed = true
+        }
         return
       }
       const away = hiddenAt === null ? 0 : Date.now() - hiddenAt

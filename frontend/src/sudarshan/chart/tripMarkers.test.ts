@@ -37,6 +37,7 @@ vi.mock('@/components/socket/SocketProvider', () => ({
 import { JournalError } from '@/sudarshan/journal/api'
 import { AFTER_ORDER_MS, AWAY_MS } from '@/sudarshan/journal/useJournalSync'
 import {
+  BURST_LONGEST_MS,
   barIndexOf,
   FOCUS_ENTRY_BARS,
   FOCUS_MAX_BARS,
@@ -751,6 +752,32 @@ describe('the marks follow the trade while the chart is open (review M1)', () =>
     socket.emit('order_update', { symbol: 'SBIN', exchange: 'NSE' })
     await wait(AFTER_ORDER_MS)
     expect(call).toHaveBeenCalledTimes(1)
+  })
+
+  it('a read still waiting when the phone is pocketed runs on return, never hidden (verify V6)', async () => {
+    const { chart } = await opened()
+    socket.emit('order_update', { symbol: 'SBIN', exchange: 'NSE' })
+    await wait(1_000)
+    visible('hidden') // pocketed inside the journal's moment
+    await wait(AFTER_ORDER_MS + 5_000)
+    expect(call).toHaveBeenCalledTimes(1) // before: the waiting read ran on the hidden page
+    visible('visible') // back well inside AWAY_MS: only the missed read asks again
+    await wait(0)
+    expect(call).toHaveBeenCalledTimes(2)
+    expect(lastMarkers(chart).map((m) => m.text)).toEqual(['B 803.05', 'S'])
+  })
+
+  it('a steady stream of updates is read at the latest 10 s after its first (verify V7)', async () => {
+    const { chart } = await opened()
+    // A script asking order status every second in analyzer mode: no update names a symbol.
+    for (let i = 0; i < 25; i++) {
+      socket.emit('analyzer_update', { response: {} })
+      await wait(1_000)
+    }
+    expect(call).toHaveBeenCalledTimes(3) // at 10 s and 20 s; before: none while it lasted
+    expect(lastMarkers(chart).map((m) => m.text)).toEqual(['B 803.05', 'S'])
+    await wait(BURST_LONGEST_MS)
+    expect(call).toHaveBeenCalledTimes(4) // and once after its last update, as for any burst
   })
 })
 

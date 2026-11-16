@@ -5,17 +5,30 @@ Since GA1.1 a strategy exit whose size Upstox's books cannot confirm is held, no
 module each try wrote an order row, a ``leg_exit_held`` event and a push to the page, while the
 trader, away from the run's Events tab, was told nothing.
 
-One record per leg of a run, kept while the leg keeps being held:
+One record per position of a leg of a run, kept while it keeps being held. A signal flip leaves
+the old side and the new one under one leg id, so the position the exit closes is part of the
+key (v0.15.0 verify V5):
 
-- The first hold of a leg writes one event. Later holds of the same leg write none.
+- The first hold of a position writes one event. Later holds of it write none.
 - The first hold for a size that could not be confirmed is logged at critical and told to the
-  owner on Telegram; while it lasts he is told again at most once in ``REMIND_S``.
+  owner on Telegram; while it lasts he is told again, less often the longer it lasts (V2): each
+  minute for the first 5 minutes, each 5 minutes until 30, then each 15.
 - When the books do answer and say the leg cannot be closed (nothing held, held the other way,
   held in another product), that is told once, with what the books say, and never repeated: it
   does not end by waiting.
-- When the exit goes after he was told of a hold, he is told once that it went.
+- Once "no position" has been told, a read that fails afterwards tells nothing (V3). When the
+  books later show the position again (held the other way or in another product, each once),
+  what follows is a first hold again; a market order working says nothing about the position.
+- The words say how to get out by hand (V1): a market order in the Upstox app, never a limit
+  order left waiting there, which the books do not count as an exit on its way.
+- When the exit goes after he was told anything of its hold, he is told once that it went.
 - A hold that is only a wait for another exit (one being placed, an earlier one not seen ended,
   a market order working on the closing side) is one event and no Telegram message, as before.
+- A record nobody was told of is dropped after 5 minutes with no hold (no tick came, or the exit
+  went another way). One the owner was told of is kept until its exit goes, the books show no
+  position, or its run ends (v0.15.0 verify, forgotten holds): an exit that goes after a feed
+  outage is still told, and a hold that follows one is a reminder, not a first message. At most
+  ``KEPT_AT_MOST`` records are kept.
 
 Deciding is done under one real lock held for dict work only (two ticks racing on one leg send
 one first message; a tick can come from a green thread or a real one). Telling is queued through
@@ -38,15 +51,24 @@ from utils.logging import get_logger
 
 logger = get_logger(__name__)
 
-#: The shortest time between two Telegram messages about one leg's unconfirmed size.
-REMIND_S = 60.0
+#: The shortest time between two Telegram messages about one position's unconfirmed size (V2),
+#: by how long the hold had lasted when he was last told: under 5 minutes, a minute; under 30,
+#: 5 minutes; after that, 15 minutes.
+REMIND = ((300.0, 60.0), (1800.0, 300.0))
+REMIND_LATE_S = 900.0
 #: A leg not held for this long has stopped asking (its exit went another way, its run ended, or
 #: no tick came): its record is dropped, and a later hold of it is a first hold again. The engine
-#: asks on every tick, so a hold that lasts is seen far more often than this.
+#: asks on every tick, so a hold that lasts is seen far more often than this. A record the owner
+#: was told of is the exception (``_Hold.kept``): it is kept however long it goes unseen.
 STALE_S = 300.0
+#: The most records kept. Every leg of every run held at once is far fewer (a strategy has at most
+#: 10 legs, and a leg two positions only after a flip); past it the record seen longest ago goes.
+KEPT_AT_MOST = 256
 
 #: What the books said when they answered: told once, never repeated.
 _SAID_ONCE = (NO_POSITION, OTHER_WAY, ELSEWHERE)
+#: Answers that show a position is held after "no position" was told (V3), each once a record.
+_SHOWN_AGAIN = (OTHER_WAY, ELSEWHERE)
 
 FIRST, AGAIN, ONCE, GONE = "first", "again", "once", "gone"
 
@@ -67,7 +89,10 @@ _DUE = {
 }
 _DUE_OTHER = "An exit was due"
 
-CLOSE_IN_UPSTOX = "If you want out now, close it in the Upstox app."
+#: V1. A market close in the app is seen by the books and nothing more is sent; a limit order
+#: left there is not counted as an exit on its way, so SUDARSHAN's exit could fill as well. One
+#: source with the books' own refusals as a run says them (exit_guard.while_tried, V1b).
+CLOSE_IN_UPSTOX = exit_guard.CLOSE_BY_HAND
 NO_POSITION_SAID = "Upstox shows no position for this leg"
 RUN_STILL_LISTS = "The run still shows the leg as open; check Positions in the Upstox app."
 
@@ -77,8 +102,27 @@ class _Hold:
     since: float
     seen: float
     told: float = 0.0  # when the owner was last told the size is not confirmed
-    alerted: bool = False  # he was told of it on Telegram at least once
-    said_once: set = field(default_factory=set)
+    alerted: bool = False  # he was told on Telegram that its size is not confirmed
+    said_once: set = field(default_factory=set)  # the books' answers told, once each
+    gone: bool = False  # "no position" has been told (V3)
+
+    @property
+    def kept(self) -> bool:
+        """The owner was told of this hold, and the books have not shown no position since: it
+        is kept until its exit goes or its run ends, however long no tick comes."""
+        return (self.alerted or bool(self.said_once)) and not self.gone
+
+    def stale(self, now: float) -> bool:
+        """Its leg has stopped asking (unseen for ``STALE_S``), and it is not ``kept``."""
+        return now - self.seen > STALE_S and not self.kept
+
+
+def remind_after(lasted: float) -> float:
+    """How long after a message sent ``lasted`` seconds into a hold the next one may go."""
+    for until, gap in REMIND:
+        if lasted < until:
+            return gap
+    return REMIND_LATE_S
 
 
 @dataclass(frozen=True)
@@ -92,7 +136,7 @@ class Note:
 
 
 class Holds:
-    """The legs being held, by ``(run id, leg id)``. No I/O; the clock is passed in."""
+    """The exits being held, by ``(run id, leg id, position)``. No I/O; the clock is passed in."""
 
     def __init__(self) -> None:
         self._lock = real_threading.Lock()
@@ -100,41 +144,82 @@ class Holds:
 
     def note(self, key: tuple, why: str, now: float) -> Note:
         """One hold of ``key`` for ``why``; says what to write and whom to tell, once."""
+        dropped = 0
         with self._lock:
             hold = self._held.get(key)
-            if hold is not None and now - hold.seen > STALE_S:
+            if hold is not None and hold.stale(now):
                 hold = None
             first = hold is None
             if first:
-                for each, old in list(self._held.items()):
-                    if now - old.seen > STALE_S:
-                        del self._held[each]
+                dropped = self._make_room(now)
                 hold = self._held[key] = _Hold(since=now, seen=now)
             hold.seen = now
-            if why == UNCONFIRMED:
-                if not hold.alerted:
-                    hold.alerted, hold.told, hold.since = True, now, now
-                    return Note(event=True, tell=FIRST)
-                if now - hold.told >= REMIND_S:
-                    hold.told = now
-                    return Note(tell=AGAIN, minutes=int((now - hold.since) // 60))
+            said = self._decide(hold, why, now, first)
+        if dropped:
+            logger.warning(
+                f"{dropped} held strategy exit(s) the owner was told of will not be told when "
+                f"they go: more than {KEPT_AT_MOST} holds are remembered at once"
+            )
+        return said
+
+    @staticmethod
+    def _decide(hold: _Hold, why: str, now: float, first: bool) -> Note:
+        """What one hold of a record calls for; under the lock."""
+        if hold.gone and why in _SHOWN_AGAIN and why not in hold.said_once:
+            # V3: after "no position" the books show a position again: what follows is a
+            # first hold again, and "no position" may be told once more. Each answer does
+            # this once a record, so books that flap between the two cannot repeat it.
+            hold.gone = hold.alerted = False
+            hold.said_once.discard(NO_POSITION)
+        if why == UNCONFIRMED:
+            if hold.gone:
+                return Note()  # V3: nothing after "no position" until it shows again
+            if not hold.alerted:
+                hold.alerted, hold.told, hold.since = True, now, now
+                return Note(event=True, tell=FIRST)
+            if now - hold.told >= remind_after(hold.told - hold.since):
+                hold.told = now
+                return Note(tell=AGAIN, minutes=int((now - hold.since) // 60))
+            return Note()
+        if why in _SAID_ONCE:
+            if why in hold.said_once:
                 return Note()
-            if why in _SAID_ONCE:
-                if why in hold.said_once:
-                    return Note()
-                hold.said_once.add(why)
-                after = hold.alerted and why == NO_POSITION
-                return Note(event=True, tell=GONE if after else ONCE)
-            return Note(event=first)
+            hold.said_once.add(why)
+            hold.gone = hold.gone or why == NO_POSITION
+            after = hold.alerted and why == NO_POSITION
+            return Note(event=True, tell=GONE if after else ONCE)
+        return Note(event=first)
+
+    def _make_room(self, now: float) -> int:
+        """Drop the stale records, then the ones seen longest ago while ``KEPT_AT_MOST`` are
+        held; under the lock. How many of those dropped had been told to the owner."""
+        for each, old in list(self._held.items()):
+            if old.stale(now):
+                del self._held[each]
+        dropped = 0
+        while len(self._held) >= KEPT_AT_MOST:
+            oldest = min(self._held, key=lambda each: self._held[each].seen)
+            dropped += self._held.pop(oldest).kept
+        return dropped
 
     def clear(self, key: tuple, now: float) -> int | None:
         """The exit of ``key`` went. The whole minutes it was held when the owner had been told
-        its size was not confirmed (so he is told it went), else None."""
+        of its hold on Telegram (so he is told it went), else None. V3: that includes "no
+        position" and the books' other answers, so his last message never says no exit went.
+        A record he was told of is ``kept``, so that holds after a feed outage too."""
         with self._lock:
             hold = self._held.pop(key, None)
-        if hold is None or not hold.alerted or now - hold.seen > STALE_S:
+        if hold is None or not (hold.alerted or hold.said_once) or hold.stale(now):
             return None
         return int((now - hold.since) // 60)
+
+    def forget_run(self, run_id: object) -> int:
+        """The run ended: every record of it goes, told or not. How many went."""
+        with self._lock:
+            ended = [key for key in self._held if key[0] == run_id]
+            for key in ended:
+                del self._held[key]
+        return len(ended)
 
     def run_is_held(self, run_id: object, now: float) -> bool:
         with self._lock:
@@ -220,7 +305,7 @@ def event_line(leg_id: object, order: dict[str, Any], why: str, sentence: str) -
         return (
             f"Exit NOT sent for leg {leg_id} ({_what(order)}): SUDARSHAN could not confirm the "
             "position size from Upstox. It keeps trying and writes here when the exit goes. "
-            "Close the position in the Upstox app if you want out now.",
+            f"{CLOSE_IN_UPSTOX}",
             "critical",
         )
     if why == NO_POSITION:
@@ -258,13 +343,25 @@ def _why(result: Any) -> str:
     return str(response.get("why") or "") if isinstance(response, dict) else ""
 
 
-def held(run_id: object, leg_id: object, kind: str, order: dict[str, Any], result: Any) -> Said:
+def held(
+    run_id: object,
+    leg_id: object,
+    kind: str,
+    order: dict[str, Any],
+    result: Any,
+    ref: object = None,
+) -> Said:
     """One held Live exit of a run's leg (a dispatch marked ``held``, or the kept refusal the
-    engine found before it wrote a row). Tells the owner when the rules above say so."""
+    engine found before it wrote a row). Tells the owner when the rules above say so.
+
+    ``ref`` names the position the exit closes (its position reference, else its owner), so
+    the old and the new side of a flipped leg are told apart (V5). The caller notes the hold
+    before it releases its exit claim (V4), so no exit of this position can go, and be told as
+    sent, between its refusal and this record."""
     try:
         why = _why(result)
         sentence = str(getattr(result, "error", "") or "")
-        note = HOLDS.note((run_id, leg_id), why, time.monotonic())
+        note = HOLDS.note((run_id, leg_id, ref), why, time.monotonic())
         if note.tell == FIRST:
             logger.critical(
                 f"Live exit NOT sent for run {run_id} leg {leg_id} ({_what(order)}): its size "
@@ -290,12 +387,14 @@ def held(run_id: object, leg_id: object, kind: str, order: dict[str, Any], resul
         return Said()
 
 
-def sent(run_id: object, leg_id: object, order: dict[str, Any], result: Any) -> str:
+def sent(
+    run_id: object, leg_id: object, order: dict[str, Any], result: Any, ref: object = None
+) -> str:
     """A Live exit of a run's leg went. Ends its hold; when the owner had been told the size was
     not confirmed he is told once that it went, and the words to add to the event are returned
     ("" otherwise)."""
     try:
-        minutes = HOLDS.clear((run_id, leg_id), time.monotonic())
+        minutes = HOLDS.clear((run_id, leg_id, ref), time.monotonic())
         if minutes is None:
             return ""
         response = getattr(result, "response", None)
@@ -313,3 +412,12 @@ def run_is_held(run_id: object) -> bool:
         return HOLDS.run_is_held(run_id, time.monotonic())
     except Exception:
         return False
+
+
+def forget_run(run_id: object) -> None:
+    """A run ended (services/strategy_module/state.clear_run_state): the holds of its exits that
+    the owner was told of are not kept any longer. Never raises."""
+    try:
+        HOLDS.forget_run(run_id)
+    except Exception:
+        logger.exception("The held exits of a run that ended could not be let go")
