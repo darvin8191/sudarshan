@@ -109,9 +109,9 @@ export function WhyNot({ why, id, told }: { why: string | null; id: string; told
   )
 }
 
-/** The white card one row of a book sits on. */
+/** The white card one row of a book sits on; its height and padding follow Display's density. */
 export const CARD =
-  'flex min-h-14 w-full flex-col gap-1 rounded-[1rem] border bg-card px-4 py-3 text-left shadow-[var(--shadow-card)] outline-none active:bg-accent focus-visible:ring-2 focus-visible:ring-ring'
+  'flex min-h-[var(--sd-row-min)] w-full flex-col gap-1 rounded-[1rem] border bg-card px-4 py-[var(--sd-card-pad-y)] text-left shadow-[var(--shadow-card)] outline-none active:bg-accent focus-visible:ring-2 focus-visible:ring-ring'
 
 /** Money that moves with the market: its sign, its arrow, up or down colour; grey when stale. */
 export function Money({
@@ -368,7 +368,11 @@ export function RefreshIcon({
   )
 }
 
-/** The page's title, as the watchlist sets it, with Refresh beside it and `extra` before it. */
+/**
+ * The page's title, as the watchlist sets it, with Refresh beside it and `extra` before it. When
+ * they do not fit one line (larger text on a narrow phone, M20.2) the buttons go under the title,
+ * at the right, and the page never scrolls sideways.
+ */
 export function BookHeading({
   title,
   refreshing,
@@ -381,9 +385,9 @@ export function BookHeading({
   extra?: ReactNode
 }) {
   return (
-    <div className="flex items-center justify-between gap-3">
+    <div className="flex flex-wrap items-center justify-between gap-3">
       <h1 className="sd-display text-[1.75rem] leading-none font-bold">{title}</h1>
-      <div className="flex shrink-0 items-center gap-2">
+      <div className="ml-auto flex shrink-0 items-center gap-2">
         {extra}
         <button type="button" onClick={onRefresh} disabled={refreshing} className={OUTLINED}>
           <RefreshCw aria-hidden="true" className={cn('size-4', refreshing && 'animate-spin')} />

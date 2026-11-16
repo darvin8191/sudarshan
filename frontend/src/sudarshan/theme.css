@@ -170,6 +170,36 @@
    figures, so it is kept to titles and single big figures, never a column. */
 html {
   font-variant-numeric: tabular-nums;
+  /* Larger text (M20.2) scales the root, so every rem grows with it, touch targets included. */
+  font-size: calc(100% * var(--sd-text-scale));
+}
+
+/* Display density and text size (M20.2, GA10.1): Display settings set data-density and data-text
+   on <html> (displaySize.ts), and these variables carry them. Larger text is 18 px to the rem: a
+   48 dp target becomes 54, never less. Compact rows take padding out of the watchlist's rows and
+   the books' cards, and keep their 48 dp: the row's floor is 3rem in both. Breakpoints are read
+   against the browser's own 16 px, so the phone layout does not change with the text. */
+:root {
+  --sd-text-scale: 1;
+  --sd-row-min: 3.5rem;
+  --sd-row-pad-y: 0.5rem;
+  --sd-card-pad-y: 0.75rem;
+}
+:root[data-text='large'] {
+  --sd-text-scale: 1.125;
+}
+:root[data-density='compact'] {
+  --sd-row-min: 3rem;
+  --sd-row-pad-y: 0.25rem;
+  --sd-card-pad-y: 0.375rem;
+}
+/* With larger text the books' four-up figure cards (Positions, Holdings, the wide pages a phone
+   shows on its side) go two-up below 1024 px, so a six-digit figure stays inside its card and the
+   page never scrolls sideways. Outside any layer, so it wins over the grid's own columns. */
+@media (width < 64rem) {
+  :root[data-text='large'] .sd-stat-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @layer components {

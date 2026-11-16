@@ -76,6 +76,7 @@ export interface Strategy {
   last_alert: AlertLine | null
   sandbox_run: SandboxRun
   quiet_days: number
+  held_book: HeldBook | null
 }
 
 export interface AlertLine {
@@ -101,6 +102,15 @@ export interface SandboxRun {
   sessions: number
   sent: number
   refused: number
+}
+
+export interface HeldBook {
+  quantity: number
+  average_price: number
+  ltp: number | null
+  pnl: number | null
+  today_realized_pnl: number
+  priced_ms: number
 }
 
 export interface AlertMessages {

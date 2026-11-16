@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { setNumberGrouping } from '@/sudarshan/dashboard/numberStyle'
 import { DEFAULT_CHAIN, readLastChain, saveLastChain } from './prefs'
 import {
   chainLinkOf,
@@ -28,6 +29,20 @@ describe('the options screen’s words', () => {
     expect(oiWords(65_000)).toBe('65,000')
     expect(oiWords(-320_000)).toBe('3.2 L')
     expect(oiWords(0)).toBe('0')
+  })
+
+  // SUDARSHAN M20.3 (GA10.2): international grouping says millions and billions instead.
+  it('says open interest in millions when Display settings ask for international grouping', () => {
+    setNumberGrouping('international')
+    try {
+      expect(oiWords(4_210_000)).toBe('4.21 M')
+      expect(oiWords(1_120_000_000)).toBe('1.12 B')
+      expect(oiWords(-320_000)).toBe('320 k')
+      expect(oiWords(65_000)).toBe('65,000')
+      expect(strikeWords(125_900)).toBe('125,900')
+    } finally {
+      setNumberGrouping('indian')
+    }
   })
 
   it('writes a strike as it is listed', () => {

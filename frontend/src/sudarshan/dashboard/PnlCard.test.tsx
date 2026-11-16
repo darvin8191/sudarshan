@@ -8,6 +8,7 @@ import { feed } from '@/test/marketDataHarness'
 import { render } from '@/test/test-utils'
 import type { Position } from '@/types/trading'
 import { STALE_MS } from './live'
+import { setNumberGrouping } from './numberStyle'
 import { type DashboardFunds, marginUse, PnlCard } from './PnlCard'
 
 const MINUS = '−'
@@ -24,6 +25,24 @@ function funds(overrides: Partial<DashboardFunds> = {}): DashboardFunds {
 }
 
 describe('PnlCard', () => {
+  // SUDARSHAN M20.3 (GA10.2): one screen under the switch, both ways.
+  it('groups its figures as Display settings ask, Indian by default', () => {
+    const big = funds({ availablecash: '1234567.80', m2mrealized: '250000.00' })
+    const { unmount } = render(<PnlCard funds={big} loading={false} />)
+    expect(screen.getByTestId('pnl-total')).toHaveTextContent('+₹2,50,650.75')
+    expect(screen.getByText('₹12,34,567.80')).toBeInTheDocument()
+    unmount()
+
+    setNumberGrouping('international')
+    try {
+      render(<PnlCard funds={big} loading={false} />)
+      expect(screen.getByTestId('pnl-total')).toHaveTextContent('+₹250,650.75')
+      expect(screen.getByText('₹1,234,567.80')).toBeInTheDocument()
+    } finally {
+      setNumberGrouping('indian')
+    }
+  })
+
   it("adds realised and unrealised into today's P&L, signed, with an up arrow", () => {
     render(<PnlCard funds={funds()} loading={false} />)
 

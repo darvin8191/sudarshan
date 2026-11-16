@@ -65,6 +65,7 @@ import { applySessionHours, sessionCalendarFor } from '@/lib/trading/sessionHour
 import { volumePoint } from '@/lib/trading/volumeSettings'
 import type { AppMode } from '@/stores/themeStore'
 import { CHART_BRANDING } from '@/sudarshan/brand'
+import { groupedNumber } from '@/sudarshan/dashboard/format'
 import type { LineY, OverlayLine, OverlayMarker, Overlays } from './overlays'
 import { PhoneDrawings } from './phoneDrawings'
 import {
@@ -1630,7 +1631,7 @@ function markerLook(marker: OverlayMarker, spacing: number) {
   }
 }
 
-const compactVolume = new Intl.NumberFormat('en-IN', {
+const compactVolume = groupedNumber({
   notation: 'compact',
   maximumFractionDigits: 2,
 })

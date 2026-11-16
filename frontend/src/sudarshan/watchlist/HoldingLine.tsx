@@ -1,5 +1,6 @@
 import { Briefcase } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { groupedNumber } from '@/sudarshan/dashboard/format'
 import { keyOf } from '@/sudarshan/dashboard/live'
 import type { HeldBook } from './useHeld'
 import type { Row } from './v2/types'
@@ -13,7 +14,7 @@ export interface HeldFigures {
 /** A cash symbol: the only kind a holding can belong to, and the only kind matched by ISIN. */
 const CASH = new Set(['NSE', 'BSE'])
 
-const NUMBER = new Intl.NumberFormat('en-IN', { maximumFractionDigits: 3 })
+const NUMBER = groupedNumber({ maximumFractionDigits: 3 })
 const MINUS = '−'
 
 const number = (value: unknown): number => {

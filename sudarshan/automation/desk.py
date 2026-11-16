@@ -10,8 +10,10 @@ Nothing here starts a thread, a timer or a loop.
 
 from __future__ import annotations
 
+import math
 import os
 import time
+from datetime import UTC, datetime
 from typing import Any
 
 from utils.logging import get_logger
@@ -23,6 +25,85 @@ SENDERS_ENV = "SUDARSHAN_AUTOMATION_SENDERS"
 TRADINGVIEW = ("52.89.214.238", "34.212.75.30", "54.218.53.128", "52.32.178.7")
 #: Said when the day's broker login is gone (or the API key is no longer the owner's).
 NO_SESSION = "The app is not logged in to Upstox. Log in, then the next alert is handled."
+
+
+def _figure(value: Any) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if math.isfinite(number) else None
+
+
+def _flat(now_ms: int) -> dict[str, Any]:
+    return {
+        "quantity": 0,
+        "average_price": 0.0,
+        "ltp": None,
+        "pnl": None,
+        "today_realized_pnl": 0.0,
+        "priced_ms": now_ms,
+    }
+
+
+def sandbox_book_row(row: Any, now_ms: int) -> dict[str, Any]:
+    """The sandbox's own row for the card (contract.HELD_BOOK). Pure.
+
+    The day's P&L is worked out at the price the sandbox last wrote on the row (at a fill or
+    when it priced its book), from the row's average, quantity and the day's booked part, so it
+    holds however the row was last written; ``priced_ms`` is that write, read as UTC (the
+    sandbox's SQLite clock), and never later than now. No row: flat."""
+    if row is None:
+        return _flat(now_ms)
+    quantity = int(_figure(row.quantity) or 0)
+    average = _figure(row.average_price) or 0.0
+    ltp = _figure(row.ltp)
+    ltp = ltp if ltp is not None and ltp > 0 else None
+    booked = _figure(row.today_realized_pnl) or 0.0
+    if quantity == 0:
+        pnl: float | None = booked
+    else:
+        pnl = None if ltp is None else booked + (ltp - average) * quantity
+    priced_ms = now_ms
+    written = getattr(row, "updated_at", None)
+    if isinstance(written, datetime):
+        utc = written if written.tzinfo else written.replace(tzinfo=UTC)
+        priced_ms = min(now_ms, int(utc.timestamp() * 1000))
+    return {
+        "quantity": quantity,
+        "average_price": average,
+        "ltp": ltp,
+        "pnl": None if pnl is None else round(pnl, 2),
+        "today_realized_pnl": booked,
+        "priced_ms": priced_ms,
+    }
+
+
+def positions_book_row(
+    rows: list[Any], exchange: str, symbol: str, product: str, now_ms: int
+) -> dict[str, Any]:
+    """Upstox's row for one contract and product, as OpenAlgo's position book maps it, read
+    now (contract.HELD_BOOK). Pure. A contract the book does not list in that product is flat
+    in it. Upstox's own P&L is the day's, realised and not, at its own last price."""
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        if (row.get("symbol"), row.get("exchange"), row.get("product")) != (
+            symbol,
+            exchange,
+            product,
+        ):
+            continue
+        ltp = _figure(row.get("ltp"))
+        return {
+            "quantity": int(_figure(row.get("quantity")) or 0),
+            "average_price": _figure(row.get("average_price")) or 0.0,
+            "ltp": ltp if ltp is not None and ltp > 0 else None,
+            "pnl": _figure(row.get("pnl")),
+            "today_realized_pnl": 0.0,
+            "priced_ms": now_ms,
+        }
+    return _flat(now_ms)
 
 
 def senders() -> frozenset[str]:
@@ -322,6 +403,58 @@ class Desk:
         except Exception:
             logger.exception("Automation: the position could not be read")
             return None
+
+    def held_book(
+        self, mode: str, exchange: str, symbol: str, product: str
+    ) -> dict[str, Any] | None:
+        """The held contract's row in the book of the strategy's own mode, for the card's P&L
+        line (M12.1, GA10.4); ``None`` when it cannot be read. Only reads, and only what a page
+        read may: the sandbox's own row as last priced (no quote is fetched, nothing written),
+        or Upstox's positions through OpenAlgo's position book with the owner's session, read
+        once for the whole page however many Live strategies hold something (a desk lives for
+        one request). The page moves the P&L with the ticks from there."""
+        api_key = self.api_key()
+        if not api_key:
+            return None
+        try:
+            if mode == "sandbox":
+                from database.sandbox_db import SandboxPositions
+                from services.sandbox_service import get_user_id_from_apikey
+
+                user_id = get_user_id_from_apikey(api_key)
+                if not user_id:
+                    return None
+                row = SandboxPositions.query.filter_by(
+                    user_id=user_id, symbol=symbol, exchange=exchange, product=product
+                ).first()
+                return sandbox_book_row(row, int(self.now() * 1000))
+            read = self.__dict__.get("_positions_read")
+            if read is None:
+                read = self.__dict__["_positions_read"] = self._read_positions(api_key)
+            if read is False:
+                return None
+            rows, read_ms = read
+            return positions_book_row(rows, exchange, symbol, product, read_ms)
+        except Exception:
+            logger.exception("Automation: the held position's book could not be read")
+            return None
+
+    def _read_positions(self, api_key: str) -> tuple[list[Any], int] | bool:
+        """Upstox's positions as OpenAlgo maps them, with when they were read; False when they
+        could not be (kept, so the other strategies of the page do not ask again)."""
+        token, broker = self.broker_session(api_key)
+        if token is None:
+            return False
+        from services.positionbook_service import get_positionbook
+
+        try:
+            ok, answer, _status = get_positionbook(auth_token=token, broker=broker)
+        except Exception:
+            logger.exception("Automation: Upstox's positions could not be read")
+            return False
+        if not ok or not isinstance(answer, dict):
+            return False
+        return list(answer.get("data") or []), int(self.now() * 1000)
 
     def place(self, order: dict[str, Any], api_key: str, analyze: bool) -> tuple[bool, Any, int]:
         """One smart order, in the pipe the caller decided. Every claim, hold, sizing rule and the

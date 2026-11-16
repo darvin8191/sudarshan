@@ -79,7 +79,8 @@ class _Server:
 
 
 class FakeFeed(_Server):
-    """sudarshan-feed's loopback API as the journal uses it: /health and /claims/<client>."""
+    """sudarshan-feed's loopback API as the journal uses it: /health, /claims/<client> and
+    /snapshot?keys=... (the last tick of each key asked for, or null)."""
 
     def __init__(self):
         super().__init__()
@@ -88,6 +89,7 @@ class FakeFeed(_Server):
         self.claim_status = 200
         self.calls: list[tuple[str, str, dict]] = []
         self.down = False
+        self.ticks: dict[str, dict] = {}
 
     def handler(feed):  # noqa: N805 - a closure over the fake, not a method
         class Handler(BaseHTTPRequestHandler):
@@ -119,6 +121,9 @@ class FakeFeed(_Server):
                         {"state": "live", "started_at": feed.started_at,
                          "subscribed": {"total": len(feed.claims)}},
                     )  # fmt: skip
+                if url.path == "/snapshot":
+                    keys = [k for k in query.get("keys", "").split(",") if k]
+                    return self._send(200, {"ticks": {k: feed.ticks.get(k) for k in keys}})
                 if url.path.startswith("/claims/"):
                     client = url.path.rpartition("/")[2]
                     if self.command == "DELETE":

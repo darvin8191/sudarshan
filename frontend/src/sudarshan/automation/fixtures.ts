@@ -61,6 +61,7 @@ export function strategy(over: Partial<Strategy> = {}): Strategy {
     last_alert: null,
     sandbox_run: { alerts: 0, sessions: 0, sent: 0, refused: 0 },
     quiet_days: 0,
+    held_book: null,
     ...over,
   }
 }

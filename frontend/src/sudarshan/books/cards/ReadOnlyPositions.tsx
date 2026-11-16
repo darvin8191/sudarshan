@@ -55,6 +55,7 @@ import { useBookOverlay } from './useBookOverlay'
 export type ReadOnlyPositionsProps = ReadOnlyBookProps<MaskedPosition>
 
 const NOTE = "The account owner's positions. Nothing here can be changed from this view."
+const MINUS = '−'
 
 const idOf = (row: MaskedPosition) => `${row.exchange}:${row.symbol ?? row.name}:${row.product}`
 
@@ -63,7 +64,10 @@ function openCount(count: number): string {
   return count === 1 ? '1 open position' : `${count} open positions`
 }
 
-/** LONG or SHORT in words, with the signed quantity beside it where the member may see it. */
+/**
+ * LONG or SHORT in words, with the signed quantity beside it where the member may see it, and
+ * where they may not, the sign alone (M2.8): a word and a sign, never the colour alone.
+ */
 function Direction({ figures }: { figures: PositionFigures }) {
   const { side, quantity } = figures
   if (side === null) return null
@@ -79,7 +83,11 @@ function Direction({ figures }: { figures: PositionFigures }) {
         side === 'long' ? 'text-[color:var(--buy-solid)]' : 'text-[color:var(--sell-solid)]'
       )}
     >
-      {quantity !== undefined && signedUnits(quantity)}
+      {quantity !== undefined ? (
+        signedUnits(quantity)
+      ) : (
+        <span data-sign="">{side === 'long' ? '+' : MINUS}</span>
+      )}
       <span className="text-[0.71875rem] tracking-wide">{word}</span>
     </span>
   )

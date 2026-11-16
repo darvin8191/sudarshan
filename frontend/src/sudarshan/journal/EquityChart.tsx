@@ -4,7 +4,7 @@
 // area in the loss tint, with a label of its deepest point. The two are named under the chart and
 // the last values are in words, never told by colour alone (design 6.2, 6.5).
 import { useEffect, useRef, useState } from 'react'
-import { directionOf } from '@/sudarshan/dashboard/format'
+import { directionOf, formatNumber } from '@/sudarshan/dashboard/format'
 import { TrendArrow } from '@/sudarshan/dashboard/Trend'
 import { chartDay, tileRupees } from './analyticsWords'
 import { dayWords } from './live'
@@ -64,7 +64,7 @@ export function EquityChart({ equity }: { equity: Equity }) {
           rightPriceScale: { borderColor: CHART_COLOURS.edge },
           timeScale: { borderColor: CHART_COLOURS.edge, timeVisible: false },
           localization: {
-            priceFormatter: (v: number) => new Intl.NumberFormat('en-IN').format(Math.round(v)),
+            priceFormatter: (v: number) => formatNumber(Math.round(v)),
           },
         })
         const curve = chart.addSeries(AreaSeries, {

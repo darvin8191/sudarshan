@@ -3,13 +3,18 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { setMarketSoundMuted, setOrderSoundMuted } from './books/chime'
 import { DisplaySettings } from './DisplaySettings'
+import { setNumberGrouping } from './dashboard/numberStyle'
 import { setCvdMode } from './display'
+import { setDensity, setTextSize } from './displaySize'
 
 const html = document.documentElement
 
 afterEach(() => {
   vi.restoreAllMocks()
   setCvdMode(false)
+  setNumberGrouping('indian')
+  setDensity('comfortable')
+  setTextSize('normal')
   localStorage.clear()
 })
 
@@ -140,5 +145,48 @@ describe('Display settings', () => {
     // Each row is a 48 dp target, the switch's label.
     for (const one of group.getAllByRole('switch'))
       expect(one.closest('label')?.className).toContain('min-h-12')
+  })
+
+  // SUDARSHAN M20.3 (GA10.2): the lakh/crore switch, off by default, with a preview in the
+  // shared formatter's own output.
+  it('switches number grouping for this device and shows the result at once', async () => {
+    const user = userEvent.setup()
+    render(<DisplaySettings />)
+    const toggle = screen.getByRole('switch', { name: 'International number grouping' })
+    expect(toggle).not.toBeChecked()
+    expect(toggle).toHaveAccessibleDescription(/Now: ₹12,34,567.89 and 12L\./)
+
+    await user.click(toggle)
+    expect(toggle).toBeChecked()
+    expect(toggle).toHaveAccessibleDescription(/Now: ₹1,234,567.89 and 1.2M\./)
+    expect(localStorage.getItem('sudarshan-number-grouping')).toBe('international')
+
+    await user.click(toggle)
+    expect(toggle).not.toBeChecked()
+    expect(localStorage.getItem('sudarshan-number-grouping')).toBeNull()
+  })
+
+  // SUDARSHAN M20.2 (GA10.1): density and text size, off by default, set on <html> for the
+  // theme's variables and kept on this device only.
+  it.each([
+    ['Compact rows', 'data-density', 'compact', 'sudarshan-density'],
+    ['Larger text', 'data-text', 'large', 'sudarshan-text'],
+  ])('turns %s on and off for this device', async (name, attribute, value, key) => {
+    const user = userEvent.setup()
+    render(<DisplaySettings />)
+    const toggle = screen.getByRole('switch', { name })
+    expect(toggle).not.toBeChecked()
+    expect(html.hasAttribute(attribute)).toBe(false)
+
+    await user.click(toggle)
+    expect(toggle).toBeChecked()
+    expect(html.getAttribute(attribute)).toBe(value)
+    expect(localStorage.getItem(key)).toBe(value)
+    expect(toggle.closest('label')?.className).toContain('min-h-12')
+
+    await user.click(toggle)
+    expect(toggle).not.toBeChecked()
+    expect(html.hasAttribute(attribute)).toBe(false)
+    expect(localStorage.getItem(key)).toBeNull()
   })
 })

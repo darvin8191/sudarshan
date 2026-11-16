@@ -15,6 +15,7 @@ import type { ReactNode } from 'react'
 import { journalCall } from '@/sudarshan/journal/api'
 import { paiseAmount, paiseText } from '@/sudarshan/journal/money'
 import { dayKey } from './api'
+import { HeldPnl } from './HeldPnl'
 import type { Mode, Strategy, StrategyState } from './types'
 import { contractName, type Tone, toneOf, whenText } from './words'
 
@@ -143,6 +144,11 @@ export function StrategyCard({ strategy, actions }: { strategy: Strategy; action
             ? `${strategy.held_side === 'short' ? 'Short' : 'Long'} ${contractName(strategy.held_symbol)} ${where}`
             : (strategy.held_note ?? 'Holds nothing')}
         </Line>
+        {strategy.held_symbol && (
+          <Line label="P&L">
+            <HeldPnl strategy={strategy} />
+          </Line>
+        )}
         <Line label="Today">
           <DayLine strategy={strategy} />
         </Line>

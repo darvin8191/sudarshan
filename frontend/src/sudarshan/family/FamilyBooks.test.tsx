@@ -96,6 +96,27 @@ describe('Positions', () => {
     expect(card.textContent).toContain('LONG')
   })
 
+  // SUDARSHAN M2.8 (GA10.7): without quantities a member still sees which way each position
+  // faces, as a word and a sign, never the colour alone, and still no quantity.
+  it('says long or short with a sign where the quantity is hidden', async () => {
+    const short = { ...MASKED_POSITION, symbol: 'SHRTX', side: 'short' }
+    routeFetch({
+      '/family/api/books/positions': ok(
+        bookOf('positions', [MASKED_POSITION, short], { hidden: ['pnl', 'qty'] })
+      ),
+    })
+    mount('/family/positions', <FamilyPositions />)
+    const long = await screen.findByRole('button', { name: /MASKD/ })
+    const longSide = long.querySelector('[data-side]')
+    expect(longSide?.getAttribute('data-side')).toBe('LONG')
+    expect(longSide?.textContent).toBe('+LONG')
+    const shortCard = await screen.findByRole('button', { name: /SHRTX/ })
+    const shortSide = shortCard.querySelector('[data-side]')
+    expect(shortSide?.getAttribute('data-side')).toBe('SHORT')
+    expect(shortSide?.textContent).toBe('\u2212SHORT')
+    for (const card of [long, shortCard]) expect(card.textContent).not.toMatch(/\d+\s*(LONG|SHORT)/)
+  })
+
   it('shows figures for a row the mask leaves', async () => {
     routeFetch({ '/family/api/books/positions': ok(bookOf('positions', [FULL_POSITION])) })
     mount('/family/positions', <FamilyPositions />)

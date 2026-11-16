@@ -4,6 +4,7 @@ import { memo, type ReactNode, useState } from 'react'
 import type { AlertRow, GroupRow } from '@/api/marketAlerts'
 import { cn } from '@/lib/utils'
 import { CARD, Confirm, OUTLINED, SentNote } from '@/sudarshan/books/cards/parts'
+import { groupedNumber } from '@/sudarshan/dashboard/format'
 import { GROUP_NO_ANSWER, sendGroupChange, useGroupHeld } from './groupActions'
 import { AlertStatusChip, BusyIcon, HELD } from './lines'
 
@@ -14,7 +15,7 @@ import { AlertStatusChip, BusyIcon, HELD } from './lines'
  * ordinary alert rows, shown only when the card is expanded. Delete asks first and says how many
  * alerts go.
  */
-const NUMBER = new Intl.NumberFormat('en-IN')
+const NUMBER = groupedNumber()
 
 /** "% move 2%", "Day high break", "VWAP cross": the kind and its figure, short. */
 export function kindWords(group: Pick<GroupRow, 'kind' | 'params'>): string {

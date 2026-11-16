@@ -37,6 +37,7 @@ export function position(extra: Partial<UpstoxPosition> = {}): UpstoxPosition {
     symbol: 'NIFTY25NOV2625000CE',
     name: 'NIFTY 25000 CE',
     product: 'D',
+    side: 'long',
     qty_u: 65_000_000, // 65
     overnight_qty_u: 0,
     day_buy_qty_u: 65_000_000,

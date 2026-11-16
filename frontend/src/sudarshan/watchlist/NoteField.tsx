@@ -1,5 +1,5 @@
 import { Check } from 'lucide-react'
-import { useId, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { cn } from '@/lib/utils'
 import { checkNote } from './v2/marks'
 import { LIMITS } from './v2/types'
@@ -7,17 +7,21 @@ import { LIMITS } from './v2/types'
 /**
  * Note (M8.6 F8): a text field with "123 of 500", Save and a "Saved" state. A note over the limit
  * is refused before anything is sent, in the server's words. `onSave` answers null when the note
- * was kept, or the sentence to show.
+ * was kept, or the sentence to show. A note typed and not saved when the field goes (the sheet
+ * closed) is handed to `onLeave`, the owner's default (GA10.8); an empty or unchanged one is not,
+ * nor one already being saved.
  */
 export function NoteField({
   saved,
   disabled,
   onSave,
+  onLeave,
 }: {
   /** The note as the server holds it. */
   saved: string
   disabled?: boolean
   onSave: (note: string) => Promise<string | null>
+  onLeave?: (note: string) => void
 }) {
   const id = useId()
   const [text, setText] = useState(saved)
@@ -32,6 +36,22 @@ export function NoteField({
   }
   const dirty = text.trim() !== saved.trim()
   const length = text.length
+
+  // What the field holds as it goes: read once, when the sheet closes.
+  const leaving = useRef({ text, saved, busy, disabled, onLeave })
+  useEffect(() => {
+    leaving.current = { text, saved, busy, disabled, onLeave }
+  })
+  useEffect(
+    () => () => {
+      const last = leaving.current
+      const note = last.text.trim()
+      if (!last.onLeave || last.busy || last.disabled) return
+      if (note === '' || note === last.saved.trim()) return
+      last.onLeave(note)
+    },
+    []
+  )
 
   const save = async () => {
     const refused = checkNote(text)

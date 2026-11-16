@@ -15,6 +15,7 @@
  * This file holds no state of its own and loads no tier: the host imports the
  * indicator tier on first use and passes the engine's registry in.
  */
+import { groupedNumber, type NumberText } from '@/sudarshan/dashboard/format'
 
 /** One study of the set: the engine's id and the settings the owner gave it. */
 export interface StudyEntry {
@@ -119,11 +120,11 @@ export function skipReason(
 }
 
 /** One formatter per number of decimals: the legend writes its values on every tick. */
-const formats = new Map<number, Intl.NumberFormat>()
-function formatOf(decimals: number): Intl.NumberFormat {
+const formats = new Map<number, NumberText>()
+function formatOf(decimals: number): NumberText {
   let format = formats.get(decimals)
   if (!format) {
-    format = new Intl.NumberFormat('en-IN', {
+    format = groupedNumber({
       minimumFractionDigits: decimals,
       maximumFractionDigits: decimals,
     })

@@ -8,6 +8,7 @@
  * service and the portfolio use (portfolio/money.ts `roundDiv`).
  */
 import type { SymbolData } from '@/lib/MarketDataManager'
+import { formatNumber, groupedNumber } from '@/sudarshan/dashboard/format'
 import { type Price, priceOf } from '@/sudarshan/dashboard/live'
 import { roundDiv } from '@/sudarshan/portfolio/money'
 import { PRICE_SCALE, type Side, type Trip } from './types'
@@ -62,7 +63,7 @@ export function tickOf(line: SymbolData | undefined): JournalTick | null {
   return ltpU === null ? null : { ltpU, at: price.at, live: price.live }
 }
 
-const COUNT = new Intl.NumberFormat('en-IN')
+const COUNT = groupedNumber()
 
 /** A quantity or a count as the owner reads it: 1,300, 12,34,567 (review L1). */
 export const countText = (n: number): string => COUNT.format(n)
@@ -70,10 +71,10 @@ export const countText = (n: number): string => COUNT.format(n)
 /** A price in rupees as the owner reads it: 2 places, 4 for a currency tick that needs them. */
 export function priceText(u: number): string {
   const places = u % 100 === 0 ? 2 : 4
-  return new Intl.NumberFormat('en-IN', {
+  return formatNumber(u / PRICE_SCALE, {
     minimumFractionDigits: places,
     maximumFractionDigits: places,
-  }).format(u / PRICE_SCALE)
+  })
 }
 
 /** "5 min", "2 h 14 min", "3 d 4 h": how long a trade was or has been held. */

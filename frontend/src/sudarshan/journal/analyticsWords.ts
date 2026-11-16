@@ -3,7 +3,7 @@
  * why in words (never infinity, never a zero standing in for it); a figure with no meaning
  * yet says what to do (design 5.2, 6.2).
  */
-import { formatRupees } from '@/sudarshan/dashboard/format'
+import { formatCompact, formatRupees } from '@/sudarshan/dashboard/format'
 import { type Metrics, PAISE_PER_RUPEE, type RatioState } from './types'
 
 const STATE_WORDS: Record<Exclude<RatioState, 'ok'>, string> = {
@@ -26,25 +26,16 @@ export function tileRupees(paise: number, signed = true): string {
   return formatRupees(rupees, { decimals: Math.abs(rupees) >= 1000 ? 0 : 2, signed })
 }
 
-const ONE_PLACE = new Intl.NumberFormat('en-IN', { maximumFractionDigits: 1 })
-
-/** Under 10, one place ("1.2", "9.9"); from 10, whole ("12", "99"). */
-const short = (value: number): string =>
-  value < 9.95 ? ONE_PLACE.format(value) : String(Math.round(value))
-
 /**
  * A signed figure short enough for a calendar or heat-map cell on a phone: +812, −1.2k, +12k,
- * +3.4L (lakh), +1.2Cr. Two significant figures past a thousand, so a cell holds five characters
- * and never cuts one off (review M4); the cell's full figure is read out. Rupees, no symbol.
+ * +3.4L (lakh), +1.2Cr, or +340k and +12M when Display settings ask for international grouping
+ * (M20.3). Two significant figures past a thousand, so a cell holds five characters and never
+ * cuts one off (review M4); the cell's full figure is read out. Rupees, no symbol.
  */
 export function compactPaise(paise: number): string {
   const rupees = Math.abs(paise) / PAISE_PER_RUPEE
   if (Math.round(rupees) === 0) return '0'
-  const sign = paise < 0 ? '−' : '+'
-  if (rupees < 999.5) return `${sign}${Math.round(rupees)}`
-  if (rupees < 99_500) return `${sign}${short(rupees / 1000)}k`
-  if (rupees < 9_950_000) return `${sign}${short(rupees / 100_000)}L`
-  return `${sign}${short(rupees / 10_000_000)}Cr`
+  return `${paise < 0 ? '−' : '+'}${formatCompact(rupees)}`
 }
 
 /** "R known for 4 of 9" and the average R, or what to do to get one. */

@@ -14,6 +14,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 import { ACTION, OUTLINED } from '@/sudarshan/books/cards/parts'
+import { formatNumber } from '@/sudarshan/dashboard/format'
 import { BottomSheet } from '@/sudarshan/watchlist/BottomSheet'
 import {
   BOX,
@@ -73,7 +74,7 @@ const KEPT_KIND = 'A list alert keeps its kind. Set another alert to change it.'
 /** "Every symbol of Swing (24)". */
 export function everySymbol(name: string, count: number | null): string {
   const of = name.trim() || 'this list'
-  return `Every symbol of ${of}${count === null ? '' : ` (${new Intl.NumberFormat('en-IN').format(count)})`}`
+  return `Every symbol of ${of}${count === null ? '' : ` (${formatNumber(count)})`}`
 }
 
 function startForm(group: GroupRow | null): Form {

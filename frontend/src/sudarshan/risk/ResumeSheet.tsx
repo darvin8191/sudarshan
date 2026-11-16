@@ -4,6 +4,7 @@ import { useEffect, useId, useRef, useState } from 'react'
 import { type KillSwitchState, type PreviewCounts, riskApi, type SwitchAnswer } from '@/api/risk'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
+import { groupedNumber } from '@/sudarshan/dashboard/format'
 import { BottomSheet } from '@/sudarshan/watchlist/BottomSheet'
 import { showToast } from '@/utils/toast'
 import { noteKillSwitch } from './killSwitch'
@@ -11,7 +12,7 @@ import { PhraseInput } from './PhraseInput'
 import { clockOf, RISK_AUDIT_KEY, RISK_STATUS_KEY, surfaceOf } from './parts'
 import { PHRASE_HINT } from './phrase'
 
-const count = new Intl.NumberFormat('en-IN')
+const count = groupedNumber()
 
 function many(value: number, one: string, more: string): string {
   return `${count.format(value)} ${value === 1 ? one : more}`

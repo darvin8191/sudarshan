@@ -20,11 +20,20 @@ vi.mock('@/api/client', async () => {
 
 const feed = vi.hoisted(() => ({ state: null as unknown }))
 vi.mock('./useLiveRows', () => ({ useLiveRows: () => feed.state }))
+const toast = vi.hoisted(() => ({
+  info: vi.fn(),
+  error: vi.fn(),
+  success: vi.fn(),
+  warning: vi.fn(),
+}))
+vi.mock('@/utils/toast', () => ({ showToast: toast }))
 
+import { useState } from 'react'
 import { createQueryClient } from '@/app/providers'
 import { LiveList } from './LiveList'
 import { OPEN_GUARD } from './openGuard'
 import { rowView } from './rows'
+import { NOTE_NOT_SAVED, NOTE_SAVED } from './SymbolMarks'
 import type { LiveRow } from './useLiveRows'
 import { NOTE_LONG, PRIVATE_WORDS } from './v2/marks'
 import type { FlagName, Row, SymbolInfo, View } from './v2/types'
@@ -130,6 +139,32 @@ function Page({
   )
 }
 
+/** The page with its sheet open on RELIANCE, closed by the sheet's own Close (GA10.8). */
+function ClosablePage() {
+  const data = useListView('list:1').data
+  const [open, setOpen] = useState<number | null>(1)
+  return (
+    <LiveList
+      items={liveRows().map((row) => row.item)}
+      apiKey={null}
+      isOpen={() => true}
+      loading={false}
+      editing={false}
+      listName="Mine"
+      openItemId={open}
+      panel={{ 'aria-label': 'Watchlist' }}
+      onOpen={(id) => setOpen(id)}
+      onMove={() => {}}
+      onRemove={() => {}}
+      onCloseSheet={() => setOpen(null)}
+      onOrder={() => {}}
+      onAlert={() => {}}
+      view={data}
+      flagNames={NAMES}
+    />
+  )
+}
+
 async function mount(props: Parameters<typeof Page>[0] = {}) {
   const out = render(
     <QueryClientProvider client={createQueryClient()}>
@@ -145,6 +180,7 @@ async function mount(props: Parameters<typeof Page>[0] = {}) {
 
 beforeEach(() => {
   b().reset()
+  vi.clearAllMocks()
   OPEN_GUARD.ms = 0
   server.info = info()
   server.rows = [rowOf('RELIANCE', 2, true), rowOf('TCS', null, false), rowOf('INFY', 5, false)]
@@ -354,5 +390,90 @@ describe('the symbol sheet', () => {
     expect(expired).toHaveTextContent('Expired')
     expect(expired.querySelector('svg')).not.toBeNull()
     expect(screen.getByText(PRIVATE_WORDS)).toBeInTheDocument()
+  })
+})
+
+// SUDARSHAN M8.6 (GA10.8): the owner's default is to save a note typed in the sheet when the
+// sheet closes, with one quiet line; an empty or unchanged note writes nothing.
+describe('a note typed and not saved when the sheet closes', () => {
+  async function openSheet() {
+    render(
+      <QueryClientProvider client={createQueryClient()}>
+        <MemoryRouter>
+          <ClosablePage />
+        </MemoryRouter>
+      </QueryClientProvider>
+    )
+    await waitFor(() => expect(b().count('view')).toBeGreaterThan(0))
+    return screen.findByRole('textbox', { name: 'Note' })
+  }
+
+  async function closeSheet() {
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+    await waitFor(() => expect(screen.queryByRole('textbox', { name: 'Note' })).toBeNull())
+    await act(async () => {})
+  }
+
+  it('is saved, once, on the version it was typed on, and says so in one quiet line', async () => {
+    const field = await openSheet()
+    fireEvent.change(field, { target: { value: '  Buy the retest above 1,420  ' } })
+    await closeSheet()
+    await waitFor(() => expect(b().count('mark')).toBe(1))
+    expect(b().calls.find((c) => c.op === 'mark')?.body).toEqual({
+      k: 'NSE:RELIANCE',
+      note: 'Buy the retest above 1,420',
+      version: 3,
+    })
+    await waitFor(() =>
+      expect(toast.info).toHaveBeenCalledWith(NOTE_SAVED, undefined, { duration: 2_000 })
+    )
+    expect(toast.error).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['unchanged', 'Wait for the retest'],
+    ['unchanged but for spaces', '  Wait for the retest '],
+    ['emptied', ''],
+    ['only spaces', '   '],
+  ])('writes nothing when %s', async (_how, value) => {
+    const field = await openSheet()
+    fireEvent.change(field, { target: { value } })
+    await closeSheet()
+    expect(b().count('mark')).toBe(0)
+    expect(toast.info).not.toHaveBeenCalled()
+    expect(toast.error).not.toHaveBeenCalled()
+  })
+
+  it('sends nothing over 500 characters, and says why and what to do', async () => {
+    const field = await openSheet()
+    fireEvent.change(field, { target: { value: 'z'.repeat(501) } })
+    await closeSheet()
+    expect(b().count('mark')).toBe(0)
+    expect(toast.error).toHaveBeenCalledTimes(1)
+    expect(toast.error.mock.calls[0][0]).toMatch(new RegExp(`^${NOTE_NOT_SAVED} It is over 500`))
+  })
+
+  it("says the server's refusal in its words, never a code", async () => {
+    b().on('mark', () => ({ status: 'error', code: 'conflict', message: CONFLICT }))
+    const field = await openSheet()
+    fireEvent.change(field, { target: { value: 'Exit below 1,380' } })
+    await closeSheet()
+    await waitFor(() => expect(toast.error).toHaveBeenCalledTimes(1))
+    const said = toast.error.mock.calls[0][0] as string
+    expect(said).toBe(`${NOTE_NOT_SAVED} ${CONFLICT} Open the symbol to type it again.`)
+    expect(said).not.toMatch(/40\d|conflict/)
+    expect(toast.info).not.toHaveBeenCalled()
+  })
+
+  it('is not sent twice when Save was pressed before closing', async () => {
+    const user = userEvent.setup()
+    const field = await openSheet()
+    fireEvent.change(field, { target: { value: 'Trail at the 20 EMA' } })
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(b().count('mark')).toBe(1))
+    await screen.findByText('Saved')
+    await closeSheet()
+    expect(b().count('mark')).toBe(1)
+    expect(toast.info).not.toHaveBeenCalled()
   })
 })

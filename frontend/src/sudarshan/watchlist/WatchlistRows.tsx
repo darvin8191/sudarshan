@@ -250,7 +250,7 @@ const PriceRow = memo(function PriceRow({
           type="button"
           aria-haspopup="dialog"
           onClick={() => onOpen(itemId)}
-          className="flex min-h-14 w-full items-center gap-3 px-4 py-2 text-left outline-none active:bg-accent focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+          className="flex min-h-[var(--sd-row-min)] w-full items-center gap-3 px-4 py-[var(--sd-row-pad-y)] text-left outline-none active:bg-accent focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
         >
           {body}
         </button>
@@ -261,7 +261,7 @@ const PriceRow = memo(function PriceRow({
           aria-haspopup="dialog"
           data-outside={outside}
           onClick={() => onOpen(itemId)}
-          className="flex min-h-14 w-full flex-col justify-center gap-1 px-4 py-2 text-left outline-none active:bg-accent focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+          className="flex min-h-[var(--sd-row-min)] w-full flex-col justify-center gap-1 px-4 py-[var(--sd-row-pad-y)] text-left outline-none active:bg-accent focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
         >
           <span className="flex w-full items-center gap-3">{body}</span>
           <span className="flex items-start gap-1.5 text-xs font-medium text-[color:var(--stale)]">
@@ -410,7 +410,10 @@ export function WatchlistRows({
     return (
       <ul aria-label="Loading" className="divide-y divide-[color:var(--divider)]">
         {[0, 1, 2, 3].map((index) => (
-          <li key={index} className="flex min-h-14 items-center justify-between gap-3 px-4">
+          <li
+            key={index}
+            className="flex min-h-[var(--sd-row-min)] items-center justify-between gap-3 px-4"
+          >
             <Skeleton className="h-4 w-32" />
             <Skeleton className="h-4 w-20" />
           </li>

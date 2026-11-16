@@ -101,6 +101,7 @@ def test_positions_keep_their_sign_and_the_multiplier(fake, token_file):
     reader, _ = make(fake, token_file)
     row = run(once(reader, ["positions"]))["positions"]["data"][0]
     assert row["qty_u"] == -65_000_000 and row["day_sell_qty_u"] == 65_000_000
+    assert row["side"] == "short"  # the direction a member is shown when the quantity is not
     assert row["avg_price_u"] == 240_002_500 and row["multiplier"] == 1
     assert row["pnl_paise"] == 66_625 and row["value_paise"] == -155_935_000
     assert row["realised_paise"] == 0 and row["unrealised_paise"] == 66_625
@@ -418,3 +419,13 @@ def test_a_master_contract_that_fails_leaves_the_figures_alone(fake, token_file)
 def test_the_reader_wording_has_no_codes_or_protocol_terms():
     for words in up.WORDS.values():
         assert not any(w in words for w in ("401", "429", "423", "HTTP", "5xx", "token file"))
+
+
+def test_a_positions_direction_is_its_quantitys_sign():
+    """M2.8 (GA10.7): the word a family member is shown when the quantity is hidden."""
+    from sudarshan.portfolio.upstox import parse_position, side_of
+
+    assert [side_of(q) for q in (65_000_000, -1, 0)] == ["long", "short", "closed"]
+    row = {"instrument_token": "NSE_FO|1", "quantity": 0, "last_price": "101.5"}
+    assert parse_position(row)["side"] == "closed"
+    assert parse_position({**row, "quantity": 30})["side"] == "long"

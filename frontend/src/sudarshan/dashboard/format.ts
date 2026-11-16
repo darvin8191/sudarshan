@@ -1,23 +1,102 @@
+import { numberGrouping, numberLocale } from './numberStyle'
+
 /**
- * Figures as a trader reads them: Indian grouping (1,23,456.79), a plus on a
+ * Figures as a trader reads them: Indian grouping (1,23,456.79) unless Display settings ask for
+ * international grouping (123,456.79; M20.3, numberStyle.ts), a plus on a
  * gain where a sign is asked for, and a true minus (U+2212) on a loss, the same
  * width as the plus so a column of signed figures stays aligned. Zero is
  * neither: whatever rounds to 0.00 shows no sign and no direction.
  */
 const MINUS = '−'
 
-const formatters = new Map<number, Intl.NumberFormat>()
+/** One `Intl.NumberFormat` per locale and shape, however many screens ask for it. */
+const formatters = new Map<string, Intl.NumberFormat>()
 
-function grouping(decimals: number): Intl.NumberFormat {
-  let formatter = formatters.get(decimals)
+function formatterFor(locale: string, options: Intl.NumberFormatOptions): Intl.NumberFormat {
+  const key = `${locale}|${JSON.stringify(options)}`
+  let formatter = formatters.get(key)
   if (!formatter) {
-    formatter = new Intl.NumberFormat('en-IN', {
-      minimumFractionDigits: decimals,
-      maximumFractionDigits: decimals,
-    })
-    formatters.set(decimals, formatter)
+    formatter = new Intl.NumberFormat(locale, options)
+    formatters.set(key, formatter)
   }
   return formatter
+}
+
+/** Something that formats a number: what a screen needs of an `Intl.NumberFormat`. */
+export interface NumberText {
+  format(value: number): string
+}
+
+/**
+ * A number format in the grouping Display settings chose (M20.3), for a figure this file has no
+ * helper for. It asks for the grouping each time it formats, so one kept in a module constant
+ * still follows the switch; on the tick path that costs one comparison.
+ */
+export function groupedNumber(options: Intl.NumberFormatOptions = {}): NumberText {
+  let locale = ''
+  let formatter: Intl.NumberFormat | null = null
+  return {
+    format(value) {
+      const wanted = numberLocale()
+      if (formatter === null || wanted !== locale) {
+        formatter = formatterFor(wanted, options)
+        locale = wanted
+      }
+      return formatter.format(value)
+    },
+  }
+}
+
+/** One figure in the grouping Display settings chose, for a line drawn now and then. */
+export function formatNumber(value: number, options: Intl.NumberFormatOptions = {}): string {
+  return formatterFor(numberLocale(), options).format(value)
+}
+
+const byDecimals = new Map<number, NumberText>()
+
+function grouping(decimals: number): NumberText {
+  let formatter = byDecimals.get(decimals)
+  if (!formatter) {
+    formatter = groupedNumber({ minimumFractionDigits: decimals, maximumFractionDigits: decimals })
+    byDecimals.set(decimals, formatter)
+  }
+  return formatter
+}
+
+const ONE_PLACE = groupedNumber({ maximumFractionDigits: 1 })
+
+/** Under 10, one place ("1.2", "9.9"); from 10, whole ("12", "99"). */
+const short = (value: number): string =>
+  value < 9.95 ? ONE_PLACE.format(value) : String(Math.round(value))
+
+const COMPACT_STEPS = {
+  indian: [
+    [1e3, 'k'],
+    [1e5, 'L'],
+    [1e7, 'Cr'],
+  ],
+  international: [
+    [1e3, 'k'],
+    [1e6, 'M'],
+    [1e9, 'B'],
+  ],
+} as const
+
+/**
+ * The size of a figure, without a sign, in at most four characters below a crore: 812, 1.2k, 12k, then 3.4L
+ * (lakh) and 1.2Cr in Indian grouping, or 340k and 12M in international grouping. Two
+ * significant figures past a thousand; a step whose figure would round to a thousand moves up.
+ */
+export function formatCompact(value: number): string {
+  const size = Math.abs(value)
+  if (size < 999.5) return String(Math.round(size))
+  const steps = COMPACT_STEPS[numberGrouping()]
+  for (let i = 0; i < steps.length; i += 1) {
+    const [unit, letter] = steps[i]
+    const next = steps[i + 1]
+    if (!next || size < next[0] * 0.995) return `${short(size / unit)}${letter}`
+  }
+  return String(Math.round(size))
 }
 
 /** A figure from the API, which sends most of them as strings. Blank or not a number: null. */

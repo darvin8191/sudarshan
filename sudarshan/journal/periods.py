@@ -3,7 +3,8 @@ announced (JB9, M15.3 to M15.5; design 3.5 and 3.6, cross-design Y8, Y22, Y32, Y
 
 * **Words** are ``core/words.py``'s (``weekly``, ``monthly``, ``fy``), every figure from ``core/``:
   the metrics of the period's closed live trips, the equity curve and its deepest drawdown on the
-  trading capital, the week against NIFTY 50 and beta through the portfolio. One line says what
+  trading capital, the week against NIFTY 50 (a close the portfolio lacks from the price feed's
+  ``cp`` when the tick names its day) and beta through the portfolio. One line says what
   the figures leave out when the period has any (review B1): positions the journal did not see
   opened with a fill in the period, and contracts that ended at expiry in it.
 * **The file** is the renderer's (JB8) and one per report, as the archive keeps one: the week's is
@@ -40,9 +41,12 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Any
 
+import httpx
+
 from . import serialize, taxpack
 from .core import benchmark, equity, kinds, metrics, words
 from .core.money import ist_clock, ist_day, to_date, to_day
+from .feedlink import price_u
 from .portfolio import PortfolioUnavailable, link_for
 from .render import doc as D
 from .render import tables
@@ -265,25 +269,84 @@ def leaves_out(rows: list[dict[str, Any]], aside: Mapping[str, int]) -> tuple[st
     return tuple(lines)
 
 
-async def _index_week(service: Any, plan: Any, span: Span, net: int,
-                      capital: int | None) -> dict[str, Any]:  # fmt: skip
-    """The account's week and NIFTY 50's: the last close of the week over the close before it."""
+#: NIFTY 50 as the price feed keys it (sudarshan/feed), for the ``cp`` fallback (GA10.5).
+NIFTY50_KEY = "NSE_INDEX|Nifty 50"
+FEED_TIMEOUT_S = 3.0
+
+
+def week_close_days(plan: Any, span: Span, now: int) -> tuple[int, int] | None:
+    """The two days the week against NIFTY 50 is measured by: the week's last trading day whose
+    session has closed by ``now``, and the trading day before the week began. A Friday holiday
+    makes Thursday the last; a holiday on Monday leaves the Friday before it. None while the
+    week has no closed trading day, or the calendar has none before it."""
     before = plan.previous_trading_days(to_date(span.start), 1)
-    last = close = prev = None
-    if before:
+    if not before:
+        return None
+    first, day = to_date(span.start), to_date(span.end)
+    while day >= first:
+        close = plan.last_close(day) if plan.trading(day) else None
+        if close is not None and close <= now:
+            return to_day(day), to_day(before[0])
+        day -= timedelta(days=1)
+    return None
+
+
+def cp_close(plan: Any, tick: Any) -> tuple[int, int] | None:
+    """(day, close_u) a price feed tick's ``cp`` names: the close of the trading day before the
+    tick's own (its ``ltt``, by India's clock), as Upstox sends it. So on the Sunday after a
+    week whose last tick was Friday's it is Thursday's close, which measures neither end of the
+    week; from the next session's first tick on it is the week's close. None for a tick with no
+    time or no price."""
+    if not isinstance(tick, Mapping):
+        return None
+    ltt, value = tick.get("ltt"), price_u(tick.get("cp"))
+    if value is None or isinstance(ltt, bool) or not isinstance(ltt, int) or ltt <= 0:
+        return None
+    named = plan.previous_trading_days(to_date(ist_day(ltt)), 1)
+    return (to_day(named[0]), value) if named else None
+
+
+async def _feed_index_tick(service: Any) -> Mapping[str, Any] | None:
+    """NIFTY 50's last tick in the price feed's snapshot (kept across restarts and after hours),
+    or None when the feed does not answer: one read on loopback, only when the portfolio's
+    closes lack a day the week needs."""
+    url = f"{service.settings.feed_url.rstrip('/')}/snapshot"
+    try:
+        async with httpx.AsyncClient(timeout=FEED_TIMEOUT_S, trust_env=False) as client:
+            answer = await client.get(url, params={"keys": NIFTY50_KEY}, follow_redirects=False)
+        if answer.status_code != 200:
+            return None
+        tick = (answer.json().get("ticks") or {}).get(NIFTY50_KEY)
+    except (httpx.HTTPError, ValueError, AttributeError):
+        return None
+    return tick if isinstance(tick, Mapping) else None
+
+
+async def _index_week(service: Any, plan: Any, span: Span, net: int,
+                      capital: int | None, now: int) -> dict[str, Any]:  # fmt: skip
+    """The account's week and NIFTY 50's: the close of the week's last trading day over the close
+    of the trading day before the week (``week_close_days``). The closes are the portfolio's; a
+    day it lacks is taken from the price feed's ``cp`` when the tick names that day (GA10.5).
+    Otherwise the index is left out, never measured to another day."""
+    days = week_close_days(plan, span, now)
+    close = prev = None
+    if days is not None:
+        last, before = days
         try:
-            answer = await link_for(service).benchmark_closes(
-                "nifty50", to_day(before[0]), span.end
-            )
+            answer = await link_for(service).benchmark_closes("nifty50", before, span.end)
         except PortfolioUnavailable:
             answer = {}
+        got = {}
         if answer.get("state") == "ok":
             got = {int(c["day"]): int(c["close_u"]) for c in answer.get("closes") or []
                    if isinstance(c, Mapping) and isinstance(c.get("close_u"), int)}  # fmt: skip
-            inside = [d for d in got if span.start <= d <= span.end]
-            if inside:
-                last = max(inside)
-                close, prev = got[last], got.get(to_day(before[0]))
+        close, prev = got.get(last), got.get(before)
+        if close is None or prev is None:
+            named = cp_close(plan, await _feed_index_tick(service))
+            if named is not None and named[0] == last and close is None:
+                close = named[1]
+            elif named is not None and named[0] == before and prev is None:
+                prev = named[1]
     return benchmark.week_vs_index(net, capital, close, prev)
 
 
@@ -400,7 +463,9 @@ async def build_period(service: Any, kind: str, span: Span, now: int, announce: 
     extra["drawdown"] = curve["drawdown"]
     extra["left_out"] = aside
     if kind == "weekly":
-        extra["benchmark"] = await _index_week(service, plan, span, block["net_paise"], capital)
+        extra["benchmark"] = await _index_week(
+            service, plan, span, block["net_paise"], capital, now
+        )
         beta_rows = [for_core(t, tags, books, None) for t in beta_trips]
         extra["beta"] = await beta_of(service, plan, beta_rows, span.end, capital, first)
         text = words.weekly(span.start, span.end, len(days), block, **extra)

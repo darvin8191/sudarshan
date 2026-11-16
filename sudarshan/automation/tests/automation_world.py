@@ -83,6 +83,7 @@ class FakeDesk:
         self.phrases_asked: list[tuple[str, str]] = []
         self.positions: dict[tuple, int] = {}
         self.book_reads: list[tuple] = []  # every read of what the account holds (M2)
+        self.held_book_reads: list[tuple] = []  # every read of a card's book row (GA10.4)
         self.books_unreadable = False
         self.placed: list[dict[str, Any]] = []
         self.script: list[Any] = []  # answers to give next, before the book is asked
@@ -206,6 +207,21 @@ class FakeDesk:
         if self.books_unreadable:
             return None
         return self.positions.get((analyze, exchange, symbol, product), 0)
+
+    def held_book(self, mode, exchange, symbol, product) -> dict[str, Any] | None:
+        """The card's book row (GA10.4): what ``positions`` holds, at an average of 25,000."""
+        self.held_book_reads.append((mode, exchange, symbol, product))
+        if self.books_unreadable:
+            return None
+        quantity = self.positions.get((mode == "sandbox", exchange, symbol, product), 0)
+        return {
+            "quantity": quantity,
+            "average_price": 25000.0 if quantity else 0.0,
+            "ltp": 25010.0 if quantity else None,
+            "pnl": 10.0 * quantity if quantity else None,
+            "today_realized_pnl": 0.0,
+            "priced_ms": int(self.clock * 1000),
+        }
 
     def position(self, symbol: str, analyze: bool = True, product: str = "MIS") -> int:
         exchange = "NFO" if symbol.endswith("FUT") or symbol[-3:-2].isdigit() else "NSE"

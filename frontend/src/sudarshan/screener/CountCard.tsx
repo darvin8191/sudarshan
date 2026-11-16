@@ -1,6 +1,7 @@
 import { CircleMinus, CirclePlus } from 'lucide-react'
 import { memo } from 'react'
 import { istTime } from '@/sudarshan/books/time'
+import { groupedNumber } from '@/sudarshan/dashboard/format'
 import type { LineView } from './cardLine'
 import { cardKey } from './dashboardCache'
 import { StatusChip } from './marks'
@@ -33,7 +34,7 @@ function same(a: Props, b: Props): boolean {
   )
 }
 
-const NUMBER = new Intl.NumberFormat('en-IN')
+const NUMBER = groupedNumber()
 
 type Series = NonNullable<Card['counts']>['series']
 

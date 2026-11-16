@@ -8,6 +8,7 @@
  * `valid_until`, after a reconnect, on returning to the page and on the first tick after "waiting".
  * It never asks on a clock that repeats.
  */
+import { groupedNumber } from '@/sudarshan/dashboard/format'
 import { rollOf } from './strikePicker'
 import { CLOCK } from './ViewSheet'
 import type {
@@ -41,8 +42,11 @@ export const RETRY_MS = [2_000, 5_000, 15_000] as const
 /** The server takes at most this many rows in one `resolve`. */
 export const MAX_ROWS = 100
 
-const NUMBER = new Intl.NumberFormat('en-IN', { maximumFractionDigits: 2 })
-/** 25900 as "25,900" and 25912.35 as "25,912.35": the server's own spelling (`numfmt.num`). */
+const NUMBER = groupedNumber({ maximumFractionDigits: 2 })
+/**
+ * 25900 as "25,900" and 25912.35 as "25,912.35": the server's own spelling (`numfmt.num`), in the
+ * grouping Display settings chose (M20.3).
+ */
 export const num = (value: number): string => NUMBER.format(value)
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']

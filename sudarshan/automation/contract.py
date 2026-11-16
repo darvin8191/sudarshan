@@ -111,6 +111,22 @@ STRATEGY = {
     "sandbox_run": "SandboxRun",
     # trading days gone with no alert, for an Active strategy; 0 when it is not known
     "quiet_days": "number",
+    # the held contract's row in the book of the strategy's own mode (the sandbox's for a
+    # Sandbox strategy, Upstox's for a Live one), read with the page; the card's P&L moves on
+    # from it with the ticks. Null when nothing is held or the book could not be read.
+    "held_book": "HeldBook | null",
+}
+#: A book's row for the held contract, as that book reports it (GA10.4): the signed quantity in
+#: the strategy's product, its average price, the book's own last price, the day's P&L at that
+#: price (realised and not; null when the row carries no price), the day's booked part, and
+#: when those figures were priced.
+HELD_BOOK = {
+    "quantity": "number",
+    "average_price": "number",
+    "ltp": "number | null",
+    "pnl": "number | null",
+    "today_realized_pnl": "number",
+    "priced_ms": "number",
 }
 ALERT = {
     "id": "number",

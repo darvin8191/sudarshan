@@ -1,6 +1,6 @@
 // How an entry's figures read on the phone: paise, qty_u and price_u to rupees and units, in
 // Indian grouping, with a true minus wherever a figure is negative (dashboard/format.ts).
-import { formatRupees } from '@/sudarshan/dashboard/format'
+import { formatNumber, formatRupees } from '@/sudarshan/dashboard/format'
 import { PAISE_PER_RUPEE, PRICE_SCALE, QTY_SCALE } from '../types'
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
@@ -31,7 +31,7 @@ export function rupeesText(paise: number): string {
 
 function plain(value: number, min: number, max: number): string {
   const sign = value < 0 ? '−' : ''
-  return `${sign}${new Intl.NumberFormat('en-IN', { minimumFractionDigits: min, maximumFractionDigits: max }).format(Math.abs(value))}`
+  return `${sign}${formatNumber(Math.abs(value), { minimumFractionDigits: min, maximumFractionDigits: max })}`
 }
 
 /** Units: whole numbers as they are, a fund's or a metal's decimals kept (up to six). */
