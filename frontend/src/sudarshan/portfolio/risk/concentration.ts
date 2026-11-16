@@ -92,6 +92,21 @@ export function overWords(
   return `${what} is ${said(weight)}% of what is held here, above your ${said(limit)}% limit.`
 }
 
+/**
+ * A bar's figure, to one decimal, that never reads across the limit (v0.14.0 verification L6):
+ * a share above it never shows the limit or less ("15.0040" against 15 shows 15.1), and one at or
+ * below it never shows more ("12.35" against 12.36 shows 12.3). Others are half up as ever.
+ */
+export function barFigure(weightPct: string, limitPct: string): number {
+  const weight = scaled(weightPct.replace('-', ''))
+  const limit = scaled(limitPct)
+  const tenth = SCALE / 10n
+  let tenths = roundDiv(weight, tenth)
+  if (weight > limit && tenths * tenth <= limit) tenths = limit / tenth + 1n
+  if (weight <= limit && tenths * tenth > limit) tenths = limit / tenth
+  return Number(tenths) / 10
+}
+
 export const untaggedWords = (weightPct: string): string =>
   `Untagged: ${two(weightPct)}%; tag them to check sectors.`
 
