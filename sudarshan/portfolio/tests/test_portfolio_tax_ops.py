@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 from test_portfolio_tax_adapter import ISIN, NOW, U, answered, cache
 
-from sudarshan.portfolio import config, reports
+from sudarshan.portfolio import config, lotcheck, reports
 from sudarshan.portfolio import store as store_module
 from sudarshan.portfolio.core import kinds
 from sudarshan.portfolio.errors import ApiError
@@ -116,6 +116,9 @@ def test_the_paper_checks_its_lots_against_the_holdings_and_marks_the_shares_sal
     pack = call(ctx, "tax_get")
     assert pack["lot_check"]["state"] == "waiting"  # no closing record to compare with yet
     assert marks(pack) == [False]
+    # Said among the notes as it is: old code added "Sales of these shares are marked to
+    # check." where no share was named and nothing was marked.
+    assert pack["notes"][0] == lotcheck.WAITING_RECORD
     call(ctx, "tax_input_set", kind="opening_lot", request_id="lot-1",
          row=lot(ctx, qty_u=25 * U, cost_paise=3_750_000))  # fmt: skip
     holding(ctx, 20261112, 40)
@@ -262,6 +265,54 @@ def test_with_the_calendar_switched_off_the_check_offers_no_tap(ctx):
     ctx.settings = dataclasses.replace(ctx.settings, insights=False)
     (row,) = call(ctx, "tax_get")["lot_check"]["rows"]
     assert "To confirm" not in row["words"] and row["fix"] is None
+
+
+def test_the_check_reads_nothing_the_paper_has_read_and_a_fault_in_it_leaves_the_paper(
+    ctx, monkeypatch
+):
+    """v0.14.0 verification L7. The check runs on every open of the Tax view, and used to read
+    the running year's history and every share's name a second time (0.67 s of 20,000 trades
+    and 250 shares, each share's replay sifting the whole history); and a fault inside it took
+    the whole Tax view down. It now takes the inputs and names the paper read (each year read
+    once, the names once), sorts each share out once, and a fault in it is a sentence."""
+    from sudarshan.portfolio import corpactions, lotcheck, tax_adapter
+
+    read = {"inputs": 0, "names": 0}
+    inputs, names = tax_adapter.inputs, corpactions.share_names
+
+    def counted_inputs(*args, **kwargs):
+        read["inputs"] += 1
+        return inputs(*args, **kwargs)
+
+    def counted_names(*args, **kwargs):
+        read["names"] += 1
+        return names(*args, **kwargs)
+
+    call(ctx, "tax_input_set", kind="opening_lot", request_id="lot-1",
+         row=lot(ctx, qty_u=25 * U, cost_paise=3_750_000))  # fmt: skip
+    holding(ctx, 20261112, 40)
+    monkeypatch.setattr(tax_adapter, "inputs", counted_inputs)
+    monkeypatch.setattr(corpactions, "share_names", counted_names)
+    pack = call(ctx, "tax_get")
+    assert len(pack["lot_check"]["rows"]) == 1
+    # One read of each year; the names once for the paper and once for its dividends block.
+    # The check reads neither again (old code: 4 and 3).
+    assert read == {"inputs": kinds.REPORT_YEARS, "names": 2}
+
+    def broken(*args, **kwargs):
+        raise RuntimeError("a fault inside the check")
+
+    monkeypatch.setattr(lotcheck, "_actions", broken)
+    pack = call(ctx, "tax_get")
+    assert pack["lot_check"] == {"state": "waiting", "account_id": None, "day": None,
+                                 "words": lotcheck.UNCHECKED, "rows": [],
+                                 "unrecorded_count": 0}  # fmt: skip
+    assert pack["notes"][0] == lotcheck.UNCHECKED and marks(pack) == [False]
+    assert lotcheck.UNCHECKED == (
+        "SUDARSHAN could not check the tax lots against your Upstox holdings this time. The rest "
+        "of this page is not affected, and the check runs again when you open it next."
+    )
+    assert "To check" in call(ctx, "tax_csv", schedule="capital_gains")["text"]  # the CSV too
 
 
 def test_a_bonus_still_to_come_is_said_as_coming_and_the_notes_name_the_share(ctx):

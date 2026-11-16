@@ -31,6 +31,7 @@ share's sales "to check".
 
 from __future__ import annotations
 
+import logging
 from dataclasses import replace
 from typing import Any
 
@@ -46,6 +47,8 @@ from .core.words import date as day_words
 from .core.words import quantity
 from .store import Tx
 
+log = logging.getLogger("sudarshan.portfolio.lotcheck")
+
 #: The record compared is at least this many days older than the last read of the trades.
 SETTLE_DAYS = 2
 WAITING_TRADES = (
@@ -56,29 +59,52 @@ WAITING_RECORD = (
     "The check of the tax lots against your Upstox holdings waits for a closing record of the "
     "Upstox account from two days or more before its trades were last read."
 )
+#: A fault inside the check never takes the paper or the Calendar down with it (v0.14.0
+#: verification L7); the journal has the detail.
+UNCHECKED = (
+    "SUDARSHAN could not check the tax lots against your Upstox holdings this time. The rest of "
+    "this page is not affected, and the check runs again when you open it next."
+)
 
 
 class TaxLots:
     """The Upstox account's tax lots, replayed up to any day. Built once per transaction: the
-    inputs are the working paper's own for the running year (every complete year of history)."""
+    inputs are the working paper's own for the running year (every complete year of history),
+    and the paper passes the ones it already read (``given``) rather than have them read twice.
+    Each share's trades, purchases and actions are sorted out once, so a share is replayed from
+    its own alone: the check costs one pass over the history, not one pass per share (v0.14.0
+    verification L7)."""
 
-    def __init__(self, tx: Tx, today: int, now: int):
+    def __init__(self, tx: Tx, today: int, now: int, given: Any = None):
         upstox = next((a for a in tx.rows("account") if a["kind"] == "upstox"), None)
         self.account = upstox["id"] if upstox else None
         self.given = self.read_at = None
         #: The first year of share trades the lots are replayed from, and the earlier years
         #: Upstox keeps that are not read in full (a purchase in them is missing until they are).
         self.first_year, self.unread = financial_year(today), []
+        self._trades: dict[str, list] = {}
+        self._opening: dict[str, list] = {}
+        self._actions: dict[str, list] = {}
         if upstox is None or (upstox.get("tax_mode") or "reports") != "reports":
             return
-        fy = financial_year(today)
-        given = tax_adapter.inputs(tx, upstox["member_id"], fy, today, now)
+        fy, mine = financial_year(today), upstox["id"]
+        if given is None or (given.fy, given.taxpayer) != (fy, upstox["member_id"]):
+            given = tax_adapter.inputs(tx, upstox["member_id"], fy, today, now)
         shares = [s for s in given.sources if (s["kind"], s["segment"]) == ("trades", "EQ")]
         if shares and shares[0]["state"] == "ok":
             self.given, self.read_at = given, shares[0]["read_at"]
             self.first_year = (tax_adapter.read_years(tx, fy) or [fy])[0]
             self.unread = [year for year in range(fy - REPORT_YEARS + 1, self.first_year)
                            if not tax_adapter.read_years(tx, year)]  # fmt: skip
+            for trade in given.trades:
+                if trade.account == mine:
+                    self._trades.setdefault(trade.instrument, []).append(trade)
+            for lot in given.opening:
+                if lot.account == mine:
+                    self._opening.setdefault(lot.instrument, []).append(lot)
+            for action in given.actions:
+                if action.account in (None, mine):
+                    self._actions.setdefault(action.instrument, []).append(action)
 
     @property
     def ready(self) -> bool:
@@ -106,12 +132,12 @@ class TaxLots:
         given, mine = self.given, self.account
         if given is None:
             return None
+        if actions is None:
+            actions = self._actions.get(isin, ())
         book = tax_lots.replay(
-            [t for t in given.trades
-             if t.instrument == isin and t.account == mine and t.day <= up_to],
-            [lot for lot in given.opening
-             if lot.instrument == isin and lot.account == mine and lot.acquired_day <= up_to],
-            [a for a in (given.actions if actions is None else actions)
+            [t for t in self._trades.get(isin, ()) if t.day <= up_to],
+            [lot for lot in self._opening.get(isin, ()) if lot.acquired_day <= up_to],
+            [a for a in actions
              if a.instrument == isin and a.account in (None, mine) and a.ex_day <= up_to],
             given.all_delivery,
             given.aliases,
@@ -278,7 +304,23 @@ def _row(isin: str, name: str | None, held: int, lots: int, purchase: str, appli
 
 
 def check(tx: Tx, today: int, now: int, lots: TaxLots | None = None, *, insights: bool,
-          taxpayer: int | None = None) -> dict[str, Any]:  # fmt: skip
+          taxpayer: int | None = None, given: Any = None,
+          names: dict[str, str] | None = None) -> dict[str, Any]:  # fmt: skip
+    """``LotCheck`` (types.ts): the shares whose tax lots and Upstox holdings differ. ``given``
+    and ``names`` are the running year's inputs and the share names the paper already read, if
+    it did. A fault inside it is logged and answered as ``waiting`` with ``UNCHECKED``: never
+    the whole page down."""
+    try:
+        return _check(tx, today, now, lots, insights=insights, taxpayer=taxpayer, given=given,
+                      names=names)  # fmt: skip
+    except Exception:
+        log.exception("the tax lots could not be checked against the Upstox holdings")
+        return {"state": "waiting", "account_id": None, "day": None, "words": UNCHECKED,
+                "rows": [], "unrecorded_count": 0}  # fmt: skip
+
+
+def _check(tx: Tx, today: int, now: int, lots: TaxLots | None, *, insights: bool,
+           taxpayer: int | None, given: Any, names: dict | None) -> dict[str, Any]:  # fmt: skip
     """``LotCheck`` (types.ts): the shares whose tax lots and Upstox holdings differ.
 
     ``state`` is ``ok`` (compared; ``rows`` may be empty), ``waiting`` (it cannot compare yet,
@@ -294,7 +336,7 @@ def check(tx: Tx, today: int, now: int, lots: TaxLots | None = None, *, insights
     upstox = next((a for a in tx.rows("account") if a["kind"] == "upstox"), None)
     if taxpayer is not None and (upstox is None or upstox["member_id"] != taxpayer):
         return out
-    lots = lots or TaxLots(tx, today, now)
+    lots = lots or TaxLots(tx, today, now, given)
     out["account_id"] = lots.account
     if lots.account is None:
         return out
@@ -307,7 +349,7 @@ def check(tx: Tx, today: int, now: int, lots: TaxLots | None = None, *, insights
     day = days[-1]
     held = _record(tx, day)
     applied, pending, left, recent, twice = _actions(tx, day)
-    names = corpactions.share_names(tx)
+    names = corpactions.share_names(tx) if names is None else names
     purchase = _purchase(lots)
     skip = recent | lots.traded_on(day)
     rows, unrecorded = [], 0
