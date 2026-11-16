@@ -115,6 +115,8 @@ export const NEVER_HIDDEN: readonly string[] = [
   'last_price_u',
   'close_price_u',
   'multiplier',
+  // SUDARSHAN M2.8 (GA10.7): a position's direction, which the portfolio's rows carry.
+  'side',
 ]
 
 /** The rows of a book answer that are rows (a malformed entry is left out, not shown as zero). */

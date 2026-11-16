@@ -127,6 +127,9 @@ they are.
 - How old a holding's price is (`fresh`: "Value from 1 Oct · 45 days old") is hidden by no
   privacy category: it carries no amount and no quantity, and a member who is shown no figures
   still has to know a number's age.
+- Which way a position faces (`side`: long, short or closed, on the portfolio's position rows) is
+  hidden by no privacy category either: a member without quantities sees "+ LONG" or "− SHORT",
+  a word and a sign, and no quantity.
 - P&L hidden puts the overall P&L out of reach, with every rupee figure and cost price. What
   it cannot hide beside a quantity: "With quantities shown, a member can still work out a day's
   change and a holding's value from the quantity and the price. Hide quantities to hide those

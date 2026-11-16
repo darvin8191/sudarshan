@@ -1230,6 +1230,8 @@ export interface UpstoxPosition {
   symbol: string | null
   name: string
   product: string
+  /** Which way it faces, from the quantity's sign; a family member sees it whatever is hidden. */
+  side: 'long' | 'short' | 'closed'
   /** Net, signed. */
   qty_u: QtyU
   overnight_qty_u: QtyU

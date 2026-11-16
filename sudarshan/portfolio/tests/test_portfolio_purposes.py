@@ -688,6 +688,21 @@ async def test_quantities_hidden_hides_what_the_book_says_of_them(rig):
 
 
 @scenario
+async def test_quantities_hidden_leave_each_positions_direction_and_nothing_more(rig):
+    """M2.8 (GA10.7): the floor removes the quantity and everything worked out from it, and
+    leaves the word for the way the position faces."""
+    await rig.grant("7", [rig.upstox_tab], shown={"pnl": False, "qty": False, "funds": False,
+                                                    "orders": False})  # fmt: skip
+    status, body = await rig.family("7", "upstox_book", parts=["positions"])
+    assert status == 200
+    rows = body["data"]["positions"]["data"]
+    assert rows and [row["side"] for row in rows] == ["short"]
+    for row in rows:
+        assert not {"qty_u", "avg_price_u", "pnl_paise", "value_paise"} & set(row)
+        assert not {k for k in row if k.endswith(("_qty_u", "_paise"))}
+
+
+@scenario
 async def test_the_family_and_the_owner_share_one_upstox_read(rig, fake):
     await rig.grant("7", [rig.upstox_tab])
     await rig.owner("upstox_book", parts=["positions"])

@@ -573,6 +573,29 @@ def test_side_comes_from_the_quantity_and_is_left_out_without_it():
     run(go())
 
 
+def test_a_direction_the_portfolio_sent_beside_no_quantity_reaches_the_phone():
+    """M2.8 (GA10.7): with quantities hidden the portfolio's floor removed the quantity but sent
+    the position's side; it is kept, and the counts of long and short can be said."""
+
+    async def go():
+        clock = Clock(ist(MONDAY, 10))
+        rows = [position(1, 100_000), position(2, -50_000)]
+        for row, side in zip(rows, ("long", "short"), strict=True):
+            row.pop("qty_u")
+            row["side"] = side
+        books, _ = shelf(clock, {"positions": rows})
+        books.screen(Sock(), member(), "positions")
+        await settle(books)
+        got = books.book_of(member(), "positions", clock())["rows"]
+        assert [r.get("side") for r in got] == ["long", "short"]
+        assert all("qty_u" not in r for r in got)
+        assert books_module.position_count(got) == {"open": 2, "long": 1, "short": 1}
+        # where the quantity is there, its sign decides
+        assert books_module.with_side({"qty_u": -5, "side": "long"})["side"] == "short"
+
+    run(go())
+
+
 def test_the_states_carry_the_design_sentences():
     at = ist(MONDAY, 10, 41, 5)
     assert (

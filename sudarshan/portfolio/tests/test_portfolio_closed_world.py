@@ -82,6 +82,9 @@ STRUCTURAL = frozenset(
         "details", "not_computed_sales", "read_status", "lot_check", "uncounted",
         # where a quantity is from, and flags and counts of rows that carry no figure
         "held_from", "to_check", "left_out_count", "unrecorded_count", "uncounted_count",
+        # a position's direction (long, short or closed): never hidden, as the table's note says
+        # of direction, and no quantity in it (M2.8, GA10.7)
+        "side",
         # the change to a decision a lot check offers (an event id, a version and a ratio), and
         # what was confirmed for a bonus or a split (its ratio, words and choices are hidden),
         # one by one in the list of every one confirmed

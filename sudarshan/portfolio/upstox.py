@@ -164,19 +164,28 @@ def parse_holding(item: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def side_of(qty: int) -> str:
+    """Which way a position faces, from its quantity's sign: long, short or closed. A family
+    member is shown it whatever the mask hides (M2.8): the floor removes the quantity, never this
+    word, so the direction no longer goes with it."""
+    return "long" if qty > 0 else "short" if qty < 0 else "closed"
+
+
 def parse_position(item: Mapping[str, Any]) -> dict[str, Any]:
     key = _text(item.get("instrument_token"))
     if key is None:
         raise Unreadable("instrument_token")
     close = price_u(item.get("close_price"))
     multiplier = _decimal(item.get("multiplier"))
+    qty = _need(qty_u(item.get("quantity")), "quantity")
     return {
         "instrument_key": key,
         "exchange": None,
         "symbol": None,
         "name": _text(item.get("trading_symbol")) or key,
         "product": _text(item.get("product")) or "",
-        "qty_u": _need(qty_u(item.get("quantity")), "quantity"),
+        "side": side_of(qty),
+        "qty_u": qty,
         "overnight_qty_u": qty_u(item.get("overnight_quantity")) or 0,
         "day_buy_qty_u": qty_u(item.get("day_buy_quantity")) or 0,
         "day_sell_qty_u": qty_u(item.get("day_sell_quantity")) or 0,
