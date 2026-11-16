@@ -17,10 +17,28 @@ def action_unconfirmed(kind: str, isin: str, day_text: str) -> str:
     )
 
 
+def action_coming(kind: str, isin: str, day_text: str) -> str:
+    """One still to come: it cannot be confirmed before its day (v0.14.0 verification L4)."""
+    return (
+        f"A {ACTION_NOUNS.get(kind, 'corporate action')} of {isin} on {day_text} is coming. "
+        "The lots change once you confirm it, on or after that day."
+    )
+
+
 def fraction_left(kind: str, isin: str, day_text: str) -> str:
     return (
         f"The {ACTION_NOUNS.get(kind, 'corporate action')} of {isin} on {day_text} leaves part "
         "of a share. It is kept as a fraction, not rounded away: enter what the company paid for it."
+    )
+
+
+def bonus_part_left(isin: str, day_text: str, left_qty_u: int) -> str:
+    """A bonus on whole shares that does not come out whole: the lots take the whole shares."""
+    part = f"{left_qty_u:06d}".rstrip("0")
+    return (
+        f"The bonus of {isin} on {day_text} leaves 0.{part} of a share over. The lots hold "
+        "the whole shares only; a company usually pays the rest in cash, which this paper does "
+        "not count: check your bank entry for it."
     )
 
 
@@ -169,6 +187,14 @@ def not_computed_sales(count: int, amount: str) -> str:
         count_of(count, "sale", "sales")
         + f" of assets outside this working paper (sale value {amount}) are not computed."
     )
+
+
+#: What a sale outside the paper is told, by ``classify.why_not`` (v0.13.0 verify N9). Neither
+#: kind is computed.
+WHY_NOT = {
+    "no_isin": "Add its ISIN in the tab to have it computed.",
+    "etf_unit": "ETF units are not computed in this release.",
+}
 
 
 EXPENSES_ALLOCATED = (

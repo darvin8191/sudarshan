@@ -9,6 +9,7 @@ import { type ReactNode, useState } from 'react'
 import { cn } from '@/lib/utils'
 import { useNow } from '@/sudarshan/dashboard/hooks'
 import { PortfolioError, portfolioCall, problemOf } from '../api'
+import { LotCheckCard } from '../calendar/LotCheckCard'
 import { dayOfInstant } from '../days'
 import { DividendsCard } from '../dividends/DividendsCard'
 import { type Member, REPORT_YEARS, type TaxPack } from '../types'
@@ -126,6 +127,7 @@ function Paper({
         <span>{meta.words}</span>
       </p>
       <ReadsCard pack={pack} onRead={onRead} />
+      <LotCheckCard check={pack.lot_check} onDone={onRead} />
       {needs.length > 0 && (
         <Card title="Needs you">
           <Sentences lines={needs} warn />

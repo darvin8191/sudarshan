@@ -38,6 +38,7 @@ const line = (more: Partial<DividendLine>): DividendLine => ({
   credited_paise: null,
   tds_paise: null,
   credited_day: null,
+  record_day: null,
   version: 4,
   ...more,
 })
@@ -69,7 +70,10 @@ const REPORT: DividendsReport = {
     total_paise: 11_65_000,
     tds_expected_paise: 1_16_500,
     unconfirmed_count: 1,
+    uncounted: [],
+    uncounted_count: 0,
   },
+  read_status: { state: 'ok', night: 20261113, words: null },
 }
 
 function show(on = true) {
@@ -173,5 +177,108 @@ describe('the confirm sheet', () => {
     expect(sheet.queryByRole('button', { name: 'Back to expected' })).toBeNull()
     await userEvent.click(sheet.getByRole('button', { name: 'Confirm as credited' }))
     expect((await sheet.findByRole('alert')).textContent).toMatch(/entry in one of your tabs/)
+  })
+})
+
+// v0.14.0 review H1, M1: a dividend is never silently dropped, and a year nothing was read for
+// never shows a bare zero.
+describe('what could not be counted', () => {
+  const WORDS =
+    'No holdings record reaches the day before this ex-date, so the amount is not known: confirm what reached your bank on the Dividends card'
+  const JULY = {
+    ...line({ id: 9, ex_day: 20260715, qty_u: 0, expected_paise: 0, name: 'Gamma Power' }),
+    words: WORDS,
+  }
+
+  it('lists it under Not counted with the company, the date and the sentence', async () => {
+    api.get.mockResolvedValue({
+      enabled: true,
+      data: {
+        ...REPORT,
+        dividends: { ...REPORT.dividends, uncounted: [JULY], uncounted_count: 1 },
+      },
+    })
+    show()
+    expect(await screen.findByText('Not counted (1)')).toBeInTheDocument()
+    expect(screen.getByText('Gamma Power · 15 Jul 2026')).toBeInTheDocument()
+    expect(screen.getByText(`${WORDS}.`)).toBeInTheDocument()
+    expect(screen.getByText(/1 not counted, listed below/)).toBeInTheDocument()
+  })
+
+  it('lets the owner confirm what reached the bank, starting from an empty amount', async () => {
+    const user = userEvent.setup()
+    api.get.mockResolvedValue({
+      enabled: true,
+      data: {
+        ...REPORT,
+        dividends: { ...REPORT.dividends, uncounted: [JULY], uncounted_count: 1 },
+      },
+    })
+    show()
+    await user.click(
+      await screen.findByRole('button', { name: 'Gamma Power, ex-date 15 Jul 2026: not counted' })
+    )
+    const sheet = await screen.findByRole('dialog')
+    expect(within(sheet).getByText(/quantity held not known/)).toBeInTheDocument()
+    expect(within(sheet).getByText(/The expected amount is not known\./)).toBeInTheDocument()
+    const box = within(sheet).getByLabelText('Credited to your bank, in rupees')
+    expect(box).toHaveValue('')
+    await user.type(box, '1800')
+    await user.click(within(sheet).getByRole('button', { name: 'Confirm as credited' }))
+    await waitFor(() => expect(api.set).toHaveBeenCalled())
+    expect(api.set.mock.calls[0][0]).toMatchObject({
+      id: 9,
+      state: 'confirmed',
+      credited_paise: 1_80_000,
+    })
+  })
+
+  it('before the first read says when it is, never a zero and never "no dividend is listed"', async () => {
+    const words =
+      "SUDARSHAN reads Upstox's corporate actions for the first time tonight after 23:45. Nothing is listed until then."
+    api.get.mockResolvedValue({
+      enabled: true,
+      data: {
+        ...REPORT,
+        dividends: { ...REPORT.dividends, payers: [], total_paise: 0, unconfirmed_count: 0 },
+        read_status: { state: 'never', night: null, words },
+      },
+    })
+    show()
+    expect(await screen.findByText(words)).toBeInTheDocument()
+    expect(screen.queryByText('₹0.00')).toBeNull()
+    expect(screen.queryByText(/No dividend is listed/)).toBeNull()
+  })
+
+  it('after a failed night says so above what it still has', async () => {
+    const words =
+      "Upstox's list could not be read last night. SUDARSHAN tries again tonight after 23:45."
+    api.get.mockResolvedValue({
+      enabled: true,
+      data: { ...REPORT, read_status: { state: 'failed', night: 20261113, words } },
+    })
+    show()
+    expect(await screen.findByText(words)).toBeInTheDocument()
+    expect(screen.getByText('Beta Bank')).toBeInTheDocument()
+  })
+})
+
+// v0.14.0 review L4: a quantity from an older closing record says which record it is from.
+describe('where a quantity is from', () => {
+  it('names the record a line stands on when none was kept for the day before the ex-date', async () => {
+    const older = line({ id: 7, ex_day: 20261016, qty_u: 100_000_000, record_day: 20261013 })
+    api.get.mockResolvedValue({
+      enabled: true,
+      data: {
+        ...REPORT,
+        dividends: {
+          ...REPORT.dividends,
+          payers: [{ ...REPORT.dividends.payers[0], lines: [older, line({})] }],
+        },
+      },
+    })
+    show()
+    expect(await screen.findByText('From the record of 13 Oct 2026')).toBeInTheDocument()
+    expect(screen.getAllByText(/From the record of/)).toHaveLength(1) // the eve's own: no mark
   })
 })

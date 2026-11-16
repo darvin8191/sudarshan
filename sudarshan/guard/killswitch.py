@@ -604,6 +604,8 @@ def _exit_all_live(
     Upstox did not send the orders in time is tried once more after ``EXIT_ALL_AGAIN_AFTER_S``;
     a position it still leaves open with nothing watching it has its stop gone, or may have, and
     the step says so and points to the Upstox app (release review v0.4.1, X5)."""
+    from sudarshan.books import exit_guard
+
     cancels = cancels if cancels is not None else _Cancels(ids=list(cancelled))
     ended = _cancels_shown(owner, cancelled, seen)
     shown = not cancelled or ended == {str(orderid) for orderid in cancelled}
@@ -629,6 +631,21 @@ def _exit_all_live(
         # Another Exit all holds the book; one that left positions out has its own words.
         return False, words.KS_EXIT_ALL_BUSY, detail
     said = words.ks_exit_all(str(body.get("message") or ""), tried_again)
+    if unwatched:
+        # GA1.3: each such position is named and kept in the report as open, and the step is
+        # never a success over one, whatever Exit all's own answer said: an exit Upstox refused
+        # and a position that could not be sized are still held, with nothing working on them.
+        names = [
+            exit_guard.trader_name(
+                exit_guard.position_of(
+                    item.get("exchange"), item.get("symbol"), item.get("product")
+                )
+            )
+            for item in unwatched
+        ]
+        detail["left_open"] = names
+        said += " " + words.ks_left_open(names)
+        ok = False
     known, maybe = _stops_gone(unwatched, cancels, seen)
     if known or maybe:
         said += " " + words.ks_left_without_stops(known, maybe)
@@ -667,9 +684,11 @@ def _left_with_nothing_watching(each: list) -> list[dict]:
     """The positions Exit all left with nothing sent and no closing order known to be working:
     not sized (the order list did not answer, or does not add up), not reached in its time, or
     not listed by Upstox's positions and not sent for (exit_guard.left_unlisted: its size could
-    not be worked out, or it may be a conversion). A position left out for an order working on
-    its closing side, a hold or a claim has that order; these have nothing, and their stops may
-    be the ones just cancelled."""
+    not be worked out, or it may be a conversion), or sent for and refused, by Upstox, by the
+    order pacer or by the risk guard (the ``refused`` mark Exit all puts on such an outcome,
+    GA1.3: the position is still open). A position left out for an order working on its closing
+    side, a hold or a claim has that order; these have nothing, and their stops may be the ones
+    just cancelled."""
     from broker.upstox.api import order_api
     from sudarshan.books import exit_guard
 
@@ -685,7 +704,11 @@ def _left_with_nothing_watching(each: list) -> list[dict]:
         }
         if late_words is not None:
             reasons.add(late_words([exit_guard.trader_name(position)]))
-        if item.get("reason") in reasons or exit_guard.left_unlisted(position, item.get("reason")):
+        if (
+            item.get("refused") is True
+            or item.get("reason") in reasons
+            or exit_guard.left_unlisted(position, item.get("reason"))
+        ):
             left.append(item)
     return left
 
@@ -697,7 +720,14 @@ def _stops_gone(unwatched: list[dict], cancels: _Cancels, seen: dict[str, dict])
     """Of the positions left with nothing watching them: how many had a stop-loss order the
     switch cancelled (a cancelled order of the stop kind on that instrument and product in the
     rows read), and how many may have had one (a cancel not confirmed, a cancel without the
-    book, a GTT cancelled, or rows the switch never saw). ``(known, maybe)``."""
+    book, a GTT cancelled, or rows the switch never saw). ``(known, maybe)``.
+
+    GA1.3: a position Upstox's positions do not list is matched to the cancelled orders by its
+    instrument alone (its product is the order rows' word, or could not be worked out), and one
+    whose contract cannot be matched at all may have had any of the orders cancelled: it is
+    counted as "may have", never passed over as if nothing were held."""
+    from sudarshan.books import exit_guard
+
     if not unwatched:
         return 0, 0
     gone: set[tuple[str, str]] = set()
@@ -717,11 +747,21 @@ def _stops_gone(unwatched: list[dict], cancels: _Cancels, seen: dict[str, dict])
         except readers.Unreadable:
             token = None
         key = (str(token or ""), rules.position_product(risk_gate.LIVE, item.get("product")))
-        if token and key in gone:
+        position = (item.get("exchange"), item.get("symbol"), item.get("product"))
+        unlisted = exit_guard.left_unlisted(position, item.get("reason"))
+        if _among(key, gone, token, unlisted):
             known += 1
-        elif unsure or (token and key in other):
+        elif unsure or _among(key, other, token, unlisted) or (not token and (gone or other)):
             maybe += 1
     return known, maybe
+
+
+def _among(key: tuple[str, str], keys: set[tuple[str, str]], token: object, unlisted: bool) -> bool:
+    """Whether a cancelled order in ``keys`` was on this position: its instrument and product,
+    or its instrument alone for one Upstox's positions do not list."""
+    if not token:
+        return False
+    return key in keys or (unlisted and any(each[0] == key[0] for each in keys))
 
 
 def _sweep_again(

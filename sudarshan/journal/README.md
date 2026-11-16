@@ -67,6 +67,11 @@ One switch, the portfolio's too, read from OpenAlgo's `.env`; off in code.
 - **Estimate against actual** (`charges_reconcile(fy)`, `core/reconcile.py`): per month and
   Upstox segment, flagged above 5%, with the part that is off most named in a sentence. A
   month the journal does not cover whole is not compared and never marked "Check".
+- **The order ticket's line** (`charges_estimate`, B6, M5.10; bridge `GET
+  /sudarshan/journal/api/charges/estimate`): one order as the ticket holds it (exchange,
+  symbol, side, quantity, `price_u`, product) priced on the card of today as one executed order
+  on the owner's plan. Read only; a segment the card does not cover answers `modelled: false`,
+  never a figure; a delivery sale names the depository charge as left out.
 - **The Tax pack** asks the portfolio for the tax working paper (`tax_pack`) and prints it
   (`taxpack.py`). The journal works out no tax figure and holds no lot matching of its own; the
   paper printed is kept whole in the archive row, so an archived pack never changes until it is

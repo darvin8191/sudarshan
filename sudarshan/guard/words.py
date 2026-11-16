@@ -450,6 +450,26 @@ def ks_left_without_stops(known: int, maybe: int = 0) -> str:
     return " ".join(said) + f" Close {them} from the Upstox app."
 
 
+def ks_left_open(names: list[str]) -> str:
+    """The positions Exit all left open with nothing sent and no closing order working, by name
+    (an exit Upstox refused, one that could not be sized, one Upstox's positions do not list):
+    said before ``ks_left_without_stops``, which says what became of their stops. Names at most
+    ten, then how many more."""
+    shown = list(names[:10])
+    if len(names) > 10:
+        shown.append(f"{len(names) - 10} more")
+    listed = shown[0] if len(shown) == 1 else ", ".join(shown[:-1]) + " and " + shown[-1]
+    if len(names) == 1:
+        return (
+            f"Still open: {listed}. Exit all did not close it and no order is working to close "
+            "it. Check Positions, and close it from the Upstox app."
+        )
+    return (
+        f"Still open: {listed}. Exit all did not close them and no order is working to close "
+        "them. Check Positions, and close them from the Upstox app."
+    )
+
+
 def ks_swept_again(said: str) -> str:
     return f"Looked again two seconds later: {said}"
 

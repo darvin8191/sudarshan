@@ -1,11 +1,14 @@
 // SUDARSHAN P7 F4 (M7.36): the Calendar view, `/portfolio?view=calendar` (design p7 9.5): what
 // waits for the owner's tap first, then Upstox's dividends, bonuses, splits and rights issues for
 // what he holds, 90 days back and 180 on. Dates and ratios are public facts read every night, not
-// market data: each row says when it was checked and nothing here says "Real-time". The owner's
-// page only; a family viewer is offered none of it.
+// market data: each row says when it was checked and nothing here says "Real-time". A bonus or a
+// split he confirmed says what he confirmed, and can be changed from its row. The owner's page
+// only; a family viewer is offered none of it.
 import { useQuery } from '@tanstack/react-query'
-import { Info, RefreshCw } from 'lucide-react'
+import { Info, PencilLine, RefreshCw } from 'lucide-react'
+import { useState } from 'react'
 import { cn } from '@/lib/utils'
+import { useOpenGuard } from '@/sudarshan/watchlist/openGuard'
 import {
   getCalendar,
   listCorporateActions,
@@ -14,11 +17,13 @@ import {
   problemOf,
 } from '../api'
 import { dayOfInstant } from '../days'
+import { SECONDARY } from '../sheets/TabFields'
 import { PORTFOLIO_KEY } from '../tab/ActivityTab'
 import { dayText, monthOf } from '../tab/format'
-import type { CalendarRow, TabInfo } from '../types'
+import type { CaDecided, CalendarRow, TabInfo } from '../types'
 import { checkedText, factText, holdText, KINDS } from './format'
-import { ToConfirm } from './ToConfirm'
+import { LotCheckCard } from './LotCheckCard'
+import { Choices, ToConfirm } from './ToConfirm'
 
 export const CALENDAR_KEY = [...PORTFOLIO_KEY, 'calendar'] as const
 /** The view's own sentence while its switch is off on the server (the ops answer `not_ready`). */
@@ -26,6 +31,16 @@ export const CALENDAR_OFF =
   'The calendar of dividends, bonuses and splits is switched off on the server. It opens here once a release switches it on.'
 export const NO_FUTURE =
   'Upstox has not listed upcoming events yet; this list shows the ones already announced.'
+
+/**
+ * Bonuses and splits not asked about yet: no closing record reaches their day, and until the
+ * year's share trades are read in full nothing can tell whether the share was held then.
+ */
+export function leftOutWords(count: number): string {
+  return count === 1
+    ? '1 earlier bonus or split is not asked about yet: SUDARSHAN cannot tell what you held on its date until Upstox’s share trades are read in full.'
+    : `${count} earlier bonuses or splits are not asked about yet: SUDARSHAN cannot tell what you held on their dates until Upstox’s share trades are read in full.`
+}
 
 const CARD = 'rounded-[1.125rem] border bg-card px-4 py-3.5 shadow-[var(--shadow-card)]'
 
@@ -37,7 +52,64 @@ async function need<T>(call: Promise<PortfolioResult<T>>): Promise<T> {
   return result.data
 }
 
-function Event({ row, today }: { row: CalendarRow; today: number }) {
+/**
+ * What the owner confirmed for a bonus or a split, and "Change what I confirmed" (v0.14.0
+ * verification M3): To confirm's own choices, sent from the decision's version. What opens
+ * takes no tap for its first half second (`openGuard.ts`), so the second tap of a double tap
+ * never presses a choice that appeared under the finger.
+ */
+function Decided({
+  row,
+  decided,
+  onDone,
+}: {
+  row: CalendarRow
+  decided: CaDecided
+  onDone: () => void
+}) {
+  const [open, setOpen] = useState(false)
+  const guard = useOpenGuard(open)
+  const { onPointerDownCapture, onClickCapture, onKeyDownCapture } = guard.handlers
+  return (
+    <div className="flex flex-col gap-2 pt-1.5">
+      <p className="text-sm">{decided.words}</p>
+      {open ? (
+        <div
+          className="flex flex-col gap-2"
+          onPointerDownCapture={onPointerDownCapture}
+          onClickCapture={onClickCapture}
+          onKeyDownCapture={onKeyDownCapture}
+          data-settling={guard.settling || undefined}
+        >
+          <ul className="flex flex-col">
+            <Choices
+              kind={row.kind}
+              eventId={decided.event_id}
+              expected={decided.expected}
+              tab={undefined}
+              version={decided.version}
+              current={decided}
+              onDone={() => {
+                setOpen(false)
+                onDone()
+              }}
+            />
+          </ul>
+          <button type="button" className={SECONDARY} onClick={() => setOpen(false)}>
+            Keep it as it is
+          </button>
+        </div>
+      ) : (
+        <button type="button" className={SECONDARY} onClick={() => setOpen(true)}>
+          <PencilLine aria-hidden="true" className="size-4" />
+          Change what I confirmed
+        </button>
+      )}
+    </div>
+  )
+}
+
+function Event({ row, today, onDone }: { row: CalendarRow; today: number; onDone: () => void }) {
   const Icon = KINDS[row.kind].icon
   const hold = holdText(row, today)
   return (
@@ -56,12 +128,23 @@ function Event({ row, today }: { row: CalendarRow; today: number }) {
       </span>
       {hold && <span className="text-sm font-semibold">{hold}</span>}
       <span className="text-xs text-[color:var(--text-tertiary)]">{checkedText(row, today)}</span>
+      {row.decided && <Decided row={row} decided={row.decided} onDone={onDone} />}
     </li>
   )
 }
 
 /** The rows of one stretch of the calendar, month by month in the order given. */
-function Months({ title, rows, today }: { title: string; rows: CalendarRow[]; today: number }) {
+function Months({
+  title,
+  rows,
+  today,
+  onDone,
+}: {
+  title: string
+  rows: CalendarRow[]
+  today: number
+  onDone: () => void
+}) {
   if (rows.length === 0) return null
   const months = new Map<number, { label: string; rows: CalendarRow[] }>()
   for (const row of rows) {
@@ -78,7 +161,7 @@ function Months({ title, rows, today }: { title: string; rows: CalendarRow[]; to
           <h4 className="pt-1.5 text-xs font-semibold text-muted-foreground">{month.label}</h4>
           <ul className="flex flex-col divide-y divide-[color:var(--divider)]">
             {month.rows.map((row) => (
-              <Event key={row.event_id} row={row} today={today} />
+              <Event key={row.event_id} row={row} today={today} onDone={onDone} />
             ))}
           </ul>
         </div>
@@ -107,6 +190,9 @@ export function CalendarView({ tabs }: { tabs: readonly TabInfo[] }) {
   const failed = calendar.error ?? actions.error
   const problem = failed ? problemOf(failed) : null
   const rows = calendar.data?.calendar ?? []
+  const status = calendar.data?.read_status
+  /** Upstox's list was read: only then does an empty list mean "nothing listed". */
+  const read = status === undefined || status.state === 'ok'
   const coming = rows.filter((r) => r.ex_day >= today).sort((a, b) => a.ex_day - b.ex_day)
   const past = rows.filter((r) => r.ex_day < today).sort((a, b) => b.ex_day - a.ex_day)
   return (
@@ -134,8 +220,30 @@ export function CalendarView({ tabs }: { tabs: readonly TabInfo[] }) {
         </p>
       ) : (
         <>
+          <LotCheckCard check={actions.data.lot_check} onDone={refresh} />
           <ToConfirm events={actions.data.to_confirm} tabs={tabs} onDone={refresh} />
-          {!calendar.data.listed_future && (
+          {actions.data.left_out_count > 0 && (
+            <p className="text-sm text-[color:var(--text-secondary)]">
+              {leftOutWords(actions.data.left_out_count)}
+            </p>
+          )}
+          {status !== undefined && status.state !== 'ok' && status.words !== null && (
+            // Before the first nightly read, or after a failed one: say so, never "nothing
+            // listed" (an empty list means that only once the list was read).
+            <p
+              role="note"
+              className={cn(
+                'flex items-start gap-2 rounded-[0.875rem] border px-3 py-2 text-sm font-semibold',
+                status.state === 'failed'
+                  ? 'border-[color:var(--gold)] bg-[color:var(--gold-tint)] text-[color:var(--warning-text)]'
+                  : 'border-[color:var(--border-strong)] bg-card text-[color:var(--text-secondary)]'
+              )}
+            >
+              <Info aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+              {status.words}
+            </p>
+          )}
+          {read && !calendar.data.listed_future && (
             <p
               role="note"
               className="flex items-start gap-2 rounded-[0.875rem] border border-[color:var(--gold)] bg-[color:var(--gold-tint)] px-3 py-2 text-sm font-semibold text-[color:var(--warning-text)]"
@@ -144,9 +252,9 @@ export function CalendarView({ tabs }: { tabs: readonly TabInfo[] }) {
               {NO_FUTURE}
             </p>
           )}
-          <Months title="Coming up" rows={coming} today={today} />
-          <Months title="The last 90 days" rows={past} today={today} />
-          {rows.length === 0 && (
+          <Months title="Coming up" rows={coming} today={today} onDone={refresh} />
+          <Months title="The last 90 days" rows={past} today={today} onDone={refresh} />
+          {read && rows.length === 0 && (
             <p className={cn(CARD, 'text-sm text-[color:var(--text-secondary)]')}>
               No dividend, bonus, split or rights issue is listed for what you hold, from{' '}
               {dayText(calendar.data.from)} to {dayText(calendar.data.to)}.

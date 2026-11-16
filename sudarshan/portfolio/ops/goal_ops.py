@@ -6,22 +6,30 @@ goal with what it counts now, how far that is, what to add each month and the mo
 by hand, never both. All three wait for ``SUDARSHAN_PORTFOLIO_GOALS`` (``ops.switched``) and are
 the owner's alone: none is a family op.
 
-A tab that has since been deleted counts as nothing and stays linked until the owner edits the
-goal; an archived tab still counts (it still holds what it held).
+A goal counts a tab's value before its loans (the design's "their value sums"), and the phone
+says so. A tab that has since been deleted counts as nothing and stays linked until the owner
+unlinks it; the answer names it in ``gone_tab_ids`` so the card can say so. An archived tab still
+counts (it still holds what it held).
+
+Each goal's figures are worked out apart: one that cannot be (``problem`` then holds its sentence)
+never fails the list, and can still be changed or archived.
 """
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Mapping
 from typing import Any
 
 from ..core import goals
 from ..core.days import day_of_instant, is_day
 from ..core.filters import Filters
-from ..core.kinds import GOALS_MAX, MAX_PAISE, NAME_MAX
+from ..core.kinds import GOAL_TARGET_MAX_PAISE, GOALS_MAX, MAX_PAISE, NAME_MAX
 from ..store import Invalid, NotFound, Tx, VersionConflict
 from . import op
 from .common import answer, parts, scope_now, warmed, whole
+
+log = logging.getLogger(__name__)
 
 RATE_MAX_BP = 5000
 FIELDS = ("name", "name_alt", "target_paise", "target_day", "rate_bp", "tab_ids", "fixed_paise")
@@ -30,6 +38,11 @@ SAYS = {
     "name": "Enter a name for the goal.",
     "name_long": f"A goal's name can have up to {NAME_MAX} characters.",
     "target": "Enter a target amount above zero.",
+    "target_big": "A goal's target can be up to ₹1,000 crore. Check the amount for extra zeros.",
+    "figures": (
+        "This goal's figures could not be worked out. Check its target, its date and what it "
+        "counts, or archive it."
+    ),
     "day": "Choose a target date after today.",
     "rate": "The assumed return must be between 0% and 50% a year.",
     "tabs": "Choose the tabs this goal counts from your own tabs.",
@@ -65,8 +78,11 @@ def checked(message: Mapping[str, Any], today: int, *, old_day: int | None = Non
     if "name_alt" in message:
         found["name_alt"] = _name(message["name_alt"], required=False)
     if "target_paise" in message:
-        if not _int(message["target_paise"], 1, MAX_PAISE):
+        target = message["target_paise"]
+        if target.__class__ is not int or target < 1:
             raise Invalid(SAYS["target"])
+        if target > GOAL_TARGET_MAX_PAISE:
+            raise Invalid(SAYS["target_big"])
         found["target_paise"] = message["target_paise"]
     if "target_day" in message:
         day = message["target_day"]
@@ -117,18 +133,29 @@ def listed(views, tx: Tx, now: int) -> dict[str, Any]:
             worth[tab_id] = 0 if live is None else live.totals["value_paise"]
         return worth[tab_id]
 
-    found = []
-    for row in tx.rows("goal"):
+    def worked(row: Mapping[str, Any]) -> dict[str, Any]:
         fixed = row["fixed_paise"]
         value = fixed if fixed is not None else sum(value_of(each) for each in row["tab_ids"])
+        return goals.figures(row["target_paise"], value, today, row["target_day"], row["rate_bp"])
+
+    found = []
+    for row in tx.rows("goal"):
+        problem = None
+        try:
+            figures = worked(row)
+        except Exception:  # one goal that cannot be worked out never fails the list
+            log.exception("goal %s: its figures could not be worked out", row["id"])
+            problem = SAYS["figures"]
+            figures = {"value_now_paise": 0, "progress_pct": "0.0000", "months_left": 0,
+                       "required_monthly_paise": 0, "on_track": False}  # fmt: skip
         found.append(
             {
                 **{key: row[key] for key in ("id", "member_id", *FIELDS)},
                 "archived": bool(row["archived"]),
                 "version": row["version"],
-                **goals.figures(
-                    row["target_paise"], value, today, row["target_day"], row["rate_bp"]
-                ),
+                **figures,
+                "gone_tab_ids": [each for each in row["tab_ids"] if each not in tabs],
+                "problem": problem,
             }
         )
     return {"as_of": now, "goals": found}

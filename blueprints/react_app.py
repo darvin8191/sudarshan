@@ -887,6 +887,13 @@ def react_reports():
     return serve_react_app()
 
 
+# SUDARSHAN M13.7: the TRINETRA view (its API is /sudarshan/signals/api/*). The page keeps its
+# tab in the query string, so this is the only path it owns.
+@react_bp.route("/trinetra", strict_slashes=False)
+def react_trinetra():
+    return serve_react_app()
+
+
 # SUDARSHAN M20.6: the owner's Family page (its API is /sudarshan/family/api/*).
 @react_bp.route("/family-members", strict_slashes=False)
 def react_family_members():

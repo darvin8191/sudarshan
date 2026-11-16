@@ -162,16 +162,27 @@ export function lineOf(check: WatchCheck, drill: DrillResult | null = null): Lin
     }
     case 'certificate': {
       const left = whole(facts.hours)
+      // v0.13.0 verify N6: the watch names why it judged no certificate (no address for the app,
+      // or the web server gave another site's). That is no failed look: nothing is being
+      // checked, unread for two days and then a warning told on Telegram.
+      const unjudged =
+        facts.cause === 'no_name'
+          ? "Not being checked: the watch does not know the app's address. Add SUDARSHAN_WATCH_CERT_HOST and the address you open the app at to /etc/sudarshan/watch.env on the server (README, the certificate check)."
+          : facts.cause === 'other_site'
+            ? "Not being checked: the web server answers the app's address with another site's certificate. Set SUDARSHAN_WATCH_CERT_HOST in /etc/sudarshan/watch.env to the address you open the app at (README, the certificate check)."
+            : ''
       return {
         group: 'server',
         label: 'Security certificate',
-        detail: unread
-          ? UNREAD
-          : left === '0'
-            ? 'Run out and not renewed. Phones refuse the app.'
-            : left
-              ? `${hours(left)} left${level === 'failing' ? ' and not renewed.' : '.'}`
-              : 'Read.',
+        detail: unjudged
+          ? unjudged
+          : unread
+            ? UNREAD
+            : left === '0'
+              ? 'Run out and not renewed. Phones refuse the app.'
+              : left
+                ? `${hours(left)} left${level === 'failing' ? ' and not renewed.' : '.'}`
+                : 'Read.',
       }
     }
     case 'posture_updates': {

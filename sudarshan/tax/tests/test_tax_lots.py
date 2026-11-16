@@ -72,3 +72,21 @@ def test_an_unconfirmed_action_says_so_in_words():
     notes = replay(case["in"]).notes
     assert "bonus of INE000A01010 on 10 Sep 2025 is not confirmed" in notes[0]
     assert "split" in notes[1] and "section" not in " ".join(notes).lower()
+
+
+def test_an_action_still_to_come_is_said_as_coming_not_as_waiting_for_a_confirmation():
+    """v0.14.0 verification L4. Counted to 1 Dec 2025, the bonus of 10 Sep 2025 is past and
+    waits for a confirmation; the split of 5 Jan 2026 is still to come and cannot be confirmed
+    yet. Old code told the owner to confirm both."""
+    case = next(c.values[0] for c in cases("lots.json") if c.id == "L1-not-accepted")
+    given = case["in"]
+    book = lots.replay(
+        [build(Trade, row) for row in given["trades"]],
+        actions=[build(Action, row) for row in given["actions"]],
+        as_of_day=20251201,
+    )
+    assert book.notes[0].startswith("A bonus of INE000A01010 on 10 Sep 2025 is not confirmed")
+    assert book.notes[1] == (
+        "A split of INE000A01010 on 5 Jan 2026 is coming. The lots change once you confirm it, "
+        "on or after that day."
+    )

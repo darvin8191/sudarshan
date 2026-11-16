@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import httpx
 import pytest
-from test_portfolio_ca_ops import event, record, scenario
+from test_portfolio_ca_ops import event, partly_read, record, scenario
 from test_portfolio_closed_world import answer_misses
 from test_portfolio_corpactions_reader import HELD, NIGHT, TRADED, UPSTOX
 from test_portfolio_import_ops import NOW, OWNER
@@ -68,10 +68,169 @@ async def test_d1_the_expected_amounts_and_the_likely_tds_of_one_payer(n):
     assert (totals["total_paise"], totals["tds_expected_paise"], totals["unconfirmed_count"]) == (
         10650 * RUPEE, 1065 * RUPEE, 2)  # fmt: skip
     line = payer["lines"][0]
-    assert set(line) == {*dividends.LINE_KEYS, "name"}
+    assert set(line) == {*dividends.LINE_KEYS, "name", "record_day"}
+    # Each quantity is from the record of the trading day before its ex-date (Thursday 13 Aug,
+    # Friday 18 Sep before Monday 21 Sep), so neither line names a record (review L4).
+    assert [ln["record_day"] for ln in payer["lines"]] == [None, None]
     assert line["member_id"] == data["member_id"] and line["fy"] == 2026
     assert answer_misses(data) == set()
     assert n.svc.store.write(OWNER, lambda tx: dividends.sync(tx, TODAY, NOW)) == 0  # settled
+
+
+@scenario
+async def test_a_payer_held_only_at_upstox_has_its_name(n):
+    """Review M2: names came from the custom tabs' assets only, so a share held only at Upstox
+    read as its ISIN on the Dividends card. The Upstox holding's own name now names it."""
+    d1(n)
+    assert (await year(n))["dividends"]["payers"][0]["name"] is None  # nothing names it yet
+    n.reader._held_now = lambda: [{"isin": UPSTOX, "name": "Probe Industries Limited"}]
+    (payer,) = (await year(n))["dividends"]["payers"]
+    assert payer["name"] == "Probe Industries Limited"
+    assert {line["name"] for line in payer["lines"]} == {"Probe Industries Limited"}
+
+
+# ---- a dividend is never silently dropped (review H1) --------------------------------------------
+@scenario
+async def test_a_dividend_from_before_the_first_closing_record_is_listed_as_not_counted(n):
+    """The reviewer's July probe. Closing records on 13 and 19 Oct 2026; dividends with the
+    ex-dates 15 Jul (Rs 20 a share), 16 Oct and 20 Oct (Rs 5.50 each).
+
+    Counted: 100 x 5.50 = 550.00 (the record of the 13th) and 300 x 5.50 = 1,650.00 (the
+    19th): 2,200.00. The July dividend has no closing record within 7 days before it, and the
+    share was held at the first record after it (100 on 13 Oct, nothing bought since July), so
+    it is listed as not counted, with its sentence, and is in no total.
+    Old code: no line and no sentence anywhere; the year read Rs 2,200.00 as if complete."""
+    record(n, 20261013, **{UPSTOX: 100})
+    event(n, "dividend", ex_day=20261016, amount_u=55_000)
+    record(n, 20261019, **{UPSTOX: 300})
+    event(n, "dividend", ex_day=20261020, amount_u=55_000)
+    july = event(n, "dividend", ex_day=20260715, amount_u=200_000)
+    data = await year(n)
+    totals = data["dividends"]
+    (payer,) = totals["payers"]
+    # Review L4: the 16 Oct line's 100 is from the record of Tuesday 13 Oct, not of Thursday
+    # 15 Oct, the trading day before its ex-date (none was taken): the line says which record.
+    assert [(ln["ex_day"], ln["expected_paise"], ln["record_day"]) for ln in payer["lines"]] == [
+        (20261016, 550 * RUPEE, 20261013), (20261020, 1650 * RUPEE, None)]  # fmt: skip
+    assert (totals["total_paise"], totals["unconfirmed_count"]) == (2200 * RUPEE, 2)
+    (left,) = totals["uncounted"]
+    assert (left["event_id"], left["isin"], left["ex_day"], left["qty_u"]) == (
+        july, UPSTOX, 20260715, 0)  # fmt: skip
+    assert left["words"] == (
+        "No holdings record reaches the day before this ex-date, so the amount is not known: "
+        "confirm what reached your bank on the Dividends card"
+    )
+    assert totals["uncounted_count"] == 1
+    assert answer_misses(data) == set()
+    # The working paper's block says how many it could not count, and lists them.
+    block = n.read(lambda tx: dividends.for_pack(tx, 2026, data["member_id"], today=TODAY))
+    assert (block["total_paise"], block["uncounted_count"]) == (2200 * RUPEE, 1)
+    assert block["uncounted"] == [
+        {"isin": UPSTOX, "name": None, "ex_day": 20260715, "words": left["words"]}
+    ]
+    # The owner confirms what reached his bank, as for any other line: Rs 1,800 credited and
+    # Rs 200 deducted count as 2,000, and the line is a line of its payer from then on.
+    done = await n.rig.call("dividend_set", id=left["id"], version=left["version"],
+                            state="confirmed", credited_paise=1800 * RUPEE,
+                            tds_paise=200 * RUPEE, credited_day=20260801)  # fmt: skip
+    assert done["status"] == "success"
+    totals = (await year(n))["dividends"]
+    assert (totals["uncounted"], totals["total_paise"]) == ([], (2200 + 2000) * RUPEE)
+    assert n.svc.store.write(OWNER, lambda tx: dividends.sync(tx, TODAY, NOW)) == 0
+
+
+@scenario
+async def test_a_dividend_of_a_share_bought_after_it_is_not_listed_at_all(n):
+    """Not counted is for what may have been held. 50 held on 13 Oct, all of them bought on
+    1 Sep 2026 (the trade history says so): 50 - 50 = 0 on the eve of 15 Jul, so the July
+    dividend was never his, and is not listed. A share with no record after the ex-date and
+    none before is listed: nothing says it was not held."""
+    from test_portfolio_ca_ops import history
+
+    history(n, (20260901, "BUY", 50))
+    record(n, 20261013, **{UPSTOX: 50})
+    event(n, "dividend", ex_day=20260715, amount_u=200_000)
+    assert (await year(n))["dividends"]["uncounted"] == []
+    # 30 of the 50 were sold again on 5 Oct and 30 bought on 1 Aug besides: held 13 Oct = 50,
+    # bought since the ex-date 80, sold since 30: 50 - (80 - 30) = 0, still not held in July.
+    history(n, (20260801, "BUY", 30), (20260901, "BUY", 50), (20261005, "SELL", 30))
+    assert (await year(n))["dividends"]["uncounted"] == []
+    # 20 of what he holds were bought before July: 50 - (30 - 0) = 20 held on the eve.
+    history(n, (20260610, "BUY", 20), (20260801, "BUY", 30))
+    (left,) = (await year(n))["dividends"]["uncounted"]
+    assert (left["ex_day"], left["name"]) == (20260715, "PROBE LTD")  # named (review M2)
+
+
+@scenario
+async def test_a_dividend_with_no_amount_is_listed_not_dropped(n):
+    record(n, 20261019, **{UPSTOX: 300})
+    event(n, "dividend", ex_day=20261020)  # Upstox gives no rupees a share
+    totals = (await year(n))["dividends"]
+    (left,) = totals["uncounted"]
+    assert (left["qty_u"], left["expected_paise"]) == (300 * U, 0)
+    assert left["words"].startswith("Upstox lists no amount for this dividend")
+    assert totals["payers"] == [] and totals["total_paise"] == 0
+
+
+@scenario
+async def test_a_closing_record_whose_holdings_were_not_read_never_drops_a_dividend(n):
+    """v0.14.0 verification M2, its probe. On Monday 19 Oct, the eve of the ex-date, the closing
+    record read the positions but not the holdings. Old code read it as holding nothing: no
+    line, and nothing under "Not counted" either (payers 0, uncounted 0), the dividend gone
+    without a word. It is no holdings record: Friday's says 100, and the line names it."""
+    record(n, 20261016, **{UPSTOX: 100})
+    partly_read(n, 20261019)
+    event(n, "dividend", ex_day=20261020, amount_u=55_000)
+    totals = (await year(n))["dividends"]
+    (payer,) = totals["payers"]
+    assert [(ln["qty_u"], ln["expected_paise"], ln["record_day"]) for ln in payer["lines"]] == [
+        (100 * U, 550 * RUPEE, 20261016)]  # fmt: skip
+    assert (totals["uncounted"], totals["total_paise"]) == ([], 550 * RUPEE)
+
+
+# ---- before the first read, and a year too old (review M1, L5) -----------------------------------
+@scenario
+async def test_the_year_says_when_the_first_read_is_and_refuses_a_year_before_the_rules(n):
+    data = await year(n)
+    assert data["read_status"] == {"state": "never", "night": None, "words": ca.FIRST_READ}
+    # FY 2019-20 is before the first threshold row (1 Apr 2020). Old code: "The portfolio
+    # service could not do this just now." (a LookupError).
+    old = await n.rig.call("dividends", fy=2019)
+    assert (old["status"], old["code"]) == ("error", "bad_request")
+    assert old["message"] == (
+        "Dividends are worked out from the financial year 2020-21 on. Choose a later year."
+    )
+    assert (await n.rig.call("dividends", fy=2020))["status"] == "success"
+
+
+@scenario
+async def test_the_papers_block_says_why_it_counts_no_dividend(n):
+    """v0.13.0 review H1: the working paper's block of a year nothing was read for, before the
+    first read, after a failed night, and with the insights switch off (v0.13.0 itself)."""
+    data = await year(n)
+    block = n.read(lambda tx: dividends.for_pack(tx, 2026, data["member_id"], today=TODAY))
+    assert block["note"] == (
+        "This paper counts no dividends yet: SUDARSHAN reads Upstox's corporate actions for the "
+        "first time tonight after 23:45, and the dividends of what you held follow."
+    )
+    # v0.13.0, insights switched off: nothing is ever read, and the paper says where to look.
+    off = n.read(lambda tx: dividends.for_pack(tx, 2026, data["member_id"], today=TODAY,
+                                               insights=False))  # fmt: skip
+    assert off["note"] == (
+        "This paper counts no dividends yet: SUDARSHAN reads them from Upstox's corporate "
+        "actions only once the dividends view is switched on in a later release. Take the "
+        "year's dividends from your bank statements or Form 26AS."
+    )
+    # After a failed night, that night's sentence, after a word on what it means here.
+    n.svc.store.write(OWNER, lambda tx: tx.job_put("corporate_actions", TODAY - 1, "failed",
+                                                   f"0 of 1 read. {ca.WORDS['refused']}", NOW))  # fmt: skip
+    failed = n.read(lambda tx: dividends.for_pack(tx, 2026, data["member_id"], today=TODAY))
+    assert failed["note"] == (
+        "Dividends may be missing here. Upstox's list could not be read last night. Upstox did "
+        "not allow SUDARSHAN to read its list of events with the read-only token. SUDARSHAN "
+        "tries again tonight after 23:45."
+    )
+    assert n.read(lambda tx: dividends.for_pack(tx, 2019, 1))["total_paise"] == 0
 
 
 @scenario

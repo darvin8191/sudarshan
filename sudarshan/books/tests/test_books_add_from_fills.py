@@ -74,13 +74,16 @@ def _to(world, symbol, size, marked=True):
 
 
 def test_the_defect_an_unmarked_entry_after_an_exit_inside_the_lag_is_missed(monkeypatch, clock):
-    """Long 65, exited (the row lags a minute). A new entry to 65 reads the row's old 65 and
-    answers "already matched": the position stays flat."""
+    """Long 65, exited (the row lags a minute). A new entry to 65 reads the row's old 65 and is
+    not sent: the position stays flat. Since GA1.2 (M6.9) the answer no longer says "already
+    matched": the order book's fills show the row is behind, and the sentence says so. Sending it
+    is still the mark's alone."""
     world = install(monkeypatch, Broker({X: 65}, 60.0))
     assert world.tv_smart_exit(X, "65", "SELL", "0")[0] == 200
     clock.advance(2.0)
     code, body = _to(world, X, 65, marked=False)
-    assert (code, body.get("message")) == (200, MATCHED)
+    assert code == 409 and body.get("message") != MATCHED
+    assert body["message"] == exit_guard.fills_not_shown_yet(("NFO", X, "MIS"))
     assert world.broker.true_qty(X) == 0
 
 
@@ -223,13 +226,16 @@ def test_a_marked_add_reads_the_order_book_once_after_the_positions(monkeypatch)
 
 
 def test_an_unmarked_add_makes_no_order_book_read(monkeypatch):
-    """Every other caller is untouched: from flat, further the same way, and already there."""
+    """Every other caller's add is untouched: from flat and further the same way. One the row
+    already shows is answered as matched after one order book read (M6.9, GA1.2: the row can be
+    behind a reversal)."""
     broker = Broker({X: 65, Z: 0}, 0.0)
     world = install(monkeypatch, broker)
     assert _to(world, X, 130, marked=False)[0] == 200
     assert _to(world, Z, 10, marked=False)[0] == 200
-    assert _to(world, Z, 10, marked=False)[1].get("message") == MATCHED
     assert broker.order_book_reads == 0
+    assert _to(world, Z, 10, marked=False)[1].get("message") == MATCHED
+    assert broker.order_book_reads == 1
 
 
 def test_the_mark_is_one_call_s_alone():

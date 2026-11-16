@@ -68,6 +68,7 @@ async def test_a_goal_counts_its_tabs_and_says_what_to_add_each_month(rig):
                 "tab_ids": [rig.tab["id"]], "fixed_paise": None, "archived": False, "version": 1,
                 "value_now_paise": 20_000_000, "progress_pct": "20.0000",
                 "required_monthly_paise": 806_000, "months_left": 60, "on_track": False,
+                "gone_tab_ids": [], "problem": None,
             }
         ],
     }  # fmt: skip
@@ -133,6 +134,9 @@ async def test_what_cannot_be_a_goal_is_refused_in_the_owners_words(rig):
         ({"name_alt": 7}, "Enter a name"),
         ({"target_paise": 0}, "target amount above zero"),
         ({"target_paise": 1.5}, "target amount above zero"),
+        ({"target_paise": kinds.GOAL_TARGET_MAX_PAISE + 1}, "up to ₹1,000 crore"),
+        ({"target_paise": 10**15}, "up to ₹1,000 crore"),
+        ({"target_paise": 10**40}, "up to ₹1,000 crore"),
         ({"target_day": TODAY}, "after today"),
         ({"target_day": 20261301}, "after today"),
         ({"rate_bp": 5001}, "between 0% and 50%"),
@@ -159,6 +163,7 @@ async def test_what_cannot_be_a_goal_is_refused_in_the_owners_words(rig):
         ({"tab_ids": []}, "one of the two"),
         ({"archived": "yes"}, "cannot be edited"),
         ({"target_day": 20200101}, "after today"),
+        ({"target_paise": 2 * kinds.GOAL_TARGET_MAX_PAISE}, "Check the amount for extra zeros"),
     ):
         refused = clean(await rig.call("goal_update", id=made["id"], version=1, **change))
         assert refused["code"] == "bad_request" and said in refused["message"], change
@@ -220,3 +225,84 @@ async def test_a_deleted_tab_counts_as_nothing_and_no_key_is_unknown_to_the_mask
     )
     renamed = await rig.call("goal_update", id=after["id"], version=1, name="Still here")
     assert renamed["data"]["goals"][0]["name"] == "Still here"
+
+
+def _kept(rig, request, **more):
+    """A goal written straight into the store, as an earlier version could have kept it."""
+    me = rig.book.members(OWNER)[0]["id"]
+    row = {"member_id": me, "name": "Kept", "name_alt": None, "target_paise": 10_000_000,
+           "target_day": 20311026, "rate_bp": 1200, "tab_ids": [], "fixed_paise": 0,
+           "archived": 0, **more}  # fmt: skip
+    return rig.svc.store.write(OWNER, lambda tx: tx.insert("goal", row, NOW, request))
+
+
+@scenario_of
+async def test_the_largest_target_is_a_thousand_crore_and_its_amount_is_a_number(rig):
+    """Review M5: Rs 2,000 crore in 7 months was accepted, and 200 days later its amount was
+    "not a number", which failed the whole list."""
+    on(rig)
+    most = await rig.call("goal_create", **home(rig, tab_ids=[], fixed_paise=0, rate_bp=5000,
+                                                target_paise=kinds.GOAL_TARGET_MAX_PAISE,
+                                                target_day=20261027))  # fmt: skip
+    goal = most["data"]["goals"][0]
+    assert goal["problem"] is None and goal["months_left"] == 0
+    assert goal["required_monthly_paise"] == kinds.GOAL_TARGET_MAX_PAISE  # all of it, at once
+    # A goal an earlier version kept above the limit still lists, with a real amount.
+    _kept(rig, "g-old", name="Old", target_paise=kinds.MAX_PAISE, target_day=20261027)
+    rig.now = NOW + 200 * 86_400_000
+    listed = (await rig.call("goals_list"))["data"]["goals"]
+    assert [g["name"] for g in listed] == ["Home", "Old"]
+    assert listed[1]["required_monthly_paise"] == kinds.MAX_PAISE and listed[1]["problem"] is None
+
+
+@scenario_of
+async def test_one_goal_that_cannot_be_worked_out_never_fails_the_list_and_can_be_archived(rig):
+    on(rig)
+    await rig.call("goal_create", **home(rig, tab_ids=[], fixed_paise=5_000_000))
+    bad = _kept(rig, "g-bad", name="Bad", target_paise=7_777_700)
+    real = goals.figures
+
+    def figures(target_paise, *rest):
+        if target_paise == 7_777_700:
+            raise ArithmeticError("not a number")
+        return real(target_paise, *rest)
+
+    goals.figures = figures
+    try:
+        listed = (await rig.call("goals_list"))["data"]["goals"]
+        shelved = await rig.call("goal_update", id=bad["id"], version=bad["version"], archived=True)
+    finally:
+        goals.figures = real
+    assert [g["name"] for g in listed] == ["Home", "Bad"]
+    assert listed[0]["problem"] is None and listed[0]["required_monthly_paise"] > 0
+    assert "could not be worked out" in listed[1]["problem"] and "archive" in listed[1]["problem"]
+    assert listed[1]["required_monthly_paise"] == 0 and listed[1]["on_track"] is False
+    assert listed[1]["progress_pct"] == "0.0000" and listed[1]["value_now_paise"] == 0
+    assert shelved["data"]["goals"][1]["archived"] is True
+    assert shelved["data"]["goals"][0]["problem"] is None
+
+
+@scenario_of
+async def test_a_deleted_tab_is_named_as_gone_and_can_be_unlinked(rig):
+    """Review M2: the goal dropped to 0% with no word, and the lost tab could not be unticked."""
+    on(rig)
+    other = rig.book.tab_create(OWNER, "t-2", "Second", "mixed", now=NOW)
+    hold(rig, other, 400_000, "b-2", name="Plot")
+    made = await rig.call("goal_create", **home(rig, tab_ids=[rig.tab["id"], other["id"]]))
+    goal = made["data"]["goals"][0]
+    assert goal["gone_tab_ids"] == [] and goal["value_now_paise"] == 40_000_000
+    version = next(t for t in rig.book.tabs(OWNER) if t["id"] == other["id"])["version"]
+    rig.book.tab_update(OWNER, other["id"], version, {"archived": True}, now=NOW)
+    kept = (await rig.call("goals_list"))["data"]["goals"][0]
+    assert kept["gone_tab_ids"] == [] and kept["value_now_paise"] == 40_000_000  # archived counts
+    rig.book.tab_delete(OWNER, other["id"], version + 1, "Second", now=NOW)
+    lost = (await rig.call("goals_list"))["data"]["goals"][0]
+    assert lost["gone_tab_ids"] == [other["id"]] and lost["tab_ids"] == goal["tab_ids"]
+    assert lost["value_now_paise"] == 0
+    # Kept as it is, the lost tab may stay; it can be unlinked, alone or for a typed amount.
+    fewer = await rig.call("goal_update", id=goal["id"], version=1, tab_ids=[rig.tab["id"]])
+    assert fewer["data"]["goals"][0]["gone_tab_ids"] == []
+    typed = await rig.call(
+        "goal_update", id=goal["id"], version=2, tab_ids=[], fixed_paise=1_000_000
+    )
+    assert typed["data"]["goals"][0]["value_now_paise"] == 1_000_000

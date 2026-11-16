@@ -151,8 +151,10 @@ def test_s1c_control_with_the_broker_auth_the_working_exit_is_seen(scalping, mon
     assert "still working at Upstox" in body["message"]
 
 
-def test_s1_the_session_is_resolved_only_while_a_hold_is_open(scalping, monkeypatch):
-    """A close with no hold open costs no session lookup and no order book read."""
+def test_s1_the_session_is_resolved_once_for_every_live_close(scalping, monkeypatch):
+    """Every live close is sized from Upstox's two books (GA1.1), so the session its order is
+    placed with is resolved once for it, hold or no hold. Before GA1.1 a close with no hold open
+    made no lookup and no read, and went at the size its own book showed."""
     import database.auth_db as auth_db
 
     looked = []
@@ -160,7 +162,7 @@ def test_s1_the_session_is_resolved_only_while_a_hold_is_open(scalping, monkeypa
         auth_db, "get_auth_token_broker", lambda key: looked.append(key) or ("t", "upstox")
     )
     ok, _body, _status = _production_close(scalping)
-    assert ok and looked == []
+    assert ok and looked == ["key"]
 
 
 def test_s1_when_the_book_truly_cannot_be_read_the_unconfirmed_rule_stays(scalping, monkeypatch):

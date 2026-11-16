@@ -417,6 +417,39 @@ def test_the_month_and_the_year_are_built_on_their_days(rig, book):  # noqa: F81
     assert kept(rig, "monthly")["file_name"].endswith(".pdf")
 
 
+def test_the_years_pack_is_built_again_on_4_april_by_the_same_job(rig, book):  # noqa: F811
+    """v0.13.0 verify N3: the pack of 1 April is frozen before the year's last charges arrive
+    (31 March's two nights later, March's own row on the 3rd). The same job builds the same
+    year's report over on 4 April, once, and on no other day."""
+    from datetime import date, timedelta
+
+    from sudarshan.journal.schedule import FY_AGAIN_AT, FY_AT, schedule_for
+
+    async def go():
+        first = await once_a_day(rig.svc, "fy", at(20270401, "07:05"), fypack.fy_job)
+        made = kept(rig, "fy")
+        between = [await once_a_day(rig.svc, "fy", at(day, "07:05"), fypack.fy_job)
+                   for day in (20270402, 20270403)]  # fmt: skip
+        early = await once_a_day(rig.svc, "fy", at(20270404, "06:55"), fypack.fy_job)
+        again = await once_a_day(rig.svc, "fy", at(20270404, "07:05"), fypack.fy_job)
+        twice = await once_a_day(rig.svc, "fy", at(20270404, "09:00"), fypack.fy_job)
+        after = await once_a_day(rig.svc, "fy", at(20270405, "07:05"), fypack.fy_job)
+        return first, made, between, early, again, twice, after
+
+    first, made, between, early, again, twice, after = scenario(rig, go)
+    assert (first, between, early, again, twice, after) == (
+        "ok", [None, None], None, "ok", None, None,
+    )  # fmt: skip
+    rebuilt = kept(rig, "fy")
+    assert rebuilt["period_key"] == made["period_key"] == "FY2627"  # the year just ended, over
+    assert rebuilt["id"] == made["id"] and rebuilt["built_ms"] > made["built_ms"]
+    assert periods.span_for_job("fy", 20270404).key == "FY2627"
+    plan = schedule_for(rig.svc)
+    days = [d for d in (date(2027, 3, 31) + timedelta(days=n) for n in range(10))
+            if plan.due("fy", d) is not None]  # fmt: skip
+    assert days == [date(2027, FY_AT[0], FY_AT[1]), date(2027, FY_AGAIN_AT[0], FY_AGAIN_AT[1])]
+
+
 def test_each_job_has_its_own_switch(rig, book):  # noqa: F811
     def off(tx):
         s = {k: v for k, v in tx.settings().items() if k != "version"}

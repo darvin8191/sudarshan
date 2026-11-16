@@ -62,6 +62,19 @@ describe('the System page words', () => {
     expect(lineOf(check('certificate', 'failing', { hours: '31' }))?.detail).toBe(
       '31 hours left and not renewed.'
     )
+    // verify N6: no certificate is being judged, and the page says so, with the setting to add,
+    // before the two days are up (unread) and after (warning).
+    for (const level of ['unread', 'warning'] as const) {
+      const unknown = lineOf(check('certificate', level, { cause: 'no_name' }))?.detail
+      expect(unknown).toMatch(/^Not being checked: the watch does not know the app's address\./)
+      expect(unknown).toContain('SUDARSHAN_WATCH_CERT_HOST')
+      expect(lineOf(check('certificate', level, { cause: 'other_site' }))?.detail).toMatch(
+        /^Not being checked: the web server answers the app's address with another site's certificate\./
+      )
+    }
+    expect(lineOf(check('certificate', 'unread'))?.detail).toBe(
+      'Could not be read at the last look.'
+    )
     expect(lineOf(check('posture_locks', 'warning', { cause: 'locks' }))?.detail).toContain(
       'OPENALGO_MCP_READ_ONLY=1'
     )

@@ -63,6 +63,7 @@ import { formatPercent, formatPrice, formatRupees } from '@/sudarshan/dashboard/
 import { useNow } from '@/sudarshan/dashboard/hooks'
 import { LiveLine } from '@/sudarshan/dashboard/LiveLine'
 import { TREND_TEXT, TrendArrow } from '@/sudarshan/dashboard/Trend'
+import { RegimeChip, regimeInstrument } from '@/sudarshan/signals' // SUDARSHAN M13.4
 import { ticketProduct } from '@/sudarshan/ticket/productPref'
 import { BottomSheet } from '@/sudarshan/watchlist/BottomSheet'
 import { useOpenGuard } from '@/sudarshan/watchlist/openGuard'
@@ -120,6 +121,9 @@ import { SidewaysStrip } from './SidewaysStrip'
 import { StudyLegend } from './StudyLegend'
 import { StyleSheet } from './StyleSheet'
 import { TimeframeSheet } from './TimeframeSheet'
+// SUDARSHAN M14.8: a trade opened from its sheet, marked on the chart.
+import { TripNotice } from './TripNotice'
+import { tripIdOf, useTripMarkers } from './tripMarkers'
 import { useChartBooks, useChartLines } from './useChartLines'
 import { usePhoneSideways } from './usePhoneLayout'
 import { usePhoneSetSync } from './usePhoneSetSync' // SUDARSHAN M4.18
@@ -468,6 +472,17 @@ const ChartScreen = memo(function ChartScreen({
     owner?.setOverlays({ lines: drawn.lines })
   }, [owner, drawn.lines])
 
+  // SUDARSHAN M14.8: "See on chart" from a trade's sheet (?trip=<id>): its fills marked, its
+  // interval chosen from its length and the view on its entry; the saved timeframe is untouched.
+  const trip = useTripMarkers({
+    owner,
+    tripId: tripIdOf(location.search),
+    symbol,
+    exchange,
+    decimals: priceDp(info?.tickSize, 0),
+    setTimeframe,
+  })
+
   // Press and hold to read a candle; not while the drawing tools are out.
   useEffect(() => {
     const el = surface.current
@@ -730,6 +745,8 @@ const ChartScreen = memo(function ChartScreen({
             closesAt={closesAt}
             openInterest={hasOpenInterest(exchange) ? { prev: prevOi } : null}
           />
+          {/* SUDARSHAN M13.4: TRINETRA's regime of the charted index (nothing otherwise). */}
+          <RegimeChip instrument={regimeInstrument(symbol, exchange)} />
           {!quoteOnly && (
             <DepthStrip
               prices={prices}
@@ -789,7 +806,10 @@ const ChartScreen = memo(function ChartScreen({
         </>
       )}
 
+      {/* SUDARSHAN M14.8: why the trade is not shown as asked, until dismissed. */}
+      {trip.notice && <TripNotice text={trip.notice} onDismiss={trip.dismiss} />}
       <SyncNotice />
+
       <div
         ref={surface}
         className="relative min-h-0 flex-1 touch-none bg-card"

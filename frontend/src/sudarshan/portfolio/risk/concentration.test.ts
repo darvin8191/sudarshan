@@ -8,7 +8,15 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { RiskConcentration } from '../types'
-import { concentration, type Holding, holdingsOf, type RiskRow, TOP, two } from './concentration'
+import {
+  barFigure,
+  concentration,
+  type Holding,
+  holdingsOf,
+  type RiskRow,
+  TOP,
+  two,
+} from './concentration'
 
 interface Case {
   id: string
@@ -71,6 +79,17 @@ describe('the parts of the rule', () => {
       '100'
     )
     expect(exact.holdings.find((bar) => bar.label === 'A')?.over_limit).toBe(false)
+  })
+
+  it('a bar’s figure never reads across the limit, on either side (v0.14.0 verification L6)', () => {
+    // Old code showed 15.0% beside "Above your limit" for a 15.004% holding.
+    expect(barFigure('15.0040', '15')).toBe(15.1)
+    expect(barFigure('15.0000', '15')).toBe(15)
+    expect(barFigure('14.9600', '15.0000')).toBe(15)
+    expect(barFigure('12.3500', '12.36')).toBe(12.3)
+    expect(barFigure('12.3490', '12.34')).toBe(12.4)
+    expect(barFigure('22.5650', '15')).toBe(22.6)
+    expect(barFigure('0.0400', '15')).toBe(0)
   })
 
   it('lists five, and a sixth only when it is over its limit; a tie goes by name', () => {

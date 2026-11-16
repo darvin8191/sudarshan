@@ -256,5 +256,9 @@ def emergency(liquid_paise: int, monthly_expenses_paise: int | None, months_targ
     if not monthly_expenses_paise or monthly_expenses_paise < 0:
         return {"months": None, "target_months": months_target, "note": words.RISK_SET_EXPENSES}
     months = Fraction(max(0, liquid_paise), monthly_expenses_paise)
-    return {"months": _text(months), "target_months": months_target,
-            "note": words.risk_months(_text(months), months_target, months >= months_target)}  # fmt: skip
+    text, enough = _text(months), months >= months_target
+    if not enough and Fraction(text) >= months_target:
+        # Review L2: 5.999975 months is sent as 5.9999, never as the target it falls short of.
+        text = _text(Fraction(months_target) - Fraction(1, 10**PCT_DECIMALS))
+    return {"months": text, "target_months": months_target,
+            "note": words.risk_months(text, months_target, enough)}  # fmt: skip

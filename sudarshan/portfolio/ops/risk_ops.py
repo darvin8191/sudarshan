@@ -217,10 +217,18 @@ def report(views, tx: Tx, tab_id: int | None, now: int) -> dict[str, Any]:
         _liquid(tabs, lives), settings["monthly_expenses_paise"], settings["months_target"]
     )
     last = periods[-1].day if periods else None
+    typed = {
+        aid
+        for tab in asked
+        for aid in lives[tab["id"]].rows_by
+        if lives[tab["id"]].assets[aid]["kind"] == "manual"
+    }
     return {
         "tab_id": tab_id,
         "as_of_day": last or today,
         "basis": words.risk_basis(last) if last else words.SERIES_WAITING,
+        # What the figures leave out or soften, said beside them (review M4, L1).
+        "words": [words.RISK_OWN_TABS, *([words.risk_typed(len(typed))] if typed else [])],
         "risk": figures,
         # The inputs of ``concentration`` above, read in the same transaction: the phone prices
         # the rows from ticks newer than ``read_at`` and applies the same rule (risk.json).

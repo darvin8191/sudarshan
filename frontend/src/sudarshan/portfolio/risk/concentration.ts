@@ -58,12 +58,23 @@ function scaled(text: string): bigint {
   return BigInt(whole) * SCALE + BigInt(part.padEnd(PCT_DECIMALS, '0').slice(0, PCT_DECIMALS))
 }
 
+/** A figure of four decimals in hundredths, half up, its sign kept: "22.5650" -> 2257n. */
+function hundredthsOf(pctText: string): bigint {
+  const hundredths = roundDiv(scaled(pctText.replace('-', '')), 100n)
+  return pctText.startsWith('-') ? -hundredths : hundredths
+}
+
+/** Hundredths as a sentence says them; a whole number stays whole: 1500n -> "15". */
+function said(hundredths: bigint): string {
+  const sign = hundredths < 0n ? '-' : ''
+  const whole = hundredths < 0n ? -hundredths : hundredths
+  if (whole % 100n === 0n) return `${sign}${whole / 100n}`
+  return `${sign}${whole / 100n}.${String(whole % 100n).padStart(2, '0')}`
+}
+
 /** A figure of four decimals as a sentence says it: to two, half up; a whole one stays whole. */
 export function two(pctText: string): string {
-  const hundredths = roundDiv(scaled(pctText.replace('-', '')), 100n)
-  const sign = pctText.startsWith('-') && hundredths !== 0n ? '-' : ''
-  if (hundredths % 100n === 0n) return `${sign}${hundredths / 100n}`
-  return `${sign}${hundredths / 100n}.${String(hundredths % 100n).padStart(2, '0')}`
+  return said(hundredthsOf(pctText))
 }
 
 export function overWords(
@@ -73,7 +84,27 @@ export function overWords(
   sector: boolean
 ): string {
   const what = sector ? `The sector ${label}` : label
-  return `${what} is ${two(weightPct)}% of what is held here, above your ${two(limitPct)}% limit.`
+  // v0.14.0 review L2, as the service says it: a share only just above the limit never reads
+  // as the limit itself ("15.0040" against 15 is 15.01, never 15); others are half up as ever.
+  const limit = hundredthsOf(limitPct)
+  const shown = hundredthsOf(weightPct)
+  const weight = shown > limit ? shown : limit + 1n
+  return `${what} is ${said(weight)}% of what is held here, above your ${said(limit)}% limit.`
+}
+
+/**
+ * A bar's figure, to one decimal, that never reads across the limit (v0.14.0 verification L6):
+ * a share above it never shows the limit or less ("15.0040" against 15 shows 15.1), and one at or
+ * below it never shows more ("12.35" against 12.36 shows 12.3). Others are half up as ever.
+ */
+export function barFigure(weightPct: string, limitPct: string): number {
+  const weight = scaled(weightPct.replace('-', ''))
+  const limit = scaled(limitPct)
+  const tenth = SCALE / 10n
+  let tenths = roundDiv(weight, tenth)
+  if (weight > limit && tenths * tenth <= limit) tenths = limit / tenth + 1n
+  if (weight <= limit && tenths * tenth > limit) tenths = limit / tenth
+  return Number(tenths) / 10
 }
 
 export const untaggedWords = (weightPct: string): string =>

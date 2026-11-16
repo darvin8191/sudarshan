@@ -62,3 +62,24 @@ def _an_order_book_with_nothing_working(monkeypatch):
     import broker.upstox.api.order_api as upstox
 
     monkeypatch.setattr(upstox, "get_order_book", lambda auth: {"status": "success", "data": []})
+
+
+@pytest.fixture(autouse=True)
+def _books_that_show_the_asked_quantity_still_held(monkeypatch):
+    """A scalping or strategy close is sized from Upstox's positions and order book
+    (sudarshan/books/surface_exits.py, ``upstox_book``). Unless a test says otherwise, they show
+    500 lots of 65 still held on the side the close closes, nothing else working, and the order
+    book's statuses are whatever the test serves through ``surface_exits.upstox_statuses``; no
+    sizing refusal is remembered from the test before. The tests of the sizing itself
+    (test_books_surface_sizing.py) put the real reader back over a simulated Upstox.
+    """
+    from sudarshan.books import surface_exits
+
+    def book(auth_token, broker, exchange, symbol, product, side):
+        held = 32500 if str(side).upper() == "SELL" else -32500
+        return surface_exits.Book(
+            statuses=surface_exits.upstox_statuses(auth_token, broker), held=held
+        )
+
+    monkeypatch.setattr(surface_exits, "upstox_book", book)
+    monkeypatch.setattr(surface_exits, "REFUSALS", surface_exits._Refusals())

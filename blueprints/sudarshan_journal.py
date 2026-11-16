@@ -15,8 +15,8 @@ Routes, all under /sudarshan/journal/api (design 7.3; the op names are the journ
     POST   /tags                  tag_create       GET    /settings          settings_get
     PATCH  /tags/<id>             tag_update       PUT    /settings          settings_set
     GET    /playbooks             playbooks_list   POST   /reconcile         reconcile_now
-    POST   /playbooks             playbook_create
-    PATCH  /playbooks/<id>        playbook_update
+    POST   /playbooks             playbook_create  GET    /charges/reconcile charges_reconcile
+    PATCH  /playbooks/<id>        playbook_update  GET    /charges/estimate  charges_estimate
 
 Each route is checked in this order: an OpenAlgo session (401), the owner himself (403 for any
 other session, reading included), CSRF on writes (the app's CSRFProtect), and a limiter on the
@@ -117,6 +117,11 @@ _ANALYTICS_QUERY = (
     ("mode", "str"), ("strategy", "str"), ("tag", "int"), ("playbook", "int"), ("from", "int"),
     ("to", "int"), ("expiry", "str"), ("period", "str"),
 )  # fmt: skip
+#: The order as the ticket holds it (B6): read only, nothing is placed or checked.
+_ESTIMATE_QUERY = (
+    ("exchange", "str"), ("symbol", "str"), ("action", "str"), ("quantity", "int"),
+    ("price_u", "int"), ("product", "str"),
+)  # fmt: skip
 OPS = (
     OpSpec("state", "GET", "/state", "read"),
     OpSpec("trips", "GET", "/trips", "read", _TRIPS_QUERY),
@@ -137,6 +142,7 @@ OPS = (
     OpSpec("settings_set", "PUT", "/settings", "write"),
     OpSpec("reconcile_now", "POST", "/reconcile", "reconcile"),
     OpSpec("charges_reconcile", "GET", "/charges/reconcile", "read", (("fy", "int"),)),
+    OpSpec("charges_estimate", "GET", "/charges/estimate", "read", _ESTIMATE_QUERY),
 )
 
 #: The codes the page acts on. ``not_confirmed``, ``unauthorized``, ``forbidden`` and

@@ -2,7 +2,8 @@
 // never changes a lot by itself: each waits here with the service's sentence on the owner's own
 // quantity, a button for the other way round, and one tap to apply it or to leave the lots as
 // they are. For one of his own tabs the card shows the entry ready to add, with what the entry
-// form's dry run says of it, and writes nothing until he adds it; then it confirms.
+// form's dry run says of it, and writes nothing until he adds it; then it confirms. The same
+// choices change a decision from the Calendar's row (`Choices` with its `version`).
 import { ArrowLeftRight, Check } from 'lucide-react'
 import { useRef, useState } from 'react'
 import { decideCorporateAction, portfolioCall } from '../api'
@@ -10,21 +11,32 @@ import { Box } from '../sheets/EntryFields'
 import { PRIMARY, ProblemLine, SECONDARY } from '../sheets/TabFields'
 import { useSend } from '../sheets/useSend'
 import { dayText } from '../tab/format'
-import type { CaEvent, CaExpected, TabInfo } from '../types'
+import type { CaDecided, CaEvent, CaExpected, CaKind, TabInfo } from '../types'
 import { entriesFor, typedRatio, UPSTOX_SCOPE, wayOf } from './confirm'
 import { KINDS } from './format'
 
 const CARD = 'rounded-[1.125rem] border bg-card px-4 py-3.5 shadow-[var(--shadow-card)]'
 
-function Holding({
-  event,
+/**
+ * One holding's choices on a bonus or a split: the reading on its quantity, the other way round,
+ * apply, or leave the lots as they are. With `version` it changes a decision already made
+ * (v0.14.0 verification M3), and the choice that is `current` is not offered again.
+ */
+export function Choices({
+  kind: eventKind,
+  eventId,
   expected,
   tab,
+  version,
+  current,
   onDone,
 }: {
-  event: CaEvent
+  kind: CaKind
+  eventId: number
   expected: CaExpected
   tab: TabInfo | undefined
+  version?: number
+  current?: Pick<CaDecided, 'state' | 'ratio_num' | 'ratio_den'>
   onDone: () => void
 }) {
   const [other, setOther] = useState(false)
@@ -33,12 +45,17 @@ function Holding({
   const [preview, setPreview] = useState<string[] | null>(null)
   const send = useSend()
   const requestId = useRef(crypto.randomUUID())
-  const kind = KINDS[event.kind].word.toLowerCase()
+  const kind = KINDS[eventKind].word.toLowerCase()
   const ofTab = expected.scope !== UPSTOX_SCOPE
   const where = ofTab ? (expected.name ?? 'your tab') : 'Upstox'
   const way = wayOf(expected, other)
   const ratio = way ?? typedRatio(num, den)
-  const entries = ofTab ? entriesFor(event.kind, expected, other) : null
+  const entries = ofTab ? entriesFor(eventKind, expected, other) : null
+  const appliedNow =
+    current?.state === 'applied' &&
+    ratio !== null &&
+    current.ratio_num === ratio.ratio_num &&
+    current.ratio_den === ratio.ratio_den
   const flip = () => {
     setOther((was) => !was)
     setPreview(null)
@@ -46,12 +63,12 @@ function Holding({
   }
   const decide = (state: 'applied' | 'dismissed') =>
     decideCorporateAction({
-      id: event.id,
+      id: eventId,
       scope: expected.scope,
       state,
       ratio_num: ratio?.ratio_num ?? 1,
       ratio_den: ratio?.ratio_den ?? 1,
-      request_id: requestId.current,
+      ...(version === undefined ? { request_id: requestId.current } : { version }),
     })
   const run = async (work: () => Promise<unknown>) => {
     if (await send.run(work)) onDone()
@@ -91,6 +108,11 @@ function Holding({
     <li className="flex flex-col gap-2 border-t border-[color:var(--divider)] pt-2.5">
       <h4 className="text-sm font-bold">{where}</h4>
       <p className="text-[0.9375rem]">{way?.words ?? expected.words}</p>
+      {expected.held_from === 'trades' && (
+        <p className="text-xs text-[color:var(--text-tertiary)]">
+          Quantity from Upstox’s trade history: no holdings record reaches this date.
+        </p>
+      )}
       {way?.fraction && (
         <p className="text-sm text-[color:var(--warning-text)]">
           Part of a share is left over. Enter what the company paid for it in the tab.
@@ -99,13 +121,13 @@ function Holding({
       {way === null && !ofTab && (
         <div className="grid grid-cols-2 gap-2">
           <Box
-            label={event.kind === 'bonus' ? 'New shares' : 'Shares after'}
+            label={eventKind === 'bonus' ? 'New shares' : 'Shares after'}
             value={num}
             onChange={setNum}
             inputMode="numeric"
           />
           <Box
-            label={event.kind === 'bonus' ? 'For every held' : 'For every held before'}
+            label={eventKind === 'bonus' ? 'For every held' : 'For every held before'}
             value={den}
             onChange={setDen}
             inputMode="numeric"
@@ -136,6 +158,10 @@ function Holding({
           <Check aria-hidden="true" className="size-4" />
           Add to {where} and confirm
         </button>
+      ) : appliedNow ? (
+        <p className="text-sm text-[color:var(--text-secondary)]">
+          This is the reading applied now.
+        </p>
       ) : (
         <button
           type="button"
@@ -153,14 +179,16 @@ function Holding({
           {other ? 'Back to the first reading' : 'The other way round'}
         </button>
       )}
-      <button
-        type="button"
-        className={SECONDARY}
-        disabled={send.pending}
-        onClick={() => run(() => decide('dismissed'))}
-      >
-        Leave my lots as they are
-      </button>
+      {current?.state !== 'dismissed' && (
+        <button
+          type="button"
+          className={SECONDARY}
+          disabled={send.pending}
+          onClick={() => run(() => decide('dismissed'))}
+        >
+          Leave my lots as they are
+        </button>
+      )}
     </li>
   )
 }
@@ -198,9 +226,10 @@ export function ToConfirm({
             </div>
             <ul className="flex flex-col gap-2.5">
               {(event.expected ?? []).map((expected) => (
-                <Holding
+                <Choices
                   key={expected.scope}
-                  event={event}
+                  kind={event.kind}
+                  eventId={event.id}
                   expected={expected}
                   tab={tabs.find((t) => t.id === expected.tab_id)}
                   onDone={onDone}

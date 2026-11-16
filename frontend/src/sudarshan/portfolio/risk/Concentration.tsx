@@ -17,7 +17,7 @@ import { pctNumber } from '../Signed'
 import { dayText } from '../tab/format'
 import type { HoldingRow, RiskConcentration, RiskReport, RiskWeight } from '../types'
 import { useTabLive } from '../useTabLive'
-import { concentration, holdingsOf } from './concentration'
+import { barFigure, concentration, holdingsOf } from './concentration'
 
 const CARD = 'rounded-[1.125rem] border bg-card px-4 py-3.5 shadow-[var(--shadow-card)]'
 const LABEL = 'text-xs font-semibold text-muted-foreground'
@@ -39,19 +39,29 @@ const NOTHING = {
 export const readWords = (at: number): string =>
   `${clockOfInstant(at)} on ${dayText(dayOfInstant(at))}`
 
-function Bars({ title, rows }: { title: string; rows: readonly RiskWeight[] }) {
+function Bars({
+  title,
+  rows,
+  limitPct,
+}: {
+  title: string
+  rows: readonly RiskWeight[]
+  /** The limit the figures never read across; null for an answer that does not carry it. */
+  limitPct: string | null
+}) {
   if (rows.length === 0) return null
   return (
     <div className="flex flex-col gap-1.5">
       <h3 className="text-sm font-semibold">{title}</h3>
       {rows.map((row) => {
         const weight = pctNumber(row.weight_pct) ?? 0
+        const figure = limitPct === null ? weight : barFigure(row.weight_pct, limitPct)
         return (
           <div key={row.label} className="flex flex-col gap-0.5">
             <div className="flex items-baseline justify-between gap-3 text-sm">
               <span className="min-w-0 break-words">{row.label}</span>
               <span className="shrink-0 font-semibold whitespace-nowrap">
-                {formatAmount(weight, 1)}%
+                {formatAmount(figure, 1)}%
               </span>
             </div>
             <div className="h-2 rounded-full bg-[color:var(--divider)]">
@@ -112,8 +122,16 @@ export function Concentration({
       {shown.holdings.length === 0 && shown.sectors.length === 0 && (
         <p className="text-sm text-[color:var(--text-secondary)]">Nothing is held here yet.</p>
       )}
-      <Bars title="Largest holdings" rows={shown.holdings} />
-      <Bars title="Largest sectors" rows={shown.sectors} />
+      <Bars
+        title="Largest holdings"
+        rows={shown.holdings}
+        limitPct={source?.max_holding_pct ?? null}
+      />
+      <Bars
+        title="Largest sectors"
+        rows={shown.sectors}
+        limitPct={source?.max_sector_pct ?? null}
+      />
       {shown.flags.map((flag) => (
         <p key={flag} className="flex gap-2 text-sm font-semibold text-[color:var(--warning-text)]">
           <CircleAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0" />

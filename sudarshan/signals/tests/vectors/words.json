@@ -1,0 +1,609 @@
+{
+ "freshness": [
+  {
+   "name": "never heard",
+   "last": null,
+   "now_ms": 1794800712250,
+   "expect": {
+    "status": "never",
+    "words": "TRINETRA is not connected yet. Publishing has not been switched on in TRINETRA.",
+    "published_ms": null,
+    "fresh_until_ms": null,
+    "colour": false,
+    "clock_ok": true,
+    "changes_at_ms": null
+   }
+  },
+  {
+   "name": "just published",
+   "last": {
+    "published_ms": 1794800712250,
+    "fresh_until_ms": 1794801072250,
+    "stopping": false,
+    "clock_ok": true,
+    "clock_diff_ms": 0
+   },
+   "now_ms": 1794800712250,
+   "expect": {
+    "status": "fresh",
+    "words": "TRINETRA · updated 09:15:12",
+    "published_ms": 1794800712250,
+    "fresh_until_ms": 1794801072250,
+    "colour": true,
+    "clock_ok": true,
+    "changes_at_ms": 1794801072250
+   }
+  },
+  {
+   "name": "a second before going stale",
+   "last": {
+    "published_ms": 1794800712250,
+    "fresh_until_ms": 1794801072250,
+    "stopping": false,
+    "clock_ok": true,
+    "clock_diff_ms": 0
+   },
+   "now_ms": 1794801072249,
+   "expect": {
+    "status": "fresh",
+    "words": "TRINETRA · updated 09:15:12",
+    "published_ms": 1794800712250,
+    "fresh_until_ms": 1794801072250,
+    "colour": true,
+    "clock_ok": true,
+    "changes_at_ms": 1794801072250
+   }
+  },
+  {
+   "name": "going stale",
+   "last": {
+    "published_ms": 1794800712250,
+    "fresh_until_ms": 1794801072250,
+    "stopping": false,
+    "clock_ok": true,
+    "clock_diff_ms": 0
+   },
+   "now_ms": 1794801072250,
+   "expect": {
+    "status": "stale",
+    "words": "TRINETRA has not published since 09:15. This is its last reading, 6 minutes old.",
+    "published_ms": 1794800712250,
+    "fresh_until_ms": 1794801072250,
+    "colour": true,
+    "clock_ok": true,
+    "changes_at_ms": 1794801132250
+   }
+  },
+  {
+   "name": "stale, 29 min 59 s old",
+   "last": {
+    "published_ms": 1794800712250,
+    "fresh_until_ms": 1794801072250,
+    "stopping": false,
+    "clock_ok": true,
+    "clock_diff_ms": 0
+   },
+   "now_ms": 1794802511250,
+   "expect": {
+    "status": "stale",
+    "words": "TRINETRA has not published since 09:15. This is its last reading, 29 minutes old.",
+    "published_ms": 1794800712250,
+    "fresh_until_ms": 1794801072250,
+    "colour": true,
+    "clock_ok": true,
+    "changes_at_ms": 1794802512250
+   }
+  },
+  {
+   "name": "stale, 30 min old: no colour",
+   "last": {
+    "published_ms": 1794800712250,
+    "fresh_until_ms": 1794801072250,
+    "stopping": false,
+    "clock_ok": true,
+    "clock_diff_ms": 0
+   },
+   "now_ms": 1794802512250,
+   "expect": {
+    "status": "stale",
+    "words": "TRINETRA has not published since 09:15. This is its last reading, 30 minutes old.",
+    "published_ms": 1794800712250,
+    "fresh_until_ms": 1794801072250,
+    "colour": false,
+    "clock_ok": true,
+    "changes_at_ms": 1794802572250
+   }
+  },
+  {
+   "name": "stale, 119 min old",
+   "last": {
+    "published_ms": 1794800712250,
+    "fresh_until_ms": 1794801072250,
+    "stopping": false,
+    "clock_ok": true,
+    "clock_diff_ms": 0
+   },
+   "now_ms": 1794807882250,
+   "expect": {
+    "status": "stale",
+    "words": "TRINETRA has not published since 09:15. This is its last reading, 119 minutes old.",
+    "published_ms": 1794800712250,
+    "fresh_until_ms": 1794801072250,
+    "colour": false,
+    "clock_ok": true,
+    "changes_at_ms": 1794807912250
+   }
+  },
+  {
+   "name": "stale, 2 h old",
+   "last": {
+    "published_ms": 1794800712250,
+    "fresh_until_ms": 1794801072250,
+    "stopping": false,
+    "clock_ok": true,
+    "clock_diff_ms": 0
+   },
+   "now_ms": 1794807912250,
+   "expect": {
+    "status": "stale",
+    "words": "TRINETRA has not published since 09:15. This is its last reading, 2 hours old.",
+    "published_ms": 1794800712250,
+    "fresh_until_ms": 1794801072250,
+    "colour": false,
+    "clock_ok": true,
+    "changes_at_ms": 1794811512250
+   }
+  },
+  {
+   "name": "stale, next day",
+   "last": {
+    "published_ms": 1794800712250,
+    "fresh_until_ms": 1794801072250,
+    "stopping": false,
+    "clock_ok": true,
+    "clock_diff_ms": 0
+   },
+   "now_ms": 1794890712250,
+   "expect": {
+    "status": "stale",
+    "words": "TRINETRA has not published since 16 Nov 09:15. This is its last reading, 25 hours old.",
+    "published_ms": 1794800712250,
+    "fresh_until_ms": 1794801072250,
+    "colour": false,
+    "clock_ok": true,
+    "changes_at_ms": 1794894312250
+   }
+  },
+  {
+   "name": "stale, 3 days",
+   "last": {
+    "published_ms": 1794800712250,
+    "fresh_until_ms": 1794801072250,
+    "stopping": false,
+    "clock_ok": true,
+    "clock_diff_ms": 0
+   },
+   "now_ms": 1795059912250,
+   "expect": {
+    "status": "stale",
+    "words": "TRINETRA has not published since 16 Nov 09:15. This is its last reading, 3 days old.",
+    "published_ms": 1794800712250,
+    "fresh_until_ms": 1794801072250,
+    "colour": false,
+    "clock_ok": true,
+    "changes_at_ms": 1795146312250
+   }
+  },
+  {
+   "name": "stopped, a minute after",
+   "last": {
+    "published_ms": 1794800712250,
+    "fresh_until_ms": 1794801072250,
+    "stopping": true,
+    "clock_ok": true,
+    "clock_diff_ms": 0
+   },
+   "now_ms": 1794800772250,
+   "expect": {
+    "status": "stopped",
+    "words": "TRINETRA was stopped by its operators at 09:15.",
+    "published_ms": 1794800712250,
+    "fresh_until_ms": 1794801072250,
+    "colour": true,
+    "clock_ok": true,
+    "changes_at_ms": 1794802512250
+   }
+  },
+  {
+   "name": "stopped, 40 min after",
+   "last": {
+    "published_ms": 1794800712250,
+    "fresh_until_ms": 1794801072250,
+    "stopping": true,
+    "clock_ok": true,
+    "clock_diff_ms": 0
+   },
+   "now_ms": 1794803112250,
+   "expect": {
+    "status": "stopped",
+    "words": "TRINETRA was stopped by its operators at 09:15.",
+    "published_ms": 1794800712250,
+    "fresh_until_ms": 1794801072250,
+    "colour": false,
+    "clock_ok": true,
+    "changes_at_ms": 1794853800000
+   }
+  },
+  {
+   "name": "stopped, next day",
+   "last": {
+    "published_ms": 1794800712250,
+    "fresh_until_ms": 1794801072250,
+    "stopping": true,
+    "clock_ok": true,
+    "clock_diff_ms": 0
+   },
+   "now_ms": 1794887112250,
+   "expect": {
+    "status": "stopped",
+    "words": "TRINETRA was stopped by its operators at 16 Nov 09:15.",
+    "published_ms": 1794800712250,
+    "fresh_until_ms": 1794801072250,
+    "colour": false,
+    "clock_ok": true,
+    "changes_at_ms": null
+   }
+  },
+  {
+   "name": "clock ahead, fresh by the time written",
+   "last": {
+    "published_ms": 1794800112250,
+    "fresh_until_ms": 1794800472250,
+    "stopping": false,
+    "clock_ok": false,
+    "clock_diff_ms": 600000
+   },
+   "now_ms": 1794800412250,
+   "expect": {
+    "status": "fresh",
+    "words": "TRINETRA · updated 09:05:12",
+    "published_ms": 1794800112250,
+    "fresh_until_ms": 1794800472250,
+    "colour": true,
+    "clock_ok": false,
+    "changes_at_ms": 1794800472250
+   }
+  },
+  {
+   "name": "clock ahead, stale",
+   "last": {
+    "published_ms": 1794800112250,
+    "fresh_until_ms": 1794800472250,
+    "stopping": false,
+    "clock_ok": false,
+    "clock_diff_ms": 600000
+   },
+   "now_ms": 1794800472250,
+   "expect": {
+    "status": "stale",
+    "words": "TRINETRA has not published since 09:05. This is its last reading, 6 minutes old.",
+    "published_ms": 1794800112250,
+    "fresh_until_ms": 1794800472250,
+    "colour": true,
+    "clock_ok": false,
+    "changes_at_ms": 1794800532250
+   }
+  },
+  {
+   "name": "published before midnight, fresh",
+   "last": {
+    "published_ms": 1794853680000,
+    "fresh_until_ms": 1794857400000,
+    "stopping": false,
+    "clock_ok": true,
+    "clock_diff_ms": 0
+   },
+   "now_ms": 1794853740000,
+   "expect": {
+    "status": "fresh",
+    "words": "TRINETRA · updated 23:58:00",
+    "published_ms": 1794853680000,
+    "fresh_until_ms": 1794857400000,
+    "colour": true,
+    "clock_ok": true,
+    "changes_at_ms": 1794853800000
+   }
+  },
+  {
+   "name": "published before midnight, after it",
+   "last": {
+    "published_ms": 1794853680000,
+    "fresh_until_ms": 1794857400000,
+    "stopping": false,
+    "clock_ok": true,
+    "clock_diff_ms": 0
+   },
+   "now_ms": 1794853860000,
+   "expect": {
+    "status": "fresh",
+    "words": "TRINETRA · updated 16 Nov 23:58:00",
+    "published_ms": 1794853680000,
+    "fresh_until_ms": 1794857400000,
+    "colour": true,
+    "clock_ok": true,
+    "changes_at_ms": 1794857400000
+   }
+  }
+ ],
+ "notes": [
+  {
+   "name": "nothing to say",
+   "last": {
+    "published_ms": 1794800712250,
+    "fresh_until_ms": 1794801072250,
+    "stopping": false,
+    "clock_ok": true,
+    "clock_diff_ms": 0
+   },
+   "refused_today": 0,
+   "gaps_today": 0,
+   "newer_format": false,
+   "expect": []
+  },
+  {
+   "name": "three refused, two gaps, a newer format",
+   "last": {
+    "published_ms": 1794800712250,
+    "fresh_until_ms": 1794801072250,
+    "stopping": false,
+    "clock_ok": true,
+    "clock_diff_ms": 0
+   },
+   "refused_today": 3,
+   "gaps_today": 2,
+   "newer_format": true,
+   "expect": [
+    {
+     "key": "refused",
+     "count": 3,
+     "words": "3 files from TRINETRA could not be read today. Its last good reading is shown."
+    },
+    {
+     "key": "newer_format",
+     "count": null,
+     "words": "TRINETRA publishes a newer format than this release reads. Update SUDARSHAN."
+    },
+    {
+     "key": "gaps",
+     "count": 2,
+     "words": "2 documents from TRINETRA did not arrive today."
+    }
+   ]
+  },
+  {
+   "name": "one refused, nothing ever accepted",
+   "last": null,
+   "refused_today": 1,
+   "gaps_today": 0,
+   "newer_format": false,
+   "expect": [
+    {
+     "key": "refused",
+     "count": 1,
+     "words": "1 file from TRINETRA could not be read today. None of its readings can be shown yet."
+    }
+   ]
+  },
+  {
+   "name": "one gap",
+   "last": {
+    "published_ms": 1794800712250,
+    "fresh_until_ms": 1794801072250,
+    "stopping": false,
+    "clock_ok": true,
+    "clock_diff_ms": 0
+   },
+   "refused_today": 0,
+   "gaps_today": 1,
+   "newer_format": false,
+   "expect": [
+    {
+     "key": "gaps",
+     "count": 1,
+     "words": "1 document from TRINETRA did not arrive today."
+    }
+   ]
+  },
+  {
+   "name": "clocks differ by ten minutes",
+   "last": {
+    "published_ms": 1794800112250,
+    "fresh_until_ms": 1794800472250,
+    "stopping": false,
+    "clock_ok": false,
+    "clock_diff_ms": 600000
+   },
+   "refused_today": 0,
+   "gaps_today": 0,
+   "newer_format": false,
+   "expect": [
+    {
+     "key": "clock",
+     "count": null,
+     "words": "TRINETRA's clock and the server's differ by 10 minutes; its times may be off."
+    }
+   ]
+  },
+  {
+   "name": "clocks differ by a day and more",
+   "last": {
+    "published_ms": 1794800712250,
+    "fresh_until_ms": 1794801072250,
+    "stopping": false,
+    "clock_ok": false,
+    "clock_diff_ms": -104400000
+   },
+   "refused_today": 0,
+   "gaps_today": 0,
+   "newer_format": false,
+   "expect": [
+    {
+     "key": "clock",
+     "count": null,
+     "words": "TRINETRA's clock and the server's differ by 29 hours; its times may be off."
+    }
+   ]
+  }
+ ],
+ "ages": [
+  {
+   "delta_ms": 0,
+   "expect": "under a minute"
+  },
+  {
+   "delta_ms": 59999,
+   "expect": "under a minute"
+  },
+  {
+   "delta_ms": 60000,
+   "expect": "1 minute"
+  },
+  {
+   "delta_ms": 119999,
+   "expect": "1 minute"
+  },
+  {
+   "delta_ms": 120000,
+   "expect": "2 minutes"
+  },
+  {
+   "delta_ms": 7199999,
+   "expect": "119 minutes"
+  },
+  {
+   "delta_ms": 7200000,
+   "expect": "2 hours"
+  },
+  {
+   "delta_ms": 172799999,
+   "expect": "47 hours"
+  },
+  {
+   "delta_ms": 172800000,
+   "expect": "2 days"
+  },
+  {
+   "delta_ms": 777600001,
+   "expect": "9 days"
+  }
+ ],
+ "times": [
+  {
+   "ms": 1794800712250,
+   "now_ms": 1794800712250,
+   "seconds": false,
+   "expect": "09:15"
+  },
+  {
+   "ms": 1794800712250,
+   "now_ms": 1794800712250,
+   "seconds": true,
+   "expect": "09:15:12"
+  },
+  {
+   "ms": 1794800712250,
+   "now_ms": 1794887112250,
+   "seconds": false,
+   "expect": "16 Nov 09:15"
+  },
+  {
+   "ms": 1794800712250,
+   "now_ms": 1794887112250,
+   "seconds": true,
+   "expect": "16 Nov 09:15:12"
+  },
+  {
+   "ms": 1794853800000,
+   "now_ms": 1794853800000,
+   "seconds": false,
+   "expect": "00:00"
+  },
+  {
+   "ms": 1794853799999,
+   "now_ms": 1794853800000,
+   "seconds": false,
+   "expect": "16 Nov 23:59"
+  }
+ ],
+ "why": [
+  {
+   "why": {
+    "en": "E.",
+    "hi": "H.",
+    "gu": "G."
+   },
+   "lang": "gu",
+   "expect": [
+    "G.",
+    "gu",
+    ""
+   ]
+  },
+  {
+   "why": {
+    "en": "E.",
+    "hi": "H."
+   },
+   "lang": "gu",
+   "expect": [
+    "E.",
+    "en",
+    "TRINETRA did not write this in Gujarati; shown in English."
+   ]
+  },
+  {
+   "why": {
+    "hi": "H."
+   },
+   "lang": "en",
+   "expect": [
+    "H.",
+    "hi",
+    "TRINETRA did not write this in English; shown in Hinglish."
+   ]
+  },
+  {
+   "why": {
+    "gu": "G."
+   },
+   "lang": "hi",
+   "expect": [
+    "G.",
+    "gu",
+    "TRINETRA did not write this in Hinglish; shown in Gujarati."
+   ]
+  },
+  {
+   "why": {},
+   "lang": "en",
+   "expect": [
+    null,
+    null,
+    "TRINETRA sent no explanation for this reading."
+   ]
+  },
+  {
+   "why": {
+    "en": null,
+    "hi": "",
+    "gu": "G."
+   },
+   "lang": "en",
+   "expect": [
+    "G.",
+    "gu",
+    "TRINETRA did not write this in English; shown in Gujarati."
+   ]
+  }
+ ]
+}

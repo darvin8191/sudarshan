@@ -19,10 +19,21 @@ vi.mock('../api', async (importOriginal) => ({
 
 import { createQueryClient } from '@/app/providers'
 import { PortfolioError } from '../api'
-import type { CaEvent, CaExpected, CalendarReport, CalendarRow, TabInfo } from '../types'
-import { CALENDAR_OFF, CalendarView, NO_FUTURE } from './CalendarView'
+import type {
+  CaDecided,
+  CaEvent,
+  CaExpected,
+  CaList,
+  CalendarReport,
+  CalendarRow,
+  LotCheck,
+  LotCheckRow,
+  TabInfo,
+} from '../types'
+import { CALENDAR_OFF, CalendarView, leftOutWords, NO_FUTURE } from './CalendarView'
 import { entriesFor, typedRatio, wayOf } from './confirm'
 import { factText, holdText } from './format'
+import { fixLabel } from './LotCheckCard'
 
 const TAB = { id: 4, name: 'Long term', version: 11 } as TabInfo
 const UPSTOX: CaExpected = {
@@ -77,12 +88,14 @@ const row = (more: Partial<CalendarRow>): CalendarRow => ({
   held_qty_u: 300_000_000,
   expected_paise: 1_65_000,
   checked_at: Date.UTC(2026, 10, 12, 10),
+  decided: null,
   ...more,
 })
 const CALENDAR: CalendarReport = {
   from: 20260816,
   to: 20270513,
   listed_future: true,
+  read_status: { state: 'ok', night: 20261113, words: null },
   calendar: [
     row({}),
     row({
@@ -105,10 +118,27 @@ const CALENDAR: CalendarReport = {
   ],
 }
 
+const NO_CHECK: LotCheck = {
+  state: 'ok',
+  account_id: 1,
+  day: 20261113,
+  words: null,
+  rows: [],
+  unrecorded_count: 0,
+}
+const LIST: CaList = {
+  events: [],
+  to_confirm: [],
+  left_out_count: 0,
+  reads: [],
+  read_status: { state: 'ok', night: 20261113, words: null },
+  lot_check: NO_CHECK,
+}
+
 function serve(over: Record<string, unknown> = {}) {
   const answers: Record<string, unknown> = {
     calendar: CALENDAR,
-    ca_list: { events: [], to_confirm: [BONUS], reads: [] },
+    ca_list: { ...LIST, to_confirm: [BONUS] },
     ca_decide: { id: 1 },
     activity_create: {
       activity: null,
@@ -268,7 +298,7 @@ describe('to confirm', () => {
 
 describe('the calendar', () => {
   it('lists what is coming and the last 90 days by month, each with kind, fact, holding and check', async () => {
-    serve({ ca_list: { events: [], to_confirm: [], reads: [] } })
+    serve({ ca_list: LIST })
     show()
     const coming = within(await screen.findByRole('region', { name: 'Coming up' }))
     expect(coming.getByText('December 2026')).toBeTruthy()
@@ -287,7 +317,7 @@ describe('the calendar', () => {
 
   it('says so when Upstox lists no future events, and when nothing is listed at all', async () => {
     serve({
-      ca_list: { events: [], to_confirm: [], reads: [] },
+      ca_list: LIST,
       calendar: { ...CALENDAR, listed_future: false, calendar: [] },
     })
     show()
@@ -300,5 +330,272 @@ describe('the calendar', () => {
     show()
     expect(await screen.findByText(CALENDAR_OFF)).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull()
+  })
+})
+
+// v0.14.0 review H2, H3, M1, M3: what the list says before it was read, after a failed night, of
+// what it leaves out, and when the lots and the holdings differ.
+describe('before the first read, and after a failed night', () => {
+  const EMPTY = { ...CALENDAR, listed_future: false, calendar: [] }
+
+  it('says when the first read is: no banner that Upstox lists nothing, no empty-list sentence', async () => {
+    const words =
+      "SUDARSHAN reads Upstox's corporate actions for the first time tonight after 23:45. Nothing is listed until then."
+    serve({
+      calendar: { ...EMPTY, read_status: { state: 'never', night: null, words } },
+      ca_list: { ...LIST, read_status: { state: 'never', night: null, words } },
+    })
+    show()
+    expect(await screen.findByText(words)).toBeInTheDocument()
+    expect(screen.queryByText(NO_FUTURE)).toBeNull()
+    expect(screen.queryByText(/No dividend, bonus, split or rights issue is listed/)).toBeNull()
+  })
+
+  it('says the list could not be read last night, in the service’s words, never "has not listed"', async () => {
+    const words =
+      "Upstox's list could not be read last night. Upstox did not allow SUDARSHAN to read its list of events with the read-only token. SUDARSHAN tries again tonight after 23:45."
+    serve({ calendar: { ...EMPTY, read_status: { state: 'failed', night: 20261113, words } } })
+    show()
+    expect(await screen.findByText(words)).toBeInTheDocument()
+    expect(screen.queryByText(NO_FUTURE)).toBeNull()
+    expect(screen.queryByText(/is listed for what you hold/)).toBeNull()
+  })
+
+  it('keeps the banner and the empty sentence for a list that was read and is empty', async () => {
+    serve({ calendar: EMPTY, ca_list: LIST })
+    show()
+    expect(await screen.findByText(NO_FUTURE)).toBeInTheDocument()
+    expect(
+      screen.getByText(/No dividend, bonus, split or rights issue is listed/)
+    ).toBeInTheDocument()
+  })
+})
+
+describe('what is left out, and the check', () => {
+  it('counts the bonuses and splits it cannot ask about yet, and says why', async () => {
+    expect(leftOutWords(1)).toBe(
+      '1 earlier bonus or split is not asked about yet: SUDARSHAN cannot tell what you held on its date until Upstox’s share trades are read in full.'
+    )
+    serve({ ca_list: { ...LIST, left_out_count: 3 } })
+    show()
+    expect(
+      await screen.findByText(
+        '3 earlier bonuses or splits are not asked about yet: SUDARSHAN cannot tell what you held on their dates until Upstox’s share trades are read in full.'
+      )
+    ).toBeInTheDocument()
+  })
+
+  it('says where a quantity comes from when no holdings record reaches the date', async () => {
+    serve({
+      ca_list: {
+        ...LIST,
+        to_confirm: [{ ...BONUS, expected: [{ ...UPSTOX, held_from: 'trades' }] }],
+      },
+    })
+    show()
+    expect(
+      await screen.findByText(
+        'Quantity from Upstox’s trade history: no holdings record reaches this date.'
+      )
+    ).toBeInTheDocument()
+  })
+
+  const TWICE: LotCheckRow = {
+    isin: 'INE000A01010',
+    name: 'Alpha Industries',
+    held_qty_u: 500_000_000,
+    lots_qty_u: 2_500_000_000,
+    ex_day: 20260928,
+    words:
+      'Alpha Industries: after the split of 28 Sep 2026 the lots say 2,500 and Upstox holds 500. Without it the lots would say 500: it may have been counted twice.',
+    fix: { event_id: 41, version: 1, state: 'dismissed', ratio_num: null, ratio_den: null },
+  }
+  const differ = (rows: LotCheckRow[]) => ({
+    ca_list: {
+      ...LIST,
+      lot_check: { ...NO_CHECK, day: 20261021, words: 'Lots and holdings differ.', rows },
+    },
+  })
+
+  it('shows a Check card naming the share and both figures when lots and holdings differ', async () => {
+    serve(differ([TWICE]))
+    show()
+    const card = await screen.findByRole('region', { name: 'Check' })
+    expect(within(card).getByText(TWICE.words)).toBeInTheDocument()
+    expect(
+      within(card).getByText(/differ for 1 share, compared at the close of 21 Oct 2026/)
+    ).toBeInTheDocument()
+  })
+
+  it('offers the one change the service proved, sends it from the decision’s version, then reads again', async () => {
+    const user = userEvent.setup()
+    serve(differ([TWICE]))
+    show()
+    const card = await screen.findByRole('region', { name: 'Check' })
+    const before = calls('ca_list').length
+    await user.click(within(card).getByRole('button', { name: 'Take this one out of my lots' }))
+    await waitFor(() => expect(calls('ca_decide')).toHaveLength(1))
+    expect(calls('ca_decide')[0]).toEqual({
+      id: 41,
+      scope: 'upstox',
+      state: 'dismissed',
+      ratio_num: 1,
+      ratio_den: 1,
+      version: 1,
+    })
+    await waitFor(() => expect(calls('ca_list').length).toBeGreaterThan(before))
+  })
+
+  it('turns a wrong-way split round, and offers nothing where no change makes the two agree', async () => {
+    const user = userEvent.setup()
+    const wrong: LotCheckRow = {
+      ...TWICE,
+      isin: 'INE000B01011',
+      fix: { event_id: 42, version: 3, state: 'applied', ratio_num: 5, ratio_den: 1 },
+    }
+    const none: LotCheckRow = { ...TWICE, isin: 'INE000C01012', name: 'Gamma Ltd', fix: null }
+    expect(fixLabel(wrong)).toBe('Apply it the other way round')
+    expect(fixLabel(none)).toBeNull()
+    serve(differ([wrong, none]))
+    show()
+    const card = await screen.findByRole('region', { name: 'Check' })
+    expect(within(card).getAllByRole('button')).toHaveLength(1)
+    await user.click(within(card).getByRole('button', { name: 'Apply it the other way round' }))
+    await waitFor(() => expect(calls('ca_decide')).toHaveLength(1))
+    expect(calls('ca_decide')[0]).toMatchObject({
+      id: 42,
+      state: 'applied',
+      ratio_num: 5,
+      ratio_den: 1,
+      version: 3,
+    })
+  })
+
+  it('says the service’s sentence when the change is refused, and reads nothing again', async () => {
+    const user = userEvent.setup()
+    serve({
+      ...differ([TWICE]),
+      ca_decide: new PortfolioError({
+        code: 'version_conflict',
+        message: 'This was changed elsewhere. Reload the page.',
+        entryId: null,
+      }),
+    })
+    show()
+    const card = await screen.findByRole('region', { name: 'Check' })
+    await user.click(within(card).getByRole('button', { name: 'Take this one out of my lots' }))
+    expect((await within(card).findByRole('alert')).textContent).toBe(
+      'This was changed elsewhere. Reload the page.'
+    )
+  })
+
+  it('shows no Check card while the lots and the holdings agree', async () => {
+    serve({ ca_list: LIST })
+    show()
+    await screen.findByText('Coming up')
+    expect(screen.queryByRole('region', { name: 'Check' })).toBeNull()
+  })
+})
+
+// v0.14.0 verification M3: a decision is changed from the event's row, from its version, with
+// To confirm's own choices; the one applied now is not offered again.
+describe('changing what was confirmed', () => {
+  const SPLIT_WORDS = 'Split 1:5: you held 100, they become 500. Is that right?'
+  const decided = (more: Partial<CaDecided> = {}): CaDecided => ({
+    event_id: 7,
+    version: 3,
+    state: 'applied',
+    ratio_num: 1,
+    ratio_den: 5,
+    words: 'You applied this split as every 5 made 1: 100 became 20.',
+    expected: {
+      scope: 'upstox',
+      held_qty_u: 100_000_000,
+      ratio_num: 5,
+      ratio_den: 1,
+      words: SPLIT_WORDS,
+      after_qty_u: 500_000_000,
+      held_from: 'record',
+      other: {
+        ratio_num: 1,
+        ratio_den: 5,
+        words: 'Split 1:5: you held 100, they become 20. Is that right?',
+        after_qty_u: 20_000_000,
+      },
+    },
+    ...more,
+  })
+  const split = (more: Partial<CaDecided> = {}) =>
+    row({
+      event_id: 8,
+      ex_day: 20261009,
+      kind: 'split',
+      amount_u: null,
+      ratio_num: 1,
+      ratio_den: 5,
+      expected_paise: null,
+      decided: decided(more),
+    })
+
+  it('says what was confirmed and opens To confirm’s choices, sending the other one from the version', async () => {
+    const user = userEvent.setup()
+    serve({ ca_list: LIST, calendar: { ...CALENDAR, calendar: [split()] } })
+    show()
+    const past = within(await screen.findByRole('region', { name: 'The last 90 days' }))
+    expect(past.getByText(decided().words)).toBeInTheDocument()
+    await user.click(past.getByRole('button', { name: 'Change what I confirmed' }))
+    expect(past.getByText(SPLIT_WORDS)).toBeInTheDocument()
+    await user.click(past.getByRole('button', { name: 'Yes, apply this split' }))
+    await waitFor(() => expect(calls('ca_decide')).toHaveLength(1))
+    expect(calls('ca_decide')[0]).toEqual({
+      id: 7,
+      scope: 'upstox',
+      state: 'applied',
+      ratio_num: 5,
+      ratio_den: 1,
+      version: 3,
+    })
+    for (const button of past.getAllByRole('button')) expect(button.className).toContain('min-h-12')
+  })
+
+  it('does not offer the reading applied now, or leaving the lots as they are when that is what stands', async () => {
+    const user = userEvent.setup()
+    serve({ ca_list: LIST, calendar: { ...CALENDAR, calendar: [split()] } })
+    show()
+    const past = within(await screen.findByRole('region', { name: 'The last 90 days' }))
+    await user.click(past.getByRole('button', { name: 'Change what I confirmed' }))
+    await user.click(past.getByRole('button', { name: 'The other way round' }))
+    expect(past.getByText('This is the reading applied now.')).toBeInTheDocument()
+    expect(past.queryByRole('button', { name: 'Yes, apply this split' })).toBeNull()
+    await user.click(past.getByRole('button', { name: 'Leave my lots as they are' }))
+    await waitFor(() => expect(calls('ca_decide')[0]).toMatchObject({ state: 'dismissed' }))
+    expect(calls('ca_decide')[0].version).toBe(3)
+  })
+
+  it('offers putting back a split left out of the lots, and closes again untouched', async () => {
+    const user = userEvent.setup()
+    const left = split({
+      state: 'dismissed',
+      ratio_num: null,
+      ratio_den: null,
+      words: 'You left your lots as they are for this split.',
+    })
+    serve({ ca_list: LIST, calendar: { ...CALENDAR, calendar: [left] } })
+    show()
+    const past = within(await screen.findByRole('region', { name: 'The last 90 days' }))
+    expect(past.getByText('You left your lots as they are for this split.')).toBeInTheDocument()
+    await user.click(past.getByRole('button', { name: 'Change what I confirmed' }))
+    expect(past.getByRole('button', { name: 'Yes, apply this split' })).toBeInTheDocument()
+    expect(past.queryByRole('button', { name: 'Leave my lots as they are' })).toBeNull()
+    await user.click(past.getByRole('button', { name: 'Keep it as it is' }))
+    expect(past.queryByRole('button', { name: 'Yes, apply this split' })).toBeNull()
+    expect(calls('ca_decide')).toHaveLength(0)
+  })
+
+  it('shows nothing to change on a row nothing was confirmed for', async () => {
+    serve({ ca_list: LIST })
+    show()
+    await screen.findByText('Coming up')
+    expect(screen.queryByRole('button', { name: 'Change what I confirmed' })).toBeNull()
   })
 })

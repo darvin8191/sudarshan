@@ -172,11 +172,21 @@ vi.mock('./phoneChart', () => ({
       this.ys = ys
       for (const listener of this.heard) listener()
     }
+    /** SUDARSHAN M14.8: what a trade opened from its sheet asks of the host. */
+    onLoaded = vi.fn(() => () => {})
+    barTimes = vi.fn(() => [] as number[])
+    showBars = vi.fn()
     constructor(opts: unknown) {
       this.opts = opts
       fakes.charts.push(this as never)
     }
   },
+}))
+// SUDARSHAN M14.8: the journal's answer for a trade opened from its sheet.
+const journal = vi.hoisted(() => ({ call: vi.fn() }))
+vi.mock('@/sudarshan/journal/api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/sudarshan/journal/api')>()),
+  journalCall: (...args: unknown[]) => journal.call(...args),
 }))
 vi.mock('@/api/trading', () => ({
   tradingApi: {
@@ -1663,5 +1673,61 @@ describe('drawing on the phone chart (C7)', () => {
     } finally {
       held.spy.mockRestore()
     }
+  })
+})
+
+describe('a trade opened from its sheet (M14.8)', () => {
+  beforeEach(() => {
+    journal.call.mockReset()
+  })
+  const at = (h: number, m: number) => Date.UTC(2026, 9, 20, h, m) - 19_800_000
+  const trade = {
+    id: 7,
+    symbol: 'SBIN',
+    exchange: 'NSE',
+    opened_ms: at(10, 2),
+    closed_ms: at(10, 41),
+    legs: [],
+  }
+
+  it("opens at the trade's interval, keeps the trade through a sheet, and saves no timeframe", async () => {
+    journal.call.mockResolvedValue({ enabled: true, data: trade })
+    await opened('/chart/NSE/SBIN?trip=7')
+    await waitFor(() => expect(chart().load).toHaveBeenLastCalledWith('SBIN', 'NSE', '1m'))
+    expect(journal.call).toHaveBeenCalledTimes(1)
+    expect(journal.call.mock.calls[0].slice(0, 2)).toEqual(['trip_get', { id: 7 }])
+    expect(chart().onLoaded).toHaveBeenCalled()
+    expect(localStorage.getItem('sudarshan-chart-interval')).toBeNull()
+    const buy = await screen.findByRole('button', { name: 'BUY' })
+    await waitFor(() => expect(buy).toBeEnabled())
+    await userEvent.click(buy)
+    expect(screen.getByLabelText('Location')).toHaveTextContent('/chart/NSE/SBIN?trip=7')
+    await userEvent.click(screen.getByRole('button', { name: 'Phone back' }))
+    expect(screen.queryByRole('dialog', { name: 'Order ticket' })).toBeNull()
+    expect(journal.call).toHaveBeenCalledTimes(1)
+  })
+
+  it('says why the trade is not marked, and the note goes on a tap', async () => {
+    journal.call.mockResolvedValue({
+      enabled: false,
+      data: null,
+      message: 'The journal is switched off on the server.',
+    })
+    await opened('/chart/NSE/SBIN?trip=7')
+    const note = await screen.findByTestId('trip-notice')
+    expect(note).toHaveTextContent(
+      'The trade’s markers could not be shown. The journal is switched off on the server.'
+    )
+    expect(chart().load).toHaveBeenLastCalledWith('SBIN', 'NSE', '5m')
+    const dismiss = screen.getByRole('button', { name: 'Dismiss this note' })
+    expect(dismiss.className).toContain('size-12')
+    await userEvent.click(dismiss)
+    expect(screen.queryByTestId('trip-notice')).toBeNull()
+  })
+
+  it('reads no trade for a chart opened without one', async () => {
+    await opened('/chart/NSE/SBIN')
+    expect(journal.call).not.toHaveBeenCalled()
+    expect(chart().onLoaded).not.toHaveBeenCalled()
   })
 })

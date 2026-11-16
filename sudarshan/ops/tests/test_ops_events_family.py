@@ -78,8 +78,10 @@ def test_the_spool_paths_and_the_notice_desks_default():
         events.BACKUP_SPOOL,
         events.FAMILY_SPOOL,
         events.WATCH_SPOOL,  # M19.5: the watch's own file, in its unit's state folder
+        events.SIGNALS_SPOOL,  # M13 T9: the TRINETRA view's notices, in its unit's state folder
     )
     assert str(events.WATCH_SPOOL) == "/var/lib/sudarshan-watch/events.jsonl"
+    assert str(events.SIGNALS_SPOOL) == "/var/lib/sudarshan-signals/events.jsonl"
     assert events.JOURNAL_SPOOL not in events.DEFAULT_SPOOLS  # the report desk reads it, not this
 
 

@@ -15,13 +15,16 @@ is 0, never below it. Otherwise the amount is ``need x i / (g - 1)``, paid at ea
 the target. ``months`` is the whole months from the as-of day to the target day, and at least 1: a
 goal due this month, or overdue, asks for all of what is missing at once.
 
-The arithmetic is Decimal at 40 digits in a context of its own; the answer is whole paise.
+The arithmetic is Decimal at 40 digits in a context of its own; the answer is whole paise. The
+last step (keeping thirty decimals, then rounding up) has a context wide enough for any amount, so
+a target with too many zeros gives a large amount, never "not a number".
 """
 
 from __future__ import annotations
 
 from decimal import ROUND_CEILING, ROUND_HALF_EVEN, Context, Decimal, localcontext
 
+from .days import add_days
 from .kinds import PAISE_PER_RUPEE
 from .money import pct
 
@@ -32,15 +35,24 @@ _CONTEXT = Context(prec=40, rounding=ROUND_HALF_EVEN, Emin=-999999, Emax=999999,
 #: Thirty of the forty digits are kept before rounding up, so that an amount that is a whole
 #: number of rupees is not pushed a rupee higher by the last digits of a root.
 _KEPT = Decimal(1).scaleb(-30)
+#: Wide enough to keep thirty decimals of any amount the 40-digit sums can give. In the 40-digit
+#: context an amount of Rs 1,000 crore or more could not keep them, and came out as NaN.
+_WIDE = Context(prec=120, rounding=ROUND_HALF_EVEN, Emin=-999999, Emax=999999, traps=[])
+
+
+def _last_day(day: int) -> bool:
+    """Whether a day (YYYYMMDD) is the last of its month."""
+    return add_days(day, 1) % 100 == 1
 
 
 def months_left(as_of_day: int, target_day: int) -> int:
     """Whole months from ``as_of_day`` to ``target_day`` (days as YYYYMMDD): 14 Nov 2026 to
-    31 Mar 2031 is 52; a month is whole on the same day of the month. 0 when less than a month is
-    left, or none."""
+    31 Mar 2031 is 52; a month is whole on the same day of the month, or on the last day of a
+    shorter month (31 Dec to 30 Jun is 6, 29 Feb 2028 to 28 Feb 2029 is 12). 0 when less than a
+    month is left, or none."""
     months = (target_day // 10000 - as_of_day // 10000) * 12
     months += target_day // 100 % 100 - as_of_day // 100 % 100
-    if target_day % 100 < as_of_day % 100:
+    if target_day % 100 < as_of_day % 100 and not _last_day(target_day):
         months -= 1
     return max(0, months)
 
@@ -58,8 +70,9 @@ def required_monthly(target_paise: int, value_now_paise: int, months: int, rate_
         if need <= 0:
             return 0
         each = need * monthly / (growth - 1) if monthly else need / months
-        rupees = (each / PAISE_PER_RUPEE).quantize(_KEPT).to_integral_value(ROUND_CEILING)
-        return int(rupees) * PAISE_PER_RUPEE
+        rupees = each / PAISE_PER_RUPEE
+    kept = rupees.quantize(_KEPT, context=_WIDE)
+    return int(kept.to_integral_value(ROUND_CEILING, context=_WIDE)) * PAISE_PER_RUPEE
 
 
 def figures(

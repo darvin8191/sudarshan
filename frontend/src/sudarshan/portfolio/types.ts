@@ -65,6 +65,7 @@ export const IMPORT_MAX_FILE_BYTES = 900_000
 export const IMPORT_MAX_ROWS = 5_000
 export const LAYOUT_VERSION = 1
 export const GOALS_MAX = 20
+export const GOAL_TARGET_MAX_PAISE = 1_000_000_000_000
 export const STAT_DAYS = 60
 export const STAT_MIN_DAYS = 20
 export const CALENDAR_PAST_DAYS = 90
@@ -1847,6 +1848,8 @@ export interface TaxGain {
   allocated: boolean
   /** A buyback's regime on its day; null for a sale. */
   buyback: 'exempt' | 'dividend_and_loss' | 'capital_gain' | null
+  /** The share's lots and the Upstox holdings differ: check this line before relying on it. */
+  to_check: boolean
   dividend_paise: Paise
 }
 
@@ -1994,6 +1997,11 @@ export interface TaxDividends {
   total_paise: Paise
   tds_expected_paise: Paise | null
   unconfirmed_count: number
+  /** The dividends the paper could not count, each with its company, date and why. */
+  uncounted: { isin: string; name: string | null; ex_day: Day; words: string }[]
+  uncounted_count: number
+  /** Said when Upstox's list was never read, or the last night failed; else null. */
+  note: string | null
 }
 
 export interface TaxCharges {
@@ -2008,6 +2016,8 @@ export interface TaxSaleOutside {
   instrument: string
   /** What the ISIN is (an ETF, a REIT, a gold bond), where a record names it; else null or absent. */
   name?: string | null
+  /** What the owner is told of it (add the ISIN; ETF units are not computed), where there is something. */
+  why?: string | null
   day: Day
   amount_paise: Paise
 }
@@ -2038,6 +2048,8 @@ export interface TaxPack {
   not_computed: string[]
   not_computed_sales: TaxSaleOutside[]
   notes: string[]
+  /** The tax lots against the Upstox holdings; a share that differs has its sales marked. */
+  lot_check: LotCheck
 }
 
 export interface TaxInputsArgs {
@@ -2206,6 +2218,8 @@ export interface CaWay {
   after_qty_u?: QtyU
   /** Part of a share is left over. */
   fraction?: boolean
+  /** The part of a share a bonus leaves out of the whole shares it brings; 0 when none. */
+  left_qty_u?: QtyU
 }
 
 /** One holding's side of an event that waits for the owner's tap (design p7 6.3). */
@@ -2223,6 +2237,9 @@ export interface CaExpected {
   added_qty_u?: QtyU
   after_qty_u?: QtyU
   fraction?: boolean
+  left_qty_u?: QtyU
+  /** Where the quantity is from: the closing record, or the lots of the trade history. */
+  held_from?: 'record' | 'trades'
   /** "The other way round"; null when the ratio reads one way only. */
   other: CaWay | null
   /** A tab only: the entries for the entry form's dry run ("Add this to <tab>"). */
@@ -2269,16 +2286,74 @@ export interface CaEvent {
 
 export interface CaRead {
   isin: string
+  /** When it was last read; for `failed` (never read), when it was last tried. */
   read_at: EpochMs | null
   state: string
   note: string | null
+}
+
+/**
+ * Whether Upstox's list of events was read at all. An empty calendar or a year with no dividend
+ * means "nothing listed" only under `ok`; under `never` and `failed` the phone shows `words`.
+ */
+export interface CaReadStatus {
+  /** `never`: no night has run yet. `failed`: the last night read nothing of what was due. */
+  state: 'never' | 'ok' | 'failed'
+  /** The night the last run belongs to; null before the first. */
+  night: Day | null
+  /** "The first read of Upstox's events is tonight after 23:45."; null under `ok`. */
+  words: string | null
 }
 
 export interface CaList {
   events: CaEvent[]
   /** Bonuses and splits waiting for the owner's one tap. */
   to_confirm: CaEvent[]
+  /** Bonuses and splits not asked about: no record shows the share held on their day. */
+  left_out_count: number
   reads: CaRead[]
+  read_status: CaReadStatus
+  lot_check: LotCheck
+}
+
+/** One share whose tax lots and Upstox holdings differ (design p7 4.3). */
+export interface LotCheckRow {
+  isin: string
+  name: string | null
+  /** What the Upstox account held at the close of the day compared. */
+  held_qty_u: QtyU
+  /** What the tax lots hold on that day. */
+  lots_qty_u: QtyU
+  /** The ex-date of the last bonus or split applied for the share; null when none was. */
+  ex_day: Day | null
+  /** "ABC: after the split of 9 Oct 2026 the lots say 2,500 and Upstox holds 500. ..." */
+  words: string
+  /** The change to an applied bonus or split that makes the two agree; null when none does. */
+  fix: LotCheckFix | null
+}
+
+/** A decision changed from its version (`ca_decide` on the event it was made on). */
+export interface LotCheckFix {
+  event_id: number
+  version: number
+  /** `applied`: the other reading; `dismissed`: the lots as they were before it. */
+  state: 'applied' | 'dismissed'
+  ratio_num: number | null
+  ratio_den: number | null
+}
+
+/** The tax lots against the Upstox holdings, after any applied action and every night. */
+export interface LotCheck {
+  /** `waiting`: it cannot compare yet, and `words` says for what. `none`: nothing to compare. */
+  state: 'ok' | 'waiting' | 'none'
+  account_id: number | null
+  /** The closing record compared with. */
+  day: Day | null
+  /** The headline when shares differ, or what the check waits for; null when all agree. */
+  words: string | null
+  rows: LotCheckRow[]
+  /** Shares held with no purchase in the records at all: not listed, only counted. */
+  unrecorded_count: number
 }
 
 export interface CaDecideArgs extends Targets {
@@ -2310,6 +2385,11 @@ export interface DividendLine {
   credited_paise: Paise | null
   tds_paise: Paise | null
   credited_day: Day | null
+  /**
+   * The closing record the quantity is from, when it is not the one of the trading day before
+   * the ex-date (a night's record was missed); null otherwise.
+   */
+  record_day: Day | null
   version: number
 }
 
@@ -2323,11 +2403,20 @@ export interface DividendPayer {
   tds_expected_paise: Paise | null
 }
 
+/** A dividend that could not be counted, with why; confirmed like any other line. */
+export interface DividendUncounted extends DividendLine {
+  /** "No holdings record from before this date, so the amount is not known; ..." */
+  words: string
+}
+
 export interface DividendsYear {
   payers: DividendPayer[]
   total_paise: Paise
   tds_expected_paise: Paise
   unconfirmed_count: number
+  /** Listed apart and in no total: never silently dropped. */
+  uncounted: DividendUncounted[]
+  uncounted_count: number
 }
 
 export interface DividendsReport {
@@ -2335,6 +2424,7 @@ export interface DividendsReport {
   member_id: number
   as_of: EpochMs
   dividends: DividendsYear
+  read_status: CaReadStatus
 }
 
 export interface DividendSetArgs extends Targets, Versioned {
@@ -2347,6 +2437,25 @@ export interface DividendSetArgs extends Targets, Versioned {
 export interface CalendarArgs {
   from?: Day
   to?: Day
+}
+
+/**
+ * What the owner confirmed for the Upstox account on a bonus or a split (v0.14.0 verification
+ * M3): "Change what I confirmed" on the event's row sends `ca_decide` from `version`, with the
+ * choices To confirm offered, in the same words.
+ */
+export interface CaDecided {
+  /** The wording the decision was made on: the id `ca_decide` changes it from. */
+  event_id: number
+  version: number
+  state: CaDecision
+  /** The reading applied; null when the lots were left as they are. */
+  ratio_num: number | null
+  ratio_den: number | null
+  /** "You applied this split as every 1 made 5: 100 became 500." */
+  words: string
+  /** The choices again, on the quantity held the day before, as To confirm put them. */
+  expected: CaExpected
 }
 
 export interface CalendarRow {
@@ -2362,6 +2471,8 @@ export interface CalendarRow {
   held_qty_u: QtyU | null
   expected_paise: Paise | null
   checked_at: EpochMs | null
+  /** A bonus or a split: what was confirmed for the Upstox account; null while nothing is. */
+  decided: CaDecided | null
 }
 
 export interface CalendarReport {
@@ -2370,6 +2481,7 @@ export interface CalendarReport {
   /** Upstox lists events to come; false: only those already announced. */
   listed_future: boolean
   calendar: CalendarRow[]
+  read_status: CaReadStatus
 }
 
 // ---- phase P7: risk, settings and goals (M7.32, M7.34) ----
@@ -2445,6 +2557,8 @@ export interface RiskReport {
   as_of_day: Day
   /** "On closing values up to 13 Nov 2026." */
   basis: string
+  /** What the figures leave out or soften: "Risk is worked out on your own tabs; ...". */
+  words: string[]
   risk: RiskFigures
   live: RiskLive
 }
@@ -2480,6 +2594,10 @@ export interface Goal {
   required_monthly_paise: Paise
   months_left: number
   on_track: boolean
+  /** Linked tabs that have since been deleted: each counts as nothing until it is unlinked. */
+  gone_tab_ids: number[]
+  /** The sentence of a goal whose figures could not be worked out; its figures are then zeros. */
+  problem: string | null
 }
 
 export interface GoalsList {
