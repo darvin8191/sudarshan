@@ -119,6 +119,11 @@ The cost runs (the chart's frame timing, and the options screen's main-thread ta
 over 50 ms) are tripwires for the owner's phone, measured on a quiet machine and a production
 build. Where `CI` is set they skip and say so; the options ones also skip on the dev server.
 
+The dashboard's app bar checks "before the fonts arrive" refuse the app's own fonts, so they
+measure the machine's `system-ui` face. CI gives it Roboto, as an Android phone has. Elsewhere the
+result depends on that machine's fonts: with Ubuntu's DejaVu Sans, SUDARSHAN overruns its room by
+under a pixel at 320 and 360 px, and those checks fail.
+
 ### In CI
 
 The `phone-specs` job of `.github/workflows/sudarshan-ci.yml` runs on every run of that workflow:

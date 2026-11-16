@@ -61,6 +61,24 @@ jobs:
       - run: npm ci
       - name: Chromium for the installed Playwright (headless only)
         run: npx playwright install --with-deps --only-shell chromium
+      # A page whose own fonts are refused falls back to system-ui, and the app bar's checks
+      # "before the fonts arrive" measure that face. On an Android phone it is Roboto. Ubuntu's,
+      # DejaVu Sans, is wider than any face a phone falls back to: with it SUDARSHAN overran its
+      # room by under a pixel at 320 and 360 px.
+      - name: Roboto for system-ui, as on an Android phone
+        run: |
+          sudo apt-get install -y -qq fonts-roboto
+          mkdir -p ~/.config/fontconfig
+          cat > ~/.config/fontconfig/fonts.conf <<'EOF'
+          <?xml version="1.0"?>
+          <!DOCTYPE fontconfig SYSTEM "urn:fontconfig:fonts.dtd">
+          <fontconfig>
+            <alias binding="strong"><family>system-ui</family><prefer><family>Roboto</family></prefer></alias>
+            <alias binding="strong"><family>ui-sans-serif</family><prefer><family>Roboto</family></prefer></alias>
+            <alias binding="strong"><family>sans-serif</family><prefer><family>Roboto</family></prefer></alias>
+          </fontconfig>
+          EOF
+          fc-match system-ui
       # The bundle only: the frontend job checks the types.
       - run: npx vite build
       - name: The phone specs (e2e/sd-*.spec.ts)
