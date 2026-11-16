@@ -294,6 +294,8 @@ RISK_OWN_TABS = "Risk is worked out on your own tabs; the Upstox portfolio is no
 #: cap sizes an asset can carry.
 MCAP_LABELS = {"large": "Large cap", "mid": "Mid cap", "small": "Small cap"}
 NO_SECTOR = "No sector set"
+#: A holding of the Upstox book the owner has not given a class in his own tabs (M7.15).
+NOT_CLASSIFIED = "Not classified"
 NO_CAP = "No cap size set"
 NO_TAG = "No tag"
 
