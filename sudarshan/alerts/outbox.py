@@ -13,8 +13,8 @@ service's own user (loopback.py).
 Pace: Telegram asks for about one message per second per chat, and OpenAlgo allows /notify 30
 times a minute per address. So: at least MIN_GAP_S between two messages and at most PER_MINUTE a
 minute, counted across every lane of the process by one Pacer (M10.5; the class is
-``sudarshan/common/pacer.py``, this module keeps the owner bot's lanes: orders, market, notices
-and reports, in that order of service). The market alerts lane
+``sudarshan/common/pacer.py``, this module keeps the owner bot's lanes: orders, market, signals,
+notices and reports, in that order of service). The market alerts lane
 (market/lane.py) takes at most MARKET_PER_MINUTE of those and no slot while order alerts wait,
 so the order lane always keeps at least PER_MINUTE - MARKET_PER_MINUTE a minute, and a fill
 during a market storm waits at most the burst pause plus one gap. Each lane sends from its own
@@ -85,12 +85,18 @@ DROP_REASONS = {
 REFUSED = "OpenAlgo refused the message"
 
 # Lanes of the Pacer, in their order of service.
-ORDERS, MARKET, NOTICES, REPORTS = "orders", "market", "notices", "reports"
+ORDERS, MARKET, SIGNALS, NOTICES, REPORTS = "orders", "market", "signals", "notices", "reports"
 #: Server notices (notices.py) and the journal's reports (a later change) share the 12 a minute
 #: that are left after the order lane's 8: a notice is at most 1 a minute, a report at most 4
 #: (two slots each: its text, then its file).
 NOTICES_PER_MINUTE = 1
 REPORTS_PER_MINUTE = 4
+#: TRINETRA's changes and its watch and act alerts (signals_desk.py, AL1/AL2, design 5.2) share
+#: the same 12: at most 4 a minute. The lane takes no slot while order alerts wait, so a fill
+#: waits at most one gap behind a signal, and none while a market message has waited longer than
+#: SIGNALS_YIELD_MARKET_S for one, so it never holds the market lane back past that.
+SIGNALS_PER_MINUTE = 4
+SIGNALS_YIELD_MARKET_S = 20.0
 #: A server notice ready to go that has waited this long for a slot takes the next one before a
 #: market alert (review L2): through a steady market storm the two would otherwise race for every
 #: slot of the shared twelve, with no bound on the notice's wait. It costs the market lane at most
@@ -108,7 +114,7 @@ def _notices_cap() -> int:
 
 
 class Pacer(_Pacer):
-    """The owner bot's send slots: the lanes orders, market, notices and reports (Y18).
+    """The owner bot's send slots: the lanes orders, market, signals, notices and reports (Y18).
 
     A ``sudarshan.common.pacer.Pacer`` with the owner bot's numbers, read from this module when
     asked so tests can shrink them. The order lane is served first and always keeps at least
@@ -116,7 +122,9 @@ class Pacer(_Pacer):
     the market lane takes at most MARKET_PER_MINUTE of it. The market lane and the notices lane
     take no slot while order alerts wait; the reports lane takes none while order alerts wait or
     the market lane has messages waiting. The market lane also takes none while a notice ready to
-    go has waited NOTICE_WAIT_S for a slot (the notice desk's LanePace says since when).
+    go has waited NOTICE_WAIT_S for a slot (the notice desk's LanePace says since when). The
+    signals lane takes at most SIGNALS_PER_MINUTE, none while order alerts wait, and none while a
+    market message has waited SIGNALS_YIELD_MARKET_S for a slot (the market lane says since when).
     """
 
     def __init__(self) -> None:
@@ -128,6 +136,12 @@ class Pacer(_Pacer):
                     lambda: MARKET_PER_MINUTE,
                     yields_to=(ORDERS,),
                     yields_after=((NOTICES, lambda: NOTICE_WAIT_S),),
+                ),
+                Lane(
+                    SIGNALS,
+                    lambda: SIGNALS_PER_MINUTE,
+                    yields_to=(ORDERS,),
+                    yields_after=((MARKET, lambda: SIGNALS_YIELD_MARKET_S),),
                 ),
                 Lane(NOTICES, _notices_cap, yields_to=(ORDERS,)),
                 Lane(REPORTS, lambda: REPORTS_PER_MINUTE, yields_to=(ORDERS, MARKET)),

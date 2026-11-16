@@ -133,9 +133,11 @@ class MarketLane:
         self._in_flight = 0
         self.throttle = Throttle()
         self.stats = {"messages": 0, "lines": 0, "dropped": 0, "failed": 0, "digests": 0}
-        # The reports lane takes no slot while this lane has messages waiting (Y18).
+        # The reports lane takes no slot while this lane has messages waiting (Y18); the signals
+        # lane none while one has waited outbox.SIGNALS_YIELD_MARKET_S since this lane last sent
+        # or its oldest fire arrived (AL1), so the Pacer is told since when as well.
         if hasattr(pacer, "set_waiting"):
-            pacer.set_waiting(MARKET, lambda: bool(self._pending))
+            pacer.set_waiting(MARKET, lambda: bool(self._pending), since=lambda: self._since)
 
     def __len__(self) -> int:
         return len(self._pending)

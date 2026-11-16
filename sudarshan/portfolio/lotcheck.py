@@ -23,9 +23,10 @@ share's sales "to check".
 * **The one fix it can prove.** Where an applied bonus or split explains a difference, and its
   other reading would make the lots and the holdings agree, the row carries that change
   (``fix``): the phone offers it as one tap through ``ca_decide``. Leaving it out is offered
-  only where another applied event of the same kind could be the same one counted twice:
-  holdings equal to the lots without it are otherwise what a late credit of the new shares, or
-  a sale not yet in Upstox's trade history, looks like, and the row says so.
+  only where another applied event could be the same one counted twice (the same kind and
+  ratio, ex-dates within ``TWICE_DAYS``): holdings equal to the lots without it are otherwise
+  what a late credit of the new shares, or a sale not yet in Upstox's trade history, looks
+  like, and the row says so.
 * **Only what the paper computes.** An ETF, a bond or a fund has no lots here and is passed over.
 """
 
@@ -65,6 +66,23 @@ UNCHECKED = (
     "SUDARSHAN could not check the tax lots against your Upstox holdings this time. The rest of "
     "this page is not affected, and the check runs again when you open it next."
 )
+#: The same sentences as a file says them (the kept Tax pack, a CSV): of the paper as it was
+#: made, never of a page to open again (v0.13.0 verification N3).
+FILE_WORDS = {
+    WAITING_TRADES: (
+        "The tax lots were not checked against the Upstox holdings for this paper: Upstox's "
+        "share trades of this year were not read in full when it was made."
+    ),
+    WAITING_RECORD: (
+        "The tax lots were not checked against the Upstox holdings for this paper: when it was "
+        "made, no closing record of the Upstox account was there from two days or more before "
+        "its trades were last read."
+    ),
+    UNCHECKED: (
+        "The tax lots could not be checked against the Upstox holdings when this paper was made. "
+        "The rest of the paper is not affected."
+    ),
+}
 
 
 class TaxLots:
@@ -174,15 +192,14 @@ def _actions(tx: Tx, up_to: int) -> tuple[dict, dict, dict, set[str], set[str]]:
     it (``core.groups``): per share, the one the owner applied last (its action as the tax core
     gets it, the decision and the event decided: the likelier mistake when one was applied twice),
     the last one still waiting, the last one he left out of the lots (dated as Upstox lists it
-    now), the shares with one in the ``core.EVE_REACH_DAYS`` up to the day, and the shares where
-    another event of the same kind as the last one applied is applied too (the only way one
-    event can be counted twice: Upstox listed it again, too far apart to be known as the
-    same)."""
+    now, with the event the decision was made on), the shares with one in the
+    ``core.EVE_REACH_DAYS`` up to the day, and the shares where the last one applied may have
+    been counted twice (``_twice``)."""
     decided = corpactions.decisions(tx)
     applied: dict[str, tuple[dict, dict, dict]] = {}
-    kinds: dict[str, list[str]] = {}
+    every: dict[str, list[tuple[dict, dict]]] = {}
     pending: dict[str, dict] = {}
-    left: dict[str, tuple[int, dict]] = {}
+    left: dict[str, tuple[int, dict, int]] = {}
     recent: set[str] = set()
     for group in core.groups(tx.ca_events(to_day=up_to, gone=True)):
         if any(0 <= days_between(e["ex_day"], up_to) < core.EVE_REACH_DAYS for e in group):
@@ -193,18 +210,36 @@ def _actions(tx: Tx, up_to: int) -> tuple[dict, dict, dict, set[str], set[str]]:
             event = next(e for e in group if e["id"] == row["event_id"])
             dated = live[-1] if live else event  # dated as accepted_actions dates it
             action = core.action_row(dated, row["ratio_num"], row["ratio_den"], True)
-            kinds.setdefault(event["isin"], []).append(event["kind"])
+            every.setdefault(event["isin"], []).append((action, row))
             if event["isin"] not in applied or applied[event["isin"]][1]["id"] < row["id"]:
                 applied[event["isin"]] = (action, row, event)
         elif row is not None:
             event = next(e for e in group if e["id"] == row["event_id"])
             if event["isin"] not in left or left[event["isin"]][0] < row["id"]:
-                left[event["isin"]] = (row["id"], live[-1] if live else event)
+                left[event["isin"]] = (row["id"], live[-1] if live else event, event["id"])
         elif live:
             pending[live[-1]["isin"]] = live[-1]
-    twice = {isin for isin, (_, _, event) in applied.items()
-             if kinds[isin].count(event["kind"]) > 1}  # fmt: skip
-    return applied, pending, {isin: e for isin, (_, e) in left.items()}, recent, twice
+    twice = {isin for isin, (action, row, _) in applied.items()
+             if _twice(action, row, every[isin])}  # fmt: skip
+    return applied, pending, {isin: (e, made) for isin, (_, e, made) in left.items()}, recent, twice
+
+
+#: Two applied events this near each other (days) may be one event Upstox listed twice.
+TWICE_DAYS = 60
+
+
+def _twice(action: dict, row: dict, every: list[tuple[dict, dict]]) -> bool:
+    """Whether another applied event of the share could be the same one as ``action``, counted
+    twice: the same kind, applied at the same ratio, with ex-dates within ``TWICE_DAYS``
+    (Upstox listed it again, too far apart to be known as the same). Two real bonuses of one
+    share months apart are not that (v0.14.0 verification N2)."""
+    return any(
+        other_row["id"] != row["id"]
+        and other["kind"] == action["kind"]
+        and other_row["ratio_num"] * row["ratio_den"] == row["ratio_num"] * other_row["ratio_den"]
+        and abs(days_between(other["ex_day"], action["ex_day"])) <= TWICE_DAYS
+        for other, other_row in every
+    )
 
 
 def _fix(lots: TaxLots, isin: str, day: int, held: int, applied: tuple,
@@ -261,6 +296,7 @@ def _purchase(lots: TaxLots) -> str:
 def _row(isin: str, name: str | None, held: int, lots: int, purchase: str, applied, pending,
          left, fix: dict | None, late: bool, insights: bool) -> dict[str, Any]:  # fmt: skip
     label, have, said = name or isin, quantity(held), quantity(lots)
+    review = None  # the decision whose reading the owner is sent to look at again
     if applied is not None:
         action = applied[0]
         what = f"the {action['kind'].lower()} of {day_words(action['ex_day'])}"
@@ -279,15 +315,20 @@ def _row(isin: str, name: str | None, held: int, lots: int, purchase: str, appli
         else:
             words += (" Neither reading of it makes the two agree: a purchase or a sale may "
                       "be missing from the records.")  # fmt: skip
+            if insights:  # v0.14.0 verification N1: whatever its day, it is listed there
+                words += (" You can see the reading you confirmed, and change it, under "
+                          "Confirmed in the Calendar.")  # fmt: skip
+                review = applied[2]["id"]
     elif pending is not None:
         words = (f"{label}: Upstox holds {have} and the lots say {said}. The {pending['kind']} "
                  f"of {day_words(pending['ex_day'])} waits for you under To confirm.")  # fmt: skip
     elif lots < held:
         cause = BONUS_CALENDAR if insights else BONUS_LATER
-        if insights and left is not None:  # v0.14.0 verification M3: the way back
-            cause = (f"You left the {left['kind']} of {day_words(left['ex_day'])} out of your "
-                     "lots: if the company did give it, change what you confirmed on its row "
-                     "in the Calendar.")  # fmt: skip
+        if insights and left is not None:  # v0.14.0 verification M3 and N1: the way back
+            event, review = left
+            cause = (f"You left the {event['kind']} of {day_words(event['ex_day'])} out of your "
+                     "lots: if the company did give it, change that under Confirmed in the "
+                     "Calendar.")  # fmt: skip
         words = f"{label}: Upstox holds {have} and the lots say {said}. {cause} {purchase}"
     else:
         words = (f"{label}: Upstox holds {have} and the lots say {said}. A sale, a transfer "
@@ -300,6 +341,7 @@ def _row(isin: str, name: str | None, held: int, lots: int, purchase: str, appli
         "ex_day": applied[0]["ex_day"] if applied is not None else None,
         "words": words,
         "fix": fix,
+        "event_id": review,
     }
 
 

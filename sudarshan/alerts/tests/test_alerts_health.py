@@ -38,7 +38,7 @@ from sudarshan.ops.release import DEPLOYED_TAG_FILE
 
 KEYS = {
     "service", "release", "version", "state", "detail", "window", "owner_ready", "owner_problem",
-    "stats", "telegram", "report_desk",
+    "stats", "telegram", "report_desk", "signals_desk",
 }  # fmt: skip
 DESK_KEYS = {"state", "on", "reason", "waiting", "last_delivery_ms"}
 

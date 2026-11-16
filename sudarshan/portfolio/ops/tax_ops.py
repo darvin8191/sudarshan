@@ -252,11 +252,12 @@ def _with_dividends(store, pack: dict, today: int, insights: bool) -> dict:
     return pack
 
 
-def _checked(pack: dict, check: dict) -> dict:
+def _checked(pack: dict, check: dict, file: bool = False) -> dict:
     """The tax lots against the Upstox holdings (``lotcheck.check``; design p7 4.3): the paper
     carries the check, says a difference first among its notes, and marks every sale of a share
     that differs "to check" (the Upstox account's only: the lots compared are its own). A check
-    that waits, or could not be made, says so among the notes, and marks nothing."""
+    that waits, or could not be made, says so among the notes, and marks nothing; in a ``file``
+    (the kept Tax pack, a CSV) in the words of a paper as it was made (``lotcheck.FILE_WORDS``)."""
     differ = {row["isin"] for row in check["rows"]}
     for key in SALE_LISTS:
         for row in pack["capital_gains"][key]:
@@ -265,7 +266,8 @@ def _checked(pack: dict, check: dict) -> dict:
     if check["rows"]:
         pack["notes"].insert(0, f"{check['words']} Sales of these shares are marked to check.")
     elif check["words"]:
-        pack["notes"].insert(0, check["words"])
+        words = check["words"]
+        pack["notes"].insert(0, lotcheck.FILE_WORDS.get(words, words) if file else words)
     return pack
 
 
@@ -312,13 +314,13 @@ def _named(pack: dict, names: dict[str, str]) -> dict:
 
 
 def _paper(store, member: int | None, fy: int, today: int, now: int, reading: bool,
-           insights: bool) -> dict:  # fmt: skip
+           insights: bool, file: bool = False) -> dict:  # fmt: skip
     def run(tx):
         years, names = _gather(tx, member, fy, today, now), _share_names(tx)
         return years, names, _lot_check(tx, years, names, today, now, insights)
 
     years, names, check = store.read(OWNER, run)
-    pack = _checked(_named(_chain(years, reading), names), check)
+    pack = _checked(_named(_chain(years, reading), names), check, file)
     return _with_dividends(store, pack, today, insights)
 
 
@@ -461,16 +463,21 @@ def _remove(tx, kind: str, row_id: int, version: int) -> dict:
 
 @op("tax_get")
 async def tax_get(ctx, message):
-    store, today = need(ctx), _today(ctx)
-    fy, member, now = _year(message, today), maybe_whole(message, "member"), ctx.clock()
-    reading, insights = _reading(ctx, fy), switch_on(ctx, "insights")
-    return await answer(lambda: _paper(store, member, fy, today, now, reading, insights))
+    return await _get(ctx, message, file=False)
 
 
 @op("tax_pack")
 async def tax_pack(ctx, message):
-    """The journal's FY pack asks for the same paper over its own purpose (owner scope)."""
-    return await tax_get(ctx, message)
+    """The journal's FY pack asks for the same paper over its own purpose (owner scope). It is
+    printed and kept whole in the archive, so it is said as a file says it."""
+    return await _get(ctx, message, file=True)
+
+
+async def _get(ctx, message, file: bool):
+    store, today = need(ctx), _today(ctx)
+    fy, member, now = _year(message, today), maybe_whole(message, "member"), ctx.clock()
+    reading, insights = _reading(ctx, fy), switch_on(ctx, "insights")
+    return await answer(lambda: _paper(store, member, fy, today, now, reading, insights, file))
 
 
 @op("tax_inputs")
@@ -706,7 +713,7 @@ def _paper_file(store, member, fy: int, schedule: str, today: int, now: int,
         return years, labels, _lot_check(tx, years, labels[1], today, now, insights)
 
     years, (who, names, accounts), check = store.read(OWNER, run)
-    pack = _with_dividends(store, _checked(_chain(years), check), today, insights)
+    pack = _with_dividends(store, _checked(_chain(years), check, file=True), today, insights)
     title = f"{HEADER} · Tax working paper · {pack['fy_label']} · {who}"
     if pack["running"]:
         title += f" · year to date, as of {day_text(pack['as_of_day'])}"
