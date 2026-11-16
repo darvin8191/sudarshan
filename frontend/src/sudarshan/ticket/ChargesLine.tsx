@@ -113,6 +113,7 @@ export function ChargesLine({ order, ltp }: { order: ChargesOrder; ltp: number |
   const [read, setRead] = useState<ChargesRead | null>(null)
   const [open, setOpen] = useState(false)
   const partsId = useId()
+  const partsBox = useRef<HTMLDivElement>(null)
 
   // The order as it stands, for the read that runs after the wait.
   const latest = useRef({ order, ltp, key })
@@ -129,6 +130,11 @@ export function ChargesLine({ order, ltp }: { order: ChargesOrder; ltp: number |
       alive.current = false
     }
   }, [])
+
+  // The line sits at the foot of the ticket's scrolling body: opened parts are brought into view.
+  useEffect(() => {
+    if (open) partsBox.current?.scrollIntoView?.({ block: 'nearest' })
+  }, [open])
 
   useEffect(() => {
     if (key === null) return
@@ -210,7 +216,7 @@ export function ChargesLine({ order, ltp }: { order: ChargesOrder; ltp: number |
         </p>
       )}
       {parts && open && shown && (
-        <div id={partsId} className="flex flex-col gap-1 px-3 pb-3">
+        <div id={partsId} ref={partsBox} className="flex flex-col gap-1 px-3 pb-3">
           <ul aria-label="Estimated charges, part by part" className="flex flex-col gap-1">
             {PARTS.map(([name, label]) => (
               <li key={name} className="flex items-baseline justify-between gap-3">

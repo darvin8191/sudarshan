@@ -46,6 +46,8 @@ export const NOT_SHOWN = 'The trade’s markers could not be shown.'
 export const FOCUS_MIN_BARS = 40
 export const FOCUS_MAX_BARS = 200
 export const FOCUS_ENTRY_BARS = 70
+/** Room kept beside the trade's marks, so an entry's price is never cut at the edge. */
+export const FOCUS_MARGIN_BARS = 8
 
 /** The address "See on chart" opens. */
 export function tripChartPath(trip: { id: number; symbol: string; exchange: string }): string {
@@ -176,35 +178,36 @@ export function tripMarkers(
 
 /**
  * The candles a trade's view shows, as indexes: the entry to the last mark with
- * a margin, at least `FOCUS_MIN_BARS` wide; a trade wider than `FOCUS_MAX_BARS`
- * opens on its entry at the chart's usual width. Kept within the candles held,
- * with a little room after the last.
+ * a margin, at least `FOCUS_MIN_BARS` wide where the candles held allow it; a
+ * trade wider than `FOCUS_MAX_BARS` opens on its entry at the chart's usual
+ * width. Kept to the candles held, with a little room after the last and before
+ * the first (where the chart reads older candles in), never padded wider.
  */
 export function focusRange(
   first: number,
   last: number,
   count: number
 ): { from: number; to: number } {
-  const span = Math.max(0, last - first)
-  const pad = Math.max(6, Math.ceil(span * 0.1))
+  const end = Math.max(first, last)
+  const pad = Math.max(FOCUS_MARGIN_BARS, Math.ceil((end - first) * 0.1))
   let from = first - pad
-  let to = Math.max(first, last) + pad
+  let to = end + pad
   if (to - from > FOCUS_MAX_BARS) {
-    from = first - 6
+    from = first - FOCUS_MARGIN_BARS
     to = from + FOCUS_ENTRY_BARS
   } else if (to - from < FOCUS_MIN_BARS) {
-    const middle = (first + Math.max(first, last)) / 2
-    from = Math.floor(middle - FOCUS_MIN_BARS / 2)
+    from = Math.floor((first + end) / 2 - FOCUS_MIN_BARS / 2)
     to = from + FOCUS_MIN_BARS
   }
   const room = count + 2
+  const floor = -FOCUS_MARGIN_BARS
   if (to > room) {
     from -= to - room
     to = room
   }
-  if (from < 0) {
-    to -= from
-    from = 0
+  if (from < floor) {
+    to = Math.min(room, to + floor - from)
+    from = floor
   }
   return { from, to }
 }

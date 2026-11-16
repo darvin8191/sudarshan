@@ -270,6 +270,18 @@ describe('the charges line', () => {
     expect(screen.queryByRole('list')).toBeNull()
   })
 
+  it('brings the opened parts into view, at the foot of the ticket', async () => {
+    // The test setup's stand-in for the browser's own (jsdom has none), shared by every test.
+    const seen = vi.mocked(HTMLElement.prototype.scrollIntoView)
+    seen.mockClear()
+    render(<ChargesLine order={ORDER} ltp={130.5} />)
+    await wait(CHARGES_SETTLE_MS)
+    expect(seen).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button'))
+    expect(seen).toHaveBeenCalledWith({ block: 'nearest' })
+    expect(seen.mock.contexts[0]).toBe(screen.getByRole('list').parentElement)
+  })
+
   it('gives the tap a target a thumb can hit', async () => {
     render(<ChargesLine order={ORDER} ltp={130.5} />)
     await wait(CHARGES_SETTLE_MS)

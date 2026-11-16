@@ -264,8 +264,10 @@ describe('the view (vectors)', () => {
       { from: 188, to: 332 },
     ],
     ['near the last candle it stops a little after it', 380, 395, 400, { from: 362, to: 402 }],
-    ['near the first candle it starts at it', 3, 10, 400, { from: 0, to: 40 }],
-    ['wider than the most it opens on the entry', 50, 300, 400, { from: 44, to: 44 + 70 }],
+    ['near the first candle it keeps a little room before it', 3, 10, 400, { from: -8, to: 32 }],
+    ['wider than the most it opens on the entry', 50, 300, 400, { from: 42, to: 42 + 70 }],
+    ['few candles: never padded wider than they are', 0, 0, 14, { from: -8, to: 16 }],
+    ['a trade that ends at the last candle keeps both ends', 330, 395, 400, { from: 321, to: 402 }],
   ])('%s', (_what, first, last, count, want) => {
     expect(focusRange(first, last, count)).toEqual(want)
   })
@@ -281,8 +283,10 @@ describe('the view (vectors)', () => {
       const { from, to } = focusRange(first, last, 400)
       expect(to - from).toBeGreaterThanOrEqual(FOCUS_MIN_BARS)
       expect(to - from).toBeLessThanOrEqual(FOCUS_MAX_BARS)
-      expect(from).toBeLessThanOrEqual(first)
+      // The entry is in view with room for its label, and nothing past the room after the last.
+      expect(from).toBeLessThanOrEqual(first - 8)
       expect(to).toBeGreaterThan(first)
+      expect(to).toBeLessThanOrEqual(402)
       // Both ends in view, or a trade too wide for that opens on its entry.
       expect(to >= last || to - from === FOCUS_ENTRY_BARS).toBe(true)
     }
