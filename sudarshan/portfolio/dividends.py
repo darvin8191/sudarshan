@@ -208,7 +208,9 @@ def calendar(tx: Tx, today: int, from_day: int, to_day: int,
     """``calendar``: the events between two days, each with its public facts and, apart from
     them, what is held (the day before the ex-date; for an event to come, now) and the amount a
     dividend is expected to bring (types.ts ``CalendarReport``). ``listed_future`` is whether
-    Upstox lists any event to come at all."""
+    Upstox lists any event to come at all; ``read_status`` whether its list was read at all, so
+    that an empty answer before the first night, or after a failed one, is never shown as
+    "nothing listed"."""
     holdings = corpactions.Holdings(tx, today, held_now)
     upstox = next((a for a in tx.rows("account") if a["kind"] == "upstox"), None)
     reads = {r["isin"]: r["read_at"] for r in tx.ca_reads() if r["state"] == "ok"}
@@ -225,7 +227,8 @@ def calendar(tx: Tx, today: int, from_day: int, to_day: int,
             "checked_at": reads.get(event["isin"]),
         })  # fmt: skip
     ahead = tx.ca_events(from_day=add_days(today, 1))
-    return {"from": from_day, "to": to_day, "listed_future": bool(ahead), "calendar": rows}
+    return {"from": from_day, "to": to_day, "listed_future": bool(ahead), "calendar": rows,
+            "read_status": corpactions.read_status(tx, today)}  # fmt: skip
 
 
 __all__ = ["calendar", "for_pack", "owner_member", "report", "set_line", "sync"]

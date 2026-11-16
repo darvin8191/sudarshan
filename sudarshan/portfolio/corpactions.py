@@ -624,6 +624,7 @@ def listing(tx: Tx, today: int, *, scope: str | None = None, from_day: int, to_d
         "to_confirm": to_confirm,
         "left_out_count": left_out,
         "reads": tx.ca_reads(),
+        "read_status": read_status(tx, today),
         "lot_check": lotcheck.check(tx, today, now or 0, holdings.lots()),
     }
 
