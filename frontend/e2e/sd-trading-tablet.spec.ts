@@ -113,6 +113,8 @@ async function serve(page: Page, analyze: boolean) {
       json({ status: 'success', data: { day: '2026-10-20', stops_at: null, closing: null } })
     )
   )
+  // The owner's own chart indicators, which OpenAlgo lists from strategies/indicators: none here.
+  await page.route('**/custom-indicators/**', (route) => route.fulfill(json([])))
   await page.route('**/api/v1/**', async (route) => {
     const path = new URL(route.request().url()).pathname.replace('/api/v1/', '')
     if (path === 'history') return route.fulfill(json({ status: 'success', data: history() }))

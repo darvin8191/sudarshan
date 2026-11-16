@@ -213,6 +213,8 @@ async function serve(
       })
     )
   )
+  // The owner's own chart indicators, which OpenAlgo lists from strategies/indicators: none here.
+  await page.route('**/custom-indicators/**', (route) => route.fulfill(json([])))
   if (fixture.clock === 'shifted') await page.addInitScript(shiftDate, fixture.now)
   else await page.clock.install({ time: fixture.now })
   // The app's own push connection (order updates), long-polling: a handshake,
