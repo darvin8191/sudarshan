@@ -353,6 +353,11 @@ def test_the_owner_flow_end_to_end(world):
     )
     assert seen["seen"] == today["unseen_alerts"] and seen["unseen_alerts"] == 0
     assert data_of(client.get(f"{PREFIX}/today", headers=JSON))["unseen_alerts"] == 0
+    # and the first run's results as a file, as every export is answered (GA7.5)
+    first_run = data_of(client.get(f"{PREFIX}/screens/{screen_id}/runs", headers=JSON))["runs"][-1]
+    file = data_of(client.get(f"{PREFIX}/runs/{first_run['id']}/csv", headers=JSON))
+    assert file["filename"].startswith("SUDARSHAN_Screener_") and file["filename"].isascii()
+    assert "Rank,Symbol,Exchange" in file["text"]
     presets = data_of(client.get(f"{PREFIX}/presets", headers=JSON))["presets"]
     assert len(presets) >= 8 and all(
         {"key", "name", "about", "usable", "where", "spec", "reason"} <= set(p) for p in presets

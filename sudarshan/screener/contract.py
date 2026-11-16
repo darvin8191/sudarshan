@@ -121,6 +121,8 @@ OPS = (
     ),
     OpSpec("runs_since", "GET", "/runs/since", "read", query=(("after", "int"), ("limit", "int"))),
     OpSpec("run", "GET", "/runs/<id>", "read"),
+    # One run's results as a CSV file (M9.16, GA7.5): ``{filename, text}``, as every export answers.
+    OpSpec("run_csv", "GET", "/runs/<id>/csv", "read"),
     OpSpec("membership", "GET", "/membership", "read", query=(("list", "int"), ("screen", "int"))),
     OpSpec("membership_update", "PATCH", "/membership/<id>", "write"),
     OpSpec("presets", "GET", "/presets", "read"),

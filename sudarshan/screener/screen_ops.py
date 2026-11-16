@@ -21,7 +21,10 @@ honestly say.
 from __future__ import annotations
 
 import asyncio
+import csv
+import io
 import logging
+import re
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import asdict
 from datetime import datetime
@@ -30,6 +33,7 @@ from typing import Any
 
 from sudarshan.alerts.market.sessions import day_key, epoch_ms, key_day, sessions_of
 from sudarshan.autologin.schedule import IST
+from sudarshan.portfolio.imports.csvutil import BOM, guard
 
 from . import alerting as al
 from . import catalog as cat
@@ -1032,3 +1036,82 @@ async def alerts_seen(ctx, args: Mapping[str, Any]) -> dict[str, Any]:
 
     return _translate(lambda: store.write(OWNER, mark))
 
+
+# ---- a run's results as a file (M9.16, GA7.5) ----------------------------------------------------------
+CSV_COLUMNS = ("Rank", "Symbol", "Exchange", "Price at the run", "Change %", "Values", "Candle")
+_NOT_SLUG = re.compile(r"[^A-Za-z0-9]+")
+SLUG_MAX = 24
+
+
+def csv_name(screen_name: str, screen_id: int, at: int) -> str:
+    """``SUDARSHAN_Screener_<screen>_<YYYY-MM-DD>_<HHMM>.csv``: ASCII whatever the screen is
+    called (a name with no Latin letter or digit becomes ``screen<id>``), the candle's close in
+    IST, as the portfolio's exports name theirs."""
+    slug = _NOT_SLUG.sub("-", screen_name or "").strip("-")[:SLUG_MAX].strip("-")
+    moment = datetime.fromtimestamp(at / 1000, IST)
+    return f"SUDARSHAN_Screener_{slug or f'screen{screen_id}'}_{moment:%Y-%m-%d_%H%M}.csv"
+
+
+def _rupees(paise) -> str:
+    if paise.__class__ is not int:
+        return ""
+    return f"{'-' if paise < 0 else ''}{abs(paise) // 100}.{abs(paise) % 100:02d}"
+
+
+def csv_text(
+    name: str, run: Mapping[str, Any], rows: Sequence[Mapping[str, Any]], not_checked: Mapping
+) -> str:
+    """The file: who made it and which run, the matches as the screen ranks them, then what was
+    not checked, grouped. Plain numbers (rupees with two decimals, a percentage without its
+    sign), a text cell that a spreadsheet would run as a formula written as text
+    (``csvutil.guard``), CRLF lines and a byte-order mark, as every SUDARSHAN export."""
+    moment = datetime.fromtimestamp(run["at"] / 1000, IST)
+    lines: list[Sequence[str]] = [
+        ("सुदर्शन SUDARSHAN", "Screener results"),
+        (name, f"{moment:%Y-%m-%d}", f"{run['candle']} candle (IST)"),
+        (),
+        ("Matches", str(run["matches"])),
+        ("Not checked", str(not_checked["count"])),
+        *((mark,) for mark in run["marks"]),
+        (),
+        CSV_COLUMNS,
+    ]
+    for row in rows:
+        change = row["change_pct"]
+        lines.append(
+            (
+                str(row["rank"]),
+                row["symbol"],
+                row["exchange"],
+                _rupees(row["ltp"]),
+                "" if change is None else f"{change:.2f}",
+                row["values"] or "",
+                "forming" if row["forming"] else "closed",
+            )
+        )
+    if not rows:
+        lines.append(("Nothing matched at this check.",))
+    if not_checked["groups"]:
+        lines += [(), ("Not checked", "Instruments", "First names")]
+        lines += [
+            (g["reason"], str(g["count"]), ", ".join(g["symbols"])) for g in not_checked["groups"]
+        ]
+    out = io.StringIO(newline="")
+    csv.writer(out, lineterminator="\r\n").writerows(
+        [[guard(cell) for cell in line] for line in lines]
+    )
+    return BOM + out.getvalue()
+
+
+@op("run_csv")
+async def run_csv(ctx, args: Mapping[str, Any]) -> dict[str, Any]:
+    """One run's results as a file for the phone to keep: ``{filename, text}``. The rows are the
+    run's own (what ``run`` answers): the prices of the run, never the prices now."""
+    found = await run(ctx, args)
+    store = _store(ctx)
+    screen = _translate(lambda: store.read(OWNER, lambda tx: tx.screen(found["screen_id"])))
+    name = screen["name"] if screen else f"Screen {found['screen_id']}"
+    return {
+        "filename": csv_name(name, found["screen_id"], found["run"]["at"]),
+        "text": csv_text(name, found["run"], found["rows"], found["not_checked"]),
+    }
