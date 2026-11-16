@@ -742,6 +742,19 @@ def order():
     return jsonify(response), status_code
 
 
+def _stop_watches(symbol, exchange, product) -> bool:
+    """SUDARSHAN M6.9 (v0.15.0 verify V1b): whether the server's risk monitor holds a Live stop
+    loss or target on this position, and so may send its own exit after a refused close. In
+    memory, no I/O; False when it cannot say (the close is then worded as one with no stop)."""
+    try:
+        from services.scalping_risk_monitor_service import get_scalping_risk_monitor
+
+        return get_scalping_risk_monitor().watches(symbol, exchange, product, "live")
+    except Exception:
+        logger.exception("Whether a scalping stop is set could not be read")
+        return False
+
+
 def _reducing_exit(symbol, exchange, product, action, quantity, auth_token, broker, api_key):
     """Freeze-safe, whole-lot risk-reducing exit. Returns (success, response, code).
 
@@ -848,6 +861,12 @@ def _reducing_exit(symbol, exchange, product, action, quantity, auth_token, brok
         read_book=surface_exits.book_reader(api_key, auth_token, broker),
         resize=resize,
     )
+    # SUDARSHAN M6.9 (v0.15.0 verify V1b): with a stop loss or target set on this position the
+    # risk monitor sends its own exit when one is reached, so a refusal that sends the trader to
+    # the Upstox app says to close there with a market order, never a limit order left waiting,
+    # as a strategy run's does. With none set nothing more is sent, and the words stay as they are.
+    if live and not answer[0] and _stop_watches(symbol, exchange, product):
+        answer = surface_exits.worded(answer, tries_again=True)
     return surface_exits.not_confirmed(answer) if live else answer
 
 

@@ -748,6 +748,12 @@ def clear_run_state(run_id: int) -> None:
     with _registry_lock:
         _run_state.pop(run_id, None)
         _state_locks.pop(run_id, None)
+    # SUDARSHAN M6.9 (v0.15.0 verify, forgotten holds): a held exit the owner was told of is
+    # remembered until its exit goes, the books show no position, or the run ends: here. After
+    # the registry lock, never under it; it never raises.
+    from sudarshan.books import held_exits
+
+    held_exits.forget_run(run_id)
 
 
 def active_run_ids() -> list[int]:

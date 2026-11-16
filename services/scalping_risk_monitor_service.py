@@ -734,6 +734,21 @@ class ScalpingRiskMonitor:
         ):
             self._remove_session(module_name)
 
+    def watches(self, symbol: str, exchange: str, product: str, mode: str) -> bool:
+        """SUDARSHAN M6.9 (v0.15.0 verify V1b): whether a stop loss or target is set on this leg
+        in ``mode``, so this monitor sends its own exit when one is reached, and again every few
+        seconds while a refused one stays due. In memory only, under the lock; no I/O."""
+        key = _slkey(symbol, str(exchange or "").upper(), str(product or "").upper())
+        with self._lock:
+            state = self._states.get(key)
+            if state is None or (state.get("mode") and state.get("mode") != mode):
+                return False
+            return (
+                state.get("current_sl") is not None
+                or state.get("initial_sl") is not None
+                or (state.get("target") or 0) > 0
+            )
+
 
 # Module-level singleton + accessors.
 scalping_risk_monitor = ScalpingRiskMonitor()
