@@ -489,9 +489,11 @@ What the entries file does not bring back, because it holds entries and nothing 
 - **The values typed for a holding** (its price points) and **loans**. In the same portfolio they
   are still there, since a holding is shared by every tab; they are not in the file.
 - **Drafts**, and the **breakdown of an entry's charges** (the total is written).
-- **A name that could mean two things.** A holding named exactly like a listed symbol that is
-  also in the list, on a row with no exchange and no ISIN, is refused with a sentence; so is a
-  name two of the owner's holdings share (a fund and a typed holding, or two funds). Rename one.
+- **A name that could mean two things.** A holding is matched by its name only on a row with no
+  exchange and no ISIN; a row that has either means a listed share. A holding named exactly like
+  a listed symbol (one in the list, or one today's instrument list knows) is refused on such a
+  row with a sentence; so is a name two of the owner's holdings share (a fund and a typed
+  holding, or two funds). Rename one.
 
 ## Ledger, valuation, performance, allocation, imports
 
