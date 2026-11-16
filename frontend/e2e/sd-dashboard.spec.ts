@@ -163,13 +163,28 @@ async function serve(page: Page, state: State) {
     '/sudarshan/screener/api/state': () =>
       json({ status: 'success', data: { enabled: false, screens: [] } }),
   }
+  // The server can be held: it then takes the page's reads and the proxy's messages and answers
+  // none of them until released, so a test can look at the screen the page drew on its own for as
+  // long as it needs, however fast the page or slow the machine.
+  const server = { held: false, waiting: [] as Array<() => void> }
+  const answerOrHold = (answer: () => void) => {
+    if (server.held) server.waiting.push(answer)
+    else answer()
+  }
+  const hold = () => {
+    server.held = true
+  }
+  const release = () => {
+    server.held = false
+    for (const answer of server.waiting.splice(0)) answer()
+  }
   await page.route(
     (url) => /^\/(api|auth|sudarshan|admin|socket\.io)\//.test(url.pathname),
     (route) => {
       const path = new URL(route.request().url()).pathname
       if (path.startsWith('/socket.io/')) return route.abort()
       const answer = answers[path]
-      return route.fulfill(answer ? answer() : json({ status: 'error', message: 'not here' }, 404))
+      answerOrHold(() => void route.fulfill(answer ? answer() : json({ status: 'error', message: 'not here' }, 404)))
     }
   )
 
@@ -202,21 +217,24 @@ async function serve(page: Page, state: State) {
       open.add(socket)
       socket.onClose(() => open.delete(socket))
       socket.onMessage((raw) => {
-        const message = JSON.parse(String(raw))
-        if (message.action === 'authenticate') {
-          socket.send(JSON.stringify({ type: 'auth', status: 'success' }))
+        const answer = () => {
+          const message = JSON.parse(String(raw))
+          if (message.action === 'authenticate') {
+            socket.send(JSON.stringify({ type: 'auth', status: 'success' }))
+          }
+          if (message.action === 'subscribe') {
+            socket.send(JSON.stringify({ type: 'subscribe', status: 'success' }))
+            ticks()
+          }
         }
-        if (message.action === 'subscribe') {
-          socket.send(JSON.stringify({ type: 'subscribe', status: 'success' }))
-          ticks()
-        }
+        answerOrHold(answer)
       })
     }
   )
   await page.goto('/dashboard')
   await page.clock.resume()
   await expect(page.getByRole('heading', { level: 1, name: 'Dashboard' })).toBeVisible()
-  return { ticks }
+  return { ticks, hold, release }
 }
 
 /** The page's own checks: sideways scroll, small targets, colour-only figures. */
@@ -363,11 +381,29 @@ test.describe(`the dashboard at ${WIDTH} x 800`, () => {
   test('the shell toast: a 48 dp close button and a success sentence that keeps its contrast', async ({ page }, info) => {
     await serve(page, STATES[0])
     await expect(page.getByTestId('status-row')).toHaveAttribute('data-ready', 'true')
+    const toaster = page.locator('[data-sonner-toaster]')
+    const toast = toaster.locator('[data-sonner-toast][data-type="success"]')
+    // The toast closes itself after the alert setting's 3 s, and 2 s after the switch the app
+    // raises the sandbox warning in front of it: on a slow machine the close button was covered
+    // or gone by the time it was tapped. A pointer resting on the toasts stops their timers (the
+    // library's own pause) and lays them out one under another, so the page's timers stand
+    // still from the switch until the pointer is there. The pause is a second ahead, so that it
+    // lands in the page's future however long the call takes.
+    await page.clock.pauseAt((await page.evaluate(() => Date.now())) + 1_000)
     await page.getByRole('button', { name: 'Switch to Analyze mode' }).tap()
-    const toast = page.locator('[data-sonner-toast][data-type="success"]').first()
+    // The library puts a toast up from a timer of no delay: the clock is run a frame at a time.
+    await expect(async () => {
+      await page.clock.runFor(16)
+      await expect(toast).toHaveAttribute('data-mounted', 'true', { timeout: 100 })
+    }).toPass({ timeout: 10_000 })
+    await toast.hover()
+    await expect(toast).toHaveAttribute('data-expanded', 'true')
+    // Time runs again (axe needs the page's timers). The warning comes in beside the toast, and
+    // the checks wait until nothing in the toaster moves.
+    await page.clock.resume()
+    await expect(toaster.locator('[data-sonner-toast][data-type="warning"]')).toHaveAttribute('data-mounted', 'true')
+    await expect.poll(() => toaster.evaluate((list) => list.getAnimations({ subtree: true }).length)).toBe(0)
     await expect(toast).toContainText('Switched to Analyze mode')
-    await expect(toast).toHaveAttribute('data-mounted', 'true')
-    await page.waitForTimeout(600) // the toast's own slide, so axe reads it at full opacity
     const close = toast.getByRole('button', { name: 'Close toast' })
     const box = await close.boundingBox()
     const around = await toast.boundingBox()
@@ -379,7 +415,8 @@ test.describe(`the dashboard at ${WIDTH} x 800`, () => {
     expect((words?.x ?? 0) + (words?.width ?? 0)).toBeLessThanOrEqual((box?.x ?? 0) + 0.5)
     const scan = await new AxeBuilder({ page }).include('[data-sonner-toaster]').withRules(['color-contrast']).analyze()
     expect(scan.violations.map((each) => `${each.id}: ${each.nodes.map((node) => node.failureSummary).join(' ')}`)).toEqual([])
-    expect(scan.passes.some((each) => each.id === 'color-contrast'), 'the toast was read').toBe(true)
+    const read = scan.passes.find((each) => each.id === 'color-contrast')?.nodes.map((node) => node.html) ?? []
+    expect(read.some((html) => html.includes('Switched to Analyze mode')), 'the success sentence was read').toBe(true)
     await page.screenshot({ path: info.outputPath('toast.png') })
     await close.tap()
     await expect(toast).toHaveCount(0)
@@ -407,7 +444,7 @@ test.describe(`the dashboard at ${WIDTH} x 800`, () => {
   }
 
   test('back from sleep: reconnecting from the first frame, real-time again with the ticks', async ({ page }, info) => {
-    const { ticks } = await serve(page, STATES[0])
+    const { ticks, hold, release } = await serve(page, STATES[0])
     await expect(page.locator('[data-feed="live"]').first()).toBeVisible()
 
     // The phone sleeps for 12 minutes: the shared socket closes 5 s after the page hides.
@@ -416,14 +453,20 @@ test.describe(`the dashboard at ${WIDTH} x 800`, () => {
       document.dispatchEvent(new Event('visibilitychange'))
     })
     await page.clock.fastForward('12:00')
+    // The server answers nothing until the waking screen has been read. Waking, the page reads
+    // its prices again while the socket is down and signs a new socket in, and either answer can
+    // land, and change the words below, before a slow machine has looked at them.
+    hold()
     await page.evaluate(() => {
       Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'visible' })
       document.dispatchEvent(new Event('visibilitychange'))
     })
     // Within a frame of the wake nothing says Real-time over the old figures.
     await expect(page.getByText(/Reconnecting · updated (12|11)m ago/).first()).toBeVisible()
+    await expect(page.locator('[data-feed="live"]')).toHaveCount(0)
     await page.screenshot({ path: info.outputPath('waking.png') })
     // The socket comes back, signs in and subscribes; the next ticks make it real-time again.
+    release()
     ticks()
     await expect(page.locator('[data-feed="live"]').first()).toBeVisible()
     await expect(page.getByText(/Open · closes 15:30/)).toBeVisible()

@@ -22,7 +22,15 @@
  * carries a sign or an arrow, not colour alone; and no colour-contrast finding from axe.
  */
 import AxeBuilder from '@axe-core/playwright'
-import { type Browser, expect, type Page, type TestInfo, test, type WebSocketRoute } from '@playwright/test'
+import {
+  type Browser,
+  expect,
+  type Locator,
+  type Page,
+  type TestInfo,
+  test,
+  type WebSocketRoute,
+} from '@playwright/test'
 
 test.use({ viewport: { width: 360, height: 800 }, deviceScaleFactor: 3, hasTouch: true, isMobile: true })
 
@@ -225,6 +233,17 @@ async function serve(page: Page, state: State, path = '/options/NFO/NIFTY') {
       }
     }
   }
+  // The proxy can be held: it then takes what the app sends and answers nothing until released,
+  // so a test can look at the screen between the socket opening and its first tick for as long
+  // as it needs, however fast the page or slow the machine.
+  const proxy = { held: false, waiting: [] as Array<() => void> }
+  const hold = () => {
+    proxy.held = true
+  }
+  const release = () => {
+    proxy.held = false
+    for (const answer of proxy.waiting.splice(0)) answer()
+  }
   await page.routeWebSocket(
     (url) => url.pathname === WS_PATH,
     (socket) => {
@@ -235,26 +254,30 @@ async function serve(page: Page, state: State, path = '/options/NFO/NIFTY') {
       open.add(socket)
       socket.onClose(() => open.delete(socket))
       socket.onMessage((raw) => {
-        const message = JSON.parse(String(raw))
-        if (message.action === 'authenticate')
-          socket.send(JSON.stringify({ type: 'auth', status: 'success' }))
-        if (message.action === 'subscribe') {
-          for (const each of message.symbols ?? [message])
-            seen.subscribed.set(`${each.exchange}:${each.symbol}`, String(message.mode))
-          socket.send(JSON.stringify({ type: 'subscribe', status: 'success' }))
-          if (state.marketOpen) ticks()
+        const answer = () => {
+          const message = JSON.parse(String(raw))
+          if (message.action === 'authenticate')
+            socket.send(JSON.stringify({ type: 'auth', status: 'success' }))
+          if (message.action === 'subscribe') {
+            for (const each of message.symbols ?? [message])
+              seen.subscribed.set(`${each.exchange}:${each.symbol}`, String(message.mode))
+            socket.send(JSON.stringify({ type: 'subscribe', status: 'success' }))
+            if (state.marketOpen) ticks()
+          }
+          if (message.action === 'unsubscribe') {
+            for (const each of message.symbols ?? [message])
+              seen.subscribed.delete(`${each.exchange}:${each.symbol}`)
+          }
         }
-        if (message.action === 'unsubscribe') {
-          for (const each of message.symbols ?? [message])
-            seen.subscribed.delete(`${each.exchange}:${each.symbol}`)
-        }
+        if (proxy.held) proxy.waiting.push(answer)
+        else answer()
       })
     }
   )
   await page.goto(path)
   await page.clock.resume()
   await expect(page.getByRole('heading', { level: 1, name: 'NIFTY' })).toBeVisible()
-  return { ticks, seen }
+  return { ticks, seen, hold, release }
 }
 
 /** The page's own checks: sideways scroll, small targets, colour-only figures. */
@@ -292,6 +315,15 @@ async function pageChecks(page: Page, scope = 'main') {
 async function axeFindings(page: Page, scope = 'main') {
   const scan = await new AxeBuilder({ page }).include(scope).withRules(['color-contrast']).analyze()
   return scan.violations.map((each) => `${each.id}: ${each.nodes.map((node) => node.target).join(' ')}`)
+}
+
+/**
+ * What just opened, past its first half second: a sheet takes no tap until then, and shows it
+ * (`data-settling`, `openGuard.ts`).
+ */
+async function settled(page: Page, opened: Locator) {
+  await expect(opened).toBeVisible()
+  await expect(page.locator('[data-settling]')).toHaveCount(0)
 }
 
 const OPEN: State = { name: 'market open with ticks', clock: '2026-11-16T10:42:05+05:30', feed: 'ticks', marketOpen: true }
@@ -425,7 +457,7 @@ test.describe('the options screen at 360 x 800', () => {
     expect(inSheet.sideways).toBe(false)
     await page.screenshot({ path: info.outputPath('strike-sheet.png') })
 
-    await page.waitForTimeout(600) // the sheet ignores taps for half a second after it opens
+    await settled(page, sheet)
     await sheet.getByRole('button', { name: 'Buy CE' }).tap()
     const ticket = page.getByRole('dialog').filter({ hasText: 'NIFTY17NOV2625900CE' })
     await expect(ticket).toBeVisible()
@@ -459,13 +491,13 @@ test.describe('the options screen at 360 x 800', () => {
     const { seen } = await serve(page, OPEN)
     await page.locator('[data-strike="25900"] [data-leg="PE"]').tap()
     const strike = page.getByRole('dialog', { name: 'NIFTY 25,900' })
-    await page.waitForTimeout(600) // a sheet ignores taps for half a second after it opens
+    await settled(page, strike)
     await strike.getByRole('button', { name: 'PE: chart, alert, depth' }).tap()
     const leg = page.getByRole('dialog', { name: 'NIFTY 25900 PE' })
     await expect(leg.getByRole('button', { name: 'Add to watchlist' })).toBeVisible()
     const inLeg = await pageChecks(page, '[role="dialog"]')
     expect(inLeg.small, 'targets under 48 x 48 in the leg sheet').toEqual([])
-    await page.waitForTimeout(600)
+    await settled(page, leg)
     await leg.getByRole('button', { name: 'Add to watchlist' }).tap()
 
     const pick = page.getByRole('dialog', { name: 'Add to watchlist' })
@@ -476,7 +508,7 @@ test.describe('the options screen at 360 x 800', () => {
     expect(inPick.small, 'targets under 48 x 48 in the list of watchlists').toEqual([])
     expect(inPick.sideways).toBe(false)
     await page.screenshot({ path: info.outputPath('add-to-watchlist.png') })
-    await page.waitForTimeout(600)
+    await settled(page, pick)
     await pick.getByRole('button', { name: /Swing/ }).dblclick() // a double tap adds once
     await expect(page.getByText('Added NIFTY 25900 PE to Swing')).toBeVisible()
     await expect(page.getByRole('dialog')).toHaveCount(0)
@@ -517,8 +549,9 @@ test.describe('the options screen at 360 x 800', () => {
   test('follows 84 instruments, 83 of them in Quote mode, and never more than 100', async ({ page }) => {
     const { seen } = await serve(page, OPEN)
     await expect(page.locator('[data-feed="live"]').first()).toBeVisible()
+    // The first ticks answer the first subscription, which need not be the last of them.
+    await expect.poll(() => seen.subscribed.size).toBe(84)
     const modes = [...seen.subscribed.values()]
-    expect(modes).toHaveLength(84)
     expect(modes.filter((mode) => mode === 'Quote')).toHaveLength(83)
     expect(seen.subscribed.get('NSE_INDEX:NIFTY')).toBe('LTP')
     // A far strike's sheet adds its two legs while it is open, and lets them go after.
@@ -549,7 +582,7 @@ test.describe('the options screen at 360 x 800', () => {
   })
 
   test('back from sleep: reconnecting from the first frame, real-time again with the ticks', async ({ page }, info) => {
-    const { ticks, seen } = await serve(page, OPEN)
+    const { ticks, seen, hold, release } = await serve(page, OPEN)
     await expect(page.locator('[data-feed="live"]').first()).toBeVisible()
     const hide = (hidden: boolean) =>
       page.evaluate((state) => {
@@ -560,10 +593,15 @@ test.describe('the options screen at 360 x 800', () => {
     await hide(true)
     await page.clock.fastForward('12:00')
     expect(seen.chain, 'nothing is read while the page is hidden').toBe(1)
+    // The proxy answers nothing until the waking screen has been read: the new socket signs in
+    // and ticks within milliseconds of the wake, and the words below would be gone by the time a
+    // slow machine looked for them.
+    hold()
     await hide(false)
     await expect(page.getByText(/Reconnecting · updated (12|11)m ago/).first()).toBeVisible()
     await expect(page.locator('[data-feed="live"]')).toHaveCount(0)
     await page.screenshot({ path: info.outputPath('waking.png') })
+    release()
     ticks(1)
     await expect(page.locator('[data-feed="live"]').first()).toBeVisible()
     await expect.poll(() => seen.chain, 'the snapshot is read again after the sleep').toBe(2)
