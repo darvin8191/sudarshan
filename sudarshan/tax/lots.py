@@ -69,9 +69,12 @@ def canonical(isin: str, aliases: dict[str, str]) -> str:
     return isin
 
 
-def replay(trades, opening=(), actions=(), all_delivery=frozenset(), aliases=None) -> LotBook:
+def replay(trades, opening=(), actions=(), all_delivery=frozenset(), aliases=None,
+           as_of_day: int | None = None) -> LotBook:  # fmt: skip
     """Replay share and equity-fund trades into lots. ``all_delivery`` holds the (taxpayer,
-    account, isin, day) the owner marked as delivery; trades of other heads are passed over."""
+    account, isin, day) the owner marked as delivery; trades of other heads are passed over.
+    ``as_of_day``: the day the lots are counted to, so that an action not confirmed whose day
+    is after it is said to be coming rather than waiting for a confirmation it cannot have."""
     names = dict(aliases or {})
     names.update({a.instrument: a.new_isin for a in actions if a.accepted and a.new_isin})
     events: list[tuple] = [(lot.acquired_day, 0, 0, lot) for lot in opening]
@@ -96,7 +99,7 @@ def replay(trades, opening=(), actions=(), all_delivery=frozenset(), aliases=Non
                 _Held(day, what.qty_u, what.cost_paise, what.source, what.qty_u)
             )
         elif rank == 1:
-            _act(book, what, canonical(what.instrument, names), out)
+            _act(book, what, canonical(what.instrument, names), out, as_of_day)
         else:
             _trade_day(book.setdefault(key, []), key, day, what, key + (day,) in all_delivery, out)
     for (taxpayer, account, isin), lots in sorted(book.items()):
@@ -107,7 +110,7 @@ def replay(trades, opening=(), actions=(), all_delivery=frozenset(), aliases=Non
     return LotBook(*(tuple(part) for part in out))
 
 
-def _act(book: dict, action: Action, isin: str, out: LotBook) -> None:
+def _act(book: dict, action: Action, isin: str, out: LotBook, as_of_day: int | None) -> None:
     """A bonus or a split on every account that holds the share on the ex-date, or on the
     action's own account only when it names one."""
     fmv_day = rules.at(rules.GRANDFATHER, action.ex_day)["fmv_day"]
@@ -116,7 +119,9 @@ def _act(book: dict, action: Action, isin: str, out: LotBook) -> None:
         if scope[2] != isin or not held or action.account not in (None, scope[1]):
             continue
         if not action.accepted:
-            out.notes.append(words.action_unconfirmed(action.kind, isin, day_text(action.ex_day)))
+            coming = as_of_day is not None and action.ex_day > as_of_day
+            say = words.action_coming if coming else words.action_unconfirmed
+            out.notes.append(say(action.kind, isin, day_text(action.ex_day)))
             continue
         if action.kind == "SPLIT":
             before = after = 0

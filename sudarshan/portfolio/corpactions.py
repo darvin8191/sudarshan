@@ -25,8 +25,15 @@ Analytics Token, with no static IP). They are public facts, kept in ``ca_event``
   such instrument at Upstox), and nothing else. A refusal (403) ends the night: the token is not
   allowed to read this list. Any other request Upstox turns down (a 400, say, for one ISIN it
   does not cover) and an answer that cannot be read are failed reads of that instrument, and
-  three in a row end the night. Nothing failed is kept as read, a night that read nothing fails
-  and says why in words (``read_status``), and the phone never shows it as an empty calendar.
+  three in a row end the night. Nothing failed is kept as read; an instrument never read that
+  failed is tried again each night after the others, the one tried longest ago first.
+* **A night fails only on a stop, or when nothing was read in the rotation week** (v0.14.0
+  verification M5). It has failed when a stop ended it before anything was read (a refusal, a
+  pause, no token, three failed reads in a row of instruments that answered before), or when
+  it read nothing and nothing has been read for ``core.ROTATION_DAYS``. A share that always
+  fails does not fail the night, and behind a good read its failure does not count towards
+  three in a row. A failed night says why in words (``read_status``), and the phone never
+  shows it as an empty calendar.
 * **Nothing changes a lot here.** A bonus or a split is only stored. It reaches the lots when the
   owner accepts it (``ops/ca_ops.py``).
 """
@@ -50,11 +57,12 @@ from sudarshan.tax.dividends import entitled_qty_u
 
 from .budget import PAUSE_S, Budget
 from .core import corpactions as core
-from .core.days import add_days, day_of_instant, financial_year
+from .core.days import add_days, day_of_instant, days_between, financial_year
 from .core.kinds import CA_DECISIONS, REPORT_YEARS
 from .core.ledger import replay
 from .core.model import BadEntry, Entry, Refusal
 from .core.words import date as day_words
+from .core.words import quantity
 from .store import Invalid, NotFound, Refused, Scope, Tx
 from .upstox import _signature, minute_of_day
 
@@ -105,11 +113,20 @@ def event_hash(event: dict[str, Any]) -> str:
     return hashlib.sha256(core.identity(event).encode("utf-8")).hexdigest()
 
 
+def holdings_days(tx: Tx) -> list[int]:
+    """The days of the Upstox account's closing records that hold its holdings, oldest first.
+    A record whose holdings could not be read (only its positions or its funds answered, so
+    ``holdings_value_paise`` is null and it has no holding lines) is not a holdings record: read
+    as one, it would say that the account held nothing that day (v0.13.0 verification M2)."""
+    return [row["day"] for row in tx.rows("upstox_eod", "day")
+            if row["holdings_value_paise"] is not None]  # fmt: skip
+
+
 def upstox_isins(tx: Tx, held_now: list[dict[str, Any]] | None = None) -> set[str]:
     """The ISINs of the Upstox account: held at its last closing record or at the last read of
     its holdings, or in its trade history."""
     found = {row.get("isin") for row in held_now or ()}
-    days = [row["day"] for row in tx.rows("upstox_eod", "day")]
+    days = holdings_days(tx)
     if days:
         lines = tx.rows("upstox_eod_holding", "instrument_key", day=days[-1])
         found |= {isin_of_key(line["instrument_key"]) for line in lines}
@@ -211,8 +228,9 @@ class CorpActions:
     async def read_one(self, isin: str, now: int) -> str:
         """Read one ISIN and keep what it lists. The outcome: ``ok`` (a clean answer with events),
         ``none`` (an empty list, or no such instrument at Upstox; asked again in a week), one of
-        ``FAILED`` (nothing changed; an instrument never read before is marked as tried, asked
-        again the next night after the ones never asked) or one of ``STOPS`` (nothing written)."""
+        ``FAILED`` (nothing changed; an instrument never read before is marked as tried, with
+        the time it was tried in ``read_at``, and asked again the next night after the others)
+        or one of ``STOPS`` (nothing written)."""
         outcome, payload = await self._call(isin)
         if outcome == "ok":
             try:
@@ -230,9 +248,10 @@ class CorpActions:
         def write(tx: Tx) -> None:
             if outcome in FAILED:
                 # The last good read stands; only an instrument with none is marked as tried,
-                # so that the rotation puts it after the ones never asked.
+                # with when (never a read: its state says failed), so that the rotation puts it
+                # after the others and the one tried longest ago first.
                 if not any(r["isin"] == isin and r["state"] != "failed" for r in tx.ca_reads()):
-                    tx.ca_read_put(isin, None, "failed", WORDS[outcome])
+                    tx.ca_read_put(isin, now, "failed", WORDS[outcome])
                 return
             if payload is None:  # no such instrument at Upstox (or not an ISIN: nothing asked)
                 tx.ca_read_put(isin, now, "none", WORDS["none"])
@@ -262,19 +281,30 @@ class CorpActions:
         return list(getattr(memory, "data", None) or [])
 
     async def plan(self, now: int) -> list[str]:
+        return (await self._plan(now))[0]
+
+    async def _plan(self, now: int) -> tuple[list[str], set[str], bool]:
+        """Tonight's ISINs, the ones among them that failed before and were never read, and
+        whether anything was read in the rotation week up to tonight."""
         today, held = day_of_instant(now), self._held_now()
 
-        def look(tx: Tx) -> list[str]:
+        def look(tx: Tx) -> tuple[list[str], set[str], bool]:
             rows = tx.ca_reads()
             reads = {r["isin"]: r["read_at"] for r in rows if r["state"] != "failed"}
-            tried = {r["isin"] for r in rows if r["state"] == "failed"}
+            tried = {r["isin"]: r["read_at"] or 0 for r in rows if r["state"] == "failed"}
             days = {k: None if v is None else day_of_instant(v) for k, v in reads.items()}
             soon = tx.ca_events(from_day=today, to_day=add_days(today, core.NEAR_DAYS))
             near = {event["isin"] for event in soon}
             known = known_isins(tx, held)
-            first = core.tonight(sorted(known - tried), days, near, today, MAX_READS)
-            # One that failed before and was never read comes last: it cannot hold up the rest.
-            return (first + sorted(known & tried))[:MAX_READS]
+            first = core.tonight(sorted(known - set(tried)), days, near, today, MAX_READS)
+            # One that failed before and was never read comes last, the one tried longest ago
+            # first: it cannot hold up the rest, and none of them waits behind the others for
+            # ever (v0.14.0 verification M5).
+            again = sorted(known & set(tried), key=lambda isin: (tried[isin], isin))
+            week = any(days_between(day, today) < core.ROTATION_DAYS
+                       for day in days.values() if day is not None)  # fmt: skip
+            todo = (first + again)[:MAX_READS]
+            return todo, set(again) & set(todo), week
 
         return await self._store(lambda store: store.read(OWNER, look))
 
@@ -286,10 +316,10 @@ class CorpActions:
 
     async def run(self, now: int) -> tuple[str, str]:
         """One night's reads. Returns ``(status, note)`` for the job log."""
-        todo = await self.plan(now)
+        todo, again, week = await self._plan(now)
         counts = {"ok": 0, "none": 0, "failed": 0}
         why: dict[str, int] = {}
-        in_a_row, stop = 0, None
+        in_a_row, stop, fresh = 0, None, 0
         for isin in todo:
             await self._pace()
             outcome = await self.read_one(isin, self.service.clock())
@@ -297,9 +327,14 @@ class CorpActions:
                 stop = outcome
                 break
             counts[outcome if outcome in counts else "failed"] += 1
-            if outcome in FAILED:
-                why[outcome] = why.get(outcome, 0) + 1
-            in_a_row = in_a_row + 1 if outcome in FAILED else 0
+            if outcome not in FAILED:
+                in_a_row = 0
+                continue
+            why[outcome] = why.get(outcome, 0) + 1
+            fresh += isin not in again
+            # One that failed before says nothing of Upstox behind a good read tonight.
+            if isin not in again or not counts["ok"] + counts["none"]:
+                in_a_row += 1
             if in_a_row >= SILENT_STOP:
                 stop = outcome
                 break
@@ -307,9 +342,15 @@ class CorpActions:
             f"{counts['ok']} of {len(todo)} instruments read, {counts['none']} with nothing "
             f"listed, {counts['failed']} not read"
         )
-        # ``kinds.JOB_STATUSES``: a night that read nothing of what was due has failed, and its
-        # note says why in the words ``read_status`` shows the owner.
-        failed = bool(todo) and not counts["ok"] + counts["none"]
+        # ``kinds.JOB_STATUSES``: a night that read nothing has failed when a stop ended it, or
+        # an instrument that answered before failed, or nothing was read in the rotation week;
+        # never for the shares that always fail. Its note says why in the words
+        # ``read_status`` shows the owner.
+        failed = (
+            bool(todo)
+            and not counts["ok"] + counts["none"]
+            and (stop in STOPS or fresh > 0 or not week)
+        )
         reason = stop or (max(sorted(why), key=why.get) if why and failed else None)
         if reason is not None:
             note = f"{note}. {WORDS[reason]}"
@@ -404,7 +445,7 @@ class Holdings:
         self.tx, self.today, self.now = tx, today, now
         self.assets = {a["isin"]: a for a in tx.rows("asset", kind="listed") if a["isin"]}
         self.tabs = [t for t in tx.rows("tab") if not t["system"] and not t["archived"]]
-        self.record_days = [row["day"] for row in tx.rows("upstox_eod", "day")]
+        self.record_days = holdings_days(tx)
         self.names = share_names(tx, held_now)
         self._records: dict[int, dict[str, int]] = {}
         self._moves: dict[int, dict[tuple[int, int], list[tuple[int, int]]]] = {}
@@ -650,7 +691,7 @@ def listing(tx: Tx, today: int, *, scope: str | None = None, from_day: int, to_d
         "left_out_count": left_out,
         "reads": tx.ca_reads(),
         "read_status": read_status(tx, today),
-        "lot_check": lotcheck.check(tx, today, now or 0, holdings.lots()),
+        "lot_check": lotcheck.check(tx, today, now or 0, holdings.lots(), insights=True),
     }
 
 
@@ -734,6 +775,36 @@ def _already(event: dict[str, Any], row: dict[str, Any]) -> str:
             "applying it again would count it twice.")  # fmt: skip
 
 
+def confirmed(holdings: Holdings, group: list[dict[str, Any]], decided: dict[int, list[dict]],
+              upstox: set[str]) -> dict[str, Any] | None:  # fmt: skip
+    """What the owner confirmed for the Upstox account on a bonus or a split (types.ts
+    ``CaDecided``; v0.14.0 verification M3), None when nothing is: the decision, made on
+    whichever wording of the event, with its version; what it did, in words; and the choices
+    To confirm offered (``expected``), with the same sentences on the quantity held the day
+    before. The Calendar's "Change what I confirmed" sends ``ca_decide`` from that version: a
+    reading taken the wrong way round, or left out when it was right, is never final."""
+    row = standing(group, decided, UPSTOX_SCOPE)
+    if row is None:
+        return None
+    event = next(e for e in group if e["id"] == row["event_id"])
+    held, more = holdings.upstox(event["isin"], event["ex_day"]), {"held_from": "record"}
+    if held is None and event["isin"] in upstox:
+        held = holdings.upstox_from_trades(event["isin"], event["ex_day"])
+        more = {"held_from": "trades"}
+    kind, num, den = event["kind"], row["ratio_num"], row["ratio_den"]
+    if row["state"] != "applied":
+        words = f"You left your lots as they are for this {kind}."
+    else:
+        how = f"{num} new for every {den} held" if kind == "bonus" else f"every {den} made {num}"
+        if held:
+            after = core.effect(kind, held, num, den)["after_qty_u"]
+            how += f": {quantity(held)} became {quantity(after)}"
+        words = f"You applied this {kind} as {how}."
+    choices = _expected(event, UPSTOX_SCOPE, held or None, **(more if held else {}))
+    return {"event_id": event["id"], "version": row["version"], "state": row["state"],
+            "ratio_num": num, "ratio_den": den, "words": words, "expected": choices}  # fmt: skip
+
+
 def accepted_actions(tx: Tx) -> list[dict[str, Any]]:
     """For the tax adapter: the Upstox account's bonuses and splits as ``tax.model.Action``
     rows, in ex-date order, one per event however many wordings of it Upstox has listed
@@ -802,7 +873,8 @@ def _sync_dividends(service: Any) -> str:
     def run(tx: Tx) -> tuple[int, dict[str, Any]]:
         from . import lotcheck
 
-        return dividends.sync(tx, today, now, held), lotcheck.check(tx, today, now)
+        # The night runs only with the Calendar switched on.
+        return dividends.sync(tx, today, now, held), lotcheck.check(tx, today, now, insights=True)
 
     changed, check = service.store.write(OWNER, run)
     differ = len(check["rows"])  # the nightly check of the lots against the holdings

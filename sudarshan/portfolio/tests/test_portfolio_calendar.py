@@ -70,7 +70,7 @@ async def test_a_row_is_the_public_facts_and_apart_from_them_what_is_held(n):
     assert rows[past] == {
         "event_id": past, "isin": UPSTOX, "name": None, "kind": "dividend", "ex_day": 20260814,
         "amount_u": 55000, "ratio_num": None, "ratio_den": None, "held_qty_u": 300 * U,
-        "expected_paise": 1650 * RUPEE, "checked_at": NOW - 5,
+        "expected_paise": 1650 * RUPEE, "checked_at": NOW - 5, "decided": None,
     }  # fmt: skip
     assert (rows[to_come]["held_qty_u"], rows[to_come]["expected_paise"]) == (250 * U, 7500 * RUPEE)
     assert (rows[bonus]["ratio_num"], rows[bonus]["ratio_den"], rows[bonus]["held_qty_u"],
@@ -149,6 +149,59 @@ async def test_it_says_when_upstox_lists_nothing_to_come(n):
     event(n, "split", 20280101, ratio=(1, 5), isin=TRADED)  # outside the range asked, still to come
     data = await calendar(n)
     assert data["listed_future"] is True and data["calendar"] == [] and gone
+
+
+@scenario
+async def test_what_was_confirmed_is_on_the_events_row_and_is_changed_from_its_version(n):
+    """v0.14.0 verification M3. No control on the phone changed a decision: a split applied
+    the wrong way round, or left out of the lots when it was right, stayed so. The event's row
+    in the Calendar now carries what was confirmed for the Upstox account, with its version and
+    the choices To confirm offered, in the same words; ``ca_decide`` from that version changes
+    it, which is also the way back for a split left out of the lots (H2)."""
+    from test_portfolio_ca_ops import SPLIT_DAY, check_of, history, lots_after, waiting
+
+    history(n, (20260610, "BUY", 100))
+    record(n, 20261008, **{UPSTOX: 100})
+    record(n, 20261021, **{UPSTOX: 500})
+    split = event(n, "split", ex_day=SPLIT_DAY, ratio=(1, 5))
+    assert (await calendar(n))["calendar"][0]["decided"] is None  # it waits under To confirm
+    asked = (await waiting(n))[0]["expected"][0]
+    wrong = await n.rig.call("ca_decide", id=split, scope="upstox", state="applied",
+                             ratio_num=1, ratio_den=5)  # fmt: skip
+    assert wrong["status"] == "success"
+
+    async def decided() -> dict:
+        return (await calendar(n))["calendar"][0]["decided"]
+
+    first = await decided()
+    version = n.read(lambda tx: tx.rows("ca_decision", event_id=split))[0]["version"]
+    assert {key: first[key] for key in first if key != "expected"} == {
+        "event_id": split, "version": version, "state": "applied", "ratio_num": 1,
+        "ratio_den": 5, "words": "You applied this split as every 5 made 1: 100 became 20."}  # fmt: skip
+    assert first["expected"] == asked  # the same choices, in To confirm's words
+    turned = {"id": first["event_id"], "scope": "upstox", "state": "applied", "ratio_num": 5,
+              "ratio_den": 1, "version": first["version"]}  # fmt: skip
+    assert (await n.rig.call("ca_decide", **turned))["status"] == "success"
+    assert lots_after(n)[0] == [(20260610, 500, 1_000_000)]
+    assert (await n.rig.call("ca_decide", **turned))["status"] != "success"  # an old version
+    # Left out of the lots from the row; the Check names it and points back to the row.
+    now = await decided()
+    left = await n.rig.call("ca_decide", id=split, scope="upstox", state="dismissed",
+                            ratio_num=1, ratio_den=1, version=now["version"])  # fmt: skip
+    assert left["status"] == "success"
+    now = await decided()
+    assert (now["state"], now["ratio_num"], now["words"]) == (
+        "dismissed", None, "You left your lots as they are for this split.")  # fmt: skip
+    (row,) = (await check_of(n))["rows"]
+    assert row["words"].startswith(
+        "PROBE LTD: Upstox holds 500 and the lots say 100. You left the split of 9 Oct 2026 out "
+        "of your lots: if the company did give it, change what you confirmed on its row in the "
+        "Calendar. "
+    )
+    back = await n.rig.call("ca_decide", id=split, scope="upstox", state="applied", ratio_num=5,
+                            ratio_den=1, version=now["version"])  # fmt: skip
+    assert back["status"] == "success" and (await check_of(n))["rows"] == []
+    assert answer_misses(await calendar(n)) == set()
 
 
 @scenario

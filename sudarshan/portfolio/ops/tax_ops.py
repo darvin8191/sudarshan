@@ -255,19 +255,32 @@ def _with_dividends(store, pack: dict, today: int, insights: bool) -> dict:
 def _checked(pack: dict, check: dict) -> dict:
     """The tax lots against the Upstox holdings (``lotcheck.check``; design p7 4.3): the paper
     carries the check, says a difference first among its notes, and marks every sale of a share
-    that differs "to check" (the Upstox account's only: the lots compared are its own)."""
+    that differs "to check" (the Upstox account's only: the lots compared are its own). A check
+    that waits, or could not be made, says so among the notes, and marks nothing."""
     differ = {row["isin"] for row in check["rows"]}
     for key in SALE_LISTS:
         for row in pack["capital_gains"][key]:
             row["to_check"] = row["isin"] in differ and row["account"] == check["account_id"]
     pack["lot_check"] = check
-    if check["words"]:
+    if check["rows"]:
         pack["notes"].insert(0, f"{check['words']} Sales of these shares are marked to check.")
+    elif check["words"]:
+        pack["notes"].insert(0, check["words"])
     return pack
+
+
+def _lot_check(tx, years: list, names: dict, today: int, now: int, insights: bool) -> dict:
+    """The check for the paper's taxpayer, on the running year's inputs and the share names
+    the paper has already read (v0.14.0 verification L7): the history is not read twice."""
+    given = years[-1] if years[-1].fy == financial_year(today) else None
+    return lotcheck.check(tx, today, now, insights=insights, taxpayer=years[-1].taxpayer,
+                          given=given, names=names)  # fmt: skip
 
 
 #: The lists of the pack whose rows are sales of a share or a fund, each named by its ISIN.
 SALE_LISTS = ("schedule", "needs_fmv", "unknown_cost", "exempt_buybacks")
+#: An ISIN as a word of a sentence.
+ISIN_WORD = re.compile(r"\bIN[A-Z0-9]{10}\b")
 
 
 def _share_names(tx) -> dict[str, str]:
@@ -279,10 +292,17 @@ def _share_names(tx) -> dict[str, str]:
 
 def _named(pack: dict, names: dict[str, str]) -> dict:
     """Each sale of the pack with its share's name beside the ISIN (None where no record names
-    it; the ISIN is always kept). The core knows a share by its ISIN only."""
+    it; the ISIN is always kept). The core knows a share by its ISIN only, so its notes ("A
+    bonus of <ISIN> on ...") name the share too, where a record names it (v0.14.0 verification
+    L4)."""
     for key in SALE_LISTS:
         for row in pack["capital_gains"][key]:
             row["name"] = names.get(row["isin"])
+    if "notes" in pack:
+        pack["notes"] = [
+            ISIN_WORD.sub(lambda found: names.get(found.group(0), found.group(0)), note)
+            for note in pack["notes"]
+        ]
     # A sale the paper does not compute (an ETF, a REIT, a bond) is named too: an ISIN alone
     # does not say what was sold. A derivative's instrument is its contract and names itself.
     for row in pack.get("not_computed_sales") or ():
@@ -294,8 +314,8 @@ def _named(pack: dict, names: dict[str, str]) -> dict:
 def _paper(store, member: int | None, fy: int, today: int, now: int, reading: bool,
            insights: bool) -> dict:  # fmt: skip
     def run(tx):
-        return (_gather(tx, member, fy, today, now), _share_names(tx),
-                lotcheck.check(tx, today, now))  # fmt: skip
+        years, names = _gather(tx, member, fy, today, now), _share_names(tx)
+        return years, names, _lot_check(tx, years, names, today, now, insights)
 
     years, names, check = store.read(OWNER, run)
     pack = _checked(_named(_chain(years, reading), names), check)
@@ -682,7 +702,8 @@ def _paper_file(store, member, fy: int, schedule: str, today: int, now: int,
                 insights: bool) -> dict:  # fmt: skip
     def run(tx):
         years = _gather(tx, member, fy, today, now)
-        return years, _labels(tx, years[-1].taxpayer), lotcheck.check(tx, today, now)
+        labels = _labels(tx, years[-1].taxpayer)
+        return years, labels, _lot_check(tx, years, labels[1], today, now, insights)
 
     years, (who, names, accounts), check = store.read(OWNER, run)
     pack = _with_dividends(store, _checked(_chain(years), check), today, insights)
