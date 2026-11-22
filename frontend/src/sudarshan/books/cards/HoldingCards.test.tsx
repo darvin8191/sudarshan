@@ -208,6 +208,8 @@ describe('Holdings on a phone', () => {
     await renderPhone(RELIANCE, HDFCBANK)
     const reliance = card(/RELIANCE/)
     expect(reliance).toHaveTextContent('Qty 40 · Avg 1,374.30')
+    // v0.16.0 phone review L5, as on the position card: each figure whole, the line wrapping.
+    expect(within(reliance).getByText('Avg 1,374.30')).toHaveClass('whitespace-nowrap')
     expect(reliance).toHaveTextContent('+₹3,120.00')
     expect(reliance).toHaveTextContent('+5.67%')
     expect(reliance).toHaveTextContent('LTP1,452.30')

@@ -304,6 +304,11 @@ describe('Positions on a phone: the cards', () => {
     expect(long).toHaveTextContent('MIS')
     expect(long).toHaveTextContent('+65LONG')
     expect(long).toHaveTextContent('NFO · 27 Oct 2026 · Avg 142.50')
+    // v0.16.0 phone review L5: the line wraps rather than cutting the average price, which is
+    // kept whole ("Avg 25,850..." at 320 px with Larger text).
+    const average = within(long).getByText('Avg 142.50')
+    expect(average).toHaveClass('whitespace-nowrap')
+    expect(average.parentElement).not.toHaveClass('truncate')
     expect(long).toHaveTextContent('LTP152.50')
     expect(long).toHaveTextContent('+₹650.00')
     expect(long).toHaveTextContent('+7.02%')
