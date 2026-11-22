@@ -1,0 +1,120 @@
+# The date sentinel: the SUDARSHAN backend tests, upstream's strategy module tests and the frontend's
+# vitest suite, run on a clock shifted ahead by libfaketime, to find a test that mixes the real
+# clock with a fake one before the calendar moves on and sets it off. Never on pull request, and
+# never a required check: it runs nightly and when dispatched, and a red run is the signal. It opens no
+# issue and posts nowhere. How to read a run: sudarshan/README.md, "The date sentinel".
+name: SUDARSHAN date sentinel
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 21:17 UTC, 02:47 IST: far from the Indian market hours and the broker's 03:00 token rollover
+    # does not matter here (nothing in this workflow reaches a broker).
+    - cron: "17 21 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sudarshan-date-sentinel-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sentinel:
+    name: "+${{ matrix.days }}d, ${{ matrix.part }}"
+    # x86: libfaketime segfaults the threaded tests on the arm64 runner (plain and multithread
+    # builds both, even with the clock not moved); a date question is the same on either.
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        # 0 is the control: libfaketime loaded, clock not moved. A test that fails there as well is
+        # not a date bomb (or not only one).
+        days: [0, 1, 7, 30, 100]
+        # 1 to 4: the four backend shards (sudarshan/tests/ci_shards.py), as sudarshan-ci.yml runs
+        # them. upstream: test/test_strategy_module_*.py.
+        # fe1 to fe3: the frontend's vitest suite in three shards (the phone specs are not part of
+        # it: they run a real browser, which libfaketime is not for).
+        part: ["1", "2", "3", "4", "upstream", "fe1", "fe2", "fe3"]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v7
+        if: ${{ !startsWith(matrix.part, 'fe') }}
+        with:
+          enable-cache: true
+          python-version: "3.12"
+      - run: uv sync --dev
+        if: ${{ !startsWith(matrix.part, 'fe') }}
+      - uses: actions/setup-node@v7
+        if: ${{ startsWith(matrix.part, 'fe') }}
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+        if: ${{ startsWith(matrix.part, 'fe') }}
+        working-directory: frontend
+      - name: Production server packages (gunicorn, eventlet)
+        if: ${{ !startsWith(matrix.part, 'fe') }}
+        run: uv pip install "gunicorn>=25.0,<26" "eventlet==0.41.2"
+      - name: libfaketime, and where it is
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq faketime
+          # The multithread build, which is the safe one for threads.
+          lib=$(ls /usr/lib/*/faketime/libfaketimeMT.so.1 /usr/lib/faketime/libfaketimeMT.so.1 2>/dev/null | head -n 1)
+          test -n "$lib" && test -e "$lib" || { echo "libfaketimeMT.so.1 not found"; exit 1; }
+          echo "FAKETIME_LIB=$lib" >> "$GITHUB_ENV"
+          echo "library: $lib"
+      - name: nginx for the family view's tests
+        if: ${{ contains('1 2 3 4', matrix.part) }}
+        run: |
+          # The same as the backend job: the shard that holds test_nginx_text.py needs a binary,
+          # or those tests skip.
+          files=$(.venv/bin/python -m sudarshan.tests.ci_shards ${{ matrix.part }} 4)
+          case " $files " in
+            *test_nginx_text.py*)
+              sudo apt-get install -y -qq nginx-light
+              sudo systemctl stop nginx || true
+              echo "SUDARSHAN_NGINX_REQUIRED=1" >> "$GITHUB_ENV" ;;
+          esac
+      # The script puts libfaketime on the pytest process only. This step, and the steps after it,
+      # keep the real clock, so they report the real date.
+      - name: The tests on a clock +${{ matrix.days }} days ahead
+        run: |
+          PYTHON=$([ -x .venv/bin/python ] && echo .venv/bin/python || echo python3) \
+            DATE_SENTINEL_OUT="$PWD/date-sentinel-out" \
+            scripts/date_sentinel.sh "${{ matrix.days }}" "${{ matrix.part }}"
+      - name: The result, on the real clock
+        if: ${{ !cancelled() }}
+        run: |
+          echo "real date: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          shifted=$(LD_PRELOAD="$FAKETIME_LIB" FAKETIME="+${{ matrix.days }}d" date -u +%F)
+          f=date-sentinel-out/failing-${{ matrix.days }}d-${{ matrix.part }}.txt
+          n=0
+          [ -s "$f" ] && n=$(wc -l < "$f")
+          {
+            echo "### +${{ matrix.days }} days (the tests saw $shifted), ${{ matrix.part }}: $n failing"
+            echo "Real date of this run: $(date -u +%F)"
+            if [ "$n" -gt 0 ]; then
+              echo '```'
+              cat "$f"
+              echo '```'
+            fi
+            skipped=$(grep -h "date sentinel: tests skipped by name" -A 100 date-sentinel-out/pytest-*.log 2>/dev/null | grep -c '  (' || true)
+            echo "Tests skipped by name (date_sentinel_skips.txt): $skipped"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: The failing test ids
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v6
+        with:
+          name: failing-tests-${{ matrix.days }}d-${{ matrix.part }}
+          path: |
+            date-sentinel-out/failing-*.txt
+            date-sentinel-out/junit-*.xml
+            date-sentinel-out/vitest-*.json
+            date-sentinel-out/pytest-*.log
+            date-sentinel-out/vitest-*.log
+          retention-days: 14
+          if-no-files-found: warn

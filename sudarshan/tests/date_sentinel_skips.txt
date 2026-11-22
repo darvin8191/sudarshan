@@ -1,0 +1,9 @@
+# Tests the date sentinel does not run, one per line: <node id glob> | <reason>.
+# Only for a reason that has nothing to do with dates (a file's modification time comes from the
+# kernel while the clock is shifted, a timeout measured against a faked clock, and the like).
+# Every entry is printed in the run's summary. A test that fails on a date is fixed, not listed.
+sudarshan/ops/tests/test_deploy_calendar.py::test_a_temporary_file_a_killed_run_left_is_cleared* | the deploy tool reads a file's age with coreutils stat and find, which libfaketime does not fake, and compares it with date, which it does
+sudarshan/ops/tests/test_deploy_hardening.py::test_a_line_that_is_not_a_whole_record_does_not_count_as_told* | the deploy tool reads a file's age with coreutils stat (not faked) and compares it with date (faked)
+sudarshan/ops/tests/test_deploy_notices.py::test_the_first_run_tells_an_install_the_earlier_tool_made_without_a_word* | the deploy tool reads the age of deployed_tag with coreutils stat (not faked) and compares it with date (faked)
+sudarshan/books/tests/test_books_exit_guard_gunicorn.py::test_a_worker_killed_on_its_timeout_takes_its_claims_with_it* | gunicorn judges a worker's timeout from file times and the monotonic clock, which libfaketime shifts differently
+sudarshan/ops/tests/test_deploy_calendar.py::test_a_rollback_puts_the_previous_files_back* | the test asserts an exact file time that coreutils cp -p restores from the kernel's own clock, and stat then shifts it (libfaketime)
