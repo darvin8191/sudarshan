@@ -1681,7 +1681,7 @@
    "level": "unread"
   },
   {
-   "name": "the token Upstox took at the daily check is fine",
+   "name": "the token Upstox took at the portfolio's last holdings or positions read is fine",
    "check": "analytics_token",
    "readings": {
     "health": {
@@ -1705,7 +1705,7 @@
    }
   },
   {
-   "name": "the token Upstox refused at the daily check is failing",
+   "name": "the token Upstox refused at that read is failing",
    "check": "analytics_token",
    "readings": {
     "health": {
@@ -1729,32 +1729,7 @@
    }
   },
   {
-   "name": "refused, and a later check missed: still failing, the refusal is what is known",
-   "check": "analytics_token",
-   "readings": {
-    "health": {
-     "portfolio": {
-      "service": "sudarshan-portfolio",
-      "portfolio_state": {
-       "enabled": true,
-       "state": "running",
-       "analytics_token": {
-        "state": "failed",
-        "at": 1793770000,
-        "missed_at": 1793856400
-       }
-      }
-     }
-    }
-   },
-   "memory": {},
-   "level": "failing",
-   "facts": {
-    "when": "1793770000"
-   }
-  },
-  {
-   "name": "stale: the check at the last start got no answer",
+   "name": "a missed_at an earlier release sent is not read: there is no start-up check to miss",
    "check": "analytics_token",
    "readings": {
     "health": {
@@ -1773,41 +1748,13 @@
     }
    },
    "memory": {},
-   "level": "warning",
+   "level": "fine",
    "facts": {
-    "when": "1793770000",
-    "cause": "missed",
-    "tried": "1793856400"
+    "when": "1793770000"
    }
   },
   {
-   "name": "stale: no check has ever answered and the last one got no answer",
-   "check": "analytics_token",
-   "readings": {
-    "health": {
-     "portfolio": {
-      "service": "sudarshan-portfolio",
-      "portfolio_state": {
-       "enabled": true,
-       "state": "running",
-       "analytics_token": {
-        "state": "unknown",
-        "at": null,
-        "missed_at": 1793770000
-       }
-      }
-     }
-    }
-   },
-   "memory": {},
-   "level": "warning",
-   "facts": {
-    "cause": "missed",
-    "tried": "1793770000"
-   }
-  },
-  {
-   "name": "no check has answered yet: unread, never a fault",
+   "name": "nothing has been read with the token yet: unread, never a fault",
    "check": "analytics_token",
    "readings": {
     "health": {
@@ -1831,7 +1778,7 @@
    }
   },
   {
-   "name": "the token file was changed after the check: unread, not the old token's result",
+   "name": "the token file was changed after the read: unread, not the old token's result",
    "check": "analytics_token",
    "readings": {
     "health": {
@@ -1857,7 +1804,7 @@
    }
   },
   {
-   "name": "the portfolio is switched off: nothing checks the token",
+   "name": "the portfolio is switched off: nothing reads with the token",
    "check": "analytics_token",
    "readings": {
     "health": {
@@ -2428,7 +2375,7 @@
    ]
   },
   {
-   "name": "the token is refused, replaced on the server, then checked again: told once each way",
+   "name": "the token is refused, replaced on the server, then read again: told once each way",
    "check": "analytics_token",
    "memory": {},
    "runs": [
@@ -2554,10 +2501,7 @@
        }
       }
      },
-     [
-      "warning",
-      "fine"
-     ]
+     null
     ],
     [
      {
@@ -2575,10 +2519,7 @@
        }
       }
      },
-     [
-      "fine",
-      "warning"
-     ]
+     null
     ]
    ]
   },

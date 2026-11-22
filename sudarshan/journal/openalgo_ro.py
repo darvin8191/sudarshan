@@ -58,10 +58,11 @@ MONTHS = ("JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", 
 BATCH = 400
 
 
-#: Log rows that only read (nothing is placed, changed or cancelled by them): not order records.
+#: Log rows that are not order records: the reads (nothing is placed, changed or cancelled by
+#: them) and the switch between Live and Analyze mode (v0.16.0 review L2).
 READS = frozenset(
     {"orderstatus", "orderbook", "tradebook", "positionbook", "openposition", "gttorderbook",
-     "holdings", "funds", "margin", "analyzer_status"}
+     "holdings", "funds", "margin", "analyzer_status", "analyzer_toggle"}
 )  # fmt: skip
 #: The columns of the year's orders file, in order (``order_lines``).
 ORDER_COLUMNS = (
@@ -228,7 +229,8 @@ def _cell(value: Any) -> str:
 
 def order_lines(row: Mapping[str, Any], mode: str) -> list[dict[str, str]]:
     """One log row as lines of the year's orders file: one line, or one per leg of a basket.
-    Nothing for a row that only read. Only the named fields are copied; the API key never is."""
+    Nothing for a row that is not an order record (``READS``; ``order_log`` leaves those out in
+    its query already). Only the named fields are copied; the API key never is."""
     api_type = str(row.get("api_type") or "")
     if api_type in READS:
         return []
@@ -335,19 +337,24 @@ class OpenAlgoRecords:
         """The order requests logged from ``start_day`` to ``end_day`` (India dates, both
         included) as ``order_lines``, oldest first: ``order_logs`` for live, ``analyzer_logs``
         for the sandbox. Read ``page`` rows at a time, each on its own engine, so a year of
-        requests is never held at once. Raises ``RecordsUnavailable`` like every read here."""
+        requests is never held at once. The rows that are not order records (``READS``) are
+        left out by the query itself, so their request and answer text is never fetched
+        (v0.16.0 review L2). Raises ``RecordsUnavailable`` like every read here."""
         table = "order_logs" if mode == "live" else "analyzer_logs"
         start, end = to_date(start_day), to_date(end_day) + timedelta(days=1)
+        marks, skipped = _bind("r", sorted(READS))
         after = 0
         while True:
             rows = self.main.query(
                 f"SELECT id, api_type, request_data, response_data, created_at FROM {table} "
                 "WHERE id > :after AND created_at >= :start AND created_at < :end "
+                f"AND (api_type IS NULL OR api_type NOT IN ({marks})) "
                 "ORDER BY id LIMIT :page",
                 after=after,
                 start=f"{start.isoformat()} 00:00:00",
                 end=f"{end.isoformat()} 00:00:00",
                 page=page,
+                **skipped,
             )
             for row in rows:
                 yield from order_lines(row, mode)

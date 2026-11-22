@@ -508,10 +508,11 @@ def _watch_failing(event: Event, now: datetime) -> list[str]:
             f"reconnects by itself; if this message comes again, {LOOK}."
         ]
     if check == "analytics_token":
+        # Judged only from the reads the token is known to make (v0.16.0 review H1).
         return [
-            "Upstox did not accept SUDARSHAN's read-only token (the Analytics Token) when it "
-            f"was checked{_checked(event, now)}. Prices, the Portfolio page and the family view "
-            "read Upstox with it.",
+            "Upstox did not accept SUDARSHAN's read-only token (the Analytics Token) when "
+            f"SUDARSHAN read your Upstox holdings or positions with it{_checked(event, now)}. "
+            "Prices, the Portfolio page and the family view read Upstox with it.",
             f"Open the Upstox developer page (My Apps) and see whether the token is still "
             f"there and active. {TOKEN_SHARED}",
         ]
@@ -600,20 +601,6 @@ def _watch_warning(event: Event, now: datetime) -> list[str]:
             "One of SUDARSHAN's services is listening on the network, not only inside the "
             f"server. Nothing has stopped; {LOOK}."
         ]
-    if check == "analytics_token":
-        last = _checked(event, now)
-        known = (
-            f"The last check that Upstox answered was{last}."
-            if last
-            else "No check has been answered yet."
-        )
-        return [
-            "SUDARSHAN could not check its read-only Upstox token (the Analytics Token) when "
-            f"the portfolio service started{_checked(event, now, 'tried')}: Upstox gave no "
-            f"answer, or the token's file on the server could not be read. {known}",
-            "If the Portfolio page shows your Upstox holdings, the token is working and "
-            f"nothing is needed. If it does not, {LOOK}.",
-        ]
     if check == "certificate":
         # The certificate has not been judged for two days (v0.13.0 verify N6): no address for
         # the app is known to the watch, or the web server answers it with another site's.
@@ -677,10 +664,9 @@ def _watch_fine(event: Event, now: datetime) -> list[str]:
         # Its only warning is "not checked": nothing was renewed, it is judged again.
         return ["SUDARSHAN's security certificate is being checked again."]
     if check == "analytics_token":
-        return [
-            "Upstox accepts SUDARSHAN's read-only token (the Analytics Token): checked"
-            f"{_checked(event, now) or ' again'}."
-        ]
+        at = _checked(event, now)
+        read = f": your Upstox holdings or positions were read with it{at}" if at else ""
+        return [f"Upstox accepts SUDARSHAN's read-only token (the Analytics Token) again{read}."]
     return {
         "login": [f"Upstox is connected again since {at}: order updates are arriving."],
         "feed": [f"The price feed is connected to Upstox again since {at}."],

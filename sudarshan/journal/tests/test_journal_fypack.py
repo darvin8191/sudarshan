@@ -19,6 +19,7 @@ import os
 import sqlite3
 import zipfile
 from datetime import UTC, date, datetime
+from pathlib import Path
 
 import pytest
 from render_pdfread import read_pdf
@@ -27,6 +28,7 @@ from test_journal_capture import files as files  # noqa: F401  (a fixture)
 from test_journal_capture import ist_ms, placed, scenario
 from test_journal_capture import rig as rig  # noqa: F401  (a fixture)
 from test_journal_period_reports import at, build, file_of, kept
+from test_journal_reports import call
 
 from sudarshan.alerts.market import spec
 from sudarshan.alerts.market.engine import Fire, State
@@ -203,6 +205,40 @@ def test_a_basket_is_a_line_per_leg_a_refusal_keeps_its_words_and_a_read_is_no_o
     assert openalgo_ro.order_lines(odd, "live")[0]["time_ist"] == ""
 
 
+def test_the_order_log_leaves_reads_and_mode_switches_out_in_its_query(rig, files, monkeypatch):  # noqa: F811
+    """v0.16.0 review L2: the reads (which can far outnumber the orders) are left out by the
+    query, so their request and answer text is never fetched; a switch between Live and Analyze
+    mode is not an order request either. Pages stay whole across the rows left out."""
+    assert "analyzer_toggle" in openalgo_ro.READS
+    kinds_logged = ("orderstatus", "analyzer_toggle", "placeorder", "openposition",
+                    "analyzer_status", "placeorder", "margin", "cancelorder")  # fmt: skip
+    with contextlib.closing(sqlite3.connect(files / "openalgo.db")) as conn, conn:
+        for n, api_type in enumerate(kinds_logged):
+            row = placed(f"m{n}", strategy=f"Row {n}", api_type=api_type,
+                         at=f"2026-11-1{n} 10:00:00")  # fmt: skip
+            conn.execute(
+                "INSERT INTO order_logs (api_type, request_data, response_data, created_at) "
+                "VALUES (?, ?, ?, ?)",
+                (row["api_type"], json.dumps(row["request_data"]),
+                 json.dumps(row["response_data"]), row["created_at"]),
+            )  # fmt: skip
+    fetched: list[str] = []
+    real = openalgo_ro._ReadOnly.query
+
+    def query(self, sql, **params):
+        rows = real(self, sql, **params)
+        fetched.extend(str(r["api_type"]) for r in rows if "api_type" in r)
+        return rows
+
+    monkeypatch.setattr(openalgo_ro._ReadOnly, "query", query)
+    lines = list(openalgo_ro.records_for(rig.svc).order_log("live", 20261101, 20261130, page=2))
+    assert not set(fetched) & openalgo_ro.READS
+    assert [(line["request"], line["strategy"]) for line in lines] == [
+        ("placeorder", "ORB"), ("placeorder", "Breakout"), ("placeorder", "Row 2"),
+        ("placeorder", "Row 5"), ("cancelorder", "Row 7"),
+    ]  # fmt: skip
+
+
 # ---- the pack ----------------------------------------------------------------------------------
 def test_the_pack_of_4_april_holds_the_year_from_1_april_to_31_march_and_no_more(year, book):  # noqa: F811
     assert date(2027, 4, 4).weekday() == 6, "4 April 2027 is a Sunday"
@@ -362,6 +398,57 @@ def test_a_store_that_cannot_be_read_puts_the_job_off_and_a_build_on_request_say
         assert _rows(pack, "alerts.csv") == [] and len(_rows(pack, "orders.csv")) == 5
 
 
+def _break_alerts(rig):  # noqa: F811
+    (rig.svc.settings.alerts_dir / DB_FILENAME).write_bytes(b"not a database at all")
+    for side in ("-wal", "-shm"):
+        (rig.svc.settings.alerts_dir / (DB_FILENAME + side)).unlink(missing_ok=True)
+
+
+def _first_page(rig) -> str:  # noqa: F811
+    with _zip(rig) as pack:
+        page = read_pdf(pack.read(fypack.READ_FIRST))
+    return " ".join(ln for p in page.pages for ln in p.lines if ln.strip())
+
+
+def test_a_store_that_stays_unreadable_still_gives_the_years_archive_its_pack(year, book):  # noqa: F811
+    """v0.16.0 review L3: a store that stays unreadable (corrupt, or its permissions lost) put
+    the scheduled build off all day, so the 16:30 backup of 4 April, the year's archive, held no
+    pack. Now it is put off only while a later try can still be kept before that backup: from
+    15:30 it is built with what can be read, and the first page names the store that could not
+    be."""
+    timer = Path(retention.__file__).parent / "systemd" / "sudarshan-backup.timer"
+    backups = sorted(
+        int(hm[:2]) * 60 + int(hm[3:5])
+        for line in timer.read_text().splitlines()
+        if line.startswith("OnCalendar=") and (hm := line.split()[1])
+    )
+    assert backups[0] == 16 * 60 + 30  # the first backup of the day: on 4 April, the archive
+    assert fypack.STRICT_UNTIL_MIN == backups[0] - 60  # an hour before it, for the last build
+    _break_alerts(year)
+    assert _job(year, 20270404) == "failed"
+    assert _job(year, 20270404, "15:15") == "failed"  # a later try can still land in time
+    assert kept(year, "records") is None
+    assert _job(year, 20270404, "15:30") == "late"
+    row = kept(year, "records")
+    assert row["built_ms"] == at(20270404, "15:30") < at(20270404, "16:30")
+    said = "alerts.csv: the alerts' history could not be read just now, so the file holds its"
+    assert said in row["text"] and said in _first_page(year)
+    with _zip(year) as pack:
+        assert _rows(pack, "alerts.csv") == [] and len(_rows(pack, "orders.csv")) == 5
+
+
+def test_a_catch_up_run_on_a_later_day_builds_the_pack_with_what_can_be_read(year, book):  # noqa: F811
+    assert _job(year, 20270401) == "ok"  # the journal ran in the week before (review L16)
+    _break_alerts(year)
+    assert _job(year, 20270404) == "failed"
+    assert _job(year, 20270405, "03:30") == "late"  # the missed day, caught up the next morning
+    row = kept(year, "records")
+    assert row["period_key"] == "FY2627" and row["built_ms"] == at(20270405, "03:30")
+    assert "the alerts' history could not be read just now" in _first_page(year)
+    job = year.svc.store.read(OWNER, lambda tx: tx.job_get("fy", 20270404))
+    assert job["status"] == "late"
+
+
 def test_a_server_without_the_other_stores_still_gets_its_pack(rig, book):  # noqa: F811
     """A laptop, or a server where alerts and the watch never ran: each file is there with its
     header, and the page says which stores are not kept. No Tax pack: the pack says how to get
@@ -456,11 +543,46 @@ def test_the_first_page_is_dated_by_the_pack_not_the_clock(year, book):  # noqa:
     assert f"/CreationDate (D:{stamp}Z)".encode() in page
 
 
-def test_a_pack_too_large_for_the_page_says_where_it_is(year, book, monkeypatch):  # noqa: F811
-    monkeypatch.setattr(fypack, "PAGE_DOWNLOAD_MAX", 100)
+def test_a_pack_too_large_for_the_page_says_where_it_is_and_is_refused_in_the_same_words(
+    year,
+    book,  # noqa: F811
+    monkeypatch,
+):
+    """v0.16.0 review L1: one rule, kinds.FILE_MAX_BYTES, for the pack's text and the download.
+    A pack past it is refused before it is read out, in the pack's own words (it is in the
+    backups); retrying never helps, so nothing says to try again. One within it downloads."""
+    assert kinds.FILE_MAX_BYTES * 4 // 3 + 64 * 1024 <= kinds.ANSWER_MAX_BYTES
+    assert kinds.FILE_MAX_BYTES > 5 * 1024 * 1024  # realistic packs are 1 to 2 MB
     year.now = at(20270404, "07:10")
     build(year, "records", period="FY2627")
-    assert kept(year, "records")["text"].endswith(fypack.TOO_LARGE)
+    whole = kept(year, "records")
+    assert fypack.TOO_LARGE not in whole["text"]
+    assert call(year, "report_file", id=whole["id"])["file_name"].endswith(".zip")
+
+    monkeypatch.setattr(kinds, "FILE_MAX_BYTES", 100)
+    build(year, "records", period="FY2627")
+    row = kept(year, "records")
+    assert row["text"].endswith(fypack.TOO_LARGE)
+    with pytest.raises(ApiError) as refused:
+        call(year, "report_file", id=row["id"])
+    assert (refused.value.status, refused.value.code) == (422, "refused")
+    assert refused.value.message == fypack.TOO_LARGE
+    assert "again" not in refused.value.message
+
+
+def test_any_report_file_too_large_for_the_page_is_refused_with_where_it_is(
+    year,
+    book,  # noqa: F811
+    monkeypatch,
+):
+    from sudarshan.journal.ops import report_ops
+
+    build(year, "weekly", period="2026W45")
+    week = kept(year, "weekly")
+    monkeypatch.setattr(kinds, "FILE_MAX_BYTES", 100)
+    with pytest.raises(ApiError) as refused:
+        call(year, "report_file", id=week["id"])
+    assert (refused.value.code, refused.value.message) == ("refused", report_ops.TOO_LARGE)
 
 
 def test_the_kind_has_its_title_and_its_file_name():

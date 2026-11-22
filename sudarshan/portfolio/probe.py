@@ -1,12 +1,25 @@
-"""The start-up probe (cross-design Y41): can the Analytics Token read the account's orders?
+"""The Analytics Token as the portfolio's own reads find it (M13.12, M19.5), and the start-up probe
+(cross-design Y41).
 
-Two designs (the family view, the journal) depend on one fact nobody has verified: whether the
-read-only Analytics Token may call ``retrieve-all``, ``get-trades-for-day`` and the order history.
-A moment after the first start of a day, this logs the HTTP status each answered and nothing from
-the body, so the owner reads the line with
+**The token check** is published in ``/health`` as ``analytics_token``: a state and a time and
+nothing else, for the server's watch and the System page. It is judged only from the reads the
+token is known to make, the ones the Upstox tab shows (``upstox.JUDGES``: holdings and positions).
+Each of those Upstox answers says it: ``ok`` when Upstox answered the read (200), ``failed`` when
+it refused the token (401). No call is made for it: the Upstox tab, the family view and the
+closing record after each trading day read them anyway. Nothing else decides it, the probe below
+included: whether Upstox lets this token read the account's orders is not known, and a refusal
+there may only mean that it may not (v0.16.0 review H1). The last result is kept in the service's
+state folder (``token-check``), written when it says something new and once a day otherwise, so a
+restart shows it. A token file that changed after the read has not been judged: the state is
+``unknown`` until the next read, never the old token's result.
+
+**The start-up probe.** Two designs (the family view, the journal) depend on one fact nobody has
+verified: whether the read-only Analytics Token may call ``retrieve-all``, ``get-trades-for-day``
+and the order history. A moment after the first start of a day, this logs the HTTP status each
+answered and nothing from the body, so the owner reads the line with
 ``journalctl -u sudarshan-portfolio | grep "Analytics Token probe"``. It spends one read of each
 API's own budget as the owner, sends the token the way the reader does, and changes no state of
-the reader (a 401 here does not pause the reads of the Upstox tab).
+the reader or of the token check: what it found is that line and nothing else.
 
 At most once a day (v0.10.0 review L7): the IST day of the last probe Upstox answered is kept in
 the service's state folder (``probe-day``), and a later start that day asks nothing. A probe that
@@ -14,14 +27,6 @@ reached no answer (no token, no network) is not counted, so the next start tries
 
 The order history is asked for an order id that cannot exist: an answer that is not 401 or 403
 tells that the token may read the endpoint at all; the status is what is logged, never a body.
-
-**What the check found is published** (M13.12, M19.5): ``/health`` carries ``analytics_token``, a
-state and a time and nothing else, for the server's watch and the System page. The result of the
-last check Upstox answered is kept beside the day (``probe-result``), so a restart later that day
-still shows it. No call is added for this: it is the result of the check above. ``failed`` is
-"Upstox refused the token at every read that answered" (401); a read the token may not make
-(403) is not a refused token. A token file that changed after the check has not been checked:
-the state is ``unknown`` until the next check, never the old token's result.
 """
 
 from __future__ import annotations
@@ -45,9 +50,9 @@ log = logging.getLogger("sudarshan.portfolio.probe")
 DELAY_S = 20.0
 #: The IST day (YYYYMMDD) of the last probe Upstox answered, in the service's state folder.
 DAY_FILE = "probe-day"
-#: The last check Upstox answered: {"at": epoch seconds, "state": "ok" or "failed", "sig": the
+#: The token check's last result: {"at": epoch seconds, "state": "ok" or "failed", "sig": the
 #: token file's time and size then}. Never the token, a status or anything Upstox said.
-RESULT_FILE = "probe-result"
+RESULT_FILE = "token-check"
 OK, FAILED, UNKNOWN = "ok", "failed", "unknown"
 PROBES = (
     ("orders", "/v2/order/retrieve-all", {}),
@@ -105,7 +110,7 @@ def _write(folder: Path, name: str, text: str) -> bool:
             handle.write(text)
         os.replace(tmp, path)
     except OSError as exc:
-        log.debug("the probe's %s could not be recorded: %s", name, exc.strerror)
+        log.debug("the portfolio's %s could not be recorded: %s", name, exc.strerror)
         with contextlib.suppress(OSError):
             tmp.unlink()
         return False
@@ -117,22 +122,13 @@ def note_probed(folder: Path, day: int) -> None:
     _write(folder, DAY_FILE, f"{day}\n")
 
 
-def judged(found: dict[str, int | str]) -> str | None:
-    """What a probe says of the token: ``failed`` when Upstox refused it (401) at every read that
-    answered, ``ok`` when any read answered otherwise, None when none answered."""
-    answered = [status for status in found.values() if isinstance(status, int)]
-    if not answered:
-        return None
-    return FAILED if all(status == 401 for status in answered) else OK
-
-
 def _whole(value: Any) -> bool:
     return isinstance(value, int) and not isinstance(value, bool)
 
 
 def read_result(folder: Path) -> dict[str, Any] | None:
-    """The last answered check as ``note_result`` kept it; None when there is none or the file
-    is cut off or not in that shape (it is then as if no check had been kept)."""
+    """The last result as ``note_result`` kept it; None when there is none or the file is cut off
+    or not in that shape (it is then as if nothing had been judged)."""
     try:
         with open(folder / RESULT_FILE, encoding="ascii") as handle:
             kept = json.loads(handle.read(4096))
@@ -149,53 +145,56 @@ def read_result(folder: Path) -> dict[str, Any] | None:
 
 
 def note_result(folder: Path, result: dict[str, Any]) -> None:
-    """Keep the result of a check Upstox answered. Never raises."""
+    """Keep the token check's result. Never raises."""
     _write(folder, RESULT_FILE, json.dumps(result, separators=(",", ":")) + "\n")
 
 
-def view(result: dict[str, Any] | None, missed_at: int | None, token_file: Path) -> dict[str, Any]:
-    """What ``/health`` says of the token: ``state`` (ok, failed, unknown) and ``at``, the epoch
-    seconds of the last check Upstox answered (None when there was none).
+def heard(service: Any, state: str, at_ms: int, sig: tuple[int, int] | None) -> None:
+    """A holdings or positions read Upstox answered (``UpstoxReader.on_verdict``): shown at once,
+    and kept when it says something new (another state, another token file) or on a new day, so
+    a tab open all day writes the file once. Never raises."""
+    result = {"at": at_ms // 1000, "state": state, "sig": None if sig is None else list(sig)}
+    old, service.token_check = service.token_check, result
+    if (
+        old is not None
+        and (old["state"], old["sig"]) == (state, result["sig"])
+        and day_of_instant(old["at"] * 1000) == day_of_instant(at_ms)
+    ):
+        return
+    note_result(Path(service.settings.state_dir), result)
 
-    ``changed`` is there when the token file is not the one that was checked: the state is then
-    unknown, whatever the old token's was. ``missed_at`` is there when a later check got no
-    answer at all (no token file, no network, no budget), so the result is older than the
-    service's last start."""
+
+def view(result: dict[str, Any] | None, token_file: Path) -> dict[str, Any]:
+    """What ``/health`` says of the token: ``state`` (ok, failed, unknown) and ``at``, the epoch
+    seconds of the last holdings or positions read Upstox answered (None when there was none).
+
+    ``changed`` is there when the token file is not the one that read used: the state is then
+    unknown, whatever the old token's was."""
     if result is None:
-        shown: dict[str, Any] = {"state": UNKNOWN, "at": None}
-    else:
-        now = _signature(Path(token_file))
-        changed = (None if now is None else list(now)) != result["sig"]
-        shown = {"state": UNKNOWN if changed else result["state"], "at": result["at"]}
-        if changed:
-            shown["changed"] = True
-    if missed_at is not None and (result is None or missed_at > result["at"]):
-        shown["missed_at"] = missed_at
+        return {"state": UNKNOWN, "at": None}
+    now = _signature(Path(token_file))
+    changed = (None if now is None else list(now)) != result["sig"]
+    shown: dict[str, Any] = {"state": UNKNOWN if changed else result["state"], "at": result["at"]}
+    if changed:
+        shown["changed"] = True
     return shown
 
 
 async def at_start(service: Any, delay_s: float = DELAY_S) -> dict[str, int | str] | None:
-    """The job: a moment after start, the probe, unless Upstox answered one today already (then
-    None). The day is recorded only when Upstox answered at least one of the three, and so is
-    the result ``/health`` shows; what an earlier start found is shown from the first moment."""
+    """The job: the kept token check shown from the first moment; then, a moment after start, the
+    probe, unless Upstox answered one today already (then None). The day is recorded only when
+    Upstox answered at least one of the three. What the probe found is logged, never judged."""
     folder = Path(service.settings.state_dir)
-    service.token_check = read_result(folder)
+    if service.token_check is None:
+        service.token_check = read_result(folder)
     await asyncio.sleep(delay_s)
     today = day_of_instant(service.clock())
     if probed_on(folder) == today:
         log.debug("the Analytics Token probe ran today already")
         return None
-    upstox = service.ensure_upstox()
-    checked = _signature(Path(upstox.token_file))
-    found = await probe(upstox)
-    state, at = judged(found), service.clock() // 1000
-    if state is None:
-        service.token_missed_at = at
-        return found
-    note_probed(folder, today)
-    result = {"at": at, "state": state, "sig": None if checked is None else list(checked)}
-    note_result(folder, result)
-    service.token_check, service.token_missed_at = result, None
+    found = await probe(service.ensure_upstox())
+    if any(_whole(status) for status in found.values()):
+        note_probed(folder, today)
     return found
 
 

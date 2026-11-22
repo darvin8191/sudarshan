@@ -9,10 +9,10 @@ The readings (a dict; a value of None, or a key that is missing, means "could no
     ist_date          today's date in India, YYYY-MM-DD
     window_open       whether the price feed's own market window is open (trading day and hours)
     health            {service: its /health answer as a dict, or None when it did not answer};
-                      the portfolio's carries ``portfolio_state.analytics_token``, the result of
-                      its own daily check of the Upstox Analytics Token: {"state": ok, failed
-                      or unknown, "at": seconds or None, "changed": true when the token file is
-                      not the one checked, "missed_at": a later check that got no answer}
+                      the portfolio's carries ``portfolio_state.analytics_token``, what Upstox
+                      said of the Analytics Token at the portfolio's last holdings or positions
+                      read: {"state": ok, failed or unknown, "at": seconds or None, "changed":
+                      true when the token file is not the one that read used}
     enabled           {service: whether its unit is enabled on this server}
     openalgo          whether OpenAlgo answered a public read
     master_date       the date in India of the last instrument list download ("" when never)
@@ -185,15 +185,16 @@ def _seconds(value) -> int | None:
 
 
 def analytics_token(readings: Mapping, memory: Mapping) -> Result:
-    """The Upstox Analytics Token, as the portfolio's own daily check found it (M13.12). The
+    """The Upstox Analytics Token, as the portfolio found it at its last holdings or positions
+    read (M13.12): only the reads the token is known to make decide it (v0.16.0 review H1). The
     watch asks Upstox nothing and never sees the token: it reads a state and a time from the
     portfolio's ``/health``.
 
-    Failing when Upstox refused the token at that check. A warning (``missed``: the result is
-    stale) when a later check, at the service's last start, got no answer at all. Unread, with
-    the cause, when nothing can be said: no check has answered yet (``never``), or the token
-    file was changed after the check (``changed``), so the old token's result is not this
-    one's. Off while the portfolio is switched off: nothing checks the token then."""
+    Failing when Upstox refused the token at that read. Unread, with the cause, when nothing can
+    be said: nothing has been read with it yet (``never``), or the token file was changed after
+    the read (``changed``), so the old token's result is not this one's. Off while the portfolio
+    is switched off: nothing reads with the token then. A ``missed_at`` an earlier release sent
+    is not read: there is no start-up check left to miss."""
     answer = (readings.get("health") or {}).get("portfolio")
     state = answer.get("portfolio_state") if isinstance(answer, Mapping) else None
     if not isinstance(state, Mapping):
@@ -203,14 +204,10 @@ def analytics_token(readings: Mapping, memory: Mapping) -> Result:
     token = state.get("analytics_token")
     if not isinstance(token, Mapping) or token.get("state") not in TOKEN_STATES:
         return Result("analytics_token", UNREAD)
-    at, missed = _seconds(token.get("at")), _seconds(token.get("missed_at"))
+    at = _seconds(token.get("at"))
     facts = {} if at is None else {"when": str(at)}
     if token["state"] == "failed":
         return Result("analytics_token", FAILING, facts)
-    if missed is not None:
-        return Result(
-            "analytics_token", WARNING, {**facts, "cause": "missed", "tried": str(missed)}
-        )
     if token["state"] == "ok":
         return Result("analytics_token", FINE, facts)
     cause = "changed" if token.get("changed") is True else "never"
