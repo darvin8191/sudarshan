@@ -12,6 +12,7 @@ import {
   TriangleAlert,
 } from 'lucide-react'
 import type { ReactNode } from 'react'
+import type { MarketOpen } from '@/sudarshan/dashboard/live'
 import { journalCall } from '@/sudarshan/journal/api'
 import { paiseAmount, paiseText } from '@/sudarshan/journal/money'
 import { dayKey } from './api'
@@ -122,7 +123,16 @@ function DayLine({ strategy }: { strategy: Strategy }) {
   )
 }
 
-export function StrategyCard({ strategy, actions }: { strategy: Strategy; actions?: ReactNode }) {
+export function StrategyCard({
+  strategy,
+  actions,
+  marketOpen,
+}: {
+  strategy: Strategy
+  actions?: ReactNode
+  /** The page's market calendar, for the P&L line's stale rule (v0.16.0 phone review L4). */
+  marketOpen?: MarketOpen
+}) {
   const last = strategy.last_alert
   const where = strategy.mode === 'live' ? 'at Upstox' : 'in the Sandbox'
   return (
@@ -146,7 +156,7 @@ export function StrategyCard({ strategy, actions }: { strategy: Strategy; action
         </Line>
         {strategy.held_symbol && (
           <Line label="P&L">
-            <HeldPnl strategy={strategy} />
+            <HeldPnl strategy={strategy} marketOpen={marketOpen} />
           </Line>
         )}
         <Line label="Today">
