@@ -204,6 +204,40 @@ def test_a_basket_is_a_line_per_leg_a_refusal_keeps_its_words_and_a_read_is_no_o
     assert openalgo_ro.order_lines(odd, "live")[0]["time_ist"] == ""
 
 
+def test_the_order_log_leaves_reads_and_mode_switches_out_in_its_query(rig, files, monkeypatch):  # noqa: F811
+    """v0.16.0 review L2: the reads (which can far outnumber the orders) are left out by the
+    query, so their request and answer text is never fetched; a switch between Live and Analyze
+    mode is not an order request either. Pages stay whole across the rows left out."""
+    assert "analyzer_toggle" in openalgo_ro.READS
+    kinds_logged = ("orderstatus", "analyzer_toggle", "placeorder", "openposition",
+                    "analyzer_status", "placeorder", "margin", "cancelorder")  # fmt: skip
+    with contextlib.closing(sqlite3.connect(files / "openalgo.db")) as conn, conn:
+        for n, api_type in enumerate(kinds_logged):
+            row = placed(f"m{n}", strategy=f"Row {n}", api_type=api_type,
+                         at=f"2026-11-1{n} 10:00:00")  # fmt: skip
+            conn.execute(
+                "INSERT INTO order_logs (api_type, request_data, response_data, created_at) "
+                "VALUES (?, ?, ?, ?)",
+                (row["api_type"], json.dumps(row["request_data"]),
+                 json.dumps(row["response_data"]), row["created_at"]),
+            )  # fmt: skip
+    fetched: list[str] = []
+    real = openalgo_ro._ReadOnly.query
+
+    def query(self, sql, **params):
+        rows = real(self, sql, **params)
+        fetched.extend(str(r["api_type"]) for r in rows if "api_type" in r)
+        return rows
+
+    monkeypatch.setattr(openalgo_ro._ReadOnly, "query", query)
+    lines = list(openalgo_ro.records_for(rig.svc).order_log("live", 20261101, 20261130, page=2))
+    assert not set(fetched) & openalgo_ro.READS
+    assert [(line["request"], line["strategy"]) for line in lines] == [
+        ("placeorder", "ORB"), ("placeorder", "Breakout"), ("placeorder", "Row 2"),
+        ("placeorder", "Row 5"), ("cancelorder", "Row 7"),
+    ]  # fmt: skip
+
+
 # ---- the pack ----------------------------------------------------------------------------------
 def test_the_pack_of_4_april_holds_the_year_from_1_april_to_31_march_and_no_more(year, book):  # noqa: F811
     assert date(2027, 4, 4).weekday() == 6, "4 April 2027 is a Sunday"
