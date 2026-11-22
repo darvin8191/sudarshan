@@ -113,7 +113,9 @@ STRATEGY = {
     "quiet_days": "number",
     # the held contract's row in the book of the strategy's own mode (the sandbox's for a
     # Sandbox strategy, Upstox's for a Live one), read with the page; the card's P&L moves on
-    # from it with the ticks. Null when nothing is held or the book could not be read.
+    # from it with the ticks. Null when nothing is held or the book could not be read (Upstox's
+    # read is cut off after 4 s), and always null in the answer to a change (/update, /state,
+    # /mode): the page reads the list again after one and keeps its row until then.
     "held_book": "HeldBook | null",
 }
 #: A book's row for the held contract, as that book reports it (GA10.4): the signed quantity in
