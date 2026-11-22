@@ -89,6 +89,10 @@ STRUCTURAL = frozenset(
         # what was confirmed for a bonus or a split (its ratio, words and choices are hidden),
         # one by one in the list of every one confirmed
         "fix", "decided", "confirmed",
+        # whose a calendar row's share is (held, traded or in a tab; on a watchlist), and when
+        # the watchlists were read with how many shares they hold: no figure of the owner's
+        # (GA8.1; the calendar itself is hidden by ``qty``)
+        "holding", "watchlist", "watchlists", "share_count",
     }
 )  # fmt: skip
 

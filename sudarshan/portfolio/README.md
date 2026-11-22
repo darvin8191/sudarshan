@@ -420,6 +420,18 @@ registration), its jobs end at once (`timers.gate_switched`) and nothing is read
 it. The owner's `state` answer carries `switches`, so the page offers a view only while its
 switch is on.
 
+**The watchlists' shares in the calendar** (GA8.1, P7 decision 15; `watchlists.py`). The night's
+corporate-actions run first reads the shares on the owner's own watchlists through OpenAlgo's
+sealed watchlists route (`op=own_members` under `WATCHLISTS_INTERNAL_INFO`, never the watchlists'
+database; `SUDARSHAN_PORTFOLIO_OPENALGO_URL`, loopback only), keeps them as the `report_cache`
+record of kind `watchlists` (no schema change), and reads their corporate actions after everything
+the owner holds, has traded or keeps in a tab, inside the same 150 reads a night and the same
+budget: a long watchlist takes longer to come round and never adds a read. `calendar` marks each
+row `holding` and `watchlist` and leaves out a share that is neither any more; its `watchlists`
+says when the lists were read, or why their shares are not shown (not read yet, Watchlists v2
+switched off, a night that could not read them, which keeps the last shares). No family op reads
+any of it.
+
 **The tax working paper** (`ops/tax_ops.py`, `tax_adapter.py`). `tax_get` is one taxpayer's
 year (a member; none is the owner, the first member) among the three Upstox keeps; anything older
 is refused with `tax_years`. The adapter turns the reader's cache, Upstox's P&L pairs, the custom

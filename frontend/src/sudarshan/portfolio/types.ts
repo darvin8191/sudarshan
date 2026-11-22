@@ -2580,6 +2580,22 @@ export interface CalendarRow {
   checked_at: EpochMs | null
   /** A bonus or a split: what was confirmed for the Upstox account; null while nothing is. */
   decided: CaDecided | null
+  /** One of the owner's shares: held, traded or kept in a tab (GA8.1). */
+  holding: boolean
+  /** On his watchlists as they were last read (GA8.1); a row is one or the other, or both. */
+  watchlist: boolean
+}
+
+/** When the watchlists' shares were read for the calendar, or why they are not shown (GA8.1). */
+export interface WatchlistsRead {
+  /** `never`: not read yet. `off`: Watchlists v2 is switched off. `failed`: the last night's read. */
+  state: 'never' | 'ok' | 'off' | 'failed'
+  /** When the shares shown were read: their "as of"; null before the first read. */
+  read_at: EpochMs | null
+  /** Shares on the lists (futures, options and indices have no corporate actions of their own). */
+  share_count: number
+  /** "SUDARSHAN could not read your watchlists last night. ..."; null under `ok`. */
+  words: string | null
 }
 
 export interface CalendarReport {
@@ -2589,6 +2605,7 @@ export interface CalendarReport {
   listed_future: boolean
   calendar: CalendarRow[]
   read_status: CaReadStatus
+  watchlists: WatchlistsRead
 }
 
 // ---- phase P7: risk, settings and goals (M7.32, M7.34) ----

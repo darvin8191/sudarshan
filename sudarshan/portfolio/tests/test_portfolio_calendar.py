@@ -8,7 +8,7 @@ import dataclasses
 
 import httpx
 import pytest
-from test_portfolio_ca_ops import event, record, scenario
+from test_portfolio_ca_ops import event, history, record, scenario
 from test_portfolio_closed_world import answer_misses
 from test_portfolio_corpactions_reader import HELD, TRADED, UPSTOX
 from test_portfolio_dividends import buy
@@ -42,6 +42,7 @@ async def test_the_calendar_reaches_ninety_days_back_and_a_hundred_and_eighty_on
     assert (kinds.CALENDAR_PAST_DAYS, kinds.CALENDAR_NEXT_DAYS) == (90, 180)
     # 26 Oct 2026 less 90 days is 28 Jul 2026; plus 180 days is 24 Apr 2027.
     days = (20260727, 20260728, 20261026, 20270424, 20270425)
+    record(n, 20261023, **{UPSTOX: 10})  # a share the account holds: its events are listed
     for day in days:
         event(n, "dividend", day, amount_u=10000)
     data = await calendar(n)
@@ -62,6 +63,7 @@ async def test_a_row_is_the_public_facts_and_apart_from_them_what_is_held(n):
     to_come = event(n, "dividend", 20261110, amount_u=300000)
     bonus = event(n, "bonus", 20261120, ratio=(1, 2))
     in_tab = event(n, "dividend", 20261105, amount_u=20000, isin=HELD)
+    history(n, (20260601, "BUY", 5), (20260701, "SELL", 5), isin=TRADED)  # traded, held no more
     not_held = event(n, "dividend", 20261106, amount_u=20000, isin=TRADED)
     n.svc.store.write(OWNER, lambda tx: tx.ca_read_put(UPSTOX, NOW - 5, "ok", None))
     n.svc.store.write(OWNER, lambda tx: tx.ca_read_put(TRADED, NOW, "none", "nothing listed"))
@@ -71,6 +73,7 @@ async def test_a_row_is_the_public_facts_and_apart_from_them_what_is_held(n):
         "event_id": past, "isin": UPSTOX, "name": None, "kind": "dividend", "ex_day": 20260814,
         "amount_u": 55000, "ratio_num": None, "ratio_den": None, "held_qty_u": 300 * U,
         "expected_paise": 1650 * RUPEE, "checked_at": NOW - 5, "decided": None,
+        "holding": True, "watchlist": False,
     }  # fmt: skip
     assert (rows[to_come]["held_qty_u"], rows[to_come]["expected_paise"]) == (250 * U, 7500 * RUPEE)
     assert (rows[bonus]["ratio_num"], rows[bonus]["ratio_den"], rows[bonus]["held_qty_u"],

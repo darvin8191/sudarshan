@@ -12,6 +12,7 @@ later parts read, and the pepper is returned by ``read_pepper`` and kept out of 
 | ``SUDARSHAN_PORTFOLIO`` | ``off`` (the release sets it) |
 | ``SUDARSHAN_PORTFOLIO_HTTP_PORT`` | ``5583`` (127.0.0.1 only) |
 | ``SUDARSHAN_PORTFOLIO_FEED_URL`` | ``http://127.0.0.1:5580`` (loopback only) |
+| ``SUDARSHAN_PORTFOLIO_OPENALGO_URL`` | ``http://127.0.0.1:5000`` (loopback only; the watchlists' sealed route) |
 | ``SUDARSHAN_PORTFOLIO_MAX_CLAIMS`` | ``200`` (the feed's ceiling for this client, at most 200) |
 | ``SUDARSHAN_PORTFOLIO_AMFI`` | ``on`` |
 | ``SUDARSHAN_PORTFOLIO_EOD_AFTER_MIN`` | ``15`` (minutes after the close; the record is at 15:55 on a normal day, 16:00 from 7 Dec 2026) |
@@ -46,6 +47,7 @@ from .core.kinds import DEFAULT_HTTP_PORT, LOCAL_HOST, SWITCH_ENV
 REPO_ROOT = Path(__file__).resolve().parents[2]
 STATE_DIR = "/var/lib/sudarshan-portfolio"
 FEED_URL = f"http://{LOCAL_HOST}:5580"
+OPENALGO_URL = f"http://{LOCAL_HOST}:5000"
 TOKEN_FILE = "/etc/sudarshan/upstox_analytics_token"
 UPSTOX_URL = "https://api.upstox.com"
 AMFI_URL = "https://portal.amfiindia.com/spages/NAVAll.txt"
@@ -162,6 +164,7 @@ class Settings:
     enabled: bool
     http_port: int = DEFAULT_HTTP_PORT
     feed_url: str = FEED_URL
+    openalgo_url: str = OPENALGO_URL
     max_claims: int = MAX_CLAIMS_CEILING
     amfi: bool = True
     eod_after_min: int = 15
@@ -199,6 +202,7 @@ class Settings:
             enabled=_switch(env, "SUDARSHAN_PORTFOLIO", False),
             http_port=_number(env, "SUDARSHAN_PORTFOLIO_HTTP_PORT", DEFAULT_HTTP_PORT, 1, 65535),
             feed_url=_loopback_url(env, "SUDARSHAN_PORTFOLIO_FEED_URL", FEED_URL),
+            openalgo_url=_loopback_url(env, "SUDARSHAN_PORTFOLIO_OPENALGO_URL", OPENALGO_URL),
             max_claims=_number(
                 env, "SUDARSHAN_PORTFOLIO_MAX_CLAIMS", MAX_CLAIMS_CEILING, 1, MAX_CLAIMS_CEILING
             ),
