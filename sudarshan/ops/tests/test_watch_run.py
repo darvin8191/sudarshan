@@ -33,7 +33,8 @@ FINE = {
         "alerts": {"state": "connected"},
         **{name: {"state": "running"} for name in ("screener", "family", "journal")},
         "signals": {"state": "off", "signals": "off"},  # installed and running, switched off
-        # GA5.1: the portfolio publishes its own daily check of the Analytics Token.
+        # GA5.1: the portfolio publishes what Upstox said of the Analytics Token at its last
+        # holdings or positions read (v0.16.0 review H1).
         "portfolio": {
             "state": "running",
             "portfolio_state": {
@@ -491,7 +492,7 @@ def test_the_check_option_prints_and_writes_nothing(tmp_path, monkeypatch, capsy
         "service_feed",
         "fine",
     ]
-    # GA5.1: the Analytics Token's line, as the portfolio's daily check found it
+    # GA5.1: the Analytics Token's line, as the portfolio's last holdings read found it
     assert [line.split() for line in printed if line.startswith("analytics_token")] == [
         ["analytics_token", "fine", f"when={int(NOW) - 7200}"]
     ]
