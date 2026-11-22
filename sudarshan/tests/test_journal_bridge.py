@@ -670,7 +670,25 @@ def test_a_download_answer_over_its_limit_is_not_sent(bridge, journal, monkeypat
     journal.answers["report_file"] = stored(PDF * 20)
     as_owner(bridge)
     response = bridge.get(PREFIX + "/reports/3/file", headers=JSON)
-    assert error_of(response) == {"code": "unavailable", "message": WORDS["bad_file"]}
+    # v0.16.0 review L1: retrying never helps, so the words say where the file is instead
+    assert error_of(response) == {"code": "unavailable", "message": WORDS["too_large_file"]}
+    assert "again" not in WORDS["too_large_file"] and "backups" in WORDS["too_large_file"]
+
+
+def test_the_journals_refusal_of_a_file_too_large_reaches_the_page_in_its_own_words(
+    bridge, journal
+):
+    """v0.16.0 review L1: the journal refuses a file it cannot answer whole (a records pack past
+    the limit) before reading it out; the bridge passes the pack's own sentence on."""
+    from sudarshan.journal.jobs import fypack
+
+    journal.answers["report_file"] = (
+        422, {"status": "error", "code": "refused", "message": fypack.TOO_LARGE},
+    )  # fmt: skip
+    as_owner(bridge)
+    response = bridge.get(PREFIX + "/reports/3/file", headers=JSON)
+    assert response.status_code == 422 and "Content-Disposition" not in response.headers
+    assert error_of(response) == {"code": "refused", "message": fypack.TOO_LARGE}
 
 
 # -- descriptors -------------------------------------------------------------------------------

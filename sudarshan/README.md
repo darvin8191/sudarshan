@@ -756,7 +756,7 @@ deploy tool installs both with the release). Nothing needs setting up for it.
 |---|---|---|
 | each SUDARSHAN service: price feed, alerts, portfolio, screener, family view, journal | one has not answered for two looks in a row (about 4 minutes) | at once |
 | the TRINETRA reader (`sudarshan-signals`), which runs whether its view is switched on or off | while the view is on: it has not answered for two looks in a row. While the view is off it is fine as long as it answers, and its silence is not told | at once, while the view is on |
-| the Upstox read-only token (the Analytics Token), as the portfolio service found it at its own check: once a day, at the service's first start that day. The watch asks Upstox nothing and never sees the token | Upstox did not accept the token at that check; or the check at the last start got no answer at all (the result is then stale) | a refusal at once; a check that got no answer after the market closes |
+| the Upstox read-only token (the Analytics Token), as the portfolio service found it when it last read your holdings or positions with it (the Upstox tab, the family view and the closing record after each trading day read them). Only those reads decide it. The watch asks Upstox nothing and never sees the token | Upstox did not accept the token at that read | at once |
 | the Upstox login | from 08:58 on a trading day there is no login for today; later in the day, order updates have stopped arriving for 4 minutes | at once |
 | the price feed's connection to Upstox | not connected for 4 minutes while the market is open | at once |
 | the instrument list | it was not refreshed today by 09:00 on a trading day | at once |
@@ -771,13 +771,15 @@ deploy tool installs both with the release). Nothing needs setting up for it.
 | Historify's downloaded history | it has reached 3 GB | after the market closes |
 | shown only, on the System page and in the Sunday summary: the nightly backup's age and its offsite copy, operating-system updates waiting, a restart the system asks for | never a notice of their own: the backup job tells its own late night, and updates are applied by you, by hand, on a non-trading day | - |
 
-- **The Analytics Token's line.** A refusal says to open the Upstox developer page (My Apps)
-  and see whether the token is still there and active, and not to create a new one before you
-  have looked: a new token ends the old one for everything else that uses it. After the token
-  file on the server is replaced the line reads "not checked yet" until the portfolio service
-  next starts on a new day; the old token's result is never shown for the new one. The check
-  runs when the portfolio service starts, so on a server that runs for weeks without an install
-  the line shows an old date: the System page says when it was.
+- **The Analytics Token's line.** It is judged only from the reads the token is known to make:
+  your holdings and positions, which SUDARSHAN reads anyway. Whether Upstox lets this token
+  read your orders is not known, so the portfolio's start-up line about the order pages is a
+  line in its log and never makes this one fail. A refusal says to open the Upstox developer
+  page (My Apps) and see whether the token is still there and active, and not to create a new
+  one before you have looked: a new token ends the old one for everything else that uses it.
+  After the token file on the server is replaced the line reads "not checked yet" until the
+  next read of your holdings or positions; the old token's result is never shown for the new
+  one.
 - **Once per cause.** A failure is told once and its recovery once, however long it lasts. A
   service that was never set up on this server (the family view before its set-up) is not a fault.
 - **While a release is being installed** the watch stands aside: the deploy tool stops and starts
@@ -1564,10 +1566,14 @@ the Tax pack off, neither is built.
 | `assistant-calls.csv` | the AI assistant's calls. The assistant's own tools are not built yet, so the file holds its header only |
 | `server-diary.jsonl` | every server notice of the year |
 
-Each file says on the first page how many rows it holds and from which day to which, so a
-store that keeps less than a year shows it there. A store this server does not have (alerts
-never switched on) gives its file with the header alone. The page downloads a pack of up to
-about 5 MB; a larger one says so and is copied from the server's backups.
+Each file says on the first page how many rows it holds and from which day to which, so a store
+that keeps less than a year shows it there. A store this server does not have (alerts never
+switched on) gives its file with the header alone. A store that is there but cannot be read puts
+the build off, tried again every 15 minutes, until 15:30 of that day; from then (and on a later
+day's catch-up) the pack is built with what could be read, and its first page names the store
+that could not be, so the year's archive always holds a pack. The page downloads a pack of up to
+about 6 MB; a larger one says so on its first lines, and the download says it too: it is copied
+from the server's backups.
 
 ## What is kept, and for how long (M18.12)
 

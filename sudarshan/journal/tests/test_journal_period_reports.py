@@ -162,6 +162,10 @@ def test_a_portfolio_that_cannot_be_asked_leaves_the_index_out_never_guessed(rig
     build(rig, "weekly", period="2026W45")
     text = kept(rig, "weekly")["text"]
     assert "index" not in text.lower().replace("set your trading capital", "")
+    # v0.16.0 review L4: the feed then asked for the close is the rig's own fake (answering
+    # nothing here), never whatever listens on the real feed's port
+    assert rig.svc.settings.feed_url != "http://127.0.0.1:5580"
+    assert [path for _method, path, _query in rig.feed.calls] == ["/snapshot"]
 
 
 # ---- the monthly statement -------------------------------------------------------------------

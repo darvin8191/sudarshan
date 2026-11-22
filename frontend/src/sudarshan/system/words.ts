@@ -96,21 +96,21 @@ function stamp(value: string | undefined): string {
 
 const TOKEN_LOOK =
   'Open the Upstox developer page (My Apps) and see whether the token is still there and active. Do not create a new token before you have looked: a new one ends the old one for everything else that uses it.'
-const TOKEN_NEXT = 'It is checked when the portfolio service next starts on a new day.'
+const TOKEN_NEXT =
+  "It is checked the next time SUDARSHAN reads your Upstox holdings or positions: on the Upstox tab, or after the next trading day's close."
 
-/** The Analytics Token's line (M13.12): what the portfolio's own daily check found, and when. */
+/**
+ * The Analytics Token's line (M13.12): what Upstox said at the portfolio's last read of the
+ * holdings or positions, and when. Only those reads judge it (v0.16.0 review H1).
+ */
 function tokenLine(check: WatchCheck): string {
   const facts = check.facts ?? {}
   const when = stamp(facts.when)
   switch (check.level) {
     case 'fine':
-      return `Accepted by Upstox${when ? ` at the last check, ${when}` : ' at the last check'}. It is checked at the portfolio service's first start of a day.`
+      return `Accepted by Upstox${when ? ` when your holdings or positions were last read, ${when}` : ' at the last read of your holdings or positions'}. Every such read checks it.`
     case 'failing':
-      return `Not accepted by Upstox${when ? ` at the check of ${when}` : ' at the last check'}. ${TOKEN_LOOK}`
-    case 'warning': {
-      const tried = stamp(facts.tried)
-      return `Could not be checked${tried ? ` at the last start, ${tried}` : ' at the last start'}: Upstox gave no answer, or the token's file on the server could not be read. ${when ? `Last accepted ${when}.` : 'No check has been answered yet.'} If the Portfolio page shows your Upstox holdings, the token is working.`
-    }
+      return `Not accepted by Upstox${when ? ` when your holdings or positions were read, ${when}` : ' at the last read of your holdings or positions'}. ${TOKEN_LOOK}`
     case 'off':
       return 'Not checked: the portfolio is switched off.'
     default:

@@ -148,8 +148,9 @@ describe('the System page words', () => {
     expect(lineOf(check('service_unknown', 'fine'))).toBeNull()
   })
 
-  it('says what the daily check of the Analytics Token found, and what to do', () => {
-    // GA5.1 (M13.12): a state and a time from the portfolio's own check; never the token.
+  it('says what Upstox said of the Analytics Token at the last holdings read, and what to do', () => {
+    // GA5.1 (M13.12): a state and a time from the portfolio; never the token. v0.16.0 review
+    // H1: only the holdings and positions reads judge it, and the line says so.
     const at = String(Date.UTC(2026, 10, 16, 3, 6) / 1000) // 08:36 in India, Mon 16 Nov 2026
     const line = (level: CheckLevel, facts: Record<string, string> = {}) =>
       lineOf(check('analytics_token', level, facts))
@@ -157,28 +158,26 @@ describe('the System page words', () => {
       group: 'market',
       label: 'Upstox read-only token (Analytics Token)',
       detail:
-        "Accepted by Upstox at the last check, 16 Nov, 08:36. It is checked at the portfolio service's first start of a day.",
+        'Accepted by Upstox when your holdings or positions were last read, 16 Nov, 08:36. Every such read checks it.',
     })
     expect(line('failing', { when: at })?.detail).toBe(
-      'Not accepted by Upstox at the check of 16 Nov, 08:36. Open the Upstox developer page (My Apps) and see whether the token is still there and active. Do not create a new token before you have looked: a new one ends the old one for everything else that uses it.'
-    )
-    const stale = line('warning', { cause: 'missed', tried: at })?.detail
-    expect(stale).toContain('Could not be checked at the last start, 16 Nov, 08:36')
-    expect(stale).toContain('No check has been answered yet.')
-    expect(line('warning', { cause: 'missed', tried: at, when: at })?.detail).toContain(
-      'Last accepted 16 Nov, 08:36.'
+      'Not accepted by Upstox when your holdings or positions were read, 16 Nov, 08:36. Open the Upstox developer page (My Apps) and see whether the token is still there and active. Do not create a new token before you have looked: a new one ends the old one for everything else that uses it.'
     )
     expect(line('unread', { cause: 'changed', when: at })?.detail).toBe(
-      'The token on the server was changed after the last check (16 Nov, 08:36), so the new one has not been checked yet. It is checked when the portfolio service next starts on a new day.'
+      "The token on the server was changed after the last check (16 Nov, 08:36), so the new one has not been checked yet. It is checked the next time SUDARSHAN reads your Upstox holdings or positions: on the Upstox tab, or after the next trading day's close."
     )
     expect(line('unread', { cause: 'never' })?.detail).toBe(
-      'Not checked yet. It is checked when the portfolio service next starts on a new day.'
+      "Not checked yet. It is checked the next time SUDARSHAN reads your Upstox holdings or positions: on the Upstox tab, or after the next trading day's close."
     )
     expect(line('unread')?.detail).toBe('Could not be read at the last look.')
     expect(line('off')?.detail).toBe('Not checked: the portfolio is switched off.')
+    // no start-up check is left to miss: an old warning reads as unread, never as stale words
+    expect(line('warning', { cause: 'missed', tried: at })?.detail).toBe(
+      'Could not be read at the last look.'
+    )
     // an odd fact never reaches the screen, and no line carries a code
     expect(line('failing', { when: '<b>401</b>' })?.detail).toMatch(
-      /^Not accepted by Upstox at the last check\. /
+      /^Not accepted by Upstox at the last read of your holdings or positions\. /
     )
     for (const level of ['fine', 'failing', 'warning', 'unread', 'off'] as CheckLevel[])
       expect(line(level, { when: at, tried: at })?.detail).not.toMatch(/\b[1-5]\d\d\b|TRINETRA/)
