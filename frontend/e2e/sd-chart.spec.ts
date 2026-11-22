@@ -805,9 +805,10 @@ test.describe('the phone chart on its side, 800 x 360', () => {
     await expect(strip.locator('[data-feed]')).toHaveText('Real-time')
     await expect(strip.getByTestId('chart-change')).toHaveText(/^[+−]₹[\d,.]+ \([+−][\d.]+%\)$/)
     // The strip is the 48 dp the design gives it, and the chart takes the rest of the height.
+    // At least 48: with Larger text its targets grow to 54 (v0.16.0 phone review L6).
     const stripBox = await strip.boundingBox()
     const surfaceBox = await page.getByTestId('chart-surface').boundingBox()
-    expect(stripBox?.height).toBe(48)
+    expect(stripBox?.height ?? 0).toBeGreaterThanOrEqual(48)
     expect(Math.round((surfaceBox?.height ?? 0) + (stripBox?.height ?? 0))).toBe(360)
     await page.screenshot({ path: info.outputPath('sideways.png') })
     await checkScreen(page)
@@ -881,6 +882,12 @@ for (const { viewport, larger } of [
       await page.clock.runFor(500)
       await tick(page, await socketOpened(served), ist(10, 0, 31), 6)
       const surface = (await page.getByTestId('chart-surface').boundingBox()) as DOMRect
+      if (!upright) {
+        // L6: the strip is at least 48 dp at either text size, and the chart takes the rest.
+        const strip = (await page.getByTestId('chart-strip').boundingBox()) as DOMRect
+        expect(strip.height).toBeGreaterThanOrEqual(48)
+        expect(Math.round(surface.height + strip.height)).toBe(viewport.height)
+      }
       await holdAt(page, surface.x + surface.width * 0.5, surface.y + surface.height * (upright ? 0.55 : 0.6))
       const side = upright ? 'Sell' : 'Buy'
       const at = page.getByRole('button', { name: new RegExp(`^${side} at [\\d,]+\\.\\d{2}$`) })
