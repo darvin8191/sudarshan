@@ -48,8 +48,9 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq faketime
-          lib=$(ls /usr/lib/*/faketime/libfaketime.so.1 /usr/lib/faketime/libfaketime.so.1 2>/dev/null | head -n 1)
-          test -n "$lib" && test -e "$lib" || { echo "libfaketime.so.1 not found"; exit 1; }
+          # The multithread build: the plain one segfaults the tests on arm64.
+          lib=$(ls /usr/lib/*/faketime/libfaketimeMT.so.1 /usr/lib/faketime/libfaketimeMT.so.1 2>/dev/null | head -n 1)
+          test -n "$lib" && test -e "$lib" || { echo "libfaketimeMT.so.1 not found"; exit 1; }
           echo "FAKETIME_LIB=$lib" >> "$GITHUB_ENV"
           echo "library: $lib"
       - name: nginx for the family view's tests

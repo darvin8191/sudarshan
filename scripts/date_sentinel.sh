@@ -40,8 +40,11 @@ mkdir -p "$out"
 
 lib=${FAKETIME_LIB:-}
 if [ -z "$lib" ]; then
-  for candidate in /usr/lib/*/faketime/libfaketime.so.1 /usr/lib/faketime/libfaketime.so.1 \
-    /usr/local/lib/faketime/libfaketime.so.1; do
+  # The multithread build first: the plain one segfaulted the test run on arm64 (the tests start
+  # threads that log while others read the clock), even with the clock not moved.
+  for candidate in /usr/lib/*/faketime/libfaketimeMT.so.1 /usr/lib/faketime/libfaketimeMT.so.1 \
+    /usr/local/lib/faketime/libfaketimeMT.so.1 /usr/lib/*/faketime/libfaketime.so.1 \
+    /usr/lib/faketime/libfaketime.so.1 /usr/local/lib/faketime/libfaketime.so.1; do
     if [ -e "$candidate" ]; then
       lib=$candidate
       break
@@ -49,7 +52,7 @@ if [ -z "$lib" ]; then
   done
 fi
 if [ -z "$lib" ] || [ ! -e "$lib" ]; then
-  echo "libfaketime.so.1 not found: install faketime or set FAKETIME_LIB" >&2
+  echo "libfaketimeMT.so.1 (or libfaketime.so.1) not found: install faketime or set FAKETIME_LIB" >&2
   exit 2
 fi
 
