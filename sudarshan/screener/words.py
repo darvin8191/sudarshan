@@ -104,7 +104,8 @@ _NOUNS = {
 _OI_READINGS = {"buildup": "build-up", "oi_change_pct": "open interest change"}
 #: Why an event operand cannot count (M9.13): what the owner can do about each.
 _EVENTS_UNKNOWN = {
-    "ex_dates": "ex-dates are read only for the shares you hold and those on your watchlists",
+    "ex_dates": "ex-dates come from the portfolio's nightly read, of the shares you hold and "
+    "those on your watchlists",
     "expiry": "it has no expiry; only futures and options do",
     "calendar": "the exchange's holiday list is not on the server",
     "far": "it expires more than 400 days ahead, past the days the screener counts",

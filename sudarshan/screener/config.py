@@ -16,6 +16,7 @@ secret is a setting: the pepper is returned by ``read_pepper`` and kept out of `
 | ``SUDARSHAN_SCREENER_FEED_ZMQ`` | ``tcp://127.0.0.1:5581`` (loopback only) |
 | ``SUDARSHAN_SCREENER_OPENALGO_URL`` | ``http://127.0.0.1:5000`` (the internal routes) |
 | ``SUDARSHAN_SCREENER_ALERTS_URL`` | ``http://127.0.0.1:5582`` (the digests) |
+| ``SUDARSHAN_SCREENER_PORTFOLIO_URL`` | ``http://127.0.0.1:5583`` (the ex-dates, M9.13) |
 | ``SUDARSHAN_SCREENER_MAX_KEYS`` | ``320`` (at most 700, X10) |
 | ``SUDARSHAN_SCREENER_MAX_ACTIVE`` | ``12`` intraday screens |
 | ``SUDARSHAN_SCREENER_OPTION_STRIKES`` | ``10`` each side of the money |
@@ -50,6 +51,7 @@ FEED_URL = f"http://{LOCAL_HOST}:5580"
 FEED_ZMQ = f"tcp://{LOCAL_HOST}:5581"
 OPENALGO_URL = f"http://{LOCAL_HOST}:5000"
 ALERTS_URL = f"http://{LOCAL_HOST}:5582"
+PORTFOLIO_URL = f"http://{LOCAL_HOST}:5583"
 #: The most keys this client may claim at the feed now, and the ceiling it may be raised to
 #: after one clean session over 600 keys on the socket (cross-design X10, S6).
 MAX_KEYS_DEFAULT = 320
@@ -138,6 +140,7 @@ class Settings:
     feed_zmq: str = FEED_ZMQ
     openalgo_url: str = OPENALGO_URL
     alerts_url: str = ALERTS_URL
+    portfolio_url: str = PORTFOLIO_URL
     max_keys: int = MAX_KEYS_DEFAULT
     max_active: int = 12
     option_strikes: int = 10
@@ -173,6 +176,7 @@ class Settings:
             feed_zmq=_loopback_url(env, "SUDARSHAN_SCREENER_FEED_ZMQ", FEED_ZMQ, "tcp"),
             openalgo_url=_loopback_url(env, "SUDARSHAN_SCREENER_OPENALGO_URL", OPENALGO_URL),
             alerts_url=_loopback_url(env, "SUDARSHAN_SCREENER_ALERTS_URL", ALERTS_URL),
+            portfolio_url=_loopback_url(env, "SUDARSHAN_SCREENER_PORTFOLIO_URL", PORTFOLIO_URL),
             max_keys=_number(
                 env, "SUDARSHAN_SCREENER_MAX_KEYS", MAX_KEYS_DEFAULT, 1, MAX_KEYS_CEILING
             ),

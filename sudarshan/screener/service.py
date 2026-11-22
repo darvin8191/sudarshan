@@ -30,6 +30,7 @@ from sudarshan.ops.release import installed_release
 from sudarshan.tasks import cancel_and_wait
 from sudarshan.vault import (
     ALERTS_SCREENER_DIGEST_INFO,
+    PORTFOLIO_SCREENER_API_INFO,
     SCREENER_API_INFO,
     SCREENER_INTERNAL_INFO,
     fernet_for,
@@ -245,10 +246,12 @@ class Service:
             self._keep_off(str(exc))
 
     def _link(self) -> None:
-        """The sealed client to OpenAlgo's internal routes and the alerts API (outbox.py); only
-        when the pepper is known, so a test without one runs no sender."""
+        """The sealed clients: OpenAlgo's internal routes and the alerts API (outbox.py), and the
+        portfolio's ex-dates (exdates.py); only when the pepper is known, so a test without one
+        runs no sender."""
         if self.pepper is None or "link" in self.parts:
             return
+        from .exdates import ExDatesLink
         from .link import Link
 
         self.parts["link"] = Link(
@@ -256,6 +259,9 @@ class Service:
             self.settings.alerts_url,
             fernet_for(self.pepper, SCREENER_INTERNAL_INFO),
             fernet_for(self.pepper, ALERTS_SCREENER_DIGEST_INFO),
+        )
+        self.parts["exdates"] = ExDatesLink(
+            self.settings.portfolio_url, fernet_for(self.pepper, PORTFOLIO_SCREENER_API_INFO)
         )
 
     def _keep_off(self, reason: str) -> None:
@@ -287,6 +293,7 @@ class Service:
 
 
 # One line per row that adds a job (S17); each module registers with @job at import:
+from . import exdates as _exdates  # noqa: E402  (M9.13: the portfolio's ex-dates)
 from . import outbox as _outbox  # noqa: E402  (M9.15: the outbox sender)
 from . import runner as _runner  # noqa: E402  (M9.14: the run loop)
 from . import runtime as _runtime  # noqa: E402  (M9.1: the feed link and live bars)
@@ -296,6 +303,7 @@ job("feed")(_runtime.run_feed)
 job("runner")(_runner.run_runner)
 job("outbox")(_outbox.run_sender)
 job("engine")(_screen_ops.run_engine_push)
+job("ex_dates")(_exdates.run_ex_dates)
 job("claims", OFF_JOBS)(_runtime.release_claims)
 
 

@@ -39,6 +39,7 @@ do: to stop the screener for good, switch it off or remove it.
 | `SUDARSHAN_SCREENER_FEED_URL`, `SUDARSHAN_SCREENER_FEED_ZMQ` | `http://127.0.0.1:5580`, `tcp://127.0.0.1:5581` |
 | `SUDARSHAN_SCREENER_OPENALGO_URL` | `http://127.0.0.1:5000` |
 | `SUDARSHAN_SCREENER_ALERTS_URL` | `http://127.0.0.1:5582` |
+| `SUDARSHAN_SCREENER_PORTFOLIO_URL` | `http://127.0.0.1:5583` (the ex-dates) |
 | `SUDARSHAN_SCREENER_MAX_KEYS` | `320` (at most 700) |
 | `SUDARSHAN_SCREENER_MAX_ACTIVE` | `12` intraday screens |
 | `SUDARSHAN_SCREENER_OPTION_STRIKES` | `10` each side of the money |
@@ -240,8 +241,9 @@ N runs replayed from 2026-10-28.jsonl.gz
 Replay check: N runs compared, all match
 ```
 
-A difference on a run the service marked `late` (a restart) or `repaired` (a pause) is printed as
-`explained: ...` and still passes. Any other line starting `DIFFERENT:` fails the check (exit 1):
+A difference on a run the service marked `late` (a restart) or `repaired` (a pause), or on a run
+of a screen that counts days to an ex-date (the portfolio's ex-dates are not in a recording, so
+the replay reads that line "Not checked"), is printed as `explained: ...` and still passes. Any other line starting `DIFFERENT:` fails the check (exit 1):
 read the journal (`journalctl -u sudarshan-screener --since today`) for that run's time. Exit 2
 means the check could not run (no recording, no screener.db, no universe yet); the message says
 which. Each screen starts the day with the members it carried from earlier days (one a check or
@@ -353,6 +355,18 @@ the pre-open volume is in no bar.
   an index waits until 15:45:05 for its closing value; the members decide, so a watchlist screen
   without either checks at 15:30:05. A held check holds the screen's later checks, which then run
   in order, and it is marked late only when made more than a minute after its hold ended.
+
+- The event lines (M9.13). "Days to expiry" counts the sessions to a future's or an option's
+  expiry, read from its symbol; an expiry on a holiday is the session before it. "Days to
+  ex-date" counts the sessions to a share's next ex-date of the kind chosen; one on a weekend or a
+  holiday takes effect at the next session. The ex-dates come from the portfolio
+  (`exdates.py`): its nightly corporate-actions read covers the shares the owner holds and those
+  on his watchlists, inside its own Upstox budget, and the screener reads them through the
+  portfolio's sealed screener purpose (`ex_dates`, `PORTFOLIO_SCREENER_API_INFO`) at start and
+  after 08:05 each day, every 10 minutes while it cannot, never on a run and never from Upstox.
+  A share the portfolio has not read is "Not checked: ex-dates come from the portfolio's nightly
+  read, ...", never a miss; one read with nothing listed counts "none listed". `/health` shows
+  the read's state, when the portfolio last read and how many shares (`parts.exdates`).
 
 ## Not built yet
 

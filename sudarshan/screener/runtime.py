@@ -223,6 +223,8 @@ class LiveSource:
         #: The exchange's sessions from today on, for the event operands (M9.13): built at each
         #: new day from the calendar, never on a run.
         self._ahead: tuple[int, ...] = ()
+        #: The portfolio's ex-dates (exdates.ExDatesLink, a job of its own reads them); None: none.
+        self.ex_dates: Any = None
         self._master_asked = 0
         self.counts = {"frames": 0, "trades": 0, "sealed": 0, "late": 0}
 
@@ -257,6 +259,7 @@ class LiveSource:
             auction_end=auction_end,
             printed=self.bars.printed(member.key, self.market.today) if member.cas else False,
             expiry=events.contract_expiry(member.symbol, member.segment),
+            ex_dates=self.ex_dates.of_key(member.key, self.clock()) if self.ex_dates else None,
         )
 
     def context(self, boundary: int, session: int) -> Context:
@@ -1039,6 +1042,7 @@ async def run_feed(service, *, tick_s: float = TICK_S) -> None:
         service.store, feed, master, service.settings, service.clock, service.ensure_calendar()
     )
     source.lists_reader = lambda specs: _watchlists(service, specs)
+    source.ex_dates = service.parts.get("exdates")
     service.parts["source"] = source
     service.parts["engine"] = source
     bars_task = None

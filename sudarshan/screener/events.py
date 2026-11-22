@@ -23,9 +23,11 @@ from __future__ import annotations
 import re
 from bisect import bisect_left, bisect_right
 from collections.abc import Callable, Sequence
+from dataclasses import fields, is_dataclass
 from datetime import date, timedelta
+from typing import Any
 
-from .types import NO_EVENTS, Why
+from .types import NO_EVENTS, Event, Why
 
 #: Sessions counted for "none listed", and how far ``ahead`` reaches (calendar days).
 NONE_LISTED = 9999
@@ -107,5 +109,21 @@ def expiry_days(expiry: int | None, days: Sequence[int]) -> int | Why:
     return bisect_right(days, expiry) - 1
 
 
+def reads_ex_dates(plan: Any) -> bool:
+    """Whether a compiled plan's lines or its rank count days to an ex-date: what the replay check
+    cannot judge, a recording holding prices and not the portfolio's ex-dates."""
+    return _ex_in((plan.clauses, plan.rank))
+
+
+def _ex_in(value: Any) -> bool:
+    if isinstance(value, Event):
+        return value.what == "ex_days"
+    if isinstance(value, tuple | list):
+        return any(_ex_in(item) for item in value)
+    if is_dataclass(value) and not isinstance(value, type):
+        return any(_ex_in(getattr(value, f.name)) for f in fields(value))
+    return False
+
+
 __all__ = ["NONE_LISTED", "REACH_DAYS", "ahead", "contract_expiry", "ex_days", "expiry_days",
-           "expiry_of_symbol"]  # fmt: skip
+           "expiry_of_symbol", "reads_ex_dates"]  # fmt: skip

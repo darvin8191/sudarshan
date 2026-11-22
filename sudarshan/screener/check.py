@@ -22,7 +22,10 @@ Before the screener was ever switched on there is no screener.db: use ``--spec``
 
 What a recording cannot hold is left out, as the service would in replay (``replay=True``): the
 exchange's status and the feed's health are not recorded, so the feed counts as healthy within
-the session and no pause is marked; the auction print is judged as recorded.
+the session and no pause is marked; the auction print is judged as recorded. Nor are the
+portfolio's ex-dates (M9.13): days to an ex-date are "Not checked" in a replay, and a difference
+on a run of a screen that counts them is listed as explained. Days to an expiry come from the
+contract's own symbol and the calendar, as in the service, and are judged.
 """
 
 from __future__ import annotations
@@ -57,7 +60,7 @@ from .engine import Context, Subject, timeframes
 from .runs import Judged, Member, evaluate
 from .screen_ops import sched_screen
 from .store import OWNER, open_read_only
-from .types import DAY, HIT, MINUTE_TFS, NOT_CHECKED, Plan, Series
+from .types import DAY, HIT, MINUTE_TFS, NOT_CHECKED, Plan, RunKey, Series
 
 CLEAN, DIFFERENT, CANNOT = 0, 1, 2
 
@@ -302,10 +305,19 @@ def line_words(line: RunLine) -> str:
     return "  ".join(parts)
 
 
+#: Why a run of a screen that counts days to an ex-date may differ from the service's (M9.13).
+EX_DATES = (
+    "the screen counts days to an ex-date, from the portfolio, which a recording does not hold"
+)
+
+
 def compare(
-    lines: Sequence[RunLine], live: Sequence[Mapping[str, Any]]
+    lines: Sequence[RunLine],
+    live: Sequence[Mapping[str, Any]],
+    ex_dates: frozenset[int] = frozenset(),
 ) -> tuple[list[str], list[str]]:
-    """(explained, unexplained) differences between the replay and the live run rows."""
+    """(explained, unexplained) differences between the replay and the live run rows; ``ex_dates``
+    are the screens whose lines count days to an ex-date."""
     explained, unexplained = [], []
     by_key = {row["run_key"]: row for row in live if row["status"] == "done"}
     seen = set()
@@ -329,7 +341,9 @@ def compare(
             f"replay {line.matched} matched, {len(line.entered)} entered, {len(line.exited)} left"
         )
         marks = row.get("marks") or {}
-        if marks.get("repaired") or marks.get("late") is not None:
+        if RunKey.parse(line.run_key).screen in ex_dates:
+            explained.append(f"{text} ({EX_DATES})")
+        elif marks.get("repaired") or marks.get("late") is not None:
             explained.append(
                 text
                 + " (the service's run was "
@@ -446,7 +460,10 @@ def main(argv: Sequence[str] | None = None, say: Callable[[str], None] = _say) -
         if not args.compare:
             return CLEAN
         live = _runs_from_db(engine, screens, day_key(day))
-        explained, unexplained = compare(lines, live)
+        counting = frozenset(
+            row["id"] for row in screens if events.reads_ex_dates(spec.compile_plan(row["spec"]))
+        )
+        explained, unexplained = compare(lines, live, counting)
         for text in explained:
             say("explained: " + text)
         for text in unexplained:
