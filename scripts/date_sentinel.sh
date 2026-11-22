@@ -56,11 +56,10 @@ if [ -z "$lib" ] || [ ! -e "$lib" ]; then
   exit 2
 fi
 
-# The monotonic clock is left alone: a constant shift cannot change a difference, and a
-# timeout measured against a faked monotonic clock is not a date question.
+# The monotonic clock is shifted with the wall clock (the default): a constant shift cannot change
+# a difference, and leaving it alone made sleeps fail (EINVAL) and 35 ops tests fail on day 1.
 shifted() {
-  LD_PRELOAD="$lib${LD_PRELOAD:+:$LD_PRELOAD}" FAKETIME="+${days}d" \
-    FAKETIME_DONT_FAKE_MONOTONIC=1 "$@"
+  LD_PRELOAD="$lib${LD_PRELOAD:+:$LD_PRELOAD}" FAKETIME="+${days}d" "$@"
 }
 
 real_now=$(date -u +%Y-%m-%dT%H:%M:%SZ)

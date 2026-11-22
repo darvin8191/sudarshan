@@ -1715,7 +1715,6 @@ under libfaketime with the clock shifted ahead by 1, 7, 30 and 100 days, plus a 
   goes in the test (put the store and the view on one injected clock, and give every timed test a
   named moment), not in the product, unless the product itself gets the date wrong.
 - **What it cannot judge:** the kernel still stamps file times with the real clock, so a test that
-  compares a file's modification time with `time.time()` can differ for that reason alone. The
-  monotonic clock is not shifted. A test that cannot run under libfaketime for a reason unrelated
+  compares a file's modification time with `time.time()` can differ for that reason alone. A test that cannot run under libfaketime for a reason unrelated
   to dates is listed with its reason in `sudarshan/tests/date_sentinel_skips.txt`; the run's summary
   prints every such skip (`date sentinel: tests skipped by name`), and nothing is skipped silently.
