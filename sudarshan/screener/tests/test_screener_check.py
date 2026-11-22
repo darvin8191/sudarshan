@@ -7,6 +7,9 @@ from __future__ import annotations
 import asyncio
 import gzip
 import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 from screener_helpers import ms
@@ -267,3 +270,18 @@ def drive_live(store, ticks, members):
 
     asyncio.run(drive())
     return made
+
+
+def test_the_owners_one_command_starts_in_a_fresh_interpreter():
+    """``python -m sudarshan.screener.check`` (README, the replay check) imported screen_ops
+    first, and screen_ops and dashboard_ops import each other: the command stopped on an
+    ImportError before reading anything. A fresh interpreter is the only place it shows, since
+    this suite has imported both long before."""
+    root = Path(__file__).resolve().parents[3]
+    done = subprocess.run(
+        [sys.executable, "-m", "sudarshan.screener.check", "--help"],
+        cwd=root, capture_output=True, text=True, timeout=120,
+        env={**os.environ, "PYTHONPATH": str(root)},
+    )  # fmt: skip
+    assert done.returncode == 0, done.stderr[-2000:]
+    assert "--compare" in done.stdout

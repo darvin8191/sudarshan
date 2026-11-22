@@ -51,6 +51,7 @@ from sudarshan.autologin.schedule import (
 from . import alerting as al
 from . import candles, scheduler, spec, words
 from . import membership as mem
+from . import ops as _ops  # noqa: F401  (first: screen_ops and dashboard_ops import each other)
 from .bars import Bars
 from .engine import Context, Subject, timeframes
 from .runs import Judged, Member, evaluate
