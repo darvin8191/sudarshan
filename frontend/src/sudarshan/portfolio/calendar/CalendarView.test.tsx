@@ -30,10 +30,11 @@ import type {
   LotCheck,
   LotCheckRow,
   TabInfo,
+  WatchlistsRead,
 } from '../types'
 import { CALENDAR_OFF, CalendarView, leftOutWords, NO_FUTURE } from './CalendarView'
 import { entriesFor, typedRatio, wayOf } from './confirm'
-import { factText, holdText } from './format'
+import { emptyText, factText, holdText, shownIn, watchlistsAsOf } from './format'
 import { fixLabel } from './LotCheckCard'
 
 const TAB = { id: 4, name: 'Long term', version: 11 } as TabInfo
@@ -90,13 +91,23 @@ const row = (more: Partial<CalendarRow>): CalendarRow => ({
   expected_paise: 1_65_000,
   checked_at: Date.UTC(2026, 10, 12, 10),
   decided: null,
+  holding: true,
+  watchlist: false,
   ...more,
 })
+/** The watchlists as the night of 13 Nov read them, at 23:50 in India. */
+const LISTS: WatchlistsRead = {
+  state: 'ok',
+  read_at: Date.parse('2026-11-13T23:50:00+05:30'),
+  share_count: 2,
+  words: null,
+}
 const CALENDAR: CalendarReport = {
   from: 20260816,
   to: 20270513,
   listed_future: true,
   read_status: { state: 'ok', night: 20261113, words: null },
+  watchlists: LISTS,
   calendar: [
     row({}),
     row({
@@ -659,5 +670,123 @@ describe('what was confirmed', () => {
     expect(past.getByText(decided().words)).toBeInTheDocument()
     expect(past.queryByRole('button', { name: 'Change what I confirmed' })).toBeNull()
     expect(screen.queryByRole('region', { name: 'Confirmed' })).toBeNull() // nothing listed
+  })
+})
+
+// GA8.2: the shares on the owner's watchlists beside his holdings, marked, with a choice of
+// Holdings, Watchlists or All, and when the lists were read.
+describe('the watchlists', () => {
+  const WATCHED = row({
+    event_id: 4,
+    isin: 'INE000C01016',
+    name: 'Gamma Ltd',
+    ex_day: 20261205,
+    held_qty_u: null,
+    expected_paise: null,
+    holding: false,
+    watchlist: true,
+  })
+  const BOTH = row({ event_id: 5, name: 'Delta Power', ex_day: 20261208, watchlist: true })
+  const MIXED = { ...CALENDAR, calendar: [row({}), WATCHED, BOTH] }
+  const names = () =>
+    within(screen.getByRole('region', { name: 'Coming up' }))
+      .getAllByRole('listitem')
+      .map((item) => item.firstElementChild?.firstElementChild?.textContent)
+
+  it('marks a watchlist share with its icon and word, beside the holdings, and says when the lists were read', async () => {
+    serve({ ca_list: LIST, calendar: MIXED })
+    show()
+    await screen.findByRole('region', { name: 'Coming up' })
+    expect(names()).toEqual(['Beta Bank', 'Gamma Ltd', 'Delta Power'])
+    const marks = screen.getAllByText('Watchlist')
+    expect(marks).toHaveLength(2)
+    for (const mark of marks) expect(mark.querySelector('svg')).not.toBeNull()
+    expect(screen.getByText('Watchlists as of 13 Nov, 23:50 · 2 shares')).toBeInTheDocument()
+    const gamma = screen.getByText('Gamma Ltd').closest('li') as HTMLElement
+    expect(within(gamma).queryByText(/You hold/)).toBeNull() // not held: no quantity, no amount
+    expect(document.body.textContent).not.toMatch(/Real-time|Live/)
+  })
+
+  it('shows Holdings, Watchlists or All, each a 48 dp segment', async () => {
+    serve({ ca_list: LIST, calendar: MIXED })
+    show()
+    await screen.findByRole('region', { name: 'Coming up' })
+    const all = screen.getByRole('tab', { name: 'All' })
+    expect(all).toHaveAttribute('aria-selected', 'true')
+    for (const name of ['Holdings', 'Watchlists', 'All']) {
+      expect(screen.getByRole('tab', { name }).className).toContain('min-h-12')
+    }
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('tab', { name: 'Holdings' }))
+    expect(names()).toEqual(['Beta Bank', 'Delta Power'])
+    expect(screen.queryByText(/Watchlists as of/)).toBeNull()
+    await user.click(screen.getByRole('tab', { name: 'Watchlists' }))
+    expect(names()).toEqual(['Gamma Ltd', 'Delta Power'])
+    expect(screen.getByRole('tab', { name: 'Watchlists' })).toHaveAttribute('aria-selected', 'true')
+    await user.click(all)
+    expect(names()).toEqual(['Beta Bank', 'Gamma Ltd', 'Delta Power'])
+  })
+
+  it('says why the lists are not shown, in the service’s words, and never under Holdings', async () => {
+    const cases: WatchlistsRead[] = [
+      { state: 'never', read_at: null, share_count: 0, words: 'First read tonight.' },
+      { state: 'off', read_at: null, share_count: 0, words: 'Watchlists v2 is off.' },
+      { ...LISTS, state: 'failed', words: 'Not read last night; the last shares are shown.' },
+    ]
+    for (const lists of cases) {
+      serve({ ca_list: LIST, calendar: { ...CALENDAR, watchlists: lists } })
+      const view = show()
+      const words = await screen.findByText(lists.words as string)
+      expect(words.closest('[role="note"]')).not.toBeNull()
+      const asOf = screen.queryByText(/Watchlists as of/)
+      expect(asOf === null).toBe(lists.state !== 'failed') // kept shares say when they were read
+      await userEvent.setup().click(screen.getByRole('tab', { name: 'Holdings' }))
+      expect(screen.queryByText(lists.words as string)).toBeNull()
+      view.unmount()
+    }
+  })
+
+  it('says what an empty choice means in its own words', () => {
+    const span = 'from 16 Aug 2026 to 13 May 2027'
+    const none = 'No dividend, bonus, split or rights issue is listed'
+    expect(emptyText('holdings', LISTS, span)).toBe(`${none} for what you hold, ${span}.`)
+    expect(emptyText('watchlists', LISTS, span)).toBe(
+      `${none} for the shares on your watchlists, ${span}.`
+    )
+    expect(emptyText('all', LISTS, span)).toBe(`${none} for what you hold or watch, ${span}.`)
+    expect(emptyText('watchlists', { ...LISTS, share_count: 0 }, span)).toBe(
+      'Your watchlists hold no shares. Futures, options and indices have no dividends, bonuses or splits of their own.'
+    )
+    const off: WatchlistsRead = { state: 'off', read_at: null, share_count: 0, words: 'x' }
+    expect(emptyText('watchlists', off, span)).toBeNull() // its own sentence says why
+    expect(emptyText('all', off, span)).toBe(`${none} for what you hold, ${span}.`)
+    expect(emptyText('all', { ...LISTS, state: 'failed', share_count: 0 }, span)).toBe(
+      `${none} for what you hold, ${span}.`
+    )
+  })
+
+  it('reads the lists’ time in India, the year only when it is not this one, and one share', () => {
+    const at = Date.parse('2026-03-31T23:50:00+05:30') // the night before the year turns
+    expect(watchlistsAsOf({ ...LISTS, read_at: at, share_count: 1 }, 20260401)).toBe(
+      'Watchlists as of 31 Mar, 23:50 · 1 share'
+    )
+    expect(watchlistsAsOf({ ...LISTS, read_at: at }, 20270105)).toBe(
+      'Watchlists as of 31 Mar 2026, 23:50 · 2 shares'
+    )
+    expect(watchlistsAsOf({ ...LISTS, state: 'off' }, 20261114)).toBeNull()
+  })
+
+  it('reads an answer from before the watchlists as the holdings it was', async () => {
+    const old = row({}) as Partial<CalendarRow>
+    delete old.holding
+    delete old.watchlist
+    expect(shownIn(old as CalendarRow, 'holdings')).toBe(true)
+    expect(shownIn(old as CalendarRow, 'watchlists')).toBe(false)
+    expect(shownIn(old as CalendarRow, 'all')).toBe(true)
+    const { watchlists: _gone, ...before } = CALENDAR
+    serve({ ca_list: LIST, calendar: { ...before, calendar: [old] } })
+    show()
+    expect(await screen.findByText('Beta Bank')).toBeInTheDocument()
+    expect(screen.queryByText(/Watchlists as of/)).toBeNull()
   })
 })
