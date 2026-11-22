@@ -1566,11 +1566,14 @@ the Tax pack off, neither is built.
 | `assistant-calls.csv` | the AI assistant's calls. The assistant's own tools are not built yet, so the file holds its header only |
 | `server-diary.jsonl` | every server notice of the year |
 
-Each file says on the first page how many rows it holds and from which day to which, so a
-store that keeps less than a year shows it there. A store this server does not have (alerts
-never switched on) gives its file with the header alone. The page downloads a pack of up to
-about 6 MB; a larger one says so on its first lines, and the download says it too: it is
-copied from the server's backups.
+Each file says on the first page how many rows it holds and from which day to which, so a store
+that keeps less than a year shows it there. A store this server does not have (alerts never
+switched on) gives its file with the header alone. A store that is there but cannot be read puts
+the build off, tried again every 15 minutes, until 15:30 of that day; from then (and on a later
+day's catch-up) the pack is built with what could be read, and its first page names the store
+that could not be, so the year's archive always holds a pack. The page downloads a pack of up to
+about 6 MB; a larger one says so on its first lines, and the download says it too: it is copied
+from the server's backups.
 
 ## What is kept, and for how long (M18.12)
 

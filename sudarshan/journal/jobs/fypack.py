@@ -28,7 +28,10 @@ pack: one zip in the Reports archive (report kind ``records``, key ``FY2627``) h
   (``openalgo_ro.order_log``), the risk layer's file (``risk_ro.history``), the alerts'
   ``market.db`` and the watch's diary. A store that is not on this server gives its file with
   the header alone and a line saying so. One that is there and cannot be read just now puts the
-  job off (it is asked again in 15 minutes); a build the owner asks for says so and goes on.
+  job off (it is asked again in 15 minutes) while a later try that day can still be kept before
+  the 16:30 backup; from 15:30, and on a catch-up run on a later day, the pack is built with what
+  could be read and its first page names the store that could not be, so the year's archive is
+  never left without one (v0.16.0 review L3). A build the owner asks for says so and goes on.
 * **Each file says what it covers** from its own rows (how many, first day, last day), never
   from a rule: a store that keeps less than a year shows it here.
 * **Nothing is sent.** The pack is not announced to the report desk: a zip is not a file
@@ -52,7 +55,7 @@ from pathlib import Path
 from typing import Any
 
 from ..core import kinds, words
-from ..core.money import IST, to_date
+from ..core.money import IST, ist_clock, ist_day, to_date
 from ..openalgo_ro import ORDER_COLUMNS, RecordsUnavailable, _ReadOnly, records_for
 from ..periods import (
     SWITCHES,
@@ -88,6 +91,10 @@ ALERT_PAGE = 2000
 #: One diary line is one notice: a longer line is not one, and a file past this is not read on.
 DIARY_LINE_MAX, DIARY_BYTES_MAX = 64 * 1024, 64 << 20
 _CELL = 300
+#: A scheduled build is put off (strict) only on its own day and only until this time (IST
+#: minutes), while a later try can still be kept before the 16:30 backup
+#: (``sudarshan/ops/systemd/sudarshan-backup.timer``), which on 4 April is the year's archive.
+STRICT_UNTIL_MIN = 15 * 60 + 30
 
 WHOSE = (
     "SUDARSHAN's books are your working record. The statements Upstox issues are the record "
@@ -505,6 +512,13 @@ async def build_records(service: Any, span: Span, now: int, strict: bool = False
     return report_id
 
 
+def strict_for(today: int, now: int) -> bool:
+    """Whether the scheduled build for ``today`` may still be put off at ``now``: on that day and
+    before ``STRICT_UNTIL_MIN``. A catch-up run on a later day never is."""
+    hour, minute, _ = ist_clock(now)
+    return ist_day(now) == today and hour * 60 + minute < STRICT_UNTIL_MIN
+
+
 def records_span(period: str | None, today: int) -> Span:
     """The year a request names (``FY2627``), or the one running now, to today. The periods'
     own rule and words (``BadPeriod``)."""
@@ -527,7 +541,8 @@ async def fy_job(service: Any, today: int, now: int, late: bool) -> str:
         return line
     # After the Tax pack, so the zip holds the one just kept; and also when that build was put
     # off, so the year's archive never goes without its records.
-    report_id = await build_records(service, span_for_job("fy", today), now, strict=True)
+    span, strict = span_for_job("fy", today), strict_for(today, now)
+    report_id = await build_records(service, span, now, strict=strict)
     if put_off is not None:
         raise put_off
     return f"{line}; records pack kept as report {report_id}"

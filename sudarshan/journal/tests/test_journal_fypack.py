@@ -19,6 +19,7 @@ import os
 import sqlite3
 import zipfile
 from datetime import UTC, date, datetime
+from pathlib import Path
 
 import pytest
 from render_pdfread import read_pdf
@@ -395,6 +396,57 @@ def test_a_store_that_cannot_be_read_puts_the_job_off_and_a_build_on_request_say
     assert "alerts.csv: the alerts' history could not be read just now" in row["text"]
     with _zip(year) as pack:
         assert _rows(pack, "alerts.csv") == [] and len(_rows(pack, "orders.csv")) == 5
+
+
+def _break_alerts(rig):  # noqa: F811
+    (rig.svc.settings.alerts_dir / DB_FILENAME).write_bytes(b"not a database at all")
+    for side in ("-wal", "-shm"):
+        (rig.svc.settings.alerts_dir / (DB_FILENAME + side)).unlink(missing_ok=True)
+
+
+def _first_page(rig) -> str:  # noqa: F811
+    with _zip(rig) as pack:
+        page = read_pdf(pack.read(fypack.READ_FIRST))
+    return " ".join(ln for p in page.pages for ln in p.lines if ln.strip())
+
+
+def test_a_store_that_stays_unreadable_still_gives_the_years_archive_its_pack(year, book):  # noqa: F811
+    """v0.16.0 review L3: a store that stays unreadable (corrupt, or its permissions lost) put
+    the scheduled build off all day, so the 16:30 backup of 4 April, the year's archive, held no
+    pack. Now it is put off only while a later try can still be kept before that backup: from
+    15:30 it is built with what can be read, and the first page names the store that could not
+    be."""
+    timer = Path(retention.__file__).parent / "systemd" / "sudarshan-backup.timer"
+    backups = sorted(
+        int(hm[:2]) * 60 + int(hm[3:5])
+        for line in timer.read_text().splitlines()
+        if line.startswith("OnCalendar=") and (hm := line.split()[1])
+    )
+    assert backups[0] == 16 * 60 + 30  # the first backup of the day: on 4 April, the archive
+    assert fypack.STRICT_UNTIL_MIN == backups[0] - 60  # an hour before it, for the last build
+    _break_alerts(year)
+    assert _job(year, 20270404) == "failed"
+    assert _job(year, 20270404, "15:15") == "failed"  # a later try can still land in time
+    assert kept(year, "records") is None
+    assert _job(year, 20270404, "15:30") == "late"
+    row = kept(year, "records")
+    assert row["built_ms"] == at(20270404, "15:30") < at(20270404, "16:30")
+    said = "alerts.csv: the alerts' history could not be read just now, so the file holds its"
+    assert said in row["text"] and said in _first_page(year)
+    with _zip(year) as pack:
+        assert _rows(pack, "alerts.csv") == [] and len(_rows(pack, "orders.csv")) == 5
+
+
+def test_a_catch_up_run_on_a_later_day_builds_the_pack_with_what_can_be_read(year, book):  # noqa: F811
+    assert _job(year, 20270401) == "ok"  # the journal ran in the week before (review L16)
+    _break_alerts(year)
+    assert _job(year, 20270404) == "failed"
+    assert _job(year, 20270405, "03:30") == "late"  # the missed day, caught up the next morning
+    row = kept(year, "records")
+    assert row["period_key"] == "FY2627" and row["built_ms"] == at(20270405, "03:30")
+    assert "the alerts' history could not be read just now" in _first_page(year)
+    job = year.svc.store.read(OWNER, lambda tx: tx.job_get("fy", 20270404))
+    assert job["status"] == "late"
 
 
 def test_a_server_without_the_other_stores_still_gets_its_pack(rig, book):  # noqa: F811
