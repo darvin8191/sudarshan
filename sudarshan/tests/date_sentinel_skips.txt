@@ -1,0 +1,4 @@
+# Tests the date sentinel does not run, one per line: <node id glob> | <reason>.
+# Only for a reason that has nothing to do with dates (a file's modification time comes from the
+# kernel while the clock is shifted, a timeout measured against a faked clock, and the like).
+# Every entry is printed in the run's summary. A test that fails on a date is fixed, not listed.
