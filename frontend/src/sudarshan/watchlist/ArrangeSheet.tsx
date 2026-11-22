@@ -1,8 +1,9 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { ArrowDown, ArrowUp, Check, FolderInput, Trash2 } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { WatchlistItem } from '@/api/watchlist'
 import { cn } from '@/lib/utils'
+import { istDay } from '@/sudarshan/dashboard/live'
 import { BottomSheet } from './BottomSheet'
 import { ListPicker } from './ListPicker'
 import { describe } from './rows'
@@ -21,6 +22,7 @@ import {
   sendRow,
   writeThenRead,
 } from './v2/arrange'
+import { draftFor, dropDraft, keepDraft } from './v2/draftStore'
 import type { View } from './v2/types'
 import { viewKey } from './v2/useListView'
 
@@ -47,6 +49,10 @@ export interface ArrangeEdit {
  * `arrange` (the section order, each symbol's section, the item order, the version `view` answered).
  * Outside edit mode `sendTo` writes the one change at once (the symbol sheet's Move to section).
  * Either way the list is read again whatever the answer.
+ *
+ * GA6.4: a draft that differs from the list is kept (`v2/draftStore`) on each change, so leaving the
+ * page by the bottom bar does not lose it; edit mode starting on the same list, version and day
+ * starts from it. Ending edit mode here (Save order, Discard moves, Done) drops it.
  */
 export function useArrange({
   ref,
@@ -68,14 +74,33 @@ export function useArrange({
   const [busy, setBusy] = useState(false)
   const [said, setSaid] = useState<string | null>(null)
   const on = editing && view !== undefined && ref !== null
+  const wasOn = useRef(false)
 
   useEffect(() => {
     if (!on) {
       setHeld(null)
       setSaid(null)
+      // GA6.4: edit mode ended on this page. Leaving the page itself never comes here.
+      if (wasOn.current) dropDraft()
     } else if (view)
-      setHeld((was) => was ?? { draft: draftOf(view, items), base: draftOf(view, items) })
-  }, [on, view, items])
+      setHeld((was) => {
+        if (was) return was
+        const kept = listId === null ? null : draftFor(listId, view.version, Date.now())
+        return kept
+          ? { draft: fitTo(kept.draft, items), base: fitTo(kept.base, items) }
+          : { draft: draftOf(view, items), base: draftOf(view, items) }
+      })
+    wasOn.current = on
+  }, [on, view, items, listId])
+
+  // GA6.4: kept while it differs from the list, on the version it was made against.
+  useEffect(() => {
+    if (!on || !held || !view || listId === null) return
+    const draft = fitTo(held.draft, items)
+    const base = fitTo(held.base, items)
+    if (sameDraft(draft, base)) dropDraft(listId)
+    else keepDraft({ listId, version: view.version, day: istDay(Date.now()), draft, base })
+  }, [on, held, view, listId, items])
 
   const change = useCallback(
     (fn: (draft: Draft) => Draft) =>

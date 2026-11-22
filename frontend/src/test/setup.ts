@@ -5,9 +5,23 @@ import { afterAll, afterEach, beforeEach, vi } from 'vitest'
 // ignore taps for half a second. Tests that are not about it tap at once.
 import { OPEN_GUARD } from '@/sudarshan/watchlist/openGuard'
 
+/**
+ * SUDARSHAN GA6.4: where the watchlist keeps unsaved moves for this tab (`v2/draftStore`'s
+ * DRAFT_KEY; draftStore.test.tsx holds the two equal). Written out, so this file imports nothing
+ * that a test file mocks.
+ */
+const WATCHLIST_DRAFT_KEY = 'sudarshan-watchlist-draft'
+
 // SUDARSHAN (M6.9): off unless a test turns it on (openGuard.test.tsx does).
 beforeEach(() => {
   OPEN_GUARD.ms = 0
+  // SUDARSHAN GA6.4: the watchlist's unsaved moves are kept in this tab's storage; one test's are
+  // never the next test's.
+  try {
+    sessionStorage.removeItem(WATCHLIST_DRAFT_KEY)
+  } catch {
+    // A test that refuses storage restores it itself.
+  }
 })
 
 // Cleanup after each test case
