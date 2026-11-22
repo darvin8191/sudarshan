@@ -16,7 +16,12 @@ portfolio page does not show them). All are GETs with ``Authorization: Bearer``,
   at any other hour is handled the same way.
 * **429.** That API rests for 60 seconds.
 * **401.** Reads of the token pause until the token file changes: the same token is shared with
-  other services and a second guess would only be refused again.
+  other services and a second guess would only be refused again. Holdings and positions
+  (``JUDGES``, the reads the token is known to make) are the exception while no read of theirs
+  has been refused with this token file: a 401 on another read (the day's orders or trades, a
+  report) may only mean that this token may not make that read (v0.16.0 review H1).
+* **The token check.** Each holdings or positions read Upstox answers is told to ``on_verdict``
+  (``probe.heard``): accepted (200) or refused (401), with the token file's signature.
 * **The token** is read from its file for every call and is never logged or kept in a message.
 
 Prices, values and P&L between reads come from ticks (design 3.4), never from this module.
@@ -61,6 +66,9 @@ assert set(PATHS) == set(UPSTOX_PARTS)
 #: The budget's name for a part's API where the part's own name is taken: the reports reader keeps
 #: Upstox's trade history (a different API) under ``trades``, so the day's trades have their own.
 API_OF = {"trades": "day_trades"}
+#: The reads the Analytics Token is known to make (the Upstox tab shows them). Only their answers
+#: say whether Upstox accepts the token: nobody has verified that it may read the others.
+JUDGES = ("holdings", "positions")
 RATE_CODE = "UDAPI10005"
 WORDS = {
     "token_missing": "SUDARSHAN cannot find its Upstox token on this server. Check the server; "
@@ -472,7 +480,13 @@ class UpstoxReader:
         self._memory = {name: PartMemory() for name in UPSTOX_PARTS}
         self._refused_at: tuple[int, int] | None = None
         self._refused = False
+        #: The token file's signature when a read in JUDGES was refused (401): only then does
+        #: the pause hold the holdings and positions reads too.
+        self._confirmed_at: tuple[int, int] | None = None
         self._told: set[str] = set()
+        #: Told of each read in JUDGES that Upstox answered: ("ok" or "failed", the time, the
+        #: token file's signature before the read). Set by the service (probe.heard).
+        self.on_verdict: Callable[[str, int, tuple[int, int] | None], None] | None = None
 
     # ---- the client ------------------------------------------------------------------------
     @property
@@ -562,11 +576,15 @@ class UpstoxReader:
     async def _read(self, name: str, memory: PartMemory, principal: str = OWNER) -> str | None:
         """One read into ``memory``; ``"held"`` when the owner's reserve refused it."""
         now = self.clock()
+        sig = _signature(self.token_file)  # the file whose token this read sends
         if self._refused:
-            if _signature(self.token_file) == self._refused_at:
+            if sig != self._refused_at:
+                self._refused = False  # the file changed: try again
+                self._told.discard("401")
+            elif name not in JUDGES or self._confirmed_at == sig:
                 return self._fail(memory, now, WORDS["token_refused"])
-            self._refused = False  # the file changed: try again
-            self._told.discard("401")
+            # else: the pause came from a read the token may not be allowed to make, and no
+            # holdings or positions read has been refused with this file: this one asks.
         if name == "funds" and in_funds_window(now):
             return self._window(memory, now)
         api = API_OF.get(name, name)
@@ -595,8 +613,12 @@ class UpstoxReader:
             del token, headers
         now = self.clock()
         status = answer.status_code
+        if name in JUDGES and status in (200, 401):
+            self._verdict("ok" if status == 200 else "failed", now, sig)
         if status == 401:
-            self._refused, self._refused_at = True, _signature(self.token_file)
+            self._refused, self._refused_at = True, sig
+            if name in JUDGES:
+                self._confirmed_at = sig
             self._say_once(
                 "401", "Upstox refused the read-only token; reads pause until it changes."
             )
@@ -626,6 +648,14 @@ class UpstoxReader:
                 log.exception("the %s rows could not be matched to the master contract", name)
         memory.data, memory.read_at, memory.tried_at = data, now, now
         memory.state, memory.note = "ok", None
+
+    def _verdict(self, state: str, now: int, sig: tuple[int, int] | None) -> None:
+        """Tell the token check what Upstox said to a read in JUDGES. Never fails a read."""
+        if self.on_verdict is not None:
+            try:
+                self.on_verdict(state, now, sig)
+            except Exception:
+                log.exception("the token check could not take a read's answer")
 
     @staticmethod
     def _rate_coded(answer: httpx.Response) -> bool:
