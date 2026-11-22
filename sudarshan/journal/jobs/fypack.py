@@ -87,9 +87,6 @@ ASSISTANT_COLUMNS = ("time_ist", "client", "tool", "arguments_sha256", "outcome"
 ALERT_PAGE = 2000
 #: One diary line is one notice: a longer line is not one, and a file past this is not read on.
 DIARY_LINE_MAX, DIARY_BYTES_MAX = 64 * 1024, 64 << 20
-#: The Reports page downloads through OpenAlgo's bridge, which passes a file up to about this
-#: size (``blueprints/sudarshan_journal.py`` ``DOWNLOAD_MAX_BYTES``, less the wrapping).
-PAGE_DOWNLOAD_MAX = 5 * 1024 * 1024
 _CELL = 300
 
 WHOSE = (
@@ -492,7 +489,9 @@ async def build_records(service: Any, span: Span, now: int, strict: bool = False
     Reports archive. Returns the report's id. ``strict`` (the scheduled run): a store that is
     there and cannot be read raises ``JobFailed`` and nothing is kept."""
     data, text, parts = await _thread(lambda: assemble(service, span, now, strict))
-    if len(data) > PAGE_DOWNLOAD_MAX:
+    # The one rule the download keeps (``report_ops``): the text says so exactly when the
+    # Reports page would refuse the file.
+    if len(data) > kinds.FILE_MAX_BYTES:
         text = f"{text}\n{TOO_LARGE}"
     summary = {
         "start": span.start,

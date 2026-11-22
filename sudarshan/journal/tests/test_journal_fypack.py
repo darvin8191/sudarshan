@@ -27,6 +27,7 @@ from test_journal_capture import files as files  # noqa: F401  (a fixture)
 from test_journal_capture import ist_ms, placed, scenario
 from test_journal_capture import rig as rig  # noqa: F401  (a fixture)
 from test_journal_period_reports import at, build, file_of, kept
+from test_journal_reports import call
 
 from sudarshan.alerts.market import spec
 from sudarshan.alerts.market.engine import Fire, State
@@ -456,11 +457,46 @@ def test_the_first_page_is_dated_by_the_pack_not_the_clock(year, book):  # noqa:
     assert f"/CreationDate (D:{stamp}Z)".encode() in page
 
 
-def test_a_pack_too_large_for_the_page_says_where_it_is(year, book, monkeypatch):  # noqa: F811
-    monkeypatch.setattr(fypack, "PAGE_DOWNLOAD_MAX", 100)
+def test_a_pack_too_large_for_the_page_says_where_it_is_and_is_refused_in_the_same_words(
+    year,
+    book,  # noqa: F811
+    monkeypatch,
+):
+    """v0.16.0 review L1: one rule, kinds.FILE_MAX_BYTES, for the pack's text and the download.
+    A pack past it is refused before it is read out, in the pack's own words (it is in the
+    backups); retrying never helps, so nothing says to try again. One within it downloads."""
+    assert kinds.FILE_MAX_BYTES * 4 // 3 + 64 * 1024 <= kinds.ANSWER_MAX_BYTES
+    assert kinds.FILE_MAX_BYTES > 5 * 1024 * 1024  # realistic packs are 1 to 2 MB
     year.now = at(20270404, "07:10")
     build(year, "records", period="FY2627")
-    assert kept(year, "records")["text"].endswith(fypack.TOO_LARGE)
+    whole = kept(year, "records")
+    assert fypack.TOO_LARGE not in whole["text"]
+    assert call(year, "report_file", id=whole["id"])["file_name"].endswith(".zip")
+
+    monkeypatch.setattr(kinds, "FILE_MAX_BYTES", 100)
+    build(year, "records", period="FY2627")
+    row = kept(year, "records")
+    assert row["text"].endswith(fypack.TOO_LARGE)
+    with pytest.raises(ApiError) as refused:
+        call(year, "report_file", id=row["id"])
+    assert (refused.value.status, refused.value.code) == (422, "refused")
+    assert refused.value.message == fypack.TOO_LARGE
+    assert "again" not in refused.value.message
+
+
+def test_any_report_file_too_large_for_the_page_is_refused_with_where_it_is(
+    year,
+    book,  # noqa: F811
+    monkeypatch,
+):
+    from sudarshan.journal.ops import report_ops
+
+    build(year, "weekly", period="2026W45")
+    week = kept(year, "weekly")
+    monkeypatch.setattr(kinds, "FILE_MAX_BYTES", 100)
+    with pytest.raises(ApiError) as refused:
+        call(year, "report_file", id=week["id"])
+    assert (refused.value.code, refused.value.message) == ("refused", report_ops.TOO_LARGE)
 
 
 def test_the_kind_has_its_title_and_its_file_name():

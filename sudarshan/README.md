@@ -1569,7 +1569,8 @@ the Tax pack off, neither is built.
 Each file says on the first page how many rows it holds and from which day to which, so a
 store that keeps less than a year shows it there. A store this server does not have (alerts
 never switched on) gives its file with the header alone. The page downloads a pack of up to
-about 5 MB; a larger one says so and is copied from the server's backups.
+about 6 MB; a larger one says so on its first lines, and the download says it too: it is
+copied from the server's backups.
 
 ## What is kept, and for how long (M18.12)
 

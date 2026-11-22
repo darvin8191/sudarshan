@@ -182,6 +182,10 @@ WORDS = {
     "then choose Download or Download CSV.",
     "bad_file": "This report's file could not be read. Its text is still on the Reports page; "
     "try the download again later.",
+    # an answer past the download's limit: retrying never helps (v0.16.0 review L1); the journal
+    # refuses such a file itself, with these words or a records pack's own
+    "too_large_file": "This report's file is larger than the Reports page can download. It is in "
+    "the server's backups; have it copied from the server.",
     "forbidden": "Only the account owner can use the journal.",
     "unauthorized": "Your session has ended. Log in again.",
     "rate_limited": "Too many requests. Wait a minute, then try again.",
@@ -469,7 +473,7 @@ def _send(spec: OpSpec, args: dict):
         return _not_answered(spec, sent=True)
     if spec.cls == "download" and len(answer.content) > DOWNLOAD_MAX_BYTES:
         logger.error("The journal: a report's file came back larger than a download may be")
-        return _error("unavailable", WORDS["bad_file"])
+        return _error("unavailable", WORDS["too_large_file"])
     try:
         body = answer.json()
     except ValueError:

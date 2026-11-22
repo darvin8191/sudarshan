@@ -55,6 +55,10 @@ PRINCIPALS = {
 SEAL_LIMITS = {"api": 64 * 1024, "delivery": 16 * 1024, "nudge": 4 * 1024, "family": 4 * 1024}
 #: The largest answer the API gives: a report's file, base64 inside the envelope (design 7.2).
 ANSWER_MAX_BYTES = 8 * 1024 * 1024
+#: The largest stored file ``report_file`` answers: its base64 (4 bytes for every 3) with 64 KiB
+#: left for the envelope's other fields stays within ANSWER_MAX_BYTES. A larger one is refused
+#: with words saying where it is, and a records pack's own text says so (v0.16.0 review L1).
+FILE_MAX_BYTES = (ANSWER_MAX_BYTES - 64 * 1024) // 4 * 3
 #: What a nudge says changed (``sudarshan/alerts/nudge.py``): a CNC fill is ``holdings``.
 NUDGE_KINDS = ("orders", "holdings")
 
