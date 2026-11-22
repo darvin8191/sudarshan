@@ -249,7 +249,9 @@ async function serve(page: Page, state: State) {
   await page.goto('/dashboard')
   await page.clock.resume()
   await expect(page.getByRole('heading', { level: 1, name: 'Dashboard' })).toBeVisible()
-  return { ticks, hold, release }
+  /** How many sockets the page holds open. */
+  const sockets = () => open.size
+  return { ticks, hold, release, sockets }
 }
 
 /** The page's own checks: sideways scroll, small targets, colour-only figures. */
@@ -488,7 +490,7 @@ test.describe(`the dashboard at ${WIDTH} x 800`, () => {
   }
 
   test('back from sleep: reconnecting from the first frame, real-time again with the ticks', async ({ page }, info) => {
-    const { ticks, hold, release } = await serve(page, STATES[0])
+    const { ticks, hold, release, sockets } = await serve(page, STATES[0])
     await expect(page.locator('[data-feed="live"]').first()).toBeVisible()
 
     // The phone sleeps for 12 minutes: the shared socket closes 5 s after the page hides.
@@ -497,6 +499,10 @@ test.describe(`the dashboard at ${WIDTH} x 800`, () => {
       document.dispatchEvent(new Event('visibilitychange'))
     })
     await page.clock.fastForward('12:00')
+    // v0.16.0 phone review M2 (found in the options spec; this one raced the same way): the page
+    // wakes only once that socket has closed. The 5 s are set when the page has taken the hide
+    // in, which a busy machine can do after the jump; the wait is for the close itself.
+    await expect.poll(sockets, { message: 'the socket closes while the page is hidden', timeout: 15_000 }).toBe(0)
     // The server answers nothing until the waking screen has been read. Waking, the page reads
     // its prices again while the socket is down and signs a new socket in, and either answer can
     // land, and change the words below, before a slow machine has looked at them.
