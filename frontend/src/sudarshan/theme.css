@@ -193,6 +193,14 @@ html {
   --sd-row-pad-y: 0.25rem;
   --sd-card-pad-y: 0.375rem;
 }
+/* The app bar keeps its usual size under Larger text (v0.16.0 phone review H1). Its buttons are
+   48 dp already, and the name's room is what the account end leaves of the phone's width: one
+   size up, that room was 29 px at 360 px in Analyze mode with the kill switch chip, and the page
+   scrolled sideways at 800 px. Drawn at the usual size, both names keep the room they have with
+   the usual text. Menus and sheets the bar opens are drawn outside it, at the larger size. */
+:root[data-text='large'] .sd-app-bar {
+  zoom: calc(1 / var(--sd-text-scale));
+}
 /* With larger text the books' four-up figure cards (Positions, Holdings, the wide pages a phone
    shows on its side) go two-up below 1024 px, so a six-digit figure stays inside its card and the
    page never scrolls sideways. Outside any layer, so it wins over the grid's own columns. */
@@ -459,9 +467,12 @@ html[data-cvd='1'] {
     height: 2.625rem;
     justify-content: center;
   }
+  /* The Devanagari follows the room as the caps do (v0.16.0 phone review H1): the design's 30px,
+     or less where the room is narrower than the outlines, which are about 2.07 times as wide as
+     they are tall. Cut to "सुद" at 360 px before; never cut now, only smaller. */
   .sd-lockup--bar .sd-lockup__wordmark {
     --sd-wordmark-weight: 22;
-    height: 1.875rem;
+    height: min(1.875rem, 48cqw);
   }
   .sd-lockup--bar .sd-lockup__latin {
     font-size: min(0.625rem, calc(100cqw / 7.6));

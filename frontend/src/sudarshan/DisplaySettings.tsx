@@ -137,7 +137,7 @@ export function DisplaySettings() {
           id="sd-text-size"
           rowId="text-size"
           title="Larger text"
-          words="Text and figures one size larger everywhere in the app, and the buttons grow with them. This device only."
+          words="Text and figures one size larger everywhere in the app, and the buttons grow with them. The top bar keeps its size, so the name and the mode stay whole. This device only."
           on={textSize === 'large'}
           onChange={(on) => setTextSize(on ? 'large' : 'normal')}
         />

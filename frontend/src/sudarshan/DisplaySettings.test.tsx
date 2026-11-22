@@ -189,4 +189,13 @@ describe('Display settings', () => {
     expect(html.hasAttribute(attribute)).toBe(false)
     expect(localStorage.getItem(key)).toBeNull()
   })
+
+  // SUDARSHAN (v0.16.0 phone review H1): the app bar is drawn at its usual size under Larger
+  // text, and the row says so rather than "everywhere".
+  it('says the top bar keeps its size under Larger text', () => {
+    render(<DisplaySettings />)
+    expect(screen.getByRole('switch', { name: 'Larger text' })).toHaveAccessibleDescription(
+      /The top bar keeps its size, so the name and the mode stay whole\./
+    )
+  })
 })

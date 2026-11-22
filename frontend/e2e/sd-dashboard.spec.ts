@@ -76,6 +76,17 @@ interface State {
   expiries?: string[]
   /** The platform is in Analyze mode (the sandbox): the app bar's chip is the wider one. */
   analyze?: boolean
+  /** The kill switch is on: the app bar carries its chip as well (v0.16.0 phone review H1). */
+  kill?: boolean
+}
+
+/** Display settings kept on the phone before the page loads: Larger text and Compact rows. */
+const LARGER = { 'sudarshan-text': 'large', 'sudarshan-density': 'compact' }
+
+async function keep(page: Page, values: Record<string, string>) {
+  await page.addInitScript((entries) => {
+    for (const [key, value] of entries) localStorage.setItem(key, value)
+  }, Object.entries(values))
 }
 
 /** Answers the app's calls and plays the feed; returns a way to send the open sockets a tick. */
@@ -159,7 +170,11 @@ async function serve(page: Page, state: State) {
       json({ status: 'success', data: dayFacts(day, state.next, state.expiries) }),
     '/sudarshan/autologin/status': () =>
       json({ status: 'success', data: { enabled: true, running: false, next_run: `${day}T08:35:00+05:30` } }),
-    '/sudarshan/risk/state': () => json({ status: 'success', data: { stage: 'off' } }),
+    '/sudarshan/risk/state': () =>
+      json({
+        status: 'success',
+        data: state.kill ? { stage: 'on', kill_switch: { known: true, on: true } } : { stage: 'off' },
+      }),
     '/sudarshan/screener/api/state': () =>
       json({ status: 'success', data: { enabled: false, screens: [] } }),
   }
@@ -282,6 +297,52 @@ async function pageChecks(page: Page) {
   })
 }
 
+/**
+ * The app bar as the phone draws it: how far the page scrolls sideways, how far the profile menu
+ * and each script of the name reach past what holds them, and the size the caps and the
+ * Devanagari are seen at. Under Larger text the bar is drawn at its usual size (theme.css,
+ * `sd-app-bar`), so a computed size is taken through the zoom it is drawn with.
+ */
+async function measureBar(page: Page) {
+  return page.evaluate(() => {
+    const doc = document.documentElement
+    const row = document.querySelector('[data-testid="navbar-row"]') as HTMLElement
+    const right = (el: Element | null) => el?.getBoundingClientRect().right ?? Number.NaN
+    const caps = row.querySelector('.sd-lockup__latin') as HTMLElement & { currentCSSZoom?: number }
+    const clip = (row.querySelector('.sd-lockup--bar') as HTMLElement).getBoundingClientRect()
+    const mark = row.querySelector('.sd-lockup__wordmark') as SVGElement
+    const zoom = caps.currentCSSZoom ?? 1
+    // How far the last letter of SUDARSHAN reaches past the box that clips the lockup (delta
+    // review L5: `toBeVisible` passes on a name cut to "SUDARSH"). The letters' own extent:
+    // the tracking after the last letter is space, not ink.
+    const range = document.createRange()
+    range.selectNodeContents(caps)
+    const tracking = (Number.parseFloat(getComputedStyle(caps).letterSpacing) || 0) * zoom
+    return {
+      sideways: doc.scrollWidth - doc.clientWidth,
+      menu: right(row.querySelector('[aria-label="Open user menu"]')) - doc.clientWidth,
+      // How far each script reaches past what clips it (the home link, the lockup's box).
+      wordmark: right(mark) - Math.min(right(row.querySelector('a[href="/dashboard"]')), clip.right),
+      latin: range.getBoundingClientRect().right - tracking - clip.right,
+      words: caps.textContent,
+      capsPx: Number.parseFloat(getComputedStyle(caps).fontSize) * zoom,
+      // v0.16.0 phone review H1: "whole" passed on a name 14 px tall; it must stay readable.
+      markPx: mark.getBoundingClientRect().height,
+    }
+  })
+}
+
+/** Both names whole and readable, and the bar inside the screen. */
+function expectWholeBar(measured: Awaited<ReturnType<typeof measureBar>>, capsFloor: boolean) {
+  expect(measured.words).toBe('SUDARSHAN')
+  expect(measured.sideways, 'no sideways scroll').toBeLessThanOrEqual(0)
+  expect(measured.menu, 'the profile menu ends inside the screen').toBeLessThanOrEqual(0)
+  expect(measured.wordmark, 'the Devanagari name is whole').toBeLessThanOrEqual(0.5)
+  expect(measured.latin, 'SUDARSHAN is whole, never cut mid-word').toBeLessThanOrEqual(0.5)
+  expect(measured.markPx, 'the Devanagari name stays readable').toBeGreaterThanOrEqual(24)
+  if (capsFloor) expect(measured.capsPx, 'the caps stay readable').toBeGreaterThanOrEqual(8)
+}
+
 async function axeFindings(page: Page) {
   const scan = await new AxeBuilder({ page })
     .include('main')
@@ -333,45 +394,28 @@ test.describe(`the dashboard at ${WIDTH} x 800`, () => {
   // fix each widened the page by 5 to 12 px at 360 (and the faces are refused on a dev server
   // whose node_modules is a link, which is how the four states above first failed). The lockup's
   // icon now steps aside instead; both scripts and every control stay inside the screen.
+  // v0.16.0 phone review H1: with the kill switch chip and Larger text it read "सुद" in Analyze
+  // mode, 14 px tall; the bar is now drawn at its usual size under Larger text.
   for (const bar of [
     { name: 'in Analyze mode', analyze: true, fonts: true },
     { name: 'before the fonts arrive', analyze: false, fonts: false },
     { name: 'in Analyze mode before the fonts arrive', analyze: true, fonts: false },
+    { name: 'in Analyze mode with the kill switch chip', analyze: true, fonts: true, kill: true },
+    { name: 'in Live mode with the kill switch chip and Larger text', analyze: false, fonts: true, kill: true, larger: true },
+    { name: 'in Analyze mode with the kill switch chip and Larger text', analyze: true, fonts: true, kill: true, larger: true },
+    { name: 'in Analyze mode with the kill switch chip and Larger text before the fonts arrive', analyze: true, fonts: false, kill: true, larger: true },
   ]) {
     test(`the app bar never widens the page: ${bar.name}`, async ({ page }, info) => {
       if (!bar.fonts) await page.route('**/*.woff2', (route) => route.abort())
-      await serve(page, { ...STATES[0], analyze: bar.analyze })
+      if (bar.larger) await keep(page, LARGER)
+      await serve(page, { ...STATES[0], analyze: bar.analyze, kill: bar.kill })
       await expect(page.getByTestId('status-row')).toHaveAttribute('data-ready', 'true')
       await expect(page.getByTestId('navbar-row').getByText(bar.analyze ? 'Analyze' : 'Live').last()).toBeVisible()
-      const measured = await page.evaluate(() => {
-        // How far the last letter of SUDARSHAN reaches past the box that clips the lockup (delta
-        // review L5: `toBeVisible` passes on a name cut to "SUDARSH"). The letters' own extent:
-        // the tracking after the last letter is space, not ink.
-        const latinPast = (bar: HTMLElement) => {
-          const caps = bar.querySelector('.sd-lockup__latin') as HTMLElement
-          const clip = (bar.querySelector('.sd-lockup--bar') as HTMLElement).getBoundingClientRect()
-          const range = document.createRange()
-          range.selectNodeContents(caps)
-          const tracking = Number.parseFloat(getComputedStyle(caps).letterSpacing) || 0
-          return range.getBoundingClientRect().right - tracking - clip.right
-        }
-        const doc = document.documentElement
-        const row = document.querySelector('[data-testid="navbar-row"]') as HTMLElement
-        const right = (el: Element | null) => el?.getBoundingClientRect().right ?? Number.NaN
-        const link = row.querySelector('a[href="/dashboard"]')
-        return {
-          sideways: doc.scrollWidth - doc.clientWidth,
-          menu: right(row.querySelector('[aria-label="Open user menu"]')) - doc.clientWidth,
-          // How far each script reaches past the link that clips it: none for the Devanagari.
-          wordmark: right(row.querySelector('.sd-lockup__wordmark')) - right(link),
-          latin: latinPast(row),
-        }
-      })
+      if (bar.kill) await expect(page.getByTestId('navbar-row').getByTestId('risk-chip')).toBeVisible()
+      if (bar.larger) await expect(page.locator('html')).toHaveAttribute('data-text', 'large')
+      const measured = await measureBar(page)
       await page.screenshot({ path: info.outputPath(`bar-${bar.name.replaceAll(' ', '-')}.png`) })
-      expect(measured.sideways, 'no sideways scroll').toBeLessThanOrEqual(0)
-      expect(measured.menu, 'the profile menu ends inside the screen').toBeLessThanOrEqual(0)
-      expect(measured.wordmark, 'the Devanagari name is whole').toBeLessThanOrEqual(0.5)
-      expect(measured.latin, 'SUDARSHAN is whole, never cut mid-word').toBeLessThanOrEqual(0.5)
+      expectWholeBar(measured, bar.fonts)
       await expect(page.getByTestId('navbar-row').getByText('SUDARSHAN')).toBeVisible()
     })
   }
@@ -501,6 +545,34 @@ test.describe('the app bar with the phone on its side, 800 x 360', () => {
     }))
     expect(doc.scroll, 'no sideways scroll').toBeLessThanOrEqual(doc.client)
   })
+
+  // v0.16.0 phone review H1: the kill switch chip's words widened the page by 2 px in Live and
+  // 33 px in Analyze, and by 84 and 117 px with Larger text. On a phone's width they wait for a
+  // laptop's (the banner above says them), and the bar keeps its usual size under Larger text.
+  for (const bar of [
+    { name: 'Live, the kill switch on', analyze: false },
+    { name: 'Analyze, the kill switch on', analyze: true },
+    { name: 'Live, the kill switch on, Larger text', analyze: false, larger: true },
+    { name: 'Analyze, the kill switch on, Larger text', analyze: true, larger: true },
+  ]) {
+    test(`the bar stays inside the screen: ${bar.name}`, async ({ page }, info) => {
+      if (bar.larger) await keep(page, LARGER)
+      await serve(page, { ...STATES[0], analyze: bar.analyze, kill: true })
+      await expect(page.getByTestId('status-row')).toHaveAttribute('data-ready', 'true')
+      const row = page.getByTestId('navbar-row')
+      await expect(row.getByTestId('risk-chip')).toBeVisible()
+      await expect(page.getByTestId('risk-banner')).toContainText('Kill switch on')
+      const measured = await measureBar(page)
+      const small = await row.evaluate((element) =>
+        [...element.querySelectorAll<HTMLElement>('a[href], button')]
+          .map((el) => el.getBoundingClientRect())
+          .filter((box) => box.width > 0 && (box.width < 47.5 || box.height < 47.5)).length
+      )
+      await page.screenshot({ path: info.outputPath(`bar-sideways-${bar.name.replaceAll(/[ ,]+/g, '-')}.png`) })
+      expectWholeBar(measured, true)
+      expect(small, 'app bar targets under 48 x 48').toBe(0)
+    })
+  }
 })
 
 // v0.13.0 delta review L5: the narrowest phone, the widest account end and the widest face. The
@@ -508,48 +580,30 @@ test.describe('the app bar with the phone on its side, 800 x 360', () => {
 test.describe('the app bar at 320 x 800', () => {
   test.use({ viewport: { width: 320, height: 800 } })
 
+  // v0.16.0 phone review H1: with the kill switch chip in Analyze mode the name read "सुदर्" at the
+  // usual text size, and less with Larger text. Under 360 px the bar's edges and both chips give
+  // some of their padding to the name.
   for (const bar of [
     { name: 'in Analyze mode before the fonts arrive', analyze: true, fonts: false },
     { name: 'in Analyze mode', analyze: true, fonts: true },
     { name: 'in Live mode before the fonts arrive', analyze: false, fonts: false },
+    { name: 'in Analyze mode with the kill switch chip', analyze: true, fonts: true, kill: true },
+    { name: 'in Analyze mode with the kill switch chip before the fonts arrive', analyze: true, fonts: false, kill: true },
+    { name: 'in Live mode with the kill switch chip and Larger text', analyze: false, fonts: true, kill: true, larger: true },
+    { name: 'in Analyze mode with the kill switch chip and Larger text', analyze: true, fonts: true, kill: true, larger: true },
+    { name: 'in Analyze mode with the kill switch chip and Larger text before the fonts arrive', analyze: true, fonts: false, kill: true, larger: true },
   ]) {
     test(`both names are whole: ${bar.name}`, async ({ page }, info) => {
       if (!bar.fonts) await page.route('**/*.woff2', (route) => route.abort())
-      await serve(page, { ...STATES[0], analyze: bar.analyze })
+      if (bar.larger) await keep(page, LARGER)
+      await serve(page, { ...STATES[0], analyze: bar.analyze, kill: bar.kill })
       await expect(page.getByTestId('status-row')).toHaveAttribute('data-ready', 'true')
       await expect(page.getByTestId('navbar-row').getByText(bar.analyze ? 'Analyze' : 'Live').last()).toBeVisible()
-      const measured = await page.evaluate(() => {
-        // How far the last letter of SUDARSHAN reaches past the box that clips the lockup (delta
-        // review L5: `toBeVisible` passes on a name cut to "SUDARSH"). The letters' own extent:
-        // the tracking after the last letter is space, not ink.
-        const latinPast = (bar: HTMLElement) => {
-          const caps = bar.querySelector('.sd-lockup__latin') as HTMLElement
-          const clip = (bar.querySelector('.sd-lockup--bar') as HTMLElement).getBoundingClientRect()
-          const range = document.createRange()
-          range.selectNodeContents(caps)
-          const tracking = Number.parseFloat(getComputedStyle(caps).letterSpacing) || 0
-          return range.getBoundingClientRect().right - tracking - clip.right
-        }
-        const doc = document.documentElement
-        const row = document.querySelector('[data-testid="navbar-row"]') as HTMLElement
-        const right = (el: Element | null) => el?.getBoundingClientRect().right ?? Number.NaN
-        const latin = row.querySelector('.sd-lockup__latin') as HTMLElement
-        return {
-          sideways: doc.scrollWidth - doc.clientWidth,
-          menu: right(row.querySelector('[aria-label="Open user menu"]')) - doc.clientWidth,
-          wordmark: right(row.querySelector('.sd-lockup__wordmark')) - right(row.querySelector('.sd-lockup--bar')),
-          latin: latinPast(row),
-          words: latin.textContent,
-          size: Number.parseFloat(getComputedStyle(latin).fontSize),
-        }
-      })
+      if (bar.kill) await expect(page.getByTestId('navbar-row').getByTestId('risk-chip')).toBeVisible()
+      if (bar.larger) await expect(page.locator('html')).toHaveAttribute('data-text', 'large')
+      const measured = await measureBar(page)
       await page.screenshot({ path: info.outputPath(`bar-320-${bar.name.replaceAll(' ', '-')}.png`) })
-      expect(measured.words).toBe('SUDARSHAN')
-      expect(measured.latin, 'SUDARSHAN is whole, never cut mid-word').toBeLessThanOrEqual(0.5)
-      expect(measured.wordmark, 'the Devanagari name is whole').toBeLessThanOrEqual(0.5)
-      expect(measured.size, 'the caps stay readable').toBeGreaterThanOrEqual(8)
-      expect(measured.sideways, 'no sideways scroll').toBeLessThanOrEqual(0)
-      expect(measured.menu, 'the profile menu ends inside the screen').toBeLessThanOrEqual(0)
+      expectWholeBar(measured, true)
     })
   }
 })
