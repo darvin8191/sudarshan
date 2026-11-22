@@ -6,8 +6,6 @@
 name: SUDARSHAN date sentinel
 
 on:
-  push:
-    branches: ["ci/date-sentinel"]
   workflow_dispatch:
   schedule:
     # 21:17 UTC, 02:47 IST: far from the Indian market hours and the broker's 03:00 token rollover
