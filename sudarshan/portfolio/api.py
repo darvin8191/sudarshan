@@ -10,16 +10,18 @@ process that can read OpenAlgo's .env can make. A seal lives 60 s, its nonce is 
 the op in the path must be the op inside it, and a seal under a purpose this service does not
 serve never opens here.
 
-Three purposes open here, each with its own key, principal and list of ops (cross-design Y4, Y6):
+Four purposes open here, each with its own key, principal and list of ops (cross-design Y4, Y6):
 
     owner    principal ``owner``                  the portfolio's own ops (the owner's bridge)
     family   principal ``viewer:<member id>``     read ops only; the scope (the member's shared
                                                   tabs and the mask) is built here from the stored
                                                   shares and privacy, never taken from the caller
     journal  principal ``sudarshan-journal``      account reads only
+    screener principal ``sudarshan-screener``     ``ex_dates`` only (M9.13): public ex-dates
 
 Which purpose a seal belongs to is which key opens it. A principal that is not the purpose's, or an
-op that is not on its list (every write op under family or journal), answers 403 and is logged.
+op that is not on its list (every write op under family, journal or screener), answers 403 and is
+logged.
 The answer of a non-owner purpose passes the scope's mask once more on its way out. The nonces sit in a NonceBook that answers 503 when full instead of forgetting one still
 valid (cross-design X9). Sizes: a sealed request is at most 64 KiB, an import's at most
 ``kinds.IMPORT_MAX_BYTES`` (the file as text seals to 1.5 to 1.9 MiB, see kinds.py), and the limit
@@ -73,14 +75,17 @@ MAX_SEALED = kinds.API_MAX_BYTES
 LIMITS = dict.fromkeys(kinds.SERVICE_OP_NAMES, kinds.API_MAX_BYTES) | {
     spec.name: kinds.IMPORT_MAX_BYTES if spec.upload else kinds.API_MAX_BYTES for spec in kinds.OPS
 }
-OWNER_PURPOSE, FAMILY, JOURNAL = "owner", "family", "journal"
-#: The ops each purpose opens (the family and journal lists are all reads; the owner's sharing ops
-#: are among the owner's own, ``kinds.SHARING_OPS``).
+OWNER_PURPOSE, FAMILY, JOURNAL, SCREENER = "owner", "family", "journal", "screener"
+#: The ops each purpose opens (the family, journal and screener lists are all reads; the owner's
+#: sharing ops are among the owner's own, ``kinds.SHARING_OPS``).
 ALLOWED = {
     OWNER_PURPOSE: frozenset(kinds.OP_NAMES),
     FAMILY: frozenset(kinds.FAMILY_OPS),
     JOURNAL: frozenset(kinds.JOURNAL_OPS),
+    SCREENER: frozenset(kinds.SCREENER_OPS),
 }
+#: The one principal each service purpose takes.
+PRINCIPALS = {JOURNAL: kinds.JOURNAL_PRINCIPAL, SCREENER: kinds.SCREENER_PRINCIPAL}
 FAMILY_PRINCIPAL = re.compile(re.escape(kinds.FAMILY_PRINCIPAL_PREFIX) + r"[A-Za-z0-9_-]{1,40}")
 #: Family ops whose answer is about the one tab its ``id`` names, the ones about the Upstox tab,
 #: and the one whose answer is an entry per tab (L6: a restricted share masks its own tab only).
@@ -144,6 +149,7 @@ class PortfolioApi:
         clock: Callable[[], float] = time.time,
         family_fernet: Fernet | None = None,
         journal_fernet: Fernet | None = None,
+        screener_fernet: Fernet | None = None,
     ):
         self.desk, self.fernet, self.clock = desk, fernet, clock
         #: The purposes this listener serves, in the order their keys are tried.
@@ -152,6 +158,8 @@ class PortfolioApi:
             self.purposes.append((FAMILY, family_fernet))
         if journal_fernet is not None:
             self.purposes.append((JOURNAL, journal_fernet))
+        if screener_fernet is not None:
+            self.purposes.append((SCREENER, screener_fernet))
         self.registry = ops_module.REGISTRY if registry is None else registry
         self.nonces = nonces if nonces is not None else NonceBook(NONCES)
         self.server: asyncio.Server | None = None
@@ -279,7 +287,7 @@ class PortfolioApi:
             return principal == OWNER
         if purpose == FAMILY:
             return FAMILY_PRINCIPAL.fullmatch(principal) is not None
-        return principal == kinds.JOURNAL_PRINCIPAL
+        return principal == PRINCIPALS.get(purpose)
 
     async def _caller(
         self, purpose: str, principal: str, args: dict, op: str = ""

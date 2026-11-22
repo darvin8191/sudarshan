@@ -39,7 +39,8 @@ def run(coro):
 # ---- the contract ------------------------------------------------------------------------------
 def test_every_op_of_the_phase_is_routed_and_waits_for_one_switch():
     assert set(PHASE_OPS) <= set(kinds.OP_NAMES)
-    assert set(kinds.SWITCH_OF) == {*PHASE_OPS, "tax_pack"}
+    # the journal's pack and the screener's ex-dates: service ops with no route of the owner's
+    assert set(kinds.SWITCH_OF) == {*PHASE_OPS, "tax_pack", "ex_dates"}
     assert set(kinds.SWITCHED_OPS) == set(kinds.SWITCH_NAMES) == set(kinds.SWITCH_ENV)
     names = [name for ops in kinds.SWITCHED_OPS.values() for name in ops]
     assert len(names) == len(set(names)), "an op waits for two switches"
