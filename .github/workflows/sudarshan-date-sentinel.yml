@@ -24,7 +24,9 @@ concurrency:
 jobs:
   sentinel:
     name: "+${{ matrix.days }}d, ${{ matrix.part }}"
-    runs-on: ${{ matrix.part == 'upstream' && 'ubuntu-latest' || 'ubuntu-24.04-arm' }}
+    # x86: libfaketime segfaults the threaded tests on the arm64 runner (plain and multithread
+    # builds both, even with the clock not moved); a date question is the same on either.
+    runs-on: ubuntu-latest
     timeout-minutes: 25
     strategy:
       fail-fast: false
@@ -48,7 +50,7 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq faketime
-          # The multithread build: the plain one segfaults the tests on arm64.
+          # The multithread build, which is the safe one for threads.
           lib=$(ls /usr/lib/*/faketime/libfaketimeMT.so.1 /usr/lib/faketime/libfaketimeMT.so.1 2>/dev/null | head -n 1)
           test -n "$lib" && test -e "$lib" || { echo "libfaketimeMT.so.1 not found"; exit 1; }
           echo "FAKETIME_LIB=$lib" >> "$GITHUB_ENV"

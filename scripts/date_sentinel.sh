@@ -40,8 +40,8 @@ mkdir -p "$out"
 
 lib=${FAKETIME_LIB:-}
 if [ -z "$lib" ]; then
-  # The multithread build first: the plain one segfaulted the test run on arm64 (the tests start
-  # threads that log while others read the clock), even with the clock not moved.
+  # The multithread build first (the tests start threads). On arm64 both builds segfaulted the
+  # test run, even with the clock not moved: use an x86_64 machine.
   for candidate in /usr/lib/*/faketime/libfaketimeMT.so.1 /usr/lib/faketime/libfaketimeMT.so.1 \
     /usr/local/lib/faketime/libfaketimeMT.so.1 /usr/lib/*/faketime/libfaketime.so.1 \
     /usr/lib/faketime/libfaketime.so.1 /usr/local/lib/faketime/libfaketime.so.1; do
