@@ -3,7 +3,7 @@ import { type ReactNode, useId, useState } from 'react'
 import { cn } from '@/lib/utils'
 import { ACTION, OUTLINED } from '@/sudarshan/books/cards/parts'
 import { BottomSheet } from '@/sudarshan/watchlist/BottomSheet'
-import { INDICATOR_BY_ID, OPTION_BY_ID, type ParamInfo } from './catalog'
+import { EVENT_BY_ID, EVENT_KINDS, INDICATOR_BY_ID, OPTION_BY_ID, type ParamInfo } from './catalog'
 import {
   AGO_WORDS,
   type Item,
@@ -22,7 +22,15 @@ import {
   tabOfPick,
   timeframesOf,
 } from './operandForm'
-import type { IndOperand, Offset, OiOperand, Operand, OptOperand, TimeFrame } from './types'
+import type {
+  EventOperand,
+  IndOperand,
+  Offset,
+  OiOperand,
+  Operand,
+  OptOperand,
+  TimeFrame,
+} from './types'
 import { offsetWords, operandChips, tfWords } from './words'
 
 const INPUT =
@@ -230,6 +238,7 @@ function Editor({
       {'ind' in draft && <Params draft={draft} onChange={onChange} problems={problems} />}
 
       {'opt' in draft && <Option draft={draft} onChange={onChange} />}
+      {'event' in draft && <EventSettings draft={draft} onChange={onChange} />}
       {'oi' in draft && <OpenInterest draft={draft} onChange={onChange} />}
 
       {readsCandles(pick) && <Candles pick={pick} draft={draft as Candled} onChange={onChange} />}
@@ -362,6 +371,50 @@ function Option({ draft, onChange }: { draft: OptOperand; onChange: (next: Opera
           options={timeframesOf({ kind: 'opt', id: draft.opt })}
           onPick={(tf) => onChange({ ...draft, tf })}
         />
+      )}
+    </>
+  )
+}
+
+/**
+ * M9.13 (GA8.3): days to an ex-date count the kind of corporate action chosen, or any; days to
+ * an expiry take nothing more. Both count trading days, 0 on the day itself.
+ */
+function EventSettings({
+  draft,
+  onChange,
+}: {
+  draft: EventOperand
+  onChange: (next: Operand) => void
+}) {
+  const info = EVENT_BY_ID.get(draft.event)
+  const note =
+    draft.event === 'ex_days'
+      ? 'Trading days to the next ex-date: 0 on the day itself, 1 when it is the next session. Known for the shares you hold and those on your watchlists.'
+      : 'Trading days to the contract’s expiry: 0 on the expiry day.'
+  return (
+    <>
+      <p className="text-sm font-medium text-[color:var(--text-secondary)]">{note}</p>
+      {info?.kinds && draft.event === 'ex_days' && (
+        <fieldset className="m-0 flex min-w-0 flex-col gap-1.5 border-0 p-0">
+          <legend className="pb-1 text-sm font-semibold">Of which action</legend>
+          <div className="flex flex-wrap gap-1.5">
+            {EVENT_KINDS.map(({ id, label }) => {
+              const on = (draft.kind ?? 'any') === id
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  aria-pressed={on}
+                  onClick={() => onChange({ event: 'ex_days', kind: id })}
+                  className={CHOICE(on)}
+                >
+                  {label}
+                </button>
+              )
+            })}
+          </div>
+        </fieldset>
       )}
     </>
   )

@@ -66,6 +66,26 @@ describe('a clause in the owner words', () => {
     expect(operatorChip({ op: 'is', args: { name: 'long_buildup' } })).toBe('Is Long build-up')
   })
 
+  it('writes days to an ex-date with its kind, and days to an expiry (M9.13)', () => {
+    expect(operandChips({ event: 'ex_days', kind: 'dividend' })).toEqual({
+      tf: null,
+      text: 'Days to ex-date (Dividend)',
+      at: null,
+    })
+    expect(operandChips({ event: 'ex_days', kind: 'any' }).text).toBe('Days to ex-date')
+    expect(operandChips({ event: 'ex_days' }).text).toBe('Days to ex-date')
+    expect(operandChips({ event: 'expiry_days' }).text).toBe('Days to expiry')
+    expect(
+      clauseSentence({
+        id: 'c1',
+        on: true,
+        left: { event: 'ex_days', kind: 'bonus' },
+        op: 'lte',
+        right: { num: '2' },
+      })
+    ).toBe('Days to ex-date (Bonus) is at or below 2')
+  })
+
   it('reads a whole clause as one sentence for a screen reader', () => {
     expect(clauseSentence(cross)).toBe('15 min EMA 20 crosses above 15 min EMA 50')
   })

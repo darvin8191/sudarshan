@@ -225,4 +225,26 @@ describe('the operand sheet', () => {
       within(clauseCard('c1')).getByRole('button', { name: 'Value: OI build-up (3 candles)' })
     ).toBeTruthy()
   })
+
+  it('applies days to an ex-date of a dividend from the Events tab, with no candle chip (M9.13)', async () => {
+    renderPage(['/screener?new=1'])
+    await openLeft()
+    await userEvent.click(screen.getByRole('button', { name: 'Change' }))
+    await userEvent.click(screen.getByRole('tab', { name: 'Events' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Days to ex-date' }))
+    expect(screen.getByText(/Trading days to the next ex-date: 0 on the day itself/)).toBeTruthy()
+    const any = screen.getByRole('button', { name: 'Any' })
+    expect(any.getAttribute('aria-pressed')).toBe('true')
+    await userEvent.click(screen.getByRole('button', { name: 'Dividend' }))
+    expect(screen.getByRole('button', { name: 'Dividend' }).getAttribute('aria-pressed')).toBe(
+      'true'
+    )
+    await userEvent.click(screen.getByRole('button', { name: 'Use this' }))
+    await waitFor(() => expect(where()).toBe('/screener?new=1'))
+    const card = clauseCard('c1')
+    expect(
+      within(card).getByRole('button', { name: 'Value: Days to ex-date (Dividend)' })
+    ).toBeTruthy()
+    expect(within(card).queryByRole('button', { name: /^Candles:/ })).toBeNull()
+  })
 })

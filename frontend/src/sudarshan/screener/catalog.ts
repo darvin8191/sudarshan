@@ -2,7 +2,7 @@
 // sudarshan/screener/catalog.py (the service checks every screen against that one, in the
 // owner's words; test_ui_catalog_matches.py fails when the two name different things). It holds
 // only what the builder needs to offer a choice and to write a clause as a sentence.
-import type { Clause, Group, GroupKind, Node, Offset, Operand, TimeFrame } from './types'
+import type { Clause, EventKind, Group, GroupKind, Node, Offset, Operand, TimeFrame } from './types'
 
 export interface FieldInfo {
   id: string
@@ -411,6 +411,26 @@ export const OPTIONS: OptionInfo[] = [
   { id: 'vix_pct', label: 'India VIX percentile', timed: false, underlying: false },
 ]
 
+/** SUDARSHAN M9.13 (GA8.3): days to an event of the instrument's (catalog.py EVENTS). */
+export interface EventInfo {
+  id: 'ex_days' | 'expiry_days'
+  label: string
+  /** True: names the kind of corporate action it counts to. */
+  kinds: boolean
+}
+
+export const EVENTS: EventInfo[] = [
+  { id: 'ex_days', label: 'Days to ex-date', kinds: true },
+  { id: 'expiry_days', label: 'Days to expiry', kinds: false },
+]
+export const EVENT_KINDS: Array<{ id: EventKind; label: string }> = [
+  { id: 'any', label: 'Any' },
+  { id: 'dividend', label: 'Dividend' },
+  { id: 'bonus', label: 'Bonus' },
+  { id: 'split', label: 'Split' },
+  { id: 'rights', label: 'Rights' },
+]
+
 export const PATTERNS = [
   'bullish_engulfing',
   'bearish_engulfing',
@@ -448,6 +468,7 @@ export const FIELD_BY_ID = new Map(FIELDS.map((field) => [field.id, field]))
 export const INDICATOR_BY_ID = new Map(INDICATORS.map((indicator) => [indicator.id, indicator]))
 export const OPERATOR_BY_ID = new Map(OPERATORS.map((operator) => [operator.id, operator]))
 export const OPTION_BY_ID = new Map(OPTIONS.map((option) => [option.id, option]))
+export const EVENT_BY_ID = new Map(EVENTS.map((event) => [event.id as string, event]))
 
 export const GROUP_TITLES: Record<GroupKind, string> = {
   all: 'Match all of these',

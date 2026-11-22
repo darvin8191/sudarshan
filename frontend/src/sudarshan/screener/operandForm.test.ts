@@ -31,12 +31,13 @@ const VECTORS = JSON.parse(
 const said = (id: string) => VECTORS.cases.find((each) => each.id === id)?.error?.message
 
 describe('the operand sheet offers what the service can read', () => {
-  it('has the five tabs, each with something to pick', () => {
+  it('has the six tabs, each with something to pick', () => {
     expect(OPERAND_TABS.map((tab) => tab.label)).toEqual([
       'Price',
       'Indicators',
       'Volume',
       'OI & options',
+      'Events',
       'Number',
     ])
     for (const tab of OPERAND_TABS) expect(itemsOf(tab.id).length).toBeGreaterThan(0)
@@ -92,6 +93,36 @@ describe('the operand sheet offers what the service can read', () => {
     expect(tabOfPick({ kind: 'num' })).toBe('number')
     expect(readsCandles({ kind: 'field', id: 'prev_close' })).toBe(false)
     expect(readsCandles({ kind: 'ind', id: 'rsi' })).toBe(true)
+  })
+})
+
+// M9.13 (GA8.3): days to a share's next ex-date and to a contract's expiry, on the Events tab.
+describe('the event operands', () => {
+  it('offers days to an ex-date and days to an expiry, started as the service stores them', () => {
+    expect(itemsOf('events').map((item) => item.label)).toEqual([
+      'Days to ex-date',
+      'Days to expiry',
+    ])
+    expect(searchItems('ex-date')[0].key).toBe('event:ex_days')
+    expect(starting({ kind: 'event', id: 'ex_days' }, 15)).toEqual({
+      event: 'ex_days',
+      kind: 'any',
+    })
+    expect(starting({ kind: 'event', id: 'expiry_days' }, 15)).toEqual({ event: 'expiry_days' })
+    const pick = pickOf({ event: 'ex_days', kind: 'dividend' })
+    expect(pick).toEqual({ kind: 'event', id: 'ex_days' })
+    expect(tabOfPick(pick)).toBe('events')
+    expect(readsCandles(pick)).toBe(false)
+  })
+
+  it('says why an event cannot be read where the service says it (SV1, SE60, SE61, SE65)', () => {
+    expect(said('SE60')).toBe(
+      'Days to ex-date is for shares. Pick F&O stocks, a NIFTY list or a watchlist.'
+    )
+    expect(said('SE61')).toBe(
+      'Days to expiry is for futures and options. Pick F&O futures, index futures, option strikes or a watchlist.'
+    )
+    expect(said('SE65')).toMatch(/^Days to ex-date is a count of days, not a line on candles\./)
   })
 })
 

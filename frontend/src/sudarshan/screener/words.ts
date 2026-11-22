@@ -3,6 +3,8 @@
  * [15 min] [EMA 50]` (design 5.2). Plain functions, so a test can call them.
  */
 import {
+  EVENT_BY_ID,
+  EVENT_KINDS,
   FIELD_BY_ID,
   GROUP_TITLES,
   INDICATOR_BY_ID,
@@ -101,6 +103,15 @@ export function operandChips(operand: Operand | undefined): Chips {
     const base = info?.label ?? operand.opt
     const of = operand.underlying && operand.underlying !== 'self' ? ` (${operand.underlying})` : ''
     return { tf: info?.timed ? tfWords(operand.tf) : null, text: `${base}${of}`, at: null }
+  }
+  if ('event' in operand) {
+    // M9.13: 'Days to ex-date (Dividend)', 'Days to ex-date', 'Days to expiry'.
+    const base = EVENT_BY_ID.get(operand.event)?.label ?? operand.event
+    const kind = operand.event === 'ex_days' && operand.kind && operand.kind !== 'any'
+    const of = kind
+      ? ` (${EVENT_KINDS.find((k) => k.id === operand.kind)?.label ?? operand.kind})`
+      : ''
+    return { tf: null, text: `${base}${of}`, at: null }
   }
   const sign = { add: '+', sub: '-', mul: '×', div: '÷' }[operand.math]
   const [a, b] = operand.args.map((arg) => inline(arg))

@@ -56,6 +56,17 @@ def test_operators_and_options_match():
     assert _ids("OPTIONS: OptionInfo[]") == list(cat.OPT)
 
 
+def test_events_and_the_kinds_of_corporate_action_match():
+    """M9.13 (GA8.3): the builder offers each event the checker takes, with its own label."""
+    assert _ids("EVENTS: EventInfo[]") == list(cat.EVENTS)
+    chunks = _chunks("EVENTS: EventInfo[]")
+    for key, spec in cat.EVENTS.items():
+        assert f"label: '{spec.words}'" in chunks[key], key
+        assert f"kinds: {'true' if spec.kinds else 'false'}" in chunks[key], key
+    kinds = re.search(r"EVENT_KINDS: [^=]*= \[(.*?)\n\]", TS, re.S).group(1)
+    assert re.findall(r"id: '([^']+)'", kinds) == list(cat.EVENT_KINDS)
+
+
 def test_states_lists_and_limits_match():
     patterns = re.search(r"PATTERNS = \[([^\]]*)\]", TS, re.S).group(1)
     assert re.findall(r"'([^']+)'", patterns) == list(cat.PATTERNS)
