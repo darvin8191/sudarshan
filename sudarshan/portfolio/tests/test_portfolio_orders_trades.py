@@ -328,12 +328,15 @@ def test_the_probe_without_a_token_says_so_and_asks_nothing(fake, tmp_path, capl
 
 
 class ProbeService:
-    """What the probe's job reads of the service: its state folder, its clock and the reader."""
+    """What the probe's job and the token check read of the service: its state folder, its
+    clock, the reader (told to report its holdings and positions answers, as the service does)
+    and the check's last result."""
 
     def __init__(self, folder, reader, clock):
         self.settings = type("Settings", (), {"state_dir": folder})()
         self.clock, self._reader = clock, reader
-        self.token_check, self.token_missed_at = None, None
+        self.token_check = None
+        reader.on_verdict = lambda state, at, sig: probe.heard(self, state, at, sig)
 
     def ensure_upstox(self):
         return self._reader
@@ -362,6 +365,8 @@ def test_the_probe_asks_upstox_at_most_once_a_day(fake, token_file, tmp_path, ca
     )
     assert caplog.text.count("Analytics Token probe:") == 2
     assert (tmp_path / probe.DAY_FILE).read_text().strip() == "20261027"
+    # v0.16.0 review H1: what the probe found is a line in the log, never the token check.
+    assert service.token_check is None and not (tmp_path / probe.RESULT_FILE).exists()
 
 
 def test_a_probe_upstox_did_not_answer_is_tried_again_at_the_next_start(fake, tmp_path):
@@ -381,6 +386,9 @@ def test_a_probe_upstox_did_not_answer_is_tried_again_at_the_next_start(fake, tm
     assert set(first.values()) == {"no token"}
     assert second == {"orders": 200, "trades": 200, "order_history": 200}
     assert fake.count("day_orders") == 1
+    assert probe.view(service.token_check, tmp_path / "missing-token") == {
+        "state": "unknown", "at": None,
+    }  # fmt: skip
 
 
 def test_a_refused_token_in_the_probe_does_not_pause_the_tabs_reads(fake, token_file):
@@ -397,9 +405,21 @@ def test_a_refused_token_in_the_probe_does_not_pause_the_tabs_reads(fake, token_
     assert run(go())["positions"]["state"] == "ok"
 
 
-# ---- GA5.1 (M13.12, M19.5): what the daily check found, for /health ----------------------------
+# ---- the token check (M13.12, M19.5; v0.16.0 review H1) ------------------------------------------
 def _checked(service, token_file):
-    return probe.view(service.token_check, service.token_missed_at, token_file)
+    return probe.view(service.token_check, token_file)
+
+
+def _reads(reader, *batches):
+    """Each batch of parts read in turn, every one asking Upstox (max age 0)."""
+
+    async def go():
+        try:
+            return [await reader.book(list(parts), 0) for parts in batches]
+        finally:
+            await reader.aclose()
+
+    return run(go())
 
 
 def _start(service, reader, times=1):
@@ -412,91 +432,183 @@ def _start(service, reader, times=1):
     return run(go())
 
 
-def test_the_check_is_published_as_a_state_and_a_time_and_never_the_token(
-    fake, token_file, tmp_path
+def test_order_endpoints_that_refuse_the_token_never_make_the_check_failed(
+    fake, token_file, tmp_path, caplog
 ):
+    """The review's case: Upstox answers 401 at all three order endpoints (say this token may
+    not read them) while the holdings read as ever. The probe logs its three numbers and
+    decides nothing; the check is the holdings read's: accepted. No alarm, no failing line."""
+    for name in ("day_orders", "day_trades", "order_history"):
+        fake.status[name] = 401
     reader, clock = make(fake, token_file)
-    service = ProbeService(tmp_path / "state", reader, clock)
-    (tmp_path / "state").mkdir()
-    _start(service, reader)
+    service = ProbeService(tmp_path, reader, clock)
+
+    async def go():
+        try:
+            found = await probe.at_start(service, 0)
+            return found, await reader.book(["holdings"], 0)
+        finally:
+            await reader.aclose()
+
+    with caplog.at_level(logging.INFO, logger="sudarshan.portfolio.probe"):
+        found, book = run(go())
+    assert found == {"orders": 401, "trades": 401, "order_history": 401}
+    assert "retrieve-all 401, get-trades-for-day 401, order history 401" in caplog.text
+    assert book["holdings"]["state"] == "ok"
     assert _checked(service, token_file) == {"state": "ok", "at": ist(11) // 1000}
-    kept = (tmp_path / "state" / probe.RESULT_FILE).read_text()
-    assert TOKEN not in kept and "200" not in kept
-    assert set(probe.read_result(tmp_path / "state")) == {"at", "state", "sig"}
 
 
-def test_a_restart_the_same_day_shows_the_morning_result_and_asks_upstox_nothing(
-    fake, token_file, tmp_path
-):
+@pytest.mark.parametrize("part", up.JUDGES)
+def test_a_holdings_or_positions_read_upstox_refused_is_failed(fake, token_file, tmp_path, part):
+    assert up.JUDGES == ("holdings", "positions")
+    fake.status[part] = 401
     reader, clock = make(fake, token_file)
-    _start(ProbeService(tmp_path, reader, clock), reader)
-    asked = fake.count()
-    again_reader, later = make(fake, token_file, at=ist(15, 30))
-    again = ProbeService(tmp_path, again_reader, later)
-    assert _start(again, again_reader) == [None]
-    assert fake.count() == asked  # GA5.1: no call is added for publishing
-    assert _checked(again, token_file) == {"state": "ok", "at": ist(11) // 1000}
+    service = ProbeService(tmp_path, reader, clock)
+    (book,) = _reads(reader, [part])
+    assert book[part]["note"] == up.WORDS["token_refused"]
+    assert _checked(service, token_file) == {"state": "failed", "at": ist(11) // 1000}
 
 
 @pytest.mark.parametrize(
-    ("statuses", "state"),
-    [
-        ((401, 401, 401), "failed"),
-        ((403, 403, 403), "ok"),  # reads the token may not make: the token itself was taken
-        ((401, 200, 200), "ok"),  # one endpoint closed to it, the others answered it
-        ((200, 500, 400), "ok"),
-    ],
+    ("part", "path"),
+    [("mtf", "mtf"), ("funds", "funds"), ("orders", "day_orders"), ("trades", "day_trades")],
 )
-def test_only_a_token_upstox_refused_everywhere_is_failed(
-    fake, token_file, tmp_path, statuses, state
-):
-    for name, status in zip(("day_orders", "day_trades", "order_history"), statuses, strict=True):
-        fake.status[name] = status
+def test_no_other_read_decides_the_check(fake, token_file, tmp_path, part, path):
+    fake.status[path] = 401
     reader, clock = make(fake, token_file)
     service = ProbeService(tmp_path, reader, clock)
-    _start(service, reader)
-    assert _checked(service, token_file)["state"] == state
-
-
-def test_a_check_that_got_no_answer_keeps_the_last_result_and_says_it_was_missed(
-    fake, token_file, tmp_path
-):
-    reader, clock = make(fake, token_file)
-    _start(ProbeService(tmp_path, reader, clock), reader)
-    # The next day's start finds no token file: nothing is asked and nothing is recorded.
-    lost = tmp_path / "missing"
-    next_reader, next_clock = make(fake, lost, at=ist(9, 0, day=27))
-    service = ProbeService(tmp_path, next_reader, next_clock)
-    _start(service, next_reader)
-    shown = probe.view(service.token_check, service.token_missed_at, token_file)
-    assert shown == {"state": "ok", "at": ist(11) // 1000, "missed_at": ist(9, 0, day=27) // 1000}
-    assert (tmp_path / probe.DAY_FILE).read_text().strip() == "20261026"
-
-
-def test_with_no_check_ever_answered_the_state_is_unknown(fake, tmp_path):
-    reader, clock = make(fake, tmp_path / "missing")
-    service = ProbeService(tmp_path, reader, clock)
-    _start(service, reader)
-    assert _checked(service, tmp_path / "missing") == {
-        "state": "unknown", "at": None, "missed_at": ist(11) // 1000,
-    }  # fmt: skip
+    (book,) = _reads(reader, [part])
+    assert book[part]["state"] == "unavailable"
+    assert service.token_check is None and _checked(service, token_file)["state"] == "unknown"
     assert not (tmp_path / probe.RESULT_FILE).exists()
 
 
-def test_a_token_file_changed_after_the_check_is_not_the_token_that_was_checked(
+def test_a_pause_another_read_set_never_keeps_holdings_and_positions_from_asking(
+    fake, token_file, tmp_path
+):
+    """The day's trades refused (the journal's 22:00 read, say): the other parts pause as
+    before, but holdings and positions still ask, so the Upstox tab keeps working and the check
+    hears Upstox's own answer."""
+    fake.status["day_trades"] = 401
+    reader, clock = make(fake, token_file)
+    service = ProbeService(tmp_path, reader, clock)
+    trades, tab, orders = _reads(reader, ["trades"], ["holdings", "positions"], ["orders"])
+    assert trades["trades"]["note"] == up.WORDS["token_refused"]
+    assert tab["holdings"]["state"] == tab["positions"]["state"] == "ok"
+    assert orders["orders"]["note"] == up.WORDS["token_refused"]
+    assert fake.count("day_orders") == 0  # still paused
+    assert _checked(service, token_file) == {"state": "ok", "at": ist(11) // 1000}
+
+
+def test_a_dead_token_another_read_saw_first_is_failed_at_the_next_holdings_read(
+    fake, token_file, tmp_path
+):
+    for path in ("day_trades", "holdings", "positions"):
+        fake.status[path] = 401
+    reader, clock = make(fake, token_file)
+    service = ProbeService(tmp_path, reader, clock)
+
+    async def go():
+        try:
+            await reader.book(["trades"], 0)
+            assert service.token_check is None  # the trades refusal decides nothing
+            await reader.book(["holdings"], 0)
+            asked = fake.count()
+            clock.advance(60)
+            return asked, await reader.book(["holdings", "positions"], 0)
+        finally:
+            await reader.aclose()
+
+    asked, again = run(go())
+    assert asked == fake.count() == 2  # once refused itself, holdings and positions pause too
+    assert again["positions"]["note"] == up.WORDS["token_refused"]
+    assert _checked(service, token_file) == {"state": "failed", "at": ist(11) // 1000}
+
+
+def test_the_check_asks_upstox_nothing_of_its_own(fake, token_file, tmp_path):
+    """GA5.1's rule holds: no call is made for the check. The tab's four parts cost four calls,
+    and a restart the same day shows the kept result and asks nothing more."""
+    reader, clock = make(fake, token_file)
+    ProbeService(tmp_path, reader, clock)
+    _reads(reader, kinds.UPSTOX_PAGE_PARTS)
+    assert fake.count() == 4
+    probe.note_probed(tmp_path, 20261026)  # today's probe has run
+    again_reader, later = make(fake, token_file, at=ist(15, 30))
+    again = ProbeService(tmp_path, again_reader, later)
+    assert _start(again, again_reader) == [None]
+    assert fake.count() == 4
+    assert _checked(again, token_file) == {"state": "ok", "at": ist(11) // 1000}
+
+
+def test_the_check_is_kept_as_a_state_and_a_time_and_never_the_token(fake, token_file, tmp_path):
+    reader, clock = make(fake, token_file)
+    ProbeService(tmp_path, reader, clock)
+    _reads(reader, ["holdings"])
+    path = tmp_path / probe.RESULT_FILE
+    assert TOKEN not in path.read_text() and "200" not in path.read_text()
+    assert set(probe.read_result(tmp_path)) == {"at", "state", "sig"}
+    assert path.stat().st_mode & 0o777 == 0o600
+
+
+def test_the_result_is_written_when_it_says_something_new_and_once_a_day(
+    fake, token_file, tmp_path
+):
+    reader, clock = make(fake, token_file)
+    service = ProbeService(tmp_path, reader, clock)
+
+    async def go():
+        seen = []
+        try:
+            for advance, part in ((0, "holdings"), (600, "holdings"), (86_400, "positions")):
+                clock.advance(advance)
+                await reader.book([part], 0)
+                seen.append((probe.read_result(tmp_path)["at"], service.token_check["at"]))
+            fake.status["holdings"] = 401
+            clock.advance(60)
+            await reader.book(["holdings"], 0)
+            seen.append((probe.read_result(tmp_path)["at"], service.token_check["at"]))
+            return seen, probe.read_result(tmp_path)["state"]
+        finally:
+            await reader.aclose()
+
+    seen, state = run(go())
+    first, later, next_day, refused = (ist(11), ist(11, 10), ist(11, 10, day=27),
+                                       ist(11, 11, day=27))  # fmt: skip
+    assert seen == [
+        (first // 1000, first // 1000),
+        (first // 1000, later // 1000),  # shown at once, the file left as it was that day
+        (next_day // 1000, next_day // 1000),
+        (refused // 1000, refused // 1000),
+    ]
+    assert state == "failed"
+
+
+def test_a_token_file_changed_after_the_read_is_not_the_token_that_was_judged(
     fake, token_file, tmp_path
 ):
     """A refused token the owner then replaces must not stay "failed", and a new token is not
-    "ok" on the old one's word: unknown until the next check."""
-    fake.status.update(day_orders=401, day_trades=401, order_history=401)
+    "ok" on the old one's word: unknown until the next holdings or positions read, which asks."""
+    fake.status["holdings"] = 401
     reader, clock = make(fake, token_file)
     service = ProbeService(tmp_path, reader, clock)
-    _start(service, reader)
-    assert _checked(service, token_file)["state"] == "failed"
-    token_file.write_text(TOKEN + "-renewed\n")
-    assert _checked(service, token_file) == {
-        "state": "unknown", "at": ist(11) // 1000, "changed": True,
-    }  # fmt: skip
+
+    async def go():
+        try:
+            await reader.book(["holdings"], 0)
+            failed = _checked(service, token_file)
+            token_file.write_text(TOKEN + "-renewed\n")
+            changed = _checked(service, token_file)
+            fake.status["holdings"] = 200
+            clock.advance(60)
+            await reader.book(["holdings"], 0)
+            return failed, changed, _checked(service, token_file)
+        finally:
+            await reader.aclose()
+
+    failed, changed, renewed = run(go())
+    assert failed == {"state": "failed", "at": ist(11) // 1000}
+    assert changed == {"state": "unknown", "at": ist(11) // 1000, "changed": True}
+    assert renewed == {"state": "ok", "at": ist(11, 1) // 1000}
     token_file.unlink()
     assert _checked(service, token_file)["state"] == "unknown"
 
@@ -511,17 +623,29 @@ def test_a_result_file_cut_off_or_misshapen_is_no_result(tmp_path, kept):
     assert probe.read_result(tmp_path) is None
 
 
-def test_the_service_health_carries_the_check(tmp_path, token_file):
+def test_the_service_health_carries_the_check_its_reader_heard(tmp_path, token_file, fake):
+    from types import SimpleNamespace
+
     from sudarshan.portfolio import config
     from sudarshan.portfolio.service import Service
 
-    settings = config.Settings(enabled=False, state_dir=tmp_path, token_file=token_file)
+    settings = config.Settings(
+        enabled=False, state_dir=tmp_path, token_file=token_file, upstox_url=fake.url
+    )
     service = Service(settings, None, jobs={})
-    signature = token_file.stat()
-    service.token_check = {
-        "at": 1_793_000_000, "state": "failed",
-        "sig": [signature.st_mtime_ns, signature.st_size],
-    }  # fmt: skip
-    shown = service.health()["portfolio_state"]["analytics_token"]
-    assert shown == {"state": "failed", "at": 1_793_000_000}
+    service.clock = lambda: ist(11)
+    service.prices = SimpleNamespace()  # no price book: the rows are matched to nothing
+    shown = lambda: service.health()["portfolio_state"]["analytics_token"]  # noqa: E731
+    assert shown() == {"state": "unknown", "at": None}
+    reader = service.ensure_upstox()
+
+    async def go():
+        try:
+            await reader.book(["holdings"], 0)
+        finally:
+            await reader.aclose()
+
+    run(go())
+    assert shown() == {"state": "ok", "at": ist(11) // 1000}
+    assert probe.read_result(tmp_path)["state"] == "ok"
     assert TOKEN not in str(service.health())

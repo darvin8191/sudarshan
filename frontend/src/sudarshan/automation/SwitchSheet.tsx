@@ -9,7 +9,7 @@ import { Label } from '@/components/ui/label'
 import { PhraseInput } from '@/sudarshan/risk/PhraseInput'
 import { PHRASE_HINT } from '@/sudarshan/risk/phrase'
 import { BottomSheet } from '@/sudarshan/watchlist/BottomSheet'
-import { type Answer, automationApi, LIST_KEY } from './api'
+import { type Answer, automationApi, keepHeldBook, LIST_KEY } from './api'
 import { ModeChip, StateChip } from './StrategyCard'
 import type { ListAnswer, OneAnswer, Strategy } from './types'
 import { contractName } from './words'
@@ -57,9 +57,15 @@ export function SwitchSheet({
       setPhrase('')
       return setRefusal(answer.message)
     }
+    // The answer carries no book row; the card keeps its own until the list is read again.
     queryClient.setQueryData<ListAnswer>(LIST_KEY, (old) =>
       old
-        ? { ...old, strategies: old.strategies.map((s) => (s.id === id ? answer.strategy : s)) }
+        ? {
+            ...old,
+            strategies: old.strategies.map((s) =>
+              s.id === id ? keepHeldBook(s, answer.strategy) : s
+            ),
+          }
         : old
     )
     onClose()

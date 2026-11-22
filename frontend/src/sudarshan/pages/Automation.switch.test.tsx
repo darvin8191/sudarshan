@@ -85,6 +85,34 @@ describe('the switch of a strategy', () => {
     expect(screen.getByTestId('auto-state')).toHaveTextContent('Stopped for new entries')
   })
 
+  it("keeps the card's P&L through a change, whose answer reads no book", async () => {
+    // v0.16.0 review M1: the server's answer to a change carries no book row (it never waits
+    // on Upstox for one); the card keeps its row until the list is read again.
+    const book = {
+      quantity: 65,
+      average_price: 25000,
+      ltp: 25010,
+      pnl: 650,
+      today_realized_pnl: 0,
+      priced_ms: Date.UTC(2026, 10, 16, 4, 45, 2),
+    }
+    const holding = { held_exchange: 'NFO', held_symbol: 'NIFTY24NOV26FUT', held_side: 'long' }
+    api.list.mockResolvedValue(listOf([strategy({ ...holding, held_book: book })]))
+    api.setState.mockResolvedValue(
+      done({ ...holding, state: 'exits_only', version: 4, held_book: null })
+    )
+    renderBook('/automation', <Automation />)
+    await settle()
+    expect(screen.getByTestId('auto-pnl')).toHaveTextContent(/^Long 65/)
+    await tap('Stop')
+    api.list.mockReturnValue(new Promise(() => {})) // the list read after the change: not back yet
+    await tap('Stop new entries')
+    expect(api.setState).toHaveBeenCalledWith(1, 3, 'exits_only')
+    expect(screen.getByTestId('auto-state')).toHaveTextContent('Stopped for new entries')
+    expect(screen.getByTestId('auto-pnl')).toHaveTextContent(/^Long 65/)
+    expect(screen.queryByText(/could not be read/)).toBeNull()
+  })
+
   it('asks again before it stops everything, and names the position nothing will close', async () => {
     api.list.mockResolvedValue(
       listOf([strategy({ held_symbol: 'NIFTY24NOV26FUT', held_side: 'long' })])

@@ -376,12 +376,17 @@ two exists in this release. Each purpose has its own principal and its own list 
   bucket (`day_trades`) apart from the trade history's (`trades`).
 * **Start-up probe** (`probe.py`): one line in the journal with the HTTP status the Analytics Token
   got from retrieve-all, get-trades-for-day and order history. Read it with
-  `journalctl -u sudarshan-portfolio | grep "Analytics Token probe"`. What it found is published
-  in `/health` as `portfolio_state.analytics_token`: `state` (`ok`, `failed` when Upstox refused
-  the token at every read that answered, `unknown`), `at` (seconds, the last check Upstox
-  answered), `changed` when the token file is not the one that was checked, and `missed_at` when
-  a later check got no answer. Never the token, and no call is made for it: the server's watch
-  and the System page read this field.
+  `journalctl -u sudarshan-portfolio | grep "Analytics Token probe"`. It is that line only: it
+  never decides the token check below.
+* **The token check** (`probe.py`, v0.16.0 review H1) is published in `/health` as
+  `portfolio_state.analytics_token`: `state` (`ok`, `failed`, `unknown`), `at` (seconds) and
+  `changed` when the token file is not the one that was read with. It is judged only from the
+  reads the token is known to make, holdings and positions (`upstox.JUDGES`): `failed` when
+  Upstox refused one of them (401), `ok` when it answered one. The Upstox tab, the family view and
+  the closing record after each trading day read them anyway, so no call is made for it. A 401 on
+  any other read (the day's orders or trades, a report) pauses the other parts as before but
+  never holdings and positions, until one of those is refused itself. Kept in `token-check` in
+  the state folder. Never the token: the server's watch and the System page read this field.
 * **Schema step 4** adds `tab_share` and `member_privacy`.
 * **Set from the owner's Family page** (v0.12.0). The four sharing ops are routes of the owner's
   bridge (`/sudarshan/portfolio/api/family/shares` and `/family/privacy`), sealed under the owner's

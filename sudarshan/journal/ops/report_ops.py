@@ -6,7 +6,8 @@
 * ``report_file`` answers ``{file_name, file_mime, file_sha256, file_b64}``: all empty until the
   renderer keeps a file (the bridge then says the report has no file to download). The week's
   file is its PNG, the month's and the year's a PDF; with ``format = "csv"`` a monthly statement
-  answers its CSV in the same four fields (JB9).
+  answers its CSV in the same four fields (JB9). A file over ``kinds.FILE_MAX_BYTES`` is refused
+  (``refused``) with words saying where it is, a records pack with its own (v0.16.0 review L1).
 * The records pack (kind ``records``) is a zip; it is built with ``report_build`` like the tax
   pack, for a financial year, and is never announced to the report desk.
 * A report that is not there is a 404 with a sentence (a bare 404 reads as an op not ready).
@@ -45,6 +46,10 @@ NO_CLOSE = (
 )
 DELIVERY_STATUSES = ("sent", "text_only", "not_sent")
 REASON_TEXT = 300
+TOO_LARGE = (
+    "This report's file is larger than the Reports page can download. It is in the server's "
+    "backups; have it copied from the server."
+)
 
 
 def report_out(row: dict[str, Any]) -> dict[str, Any]:
@@ -59,6 +64,16 @@ def report_out(row: dict[str, Any]) -> dict[str, Any]:
 
 def _gone() -> ApiError:
     return ApiError(404, "not_found", GONE)
+
+
+def _fits(row: dict[str, Any], data: bytes) -> None:
+    """Refuse a file the API cannot answer whole, before it is read out: a retry never helps,
+    so the words say where it is (the records pack's own sentence for a pack)."""
+    if len(data) > kinds.FILE_MAX_BYTES:
+        from ..jobs.fypack import RECORDS
+        from ..jobs.fypack import TOO_LARGE as PACK_TOO_LARGE
+
+        raise ApiError(422, "refused", PACK_TOO_LARGE if row.get("kind") == RECORDS else TOO_LARGE)
 
 
 @op("reports_list")
@@ -103,9 +118,12 @@ async def report_file(ctx, args):
         if kept is None:
             return {"file_name": None, "file_mime": None, "file_sha256": None, "file_b64": None}
         name, mime, sha, data = kept
+        _fits(row, data)
         return {"file_name": name, "file_mime": mime, "file_sha256": sha,
                 "file_b64": base64.b64encode(data).decode("ascii")}  # fmt: skip
     has = blob is not None and row.get("file_name")
+    if has:
+        _fits(row, blob)
     return {
         "file_name": row.get("file_name") if has else None,
         "file_mime": row.get("file_mime") if has else None,

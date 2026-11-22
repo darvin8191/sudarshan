@@ -11,6 +11,7 @@ import {
   type Mode,
   type OneAnswer,
   type OthersAnswer,
+  type Strategy,
   type StrategyForm,
   type StrategyState,
 } from './types'
@@ -56,6 +57,21 @@ async function read<T>(route: Route, params?: object): Promise<T> {
   const answer = await ask<T>(route, params)
   if (!answer.ok) throw new Error(answer.message)
   return answer
+}
+
+/**
+ * A change's answer as the card shows it until the list is read again (v0.16.0 review M1): the
+ * server reads no book for a change, so its answer's row is always null. The card keeps the row
+ * it had while the strategy holds the same contract, in the same mode and product.
+ */
+export function keepHeldBook(before: Strategy, after: Strategy): Strategy {
+  const same =
+    after.held_book === null &&
+    before.mode === after.mode &&
+    before.product === after.product &&
+    before.held_exchange === after.held_exchange &&
+    before.held_symbol === after.held_symbol
+  return same ? { ...after, held_book: before.held_book } : after
 }
 
 export const LIST_KEY = ['sudarshan-automation', 'list'] as const

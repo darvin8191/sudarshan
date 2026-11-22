@@ -14,6 +14,7 @@ import pytest
 from journal_fakes import (
     KEYS,
     PORTFOLIO_KEY,
+    FakeFeed,
     FakePortfolio,
     make_latency_db,
     make_openalgo_db,
@@ -270,10 +271,16 @@ class Rig:
     def __init__(self, tmp_path: Path, files: Path):
         self.portfolio = FakePortfolio()
         url = self.portfolio.start()
+        # The rig's own price feed, answering nothing (v0.16.0 review L4): no test reaches the
+        # feed's real port (127.0.0.1:5580), whatever listens there. A test that wants a feed
+        # sets ``ticks`` and ``down = False``, or points the settings at its own.
+        self.feed = FakeFeed()
+        self.feed.down = True
         settings = Settings(
             enabled=True,
             state_dir=tmp_path / "state",
             portfolio_url=url,
+            feed_url=self.feed.start(),
             openalgo_db=files / "openalgo.db",
             latency_db=files / "latency.db",
             sandbox_db=files / "sandbox.db",
@@ -303,6 +310,7 @@ class Rig:
 
     def stop(self):
         self.portfolio.stop()
+        self.feed.stop()
         self.svc.store.close()
         store.stop()
 

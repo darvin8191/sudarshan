@@ -441,17 +441,26 @@ class Desk:
 
     def _read_positions(self, api_key: str) -> tuple[list[Any], int] | bool:
         """Upstox's positions as OpenAlgo maps them, with when they were read; False when they
-        could not be (kept, so the other strategies of the page do not ask again)."""
+        could not be (kept, so the other strategies of the page do not ask again).
+
+        Cut off after ``exit_guard.EXIT_ORDERS_READ_S`` and never retried, as an exit's order
+        book read is (v0.16.0 review M1): the page's answers wait for this read, the answer to
+        Stop included, and the shared client's own limit is 120 s with retries on a 429."""
         token, broker = self.broker_session(api_key)
         if token is None:
             return False
+        import broker.upstox.api.order_api as upstox
         from services.positionbook_service import get_positionbook
+        from sudarshan.books import exit_guard
 
+        limit = upstox._READ_LIMIT.set(exit_guard.EXIT_ORDERS_READ_S)
         try:
             ok, answer, _status = get_positionbook(auth_token=token, broker=broker)
         except Exception:
             logger.exception("Automation: Upstox's positions could not be read")
             return False
+        finally:
+            upstox._READ_LIMIT.reset(limit)
         if not ok or not isinstance(answer, dict):
             return False
         return list(answer.get("data") or []), int(self.now() * 1000)

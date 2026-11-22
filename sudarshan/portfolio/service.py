@@ -13,8 +13,9 @@ and the sealed local API on 127.0.0.1:5583.
   port is tried again every minute. The service never exits for this and never tries another
   port (X2). Exit status 2 is for a setting or key it cannot use, which a restart would not mend.
 * **/health** is the ops document (the release, the version, the state) plus ``portfolio_state``
-  (R14); no owner data. ``portfolio_state.analytics_token`` is the daily token check's last
-  result (probe.py): a state and a time, never the token.
+  (R14); no owner data. ``portfolio_state.analytics_token`` is the token check's last result
+  (probe.py), judged from the holdings and positions reads alone: a state and a time, never
+  the token.
 """
 
 from __future__ import annotations
@@ -129,10 +130,9 @@ class Service:
         #: The day the settle last ran in this process (a failed one is retried at a restart).
         self.settle_tried: int | None = None
         self._amfi: Any = None
-        #: The daily Analytics Token check (probe.py): the last one Upstox answered, and the
-        #: time of a later one that got no answer. ``/health`` shows a state and a time of them.
+        #: The Analytics Token check (probe.py): what Upstox said to the last holdings or
+        #: positions read it answered. ``/health`` shows a state and a time of it.
         self.token_check: dict[str, Any] | None = None
-        self.token_missed_at: int | None = None
         self._state = "starting"
         self._tasks: dict[str, asyncio.Task] = {}
         self._stop = asyncio.Event()
@@ -187,6 +187,7 @@ class Service:
     def ensure_upstox(self) -> Any:
         """The Upstox reader (upstox.py), built on first use."""
         if self.upstox is None:
+            from .probe import heard
             from .upstox import UpstoxReader, matcher
 
             self.upstox = UpstoxReader(
@@ -195,6 +196,7 @@ class Service:
                 clock=lambda: self.clock(),
                 decorate=matcher(self.ensure_resolver(), self.ensure_prices()),
             )
+            self.upstox.on_verdict = lambda state, at, sig: heard(self, state, at, sig)
         return self.upstox
 
     def ensure_reports(self) -> Any:
@@ -213,7 +215,7 @@ class Service:
 
     def health(self) -> dict[str, Any]:
         """The ops document plus the service's own ``portfolio_state``: states and counts only.
-        ``analytics_token`` is the daily check's last result (probe.py): a state and a time."""
+        ``analytics_token`` is the token check's last result (probe.py): a state and a time."""
         from .probe import view
 
         return {
@@ -229,9 +231,7 @@ class Service:
                     name: ("running" if not t.done() else "ended")
                     for name, t in self._tasks.items()
                 },
-                "analytics_token": view(
-                    self.token_check, self.token_missed_at, self.settings.token_file
-                ),
+                "analytics_token": view(self.token_check, self.settings.token_file),
                 **({"reason": self.off_reason} if self.off_reason else {}),
             },
         }

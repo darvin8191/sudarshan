@@ -159,14 +159,18 @@ def _owned(change):
         return _refusal("That could not be saved. Nothing was changed. Try again.", 500)
 
 
-def _one(strategy, store_, desk, **more):
+def _one(strategy, store_, desk, *, read_book=True, **more):
+    """One strategy's answer. A change's answer (``read_book=False``) reads no book: the page
+    reads the list again after every change, so its answer never waits on Upstox (v0.16.0
+    review M1)."""
     from sudarshan.automation import control, messages
 
     now_ms = int(desk.now() * 1000)
+    book = desk.held_book if read_book else None
     return jsonify(
         {
             "status": "success",
-            "strategy": control.view(strategy, store_, now_ms, book=desk.held_book),
+            "strategy": control.view(strategy, store_, now_ms, book=book),
             "messages": messages.for_strategy(strategy),
             **more,
         }
@@ -220,7 +224,10 @@ def api_update():
         return _refusal(words.CHANGED_ELSEWHERE)
     return _owned(
         lambda: _one(
-            control.update(sid, version, body.get("changes"), desk=desk, store=store_), store_, desk
+            control.update(sid, version, body.get("changes"), desk=desk, store=store_),
+            store_,
+            desk,
+            read_book=False,
         )
     )
 
@@ -243,6 +250,7 @@ def api_state():
             ),
             store_,
             desk,
+            read_book=False,
         )
     )  # fmt: skip
 
@@ -265,6 +273,7 @@ def api_mode():
             ),
             store_,
             desk,
+            read_book=False,
         )
     )  # fmt: skip
 

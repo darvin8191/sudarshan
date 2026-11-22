@@ -7,9 +7,11 @@ positions through OpenAlgo's position book. Nothing here reaches Upstox.
 
 from __future__ import annotations
 
+import time
 from datetime import UTC, datetime
 from types import SimpleNamespace
 
+import httpx
 import pytest
 from automation_world import (
     NOW,
@@ -91,6 +93,33 @@ def test_a_book_that_cannot_be_read_leaves_the_row_out_and_the_rest_of_the_card(
     assert answer.status_code == 200
     (seen,) = answer.get_json()["strategies"]
     assert seen["held_symbol"] == "NIFTY24NOV26FUT" and seen["held_book"] is None
+
+
+def test_the_answer_to_a_change_reads_no_book_and_the_list_after_it_does(client, store, desk):
+    """v0.16.0 review M1: the answers to /update, /state and /mode never wait on a book read
+    (the page reads the list again after each), so a slow Upstox cannot hold the answer to
+    Stop. /one and /list still read it."""
+    made = owner(client, "post", f"{API}/create", FORM).get_json()
+    owner(client, "post", f"{API}/state", {"id": 1, "version": 1, "state": "active"})
+    intake.handle(made["token"], indicator_alert("long", NOW - 1), TV, desk, store)
+    desk.held_book_reads.clear()
+    version = store.strategy(1).version
+    answers = [
+        owner(client, "post", f"{API}/state",
+              {"id": 1, "version": version, "state": "exits_only"}),
+        owner(client, "put", f"{API}/update",
+              {"id": 1, "version": version + 1, "changes": {"max_alerts_day": 30}}),
+        owner(client, "post", f"{API}/mode",
+              {"id": 1, "version": version + 2, "mode": "sandbox"}),
+    ]  # fmt: skip
+    for answer in answers:
+        assert answer.status_code == 200, answer.get_json()
+        seen = answer.get_json()["strategy"]
+        assert seen["held_symbol"] == "NIFTY24NOV26FUT" and seen["held_book"] is None
+    assert desk.held_book_reads == []
+    assert owner(client, "get", f"{API}/one?id=1").get_json()["strategy"]["held_book"]
+    listed = owner(client, "get", f"{API}/list").get_json()["strategies"]
+    assert listed[0]["held_book"]["quantity"] == 65 and len(desk.held_book_reads) == 2
 
 
 def test_every_view_names_the_field_and_asks_no_book_without_a_reader(store, desk):
@@ -240,6 +269,75 @@ def test_the_desk_reads_upstoxs_positions_with_the_owners_session(monkeypatch):
     assert Desk().held_book("live", "NFO", "NIFTY24NOV26FUT", "MIS") is None
     monkeypatch.setattr(Desk, "api_key", lambda self: None)
     assert Desk().held_book("sandbox", "NFO", "NIFTY24NOV26FUT", "MIS") is None
+
+
+class SlowUpstox:
+    """Upstox's positions read, slower than any page should wait: it answers after ``delay``
+    seconds, or raises the timeout the call asked for when that comes first. Records each call."""
+
+    def __init__(self, delay: float = 5.0, status: int = 200):
+        self.delay, self.status, self.calls = delay, status, []
+
+    def get(self, url, headers=None, timeout=None, extensions=None, **kwargs):
+        self.calls.append({"timeout": timeout, "extensions": dict(extensions or {})})
+        waited = self.delay if timeout is None else min(self.delay, timeout)
+        time.sleep(waited)
+        if waited < self.delay:
+            raise httpx.ReadTimeout("slow")
+        body = (
+            {"status": "success", "data": []}
+            if self.status == 200
+            else {
+                "status": "error",
+                "errors": [{"errorCode": "UDAPI10005", "message": "Slow down"}],
+            }
+        )
+        return httpx.Response(self.status, json=body, request=httpx.Request("GET", url))
+
+
+@pytest.fixture
+def slow_upstox(monkeypatch):
+    """The desk's Live read through OpenAlgo's real position book and Upstox module, with only
+    the network replaced by a slow fake (and the limit shortened, so the test takes a moment)."""
+    from broker.upstox.api import order_api
+    from database import settings_db
+    from sudarshan.books import exit_guard
+
+    assert exit_guard.EXIT_ORDERS_READ_S == 4.0  # what the page waits at most, in production
+    monkeypatch.setattr(exit_guard, "EXIT_ORDERS_READ_S", 0.2)
+    monkeypatch.setattr(settings_db, "get_analyze_mode", lambda: False)  # no settings table here
+    monkeypatch.setattr(order_api, "apply_rate_limit", lambda *a, **k: None)
+    monkeypatch.setenv("BROKER_API_KEY", "key")
+    monkeypatch.setattr(Desk, "api_key", lambda self: "owner-key")
+    monkeypatch.setattr(Desk, "broker_session", lambda self, key: ("session", "upstox"))
+    made = SlowUpstox()
+    monkeypatch.setattr(order_api, "get_httpx_client", lambda: made)
+    return made
+
+
+def test_a_slow_upstox_is_cut_off_once_and_the_card_says_the_book_was_not_read(slow_upstox):
+    """v0.16.0 review M1: the shared client would wait 120 s and retry; the card's read is cut
+    off at the exit reads' limit and asked once, and the card says the book was not read."""
+    from broker.upstox.api import order_api
+
+    started = time.monotonic()
+    assert Desk().held_book("live", "NFO", "NIFTY24NOV26FUT", "MIS") is None
+    assert time.monotonic() - started < 2.0
+    (call,) = slow_upstox.calls
+    assert call["timeout"] == 0.2 and call["extensions"] == {order_api.NO_READ_RETRY: True}
+    assert order_api._READ_LIMIT.get() is None  # the limit ends with the read
+
+
+def test_a_rate_limited_read_is_answered_as_it_is_never_waited_out(slow_upstox):
+    slow_upstox.delay, slow_upstox.status = 0.0, 429
+    assert Desk().held_book("live", "NFO", "NIFTY24NOV26FUT", "MIS") is None
+    assert len(slow_upstox.calls) == 1  # no retry after Upstox's 429
+
+
+def test_a_quick_upstox_answers_the_card_under_the_same_limit(slow_upstox):
+    slow_upstox.delay = 0.0
+    got = Desk().held_book("live", "NFO", "NIFTY24NOV26FUT", "MIS")
+    assert got is not None and got["quantity"] == 0  # read, and nothing held in this book
 
 
 def test_a_desk_read_that_fails_is_none_and_logged_never_raised(monkeypatch):
