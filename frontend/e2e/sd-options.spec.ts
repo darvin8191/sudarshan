@@ -32,6 +32,7 @@ import {
   test,
   type WebSocketRoute,
 } from '@playwright/test'
+import { ticketCuts } from './sd-ticket'
 
 test.use({ viewport: { width: 360, height: 800 }, deviceScaleFactor: 3, hasTouch: true, isMobile: true })
 
@@ -466,6 +467,7 @@ test.describe('the options screen at 360 x 800', () => {
     const ticket = page.getByRole('dialog').filter({ hasText: 'NIFTY17NOV2625900CE' })
     await expect(ticket).toBeVisible()
     await page.screenshot({ path: info.outputPath('ticket.png') })
+    expect(await ticketCuts(ticket), 'parts of the ticket that are cut').toEqual([])
     await page.goBack()
     await expect(page.getByRole('dialog')).toHaveCount(0)
     await expect(page.locator('[data-strike]')).toHaveCount(21)
@@ -706,3 +708,43 @@ test.describe('the options screen at 360 x 800', () => {
     expect(seen.subscribed.size, 'still the 84 instruments').toBe(84)
   })
 })
+
+// v0.16.0 phone review H2: with Larger text the option ticket read "Total qty: 6" for 65 and its
+// Shares button was cut by the ticket's edge. Opened from the strike sheet; nothing is sent.
+for (const { viewport, larger } of [
+  { viewport: { width: 360, height: 800 }, larger: true },
+  { viewport: { width: 320, height: 640 }, larger: false },
+  { viewport: { width: 320, height: 640 }, larger: true },
+]) {
+  const size = `${viewport.width} x ${viewport.height}${larger ? ', Larger text' : ''}`
+  test.describe(`the option ticket at ${size}`, () => {
+    test.use({ viewport })
+
+    test('the lot, the total and both quantity units whole', async ({ page }, info) => {
+      if (larger)
+        await page.addInitScript(() => {
+          localStorage.setItem('sudarshan-text', 'large')
+          localStorage.setItem('sudarshan-density', 'compact')
+        })
+      const { seen } = await serve(page, OPEN)
+      await page.locator('[data-strike="25900"] [data-leg="CE"]').tap()
+      const sheet = page.getByRole('dialog', { name: 'NIFTY 25,900' })
+      await settled(page, sheet)
+      await sheet.getByRole('button', { name: 'Buy CE' }).tap()
+      const ticket = page.getByRole('dialog').filter({ hasText: 'NIFTY17NOV2625900CE' })
+      await settled(page, ticket)
+      await expect(ticket.getByText('Total qty: 65', { exact: true })).toBeVisible()
+      await expect(ticket.getByTestId('ticket-summary')).toHaveText(/^BUY 65 \(1 lot\) NIFTY17NOV2625900CE · /)
+      for (const unit of ['Lots', 'Shares']) {
+        const box = (await ticket.getByRole('button', { name: unit, exact: true }).boundingBox()) as DOMRect
+        expect(box.width, `${unit} is a 48 dp target`).toBeGreaterThanOrEqual(47.5)
+        expect(box.height, `${unit} is a 48 dp target`).toBeGreaterThanOrEqual(47.5)
+      }
+      await page.screenshot({ path: info.outputPath('ticket.png') })
+      expect(await ticketCuts(ticket), 'parts of the ticket that are cut').toEqual([])
+      const checks = await pageChecks(page, '[role="dialog"]')
+      expect(checks.sideways, 'no sideways scroll').toBe(false)
+      expect(seen.orders, 'no order was sent').toBe(0)
+    })
+  })
+}

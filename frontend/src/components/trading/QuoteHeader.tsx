@@ -52,12 +52,16 @@ export function QuoteHeader({
     )
   }
 
+  // M20.2 (v0.16.0 phone review H2): with Larger text both rows ran past the ticket's edge (the
+  // ask read "803.8" at 320 px). The price row wraps its change under the price, and bid and ask
+  // take a half each, a size going under its price where the half is too narrow: never cut, and
+  // no separator left hanging at a line's end.
   return (
     <div className="p-3 bg-muted/30 rounded-lg space-y-2">
       {/* Exchange Badge and LTP Row */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
         <Badge className={cn('text-[10px] px-1.5 py-0', EXCHANGE_BADGE)}>{exchange}</Badge>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-x-2">
           <span className="text-xl font-bold">{ltp !== undefined ? ltp.toFixed(2) : '-'}</span>
           {displayChange !== undefined && (
             <span
@@ -81,8 +85,8 @@ export function QuoteHeader({
       </div>
 
       {/* Bid/Ask Row */}
-      <div className="flex items-center justify-between text-sm border-t border-border/50 pt-2">
-        <div className="flex items-center gap-2">
+      <div className="grid grid-cols-2 gap-x-3 text-sm border-t border-border/50 pt-2">
+        <div className="flex flex-wrap items-center gap-x-2">
           <span className="text-muted-foreground">Bid:</span>
           <span className="text-[color:var(--buy-solid)] font-medium font-mono">
             {bidPrice !== undefined && bidPrice > 0 ? bidPrice.toFixed(2) : '-'}
@@ -91,8 +95,7 @@ export function QuoteHeader({
             <span className="text-muted-foreground text-xs">x{bidSize.toLocaleString()}</span>
           )}
         </div>
-        <div className="text-muted-foreground">|</div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-x-2">
           <span className="text-muted-foreground">Ask:</span>
           <span className="text-[color:var(--sell-solid)] font-medium font-mono">
             {askPrice !== undefined && askPrice > 0 ? askPrice.toFixed(2) : '-'}
