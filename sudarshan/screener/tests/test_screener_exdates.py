@@ -217,7 +217,7 @@ def test_the_service_reads_the_portfolio_on_this_server_only(tmp_path):
     settings = config.Settings.from_env({"SUDARSHAN_SCREENER": "on"})
     assert settings.portfolio_url == URL
     with pytest.raises(config.ConfigError):
-        config.Settings.from_env({"SUDARSHAN_SCREENER_PORTFOLIO_URL": "http://10.0.0.5:5583"})
+        config.Settings.from_env({"SUDARSHAN_SCREENER_PORTFOLIO_URL": "http://192.0.2.1:5583"})
     svc = Service(settings, KEY)
     svc.pepper = os.environ["API_KEY_PEPPER"]
     svc._link()
