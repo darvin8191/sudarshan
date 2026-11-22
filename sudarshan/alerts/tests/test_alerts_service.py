@@ -361,6 +361,9 @@ def test_the_whole_process_end_to_end(tmp_path, mistyped):
                 "SUDARSHAN_OPENALGO_URL": notify.url,
                 "SUDARSHAN_ALERTS_ALWAYS_ON": "1",
             }
+            # The date sentinel runs this process on a shifted clock (libfaketime): the child must
+            # read the same one, or the option below expires "this year" on the child's clock only.
+            env |= {k: os.environ[k] for k in ("LD_PRELOAD", "FAKETIME") if k in os.environ}
             if mistyped:
                 port = _free_port()
                 env |= MISTYPED[mistyped][0] | {

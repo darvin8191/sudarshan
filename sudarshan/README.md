@@ -1696,14 +1696,15 @@ A test that mixes the real clock with a fake one passes for days and then fails 
 moves on (the store stamped with the wall clock, the view judged on a clock fixed at an earlier
 day). The date sentinel finds the next one before it goes off. It runs the SUDARSHAN backend tests
 (the four shards of `sudarshan/tests/ci_shards.py`) and upstream's `test/test_strategy_module_*.py`
-under libfaketime with the clock shifted ahead by 1, 7, 30 and 100 days, plus a control run at 0.
+and the frontend's vitest suite (three shards; not the phone specs, which need a real browser) under
+libfaketime with the clock shifted ahead by 1, 7, 30 and 100 days, plus a control run at 0.
 
 - **Where:** `.github/workflows/sudarshan-date-sentinel.yml`, nightly at 02:47 IST (21:17 UTC) and
   by hand (`gh workflow run sudarshan-date-sentinel.yml --ref <branch>`). A schedule only fires
   from the repository's default branch; a dispatch works from any branch that has the file. It is
   never on push or pull request and is not a required check. It opens no issue and posts nowhere:
   a red run is the signal.
-- **Locally:** `sudo apt-get install -y faketime`, then `scripts/date_sentinel.sh <days> [1|2|3|4|upstream|all]`
+- **Locally:** `sudo apt-get install -y faketime`, then `scripts/date_sentinel.sh <days> [1|2|3|4|upstream|fe1|fe2|fe3|all]`
   (`PYTHON=` picks the interpreter; results land in `date-sentinel-out/`).
 - **Reading a run:** one job per offset and part, named `+<days>d, <part>`. Each uploads an artifact
   `failing-tests-<days>d-<part>` holding `failing-<days>d-<part>.txt` (one failing test id per line),
@@ -1714,7 +1715,8 @@ under libfaketime with the clock shifted ahead by 1, 7, 30 and 100 days, plus a 
   +100, names the day it goes off: work out the date from the real date plus the offset. The fix
   goes in the test (put the store and the view on one injected clock, and give every timed test a
   named moment), not in the product, unless the product itself gets the date wrong.
-- **What it cannot judge:** the kernel still stamps file times with the real clock, so a test that
-  compares a file's modification time with `time.time()` can differ for that reason alone. A test that cannot run under libfaketime for a reason unrelated
+- **What it cannot judge:** libfaketime shifts the times `stat` reports but not the kernel's own, so
+  the sentinel's pytest plugin corrects `os.utime` for the shift; a shell tool that reads file ages
+  with coreutils `stat` or `find` still sees the real ones. A test that cannot run under libfaketime for a reason unrelated
   to dates is listed with its reason in `sudarshan/tests/date_sentinel_skips.txt`; the run's summary
   prints every such skip (`date sentinel: tests skipped by name`), and nothing is skipped silently.
