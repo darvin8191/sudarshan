@@ -85,6 +85,7 @@ import { useProfileMenuItems } from '@/hooks/useProfileMenuItems'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/authStore'
 import { useThemeStore } from '@/stores/themeStore'
+import { DOWNLOAD_LIST, downloadListWords } from '@/sudarshan/historifyWords' // SUDARSHAN M8.19
 import { showToast } from '@/utils/toast'
 
 // Types
@@ -955,12 +956,12 @@ export default function Historify() {
       })
       const data = await response.json()
       if (data.status === 'success') {
-        showToast.success(data.message, 'historify')
+        showToast.success(downloadListWords(data.message), 'historify') // SUDARSHAN M8.19
         setNewSymbol('')
         loadWatchlist()
         loadStats()
       } else {
-        showToast.error(data.message || 'Failed to add symbol', 'historify')
+        showToast.error(downloadListWords(data.message || 'Failed to add symbol'), 'historify') // SUDARSHAN M8.19
       }
     } catch (_error) {
       showToast.error('Failed to add symbol', 'historify')
@@ -978,11 +979,11 @@ export default function Historify() {
       })
       const data = await response.json()
       if (data.status === 'success') {
-        showToast.success(data.message, 'historify')
+        showToast.success(downloadListWords(data.message), 'historify') // SUDARSHAN M8.19
         loadWatchlist()
         loadStats()
       } else {
-        showToast.error(data.message || 'Failed to remove symbol', 'historify')
+        showToast.error(downloadListWords(data.message || 'Failed to remove symbol'), 'historify') // SUDARSHAN M8.19
       }
     } catch (_error) {
       showToast.error('Failed to remove symbol', 'historify')
@@ -1020,7 +1021,10 @@ export default function Historify() {
         loadWatchlist()
         loadStats()
       } else {
-        showToast.error(data.message || 'Failed to bulk add symbols', 'historify')
+        showToast.error(
+          downloadListWords(data.message || 'Failed to bulk add symbols'),
+          'historify'
+        ) // SUDARSHAN M8.19
       }
     } catch (_error) {
       showToast.error('Failed to bulk add symbols', 'historify')
@@ -1120,7 +1124,7 @@ export default function Historify() {
         loadJobs()
         setActiveTab('jobs')
       } else {
-        showToast.error(data.message || 'Failed to create job', 'historify')
+        showToast.error(downloadListWords(data.message || 'Failed to create job'), 'historify') // SUDARSHAN M8.19
       }
     } catch (_error) {
       showToast.error('Failed to create job', 'historify')
@@ -1129,7 +1133,7 @@ export default function Historify() {
 
   const downloadWatchlist = async () => {
     if (watchlist.length === 0) {
-      showToast.warning('Watchlist is empty', 'historify')
+      showToast.warning(`${DOWNLOAD_LIST} is empty`, 'historify') // SUDARSHAN M8.19
       return
     }
     const symbols = watchlist.map((item) => ({ symbol: item.symbol, exchange: item.exchange }))
@@ -1317,14 +1321,17 @@ export default function Historify() {
       })
       const data = await response.json()
       if (data.status === 'success') {
-        showToast.success(data.message, 'historify')
+        showToast.success(downloadListWords(data.message), 'historify') // SUDARSHAN M8.19
         setWatchlistSelectedSymbols(new Set())
         loadWatchlist()
       } else {
-        showToast.error(data.message || 'Failed to remove from watchlist', 'historify')
+        showToast.error(
+          downloadListWords(data.message || 'Failed to remove from the download list'), // SUDARSHAN M8.19
+          'historify'
+        )
       }
     } catch (_error) {
-      showToast.error('Failed to remove from watchlist', 'historify')
+      showToast.error('Failed to remove from the download list', 'historify') // SUDARSHAN M8.19
     } finally {
       setIsBulkWatchlistDeleting(false)
       setBulkWatchlistDeleteDialogOpen(false)
@@ -1659,10 +1666,15 @@ export default function Historify() {
           {/* Tab Navigation - Scrollable on mobile */}
           <div className="border-b border-border px-4 overflow-x-auto">
             <TabsList className="h-10 bg-transparent w-max min-w-full sm:w-auto">
-              <TabsTrigger value="watchlist" className="gap-1.5 data-[state=active]:bg-muted">
+              <TabsTrigger
+                value="watchlist"
+                aria-label={DOWNLOAD_LIST} // SUDARSHAN M8.19: the phone shows a short label
+                className="gap-1.5 data-[state=active]:bg-muted"
+              >
                 <Target className="h-4 w-4" />
-                <span className="hidden sm:inline">Watchlist</span>
-                <span className="sm:hidden">Watch</span>
+                <span className="hidden sm:inline">{DOWNLOAD_LIST}</span>
+                <span className="sm:hidden">List</span>
+                {/* SUDARSHAN M8.19 */}
                 {watchlist.length > 0 && (
                   <Badge variant="secondary" className="ml-1 h-5 min-w-5 text-xs">
                     {watchlist.length}
@@ -1708,7 +1720,7 @@ export default function Historify() {
                     <div className="flex flex-col sm:flex-row gap-3">
                       <div className="flex-1 relative" ref={searchContainerRef}>
                         <Input
-                          placeholder="Quick add symbol to watchlist..."
+                          placeholder="Quick add symbol to the download list..." // SUDARSHAN M8.19
                           value={newSymbol}
                           onChange={(e) => setNewSymbol(e.target.value.toUpperCase())}
                           className="h-9"
@@ -1748,7 +1760,8 @@ export default function Historify() {
                       </Select>
                       <Button onClick={addToWatchlist} className="h-9" size="sm">
                         <Plus className="h-4 w-4 mr-1" />
-                        Add to Watchlist
+                        Add to download list
+                        {/* SUDARSHAN M8.19 */}
                       </Button>
                       <Button
                         variant="outline"
@@ -1894,7 +1907,8 @@ export default function Historify() {
                               colSpan={7}
                               className="text-center py-8 text-muted-foreground"
                             >
-                              No data available. Add symbols to watchlist and download data.
+                              No data available. Add symbols to the download list and download data.
+                              {/* SUDARSHAN M8.19 */}
                             </TableCell>
                           </TableRow>
                         ) : (
@@ -1982,7 +1996,7 @@ export default function Historify() {
                                       })
                                       setDeleteDialogOpen(true)
                                     }}
-                                    aria-label={`Delete ${item.symbol} from watchlist`}
+                                    aria-label={`Delete the data of ${item.symbol}`} // SUDARSHAN M8.19: it deletes data, not a list entry
                                   >
                                     <Trash2 className="h-3.5 w-3.5" />
                                   </Button>
@@ -2272,7 +2286,8 @@ export default function Historify() {
                                 className="text-center py-12 text-muted-foreground"
                               >
                                 <Target className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                                <p>No symbols in watchlist</p>
+                                <p>No symbols in the download list</p>
+                                {/* SUDARSHAN M8.19 */}
                                 <p className="text-sm mt-1">Add symbols using the search above</p>
                               </TableCell>
                             </TableRow>
@@ -2336,8 +2351,8 @@ export default function Historify() {
                                       onClick={() =>
                                         removeFromWatchlist(item.symbol, item.exchange)
                                       }
-                                      title="Remove from watchlist"
-                                      aria-label={`Remove ${item.symbol} from watchlist`}
+                                      title="Remove from the download list" // SUDARSHAN M8.19
+                                      aria-label={`Remove ${item.symbol} from the download list`} // SUDARSHAN M8.19
                                     >
                                       <X className="h-4 w-4" />
                                     </Button>
@@ -2374,7 +2389,10 @@ export default function Historify() {
                         <div className="text-center py-12 text-muted-foreground">
                           <DownloadCloud className="h-12 w-12 mx-auto mb-4 opacity-50" />
                           <p>No download jobs yet</p>
-                          <p className="text-sm mt-1">Start a download from the Watchlist tab</p>
+                          <p className="text-sm mt-1">
+                            Start a download from the {DOWNLOAD_LIST} tab
+                            {/* SUDARSHAN M8.19 */}
+                          </p>
                         </div>
                       ) : (
                         <div className="divide-y divide-border">
@@ -2399,7 +2417,7 @@ export default function Historify() {
                                       />
                                       <span className="font-medium truncate">Job {job.id}</span>
                                       <Badge variant="outline" className="text-xs">
-                                        {job.job_type}
+                                        {downloadListWords(job.job_type) /* SUDARSHAN M8.19 */}
                                       </Badge>
                                       <Badge
                                         variant={
@@ -2774,7 +2792,7 @@ export default function Historify() {
               <Input
                 value={scheduleName}
                 onChange={(e) => setScheduleName(e.target.value)}
-                placeholder="Daily Watchlist Update"
+                placeholder="Daily download list update" // SUDARSHAN M8.19
                 className="mt-1"
               />
             </div>
@@ -2783,7 +2801,7 @@ export default function Historify() {
               <Input
                 value={scheduleDescription}
                 onChange={(e) => setScheduleDescription(e.target.value)}
-                placeholder="Downloads daily data for all watchlist symbols"
+                placeholder="Downloads daily data for every symbol in the download list" // SUDARSHAN M8.19
                 className="mt-1"
               />
             </div>
@@ -2948,7 +2966,8 @@ export default function Historify() {
                 className="mt-1"
               />
               <p className="text-xs text-muted-foreground mt-1">
-                Incremental download from watchlist. Lookback used only for new symbols.
+                Incremental download from the download list. Lookback used only for new symbols.
+                {/* SUDARSHAN M8.19 */}
               </p>
             </div>
           </div>
@@ -3473,10 +3492,12 @@ NIFTY24DEC25000CE,NFO"
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              Remove {watchlistSelectedSymbols.size} Symbol(s) from Watchlist
+              Remove {watchlistSelectedSymbols.size} symbol(s) from the download list
+              {/* SUDARSHAN M8.19 */}
             </AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to remove the selected symbols from your watchlist?
+              Are you sure you want to remove the selected symbols from your download list?
+              {/* SUDARSHAN M8.19 */}
               <div className="mt-2 max-h-32 overflow-y-auto text-sm">
                 {Array.from(watchlistSelectedSymbols)
                   .slice(0, 10)
