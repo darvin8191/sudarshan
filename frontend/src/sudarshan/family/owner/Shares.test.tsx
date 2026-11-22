@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, configure, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 // The first render of this file pays for loading three sections and their queries; on a shared
 // two-core box under load that has taken past the default second, so the waits get four.
@@ -363,6 +363,17 @@ describe('books', () => {
 })
 
 describe('portfolio tabs', () => {
+  // The form checks a typed end against the clock (Date.now), so the clock is the fixtures' own
+  // day: an end typed in the test stays in the future whatever day the suite runs (the one below
+  // passed on 20 Nov 2026 and turned the test red on every line).
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(NOW)
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
   const section = async () =>
     (await screen.findByRole('heading', { name: 'Portfolio tabs' })).closest(
       'section'
