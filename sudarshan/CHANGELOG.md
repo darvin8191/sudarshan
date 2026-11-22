@@ -5,6 +5,281 @@ publish. The owner publishes each release on GitHub. The server's deploy timer t
 outside 08:30-16:00 IST on trading days (09:00-15:45 until v0.3.1), keeps backups, and rolls
 back if the app does not come up healthy.
 
+## v0.16.0 (23 Nov 2026)
+
+Four things, and none of them sends an order. **Your records and the server's own checks:** the
+System page and the server watch show whether Upstox accepts SUDARSHAN's read-only token (the
+Analytics Token), judged only at SUDARSHAN's own reads of your Upstox holdings and positions;
+Reports builds a Records pack for each financial year; market alerts that fired are kept through
+their financial year; and the server watch now checks the TRINETRA reader too. **The Upstox tab
+gains Allocation and Performance,** both read-only. **Display settings gain three switches,** each
+off until you turn it on: international number grouping, Compact rows and Larger text. **And small
+fixes,** among them each Automation strategy's P&L on its card. No switch changes: the TRINETRA
+view, charts across devices and the reversal judged on fills still ship off, and no setting is
+added. The reviews found no order path changed and no new entry point. It includes everything in
+v0.15.0. **Publish only after v0.15.0 has installed and run one trading day: Monday 23 Nov after
+the close, or later (Tuesday 24 Nov is a market holiday, Prakash Gurpurb).**
+
+### What changes for you from the day you install it
+- **System page, under Market day: "Upstox read-only token (Analytics Token)".** Until SUDARSHAN
+  next reads your Upstox holdings or positions it says "Not checked yet"; open the Upstox tab, or
+  wait for the next trading day's close, and it says "Accepted by Upstox when your holdings or
+  positions were last read", with the date and time. Under Services, "TRINETRA reader" says
+  "Answering. The TRINETRA view is switched off."
+- **Reports: "Build the records pack now",** and from 4 April each year a Records pack in the
+  archive.
+- **Alerts, History keeps market alerts that fired for longer** (below).
+- **Portfolio, Upstox tab: Allocation and Performance,** beside Holdings, Positions, Funds and
+  History. Family members see neither.
+- **Profile, Display: "International number grouping", "Compact rows" and "Larger text",** all
+  off. Each is kept on the device you set it on.
+- **Automation: a strategy that holds a position shows it on its card,** with its P&L.
+- **A note you type in a symbol's sheet is saved when you close the sheet,** with "Note saved".
+- **The install changes no setting and starts no new service,** and nothing needs a line on the
+  server. The install tool v0.15.0 brought makes it, so a few small things differ from v0.15.0's
+  install (below).
+
+### What the install does this time
+v0.15.0 was installed by the older install tool, v0.6.0's. The tool v0.15.0 brought has run on the
+server every ten minutes since, and it is the one that installs this release. This release brings
+no newer tool, no new setting, no new timer and no nginx change. Against v0.15.0's install:
+- **The family view's service is put in place.** It starts only once the family view's one-time
+  set-up has passed its check (`sudarshan/README.md`, "The family view's one-time set-up"), and the
+  view stays switched off either way. If v0.15.0's install told you on Telegram "A background
+  service in v0.15.0 was not installed: the family service", this ends it: the older tool's safety
+  check did not know the family view's own account. Nothing for you to do.
+- **If the nginx lines that fence the alert links are not on the server,** the install's message on
+  Telegram also says "The alert links on this server can still be reached from any address, not
+  only from TradingView. Nothing stopped working." v0.15.0's install could not look. The steps are
+  in `sudarshan/README.md` under "The fence around the alert links"; do them before your first
+  Automation strategy, as v0.14.0's notes said.
+- **The install also checks that the journal and the TRINETRA reader answer after their restart,**
+  as it did already for the price feed, the alerts, the portfolio and the screener, and notes it in
+  its own log if one does not within 30 seconds. Nothing is sent for that.
+- **Nothing needs `sudo sudarshan-deploy --redeploy`** or any other line on the server.
+
+### The read-only token, the Records pack and what is kept
+- **The token line is judged only at SUDARSHAN's own reads of your Upstox holdings and
+  positions,** the reads this token is known to make: the Upstox tab, the family view and the
+  closing record after each trading day's close. Every such read checks it; no call to Upstox is
+  added for it.
+- **If Upstox refuses it,** you are told on Telegram at once, and the System page line says the
+  same: open the Upstox developer page (My Apps) and see whether the token is still there and
+  active. **Do not create a new token before you have looked:** a new one ends the old one for
+  everything else that uses it, your other trading system included. When Upstox accepts it again,
+  you are told that too.
+- **If Upstox refuses one of this token's other reads** (the day's orders or trades), the Upstox
+  tab keeps showing your holdings and positions, and the token line is not changed by it.
+- **The Records pack** is one zip for a financial year, built on 4 April before 08:00, just after
+  the Tax pack and under the same switch: a first page (`00-read-first.pdf`) saying what is in it
+  and what to add from Upstox and your bank, the Tax pack, your trades, every order request with
+  its answer (never your API key), the risk history, the market alerts that fired and the server's
+  notices. Download it from Reports, or build it at any time with "Build the records pack now". It
+  is never sent to Telegram.
+- **Its order list (`orders.csv`) holds order requests and their answers only:** not the app's
+  reads of your books, and not your switches between Live and analyzer mode.
+- **The risk history in it covers the last 90 days only,** because that is all the risk layer keeps
+  today.
+- **If a store the pack reads cannot be read on 4 April,** the pack is still built by 15:30 with
+  what could be read, so that day's 16:30 backup, the year's archive, always holds one; its first
+  page names what is missing.
+- **Market alerts that fired are kept through their financial year and the April after it,** never
+  less than the 100 days kept before.
+- **The server watch now checks the TRINETRA reader.** While the TRINETRA view is switched off it
+  shows as answering, and you are not told if it stops. Once the view is on, a reader that does not
+  answer for about 4 minutes is told on Telegram.
+- **The README has one table of what SUDARSHAN keeps, and for how long** ("What is kept, and for
+  how long").
+
+### The Upstox tab: Allocation and Performance
+- **Allocation:** your Upstox holdings by class and by sector, as bars that move with prices. Its
+  line says "Real-time" only while ticks arrive; otherwise "Waiting for prices", "Market closed" or
+  how old the prices are. A share takes the class and sector you gave it in one of your own tabs;
+  one without them is in "Not classified" or "No sector set", with a sentence. SUDARSHAN never
+  guesses them.
+- **Performance:** "Holdings value now" at the top moves with prices. Below it, marked "Closing
+  record": the value counted, "Net money put in", the gain so far, the yearly return (XIRR) once a
+  year of money is behind it, the time-weighted return (TWR), and the same money on the same days
+  in NIFTY 50 and NIFTY 500. They come from Upstox's share trades of the last three financial years
+  and a closing record, so they are as of a close, and say so ("At the close of ..., not
+  real-time").
+- **"Not counted":** a share you hold with no purchase in that trade history (bought before it, or
+  received without a trade) is listed with its quantity and value and left out of the return,
+  never taken as bought for nothing.
+- **Not in these figures:** dividends, brokerage, taxes and F&O.
+- **Upstox is asked nothing new for Allocation.** Performance reads a year of trades only when it
+  is due, within the limits the Trades view keeps. The index lines need index history from before
+  your first trade; it is collected a little each day, and until then they say so.
+
+### Display: number grouping, Compact rows and Larger text
+- **"International number grouping"** shows figures as 1,234,567.89, with M and B in short
+  figures, instead of the Indian 12,34,567.89 with L and Cr. The row shows a sample figure in the
+  grouping now chosen. Indian stays the default. Messages the server writes, such as alerts and
+  Telegram, keep the Indian way.
+- **"Compact rows":** watchlist rows and the cards in Positions, Orders, Holdings and Trades take
+  less height, so more fit on the screen. Every button stays finger-sized.
+- **"Larger text":** text and figures one size larger everywhere in the app, and the buttons grow
+  with them.
+- **Each is kept on that device only,** never on the server.
+
+### Small fixes
+- **Automation: a strategy that holds a position shows it on its card** ("Long 65", say) with its
+  P&L moving with every tick and "Real-time" while ticks arrive, or "Read at" and the time when
+  they do not. A Sandbox strategy's comes from the Sandbox, a Live one's from Upstox's positions,
+  read for at most 4 seconds; Stop, Start and edits answer at once. When the book cannot be read,
+  the card says so.
+- **A note you type in a symbol's sheet is saved when you close the sheet,** with a short "Note
+  saved". An empty or unchanged note saves nothing. One over 500 characters is not saved, and the
+  sentence says to open the symbol and type a shorter one.
+- **A family member who may not see quantities** now sees each open position as open, marked LONG
+  with a plus sign or SHORT with a minus sign, still with no quantity. Before, every position read
+  as closed for such a member. This shows once the family view is switched on.
+- **The week in review** (Sunday 18:00) takes NIFTY 50's close from the price feed when the
+  portfolio missed recording it. A week whose last close is missing from both now leaves the index
+  out, instead of measuring to an earlier day.
+- **For the work sessions, nothing for you:** SUDARSHAN's checks now open every phone and tablet
+  screen that has a browser test, upright and on its side, so a screen a later change breaks fails
+  there first; two tests whose written dates had passed (17 and 20 Nov) now run on their own
+  clocks; the feature status table was tidied.
+- **Also for the work sessions:** the checks can now run the backend and frontend tests on a clock
+  1, 7, 30 and 100 days ahead, to catch tests that depend on the date before they fail; that nightly
+  run starts only once GitHub's default branch is `sudarshan` (it is `main` today), which is your
+  choice.
+
+### What ships switched off, and how you would switch each on
+Nothing below changes anything until you switch it on, and none of it is promised for a date.
+- **The TRINETRA view** (`SUDARSHAN_SIGNALS`). v0.15.0's notes said not to switch it on until the
+  server watch checks the TRINETRA reader; this release adds that check (above). The steps are in
+  `sudarshan/README.md` under "The TRINETRA view" and "The letterbox's one-time set-up";
+  TRINETRA's operators have a step of their own. If you switch it on, tell the next work session
+  first: the checks for the view's first day are not in these notes.
+- **Charts across devices** (`SUDARSHAN_CHARTS_SYNC`), unchanged from v0.15.0, whose notes give the
+  steps: the app's setting, one nginx line and a restart of OpenAlgo.
+- **A reversal back, judged on fills** (`SUDARSHAN_REVERSAL_FROM_FILLS`), still not written, which
+  means off. Leave it so until the first Live day's check in v0.15.0's notes has told you how late
+  Upstox's positions run.
+- **Market alerts** are on or off as you set them in the alerts' own settings on the server; this
+  release does not touch that. The family view stays off (above).
+
+### What you must do
+- **Publish after the close.** Published on Monday 23 Nov after 15:30, it installs after 16:00
+  that day. Published on Tuesday 24 Nov, a market holiday, it installs at the deploy timer's next
+  run (every ten minutes) after the release's build has finished, if the server's holiday list has
+  that day; if it does not, the install waits until 16:00. Either way, Wednesday 25 Nov is its first
+  trading day.
+- **Nothing on the server.** No setting is added or changed. Leave `SUDARSHAN_SIGNALS`,
+  `SUDARSHAN_CHARTS_SYNC` and `SUDARSHAN_REVERSAL_FROM_FILLS` as shipped, unless you choose the
+  TRINETRA view as above.
+- **If Telegram reminds you about the alert links after the install,** nothing stopped working;
+  install the nginx lines before your first Automation strategy (above).
+- **Once after the install, on the phone.** No order is involved.
+  - System page: "Upstox read-only token (Analytics Token)" says "Not checked yet". Open the
+    Upstox tab once, until your holdings show; the line then says "Accepted by Upstox when your
+    holdings or positions were last read", with that time. If it ever says "Not accepted", do not
+    create a new token: look on the Upstox developer page first, as its sentence says, and tell
+    the next work session.
+  - System page, Services: "TRINETRA reader" says "Answering. The TRINETRA view is switched off."
+  - Reports: tap "Build the records pack now", then download the pack. `00-read-first.pdf` lists
+    the files; `orders.csv` has this year's orders, no API key and no line for a switch between
+    Live and analyzer mode; `risk-history.csv` starts about 90 days back.
+  - Upstox tab, Allocation: the Class bars, and the Sector bars, each add up to the holdings value.
+    In market hours they move; after the close the line says "Market closed".
+  - Upstox tab, Performance: "Not counted" lists only shares you bought before the trade history
+    begins, or received without a trade.
+  - Profile, Display: turn on "International number grouping": the row's sample and the
+    dashboard's figures change from the Indian grouping (12,34,567.89) to the international
+    (1,234,567.89). Turn it off again.
+  - Profile, Display: turn on "Compact rows" and "Larger text"; open the watchlist and Positions,
+    upright and on its side: nothing scrolls sideways and every button is easy to tap. Then set
+    them as you like.
+  - Watchlist: type a note in a symbol's sheet and close it with Back: "Note saved" shows, the row
+    gets its note mark, and the note is there when you open the sheet again.
+  - Automation, in analyzer mode, with a Sandbox strategy holding a position: in market hours the
+    card's P&L moves with ticks, says "Real-time" and matches Positions for that contract; after the
+    close it says "Read at" and a time. Tap Stop, then "Stop new entries": the sheet closes at once
+    and the card keeps its P&L line. Start the strategy again.
+- **Later, once each.**
+  - The first Sunday's week in review: the "Against NIFTY 50" line as before. If it is missing,
+    tell the next work session: that week can be built again after Monday 09:15, from the feed.
+  - The day after you buy shares for delivery: compare that share on the Upstox tab with the
+    Upstox app. If the tab counts more shares than the app holds, tell the next work session.
+  - Once the family view is on: a member with quantities hidden sees LONG or SHORT on each open
+    position, and no quantity.
+  - 4 April 2027, after 07:10: Reports shows the Tax pack and the Records pack for 2026-27, both
+    built that morning.
+
+### What is refused now that used to be accepted
+- **A report's file larger than about 6 MB, on Download** (in practice only a very large Records
+  pack; a usual one is 1 to 2 MB): it is refused at once, saying it is larger than the Reports page
+  can download and that it is in the server's backups, to be copied from the server. Before, such
+  a file was read whole and then answered "try the download again later". A Records pack that
+  large says the same in its text on the Reports page.
+- Nothing else that worked before is refused by this release.
+
+### Still to check, or not modelled
+- **Nothing in this release has run on your server.** The builders ran each part against a
+  simulated Upstox and the Sandbox in a throwaway copy; the reviewers opened the phone screens in a
+  test browser at phone sizes. Nobody has used it on a real phone yet.
+- **The token line's first verdict** comes at the first read after the install: when you open the
+  Upstox tab, or else after Wednesday's close (Tuesday is a holiday).
+- **Whether Upstox lets this token read the day's orders and trades is still not known.** Where
+  one of this token's reads other than holdings and positions is refused (the day's orders or
+  trades, Upstox's reports, corporate actions), that part stops and says "Upstox did not accept
+  SUDARSHAN's read-only token", even though the token may be fine; the token line and Telegram are
+  not changed by it. If you see that sentence while the System page says the token is accepted, do
+  not create a new token; tell the next work session.
+- **A Records pack built while one of its stores could not be read** says so only on its first
+  page; nothing is sent on Telegram. The pack is not announced either: you find it in Reports.
+- **Upstox tab:** whether Upstox's holdings already count the shares bought the day before is not
+  verified. The tab adds the shares still settling to the ones held, so if Upstox counts them as
+  held already, the day after a delivery purchase they are counted twice (the check above). A class
+  or sector can be given only where a holding is added to one of your own tabs, so a share held
+  only at Upstox stays "Not classified" for now. Shares that left without a trade (an off-market
+  transfer, a buyback, a merger) are valued at what is still held, said in words; their money is
+  not in the return.
+- **Grouping:** besides the server's messages, some figures on the trading terminal and the Tools
+  pages keep the Indian way.
+- **Compact rows** changes only the watchlist rows and the books' cards. A few small buttons from
+  OpenAlgo (the Profile page's tabs, the wide Positions and Holdings pages' buttons) are under
+  finger size at either setting, as they were before.
+- **The Automation card's Live side** has not met a real Upstox book: Live automation is not
+  allowed yet.
+- **Week in review:** on Sunday the feed's last close is the day before the week's last, so a close
+  the portfolio missed leaves the index out until the week is built again after Monday's open.
+- **A note** emptied and closed is not removed; use Save to clear it.
+- **Not in this release:** Live automation and Protect in Live.
+
+### Reviews
+- **The server review said: publish yes, after one fix,** with no order path changed and family
+  privacy holding. The fix: the token line could have called a working token refused, judging it
+  from reads Upstox may not allow this token at all. The server fix round made it, cut the
+  Automation page's wait on Upstox (it could have waited up to two minutes, Stop included), and
+  closed three smaller points in the Records pack and one in a test.
+- **The phone review said: publish yes, after two fixes,** both only with Larger text on, with no
+  new order path. The phone fix round is still running (below).
+- **No verifier has checked the fix rounds yet.**
+
+### The phone fix round
+PHONE FIX ROUND: to be filled in
+
+This section is rewritten when the phone fix round has merged. Until then, these stand as the phone
+review found them, and the release must not be published with this section in this state.
+- **Larger text cuts the Devanagari name in the app bar** on a phone 360 or 320 px wide, most in
+  analyzer mode with the kill switch on; on a phone turned on its side with the kill switch on, the
+  page scrolls sideways.
+- **Larger text cuts figures in the order ticket:** "Total qty" can read 6 for 65, the Shares button
+  is cut at the ticket's edge and the quote row's ask size is cut; on a 320 px phone the ask price
+  and the title are cut and the price field starts below the first screen. The order line beside
+  Place stays whole in every case.
+- **With international grouping on,** the trading terminal's dock shows its header one way and its
+  rows the other, and some Tools figures follow the switch while others do not. The values are the
+  same.
+- **Smaller points:** open interest at the edge of a unit can read "1,000 k"; a note refused while a
+  Save was already on its way is lost with no message; the ticket's quantities do not follow the
+  grouping; the Automation card's P&L keeps its colour when ticks are not arriving (its "Read at"
+  still says how old it is); at 320 px with Larger text, Allocation's bar names and a position
+  card's average price are cut.
+
 ## v0.15.0 (16 Nov 2026)
 
 Four things. **Live closes are sized more carefully:** the scalping terminal's Close, Close all and
