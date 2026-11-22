@@ -3,6 +3,7 @@
 
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
+import { groupedNumber } from '@/sudarshan/dashboard/format'
 
 export interface QuoteHeaderProps {
   exchange: string
@@ -22,6 +23,9 @@ export interface QuoteHeaderProps {
 // bid is on the buy side and the ask on the sell side, each beside its word.
 const EXCHANGE_BADGE =
   'border-[color:var(--border-strong)] bg-transparent text-[color:var(--text-secondary)]'
+// M20.3 (v0.16.0 phone review L3): the sizes are grouped the way Display settings ask, as the
+// line beside Place is, not in the phone's own locale.
+const SIZES = groupedNumber()
 
 export function QuoteHeader({
   exchange,
@@ -92,7 +96,7 @@ export function QuoteHeader({
             {bidPrice !== undefined && bidPrice > 0 ? bidPrice.toFixed(2) : '-'}
           </span>
           {bidSize !== undefined && bidSize > 0 && (
-            <span className="text-muted-foreground text-xs">x{bidSize.toLocaleString()}</span>
+            <span className="text-muted-foreground text-xs">x{SIZES.format(bidSize)}</span>
           )}
         </div>
         <div className="flex flex-wrap items-center justify-end gap-x-2">
@@ -101,7 +105,7 @@ export function QuoteHeader({
             {askPrice !== undefined && askPrice > 0 ? askPrice.toFixed(2) : '-'}
           </span>
           {askSize !== undefined && askSize > 0 && (
-            <span className="text-muted-foreground text-xs">x{askSize.toLocaleString()}</span>
+            <span className="text-muted-foreground text-xs">x{SIZES.format(askSize)}</span>
           )}
         </div>
       </div>

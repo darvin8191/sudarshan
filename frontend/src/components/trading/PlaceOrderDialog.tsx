@@ -29,6 +29,8 @@ import { useAuthStore } from '@/stores/authStore'
 import { useThemeStore } from '@/stores/themeStore'
 // SUDARSHAN: where the quote stands (Real-time, Reconnecting, Updated, Market closed).
 import { QuoteStatus } from '@/sudarshan/books/QuoteStatus'
+// M20.3 (v0.16.0 phone review L3): quantities grouped the way Display settings ask.
+import { groupedNumber } from '@/sudarshan/dashboard/format'
 // SUDARSHAN M20.7: the kill switch's line on the ticket.
 import { KillSwitchNote } from '@/sudarshan/risk/RiskBanner'
 // SUDARSHAN B6 (M5.10): the journal's charges estimate for the order; it changes nothing sent.
@@ -172,7 +174,8 @@ const TOUCH = 'h-12 min-w-12'
 /** The footer's two buttons: at least 48 dp tall, a long label on two lines inside it. */
 const FOOT = 'h-auto min-h-12 whitespace-normal leading-tight'
 const STEP = 'size-12 shrink-0 px-0 text-lg'
-const UNITS = new Intl.NumberFormat('en-IN')
+/** Quantities, grouped the way Display settings ask at every call (Indian unless changed). */
+const UNITS = groupedNumber()
 
 /**
  * The order as one line, shown beside the Place button (v0.13.0 review H1): on a phone the body
@@ -603,7 +606,7 @@ export function PlaceOrderDialog({
               {usesLots && (
                 <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
                   <span className="whitespace-nowrap">Lot size: {lotSize}</span>
-                  <span className="whitespace-nowrap">Total qty: {formQuantity}</span>
+                  <span className="whitespace-nowrap">Total qty: {UNITS.format(formQuantity)}</span>
                 </div>
               )}
             </div>

@@ -10,10 +10,13 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { tradingApi } from '@/api/trading'
+import { setNumberGrouping } from '@/sudarshan/dashboard/numberStyle'
 import { noteKillSwitch, resetKillSwitchForTests } from '@/sudarshan/risk/killSwitch'
 import { act, fireEvent, render, screen, userEvent, waitFor } from '@/test/test-utils'
 import { showToast } from '@/utils/toast'
+import { MarketDepthPanel } from './MarketDepthPanel'
 import { lotsFor, orderLine, PlaceOrderDialog, roundToTick, tickDecimals } from './PlaceOrderDialog'
+import { QuoteHeader } from './QuoteHeader'
 
 vi.mock('@/api/trading', async () => {
   const actual = await vi.importActual<typeof import('@/api/trading')>('@/api/trading')
@@ -285,6 +288,41 @@ describe('PlaceOrderDialog on a phone', () => {
     expect(orderLine({ ...base, lots: 1, quantity: 75, priceType: 'MARKET' }).rest).toContain(
       '75 (1 lot) '
     )
+  })
+
+  // v0.16.0 phone review L3: the line's quantity, the total beside the box, the quote sizes and
+  // the depth's sizes follow Display settings' grouping; what is sent is the same number.
+  it('groups its quantities and sizes the way Display settings ask (L3)', () => {
+    const units = (quantity: number) =>
+      orderLine({ ...nifty, quantity, price: 0, trigger: 0 } as Parameters<typeof orderLine>[0])
+        .rest
+    expect(units(150_000)).toMatch(/^1,50,000 NIFTY28MAR2420800CE/)
+    setNumberGrouping('international')
+    try {
+      expect(units(150_000)).toMatch(/^150,000 NIFTY28MAR2420800CE/)
+      render(<PlaceOrderDialog {...nifty} quantity={150_000} />)
+      expect(screen.getByText('Total qty: 150,000')).toBeInTheDocument()
+      render(
+        <QuoteHeader
+          exchange="NSE"
+          ltp={803.8}
+          bidPrice={803.75}
+          askPrice={803.8}
+          bidSize={124_000}
+          askSize={1_250}
+        />
+      )
+      expect(screen.getByText('x124,000')).toBeInTheDocument()
+      expect(screen.getByText('x1,250')).toBeInTheDocument()
+      const depth = {
+        buy: [{ price: 803.75, quantity: 124_000 }],
+        sell: [{ price: 803.8, quantity: 1_250 }],
+      }
+      render(<MarketDepthPanel depth={depth} isExpanded onToggle={() => {}} />)
+      expect(screen.getAllByText('124,000').length).toBeGreaterThan(0)
+    } finally {
+      setNumberGrouping('indian')
+    }
   })
 
   it('names the Action, Price Type, Product and Exchange pickers and the steppers (M2)', () => {
