@@ -22,6 +22,10 @@ import { setPortfolioCard, usePortfolioCard } from './dashboard/portfolioCard'
 import { setCvdMode, useCvdMode } from './display'
 import { setDensity, setTextSize, useDensity, useTextSize } from './displaySize'
 
+/** What keeps the Indian way whatever the grouping switch says (M20.3, v0.16.0 phone review M1). */
+const STILL_INDIAN =
+  'Messages the server writes (alerts, Telegram), the watchlist and chart on the Trading page, and some figures on the Tools pages keep the Indian way.'
+
 /**
  * Profile's Display tab, in place of upstream's theme picker. The theme and the
  * accent are stated here rather than offered (light only, one brand accent: a
@@ -113,12 +117,14 @@ export function DisplaySettings() {
         />
 
         {/* SUDARSHAN M20.3: Indian grouping unless this is on. The preview is drawn by the shared
-            formatter, so it changes the moment the switch does. */}
+            formatter, so it changes the moment the switch does. The last sentence names what
+            still keeps the Indian way (v0.16.0 phone review M1): the dock under the chart on
+            the Trading page follows the switch now; its watchlist and chart do not. */}
         <SoundRow
           id="sd-number-grouping"
           rowId="number-grouping"
           title="International number grouping"
-          words={`Off: figures are grouped the Indian way, 12,34,567.89, with L (lakh) and Cr (crore) in short figures. On: 1,234,567.89, with M and B. Now: ${formatRupees(1234567.89)} and ${formatCompact(1234567.89)}. This device only. Messages the server writes, such as alerts and Telegram, keep the Indian way.`}
+          words={`Off: figures are grouped the Indian way, 12,34,567.89, with L (lakh) and Cr (crore) in short figures. On: 1,234,567.89, with M and B. Now: ${formatRupees(1234567.89)} and ${formatCompact(1234567.89)}. This device only. ${STILL_INDIAN}`}
           on={grouping === 'international'}
           onChange={(on) => setNumberGrouping(on ? 'international' : 'indian')}
         />
