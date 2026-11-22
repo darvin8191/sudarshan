@@ -7,7 +7,9 @@
 #         nightly workflow uses.
 # [part]  1 to 4  one shard of the sudarshan backend tests (sudarshan/tests/ci_shards.py)
 #         upstream  test/test_strategy_module_*.py
-#         all  every one of those, one after another (the default)
+#         fe1, fe2, fe3  one third of the frontend's vitest suite (vitest --shard; needs Node and
+#                 frontend/node_modules; the phone specs are not part of it)
+#         all  the backend parts and upstream, one after another (the default; not the frontend)
 #
 # Environment: PYTHON (default .venv/bin/python, else python3), FAKETIME_LIB (default: searched for),
 # DATE_SENTINEL_OUT (default ./date-sentinel-out, where the logs, the junit files and
@@ -20,14 +22,14 @@
 set -u
 
 usage() {
-  echo "usage: scripts/date_sentinel.sh <days> [1|2|3|4|upstream|all]" >&2
+  echo "usage: scripts/date_sentinel.sh <days> [1|2|3|4|upstream|fe1|fe2|fe3|all]" >&2
   exit 2
 }
 
 days=${1:-}
 part=${2:-all}
 case "$days" in '' | *[!0-9]*) usage ;; esac
-case "$part" in 1 | 2 | 3 | 4 | upstream | all) ;; *) usage ;; esac
+case "$part" in 1 | 2 | 3 | 4 | upstream | fe1 | fe2 | fe3 | all) ;; *) usage ;; esac
 
 root=$(cd "$(dirname "$0")/.." && pwd)
 cd "$root" || exit 2
@@ -101,7 +103,53 @@ run_shard() { # run_shard <n>
   [ "$#" -gt 0 ] && run_files "$part_label" "$@"
 }
 
+run_frontend() { # run_frontend <n> : the n-th third of vitest, on the shifted clock
+  label=fe$1
+  failed="$out/failing-${days}d-$label.txt"
+  rm -f "$failed"
+  node_now=$(shifted node -e 'process.stdout.write(new Date().toISOString().slice(0, 10))')
+  echo "date sentinel: node reads $node_now under +${days}d (expected $expected)"
+  if [ "$node_now" != "$expected" ] && [ "$days" -ne 0 ]; then
+    echo "libfaketime did not move Node's clock; nothing was run" >&2
+    status=2
+    return
+  fi
+  (
+    cd frontend || exit 2
+    shifted nice -n 10 npx vitest run --shard="$1/3" --reporter=default --reporter=json \
+      --outputFile.json="$out/vitest-${days}d-$label.json" 2>&1 | tee "$out/vitest-${days}d-$label.log"
+    exit "${PIPESTATUS[0]}"
+  )
+  code=$?
+  # One failing test per line, as "file > test name"; a file that failed to load counts too.
+  "$py" - "$out/vitest-${days}d-$label.json" "$failed" <<'PY'
+import json, sys
+ids = []
+try:
+    data = json.load(open(sys.argv[1], encoding="utf-8"))
+    for suite in data.get("testResults", []):
+        name = suite["name"].split("/frontend/")[-1]
+        failing = [t for t in suite.get("assertionResults", []) if t.get("status") == "failed"]
+        for t in failing:
+            ids.append(f"frontend/{name} > {t.get('fullName', t.get('title'))}")
+        if suite.get("status") == "failed" and not failing:
+            ids.append(f"frontend/{name} > (the file did not run)")
+except (OSError, ValueError):
+    pass
+open(sys.argv[2], "w", encoding="utf-8").write("".join(f"{i}\n" for i in ids))
+PY
+  if [ "$code" -ne 0 ]; then
+    status=1
+    if [ ! -s "$failed" ]; then
+      echo "(vitest exited $code with no failing test id: see the log)" >"$failed"
+    fi
+  fi
+}
+
 case "$part" in
+  fe1 | fe2 | fe3)
+    run_frontend "${part#fe}"
+    ;;
   1 | 2 | 3 | 4)
     part_label=$part
     run_shard "$part"

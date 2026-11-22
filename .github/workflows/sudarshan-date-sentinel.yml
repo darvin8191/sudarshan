@@ -1,7 +1,7 @@
-# The date sentinel: the SUDARSHAN backend tests and upstream's strategy module tests, run on a
-# clock shifted ahead by libfaketime, to find a test that mixes the real clock with a fake one
-# before the calendar moves on and sets it off. Never on push or pull request and never a
-# required check: it runs nightly and when dispatched, and a red run is the signal. It opens no
+# The date sentinel: the SUDARSHAN backend tests, upstream's strategy module tests and the frontend's
+# vitest suite, run on a clock shifted ahead by libfaketime, to find a test that mixes the real
+# clock with a fake one before the calendar moves on and sets it off. Never on pull request, and
+# never a required check: it runs nightly and when dispatched, and a red run is the signal. It opens no
 # issue and posts nowhere. How to read a run: sudarshan/README.md, "The date sentinel".
 name: SUDARSHAN date sentinel
 
@@ -36,15 +36,29 @@ jobs:
         days: [0, 1, 7, 30, 100]
         # 1 to 4: the four backend shards (sudarshan/tests/ci_shards.py), as sudarshan-ci.yml runs
         # them. upstream: test/test_strategy_module_*.py.
-        part: ["1", "2", "3", "4", "upstream"]
+        # fe1 to fe3: the frontend's vitest suite in three shards (the phone specs are not part of
+        # it: they run a real browser, which libfaketime is not for).
+        part: ["1", "2", "3", "4", "upstream", "fe1", "fe2", "fe3"]
     steps:
       - uses: actions/checkout@v6
       - uses: astral-sh/setup-uv@v7
+        if: ${{ !startsWith(matrix.part, 'fe') }}
         with:
           enable-cache: true
           python-version: "3.12"
       - run: uv sync --dev
+        if: ${{ !startsWith(matrix.part, 'fe') }}
+      - uses: actions/setup-node@v7
+        if: ${{ startsWith(matrix.part, 'fe') }}
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+        if: ${{ startsWith(matrix.part, 'fe') }}
+        working-directory: frontend
       - name: Production server packages (gunicorn, eventlet)
+        if: ${{ !startsWith(matrix.part, 'fe') }}
         run: uv pip install "gunicorn>=25.0,<26" "eventlet==0.41.2"
       - name: libfaketime, and where it is
         run: |
@@ -56,7 +70,7 @@ jobs:
           echo "FAKETIME_LIB=$lib" >> "$GITHUB_ENV"
           echo "library: $lib"
       - name: nginx for the family view's tests
-        if: matrix.part != 'upstream'
+        if: ${{ contains('1 2 3 4', matrix.part) }}
         run: |
           # The same as the backend job: the shard that holds test_nginx_text.py needs a binary,
           # or those tests skip.
@@ -71,7 +85,8 @@ jobs:
       # keep the real clock, so they report the real date.
       - name: The tests on a clock +${{ matrix.days }} days ahead
         run: |
-          PYTHON=.venv/bin/python DATE_SENTINEL_OUT="$PWD/date-sentinel-out" \
+          PYTHON=$([ -x .venv/bin/python ] && echo .venv/bin/python || echo python3) \
+            DATE_SENTINEL_OUT="$PWD/date-sentinel-out" \
             scripts/date_sentinel.sh "${{ matrix.days }}" "${{ matrix.part }}"
       - name: The result, on the real clock
         if: ${{ !cancelled() }}
@@ -100,6 +115,8 @@ jobs:
           path: |
             date-sentinel-out/failing-*.txt
             date-sentinel-out/junit-*.xml
+            date-sentinel-out/vitest-*.json
             date-sentinel-out/pytest-*.log
+            date-sentinel-out/vitest-*.log
           retention-days: 14
           if-no-files-found: warn
