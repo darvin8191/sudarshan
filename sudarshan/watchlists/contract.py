@@ -275,10 +275,13 @@ OP_NAMES = tuple(op.name for op in OPS)
 #: Every route that changes something: the family layer's test asks that a viewer is refused each.
 WRITE_ROUTES = tuple((op.method, API_PREFIX + op.route) for op in OPS if op.cls == "write")
 
-#: The sealed members route (W23): ``POST INTERNAL_PREFIX/read?op=members|version``.
+#: The sealed members route (W23): ``POST INTERNAL_PREFIX/read?op=members|version|own_members``.
+#: ``own_members`` (GA8.1) is every list of the owner's own at once, in the members op's shape:
+#: the portfolio reads it for the corporate-action calendar of his watchlists' shares.
 INTERNAL_OPS = (
     OpSpec("members", "POST", "/read", "read", "ref:string", "Members"),
     OpSpec("version", "POST", "/read", "read", "", "Version"),
+    OpSpec("own_members", "POST", "/read", "read", "", "Members"),
 )
 
 

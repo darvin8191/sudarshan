@@ -668,6 +668,8 @@ export interface MembersReq {
 
 export type VersionReq = Record<string, never>
 
+export type OwnMembersReq = Record<string, never>
+
 export interface WatchlistOps {
   state: { req: StateReq; res: State }
   lists: { req: ListsReq; res: Lists }
@@ -698,4 +700,5 @@ export interface WatchlistOps {
 export interface InternalOps {
   members: { req: MembersReq; res: Members }
   version: { req: VersionReq; res: Version }
+  own_members: { req: OwnMembersReq; res: Members }
 }
