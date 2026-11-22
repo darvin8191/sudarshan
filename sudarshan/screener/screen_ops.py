@@ -248,6 +248,9 @@ def _label(operand: Mapping[str, Any]) -> str:
         return "OI change" if operand["oi"] == "oi_change_pct" else "OI"
     if "opt" in operand:
         return str(operand["opt"]).replace("_", " ")
+    if "event" in operand:
+        spec = cat.EVENTS.get(operand["event"])
+        return spec.words if spec else "days"
     if "math" in operand:
         return "value"
     return ""

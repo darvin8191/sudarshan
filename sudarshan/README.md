@@ -70,6 +70,8 @@ nonce that could still be replayed.
 | the alerts' "orders changed" nudge to the journal | `sudarshan/journal/nudge/v1` | 4 KiB |
 | the family service to the journal (P6, counts only) | `sudarshan/journal/family/v1` | 4 KiB |
 | the journal to the portfolio API (account reads only) | `sudarshan/portfolio/api/journal/v1` | 64 KiB |
+| the screener to the portfolio API (`ex_dates` only, M9.13) | `sudarshan/portfolio/api/screener/v1` | 64 KiB |
+| the market alerts and the portfolio to OpenAlgo's watchlists route (reads only) | `sudarshan/watchlists/internal/v1` | 16 KiB |
 | OpenAlgo to the TRINETRA view's API (M13) | `sudarshan/signals/api/v1` | 16 KiB |
 | the journal to the TRINETRA view (`state_at`, `state` only) | `sudarshan/signals/journal/v1` | 4 KiB |
 | the TRINETRA view to OpenAlgo's owner room | `sudarshan/signals/push/v1` | 32 KiB |

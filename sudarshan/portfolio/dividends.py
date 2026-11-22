@@ -300,16 +300,27 @@ def calendar(tx: Tx, today: int, from_day: int, to_day: int,
     dividend is expected to bring (types.ts ``CalendarReport``). ``listed_future`` is whether
     Upstox lists any event to come at all; ``read_status`` whether its list was read at all, so
     that an empty answer before the first night, or after a failed one, is never shown as
-    "nothing listed"."""
+    "nothing listed".
+
+    GA8.1: a row is a share of the owner's (``holding``: held, traded or kept in a tab, the
+    shares the nightly read is for) or one on his watchlists as last read (``watchlist``), or
+    both; a share that is neither any more is left out. ``watchlists`` says when the lists were
+    read, or why their shares are not shown."""
+    from . import watchlists
+
     holdings = corpactions.Holdings(tx, today, held_now)
     upstox = next((a for a in tx.rows("account") if a["kind"] == "upstox"), None)
     reads = {r["isin"]: r["read_at"] for r in tx.ca_reads() if r["state"] == "ok"}
     decided = corpactions.decisions(tx)
     groups = {e["id"]: group for group in core.groups(tx.ca_events(gone=True)) for e in group}
+    mine, watched = corpactions.known_isins(tx, held_now), watchlists.shares(tx)
     known: set[str] | None = None  # the Upstox account's shares, read only when a row needs them
     rows = []
     for event in tx.ca_events(from_day=from_day, to_day=to_day):
-        held = sum(_held(holdings, upstox, event).values())
+        holding, watchlist = event["isin"] in mine, event["isin"] in watched
+        if not (holding or watchlist):
+            continue
+        held = sum(_held(holdings, upstox, event).values()) if holding else 0
         pays = event["kind"] == "dividend" and event["amount_u"] is not None and held
         done = None
         if event["kind"] in core.LOT_KINDS and corpactions.standing(
@@ -317,17 +328,20 @@ def calendar(tx: Tx, today: int, from_day: int, to_day: int,
         ):
             known = corpactions.upstox_isins(tx, held_now) if known is None else known
             done = corpactions.confirmed(holdings, groups[event["id"]], decided, known)
+        name = holdings.name(event["isin"]) or (watched.get(event["isin"]) or {}).get("symbol")
         rows.append({
-            "event_id": event["id"], "isin": event["isin"], "name": holdings.name(event["isin"]),
+            "event_id": event["id"], "isin": event["isin"], "name": name,
             "kind": event["kind"], "ex_day": event["ex_day"], "amount_u": event["amount_u"],
             "ratio_num": event["ratio_num"], "ratio_den": event["ratio_den"],
             "held_qty_u": held or None,
             "expected_paise": rules.expected_paise(held, event["amount_u"]) if pays else None,
             "checked_at": reads.get(event["isin"]), "decided": done,
+            "holding": holding, "watchlist": watchlist,
         })  # fmt: skip
     ahead = tx.ca_events(from_day=add_days(today, 1))
     return {"from": from_day, "to": to_day, "listed_future": bool(ahead), "calendar": rows,
-            "read_status": corpactions.read_status(tx, today)}  # fmt: skip
+            "read_status": corpactions.read_status(tx, today),
+            "watchlists": watchlists.status(tx, today)}  # fmt: skip
 
 
 __all__ = ["calendar", "for_pack", "owner_member", "report", "set_line", "sync"]

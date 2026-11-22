@@ -195,7 +195,7 @@ def test_the_route_reads_so_it_is_not_a_write_route_and_a_viewer_cannot_reach_it
     viewer = app.test_client()
     login_session(viewer, VIEWER)
     headers = csrf_headers(viewer)
-    for op in ("members", "version"):  # a session is no key: the seal is the only way in
+    for op in ("members", "version", "own_members"):  # a session is no key: only the seal
         r = viewer.post(URL, query_string={"op": op}, data=b"", headers=headers)
         assert r.status_code in (403, 411)
         r = viewer.post(URL, query_string={"op": op}, json={"ref": "list:1"}, headers=headers)
@@ -392,7 +392,7 @@ def test_a_deleted_or_unknown_list_is_gone(client):
 def test_with_the_switch_off_every_op_answers_off(client, monkeypatch):
     lid, _ = make_list()
     monkeypatch.setenv(contract.SWITCH_ENV, "off")
-    for op, ref in (("members", f"list:{lid}"), ("version", None)):
+    for op, ref in (("members", f"list:{lid}"), ("version", None), ("own_members", None)):
         r = ask(client, op, ref)
         assert r.status_code == 503 and r.get_json()["code"] == "off"
     monkeypatch.setenv(contract.SWITCH_ENV, "on")
@@ -405,6 +405,82 @@ def test_a_master_that_is_not_loaded_is_failed_so_the_caller_changes_nothing(cli
     master.shared().drop()
     r = ask(client, ref=f"list:{lid}")
     assert r.status_code == 500 and r.get_json()["code"] == "failed"
+    r = ask(client, "own_members")
+    assert r.status_code == 500 and r.get_json()["code"] == "failed"
+
+
+# -- every list of the owner's own together (GA8.1: the portfolio's calendar) --------------------
+def test_own_members_answers_every_own_list_together_one_row_a_contract(client):
+    a, _ = make_list(("SBIN", "NSE_INDEX:NIFTY"), "A")
+    b, _ = make_list(("SBIN", "BSE_INDEX:SENSEX"), "B")
+    follow(b, "0", kind="month_future")
+    got = data_of(ask(client, "own_members"))
+    # List A, then list B's follow row and its fixed rows; SBIN once, the first time it comes.
+    assert [r["symbol"] for r in got["rows"]] == ["SBIN", "NIFTY", "NIFTY24NOV26FUT", "SENSEX"]
+    assert got["rows"][0] == data_of(ask(client, ref=f"list:{a}"))["rows"][0]
+    assert got["version"] == versions.read() and got["valid_until"] == CLOSE_24
+    assert "list_key" not in got and "created_at" not in got and got["left_out"] == []
+
+
+def test_own_members_with_no_list_answers_no_row(client):
+    got = data_of(ask(client, "own_members"))
+    assert (got["rows"], got["left_out"], got["valid_until"]) == ([], [], None)
+    assert got["version"] == versions.read()
+
+
+def test_a_list_deleted_while_own_members_reads_it_is_passed_over(client, monkeypatch):
+    from sudarshan.watchlists.ops import OpError
+
+    a, _ = make_list(("SBIN",), "A")
+    make_list(("NSE_INDEX:NIFTY",), "B")
+    real = list_reader.members
+
+    def members(ident, user):
+        if ident == str(a):
+            raise OpError("gone", words.NOT_LISTED)
+        return real(ident, user)
+
+    monkeypatch.setattr(list_reader, "members", members)
+    assert [r["symbol"] for r in data_of(ask(client, "own_members"))["rows"]] == ["NIFTY"]
+
+
+def test_the_portfolios_reader_of_the_watchlists_shares_reads_own_members(app, monkeypatch):
+    """GA8.1: the portfolio's reader cannot drift from the route either. A share is a row whose
+    Upstox key carries an ISIN, once however many lists and exchanges list it, under NSE's
+    symbol; a key without one (an index, this master's SBIN) is no share."""
+    from types import SimpleNamespace
+
+    httpx = pytest.importorskip("httpx")
+    reader = pytest.importorskip("sudarshan.portfolio.watchlists")
+    monkeypatch.setattr(reader.loopback, "refusal", lambda url: None)  # no real listener here
+    served = app.test_client()
+
+    class Flask(httpx.AsyncBaseTransport):
+        async def handle_async_request(self, request):
+            r = served.post(request.url.path, query_string=dict(request.url.params),
+                            data=request.content, headers=dict(request.headers))  # fmt: skip
+            return httpx.Response(r.status_code, content=r.get_data(), headers=dict(r.headers))
+
+    def share(exchange):
+        return SimpleNamespace(
+            symbol="ITC", name="ITC", exchange=exchange, token=f"{exchange}_EQ|INE154A01025",
+            expiry=None, strike=None, lotsize=1, tick_size=0.05, instrumenttype="EQ",
+            underlying=None,
+        )  # fmt: skip
+
+    use(build_master(more=(share("NSE"), share("BSE"))), monkeypatch)
+    make_list(("BSE:ITC", "SBIN", "NSE_INDEX:NIFTY"), "A")
+    make_list(("ITC",), "B")
+
+    async def go():
+        async with httpx.AsyncClient(transport=Flask()) as client:
+            return await reader.ask("http://127.0.0.1:5000", fernet(), client)
+
+    state, rows = asyncio.run(go())
+    assert state == "ok" and len(rows) == 4
+    assert reader.shares_of(rows) == [{"isin": "INE154A01025", "symbol": "ITC", "exchange": "NSE"}]
+    monkeypatch.setenv(contract.SWITCH_ENV, "off")
+    assert asyncio.run(go()) == ("off", [])
 
 
 # -- the alerts service's own client -------------------------------------------------------------

@@ -285,8 +285,20 @@ class CorpActions:
 
     async def _plan(self, now: int) -> tuple[list[str], set[str], bool]:
         """Tonight's ISINs, the ones among them that failed before and were never read, and
-        whether anything was read in the rotation week up to tonight."""
+        whether anything was read in the rotation week up to tonight. The watchlists' shares
+        (GA8.1) come after everything the owner holds, has traded or keeps in a tab, in the reads
+        left: a long watchlist takes longer to come round and never adds a read."""
+        from . import watchlists
+
         today, held = day_of_instant(now), self._held_now()
+
+        def order(isins: set[str], tried: dict[str, int], days, near, room: int) -> list[str]:
+            first = core.tonight(sorted(isins - set(tried)), days, near, today, room)
+            # One that failed before and was never read comes last, the one tried longest ago
+            # first: it cannot hold up the rest, and none of them waits behind the others for
+            # ever (v0.14.0 verification M5).
+            again = sorted(isins & set(tried), key=lambda isin: (tried[isin], isin))
+            return (first + again)[:room]
 
         def look(tx: Tx) -> tuple[list[str], set[str], bool]:
             rows = tx.ca_reads()
@@ -296,15 +308,12 @@ class CorpActions:
             soon = tx.ca_events(from_day=today, to_day=add_days(today, core.NEAR_DAYS))
             near = {event["isin"] for event in soon}
             known = known_isins(tx, held)
-            first = core.tonight(sorted(known - set(tried)), days, near, today, MAX_READS)
-            # One that failed before and was never read comes last, the one tried longest ago
-            # first: it cannot hold up the rest, and none of them waits behind the others for
-            # ever (v0.14.0 verification M5).
-            again = sorted(known & set(tried), key=lambda isin: (tried[isin], isin))
+            todo = order(known, tried, days, near, MAX_READS)
+            watched = set(watchlists.shares(tx)) - known
+            todo += order(watched, tried, days, near, MAX_READS - len(todo))
             week = any(days_between(day, today) < core.ROTATION_DAYS
                        for day in days.values() if day is not None)  # fmt: skip
-            todo = (first + again)[:MAX_READS]
-            return todo, set(again) & set(todo), week
+            return todo, set(tried) & set(todo), week
 
         return await self._store(lambda store: store.read(OWNER, look))
 
@@ -402,6 +411,36 @@ def read_status(tx: Tx, today: int) -> dict[str, Any]:
     why = next((text for text in WORDS.values() if text in detail), "")
     parts = (NOT_READ.format(night=night), why, RETRY.format(when=when))
     return {"state": "failed", "night": last["day"], "words": " ".join(p for p in parts if p)}
+
+
+# ---- the screener's ex-dates (M9.13, gap audit GA8.3) -------------------------------------------
+#: From a week back (an ex-date on a weekend or a holiday just passed takes effect at the next
+#: session) to as far on as the screener counts sessions (``screener/events.py``, REACH_DAYS).
+EX_DATES_BACK_DAYS, EX_DATES_AHEAD_DAYS = 7, 400
+#: A share last read cleanly longer ago than two rotation weeks is left out: its list may be old.
+EX_DATES_FRESH_DAYS = 2 * core.ROTATION_DAYS + 1
+
+
+def ex_dates(tx: Tx, today: int) -> dict[str, Any]:
+    """The screener's one read (``ops/ca_ops.ex_dates``): each share whose list was read cleanly
+    in the last ``EX_DATES_FRESH_DAYS`` (the nightly read covers what the owner holds, has traded
+    or keeps in a tab, and the shares on his watchlists), with the kind and ex-date of each event
+    the calendar shows in the span. A share given with no events lists none in it; a share left
+    out is one SUDARSHAN does not know about. Public facts only: no quantity, tab or decision."""
+    oldest = add_days(today, -EX_DATES_FRESH_DAYS)
+    read = {
+        row["isin"]: row["read_at"]
+        for row in tx.ca_reads()
+        if row["state"] in ("ok", "none") and row["read_at"]
+        and day_of_instant(row["read_at"]) >= oldest
+    }  # fmt: skip
+    listed: dict[str, list[list[Any]]] = {isin: [] for isin in read}
+    span = (add_days(today, -EX_DATES_BACK_DAYS), add_days(today, EX_DATES_AHEAD_DAYS))
+    for event in tx.ca_events(from_day=span[0], to_day=span[1]) if read else ():
+        if event["isin"] in listed:
+            listed[event["isin"]].append([event["kind"], event["ex_day"]])
+    shares = [{"isin": isin, "events": listed[isin]} for isin in sorted(read)]
+    return {"as_of": max(read.values(), default=None), "shares": shares}
 
 
 # ---- what was held, and the owner's decisions (design p7 6.3) -----------------------------------
@@ -864,9 +903,13 @@ async def corporate_actions_step(service: Any, now: int) -> str | None:
     )
     if done is not None:
         return None
+    from . import watchlists
+
     try:
+        # The watchlists' shares first (GA8.1), so tonight's rotation reads the lists of tonight.
+        watched = await watchlists.refresh(service, now)
         status, note = await ensure(service).run(now)
-        note = f"{note}; {await loop.run_in_executor(None, _sync_dividends, service)}"
+        note = f"{note}; {watched}; {await loop.run_in_executor(None, _sync_dividends, service)}"
     except Exception:
         log.exception("the nightly read of corporate actions failed")
         status, note = "failed", "Corporate actions could not be read tonight."

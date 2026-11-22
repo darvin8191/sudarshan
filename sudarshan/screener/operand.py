@@ -15,6 +15,7 @@ from sudarshan.alerts.market.grain import to_decimal
 from sudarshan.screener import catalog as cat
 from sudarshan.screener.types import (
     DAY,
+    DAYS,
     FIRST_TODAY,
     LAST_PREV_DAY,
     MAX_AGO,
@@ -25,6 +26,7 @@ from sudarshan.screener.types import (
     TF,
     WEEK,
     Clause,
+    Event,
     Field,
     Ind,
     Math,
@@ -150,7 +152,7 @@ def _ago(at) -> int:
 
 
 # ---- operands ----------------------------------------------------------------------------------
-_KINDS = ("num", "field", "ind", "oi", "opt", "math")
+_KINDS = ("num", "field", "ind", "oi", "opt", "event", "math")
 
 
 def operand(
@@ -325,6 +327,29 @@ def _opt(raw: dict, scope: Scope, path: str):
     return stored, Opt(what, underlying, tf, spec.unit)
 
 
+def _event(raw: dict, scope: Scope, path: str):
+    """Days to an event of the instrument's (M9.13): a share's next ex-date (of one kind of
+    corporate action, or any) or a contract's expiry; only on universes whose instruments have it."""
+    what = raw["event"]
+    spec = cat.EVENTS.get(what) if what.__class__ is str else None
+    if spec is None:
+        raise SpecError(path, "Pick days to ex-date or days to expiry.")
+    if scope.universe not in spec.universes:
+        raise SpecError(path, spec.refusal)
+    stored, kinds = {"event": what}, ()
+    if spec.kinds:
+        name = raw.get("kind", "any")
+        if name not in cat.EVENT_KINDS:
+            raise SpecError(
+                f"{path}.kind",
+                "Pick any corporate action, a dividend, a bonus, a split or a rights issue.",
+            )
+        stored["kind"] = name
+        kinds = cat.CA_KINDS if name == "any" else (name,)
+    scope.uses.add("events")
+    return stored, Event(what, kinds, DAYS)
+
+
 def _math(raw: dict, scope: Scope, path: str):
     op, args = raw["math"], raw.get("args")
     if op not in cat.MATH_OPS or args.__class__ is not list or len(args) != 2:
@@ -367,7 +392,8 @@ def _math(raw: dict, scope: Scope, path: str):
     return {"math": op, "args": stored_args}, Math(op, a, b, unit)
 
 
-_BUILD = {"num": _num, "field": _field, "ind": _ind, "oi": _oi, "opt": _opt, "math": _math}
+_BUILD = {"num": _num, "field": _field, "ind": _ind, "oi": _oi, "opt": _opt, "event": _event,
+          "math": _math}  # fmt: skip
 
 
 def adopt(num: Num, unit: str) -> Num:
@@ -396,7 +422,7 @@ OBV_WORDS = (
 def tfs_of(item: Operand) -> set:
     if item.kind == "math":
         return tfs_of(item.a) | tfs_of(item.b)
-    if item.kind in ("num", "opt") and getattr(item, "tf", None) is None:
+    if item.kind in ("num", "opt", "event") and getattr(item, "tf", None) is None:
         return set()
     if item.kind == "field" and item.tf is None:
         return set()
@@ -423,6 +449,10 @@ def account(item: Operand, extra: int, scope: Scope, path: str, state: str | Non
         scope.require(item.tf, count + extra, "Looking back that far", _SMALLER, path)
     elif kind == "opt" and item.tf is not None:
         scope.require(item.tf, 2, "Reading the change in implied volatility", _SMALLER, path)
+    elif kind == "event":
+        # Judged at each check of an instrument that traded in the run's candle (engine._early):
+        # with no line on candles, that candle is what the source builds.
+        scope.require(scope.tf, 1, "Reading the run's candle", _SMALLER, path)
 
 
 _SMALLER = "Use a smaller number or a smaller timeframe."
@@ -529,7 +559,7 @@ def _binary(spec: cat.OpSpec, op: str, left: Operand, right: Operand, cid: str) 
             "A cross compares two lines on the same candles. Pick the same timeframe on both sides.",
         )
     for side, name in ((left, "left"), (right, "right")):
-        if side.kind in ("oi", "opt"):
+        if side.kind in ("oi", "opt", "event"):
             raise SpecError(
                 f"{cid}.{name}",
                 "A cross needs a line with candles behind it. Use 'Is above' or 'Is below' for this one.",
@@ -555,6 +585,12 @@ def _unary(op: str, left: Operand, cid: str) -> None:
         raise SpecError(f"{cid}.op", "A build-up or a pattern is checked with 'Is'.")
     if left.kind == "num":
         raise SpecError(f"{cid}.left", "Pick a value to check, not a number.")
+    if left.kind == "event" and op in ("rising", "falling"):
+        raise SpecError(
+            f"{cid}.op",
+            f"{cat.EVENTS[left.what].words} is a count of days, not a line on candles. Use "
+            "'Is at or below', 'Equals' or 'Is between'.",
+        )
     if is_obv(left) and op not in ("rising", "falling"):
         raise SpecError(f"{cid}.left", OBV_WORDS)
 

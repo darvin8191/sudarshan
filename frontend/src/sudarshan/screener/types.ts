@@ -39,7 +39,13 @@ export type Operand =
       tf?: TimeFrame
     }
   | { opt: string; underlying?: string; tf?: TimeFrame }
+  // SUDARSHAN M9.13 (GA8.3): trading days to a share's next ex-date (of one kind, or any) or to
+  // a contract's expiry; 0 is the day itself.
+  | { event: 'ex_days'; kind?: EventKind }
+  | { event: 'expiry_days' }
   | { math: 'add' | 'sub' | 'mul' | 'div'; args: [Operand, Operand] }
+
+export type EventKind = 'any' | 'dividend' | 'bonus' | 'split' | 'rights'
 
 export interface Clause {
   id: string
@@ -461,5 +467,6 @@ export const WORDS = {
 
 export type IndOperand = Extract<Operand, { ind: string }>
 export type OptOperand = Extract<Operand, { opt: string }>
+export type EventOperand = Extract<Operand, { event: string }>
 export type OiOperand = Extract<Operand, { oi: 'buildup' | 'oi_change_pct' }>
 export type FieldOperand = Extract<Operand, { field: string }>

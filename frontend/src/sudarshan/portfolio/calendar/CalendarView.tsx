@@ -4,9 +4,13 @@
 // market data: each row says when it was checked and nothing here says "Real-time". Every bonus
 // and split he confirmed is listed under Confirmed, whatever its day, and can be changed there.
 // The owner's page only; a family viewer is offered none of it.
+// GA8.2: the shares on his watchlists too, each such row marked "Watchlist" with its icon, and a
+// choice of Holdings, Watchlists or All; the lists say when they were read ("as of").
 import { useQuery } from '@tanstack/react-query'
-import { Info, RefreshCw } from 'lucide-react'
+import { Eye, Info, RefreshCw } from 'lucide-react'
+import { useState } from 'react'
 import { cn } from '@/lib/utils'
+import { Segmented } from '@/sudarshan/journal/Segmented'
 import {
   getCalendar,
   listCorporateActions,
@@ -17,9 +21,19 @@ import {
 import { dayOfInstant } from '../days'
 import { PORTFOLIO_KEY } from '../tab/ActivityTab'
 import { dayText, monthOf } from '../tab/format'
-import type { CaConfirmed, CalendarRow, TabInfo } from '../types'
+import type { CaConfirmed, CalendarRow, TabInfo, WatchlistsRead } from '../types'
 import { Decided } from './Decided'
-import { checkedText, factText, holdText, KINDS } from './format'
+import {
+  type CalendarShow,
+  checkedText,
+  emptyText,
+  factText,
+  holdText,
+  KINDS,
+  SHOWS,
+  shownIn,
+  watchlistsAsOf,
+} from './format'
 import { LotCheckCard } from './LotCheckCard'
 import { ToConfirm } from './ToConfirm'
 
@@ -103,9 +117,18 @@ function Event({ row, today }: { row: CalendarRow; today: number }) {
         <span className="min-w-0 text-[0.9375rem] font-semibold break-words">
           {row.name ?? row.isin}
         </span>
-        <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-[color:var(--border-strong)] px-2 py-0.5 text-xs font-semibold">
-          <Icon aria-hidden="true" className="size-3.5" />
-          {KINDS[row.kind].word}
+        <span className="flex shrink-0 flex-col items-end gap-1 sm:flex-row sm:items-start">
+          <span className="inline-flex items-center gap-1 rounded-full border border-[color:var(--border-strong)] px-2 py-0.5 text-xs font-semibold">
+            <Icon aria-hidden="true" className="size-3.5" />
+            {KINDS[row.kind].word}
+          </span>
+          {row.watchlist && (
+            // On a watchlist: its icon and its word, never the tint alone.
+            <span className="inline-flex items-center gap-1 rounded-full bg-[color:var(--brand-tint)] px-2 py-0.5 text-xs font-semibold text-[color:var(--brand)]">
+              <Eye aria-hidden="true" className="size-3.5" />
+              Watchlist
+            </span>
+          )}
         </span>
       </div>
       <span className="text-sm text-[color:var(--text-secondary)]">
@@ -148,6 +171,38 @@ function Months({ title, rows, today }: { title: string; rows: CalendarRow[]; to
   )
 }
 
+/**
+ * When the watchlists' shares were read, and why they are not shown when they are not (GA8.2):
+ * not read yet, Watchlists v2 switched off, or a night that could not read them.
+ */
+function Lists({ read, today }: { read: WatchlistsRead; today: number }) {
+  const asOf = watchlistsAsOf(read, today)
+  return (
+    <>
+      {asOf !== null && <p className="text-xs text-[color:var(--text-tertiary)]">{asOf}</p>}
+      {read.words !== null && (
+        <p
+          role="note"
+          className={cn(
+            'flex items-start gap-2 rounded-[0.875rem] border px-3 py-2 text-sm font-semibold',
+            read.state === 'failed'
+              ? 'border-[color:var(--gold)] bg-[color:var(--gold-tint)] text-[color:var(--warning-text)]'
+              : 'border-[color:var(--border-strong)] bg-card text-[color:var(--text-secondary)]'
+          )}
+        >
+          <Info aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+          {read.words}
+        </p>
+      )}
+    </>
+  )
+}
+
+function Empty({ text }: { text: string | null }) {
+  if (text === null) return null
+  return <p className={cn(CARD, 'text-sm text-[color:var(--text-secondary)]')}>{text}</p>
+}
+
 export function CalendarView({ tabs }: { tabs: readonly TabInfo[] }) {
   const today = dayOfInstant(Date.now())
   const options = { retry: false, refetchOnWindowFocus: false } as const
@@ -165,9 +220,11 @@ export function CalendarView({ tabs }: { tabs: readonly TabInfo[] }) {
     void calendar.refetch()
     void actions.refetch()
   }
+  const [show, setShow] = useState<CalendarShow>('all')
   const failed = calendar.error ?? actions.error
   const problem = failed ? problemOf(failed) : null
-  const rows = calendar.data?.calendar ?? []
+  const rows = (calendar.data?.calendar ?? []).filter((r) => shownIn(r, show))
+  const lists = calendar.data?.watchlists
   const status = calendar.data?.read_status
   /** Upstox's list was read: only then does an empty list mean "nothing listed". */
   const read = status === undefined || status.state === 'ok'
@@ -235,13 +292,18 @@ export function CalendarView({ tabs }: { tabs: readonly TabInfo[] }) {
               {NO_FUTURE}
             </p>
           )}
+          <Segmented label="Show the events of" value={show} options={SHOWS} onChange={setShow} />
+          {show !== 'holdings' && lists !== undefined && <Lists read={lists} today={today} />}
           <Months title="Coming up" rows={coming} today={today} />
           <Months title="The last 90 days" rows={past} today={today} />
           {read && rows.length === 0 && (
-            <p className={cn(CARD, 'text-sm text-[color:var(--text-secondary)]')}>
-              No dividend, bonus, split or rights issue is listed for what you hold, from{' '}
-              {dayText(calendar.data.from)} to {dayText(calendar.data.to)}.
-            </p>
+            <Empty
+              text={emptyText(
+                show,
+                lists,
+                `from ${dayText(calendar.data.from)} to ${dayText(calendar.data.to)}`
+              )}
+            />
           )}
         </>
       )}

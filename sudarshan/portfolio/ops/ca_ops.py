@@ -1,7 +1,8 @@
 """Corporate actions, expected dividends and the calendar (phase P7, lane C: M7.13, M7.29, M7.36).
 
-Owner ops only (none is a family or a journal op), each behind ``SUDARSHAN_PORTFOLIO_INSIGHTS``
-(``ops.switched``). ``ca_list`` shows Upstox's events with the owner's decisions and the bonuses
+Owner ops (none is a family or a journal op), each behind ``SUDARSHAN_PORTFOLIO_INSIGHTS``
+(``ops.switched``), and ``ex_dates``, the screener purpose's one read (M9.13): public ex-dates for
+its "days to ex-date" line, behind the same switch. ``ca_list`` shows Upstox's events with the owner's decisions and the bonuses
 and splits waiting for his one tap; ``ca_decide`` is that tap. Neither reads Upstox by itself: the
 events come from the nightly read (``corpactions.py``), except one instrument a minute that the
 owner asks to be read again (``isin``). Nothing here writes a ledger: a tab gets a split or a bonus
@@ -138,3 +139,10 @@ async def calendar(ctx, message):
     return await answer(
         lambda: store.read(OWNER, lambda tx: dividends.calendar(tx, today, start, end, held))
     )
+
+
+@op("ex_dates")
+async def ex_dates(ctx, message):
+    """The screener's read, under its own purpose (M9.13): from the store alone, never Upstox."""
+    store, today = need(ctx), day_of_instant(ctx.clock())
+    return await answer(lambda: store.read(OWNER, lambda tx: corpactions.ex_dates(tx, today)))

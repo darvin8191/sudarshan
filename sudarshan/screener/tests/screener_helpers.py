@@ -97,6 +97,8 @@ def operand(item) -> dict:
         }  # fmt: skip
     if kind == "opt":
         return {"opt": item.what, "underlying": item.underlying, "tf": item.tf, "unit": item.unit}
+    if kind == "event":
+        return {"event": item.what, "kinds": list(item.kinds), "unit": item.unit}
     return {"math": item.op, "args": [operand(item.a), operand(item.b)], "unit": item.unit}
 
 

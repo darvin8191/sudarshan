@@ -341,7 +341,7 @@ of labelled lines). Funds are not read between 00:00 and 05:30 IST.
 
 ### Other purposes: the family and the journal (ring prep, v0.10.0)
 
-The listener opens three seal purposes, told apart by which key opens the seal
+The listener opens four seal purposes (the screener's since GA8.3), told apart by which key opens the seal
 (`sudarshan/vault/keys.py`); nothing here changes the owner's screens, and no caller of the other
 two exists in this release. Each purpose has its own principal and its own list of ops
 (`core/kinds.py`); an op not on its list answers 403 and is logged once a minute.
@@ -351,6 +351,7 @@ two exists in this release. Each purpose has its own principal and its own list 
 | owner (`PORTFOLIO_API_INFO`) | `owner` | the contract's ops, the four sharing ops among them (`shares_list`, `share_set`, `share_remove`, `member_privacy_set`) |
 | family (`PORTFOLIO_FAMILY_API_INFO`) | `viewer:<member id>` | reads: `state`, `summary`, `tab_get`, `performance`, `upstox_book`, `upstox_history`, `shares_for_viewer` |
 | journal (`PORTFOLIO_JOURNAL_API_INFO`) | `sudarshan-journal` | reads: `trades_day`, `order_history`, `historical_trades`, `pnl_report` (part `charges` also for some days: `from`, `to`, both inside the year), `positions`, `holdings`, `funds`, `benchmark_closes`, and `tax_pack` (`fy`, `member`: the owner's own working paper, as `tax_get` answers it, behind `SUDARSHAN_TAX`) |
+| screener (`PORTFOLIO_SCREENER_API_INFO`, M9.13) | `sudarshan-screener` | `ex_dates` only, behind `SUDARSHAN_PORTFOLIO_INSIGHTS`: each share whose corporate actions were read cleanly in the last 15 days, with the kind and ex-date of its events from a week back to 400 days on (`corpactions.ex_dates`); public facts, no quantity, tab or decision |
 
 * **Family scope** (`sharing.py`): built here, never taken from the caller. Tabs are the member's
   unexpired `tab_share` rows (the member's own row beats their role's) intersected with
@@ -424,6 +425,18 @@ Off, its ops answer `not_ready` whatever their module does (`ops.switched`, put 
 registration), its jobs end at once (`timers.gate_switched`) and nothing is read from Upstox for
 it. The owner's `state` answer carries `switches`, so the page offers a view only while its
 switch is on.
+
+**The watchlists' shares in the calendar** (GA8.1, P7 decision 15; `watchlists.py`). The night's
+corporate-actions run first reads the shares on the owner's own watchlists through OpenAlgo's
+sealed watchlists route (`op=own_members` under `WATCHLISTS_INTERNAL_INFO`, never the watchlists'
+database; `SUDARSHAN_PORTFOLIO_OPENALGO_URL`, loopback only), keeps them as the `report_cache`
+record of kind `watchlists` (no schema change), and reads their corporate actions after everything
+the owner holds, has traded or keeps in a tab, inside the same 150 reads a night and the same
+budget: a long watchlist takes longer to come round and never adds a read. `calendar` marks each
+row `holding` and `watchlist` and leaves out a share that is neither any more; its `watchlists`
+says when the lists were read, or why their shares are not shown (not read yet, Watchlists v2
+switched off, a night that could not read them, which keeps the last shares). No family op reads
+any of it.
 
 **The tax working paper** (`ops/tax_ops.py`, `tax_adapter.py`). `tax_get` is one taxpayer's
 year (a member; none is the owner, the first member) among the three Upstox keeps; anything older

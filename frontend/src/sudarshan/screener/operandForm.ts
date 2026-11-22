@@ -1,10 +1,12 @@
 /**
  * What the operand sheet offers and builds (design 5.2), as plain functions a test calls: the
- * five tabs (Price, Indicators, Volume, OI & options, Number), the items of each, an operand
+ * tabs (Price, Indicators, Volume, OI & options, Events, Number), the items of each, an operand
  * started from an item with the screen's own timeframe, and the range of each parameter in words.
+ * Events (M9.13, GA8.3): days to a share's next ex-date and to a contract's expiry.
  */
 import {
   BUILDUP_STATES,
+  EVENTS,
   FIELD_BY_ID,
   FIELDS,
   INDICATOR_BY_ID,
@@ -17,13 +19,14 @@ import {
 } from './catalog'
 import type { Offset, Operand, TimeFrame } from './types'
 
-export type OperandTab = 'price' | 'indicators' | 'volume' | 'oi' | 'number'
+export type OperandTab = 'price' | 'indicators' | 'volume' | 'oi' | 'events' | 'number'
 
 export const OPERAND_TABS: Array<{ id: OperandTab; label: string }> = [
   { id: 'price', label: 'Price' },
   { id: 'indicators', label: 'Indicators' },
   { id: 'volume', label: 'Volume' },
   { id: 'oi', label: 'OI & options' },
+  { id: 'events', label: 'Events' },
   { id: 'number', label: 'Number' },
 ]
 
@@ -32,6 +35,7 @@ export type Pick =
   | { kind: 'ind'; id: string }
   | { kind: 'oi'; what: 'buildup' | 'oi_change_pct' }
   | { kind: 'opt'; id: string }
+  | { kind: 'event'; id: 'ex_days' | 'expiry_days' }
   | { kind: 'num' }
   | { kind: 'math' }
 
@@ -89,6 +93,14 @@ export const ITEMS: Item[] = [
       pick: { kind: 'opt', id: o.id },
     })
   ),
+  ...EVENTS.map(
+    (e): Item => ({
+      key: `event:${e.id}`,
+      label: e.label,
+      tab: 'events',
+      pick: { kind: 'event', id: e.id },
+    })
+  ),
   { key: 'num', label: 'A number', tab: 'number', pick: { kind: 'num' } },
 ]
 
@@ -104,7 +116,7 @@ export function searchItems(text: string): Item[] {
 /** The tab an item is on: where the sheet opens for an operand already chosen. */
 export function tabOfPick(pick: Pick): OperandTab {
   const key =
-    pick.kind === 'field' || pick.kind === 'ind' || pick.kind === 'opt'
+    pick.kind === 'field' || pick.kind === 'ind' || pick.kind === 'opt' || pick.kind === 'event'
       ? `${pick.kind}:${pick.id}`
       : pick.kind === 'oi'
         ? `oi:${pick.what}`
@@ -119,6 +131,7 @@ export function pickOf(operand: Operand): Pick {
   if ('ind' in operand) return { kind: 'ind', id: operand.ind }
   if ('oi' in operand) return { kind: 'oi', what: operand.oi }
   if ('opt' in operand) return { kind: 'opt', id: operand.opt }
+  if ('event' in operand) return { kind: 'event', id: operand.event }
   return { kind: 'math' }
 }
 
@@ -162,6 +175,8 @@ export function starting(pick: Pick, tf: TimeFrame): Operand {
         ...(info?.timed ? { tf } : {}),
       }
     }
+    case 'event':
+      return pick.id === 'ex_days' ? { event: 'ex_days', kind: 'any' } : { event: 'expiry_days' }
     default:
       return { num: '0' }
   }

@@ -22,7 +22,10 @@ Before the screener was ever switched on there is no screener.db: use ``--spec``
 
 What a recording cannot hold is left out, as the service would in replay (``replay=True``): the
 exchange's status and the feed's health are not recorded, so the feed counts as healthy within
-the session and no pause is marked; the auction print is judged as recorded.
+the session and no pause is marked; the auction print is judged as recorded. Nor are the
+portfolio's ex-dates (M9.13): days to an ex-date are "Not checked" in a replay, and a difference
+on a run of a screen that counts them is listed as explained. Days to an expiry come from the
+contract's own symbol and the calendar, as in the service, and are judged.
 """
 
 from __future__ import annotations
@@ -49,14 +52,15 @@ from sudarshan.autologin.schedule import (
 )
 
 from . import alerting as al
-from . import candles, scheduler, spec, words
+from . import candles, events, scheduler, spec, words
 from . import membership as mem
+from . import ops as _ops  # noqa: F401  (first: screen_ops and dashboard_ops import each other)
 from .bars import Bars
 from .engine import Context, Subject, timeframes
 from .runs import Judged, Member, evaluate
 from .screen_ops import sched_screen
 from .store import OWNER, open_read_only
-from .types import DAY, HIT, MINUTE_TFS, NOT_CHECKED, Plan, Series
+from .types import DAY, HIT, MINUTE_TFS, NOT_CHECKED, Plan, RunKey, Series
 
 CLEAN, DIFFERENT, CANNOT = 0, 1, 2
 
@@ -83,6 +87,8 @@ class ReplaySource:
     market: Market
     members_by_universe: Mapping[str, Sequence[Member]]
     last: dict[str, Mapping[str, Any]] = field(default_factory=dict)
+    #: The exchange's sessions from the recorded day on, as the service counts them (M9.13).
+    trading_days: tuple[int, ...] = ()
 
     def members(self, universe: Mapping[str, Any]) -> Sequence[Member]:
         return self.members_by_universe.get(_uni_key(universe), [])
@@ -104,10 +110,12 @@ class ReplaySource:
             cp=paise(frame.get("cp")) if frame else None,
             auction_end=own.end if (member.cas and own is not None) else None,
             printed=self.bars.printed(member.key, self.market.today) if member.cas else False,
+            expiry=events.contract_expiry(member.symbol, member.segment),
         )
 
     def context(self, boundary: int, session: int) -> Context:
-        return Context(boundary, session, self.market.previous)
+        days = self.trading_days if self.trading_days[:1] == (session,) else ()
+        return Context(boundary, session, self.market.previous, trading_days=days)
 
     def prices(self, member: Member) -> tuple[int | None, int | None]:
         frame = self.last.get(member.key)
@@ -184,7 +192,9 @@ async def replay_day(
     day = day or datetime.fromtimestamp(first[1] / 1000, IST).date()
     auction = frozenset(m.key for members in universes.values() for m in members if m.cas)
     market = market_for(day, calendar, auction, first[1])
-    source = ReplaySource(bars, market, universes)
+    source = ReplaySource(
+        bars, market, universes, trading_days=events.ahead(day, calendar.is_trading_day)
+    )
     plans = {row["id"]: spec.compile_plan(row["spec"]) for row in screens}
     sched = [_on_the_day(sched_screen(row), day) for row in screens]
     rows: dict[int, dict[str, mem.Row]] = {
@@ -295,10 +305,19 @@ def line_words(line: RunLine) -> str:
     return "  ".join(parts)
 
 
+#: Why a run of a screen that counts days to an ex-date may differ from the service's (M9.13).
+EX_DATES = (
+    "the screen counts days to an ex-date, from the portfolio, which a recording does not hold"
+)
+
+
 def compare(
-    lines: Sequence[RunLine], live: Sequence[Mapping[str, Any]]
+    lines: Sequence[RunLine],
+    live: Sequence[Mapping[str, Any]],
+    ex_dates: frozenset[int] = frozenset(),
 ) -> tuple[list[str], list[str]]:
-    """(explained, unexplained) differences between the replay and the live run rows."""
+    """(explained, unexplained) differences between the replay and the live run rows; ``ex_dates``
+    are the screens whose lines count days to an ex-date."""
     explained, unexplained = [], []
     by_key = {row["run_key"]: row for row in live if row["status"] == "done"}
     seen = set()
@@ -322,7 +341,9 @@ def compare(
             f"replay {line.matched} matched, {len(line.entered)} entered, {len(line.exited)} left"
         )
         marks = row.get("marks") or {}
-        if marks.get("repaired") or marks.get("late") is not None:
+        if RunKey.parse(line.run_key).screen in ex_dates:
+            explained.append(f"{text} ({EX_DATES})")
+        elif marks.get("repaired") or marks.get("late") is not None:
             explained.append(
                 text
                 + " (the service's run was "
@@ -439,7 +460,10 @@ def main(argv: Sequence[str] | None = None, say: Callable[[str], None] = _say) -
         if not args.compare:
             return CLEAN
         live = _runs_from_db(engine, screens, day_key(day))
-        explained, unexplained = compare(lines, live)
+        counting = frozenset(
+            row["id"] for row in screens if events.reads_ex_dates(spec.compile_plan(row["spec"]))
+        )
+        explained, unexplained = compare(lines, live, counting)
         for text in explained:
             say("explained: " + text)
         for text in unexplained:

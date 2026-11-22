@@ -50,6 +50,7 @@ CODES = [
     T.WINDOW_OPEN,
     T.OTHER_DAY,
     T.NO_FEED,
+    T.NO_EVENTS,
 ]
 
 

@@ -54,6 +54,9 @@ FAMILY_INTERNAL_INFO = b"sudarshan/family/internal/v1"
 PORTFOLIO_FAMILY_API_INFO = b"sudarshan/portfolio/api/family/v1"
 #: Seals the journal's read-only portfolio calls (principal sudarshan-journal; account reads, G2).
 PORTFOLIO_JOURNAL_API_INFO = b"sudarshan/portfolio/api/journal/v1"
+#: Seals the screener's one portfolio read (principal sudarshan-screener): ``ex_dates``, the
+#: corporate actions' ex-dates for its "days to ex-date" line (M9.13).
+PORTFOLIO_SCREENER_API_INFO = b"sudarshan/portfolio/api/screener/v1"
 #: Seals OpenAlgo's bridge to the journal's local API (sudarshan-journal, 127.0.0.1:5586; P7).
 JOURNAL_API_INFO = b"sudarshan/journal/api/v1"
 #: Seals the alerts' report desk calls to the journal: report_get, report_file and delivery only.
@@ -88,6 +91,7 @@ PURPOSES = (
     FAMILY_INTERNAL_INFO,
     PORTFOLIO_FAMILY_API_INFO,
     PORTFOLIO_JOURNAL_API_INFO,
+    PORTFOLIO_SCREENER_API_INFO,
     JOURNAL_API_INFO,
     JOURNAL_DELIVERY_INFO,
     JOURNAL_NUDGE_INFO,

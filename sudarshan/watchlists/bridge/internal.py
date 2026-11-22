@@ -1,18 +1,23 @@
-"""The sealed members route (M8.14, W23): what the list alerts read of a list, and nothing else.
+"""The sealed members route (M8.14, W23): what the ring services read of a list, and nothing else.
 
-``POST /sudarshan/watchlists/internal/read?op=members|version`` is for ``sudarshan-alerts`` alone,
-on the screener's pattern: no session and no CSRF (the service has no browser to forge; the seal
-is its proof), one Fernet token under ``WATCHLISTS_INTERNAL_INFO`` in the body, a nonce book that
-refuses a replay, 16 KiB at most, and a 404 for any request nginx forwarded (the service calls
-127.0.0.1 directly, so a proxy header means it came from outside). The checks run in that order,
-the seal before the switch, so an unsealed caller learns nothing, not even whether v2 is on.
+``POST /sudarshan/watchlists/internal/read?op=members|version|own_members`` is for this server's
+ring services (``sudarshan-alerts`` for its list alerts, ``sudarshan-portfolio`` for the calendar
+of the watchlists' shares, GA8.1), on the screener's pattern: no session and no CSRF (a service
+has no browser to forge; the seal is its proof), one Fernet token under ``WATCHLISTS_INTERNAL_INFO``
+in the body, a nonce book that refuses a replay, 16 KiB at most, and a 404 for any request nginx
+forwarded (a service calls 127.0.0.1 directly, so a proxy header means it came from outside). The
+checks run in that order, the seal before the switch, so an unsealed caller learns nothing, not
+even whether v2 is on.
 
-Then: the switch (``off`` for both ops), and the owner (the one account of this instance). ``version``
+Then: the switch (``off`` for every op), and the owner (the one account of this instance). ``version``
 answers the lists version alone. ``members {ref}`` answers the rows of ``list:<id>``,
 ``list:<id>/section:<sid>``, ``preset:<id>`` or ``flag:<n>`` as the reader of that kind has them
 today (``refs/<kind>.members``), resolved through the master: a ranked ref is refused in words, an
 unknown or deleted list is ``gone``, a master that is not loaded is ``failed`` (the caller changes
-nothing and asks again).
+nothing and asks again). ``own_members`` answers the same over every list of the owner's own
+together (OpenAlgo's lists in their order, sections and follow rows as ``members`` reads them; not
+the built-in, ranked or flag lists): one row per contract, a list deleted while it is read passed
+over, no list identity.
 
 The answer is ``{status: "ok", data: {version, ref_version, created_at, list_key, rows, left_out,
 valid_until}}``:
@@ -129,8 +134,8 @@ def _open(op: str):
     except HandoffRejected as exc:
         _warn_once(
             "refused",
-            "Watchlists: refused an internal request that was not sealed by this server's "
-            "sudarshan-alerts (%s)", exc,
+            "Watchlists: refused an internal request that was not sealed by this server's ring "
+            "services (%s)", exc,
         )  # fmt: skip
         return None, _refused(403, "Forbidden")
     return message, None
@@ -239,6 +244,36 @@ def _members(ref) -> dict:
     return jsonify({"status": "ok", "data": data})
 
 
+def _own_members():
+    """``own_members``: every list of the owner's own together, in the members op's shape (one
+    row per contract: ``wire`` keeps the first). A list deleted between the listing and its read
+    is passed over; any other refusal is the answer, as for ``members``."""
+    from sudarshan.watchlists.ops import OpError
+    from sudarshan.watchlists.ops.lists import own_lists
+
+    owner = find_user_by_username()
+    if owner is None:
+        return _error("failed")
+    reader, rows, left_out = refs.readers()["list"], [], []
+    try:
+        for lid, _name, _made, _count in own_lists(owner.username):
+            try:
+                got = reader.members(str(lid), owner.username)
+            except OpError as refused:
+                if refused.code != "gone":
+                    raise
+                continue
+            rows += got["members"]
+            left_out += got["left_out"]
+        data = wire({"version": versions.read(), "members": rows, "left_out": left_out},
+                    reader_now())  # fmt: skip
+    except OpError as refused:
+        return _error(refused.code, refused.message)
+    except _Failed as failed:
+        return _error("failed", failed.text)
+    return jsonify({"status": "ok", "data": data})
+
+
 def reader_now() -> int:
     return int(time.time() * 1000)
 
@@ -257,6 +292,8 @@ def read():
         engine.ready()
         if op == "version":
             response = jsonify({"status": "ok", "data": {"version": versions.read()}})
+        elif op == "own_members":
+            response = _own_members()
         else:
             response = _members(message.get("ref"))
     except (engine.RecordTooNew, engine.RecordUnreadable):

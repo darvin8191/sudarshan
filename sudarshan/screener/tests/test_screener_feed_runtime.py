@@ -437,3 +437,26 @@ def test_waits_of_skips_what_the_screener_does_not_follow():
     assert sch.waits_of([kept, cut], arrived.get) == sch.Waits(printed=None)
     assert sch.waits_of([kept, cut], arrived.get, lambda m: m is kept) == sch.Waits(printed=1_000)
     assert sch.waits_of([cut], arrived.get, lambda m: False) == sch.Waits(printed=0)
+
+
+def test_a_run_counts_days_on_the_days_own_calendar_and_reads_a_contracts_expiry(world):
+    """M9.13 (GA8.3): the sessions from the day's calendar reach the run's context once a day,
+    for that session only, and a future's expiry comes from its symbol; a share has none."""
+    from sudarshan.screener.runs import Member
+
+    store, source, clock = world
+    source.new_day(clock["now"])
+    days = source.context(ms(DAY, "09:30"), 20261028).trading_days
+    assert days[:4] == (20261028, 20261029, 20261030, 20261102) and 20261031 not in days
+    assert source.context(ms(DAY, "09:30"), 20261029).trading_days == ()  # not today's session
+    plan = spec.compile_plan(
+        spec.check({**SPEC, "universe": {"kind": "watchlist", "list_id": 7}, "where": {
+            "id": "c1", "left": {"event": "expiry_days"}, "op": "eq", "right": {"num": "0"}}})
+    )  # fmt: skip
+    future = Member("NSE_FO|49081", "NIFTY24NOV26FUT", "NFO", "NSE_FO", False)
+    share = Member(SBIN, "SBIN", "NSE", "NSE_EQ", False)
+    for member in (future, share):
+        source._last[member.key] = {"ltp": 100.0, "cp": 99.0}  # a price has come for each
+    assert source.subject(future, plan, ms(DAY, "09:30")).expiry == 20261124
+    assert source.subject(share, plan, ms(DAY, "09:30")).expiry is None
+    assert source.subject(share, plan, ms(DAY, "09:30")).ex_dates is None  # not read here yet

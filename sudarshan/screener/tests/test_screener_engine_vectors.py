@@ -12,6 +12,7 @@ The expectations are typed from the rules in engine.py's notes, never produced b
 from __future__ import annotations
 
 import json
+from datetime import date
 from fractions import Fraction
 from functools import cache
 from pathlib import Path
@@ -19,7 +20,7 @@ from pathlib import Path
 import pytest
 from screener_helpers import assert_same, candle, day_key, ladder, ms, want
 
-from sudarshan.screener import engine, library, options, spec
+from sudarshan.screener import engine, events, library, options, spec
 from sudarshan.screener import types as T
 from sudarshan.screener.types import Candle, Outcome, Series, Why
 
@@ -132,7 +133,22 @@ def subject_of(case: dict) -> engine.Subject:
         underlying=case.get("underlying"),
         auction_end=ms(*case["auction_end"]) if "auction_end" in case else None,
         printed=case.get("printed", False),
+        expiry=day_key(case["expiry"]) if "expiry" in case else None,
+        ex_dates=(
+            tuple((kind, day_key(day)) for kind, day in case["ex_dates"])
+            if "ex_dates" in case
+            else None
+        ),
     )
+
+
+def days_of(raw: dict | None) -> tuple[int, ...]:
+    """The sessions a case's calendar holds: weekdays from ``from`` to ``to``, less ``shut``."""
+    if raw is None:
+        return ()
+    start, end = date.fromisoformat(raw["from"]), date.fromisoformat(raw["to"])
+    shut = {date.fromisoformat(day) for day in raw.get("shut", ())}
+    return events.ahead(start, lambda d: d.weekday() < 5 and d not in shut, (end - start).days + 1)
 
 
 def context_of(case: dict) -> engine.Context:
@@ -149,6 +165,7 @@ def context_of(case: dict) -> engine.Context:
         opens=opens.get,
         bench=lambda index, tf: bench.get((index, tf)),
         options=view_of(case["view"]) if "view" in case else None,
+        trading_days=days_of(case.get("days")),
     )
 
 

@@ -33,6 +33,8 @@ from sudarshan.vault import (
     PORTFOLIO_API_INFO,
     PORTFOLIO_FAMILY_API_INFO,
     PORTFOLIO_JOURNAL_API_INFO,
+    PORTFOLIO_SCREENER_API_INFO,
+    WATCHLISTS_INTERNAL_INFO,
     fernet_for,
 )
 
@@ -98,12 +100,17 @@ class Service:
         port_retry_s: float = PORT_RETRY_S,
         family_fernet=None,
         journal_fernet=None,
+        watch_fernet=None,
+        screener_fernet=None,
     ):
         self.settings = settings
+        #: The seal of the watchlists' internal route (watchlists.py, GA8.1); None: not read.
+        self.watch_fernet = watch_fernet
         self.enabled = settings.enabled
         self.api = PortfolioApi(
-            self, fernet, family_fernet=family_fernet, journal_fernet=journal_fernet
-        )
+            self, fernet, family_fernet=family_fernet, journal_fernet=journal_fernet,
+            screener_fernet=screener_fernet,
+        )  # fmt: skip
         self.store: Any = None
         #: Why the portfolio is off when the switch is on (a newer file, a store that will not
         #: open), in the owner's words; the API answers every op with it.
@@ -350,6 +357,8 @@ def main() -> int:
             fernet,
             family_fernet=fernet_for(pepper, PORTFOLIO_FAMILY_API_INFO),
             journal_fernet=fernet_for(pepper, PORTFOLIO_JOURNAL_API_INFO),
+            watch_fernet=fernet_for(pepper, WATCHLISTS_INTERNAL_INFO),
+            screener_fernet=fernet_for(pepper, PORTFOLIO_SCREENER_API_INFO),
         )
         asyncio.run(_serve(service))
     except Exception:  # a bug: systemd restarts it

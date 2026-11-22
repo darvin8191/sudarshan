@@ -307,6 +307,7 @@ SWITCHED_OPS = {
         "risk",
         "settings_get",
         "settings_set",
+        "ex_dates",
     ),
     "goals": ("goals_list", "goal_create", "goal_update", "export_pdf"),
 }
@@ -629,14 +630,20 @@ JOURNAL_OPS = (
     "benchmark_closes",
     "tax_pack",
 )
+#: The only op under the screener purpose (principal ``sudarshan-screener``; M9.13, GA8.3): the
+#: ex-dates of the shares whose corporate actions the nightly read covers, for the screener's
+#: "days to ex-date" line. Public facts (``ca_event``) and no account figure; it waits for the
+#: insights switch, as the read that fills it does.
+SCREENER_OPS = ("ex_dates",)
 FAMILY_PRINCIPAL_PREFIX = "viewer:"
 JOURNAL_PRINCIPAL = "sudarshan-journal"
+SCREENER_PRINCIPAL = "sudarshan-screener"
 #: A tab share's level: ``view`` shows what the member's privacy allows; ``restricted`` shows no
 #: figures at all (symbols, names and directions only).
 SHARE_LEVELS = ("view", "restricted")
 #: The four categories of a member's privacy (family design 3.1; Y24).
 PRIVACY_CATEGORIES = ("pnl", "qty", "funds", "orders")
-SERVICE_OP_NAMES = tuple(dict.fromkeys((*OP_NAMES, *FAMILY_OPS, *JOURNAL_OPS)))
+SERVICE_OP_NAMES = tuple(dict.fromkeys((*OP_NAMES, *FAMILY_OPS, *JOURNAL_OPS, *SCREENER_OPS)))
 
 # ---- what types.ts repeats -----------------------------------------------------------------
 #: The numbers, lists, labels, strings and sentences the phone's types.ts carries a copy of, by

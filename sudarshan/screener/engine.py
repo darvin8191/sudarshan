@@ -58,9 +58,10 @@ from typing import NamedTuple
 import numpy as np
 
 from sudarshan.screener import catalog as cat
-from sudarshan.screener import library, options, patterns, price
+from sudarshan.screener import events, library, options, patterns, price
 from sudarshan.screener.types import (
     DAY,
+    DAYS,
     FALSE,
     FIRST_TODAY,
     HIT,
@@ -85,6 +86,7 @@ from sudarshan.screener.types import (
     WEEK,
     ZERO,
     Clause,
+    Event,
     Field,
     Group,
     Ind,
@@ -130,7 +132,9 @@ class Subject:
     close (paise), ``year`` the 52-week (high, low) of the morning snapshot, ``prev_oi`` yesterday's
     open interest, ``underlying`` the name its options chain is kept under. ``auction_end`` is the
     end of the last candle of a stock that closes by auction (the cash close) and ``printed`` says
-    whether its auction price has come.
+    whether its auction price has come. ``expiry`` is a future's or an option's own expiry
+    (YYYYMMDD) and ``ex_dates`` the share's corporate actions, ``(kind, ex_day)``, as SUDARSHAN read
+    them, None when it does not read them (M9.13).
     """
 
     symbol: str
@@ -141,6 +145,8 @@ class Subject:
     underlying: str | None = None
     auction_end: int | None = None
     printed: bool = False
+    expiry: int | None = None
+    ex_dates: tuple[tuple[str, int], ...] | None = None
 
 
 def _no_opens(session: int) -> int | None:
@@ -158,7 +164,8 @@ class Context:
     ``boundary`` is the end of the candle judged (epoch ms) and ``session`` its trading day
     (YYYYMMDD); ``previous`` is the trading day before it (0: not known). ``opens`` maps a session
     to its start; ``bench`` returns an index's candles on a timeframe; ``options`` answers an option
-    operand (``options.View``).
+    operand (``options.View``). ``trading_days`` are the exchange's sessions from this one on,
+    ascending, as its calendar knows them (``events.ahead``); empty: not known (M9.13).
     """
 
     boundary: int
@@ -167,6 +174,7 @@ class Context:
     opens: Callable[[int], int | None] = _no_opens
     bench: Callable[[str, TF], Series | None] = _no_bench
     options: Callable[..., Value] | None = None
+    trading_days: tuple[int, ...] = ()
 
 
 # ---- numbers --------------------------------------------------------------------------------------
@@ -265,6 +273,8 @@ def show(value: Number | str, unit: str) -> str:
         return _fixed(exact, 2)
     if unit == QTY:
         return str(int(exact)) if exact.denominator == 1 else _trimmed(_fixed(exact, 2))
+    if unit == DAYS and exact >= events.NONE_LISTED:
+        return "none listed"
     return _trimmed(_fixed(exact, 4))
 
 
@@ -439,6 +449,8 @@ class Reading:
             return self._oi(op, back)
         if kind == "opt":
             return self._opt(op, back)
+        if kind == "event":
+            return self._event(op, back)
         return self._math(op, back)
 
     def _math(self, op: Math, back: int) -> Value:
@@ -610,6 +622,16 @@ class Reading:
             return Why(NO_DATA, ("earlier option values",))
         view = self.ctx.options if self.ctx.options is not None else options.View()
         return view(opt, self.subject.underlying)
+
+    def _event(self, event: Event, back: int) -> Value:
+        """Sessions to the instrument's next ex-date or its expiry (``events``); a count has no
+        candle before it to read (a cross or a run of candles is refused when a screen is saved)."""
+        if back:
+            return Why(NO_DATA, ("earlier event values",))
+        days, subject = self.ctx.trading_days, self.subject
+        if event.what == "expiry_days":
+            return events.expiry_days(subject.expiry, days)
+        return events.ex_days(subject.ex_dates, event.kinds, days, self.ctx.previous)
 
     # -- lines --
     def clause(self, line: Clause) -> Result:

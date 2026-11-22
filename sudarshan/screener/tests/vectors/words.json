@@ -49,7 +49,12 @@
 {"id": "W13e", "why": ["paused", "not a time"], "sentence": "Could not be checked this time", "line": "Not checked: could not be checked this time", "note": "a detail that is not a time"}, 
 {"id": "W13f", "why": ["paused", 1000000000000000], "sentence": "Could not be checked this time", "line": "Not checked: could not be checked this time", "note": "a time too far off for the calendar"}, 
 {"id": "W13g", "why": ["paused", 100000000000000000000], "sentence": "Could not be checked this time", "line": "Not checked: could not be checked this time", "note": "a time too far off for the clock"}, 
-{"id": "W13h", "why": ["paused", 1000000000000000000000000000000], "sentence": "Could not be checked this time", "line": "Not checked: could not be checked this time", "note": "a time too far off to count"}],
+{"id": "W13h", "why": ["paused", 1000000000000000000000000000000], "sentence": "Could not be checked this time", "line": "Not checked: could not be checked this time", "note": "a time too far off to count"}, 
+{"id": "W60", "why": ["no_events", "ex_dates"], "sentence": "Ex-dates come from the portfolio's nightly read, of the shares you hold and those on your watchlists", "line": "Not checked: ex-dates come from the portfolio's nightly read, of the shares you hold and those on your watchlists", "note": "M9.13: a share the portfolio has not read (neither held nor watched), or no read from it"}, 
+{"id": "W61", "why": ["no_events", "expiry"], "sentence": "It has no expiry; only futures and options do", "line": "Not checked: it has no expiry; only futures and options do", "note": "M9.13: days to expiry on a share in a watchlist"}, 
+{"id": "W62", "why": ["no_events", "calendar"], "sentence": "The exchange's holiday list is not on the server", "line": "Not checked: the exchange's holiday list is not on the server", "note": "M9.13: no trading days to count on"}, 
+{"id": "W64", "why": ["no_events", "far"], "sentence": "It expires more than 400 days ahead, past the days the screener counts", "line": "Not checked: it expires more than 400 days ahead, past the days the screener counts", "note": "M9.13: a long-dated contract"}, 
+{"id": "W63", "why": ["no_events", "something else"], "sentence": "Could not be checked this time", "line": "Not checked: could not be checked this time", "note": "a date name the words do not know"}],
 "not_checked": [
 {"id": "N1", "whys": [], "line": "Not checked"}, 
 {"id": "N2", "whys": [["warming", 50, 37]], "line": "Not checked: warming up (37 of 50 candles so far)"}, 
