@@ -102,6 +102,13 @@ _NOUNS = {
     "earlier option values": "earlier option values",
 }
 _OI_READINGS = {"buildup": "build-up", "oi_change_pct": "open interest change"}
+#: Why an event operand cannot count (M9.13): what the owner can do about each.
+_EVENTS_UNKNOWN = {
+    "ex_dates": "ex-dates are read only for the shares you hold and those on your watchlists",
+    "expiry": "it has no expiry; only futures and options do",
+    "calendar": "the exchange's holiday list is not on the server",
+    "far": "it expires more than 400 days ahead, past the days the screener counts",
+}
 _TF_WORDS = {"1": "1 minute", "D": "a day", "W": "a week"}
 _UNKNOWN = "could not be checked this time"
 
@@ -153,6 +160,9 @@ def _reason(why: T.Why) -> str:
                 f"past the {_count(limit, 'instrument', 'instruments')} the screener can follow "
                 "tick by tick"
             )
+        if code == T.NO_EVENTS:
+            (what,) = detail
+            return _EVENTS_UNKNOWN.get(what, _UNKNOWN)
         if code == T.NEEDS_HISTORY:
             need, tf, most = detail
             span = _TF_WORDS.get(str(tf)) or f"{quantity(int(tf))} minutes"

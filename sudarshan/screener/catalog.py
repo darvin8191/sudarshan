@@ -307,6 +307,34 @@ OPT: dict[str, OptSpec] = {
     "vix_pct": OptSpec(PCT, "India VIX percentile", underlying=False),
 }
 
+
+# ---- events (M9.13, gap audit GA8.3) -----------------------------------------------------------
+@dataclass(frozen=True, slots=True)
+class EventSpec:
+    words: str
+    #: True: names the kind of corporate action it counts to (``EVENT_KINDS``).
+    kinds: bool
+    #: The universes whose instruments have such a date; another is refused with ``refusal``.
+    universes: frozenset
+    refusal: str
+
+
+#: The corporate actions an ex-date belongs to, as the portfolio reads them from Upstox
+#: (portfolio.core.kinds.CA_KINDS); "any" counts every one of them.
+CA_KINDS = ("dividend", "bonus", "split", "rights")
+EVENT_KINDS = ("any", *CA_KINDS)
+EVENTS: dict[str, EventSpec] = {
+    "ex_days": EventSpec(
+        "Days to ex-date", True, frozenset({"fno_stocks", "index_list", "watchlist"}),
+        "Days to ex-date is for shares. Pick F&O stocks, a NIFTY list or a watchlist.",
+    ),
+    "expiry_days": EventSpec(
+        "Days to expiry", False, frozenset({"fno_futures", "index_futures", "options", "watchlist"}),
+        "Days to expiry is for futures and options. Pick F&O futures, index futures, option "
+        "strikes or a watchlist.",
+    ),
+}  # fmt: skip
+
 # ---- operators -------------------------------------------------------------------------------
 BINARY, UNARY = "binary", "unary"
 

@@ -285,3 +285,24 @@ def test_the_owners_one_command_starts_in_a_fresh_interpreter():
     )  # fmt: skip
     assert done.returncode == 0, done.stderr[-2000:]
     assert "--compare" in done.stdout
+
+
+def test_the_replay_counts_days_and_reads_expiries_as_the_service_does():
+    """M9.13 (GA8.3): the replayed day's sessions from the same calendar, for that session only,
+    and a future's expiry from its symbol: an event line judges the same in the replay."""
+    from datetime import date
+
+    from sudarshan.screener import events
+
+    day = date(2026, 10, 28)
+    days = events.ahead(day, Calendar().is_trading_day)
+    market = check.market_for(day, Calendar(), frozenset(), ms(DAY, "09:15"))
+    source = check.ReplaySource(Bars(), market, {}, trading_days=days)
+    assert days[:3] == (20261028, 20261029, 20261030)
+    assert source.context(ms(DAY, "10:15"), 20261028).trading_days == days
+    assert source.context(ms(DAY, "10:15"), 20261029).trading_days == ()
+    future = Member("NSE_FO|49081", "NIFTY24NOV26FUT", "NFO", "NSE_FO", False)
+    plan = spec.compile_plan(spec.check({**SPEC, "universe": {"kind": "fno_futures"}, "where": {
+        "id": "c1", "left": {"event": "expiry_days"}, "op": "eq", "right": {"num": "0"}}}))  # fmt: skip
+    source.last[future.key] = {"ltp": 100.0, "cp": 99.0}
+    assert source.subject(future, plan, ms(DAY, "10:15")).expiry == 20261124

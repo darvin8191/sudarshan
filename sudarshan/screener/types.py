@@ -32,7 +32,9 @@ MAX_AGO = 100
 
 # What a value is measured in. A typed number adopts the unit of what it is compared with.
 PAISE, QTY, PCT, RUPEES, NUM, STATE = "paise", "qty", "pct", "rupees", "num", "state"
-UNITS = (PAISE, QTY, PCT, RUPEES, NUM, STATE)
+#: A count of trading sessions (the event operands, M9.13).
+DAYS = "days"
+UNITS = (PAISE, QTY, PCT, RUPEES, NUM, STATE, DAYS)
 
 
 def plain(value: Fraction | int) -> str:
@@ -119,6 +121,9 @@ NO_FEED = "no_feed"  # (): no price from the feed yet
 #: (need, tf, most): more candles of ``tf`` than today alone can give, before the history download
 NEEDS_HISTORY = "needs_history"
 OVER_LIMIT = "over_limit"  # (limit,): past the instruments the screener may follow tick by tick
+#: (what,): the dates an event operand counts to are not known here: "ex_dates" (a share whose
+#: corporate actions SUDARSHAN does not read), "expiry" (no contract), "calendar" (no exchange days)
+NO_EVENTS = "no_events"
 
 
 @dataclass(frozen=True, slots=True)
@@ -260,6 +265,17 @@ class Opt:
 
 
 @dataclass(frozen=True, slots=True)
+class Event:
+    """Trading days to an event of the instrument's (M9.13): its next ex-date or its expiry."""
+
+    what: str  # "ex_days" | "expiry_days"
+    #: The corporate actions an ex-date counts for (ex_days); () for an expiry.
+    kinds: tuple
+    unit: str = DAYS
+    kind = "event"
+
+
+@dataclass(frozen=True, slots=True)
 class Math:
     op: str  # add | sub | mul | div
     a: Operand
@@ -268,7 +284,7 @@ class Math:
     kind = "math"
 
 
-Operand = Num | Field | Ind | Oi | Opt | Math
+Operand = Num | Field | Ind | Oi | Opt | Math | Event
 
 
 @dataclass(frozen=True, slots=True)

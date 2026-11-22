@@ -49,7 +49,7 @@ from sudarshan.autologin.schedule import (
 )
 
 from . import alerting as al
-from . import candles, scheduler, spec, words
+from . import candles, events, scheduler, spec, words
 from . import membership as mem
 from . import ops as _ops  # noqa: F401  (first: screen_ops and dashboard_ops import each other)
 from .bars import Bars
@@ -84,6 +84,8 @@ class ReplaySource:
     market: Market
     members_by_universe: Mapping[str, Sequence[Member]]
     last: dict[str, Mapping[str, Any]] = field(default_factory=dict)
+    #: The exchange's sessions from the recorded day on, as the service counts them (M9.13).
+    trading_days: tuple[int, ...] = ()
 
     def members(self, universe: Mapping[str, Any]) -> Sequence[Member]:
         return self.members_by_universe.get(_uni_key(universe), [])
@@ -105,10 +107,12 @@ class ReplaySource:
             cp=paise(frame.get("cp")) if frame else None,
             auction_end=own.end if (member.cas and own is not None) else None,
             printed=self.bars.printed(member.key, self.market.today) if member.cas else False,
+            expiry=events.contract_expiry(member.symbol, member.segment),
         )
 
     def context(self, boundary: int, session: int) -> Context:
-        return Context(boundary, session, self.market.previous)
+        days = self.trading_days if self.trading_days[:1] == (session,) else ()
+        return Context(boundary, session, self.market.previous, trading_days=days)
 
     def prices(self, member: Member) -> tuple[int | None, int | None]:
         frame = self.last.get(member.key)
@@ -185,7 +189,9 @@ async def replay_day(
     day = day or datetime.fromtimestamp(first[1] / 1000, IST).date()
     auction = frozenset(m.key for members in universes.values() for m in members if m.cas)
     market = market_for(day, calendar, auction, first[1])
-    source = ReplaySource(bars, market, universes)
+    source = ReplaySource(
+        bars, market, universes, trading_days=events.ahead(day, calendar.is_trading_day)
+    )
     plans = {row["id"]: spec.compile_plan(row["spec"]) for row in screens}
     sched = [_on_the_day(sched_screen(row), day) for row in screens]
     rows: dict[int, dict[str, mem.Row]] = {

@@ -53,7 +53,7 @@ from sudarshan.alerts.market.sessions import (
 from sudarshan.autologin.schedule import IST
 from sudarshan.feed.client_auth import auth_headers  # FL1
 
-from . import candles, universe
+from . import candles, events, universe
 from .bars import UNFOLLOWED, Bar, Bars, Followed, Sealed
 from .engine import Context, Subject, timeframes
 from .runs import Member
@@ -220,6 +220,9 @@ class LiveSource:
             Callable[[Sequence[Mapping[str, Any]]], Awaitable[Mapping[int, Sequence]]] | None
         ) = None
         self.counts_extra = {"reanchored": 0, "lists_reread": 0}
+        #: The exchange's sessions from today on, for the event operands (M9.13): built at each
+        #: new day from the calendar, never on a run.
+        self._ahead: tuple[int, ...] = ()
         self._master_asked = 0
         self.counts = {"frames": 0, "trades": 0, "sealed": 0, "late": 0}
 
@@ -253,10 +256,14 @@ class LiveSource:
             cp=paise(cp),
             auction_end=auction_end,
             printed=self.bars.printed(member.key, self.market.today) if member.cas else False,
+            expiry=events.contract_expiry(member.symbol, member.segment),
         )
 
     def context(self, boundary: int, session: int) -> Context:
-        return Context(boundary, session, self.market.previous, opens=self._opens)
+        days = self._ahead if self._ahead[:1] == (session,) else ()
+        return Context(
+            boundary, session, self.market.previous, opens=self._opens, trading_days=days
+        )
 
     def _opens(self, session: int) -> int | None:
         found = self.market.sessions.get("NSE_EQ")
@@ -407,6 +414,7 @@ class LiveSource:
         sessions = sessions_of(day, trading_day=trading, window=windows.get(day))
         previous = previous_trading_day(day, self.calendar.is_trading_day)
         self.market = Market(day_key(day), sessions, day_key(previous) if previous else 0)
+        self._ahead = events.ahead(day, self.calendar.is_trading_day)
         self._pauses, self._open_pause, self._open_pause_id, self._last = [], None, None, {}
         self._heard = {}
         self._gap_rows = {}

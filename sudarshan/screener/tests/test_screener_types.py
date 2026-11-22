@@ -105,7 +105,7 @@ def test_plain_reads_back_as_the_same_number():
 def test_timeframes_and_units():
     assert t.TIMEFRAMES == (1, 3, 5, 15, 30, 60, "D", "W")
     assert t.MINUTE_TFS == (1, 3, 5, 15, 30, 60)
-    assert set(t.UNITS) == {"paise", "qty", "pct", "rupees", "num", "state"}
+    assert set(t.UNITS) == {"paise", "qty", "pct", "rupees", "num", "state", "days"}
     assert t.MAX_AGO == 100
 
 
