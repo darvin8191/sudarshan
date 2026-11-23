@@ -617,7 +617,21 @@ export const LiveList = memo(function LiveList({
       )}
 
       {pref && !editing && (
-        <ViewLine pref={pref} at={sorted.at} readAt={sorted.readAt} onAgain={sorted.again} />
+        <ViewLine
+          pref={pref}
+          at={sorted.at}
+          readAt={sorted.readAt}
+          onAgain={sorted.again}
+          figures={
+            shownCols.length > 0
+              ? {
+                  picked: (pref.cols ?? []).length,
+                  shown: drawnCols.length,
+                  uneven: drawn !== null && drawn.least < drawn.most,
+                }
+              : undefined
+          } // M8.3
+        />
       )}
 
       {preset && (

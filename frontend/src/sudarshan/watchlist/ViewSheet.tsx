@@ -1,8 +1,9 @@
 import { useQueryClient } from '@tanstack/react-query'
-import { ArrowUpDown, Check, Sunrise } from 'lucide-react'
+import { ArrowUpDown, Check, Columns3, Sunrise } from 'lucide-react'
 import { type ReactNode, useCallback, useState } from 'react'
 import { cn } from '@/lib/utils'
 import { BottomSheet } from './BottomSheet'
+import { FIGURES, MAX_FIGURES } from './figures'
 import { OPEN_UNKNOWN } from './rows'
 import {
   BASIS_LINE,
@@ -15,7 +16,7 @@ import {
   sortWords,
 } from './sort'
 import { callOp, problemOf } from './v2/api'
-import type { Basis, Pref, View } from './v2/types'
+import type { Basis, Figure, Pref, View } from './v2/types'
 import { viewKey } from './v2/useListView'
 
 /**
@@ -93,6 +94,75 @@ function Group({ title, children }: { title: string; children: ReactNode }) {
   )
 }
 
+/** M8.3 GA6.2: the View sheet's names for the figures beside the price (W1). */
+const PICK_NAMES: Record<Figure, string> = {
+  high: 'Day high',
+  low: 'Day low',
+  open: 'Today’s open',
+  prev: 'Previous close',
+  volume: 'Volume',
+  oi: 'Open interest (OI)',
+  atp: 'Average price (ATP)',
+  iv: 'IV (options)',
+}
+export const FIGURES_HELP =
+  'Pick up to six. The first two show with the phone upright, up to six when it is turned on its side.'
+export const FIGURES_DATA =
+  'Day high, Day low, Volume, OI, ATP and IV come with every tick and use more mobile data than the price alone. IV is Upstox’s; the strike sheet works its own out.'
+export const FIGURES_LEFT_OUT =
+  'Not offered here: OI change, 52-week high and low, circuit limits, bid and ask (Market depth in the symbol sheet has them), Greeks and PCR (the strike sheet and the option tools), and charts in the rows.'
+export const SIX_AT_MOST = 'Six figures at most. Remove one first.'
+const NOTE = 'px-3 text-[0.8125rem] font-medium text-[color:var(--text-tertiary)]'
+
+/** "Figures in the rows": each pick saved at once in the order made; a seventh is refused in place. */
+function FigurePicker({
+  picked,
+  onChange,
+}: {
+  picked: readonly Figure[]
+  onChange: (next: Figure[]) => void
+}) {
+  const [refused, setRefused] = useState(false)
+  const toggle = (id: Figure) => {
+    const on = picked.includes(id)
+    if (!on && picked.length >= MAX_FIGURES) return setRefused(true)
+    setRefused(false)
+    onChange(on ? picked.filter((each) => each !== id) : [...picked, id])
+  }
+  return (
+    <Group title="Figures in the rows">
+      <p className={cn(NOTE, 'pb-1')}>{FIGURES_HELP}</p>
+      {FIGURES.map(({ id }) => {
+        const place = picked.indexOf(id) + 1
+        return (
+          // biome-ignore lint/a11y/useSemanticElements: a 48 dp row like the sheet's other choices, with its place beside the name; a native checkbox is a box, not the row
+          <button
+            key={id}
+            type="button"
+            role="checkbox"
+            aria-checked={place > 0}
+            aria-label={place > 0 ? `${PICK_NAMES[id]}, place ${place}` : PICK_NAMES[id]}
+            onClick={() => toggle(id)}
+            className={cn(ROW, place > 0 && 'bg-[color:var(--primary-tint)] font-bold')}
+          >
+            {PICK_NAMES[id]}
+            {place > 0 && (
+              <span className="ml-auto flex size-7 items-center justify-center rounded-full bg-[color:var(--brand)] text-sm font-bold text-white">
+                {place}
+              </span>
+            )}
+          </button>
+        )
+      })}
+      <output className="block px-3 text-sm font-semibold text-[color:var(--warning-text)]">
+        {refused ? SIX_AT_MOST : ''}
+      </output>
+      <p className={cn(NOTE, 'pt-1')}>{FIGURES_DATA}</p>
+      <p className={cn(NOTE, 'pt-1')}>{FIGURES_LEFT_OUT}</p>
+    </Group>
+  )
+}
+
 /** The View sheet: Sort by, High first or A to Z, Change from. F7's switch goes where `extra` does. */
 export function ViewSheet({
   open,
@@ -152,6 +222,10 @@ export function ViewSheet({
           </p>
         )}
       </Group>
+      <FigurePicker
+        picked={pref.cols ?? []}
+        onChange={(cols) => onChange({ ...pref, cols })} // M8.3
+      />
       {extra}
       {problem && (
         <p role="alert" className="px-3 pt-2 text-sm font-medium text-[color:var(--down)]">
@@ -178,14 +252,18 @@ export function ViewLine({
   at,
   readAt,
   onAgain,
+  figures,
 }: {
   pref: Pref
   at: number | null
   /** F9: when the prices of a list longer than the window were read, when that is what it was ranked on. */
   readAt?: number | null
   onAgain: () => void
+  /** M8.3: the figures picked, how many the rows draw at this width, and whether rows differ. */
+  figures?: { picked: number; shown: number; uneven: boolean }
 }) {
-  if (isDefaultView(pref)) return null
+  const fewer = figures !== undefined && figures.shown < figures.picked
+  if (isDefaultView(pref) && !fewer) return null
   const sorted = pref.sort !== 'list'
   const prices = needsPrices(pref.sort)
   return (
@@ -214,6 +292,12 @@ export function ViewLine({
         <span className="flex items-center gap-1.5">
           <Sunrise aria-hidden="true" className="size-3.5" />
           {BASIS_LINE}
+        </span>
+      )}
+      {figures && fewer && (
+        <span data-figures-line="true" className="flex items-center gap-1.5">
+          <Columns3 aria-hidden="true" className="size-3.5" />
+          {`Figures: ${figures.uneven ? 'up to ' : ''}${figures.shown} of ${figures.picked} shown here; turn the phone on its side for the rest.`}
         </span>
       )}
     </p>
