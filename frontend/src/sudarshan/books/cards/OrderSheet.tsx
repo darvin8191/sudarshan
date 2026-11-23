@@ -12,8 +12,9 @@ import { ActionWords, OUTLINED } from './parts'
  * What an order's sheet gained in B2 (M6.1): the order type in words, the broker's reason for a
  * rejection without its error code, and Repeat, which opens the app's order ticket for the same
  * instrument, side and quantity, in the order's own product ("repeat" promises the same order;
- * v0.13.0 review M3), with its price type, price and trigger (test day TD5). Nothing is sent
- * until the owner presses the ticket's button. The sheet itself is OrderCards'.
+ * v0.13.0 review M3), with its price type, price and trigger (test day TD5); a stop whose trigger
+ * the price has already passed says so before Place (v0.17.0 review L3). Nothing is sent until the
+ * owner presses the ticket's button. The sheet itself is OrderCards'.
  */
 
 /** "Stop-loss limit (SL)": an order's price type in words. */
@@ -165,6 +166,8 @@ export function RepeatTicket({
       priceType={copied.priceType}
       price={copied.price}
       triggerPrice={copied.triggerPrice}
+      // v0.17.0 review L3: a stop the last price has passed says so before Place.
+      warnPassedTrigger
       strategy="Orders"
     />
   )
