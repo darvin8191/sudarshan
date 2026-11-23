@@ -14,7 +14,6 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-import pytz
 from flask import Flask
 
 sys.path.insert(0, str(Path(__file__).parents[1]))
