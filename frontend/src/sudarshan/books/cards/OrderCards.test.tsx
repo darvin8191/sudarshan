@@ -24,9 +24,14 @@ const api = vi.hoisted(() => ({
 vi.mock('@/sudarshan/watchlist/api', () => ({
   contractOf: (...args: unknown[]) => api.contractOf(...args),
 }))
-vi.mock('@/components/trading/PlaceOrderDialog', async () => {
+vi.mock('@/components/trading/PlaceOrderDialog', async (importOriginal) => {
   const { createElement } = await import('react')
+  // The ticket's own tick rounding, which Repeat uses for the price it copies (TD5).
+  const { roundToTick } = await importOriginal<
+    typeof import('@/components/trading/PlaceOrderDialog')
+  >()
   return {
+    roundToTick,
     PlaceOrderDialog: (props: Record<string, unknown>) =>
       props.open
         ? createElement(
@@ -40,6 +45,9 @@ vi.mock('@/components/trading/PlaceOrderDialog', async () => {
               `lot ${props.lotSize}`,
               `product ${props.product}`,
               `strategy ${props.strategy}`,
+              `type ${props.priceType ?? 'MARKET'}`,
+              `price ${props.price ?? '-'}`,
+              `trigger ${props.triggerPrice ?? '-'}`,
             ].join(' ')
           )
         : null,
@@ -588,9 +596,11 @@ describe('Order book on a phone: the sheet and its actions', () => {
     await tap.click(orderCard('1002'))
     await settle()
     await tap.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Repeat' }))
+    // TD5: the stop as it was, its trigger and limit price copied, nothing sent until Place.
     expect(screen.getByRole('region', { name: 'Order ticket' })).toHaveTextContent(
-      'SELL NIFTY27OCT2625800PE NFO qty 65 lot 65 product MIS strategy Orders'
+      'SELL NIFTY27OCT2625800PE NFO qty 65 lot 65 product MIS strategy Orders type SL price 95 trigger 96'
     )
+    expect(api.cancelOrder).not.toHaveBeenCalled()
     expect(where()).toBe('/orderbook?act=sell&row=1002')
     back()
     await waitFor(() => expect(screen.queryByRole('region', { name: 'Order ticket' })).toBeNull())
@@ -605,7 +615,7 @@ describe('Order book on a phone: the sheet and its actions', () => {
     await settle()
     await tap.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Repeat' }))
     expect(screen.getByRole('region', { name: 'Order ticket' })).toHaveTextContent(
-      'SELL NIFTY27OCT2625800PE NFO qty 65 lot 65 product NRML strategy Orders'
+      'SELL NIFTY27OCT2625800PE NFO qty 65 lot 65 product NRML strategy Orders type SL'
     )
   })
 

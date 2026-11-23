@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { Repeat } from 'lucide-react'
-import { PlaceOrderDialog } from '@/components/trading/PlaceOrderDialog'
+import { PlaceOrderDialog, roundToTick } from '@/components/trading/PlaceOrderDialog'
 import { cn } from '@/lib/utils'
 import { type BookOrder, reasonOf } from '@/sudarshan/books/orderFold'
 import { withoutCode } from '@/sudarshan/books/sendOutcome'
@@ -12,8 +12,8 @@ import { ActionWords, OUTLINED } from './parts'
  * What an order's sheet gained in B2 (M6.1): the order type in words, the broker's reason for a
  * rejection without its error code, and Repeat, which opens the app's order ticket for the same
  * instrument, side and quantity, in the order's own product ("repeat" promises the same order;
- * v0.13.0 review M3). The price type is the ticket's own, and nothing is sent until the owner
- * presses the ticket's button. The sheet itself is OrderCards'.
+ * v0.13.0 review M3), with its price type, price and trigger (test day TD5). Nothing is sent
+ * until the owner presses the ticket's button. The sheet itself is OrderCards'.
  */
 
 /** "Stop-loss limit (SL)": an order's price type in words. */
@@ -108,10 +108,34 @@ export function repeatProduct(order: BookOrder): Product | undefined {
   return productsFor(order.exchange).includes(product) ? product : ticketProduct(order.exchange)
 }
 
+type PriceType = 'MARKET' | 'LIMIT' | 'SL' | 'SL-M'
+const PRICE_TYPES: readonly string[] = ['MARKET', 'LIMIT', 'SL', 'SL-M']
+
 /**
- * Repeat's ticket: the app's order ticket on the order's instrument, side and quantity, in the
- * order's own product. It opens once the lot size is known (RepeatButton waits for
- * the same read, so this one is already there).
+ * What Repeat copies of an order's price (test day TD5): its price type, and its price for LIMIT
+ * and SL and its trigger for SL and SL-M, on the tick as the ticket rounds them. Repeat of a
+ * resting BUY LIMIT 10.05 opened as MARKET before, one quick tap from a buy at the market. A type
+ * the ticket does not take copies nothing, and the ticket opens as it always has.
+ */
+export function repeatPrice(
+  order: BookOrder,
+  tickSize: number
+): { priceType?: PriceType; price?: number; triggerPrice?: number } {
+  const type = String(order.pricetype ?? '').toUpperCase()
+  if (!PRICE_TYPES.includes(type)) return {}
+  const at = (value: unknown) =>
+    Number(value) > 0 ? roundToTick(Number(value), tickSize) : undefined
+  return {
+    priceType: type as PriceType,
+    ...(type === 'LIMIT' || type === 'SL' ? { price: at(order.price) } : {}),
+    ...(type === 'SL' || type === 'SL-M' ? { triggerPrice: at(order.trigger_price) } : {}),
+  }
+}
+
+/**
+ * Repeat's ticket: the app's order ticket on the order's instrument, side, quantity, price type,
+ * price and trigger, in the order's own product. It opens once the lot size is known
+ * (RepeatButton waits for the same read, so this one is already there).
  */
 export function RepeatTicket({
   order,
@@ -124,6 +148,7 @@ export function RepeatTicket({
 }) {
   const contract = useContract(apiKey, order.symbol, order.exchange)
   if (!contract.data) return null
+  const copied = repeatPrice(order, contract.data.tickSize)
   return (
     <PlaceOrderDialog
       open
@@ -137,6 +162,9 @@ export function RepeatTicket({
       lotSize={contract.data.lotSize}
       tickSize={contract.data.tickSize}
       product={repeatProduct(order)}
+      priceType={copied.priceType}
+      price={copied.price}
+      triggerPrice={copied.triggerPrice}
       strategy="Orders"
     />
   )

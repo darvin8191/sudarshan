@@ -1,0 +1,69 @@
+{
+  "about": "Test day TD5 (M6.1): Repeat on an order opens the app's order ticket as the order was: side, quantity, product, price type, and the price (LIMIT, SL) and trigger (SL, SL-M) on the instrument's tick. Each case is a book row, the contract's lot and tick, the ticket as it opens, and the request its Place sends. NSE cash and an NFO option, for each of the four price types; the last case is an off-tick price, rounded as the ticket rounds a typed one.",
+  "cases": [
+    {
+      "name": "NSE cash, MARKET",
+      "order": { "symbol": "RELIANCE", "exchange": "NSE", "action": "BUY", "quantity": 1, "price": 0, "trigger_price": 0, "pricetype": "MARKET", "product": "MIS", "orderid": "3001", "order_status": "complete" },
+      "contract": { "lotSize": 1, "tickSize": 0.1 },
+      "ticket": { "action": "BUY", "quantity": 1, "priceType": "Market", "product": "MIS", "price": null, "trigger": null, "line": "BUY 1 RELIANCE · MARKET · MIS" },
+      "sends": { "symbol": "RELIANCE", "exchange": "NSE", "action": "BUY", "quantity": 1, "pricetype": "MARKET", "product": "MIS" }
+    },
+    {
+      "name": "NSE cash, LIMIT",
+      "order": { "symbol": "RELIANCE", "exchange": "NSE", "action": "BUY", "quantity": 1, "price": 1355, "trigger_price": 0, "pricetype": "LIMIT", "product": "CNC", "orderid": "3002", "order_status": "open" },
+      "contract": { "lotSize": 1, "tickSize": 0.1 },
+      "ticket": { "action": "BUY", "quantity": 1, "priceType": "Limit", "product": "CNC", "price": 1355, "trigger": null, "line": "BUY 1 RELIANCE · LIMIT 1355.00 · CNC" },
+      "sends": { "symbol": "RELIANCE", "exchange": "NSE", "action": "BUY", "quantity": 1, "pricetype": "LIMIT", "product": "CNC", "price": 1355 }
+    },
+    {
+      "name": "NSE cash, SL",
+      "order": { "symbol": "RELIANCE", "exchange": "NSE", "action": "SELL", "quantity": 12, "price": 1349, "trigger_price": 1349.5, "pricetype": "SL", "product": "MIS", "orderid": "3003", "order_status": "trigger pending" },
+      "contract": { "lotSize": 1, "tickSize": 0.1 },
+      "ticket": { "action": "SELL", "quantity": 12, "priceType": "SL-L", "product": "MIS", "price": 1349, "trigger": 1349.5, "line": "SELL 12 RELIANCE · SL-L 1349.00, trigger 1349.50 · MIS" },
+      "sends": { "symbol": "RELIANCE", "exchange": "NSE", "action": "SELL", "quantity": 12, "pricetype": "SL", "product": "MIS", "price": 1349, "trigger_price": 1349.5 }
+    },
+    {
+      "name": "NSE cash, SL-M",
+      "order": { "symbol": "RELIANCE", "exchange": "NSE", "action": "SELL", "quantity": 12, "price": 0, "trigger_price": 1349.5, "pricetype": "SL-M", "product": "CNC", "orderid": "3004", "order_status": "cancelled" },
+      "contract": { "lotSize": 1, "tickSize": 0.1 },
+      "ticket": { "action": "SELL", "quantity": 12, "priceType": "SL-M", "product": "CNC", "price": null, "trigger": 1349.5, "line": "SELL 12 RELIANCE · SL-M, trigger 1349.50 · CNC" },
+      "sends": { "symbol": "RELIANCE", "exchange": "NSE", "action": "SELL", "quantity": 12, "pricetype": "SL-M", "product": "CNC", "trigger_price": 1349.5 }
+    },
+    {
+      "name": "NFO option, MARKET",
+      "order": { "symbol": "NIFTY24NOV2625800PE", "exchange": "NFO", "action": "BUY", "quantity": 65, "price": 0, "trigger_price": 0, "pricetype": "MARKET", "product": "MIS", "orderid": "3005", "order_status": "complete" },
+      "contract": { "lotSize": 65, "tickSize": 0.05 },
+      "ticket": { "action": "BUY", "quantity": 1, "priceType": "Market", "product": "MIS", "price": null, "trigger": null, "line": "BUY 65 (1 lot) NIFTY24NOV2625800PE · MARKET · MIS" },
+      "sends": { "symbol": "NIFTY24NOV2625800PE", "exchange": "NFO", "action": "BUY", "quantity": 65, "pricetype": "MARKET", "product": "MIS" }
+    },
+    {
+      "name": "NFO option, LIMIT (the test day's resting BUY LIMIT 10.05)",
+      "order": { "symbol": "NIFTY24NOV2625800PE", "exchange": "NFO", "action": "BUY", "quantity": 65, "price": 10.05, "trigger_price": 0, "pricetype": "LIMIT", "product": "MIS", "orderid": "3006", "order_status": "open" },
+      "contract": { "lotSize": 65, "tickSize": 0.05 },
+      "ticket": { "action": "BUY", "quantity": 1, "priceType": "Limit", "product": "MIS", "price": 10.05, "trigger": null, "line": "BUY 65 (1 lot) NIFTY24NOV2625800PE · LIMIT 10.05 · MIS" },
+      "sends": { "symbol": "NIFTY24NOV2625800PE", "exchange": "NFO", "action": "BUY", "quantity": 65, "pricetype": "LIMIT", "product": "MIS", "price": 10.05 }
+    },
+    {
+      "name": "NFO option, SL",
+      "order": { "symbol": "NIFTY24NOV2625800PE", "exchange": "NFO", "action": "SELL", "quantity": 130, "price": 95, "trigger_price": 96, "pricetype": "SL", "product": "NRML", "orderid": "3007", "order_status": "trigger pending" },
+      "contract": { "lotSize": 65, "tickSize": 0.05 },
+      "ticket": { "action": "SELL", "quantity": 2, "priceType": "SL-L", "product": "NRML", "price": 95, "trigger": 96, "line": "SELL 130 (2 lots) NIFTY24NOV2625800PE · SL-L 95.00, trigger 96.00 · NRML" },
+      "sends": { "symbol": "NIFTY24NOV2625800PE", "exchange": "NFO", "action": "SELL", "quantity": 130, "pricetype": "SL", "product": "NRML", "price": 95, "trigger_price": 96 }
+    },
+    {
+      "name": "NFO option, SL-M",
+      "order": { "symbol": "NIFTY24NOV2625800PE", "exchange": "NFO", "action": "SELL", "quantity": 65, "price": 0, "trigger_price": 96.35, "pricetype": "SL-M", "product": "MIS", "orderid": "3008", "order_status": "rejected" },
+      "contract": { "lotSize": 65, "tickSize": 0.05 },
+      "ticket": { "action": "SELL", "quantity": 1, "priceType": "SL-M", "product": "MIS", "price": null, "trigger": 96.35, "line": "SELL 65 (1 lot) NIFTY24NOV2625800PE · SL-M, trigger 96.35 · MIS" },
+      "sends": { "symbol": "NIFTY24NOV2625800PE", "exchange": "NFO", "action": "SELL", "quantity": 65, "pricetype": "SL-M", "product": "MIS", "trigger_price": 96.35 }
+    },
+    {
+      "name": "NFO option, LIMIT off the tick (10.03 on a 0.05 tick)",
+      "offTick": true,
+      "order": { "symbol": "NIFTY24NOV2625800PE", "exchange": "NFO", "action": "BUY", "quantity": 65, "price": 10.03, "trigger_price": 0, "pricetype": "LIMIT", "product": "MIS", "orderid": "3009", "order_status": "open" },
+      "contract": { "lotSize": 65, "tickSize": 0.05 },
+      "ticket": { "action": "BUY", "quantity": 1, "priceType": "Limit", "product": "MIS", "price": 10.05, "trigger": null, "line": "BUY 65 (1 lot) NIFTY24NOV2625800PE · LIMIT 10.05 · MIS" },
+      "sends": { "symbol": "NIFTY24NOV2625800PE", "exchange": "NFO", "action": "BUY", "quantity": 65, "pricetype": "LIMIT", "product": "MIS", "price": 10.05 }
+    }
+  ]
+}
