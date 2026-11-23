@@ -32,6 +32,7 @@ import blueprints.websocket_example as market
 import database.auth_db as auth_db
 import utils.session as session_check
 from database import user_db
+from sudarshan.tests.session_clock import login_moment
 
 IST = pytz.timezone("Asia/Kolkata")
 #: The moments every test runs at (IST). The daily expiry this file sets is 00:00.
@@ -149,6 +150,7 @@ def browser(app, who: str, login=None):
     hour ago, or the expiry itself when that is later, so the owner's login is never past it;
     "past the daily expiry" logged in a minute before it. ``login`` names another time."""
     client = app.test_client()
+    login_moment()  # waits out a rollover that is about to pass, so the 30 minutes below cannot straddle it
     now = session_check.datetime.now(IST)
     expiry = session_check.last_daily_expiry(now)
     if login is None:

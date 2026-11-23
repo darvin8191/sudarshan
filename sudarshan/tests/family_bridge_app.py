@@ -26,6 +26,7 @@ from database import user_db, watchlist_db
 from limiter import limiter
 from sudarshan.autologin.handoff import HandoffRejected, NonceBook, open_sealed, seal
 from sudarshan.family import contract
+from sudarshan.tests.session_clock import login_moment
 from sudarshan.vault import FAMILY_ADMIN_INFO, FAMILY_INTERNAL_INFO, fernet_for
 
 OWNER = "owner"
@@ -101,7 +102,7 @@ def reset_lists() -> dict[str, int]:
 
 def login_session(client, username: str = OWNER) -> None:
     """A signed session for ``username``: for anyone else, a session forged with the app's key."""
-    now_ist = datetime.now(pytz.timezone("Asia/Kolkata"))
+    now_ist = login_moment()
     with client.session_transaction() as session:
         session["user"] = username
         session["logged_in"] = True

@@ -25,6 +25,7 @@ import blueprints.websocket_example  # noqa: E402,F401  (the /market namespace)
 from events.order_events import OrderPlacedEvent  # noqa: E402
 from extensions import socketio  # noqa: E402
 from subscribers import socketio_subscriber  # noqa: E402
+from sudarshan.tests.session_clock import login_moment
 from utils.event_bus import bus  # noqa: E402
 from utils.socketio_error_handler import init_socketio_error_handling  # noqa: E402
 
@@ -43,7 +44,7 @@ def login_for_tests():
     session["user"] = request.args.get("user", OWNER)
     if request.args.get("half"):
         return {"status": "success"}
-    at = datetime.now(pytz.timezone("Asia/Kolkata"))
+    at = login_moment()
     if request.args.get("expired"):
         at -= timedelta(days=1)
     session["logged_in"] = True

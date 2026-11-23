@@ -24,6 +24,7 @@ from database import strategy_module_db as store  # noqa: E402
 from database.engine_factory import create_db_engine  # noqa: E402
 from limiter import limiter  # noqa: E402
 from services.strategy_module.engine import StartResult  # noqa: E402
+from sudarshan.tests.session_clock import login_stamp  # noqa: E402  # SUDARSHAN M0.1
 
 USER = "lifecycle-tester"
 OTHER = "somebody-else"
@@ -62,7 +63,7 @@ def client(monkeypatch):
     with test_client.session_transaction() as flask_session:
         flask_session["logged_in"] = True
         flask_session["user"] = USER
-        flask_session["login_time"] = datetime.now(pytz.timezone("Asia/Kolkata")).isoformat()
+        flask_session["login_time"] = login_stamp()  # SUDARSHAN M0.1
     return test_client
 
 
