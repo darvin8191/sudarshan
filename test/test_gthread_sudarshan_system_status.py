@@ -74,9 +74,11 @@ APP = textwrap.dedent(
 
     @app.route("/login/<who>")
     def login(who):
+        from sudarshan.tests.session_clock import login_stamp  # SUDARSHAN M0.1
+
         session["user"] = who
         session["logged_in"] = True
-        session["login_time"] = datetime.now(pytz.timezone("Asia/Kolkata")).isoformat()
+        session["login_time"] = login_stamp()  # SUDARSHAN M0.1: never straddles 03:00 IST
         return jsonify(csrf=generate_csrf())
 
     @app.route("/cutoff")
