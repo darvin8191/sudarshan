@@ -6,6 +6,7 @@
 import { QueryClientProvider } from '@tanstack/react-query'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { AxiosError } from 'axios'
 import { MemoryRouter } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -34,7 +35,13 @@ import { LiveList } from './LiveList'
 import { clearNoteDraftsForTests } from './noteDrafts'
 import { OPEN_GUARD } from './openGuard'
 import { rowView } from './rows'
-import { NOTE_KEPT, NOTE_NOT_SAVED, NOTE_SAVED } from './SymbolMarks'
+import {
+  NOTE_KEPT,
+  NOTE_NOT_CONFIRMED,
+  NOTE_NOT_SAVED,
+  NOTE_SAVED,
+  NOTE_UNANSWERED,
+} from './SymbolMarks'
 import type { LiveRow } from './useLiveRows'
 import { NOTE_LONG, PRIVATE_WORDS } from './v2/marks'
 import type { FlagName, Row, SymbolInfo, View } from './v2/types'
@@ -545,6 +552,69 @@ describe('a note typed and not saved when the sheet closes', () => {
     )
     expect(toast.error).not.toHaveBeenCalled()
     expect(b().count('mark')).toBe(1)
+  })
+
+  // v0.17.0 verification V4: a write that got no answer may have been saved, so it is "not
+  // confirmed", never "not saved"; a refusal (the tests above) stays "Note not saved:".
+  const noAnswer = (code: string) => new AxiosError('no answer', code)
+
+  it('says Note not confirmed when the save on closing got no answer, and keeps the note', async () => {
+    b().on('mark', () => {
+      throw noAnswer('ECONNABORTED') // the write timed out
+    })
+    const field = await openSheet()
+    fireEvent.change(field, { target: { value: 'Exit below 1,380' } })
+    await closeSheet()
+    await waitFor(() => expect(toast.error).toHaveBeenCalledTimes(1))
+    const said = toast.error.mock.calls[0][0] as string
+    expect(said).toBe(`${NOTE_NOT_CONFIRMED} ${NOTE_UNANSWERED}`)
+    expect(said).not.toMatch(/not saved|timeout|ECONN|40\d|50\d/i)
+    expect(toast.info).not.toHaveBeenCalled()
+    expect(await reopen()).toHaveValue('Exit below 1,380')
+    await saveOnClosing()
+  })
+
+  it('says Note not confirmed for a Save on its way when the sheet closed that got no answer', async () => {
+    let fail: (reason: unknown) => void = () => {}
+    b().on(
+      'mark',
+      () =>
+        new Promise((_resolve, reject) => {
+          fail = reject
+        })
+    )
+    const user = userEvent.setup()
+    const field = await openSheet()
+    fireEvent.change(field, { target: { value: 'Typed, then Back' } })
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(b().count('mark')).toBe(1))
+    await closeSheet()
+    await act(async () => fail(noAnswer('ERR_NETWORK'))) // the phone lost its connection
+    await waitFor(() => expect(toast.error).toHaveBeenCalledTimes(1))
+    expect(toast.error.mock.calls[0][0]).toBe(`${NOTE_NOT_CONFIRMED} ${NOTE_UNANSWERED}`)
+    expect(b().count('mark'), 'one write, never a second on closing').toBe(1)
+    expect(await reopen()).toHaveValue('Typed, then Back')
+    await saveOnClosing()
+  })
+
+  /** Closed again with the server taking it, the kept note is saved as any typed note is. */
+  async function saveOnClosing() {
+    b().on('mark', () => ({ version: '5', id: null, words: null }))
+    await closeSheet()
+    await waitFor(() =>
+      expect(toast.info).toHaveBeenCalledWith(NOTE_SAVED, undefined, { duration: 2_000 })
+    )
+  }
+
+  it('says Note not saved for a refusal, never Note not confirmed', async () => {
+    b().on('mark', () => ({ status: 'error', code: 'conflict', message: CONFLICT }))
+    const field = await openSheet()
+    fireEvent.change(field, { target: { value: 'Exit below 1,380' } })
+    await closeSheet()
+    await waitFor(() => expect(toast.error).toHaveBeenCalledTimes(1))
+    const said = toast.error.mock.calls[0][0] as string
+    expect(said.startsWith(NOTE_NOT_SAVED)).toBe(true)
+    expect(said).not.toContain(NOTE_NOT_CONFIRMED)
   })
 
   it('lets a kept note go once the sheet has shown it: emptied and closed, it is not back', async () => {
