@@ -9,6 +9,8 @@ import { installMarketAlerts } from '@/sudarshan/alerts/marketAlerts' // SUDARSH
 // SUDARSHAN: the shared connection and the app-wide order alerts (src/sudarshan/books).
 import { claimOrderSound } from '@/sudarshan/books/chime'
 import { installOrderAlerts, noteAppCancelEvent } from '@/sudarshan/books/orderAlerts'
+// SUDARSHAN TD6: a GTT set or changed in the sandbox says so, never "Order Placed".
+import { gttToast } from '@/sudarshan/books/protect/protect'
 // SUDARSHAN M6.9: Exit all's result shows once, whoever speaks first.
 import { EXIT_ALL_TOAST } from '@/sudarshan/books/sendOutcome'
 import { acquireSharedSocket, releaseSharedSocket } from '@/sudarshan/books/sharedSocket'
@@ -351,6 +353,10 @@ export function useSocket() {
       const quantity = data.request.quantity || ''
       const orderid = data.response.orderid || data.request.orderid || ''
       const apiType = data.request.api_type || ''
+      const gtt =
+        data.response.status === 'success'
+          ? gttToast(data.request as unknown as Record<string, unknown>)
+          : null
 
       if (data.response.status === 'error') {
         // SUDARSHAN: the server's own sentence and nothing in front of it, neither "Error:" (it
@@ -366,6 +372,9 @@ export function useSocket() {
         message = orderid ? `Order Modified - ID: ${orderid}` : 'Order Modified'
       } else if (apiType === 'closeposition') {
         message = data.response.message || 'Position Closed'
+      } else if (gtt) {
+        // SUDARSHAN TD6: a Protect shares its toast with the Protect sheet's own answer.
+        message = gtt.text
       } else if (
         apiType === 'placesmartorder' &&
         data.response.message &&
@@ -399,7 +408,7 @@ export function useSocket() {
           type,
           message,
           'analyzer',
-          undefined,
+          gtt?.id,
           data.response.status === 'error' ? refusedSymbol(message, symbol) : undefined
         )
       }

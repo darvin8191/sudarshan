@@ -13,7 +13,15 @@ import {
 import type { SendOutcome } from '@/sudarshan/books/sent'
 import type { GttOrder, Holding } from '@/types/trading'
 import { showToast } from '@/utils/toast'
-import { protectRequest, protectsOf, refusal } from './protect'
+import {
+  type Protect,
+  protectRemovedWords,
+  protectRequest,
+  protectSetWords,
+  protectsOf,
+  protectToastId,
+  refusal,
+} from './protect'
 
 /**
  * Protect's three sends (M5.6, G2). ORDER PATH, shown only where SUDARSHAN_GTT_PROTECT says.
@@ -58,16 +66,20 @@ function heldWords(kind: keyof typeof WORDS, outcome: HeldOutcome, body: unknown
   return WORDS[kind][outcome]
 }
 
-/** One send, read as the books read theirs: sent, held as not confirmed, or refused in words. */
+/**
+ * One send, read as the books read theirs: sent, held as not confirmed, or refused in words. A
+ * toast sent with an id is the one the sandbox's own event for it shares (TD6).
+ */
 async function run(
   kind: keyof typeof WORDS,
   done: string,
-  call: () => Promise<{ status: string; message?: string }>
+  call: () => Promise<{ status: string; message?: string }>,
+  id?: string
 ): Promise<SendOutcome> {
   try {
     const body = await call()
     if (body.status === 'success') {
-      showToast.success(done, 'orders')
+      showToast.success(done, 'orders', id ? { id } : undefined)
       return 'sent'
     }
     const held = answeredHeld(body)
@@ -96,7 +108,9 @@ export async function placeProtect(
   quantity: number,
   trigger: number,
   side: 'falls' | 'rises',
-  _book?: unknown
+  _book?: unknown,
+  /** Analyze mode: it goes to the sandbox, and its toast says so (TD6). */
+  sandbox = false
 ): Promise<SendOutcome> {
   const apiKey = useAuthStore.getState().apiKey
   if (!apiKey) {
@@ -120,14 +134,20 @@ export async function placeProtect(
     showToast.error(`Protect was not set. ${why}`, 'orders')
     return 'refused'
   }
-  return run('set', `Protect set on ${holding.symbol}.`, async () => {
-    const response = await apiClient.post(
-      '/placegttorder',
-      protectRequest(apiKey, holding, quantity, trigger, side),
-      { timeout: SEND_TIMEOUT_MS }
-    )
-    return response.data
-  })
+  const done = protectSetWords('set', { symbol: holding.symbol, quantity, trigger, side }, sandbox)
+  return run(
+    'set',
+    done,
+    async () => {
+      const response = await apiClient.post(
+        '/placegttorder',
+        protectRequest(apiKey, holding, quantity, trigger, side),
+        { timeout: SEND_TIMEOUT_MS }
+      )
+      return response.data
+    },
+    protectToastId(holding.exchange, holding.symbol)
+  )
 }
 
 /** Change a Protect's price or quantity: the GTT tab's own modify call, the same single sell. */
@@ -136,15 +156,26 @@ export function changeProtect(
   holding: Held,
   quantity: number,
   trigger: number,
-  side: 'falls' | 'rises'
+  side: 'falls' | 'rises',
+  sandbox = false
 ): Promise<SendOutcome> {
   const { apikey: _apikey, ...body } = protectRequest('', holding, quantity, trigger, side)
-  return run('change', `Protect changed on ${holding.symbol}.`, () =>
-    tradingApi.modifyGttOrder(triggerId, body)
+  const at = { symbol: holding.symbol, quantity, trigger, side }
+  return run(
+    'change',
+    protectSetWords('changed', at, sandbox),
+    () => tradingApi.modifyGttOrder(triggerId, body),
+    protectToastId(holding.exchange, holding.symbol)
   )
 }
 
-/** Remove a Protect: the GTT tab's own cancel call. */
-export function removeProtect(triggerId: string): Promise<SendOutcome> {
-  return run('remove', 'Protect removed.', () => tradingApi.cancelGttOrder(triggerId))
+/** Remove a Protect: the GTT tab's own cancel call; the toast says what it would have sold. */
+export function removeProtect(
+  protect: Protect,
+  symbol: string,
+  sandbox = false
+): Promise<SendOutcome> {
+  return run('remove', protectRemovedWords(symbol, protect, sandbox), () =>
+    tradingApi.cancelGttOrder(protect.triggerId)
+  )
 }

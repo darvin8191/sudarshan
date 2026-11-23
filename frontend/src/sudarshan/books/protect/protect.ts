@@ -186,3 +186,55 @@ export function sellQuestion(protect: Protect): string {
 }
 
 export const NOT_READ = 'Protect orders could not be read just now.'
+
+const inSandbox = (sandbox: boolean) => (sandbox ? ' in the sandbox' : '')
+
+/**
+ * The toast once a Protect is set or changed (test day TD6): what it will do, never that an
+ * order was placed, since nothing is sold until the price gets there. "Protect set: ENGINERSIN
+ * sells 2 in the sandbox if the price falls to 270.00."
+ */
+export function protectSetWords(
+  kind: 'set' | 'changed',
+  at: { symbol: string; quantity: number; trigger: number; side: 'falls' | 'rises' },
+  sandbox: boolean
+): string {
+  return `Protect ${kind}: ${at.symbol} sells ${UNITS.format(at.quantity)}${inSandbox(sandbox)} if the price ${at.side} to ${NUMBER.format(at.trigger)}.`
+}
+
+/** The toast once a Protect is removed, saying what it would have sold. */
+export function protectRemovedWords(symbol: string, protect: Protect, sandbox: boolean): string {
+  return `Protect removed${inSandbox(sandbox)}: the order to sell ${UNITS.format(protect.quantity)} ${symbol} at ${NUMBER.format(protect.trigger)} is cancelled. ${symbol} is not protected now.`
+}
+
+/** One toast for one Protect, whichever says it first: the page's answer or the sandbox's event. */
+export const protectToastId = (exchange: string, symbol: string) => `protect:${exchange}:${symbol}`
+
+/**
+ * What the sandbox's event for a GTT set or changed says (TD6), in place of the generic "SELL
+ * Order Placed for Symbol: ...": a Protect in Protect's words, any other GTT as a GTT that waits
+ * for its price. Null for anything else (a GTT cancelled or fired, an order).
+ */
+export function gttToast(request: Record<string, unknown>): { text: string; id?: string } | null {
+  const type = String(request.trigger_type ?? '').toUpperCase()
+  if (type !== 'SINGLE' && type !== 'OCO') return null
+  const kind = request.trigger_id ? 'changed' : 'set'
+  const symbol = String(request.symbol ?? '')
+  const quantity = Number(request.quantity) || 0
+  const action = String(request.action ?? '').toUpperCase()
+  const [sl, tg] = [Number(request.triggerprice_sl) || 0, Number(request.triggerprice_tg) || 0]
+  if (request.strategy === STRATEGY && type === 'SINGLE' && action === 'SELL' && (sl || tg)) {
+    const at = { symbol, quantity, trigger: sl || tg, side: sl ? 'falls' : 'rises' } as const
+    return {
+      text: protectSetWords(kind, at, true),
+      id: protectToastId(String(request.exchange ?? ''), symbol),
+    }
+  }
+  const prices = [sl, tg, Number(request.trigger_price) || 0].filter((price) => price > 0)
+  const when = prices.length
+    ? ` when the price reaches ${[...new Set(prices)].map((price) => NUMBER.format(price)).join(' or ')}`
+    : ''
+  return {
+    text: `GTT ${kind} in the sandbox: ${action} ${UNITS.format(quantity)} ${symbol}${when}. No order is placed until then.`,
+  }
+}

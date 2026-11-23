@@ -4,9 +4,12 @@ import {
   asks,
   checkQuantity,
   checkTrigger,
+  gttToast,
   protectable,
   protectedLine,
+  protectRemovedWords,
   protectRequest,
+  protectSetWords,
   protectShown,
   protectsOf,
   refusal,
@@ -100,5 +103,99 @@ describe('Protect, the pure part', () => {
     expect(sellQuestion({ triggerId: 'x', quantity: 50, trigger: 1240 })).toBe(
       'A Protect order for 50 shares is active. Remove it too?'
     )
+  })
+})
+
+/**
+ * Test day TD6: after Set Protect the toast said "SELL Order Placed for Symbol: ENGINERSIN, Qty: 2",
+ * which reads like a sale sent now. A Protect says what it will do; any other GTT says it waits.
+ */
+describe('what a Protect and a GTT say once set (TD6)', () => {
+  const ENGINERSIN = { symbol: 'ENGINERSIN', quantity: 2, trigger: 270, side: 'falls' } as const
+
+  it('a Protect set, changed or removed, in Live and in the sandbox', () => {
+    expect(protectSetWords('set', ENGINERSIN, true)).toBe(
+      'Protect set: ENGINERSIN sells 2 in the sandbox if the price falls to 270.00.'
+    )
+    expect(protectSetWords('set', ENGINERSIN, false)).toBe(
+      'Protect set: ENGINERSIN sells 2 if the price falls to 270.00.'
+    )
+    expect(protectSetWords('changed', { ...ENGINERSIN, trigger: 265 }, true)).toBe(
+      'Protect changed: ENGINERSIN sells 2 in the sandbox if the price falls to 265.00.'
+    )
+    expect(
+      protectSetWords(
+        'set',
+        { symbol: 'RELIANCE', quantity: 1500, trigger: 1640.5, side: 'rises' },
+        false
+      )
+    ).toBe('Protect set: RELIANCE sells 1,500 if the price rises to 1,640.50.')
+    const working = { triggerId: 'GTT-1', quantity: 2, trigger: 265 }
+    expect(protectRemovedWords('ENGINERSIN', working, true)).toBe(
+      'Protect removed in the sandbox: the order to sell 2 ENGINERSIN at 265.00 is cancelled. ENGINERSIN is not protected now.'
+    )
+    expect(protectRemovedWords('ENGINERSIN', working, false)).toBe(
+      'Protect removed: the order to sell 2 ENGINERSIN at 265.00 is cancelled. ENGINERSIN is not protected now.'
+    )
+  })
+
+  it("the sandbox's event for a Protect: its words, and the toast the Protect sheet shares", () => {
+    const { apikey: _key, ...sent } = protectRequest(
+      'k',
+      { symbol: 'ENGINERSIN', exchange: 'NSE' },
+      2,
+      270,
+      'falls'
+    )
+    expect(gttToast(sent)).toEqual({
+      text: 'Protect set: ENGINERSIN sells 2 in the sandbox if the price falls to 270.00.',
+      id: 'protect:NSE:ENGINERSIN',
+    })
+    expect(gttToast({ ...sent, trigger_id: 'GTT-1', price: 265, triggerprice_sl: 265 })).toEqual({
+      text: 'Protect changed: ENGINERSIN sells 2 in the sandbox if the price falls to 265.00.',
+      id: 'protect:NSE:ENGINERSIN',
+    })
+  })
+
+  it('any other GTT set or changed waits for its price, and never reads as an order placed', () => {
+    const single = {
+      strategy: 'Python',
+      trigger_type: 'SINGLE',
+      exchange: 'NSE',
+      symbol: 'SBIN',
+      action: 'BUY',
+      product: 'CNC',
+      quantity: 5,
+      pricetype: 'LIMIT',
+      price: 790,
+      triggerprice_sl: 0,
+      triggerprice_tg: 790,
+    }
+    expect(gttToast(single)).toEqual({
+      text: 'GTT set in the sandbox: BUY 5 SBIN when the price reaches 790.00. No order is placed until then.',
+    })
+    expect(
+      gttToast({
+        ...single,
+        trigger_type: 'oco',
+        action: 'SELL',
+        triggerprice_sl: 760,
+        triggerprice_tg: 830,
+        trigger_id: '9',
+      })
+    ).toEqual({
+      text: 'GTT changed in the sandbox: SELL 5 SBIN when the price reaches 760.00 or 830.00. No order is placed until then.',
+    })
+    // A Protect's tag on a buy is not a Protect.
+    expect(gttToast({ ...single, strategy: 'Protect' })?.id).toBeUndefined()
+    for (const said of [gttToast(single)?.text]) expect(said).not.toMatch(/Order Placed/i)
+  })
+
+  it('says nothing of its own for a GTT cancelled or fired, or an order', () => {
+    expect(gttToast({ trigger_id: 'GTT-1' })).toBeNull()
+    expect(gttToast({ api_type: 'gtttriggered', trigger_id: 'GTT-1', symbol: 'SBIN' })).toBeNull()
+    expect(
+      gttToast({ api_type: 'placeorder', symbol: 'SBIN', action: 'BUY', quantity: '1' })
+    ).toBeNull()
   })
 })

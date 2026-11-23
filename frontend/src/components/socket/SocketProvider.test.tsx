@@ -736,3 +736,69 @@ describe('order event hooks on the shared connection', () => {
     })
   })
 })
+
+/**
+ * SUDARSHAN test day TD6: after Set Protect the sandbox's event read "SELL Order Placed for
+ * Symbol: ENGINERSIN, Qty: 2", as if a sale had been sent. A GTT set or changed says so.
+ */
+describe('a GTT set in the sandbox (TD6)', () => {
+  function sandboxGtt(request: Record<string, unknown>) {
+    renderAt(
+      '/probe',
+      <Route element={<Layout />}>
+        <Route path="/probe" element={<p>page</p>} />
+      </Route>
+    )
+    act(() =>
+      onlySocket().fire('analyzer_update', {
+        request,
+        response: { status: 'success', trigger_id: '41', mode: 'analyze' },
+      })
+    )
+  }
+  const said = () => Object.values(toasts).flatMap((fn) => fn.mock.calls.map((call) => call[0]))
+  const PROTECT = {
+    strategy: 'Protect',
+    trigger_type: 'SINGLE',
+    exchange: 'NSE',
+    symbol: 'ENGINERSIN',
+    action: 'SELL',
+    product: 'CNC',
+    quantity: 2,
+    pricetype: 'LIMIT',
+    price: 270,
+    triggerprice_sl: 270,
+    triggerprice_tg: 0,
+  }
+
+  it("says a Protect's words, in the toast the Protect sheet's own answer shares", () => {
+    sandboxGtt(PROTECT)
+    expect(toasts.success).toHaveBeenCalledTimes(1)
+    expect(toasts.success).toHaveBeenCalledWith(
+      'Protect set: ENGINERSIN sells 2 in the sandbox if the price falls to 270.00.',
+      { id: 'protect:NSE:ENGINERSIN' }
+    )
+    expect(said().join(' ')).not.toMatch(/Order Placed/)
+  })
+
+  it('says a Protect changed', () => {
+    sandboxGtt({ ...PROTECT, trigger_id: '41', price: 265, triggerprice_sl: 265 })
+    expect(toasts.success).toHaveBeenCalledWith(
+      'Protect changed: ENGINERSIN sells 2 in the sandbox if the price falls to 265.00.',
+      { id: 'protect:NSE:ENGINERSIN' }
+    )
+  })
+
+  it('says any other GTT was set and waits for its price', () => {
+    sandboxGtt({ ...PROTECT, strategy: 'Python', triggerprice_sl: 0, triggerprice_tg: 290 })
+    expect(toasts.success).toHaveBeenCalledWith(
+      'GTT set in the sandbox: SELL 2 ENGINERSIN when the price reaches 290.00. No order is placed until then.'
+    )
+    expect(said().join(' ')).not.toMatch(/Order Placed/)
+  })
+
+  it('still says an order the sandbox placed as placed', () => {
+    sandboxGtt({ api_type: 'placeorder', symbol: 'SBIN', action: 'BUY', quantity: '1' })
+    expect(toasts.success).toHaveBeenCalledWith('BUY Order Placed for Symbol: SBIN, Qty: 1')
+  })
+})

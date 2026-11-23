@@ -63,7 +63,7 @@ export function ProtectPanel({
 
   const remove = (protect: Protect) =>
     void sendHeld('gtt', sandbox, [{ id: protect.triggerId }], async () => {
-      const outcome = await removeProtect(protect.triggerId)
+      const outcome = await removeProtect(protect, holding.symbol, sandbox)
       void book.refresh()
       return outcome
     })
@@ -200,8 +200,8 @@ function ProtectSheet({
     void sendHeld('gtt', sandbox, [{ id }], async () => {
       // One per holding: the book is read again just before a new one goes.
       const outcome = editing
-        ? await changeProtect(editing.triggerId, holding, shares, at, side)
-        : await placeProtect(holding, shares, at, side, book)
+        ? await changeProtect(editing.triggerId, holding, shares, at, side, sandbox)
+        : await placeProtect(holding, shares, at, side, book, sandbox)
       void book.refresh()
       return outcome
     })
@@ -334,7 +334,7 @@ export function SellQuestion({
         if (remove) {
           for (const protect of protects) {
             void sendHeld('gtt', sandbox, [{ id: protect.triggerId }], async () => {
-              const outcome = await removeProtect(protect.triggerId)
+              const outcome = await removeProtect(protect, holding?.symbol ?? '', sandbox)
               void book.refresh()
               return outcome
             })

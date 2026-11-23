@@ -147,10 +147,13 @@ function user() {
   return userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
 }
 
-const toast = vi.hoisted(() => ({ said: [] as string[] }))
+const toast = vi.hoisted(() => ({ said: [] as string[], ids: [] as unknown[] }))
 vi.mock('@/utils/toast', () => ({
   showToast: {
-    success: (text: string) => toast.said.push(`ok: ${text}`),
+    success: (text: string, _category?: string, options?: { id?: unknown }) => {
+      toast.said.push(`ok: ${text}`)
+      toast.ids.push(options?.id)
+    },
     warning: (text: string) => toast.said.push(`held: ${text}`),
     error: (text: string) => toast.said.push(`refused: ${text}`),
   },
@@ -187,6 +190,7 @@ beforeEach(() => {
   feed.reset()
   ticket.opened = []
   toast.said = []
+  toast.ids = []
   resetSentForTests()
   noteProtectStage('on')
   for (const fn of Object.values(api)) fn.mockReset()
@@ -281,7 +285,11 @@ describe('Protect on a holding (M5.6)', () => {
         triggerprice_tg: 0,
       },
     ])
-    expect(toast.said).toEqual(['ok: Protect set on RELIANCE.'])
+    // TD6: what it will do, never an order placed; the sandbox's own event shares the toast.
+    expect(toast.said).toEqual([
+      'ok: Protect set: RELIANCE sells 40 if the price falls to 1,420.00.',
+    ])
+    expect(toast.ids).toEqual(['protect:NSE:RELIANCE'])
     // the card and the sheet now say so, with Change and Remove in place of Protect
     expect(screen.getAllByText('Protected: sell 40 at 1,420.00').length).toBeGreaterThan(0)
     expect(screen.queryByRole('button', { name: 'Protect' })).toBeNull()
@@ -438,6 +446,9 @@ describe('Protect on a holding (M5.6)', () => {
     await settle()
     expect(api.cancelGttOrder.mock.calls).toEqual([['GTT-1']])
     expect(screen.queryByText('Protected: sell 40 at 1,420.00')).toBeNull()
+    expect(toast.said).toEqual([
+      'ok: Protect removed: the order to sell 40 RELIANCE at 1,420.00 is cancelled. RELIANCE is not protected now.',
+    ])
   })
 
   it('changes one with the same single sell', async () => {
@@ -475,6 +486,48 @@ describe('Protect on a holding (M5.6)', () => {
         },
       ],
     ])
+    expect(toast.said).toEqual([
+      'ok: Protect changed: RELIANCE sells 40 if the price falls to 1,400.00.',
+    ])
+  })
+
+  it('in Analyze mode says each one is in the sandbox (TD6)', async () => {
+    noteProtectStage('sandbox')
+    theme.appMode = 'analyzer'
+    const tap = user()
+    await renderPhone(RELIANCE)
+    await openSheet(tap, /RELIANCE/)
+    await tap.click(screen.getByRole('button', { name: 'Protect in the sandbox' }))
+    await settle()
+    fireEvent.change(screen.getByLabelText('Sell at price'), { target: { value: '1420' } })
+    await tap.click(screen.getByRole('button', { name: /^Set Protect/ }))
+    await settle()
+    api.getGttOrderbook.mockResolvedValueOnce(bookOf()).mockResolvedValue(bookOf(gtt()))
+    await tap.click(
+      within(screen.getByRole('dialog', { name: 'Set Protect?' })).getByRole('button', {
+        name: /^Set Protect/,
+      })
+    )
+    await settle()
+    await settle()
+    expect(api.post).toHaveBeenCalledTimes(1)
+    expect(toast.said).toEqual([
+      'ok: Protect set: RELIANCE sells 40 in the sandbox if the price falls to 1,420.00.',
+    ])
+    expect(toast.ids).toEqual(['protect:NSE:RELIANCE'])
+    await tap.click(screen.getByRole('button', { name: 'Remove' }))
+    await settle()
+    api.getGttOrderbook.mockResolvedValue(bookOf())
+    await tap.click(
+      within(screen.getByRole('dialog', { name: 'Remove Protect?' })).getByRole('button', {
+        name: /^Remove/,
+      })
+    )
+    await settle()
+    await settle()
+    expect(toast.said.at(-1)).toBe(
+      'ok: Protect removed in the sandbox: the order to sell 40 RELIANCE at 1,420.00 is cancelled. RELIANCE is not protected now.'
+    )
   })
 
   it('Sell on a protected holding asks first; ticked, Protect is removed and the ticket opens', async () => {
