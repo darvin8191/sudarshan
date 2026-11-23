@@ -402,6 +402,64 @@ test.describe('choosing the figures, upright', () => {
   })
 })
 
+/**
+ * v0.17.0 review L2: at 320 px with Larger text the expired row read "NIFTY 22..." over "NFO · 3
+ * Nov ...". Its name, its date and "Expired on 3 Nov 2026" are whole and inside the row on every
+ * screen; upright the words take two lines, "3 Nov 2026" whole on the second.
+ */
+async function expiredRowChecks(page: Page) {
+  return page.getByRole('button', { name: /^NIFTY 22700 PE/ }).evaluate((button) => {
+    const edge = button.getBoundingClientRect()
+    const cut: string[] = []
+    const whole = (el: Element | null | undefined, what: string) => {
+      if (!(el instanceof HTMLElement)) return void cut.push(`${what} not found`)
+      const box = el.getBoundingClientRect()
+      if (box.left < edge.left - 0.5 || box.right > edge.right + 0.5) cut.push(`${what} reaches past the row`)
+      if (el.scrollWidth > el.clientWidth + 1) cut.push(`${what} is cut`)
+    }
+    const title = button.querySelector('span[title]')
+    whole(title, 'the name')
+    whole(title?.parentElement?.nextElementSibling?.firstElementChild, 'its date')
+    const words = button.querySelector('[data-expired-on]')
+    whole(words, 'Expired on')
+    const day = words?.querySelector('.whitespace-nowrap')
+    whole(day, 'the day')
+    return {
+      cut,
+      text: (words?.textContent ?? '').trim(),
+      dayLines: day ? day.getClientRects().length : 0,
+      wordLines: words ? Math.round(words.getBoundingClientRect().height / Number.parseFloat(getComputedStyle(words).lineHeight)) : 0,
+      sideways: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+    }
+  })
+}
+
+for (const viewport of [
+  { width: 320, height: 640 },
+  { width: 360, height: 800 },
+  { width: 800, height: 360 },
+]) {
+  for (const text of ['normal', 'large'] as const) {
+    test.describe(`an expired row at ${viewport.width} x ${viewport.height}, ${text} text (L2)`, () => {
+      test.use({ viewport, hasTouch: true, isMobile: true })
+
+      test('its name, its date and its words are whole', async ({ page }, info) => {
+        if (text === 'large')
+          await page.addInitScript(() => localStorage.setItem('sudarshan-text', 'large'))
+        await serve(page, { cols: [], expired: true })
+        const checks = await expiredRowChecks(page)
+        expect(checks.cut, 'parts of the expired row that are cut').toEqual([])
+        expect(checks.sideways, 'sideways scroll').toBe(false)
+        expect(checks.text).toBe('Expired on 3 Nov 2026')
+        expect(checks.dayLines, '"3 Nov 2026" on one line').toBe(1)
+        expect(checks.wordLines).toBe(viewport.width < 640 ? 2 : 1)
+        await page.getByRole('button', { name: /^NIFTY 22700 PE/ }).scrollIntoViewIfNeeded()
+        await page.screenshot({ path: info.outputPath(`watchlist-expired-${viewport.width}-${text}.png`) })
+      })
+    })
+  }
+}
+
 test.describe('an expired contract in the list, upright (M8.2 TD1)', () => {
   test.use({ viewport: { width: 360, height: 800 }, hasTouch: true, isMobile: true })
 

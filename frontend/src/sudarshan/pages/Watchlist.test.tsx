@@ -1538,6 +1538,10 @@ describe('an expired contract in a list (M8.2 TD1)', () => {
     await screen.findByText('812.40')
     expect(row).toHaveTextContent('Expired on 3 Nov 2026')
     expect(row).not.toHaveTextContent('No price yet')
+    // v0.17.0 review L2: its name and date wrap rather than being cut, and "3 Nov 2026" stays whole.
+    expect(within(row).getByText('3 Nov 2026')).toHaveClass('whitespace-nowrap')
+    expect(within(row).getByText('NIFTY 22700 PE')).toHaveClass('break-words')
+    expect(within(row).getByText('NIFTY 22700 PE')).not.toHaveClass('truncate')
     // The other rows tick, so the expired one would be the only quiet row a re-sync asks for.
     for (let i = 0; i < 8; i += 1) {
       tick('SBIN', 'NSE', { ltp: 812 + i })

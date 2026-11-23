@@ -297,9 +297,14 @@ export function reaskable(
 
 /** "Expired on 3 Nov 2026": what an expired row says where its price would be. */
 export function expiredWords(day: string): string {
+  return `Expired on ${expiredDay(day)}`
+}
+
+/** "3 Nov 2026": the day in those words, kept whole on a line of its own (review L2). */
+export function expiredDay(day: string): string {
   const [year, month, date] = day.split('-').map(Number)
   const name = MONTHS[month - 1]
-  return `Expired on ${date} ${name.charAt(0)}${name.slice(1).toLowerCase()} ${year}`
+  return `${date} ${name.charAt(0)}${name.slice(1).toLowerCase()} ${year}`
 }
 
 /** Whether an exchange's symbols carry an expiry (M4.15 TD2: the phone chart asks too). */

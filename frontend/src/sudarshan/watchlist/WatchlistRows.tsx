@@ -15,7 +15,7 @@ import { type HeldFigures, HoldingLine } from './HoldingLine'
 import { MarkGlyph } from './marks'
 import {
   describe,
-  expiredWords,
+  expiredDay,
   formatChange,
   OPEN_UNKNOWN,
   priceDecimals,
@@ -79,6 +79,7 @@ function Name({
   mark,
   metric,
   roomy,
+  whole,
 }: {
   symbol: string
   exchange: string
@@ -98,13 +99,16 @@ function Name({
    * 7rem floor); only a name that cannot fit beside the price at all is cut, with no figure shown.
    */
   roomy?: boolean
+  /** v0.17.0 review L2: an expired row's name and date wrap onto a second line, never cut. */
+  whole?: boolean
 }) {
   const named = describe(symbol, exchange)
+  const fit = whole ? 'break-words' : 'truncate'
   return (
     <span className={cn('flex min-w-0 flex-col gap-0.5', roomy ? 'flex-initial' : 'flex-1')}>
       <span className="flex min-w-0 items-center gap-2">
         {mark?.flag != null && <MarkGlyph mark={mark.flag} /> /* F8 */}
-        <span className="truncate text-[0.9375rem] leading-tight font-semibold" title={symbol}>
+        <span className={cn(fit, 'text-[0.9375rem] leading-tight font-semibold')} title={symbol}>
           {named.title}
         </span>
         {
@@ -131,7 +135,12 @@ function Name({
         {chip && <ChipMark chip={chip} />}
       </span>
       <span className="flex min-w-0 flex-wrap items-center gap-x-2">
-        <span className="min-w-0 truncate text-xs leading-tight font-medium text-[color:var(--text-tertiary)]">
+        <span
+          className={cn(
+            'min-w-0 text-xs leading-tight font-medium text-[color:var(--text-tertiary)]',
+            fit
+          )}
+        >
           {named.detail}
         </span>
         {/* F7: "Holding 25" and "Position +65", in ink; nothing for zero. */}
@@ -279,15 +288,19 @@ const PriceRow = memo(function PriceRow({
         mark={expired && mark ? { ...mark, expired: false } : mark} // TD1: said once, with its day
         metric={metric} // F16
         roomy={shown} // M8.3
+        whole={expired !== undefined} // L2
       />
       {shown && <FigureCells cells={cells} grey={figures.stale || figures.outside !== undefined} />}
       {expired ? (
+        // L2: "Expired on" over "3 Nov 2026" on a phone upright, so the name beside it is whole.
         <span
           data-expired-on={expired}
-          className="flex max-w-[8.5rem] shrink-0 items-start gap-1 text-right text-xs leading-tight font-semibold text-[color:var(--warning-text)]"
+          className="flex max-w-[6rem] shrink-0 items-start gap-1 text-right text-xs leading-tight font-semibold text-[color:var(--warning-text)] sm:max-w-none"
         >
           <Clock aria-hidden="true" className="mt-px size-3 shrink-0" />
-          {expiredWords(expired)}
+          <span>
+            Expired on <span className="whitespace-nowrap">{expiredDay(expired)}</span>
+          </span>
         </span>
       ) : (
         <Figures {...figures} decimals={priceDecimals(exchange)} />

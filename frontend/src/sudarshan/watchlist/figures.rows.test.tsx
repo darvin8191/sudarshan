@@ -410,7 +410,7 @@ describe('an expired contract in a v2 list (M8.2 TD1)', () => {
     const page = mount({ cols: ['high', 'volume'], list: [...items(1), EXPIRED] })
     await settle()
     const gone = row('NIFTY 22700 PE')
-    expect(within(gone).getByText('Expired on 3 Nov 2026')).toBeInTheDocument()
+    expect(gone).toHaveTextContent('Expired on 3 Nov 2026') // L2: the day is a span of its own
     expect(cells(gone)).toEqual([])
     expect(gone.closest('li')?.textContent).not.toMatch(/not real-time|No price/)
     expect(cells(row('INFY'))).toEqual(['high', 'volume'])
