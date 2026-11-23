@@ -214,6 +214,10 @@ Nothing below changes anything until you switch it on, and none of it is promise
     position, and no quantity.
   - 4 April 2027, after 07:10: Reports shows the Tax pack and the Records pack for 2026-27, both
     built that morning.
+  - Optional, on the server, any evening after a trading day:
+    `sudo journalctl -u sudarshan-portfolio -n 2000 --no-pager | grep "Analytics Token probe"`.
+    Send the lines to the next work session: they say whether Upstox lets this token read the
+    day's orders and trades (below). They carry no token or key.
 
 ### What is refused now that used to be accepted
 - **A report's file larger than about 6 MB, on Download** (in practice only a very large Records
@@ -229,12 +233,15 @@ Nothing below changes anything until you switch it on, and none of it is promise
   test browser at phone sizes. Nobody has used it on a real phone yet.
 - **The token line's first verdict** comes at the first read after the install: when you open the
   Upstox tab, or else after Wednesday's close (Tuesday is a holiday).
-- **Whether Upstox lets this token read the day's orders and trades is still not known.** Where
-  one of this token's reads other than holdings and positions is refused (the day's orders or
-  trades, Upstox's reports, corporate actions), that part stops and says "Upstox did not accept
-  SUDARSHAN's read-only token", even though the token may be fine; the token line and Telegram are
-  not changed by it. If you see that sentence while the System page says the token is accepted, do
-  not create a new token; tell the next work session.
+- **Whether Upstox lets this token read the day's orders and trades is still not known.** If
+  Upstox refuses this token one of its reads other than holdings and positions (the day's trades,
+  which the journal reads every evening, or Upstox's reports or corporate actions), the Upstox tab
+  keeps showing your holdings and positions, but its funds, MTF, reports and Performance pause until
+  the token is changed or the next release installs, and they say "Upstox did not accept
+  SUDARSHAN's read-only token" while the System page still says it is accepted; the closing records
+  then lose their funds figure. v0.15.0 paused the whole Upstox tab in that case, so this is no
+  worse. If you see that sentence while the System page says the token is accepted, do not create a
+  new token; tell the next work session. The next release pauses only the read that was refused.
 - **A Records pack built while one of its stores could not be read** says so only on its first
   page; nothing is sent on Telegram. The pack is not announced either: you find it in Reports.
 - **Upstox tab:** whether Upstox's holdings already count the shares bought the day before is not
@@ -247,7 +254,8 @@ Nothing below changes anything until you switch it on, and none of it is promise
 - **Grouping:** the server's messages, the Trading page's watchlist and chart, and some Tools
   figures keep the Indian way, as the Display row says.
 - **On a 320 px phone with "Larger text",** the order ticket's first screen holds only the side and
-  the quantity; scroll to reach the price. The line beside Place always shows the whole order.
+  the quantity; scroll to reach the price type, the product and the price. The line beside Place
+  always shows the whole order.
 - **A note kept after a refused save** waits in its sheet for the rest of the visit; a reload of the
   page drops it.
 - **After the phone wakes,** a connection that is still signed in can show figures as updated
@@ -272,7 +280,12 @@ Nothing below changes anything until you switch it on, and none of it is promise
 - **The phone review said: publish yes, after two fixes,** both only with Larger text on, with no
   new order path. The phone fix round made both and closed the review's eight smaller points
   (below); what an order sends did not change.
-- **No verifier has checked the fix rounds yet.**
+- **A verifier then checked both fix rounds against the reviews: publish yes.** Every finding is
+  fixed and no order path changed. It sent the same orders through the old and the new order
+  ticket, at both text sizes and both groupings, and every order matched; it ran the phone checks
+  three times with the settings stored before the page loads. It found nothing that holds the
+  release. Its points (the paused reads above, a refused holdings read that nothing asks again
+  until the token changes, and two smaller wording and layout points) go to the next release.
 
 ### The phone fix round
 - **With "Larger text" on, the top bar keeps its usual size.** The name in both scripts and the Live
