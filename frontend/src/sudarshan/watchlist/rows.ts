@@ -323,6 +323,18 @@ export function contractParts(
   return future ? { base } : { base, strike, right: right as 'CE' | 'PE' }
 }
 
+/**
+ * M20.2 (v0.17.0 review L5): a contract's symbol in the parts a line may break between, base,
+ * expiry, then strike and side together (or FUT): BANKNIFTY | 30DEC26 | 58500PE, so "PE" is never
+ * left alone on a line. Anything else is one part.
+ */
+export function symbolBreaks(symbol: string, exchange: string): string[] {
+  const parts = contractParts(symbol, exchange)
+  if (!parts) return [symbol]
+  const tail = parts.strike ? `${parts.strike}${parts.right}` : 'FUT'
+  return [parts.base, symbol.slice(parts.base.length, symbol.length - tail.length), tail]
+}
+
 /** Where an instrument's options trade, for the option chain. */
 const CHAIN_EXCHANGE: Record<string, string> = {
   NSE: 'NFO',

@@ -21,6 +21,7 @@
  * socket, never raises the refresh notice, and its sheet asks before it removes the row.
  */
 import { expect, type Page, test, type WebSocketRoute } from '@playwright/test'
+import { ticketCuts } from './sd-ticket'
 
 test.skip(({ browserName }) => browserName !== 'chromium', 'the phone specs run on Chromium only')
 
@@ -187,6 +188,28 @@ async function serve(page: Page, fixture: Fixture) {
       caught.prefs.push(body)
       Object.assign(pref, body as object)
       return ok({ version: null, id: null, words: null })
+    },
+    // M20.2 L5: what the order ticket reads of an instrument: its lot and tick, its book's top level.
+    '/api/v1/symbol': (body) => {
+      const { symbol, exchange } = body as { symbol: string; exchange: string }
+      const lot = exchange === 'NFO' ? (symbol.startsWith('BANKNIFTY') ? 30 : 65) : 1
+      return json({ status: 'success', data: { symbol, exchange, name: symbol, lotsize: lot, tick_size: 0.05 } })
+    },
+    '/api/v1/depth': (body) => {
+      const row = ROWS.find((each) => each.symbol === (body as { symbol: string }).symbol) ?? ROWS[0]
+      return json({
+        status: 'success',
+        data: {
+          ltp: row.ltp,
+          prev_close: row.prev,
+          bids: [{ price: row.ltp - 0.05, quantity: 12_480 }],
+          asks: [{ price: row.ltp + 0.05, quantity: 9_315 }],
+        },
+      })
+    },
+    '/api/v1/quotes': (body) => {
+      const row = ROWS.find((each) => each.symbol === (body as { symbol: string }).symbol) ?? ROWS[0]
+      return json({ status: 'success', data: { ltp: row.ltp, prev_close: row.prev, bid: row.ltp - 0.05, ask: row.ltp + 0.05 } })
     },
     // As the server answers: an error entry for a symbol its master lacks, 400 naming them when it
     // lists none of the call (TD1).
@@ -455,6 +478,94 @@ for (const viewport of [
         expect(checks.wordLines).toBe(viewport.width < 640 ? 2 : 1)
         await page.getByRole('button', { name: /^NIFTY 22700 PE/ }).scrollIntoViewIfNeeded()
         await page.screenshot({ path: info.outputPath(`watchlist-expired-${viewport.width}-${text}.png`) })
+      })
+    })
+  }
+}
+
+/**
+ * M20.2 (v0.17.0 review L5): the order ticket opened from the watchlist. Below 360 px with Larger
+ * text a share above 1,000 broke each side of the bid and ask into three lines ("Bid:", the price,
+ * the size), and an option's symbol broke inside itself ("BANKNIFTY30DEC2658500P" over "E"). On
+ * every screen: the bid and ask take two lines at most, each side's words on one; the symbol's
+ * parts each on one line; nothing of the ticket cut; the line beside Place whole and in view.
+ * Nothing is placed: Place is never pressed.
+ */
+async function ticketHead(page: Page) {
+  return page.getByRole('dialog', { name: /^Place Order - BUY/ }).evaluate((dialog) => {
+    const tops = (el: Element) => new Set([...el.getClientRects()].map((rect) => Math.round(rect.top)))
+    // Each side is what holds its word ("Bid:", "Ask:"), found by the words alone.
+    const sides = ['Bid:', 'Ask:'].map(
+      (word) =>
+        [...dialog.querySelectorAll('span')].find((span) => span.textContent === word)
+          ?.parentElement as HTMLElement
+    )
+    const lines = new Set(sides.map((side) => Math.round(side.getBoundingClientRect().top))).size
+    // One line: every word of the side shares one band (different sizes, so no common top).
+    const sideLines = sides.map((side) => {
+      const boxes = [...side.children].map((child) => child.getBoundingClientRect())
+      const top = Math.max(...boxes.map((box) => box.top))
+      const bottom = Math.min(...boxes.map((box) => box.bottom))
+      return top < bottom ? 1 : 2
+    })
+    const title = dialog.querySelector('h2 > span:last-of-type') as HTMLElement // the symbol
+    const parts = [...title.childNodes].filter((node) => node.nodeType === Node.TEXT_NODE)
+    const broken = parts
+      .filter((node) => {
+        const range = document.createRange()
+        range.selectNodeContents(node)
+        return tops(range).size > 1
+      })
+      .map((node) => node.textContent)
+    return {
+      lines,
+      sideLines,
+      words: sides.map((side) => (side.textContent ?? '').replace(/\s+/g, ' ').trim()),
+      symbol: title.textContent,
+      broken,
+    }
+  })
+}
+
+for (const viewport of [
+  { width: 320, height: 640 },
+  { width: 360, height: 800 },
+  { width: 800, height: 360 },
+]) {
+  for (const text of ['normal', 'large'] as const) {
+    test.describe(`the ticket from the watchlist at ${viewport.width} x ${viewport.height}, ${text} text (L5)`, () => {
+      test.use({ viewport, hasTouch: true, isMobile: true })
+
+      test('bid and ask in two lines at most, the symbol broken only between its parts', async ({ page }, info) => {
+        if (text === 'large')
+          await page.addInitScript(() => localStorage.setItem('sudarshan-text', 'large'))
+        await serve(page, { cols: [] })
+        for (const { row, symbol } of [
+          { row: /^INFY/, symbol: 'INFY' },
+          { row: /^BANKNIFTY 58500 PE/, symbol: 'BANKNIFTY30DEC2658500PE' },
+        ]) {
+          await page.getByRole('button', { name: row }).click()
+          await page.waitForTimeout(700) // the sheet's fade and its half-second guard
+          await page.getByRole('dialog').getByRole('button', { name: 'BUY', exact: true }).click()
+          const ticket = page.getByRole('dialog', { name: /^Place Order - BUY/ })
+          await expect(ticket).toBeVisible()
+          await expect(ticket.getByText('Bid:', { exact: true }).locator('..')).toContainText('x12,480')
+          await page.waitForTimeout(700)
+          const head = await ticketHead(page)
+          expect(head.symbol).toBe(symbol)
+          expect(head.broken, `${symbol}: a part broken inside itself`).toEqual([])
+          expect(head.lines, `${symbol}: lines of bid and ask`).toBeLessThanOrEqual(2)
+          expect(head.sideLines, `${symbol}: a side's words over more than one line`).toEqual([1, 1])
+          expect(head.words[0]).toMatch(/^Bid:\d+\.\d{2}x12,480$/) // three spans, set apart by a gap
+          expect(head.words[1]).toMatch(/^Ask:\d+\.\d{2}x9,315$/)
+          expect(await ticketCuts(ticket), `${symbol}: parts of the ticket that are cut`).toEqual([])
+          await expect(ticket.getByTestId('ticket-summary')).toBeInViewport({ ratio: 1 })
+          await page.screenshot({ path: info.outputPath(`ticket-${symbol}-${viewport.width}-${text}.png`) })
+          await ticket.getByRole('button', { name: 'Cancel', exact: true }).click()
+          await expect(ticket).toHaveCount(0)
+          await page.keyboard.press('Escape') // the symbol sheet, if it stayed under the ticket
+          await expect(page.getByRole('dialog')).toHaveCount(0)
+        }
       })
     })
   }

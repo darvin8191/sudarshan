@@ -369,8 +369,25 @@ describe('PlaceOrderDialog on a phone', () => {
     expect(classes(total)).toContain('whitespace-nowrap')
     expect(classes(total.parentElement?.parentElement)).toContain('flex-wrap')
     expect(classes(screen.getByText('NIFTY28MAR2420800CE'))).not.toContain('truncate')
-    // Bid and ask take a half each, with no separator to hang at a line's end.
-    expect(classes(screen.getByText('Ask:').parentElement?.parentElement)).toContain('grid-cols-2')
+    // v0.17.0 review L5: the symbol breaks only between its parts, never inside one.
+    const symbol = screen.getByText('NIFTY28MAR2420800CE')
+    expect(classes(symbol)).toContain('break-words')
+    expect(symbol.className).not.toMatch(/overflow-wrap:anywhere/)
+    expect([...symbol.childNodes].map((node) => node.nodeName)).toEqual([
+      '#text',
+      'WBR',
+      '#text',
+      'WBR',
+      '#text',
+    ])
+    // L5: each side keeps its label, price and size together; the row wraps only between them,
+    // with no separator to hang at a line's end.
+    for (const side of ['Bid:', 'Ask:']) {
+      const group = screen.getByText(side).parentElement
+      expect(classes(group)).toContain('whitespace-nowrap')
+      expect(classes(group)).not.toContain('flex-wrap')
+      expect(classes(group?.parentElement)).toContain('flex-wrap')
+    }
     expect(screen.queryByText('|')).toBeNull()
     for (const name of ['Place BUY Order', 'Cancel'])
       expect(classes(screen.getByRole('button', { name }))).toContain('whitespace-normal')

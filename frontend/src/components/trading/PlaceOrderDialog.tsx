@@ -41,6 +41,8 @@ import { SettlementLine } from '@/sudarshan/ticket/SettlementLine'
 // SUDARSHAN B4 (M5.11): size by risk, which fills the quantity box and sends nothing.
 import { SizeByRisk } from '@/sudarshan/ticket/SizeByRisk'
 import { entryOf } from '@/sudarshan/ticket/sizeHelper'
+// SUDARSHAN M20.2 (v0.17.0 phone review L5): the symbol breaks only between its parts.
+import { TicketSymbol } from '@/sudarshan/ticket/TicketSymbol'
 // SUDARSHAN M6.9: a ticket that has just opened takes no tap for half a second.
 import { useOpenGuard } from '@/sudarshan/watchlist/openGuard'
 import { showToast } from '@/utils/toast'
@@ -523,12 +525,13 @@ export function PlaceOrderDialog({
           {/* M20.2 (v0.16.0 phone review H2): the symbol wraps under the side when the title
               has no room for it (Larger text at 320 px read "SELL S..."); it is never cut.
               v0.17.0 verification V5: below 360 px with Larger text the lead is read, not shown
-              (`sd-ticket-lead`, theme.css), so the side and the symbol share one line. */}
+              (`sd-ticket-lead`, theme.css), so the side and the symbol share one line.
+              v0.17.0 phone review L5: a long contract symbol breaks only between its parts. */}
           <DialogTitle className="flex flex-wrap items-center gap-x-2 gap-y-0.5 pr-10 text-left">
             <span className="sd-ticket-lead">Place Order -</span>
             <span className={SIDE_INK[formAction]}>{formAction}</span>
-            <span className="min-w-0 text-muted-foreground font-normal text-sm [overflow-wrap:anywhere]">
-              {symbol}
+            <span className="min-w-0 text-muted-foreground font-normal text-sm break-words">
+              <TicketSymbol symbol={symbol} exchange={exchange} />
             </span>
           </DialogTitle>
         </DialogHeader>

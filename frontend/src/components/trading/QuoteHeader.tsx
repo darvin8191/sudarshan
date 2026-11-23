@@ -57,9 +57,10 @@ export function QuoteHeader({
   }
 
   // M20.2 (v0.16.0 phone review H2): with Larger text both rows ran past the ticket's edge (the
-  // ask read "803.8" at 320 px). The price row wraps its change under the price, and bid and ask
-  // take a half each, a size going under its price where the half is too narrow: never cut, and
-  // no separator left hanging at a line's end.
+  // ask read "803.8" at 320 px). The price row wraps its change under the price; never cut, and
+  // no separator left hanging at a line's end. v0.17.0 phone review L5: each side keeps its label,
+  // price and size together and the row wraps only between Bid and Ask, so it takes two lines at
+  // most (a share above 1,000 broke each half into three at 320 px with Larger text).
   return (
     <div className="p-3 bg-muted/30 rounded-lg space-y-2">
       {/* Exchange Badge and LTP Row */}
@@ -89,8 +90,10 @@ export function QuoteHeader({
       </div>
 
       {/* Bid/Ask Row */}
-      <div className="grid grid-cols-2 gap-x-3 text-sm border-t border-border/50 pt-2">
-        <div className="flex flex-wrap items-center gap-x-2">
+      {/* Two lines at most, no taller than the old halves were with a size under its price
+          (tight leading, no gap between the lines), so the ticket's first screen keeps its fields. */}
+      <div className="flex flex-wrap items-center justify-between gap-x-3 text-sm leading-tight border-t border-border/50 pt-2">
+        <div data-quote-side="bid" className="flex items-center gap-x-2 whitespace-nowrap">
           <span className="text-muted-foreground">Bid:</span>
           <span className="text-[color:var(--buy-solid)] font-medium font-mono">
             {bidPrice !== undefined && bidPrice > 0 ? bidPrice.toFixed(2) : '-'}
@@ -99,7 +102,10 @@ export function QuoteHeader({
             <span className="text-muted-foreground text-xs">x{SIZES.format(bidSize)}</span>
           )}
         </div>
-        <div className="flex flex-wrap items-center justify-end gap-x-2">
+        <div
+          data-quote-side="ask"
+          className="ml-auto flex items-center justify-end gap-x-2 whitespace-nowrap"
+        >
           <span className="text-muted-foreground">Ask:</span>
           <span className="text-[color:var(--sell-solid)] font-medium font-mono">
             {askPrice !== undefined && askPrice > 0 ? askPrice.toFixed(2) : '-'}
