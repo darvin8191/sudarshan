@@ -221,6 +221,53 @@ const names = (page: Page, part: string) =>
     .getByRole('listitem')
     .evaluateAll((items) => items.map((item) => item.firstElementChild?.firstElementChild?.textContent))
 
+/**
+ * v0.17.0 phone review L1: each segment's word drawn inside its segment (at 320 px with Larger
+ * text "Watchlists" ran 11 px past its own and under All), whichever segment is chosen.
+ */
+async function segmentChecks(page: Page) {
+  return page.getByRole('tablist', { name: 'Show the events of' }).evaluate((list) => {
+    const out: string[] = []
+    for (const tab of list.querySelectorAll<HTMLElement>('[role="tab"]')) {
+      const box = tab.getBoundingClientRect()
+      const range = document.createRange()
+      range.selectNodeContents(tab)
+      const ink = range.getBoundingClientRect()
+      if (ink.left < box.left - 0.5 || ink.right > box.right + 0.5)
+        out.push(`${tab.textContent}: its word runs past its segment`)
+      if (box.width < 47.5 || box.height < 47.5) out.push(`${tab.textContent}: under 48 x 48`)
+    }
+    const doc = document.documentElement
+    if (doc.scrollWidth > doc.clientWidth) out.push('the page scrolls sideways')
+    return out
+  })
+}
+
+for (const viewport of [
+  { width: 320, height: 640 },
+  { width: 360, height: 800 },
+  { width: 800, height: 360 },
+]) {
+  for (const text of ['usual', 'Larger'] as const) {
+    test.describe(`the calendar at ${viewport.width} x ${viewport.height}, ${text} text`, () => {
+      test.use({ viewport, hasTouch: true, isMobile: true })
+
+      test('Holdings, Watchlists and All keep their words inside them (L1)', async ({ page }, info) => {
+        if (text === 'Larger')
+          await page.addInitScript(() => localStorage.setItem('sudarshan-text', 'large'))
+        await serve(page)
+        const tabs = page.getByRole('tablist', { name: 'Show the events of' })
+        for (const name of ['All', 'Watchlists', 'Holdings']) {
+          await tabs.getByRole('tab', { name }).click()
+          await expect(tabs.getByRole('tab', { name })).toHaveAttribute('aria-selected', 'true')
+          expect(await segmentChecks(page), `${name} chosen`).toEqual([])
+        }
+        await page.screenshot({ path: info.outputPath(`calendar-${viewport.width}-${text}.png`) })
+      })
+    })
+  }
+}
+
 for (const screen of [
   { label: 'upright', viewport: { width: 360, height: 800 } },
   { label: 'on its side', viewport: { width: 800, height: 360 } },

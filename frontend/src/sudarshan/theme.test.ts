@@ -432,6 +432,14 @@ describe('display density and text size', () => {
     expect(css.match(/\.sd-ticket-body/g)).toHaveLength(1)
   })
 
+  // v0.17.0 phone review L1: "Watchlists" ran past its segment at 320 px with Larger text.
+  it("narrows a segmented control's side padding below 360 px with Larger text, only there", () => {
+    expect(css).toMatch(
+      /@media \(width < 22\.5rem\) \{\s*:root\[data-text='large'\] \.sd-seg \{\s*padding-inline: 0\.25rem;\s*\}\s*\}/
+    )
+    expect(css.match(/\.sd-seg/g)).toHaveLength(1)
+  })
+
   it('changes no colour', () => {
     for (const selector of [":root[data-text='large']", ":root[data-density='compact']"]) {
       const escaped = selector.replace(/[[\]]/g, '\\$&')

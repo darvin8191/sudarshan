@@ -220,6 +220,14 @@ html {
     padding-top: 0;
   }
 }
+/* There too, a segmented control's segments (journal/Segmented.tsx) narrow their side padding, so
+   their words stay inside them: "Watchlists" ran 11 px past its segment on the Calendar at 320 px
+   (v0.17.0 phone review L1). */
+@media (width < 22.5rem) {
+  :root[data-text='large'] .sd-seg {
+    padding-inline: 0.25rem;
+  }
+}
 /* With larger text the books' four-up figure cards (Positions, Holdings, the wide pages a phone
    shows on its side) go two-up below 1024 px, so a six-digit figure stays inside its card and the
    page never scrolls sideways. Outside any layer, so it wins over the grid's own columns. */
