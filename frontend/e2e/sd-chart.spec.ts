@@ -302,6 +302,9 @@ async function serve(
         return route.fulfill(
           json({ status: 'success', data: { orders: fixture.books?.orders ?? [], statistics: {} } })
         )
+      // TD2: the expiry days the master lists, nearest first (an expired contract's offer).
+      case 'expiry':
+        return route.fulfill(json({ status: 'success', data: ['27-OCT-26', '03-NOV-26'] }))
       case 'symbol':
         return route.fulfill(
           json({
@@ -787,6 +790,22 @@ test.describe('the phone chart at 360 x 800', () => {
     await settled(page, page.getByRole('dialog', { name: 'Market depth' }))
     await page.screenshot({ path: info.outputPath('depth.png') })
     await checkScreen(page)
+  })
+
+  test('an expired contract: says it expired, builds no chart, and opens the nearest expiry (TD2)', async ({ page }, info) => {
+    await serve(page, { now: ist(10, 0, 30) })
+    await open(page, '/chart/NFO/NIFTY13OCT2625900CE')
+    await expect(page.getByRole('heading', { name: 'Expired on 13 Oct 2026' })).toBeVisible()
+    const next = page.getByRole('button', { name: 'NIFTY 27 OCT 25900 CE, Same strike and side, nearest expiry' })
+    await expect(next).toBeVisible()
+    await expect(page.getByRole('button', { name: 'NIFTY, The index' })).toBeVisible()
+    await expect(page.getByText(/Try again|No price yet|ordering is off/)).toHaveCount(0)
+    await expect(page.getByTestId('chart-surface')).toHaveCount(0)
+    await page.screenshot({ path: info.outputPath('expired.png') })
+    await checkScreen(page)
+    await next.tap()
+    await expect(page).toHaveURL(/\/chart\/NFO\/NIFTY27OCT2625900CE$/)
+    await expect(page.getByTestId('chart-surface')).toBeVisible()
   })
 
   test('keeping the screen on where the phone will not: the switch goes off and says why', async ({ page }, info) => {
