@@ -114,12 +114,13 @@ no newer tool, no new setting, no new timer and no nginx change. Against v0.15.0
 ### Display: number grouping, Compact rows and Larger text
 - **"International number grouping"** shows figures as 1,234,567.89, with M and B in short
   figures, instead of the Indian 12,34,567.89 with L and Cr. The row shows a sample figure in the
-  grouping now chosen. Indian stays the default. Messages the server writes, such as alerts and
-  Telegram, keep the Indian way.
+  grouping now chosen. Indian stays the default. Messages the server writes (alerts, Telegram),
+  the watchlist and chart on the Trading page, and some figures on the Tools pages keep the Indian
+  way, and the row says so.
 - **"Compact rows":** watchlist rows and the cards in Positions, Orders, Holdings and Trades take
   less height, so more fit on the screen. Every button stays finger-sized.
 - **"Larger text":** text and figures one size larger everywhere in the app, and the buttons grow
-  with them.
+  with them. The top bar keeps its size, so the name and the mode stay whole.
 - **Each is kept on that device only,** never on the server.
 
 ### Small fixes
@@ -172,7 +173,8 @@ Nothing below changes anything until you switch it on, and none of it is promise
   TRINETRA view as above.
 - **If Telegram reminds you about the alert links after the install,** nothing stopped working;
   install the nginx lines before your first Automation strategy (above).
-- **Once after the install, on the phone.** No order is involved.
+- **Once after the install, on the phone.** Only the order ticket check places an order, in
+  analyzer mode.
   - System page: "Upstox read-only token (Analytics Token)" says "Not checked yet". Open the
     Upstox tab once, until your holdings show; the line then says "Accepted by Upstox when your
     holdings or positions were last read", with that time. If it ever says "Not accepted", do not
@@ -190,8 +192,13 @@ Nothing below changes anything until you switch it on, and none of it is promise
     dashboard's figures change from the Indian grouping (12,34,567.89) to the international
     (1,234,567.89). Turn it off again.
   - Profile, Display: turn on "Compact rows" and "Larger text"; open the watchlist and Positions,
-    upright and on its side: nothing scrolls sideways and every button is easy to tap. Then set
-    them as you like.
+    upright and on its side: nothing scrolls sideways and every button is easy to tap, and the top
+    bar shows the name in both scripts and the mode chip whole. Then set them as you like.
+  - In analyzer mode, on a trading day, with "Larger text" on: open Buy on a NIFTY option. The
+    title shows the whole symbol, "Total qty" is whole, Lots and Shares sit inside the ticket, and
+    the line beside Place shows the whole order. Place once: it goes to the Sandbox, once. This is
+    the one order this release asks for, because the ticket's layout changed; what it sends did
+    not.
   - Watchlist: type a note in a symbol's sheet and close it with Back: "Note saved" shows, the row
     gets its note mark, and the note is there when you open the sheet again.
   - Automation, in analyzer mode, with a Sandbox strategy holding a position: in market hours the
@@ -237,8 +244,15 @@ Nothing below changes anything until you switch it on, and none of it is promise
   only at Upstox stays "Not classified" for now. Shares that left without a trade (an off-market
   transfer, a buyback, a merger) are valued at what is still held, said in words; their money is
   not in the return.
-- **Grouping:** besides the server's messages, some figures on the trading terminal and the Tools
-  pages keep the Indian way.
+- **Grouping:** the server's messages, the Trading page's watchlist and chart, and some Tools
+  figures keep the Indian way, as the Display row says.
+- **On a 320 px phone with "Larger text",** the order ticket's first screen holds only the side and
+  the quantity; scroll to reach the price. The line beside Place always shows the whole order.
+- **A note kept after a refused save** waits in its sheet for the rest of the visit; a reload of the
+  page drops it.
+- **After the phone wakes,** a connection that is still signed in can show figures as updated
+  without saying "Reconnecting" until the old connection closes. That was so before this release
+  too.
 - **Compact rows** changes only the watchlist rows and the books' cards. A few small buttons from
   OpenAlgo (the Profile page's tabs, the wide Positions and Holdings pages' buttons) are under
   finger size at either setting, as they were before.
@@ -256,29 +270,28 @@ Nothing below changes anything until you switch it on, and none of it is promise
   Automation page's wait on Upstox (it could have waited up to two minutes, Stop included), and
   closed three smaller points in the Records pack and one in a test.
 - **The phone review said: publish yes, after two fixes,** both only with Larger text on, with no
-  new order path. The phone fix round is still running (below).
+  new order path. The phone fix round made both and closed the review's eight smaller points
+  (below); what an order sends did not change.
 - **No verifier has checked the fix rounds yet.**
 
 ### The phone fix round
-PHONE FIX ROUND: to be filled in
-
-This section is rewritten when the phone fix round has merged. Until then, these stand as the phone
-review found them, and the release must not be published with this section in this state.
-- **Larger text cuts the Devanagari name in the app bar** on a phone 360 or 320 px wide, most in
-  analyzer mode with the kill switch on; on a phone turned on its side with the kill switch on, the
-  page scrolls sideways.
-- **Larger text cuts figures in the order ticket:** "Total qty" can read 6 for 65, the Shares button
-  is cut at the ticket's edge and the quote row's ask size is cut; on a 320 px phone the ask price
-  and the title are cut and the price field starts below the first screen. The order line beside
-  Place stays whole in every case.
-- **With international grouping on,** the trading terminal's dock shows its header one way and its
-  rows the other, and some Tools figures follow the switch while others do not. The values are the
-  same.
-- **Smaller points:** open interest at the edge of a unit can read "1,000 k"; a note refused while a
-  Save was already on its way is lost with no message; the ticket's quantities do not follow the
-  grouping; the Automation card's P&L keeps its colour when ticks are not arriving (its "Read at"
-  still says how old it is); at 320 px with Larger text, Allocation's bar names and a position
-  card's average price are cut.
+- **With "Larger text" on, the top bar keeps its usual size.** The name in both scripts and the Live
+  or Analyze chip stay whole on every phone, also with the kill switch on, and a phone held sideways
+  no longer scrolls sideways.
+- **The order ticket shows every figure and button whole** on narrow phones and with "Larger text":
+  the title wraps the whole symbol, "Total qty", Lots and Shares stay inside the ticket, and bid and
+  ask each take half the quote row. What an order sends is unchanged.
+- **International grouping now also covers the dock under the Trading page's chart** and the
+  ticket's quantities and sizes.
+- **Open interest at the edge of a unit reads "1.00 M" or "1.00 Cr",** not "1,000 k" or "100.0 L".
+- **A note that could not be saved after you closed a symbol's sheet is no longer lost.** A message
+  says why ("Note not saved:" and the reason), and the note waits in the sheet when you open the
+  symbol again.
+- **On the Automation page, a strategy's P&L turns grey when its prices stop during market hours,**
+  as on Positions; after the close it keeps its colour, with "Read at".
+- **Allocation bars and the position and holding cards no longer cut a name or a price.**
+- Two phone checks that sometimes failed in the work session, after the phone wakes, now wait for
+  the old connection to close; the screen itself is unchanged.
 
 ## v0.15.0 (16 Nov 2026)
 
