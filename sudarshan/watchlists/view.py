@@ -80,6 +80,7 @@ def _follow(f: dict, section_id: int | None) -> dict:
         "underlying": f["underlying"],
         "underlying_exchange": f["underlying_exchange"],
         "expiry_rule": f["expiry_rule"],
+        "expiry_on": f.get("expiry_on"),
         "strike_rule": None if month else f.get("strike_rule"),
         "offset": None if month else f.get("offset", 0),
         "strike": None if month or paise is None else paise / 100,

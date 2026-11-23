@@ -2,10 +2,18 @@
 """
 Migration: SUDARSHAN Watchlists v2 (the store, M8.4)
 
-Creates db/sudarshan_watchlists.db and its nine tables (schema 1), from the ORM in
+Creates db/sudarshan_watchlists.db and its nine tables (schema 2), from the ORM in
 sudarshan/watchlists/schema.py: sections, follow rows, flags and notes, favourite slots, view
 preferences and the meta table that records the schema. A file of its own, so no OpenAlgo table
 changes.
+
+Schema 2 (M8.11) lets a follow row stay on one expiry date: a fifth expiry rule, "date", and the
+column wl_row.expiry_on. SQLite cannot change a CHECK constraint in place, so a schema-1 wl_row is
+rebuilt (create the new table, copy every row with its id, drop the old, rename, the indexes again)
+in one IMMEDIATE transaction; the copy keeps every value, and expiry_on is NULL for every existing
+row, which is what each says (no row could stay on a date before). The app's first use rebuilds
+the same way. A schema-2 file is refused by schema-1 code, as a newer file always was; a deploy
+rolled back restores db/ from its backup.
 
 Listed in migrate_all.py's MIGRATIONS but not in REQUIRED_MIGRATIONS, on purpose: an overlay of
 OpenAlgo's lists is not worth rolling a release back. With the file missing or older, the app's
@@ -112,8 +120,15 @@ def missing_indexes(engine):
 def pending(engine):
     """What would change: the lines --status prints, in the order apply does them."""
     code = _schema().SCHEMA_VERSION
+    rebuild = _schema().needs_row_rebuild(engine)
     steps = [f"table {name} MISSING" for name in missing_tables(engine)]
-    steps += [f"column {t.name}.{c.name} MISSING" for t, c in missing_columns(engine)]
+    if rebuild:  # the rebuild brings wl_row's new column with it
+        steps.append(f"table wl_row checks from schema 1 (to {code}): rebuild")
+    steps += [
+        f"column {t.name}.{c.name} MISSING"
+        for t, c in missing_columns(engine)
+        if not (rebuild and t.name == "wl_row")
+    ]
     steps += [f"index {index.name} MISSING" for index in missing_indexes(engine)]
     stored = _schema().stored_schema(engine)
     if stored is None or stored < code:
@@ -173,6 +188,7 @@ def apply(path):
         # Each only when missing, columns before the indexes that cover them: an interrupted run
         # completes cleanly and the app's own first use at the same moment is no failure.
         schema.create_tables(engine)
+        schema.rebuild_row_checks(engine)  # schema 1 to 2: wl_row's checks (one transaction)
         for table, column in missing_columns(engine):
             if column.primary_key:
                 print(f"  [FAIL] {table.name} has no {column.name} key column; it cannot be added")

@@ -21,6 +21,10 @@ NOT_LOADED = (
     "Today's contract list is not loaded yet, so this row cannot be checked. Try again in a minute."
 )
 TOO_MANY = "That is more rows than one look can follow. Open fewer at a time."
+#: A row that stays on a date (M8.11).
+DATE_FUTURE = "A future row follows the month. Add a dated future to the list as a symbol."
+DATE_NEEDED = "Pick the date this row stays on."
+DATE_GONE = "That expiry has passed. Pick one still trading."
 
 
 def not_listed(underlying: str) -> str:

@@ -92,7 +92,7 @@ ENUMS = {
     #: The figures a row can show beside its price (M8.3, GA6.1), in the View sheet's order.
     "Figure": ("high", "low", "open", "prev", "volume", "oi", "atp", "iv"),
     "FollowKind": ("atm_option", "month_future", "strike_pair"),
-    "ExpiryRule": ("nearest", "next", "month", "next_month"),
+    "ExpiryRule": ("nearest", "next", "month", "next_month", "date"),
     "StrikeRule": ("atm", "fixed"),
     "OptRight": ("CE", "PE"),
     "UnderlyingExchange": ("NSE_INDEX", "NSE", "BSE_INDEX", "BSE"),
@@ -124,8 +124,8 @@ ENUMS = {
 _ROW = "list:int, section_id?:int|null, version:string"
 _FOLLOW = (
     "kind:FollowKind, underlying:string, underlying_exchange:string, "
-    "expiry_rule?:ExpiryRule, strike_rule?:StrikeRule, offset?:int, strike?:number, "
-    "opt_right?:OptRight|null"
+    "expiry_rule?:ExpiryRule, expiry_on?:string|null, strike_rule?:StrikeRule, offset?:int, "
+    "strike?:number, opt_right?:OptRight|null"
 )
 
 RECORDS = {
@@ -144,8 +144,8 @@ RECORDS = {
     "Row": "item:int|null, contract:Contract, section_id:int|null, flag:int|null, "
     "has_note:bool, expired:bool, metric:string|null",
     "FollowRow": "id:int, kind:FollowKind, section_id:int|null, position:int, underlying:string, "
-    "underlying_exchange:UnderlyingExchange, expiry_rule:ExpiryRule, strike_rule:StrikeRule|null, "
-    "offset:int|null, strike:number|null, opt_right:OptRight|null",
+    "underlying_exchange:UnderlyingExchange, expiry_rule:ExpiryRule, expiry_on:string|null, "
+    "strike_rule:StrikeRule|null, offset:int|null, strike:number|null, opt_right:OptRight|null",
     "View": "ref:string, kind:RefKind, name:string, version:string, locked:bool, "
     "as_of:string|null, lines:string[], total:int, missing:string[], sections:Section[], "
     "rows:Row[], follow:FollowRow[], pref:Pref",

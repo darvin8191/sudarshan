@@ -57,6 +57,7 @@ export function rollOf(
   expiries: readonly Expiry[],
   rule: ExpiryRule
 ): { on: string; ends: string; to: string | null } | null {
+  if (rule === 'date') return null // M8.11: a row that stays on its date never moves
   const dates = expiries.map((each) => each.date)
   const monthly = expiries.filter((each) => each.month).map((each) => each.date)
   const [on, ends, to] = {

@@ -113,7 +113,8 @@ def read_overlay(lid: int, items: list) -> dict:
         out["follow"] = [
             {"id": r.id, "kind": r.kind, "section_id": r.section_id, "position": r.position,
              "underlying": r.underlying, "underlying_exchange": r.underlying_exchange,
-             "expiry_rule": r.expiry_rule, "strike_rule": r.strike_rule, "offset": r.offset,
+             "expiry_rule": r.expiry_rule, "expiry_on": r.expiry_on,
+             "strike_rule": r.strike_rule, "offset": r.offset,
              "strike_paise": r.strike_paise, "opt_right": r.opt_right}
             for r in s.scalars(select(fol).where(fol.principal == OWNER, fol.list_id == lid))
         ]  # fmt: skip

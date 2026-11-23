@@ -90,6 +90,7 @@ def _centre(rule: dict, strikes: list[float], held) -> float | None:
 
 
 def _closes(
+    rule: dict,
     expiries: list[str],
     now_ms: int,
     closes_of: Callable[[list[str]], dict[str, int]],
@@ -98,11 +99,16 @@ def _closes(
     exchange: str,
 ) -> dict[str, int]:
     """The dated closes that matter: today's expiry (is it still open?) and the ones the rule
-    picks (when does it end?), asked of the calendar in two steps, each once."""
+    picks (when does it end?), asked of the calendar in two steps, each once. A row that stays on
+    a date (M8.11) needs that day's alone."""
     today = numfmt.ist_date(now_ms).isoformat()
-    got = closes_of([today]) if today in expiries else {}
-    picked = dynamic.pick_expiries(expiries, now_ms, got, index=index, exchange=exchange)
-    more = [e for e in picked.values() if e and e not in got and e != today]
+    dated = rule["expiry_rule"] == "date"
+    got = closes_of([today]) if today in expiries or rule.get("expiry_on") == today else {}
+    if dated:
+        more = [d for d in (rule.get("expiry_on"),) if d and d not in got and d != today]
+    else:
+        picked = dynamic.pick_expiries(expiries, now_ms, got, index=index, exchange=exchange)
+        more = [e for e in picked.values() if e and e not in got and e != today]
     return {**got, **(closes_of(more) if more else {})}
 
 
@@ -161,8 +167,8 @@ def resolve_rows(
         listed = book.futures(name, fo) if futures else book.options(name, fo)
         expiries = sorted(listed)
         regime = {"index": stops.is_index(name, indices), "exchange": fo}
-        closes = _closes(expiries, now_ms, lambda d, fo=fo: closes_of(fo, d), **regime)
-        expiry = dynamic.pick_expiries(expiries, now_ms, closes, **regime)[rule["expiry_rule"]]
+        closes = _closes(rule, expiries, now_ms, lambda d, fo=fo: closes_of(fo, d), **regime)
+        expiry, _ = dynamic.expiry_of(rule, expiries, now_ms, closes, **regime)
         rows = listed.get(expiry, []) if not futures and expiry else []
         strikes = sorted({r.strike for r in rows if r.strike is not None})
         sides: dict[tuple[str, float], tuple[str, ...]] = {}
@@ -186,9 +192,8 @@ def resolve_rows(
                 for r in rows:
                     if r.strike == res.strike and r.instrumenttype in sides_wanted:
                         got[r.instrumenttype.lower()] = _contract(r, isin)
-            before = dynamic.pick_expiries(expiries, now_ms - ROLL_WINDOW_MS, closes, **regime)
-            old = before[rule["expiry_rule"]]
-            if old and old != res.expiry:
+            old, _ = dynamic.expiry_of(rule, expiries, now_ms - ROLL_WINDOW_MS, closes, **regime)
+            if old and old != res.expiry and rule["expiry_rule"] != "date":  # a dated row ends
                 text = dwords.rolled(res.expiry, dynamic.close_ms(old, closes, **regime))
                 rolled = True
         out.append(_entry(

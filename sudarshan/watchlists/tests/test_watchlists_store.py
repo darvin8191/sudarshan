@@ -29,8 +29,8 @@ FROZEN = {
     "wl_section_item": "principal list_id exchange symbol section_id",
     "wl_row": (
         "id principal list_id section_id position kind underlying underlying_exchange expiry_rule"
-        " strike_rule offset strike_paise opt_right created_at updated_at"
-    ),
+        " expiry_on strike_rule offset strike_paise opt_right created_at updated_at"
+    ),  # expiry_on: schema 2 (M8.11)
     "wl_symbol": "principal exchange symbol flag flag_at note note_at version updated_at",
     "wl_flag": "principal mark name",
     "wl_favourite": "principal slot ref updated_at oa_created_at",
@@ -84,10 +84,10 @@ def test_the_file_is_in_db_and_the_variable_is_the_contracts(tmp_path, monkeypat
     assert schema.default_path() == tmp_path / "w.db"
 
 
-def test_schema_one_is_recorded_and_nothing_else_is_seeded(store):
+def test_the_schema_is_recorded_and_nothing_else_is_seeded(store):
     with engine.open_session():
         pass
-    assert _raw(store, "SELECT name, value FROM wl_meta") == [("schema", "1")]
+    assert _raw(store, "SELECT name, value FROM wl_meta") == [("schema", "2")]
     for table in FROZEN:
         if table != "wl_meta":
             assert _raw(store, f"SELECT count(*) FROM {table}") == [(0,)], table
@@ -109,7 +109,7 @@ def test_creation_is_idempotent_and_keeps_every_row(store):
         engine.prepare(s.get_bind())  # and the app and migration meeting
         engine.prepare(s.get_bind())
     assert _raw(store, "SELECT * FROM wl_list") == [("owner", 7, "2026-11-01 10:00:00", 4, 99)]
-    assert _raw(store, "SELECT * FROM wl_meta") == [("schema", "1")]
+    assert _raw(store, "SELECT * FROM wl_meta") == [("schema", "2")]  # raised, never lowered
 
 
 def test_a_missing_column_is_added_in_place(store):
@@ -136,7 +136,7 @@ def test_a_file_from_a_newer_release_is_refused_in_words_and_left_alone(store):
     with engine.open_session():
         pass
     engine.dispose()
-    _raw(store, "UPDATE wl_meta SET value = '2' WHERE name = 'schema'")
+    _raw(store, "UPDATE wl_meta SET value = '3' WHERE name = 'schema'")
     _raw(store, "CREATE TABLE wl_future (x INTEGER)")
     before = store.read_bytes()
     for _ in range(2):  # refused each time, never cached as ready
@@ -170,7 +170,7 @@ def test_a_file_with_tables_but_no_schema_row_is_adopted(store):
     _raw(store, "CREATE TABLE wl_meta (name VARCHAR(40) PRIMARY KEY, value VARCHAR(80) NOT NULL)")
     with engine.open_session():
         pass
-    assert _raw(store, "SELECT value FROM wl_meta WHERE name = 'schema'") == [("1",)]
+    assert _raw(store, "SELECT value FROM wl_meta WHERE name = 'schema'") == [("2",)]
 
 
 def test_ranges_and_enums_are_held_by_the_file(store):
@@ -283,7 +283,7 @@ def test_concurrent_first_uses_make_one_file_and_agree(store):
     for t in threads:
         t.join(30)
     assert not errors
-    assert _raw(store, "SELECT value FROM wl_meta WHERE name = 'schema'") == [("1",)]
+    assert _raw(store, "SELECT value FROM wl_meta WHERE name = 'schema'") == [("2",)]
 
 
 @pytest.mark.skipif(not Path("/proc/self/fd").exists(), reason="counts descriptors through /proc")

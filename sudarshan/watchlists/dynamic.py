@@ -36,7 +36,7 @@ class Resolution(NamedTuple):
     band: tuple[float | None, float | None] | None
     valid_until: int | None
     price: Price
-    why: str | None  # no_expiry, past_end, no_strike, no_side, no_price
+    why: str | None  # no_expiry, date_past, past_end, no_strike, no_side, no_price
     missing: tuple[str, ...] = ()
     steps: int | None = None
 
@@ -87,6 +87,31 @@ def pick_expiries(
         "month": month,
         "next_month": after[0] if after else None,
     }
+
+
+def expiry_of(
+    rule: dict[str, Any],
+    expiries: list[str],
+    now_ms: int,
+    closes: dict[str, int] | None = None,
+    *,
+    index: bool = False,
+    exchange: str = "NFO",
+) -> tuple[str | None, str | None]:
+    """The expiry a row points at now and, when it has none, why (M8.11).
+
+    The four relative rules pick as ``pick_expiries`` does (``no_expiry`` when the list has none
+    for the rule). ``date`` stays on ``rule["expiry_on"]``: ``date_past`` once that day's stop has
+    passed (it never moves to the next expiry), else ``no_expiry`` while it is not in the list.
+    """
+    if rule["expiry_rule"] == "date":
+        day = rule.get("expiry_on")
+        if not day or close_ms(day, closes, index=index, exchange=exchange) <= now_ms:
+            return None, "date_past"
+        return (day, None) if day in set(expiries) else (None, "no_expiry")
+    got = pick_expiries(expiries, now_ms, closes, index=index, exchange=exchange)
+    picked = got[rule["expiry_rule"]]
+    return picked, None if picked else "no_expiry"
 
 
 def atm_strike(price: float, strikes: list[float]) -> float | None:
@@ -183,11 +208,9 @@ def resolve(
     ``fixed``), ``offset``, ``strike`` (rupees, fixed) and ``opt_right``. ``sides`` optionally
     names the rights listed per (expiry, strike) so a missing side is told, never guessed.
     """
-    expiry = pick_expiries(expiries, now_ms, closes, index=index, exchange=exchange)[
-        row["expiry_rule"]
-    ]
+    expiry, why = expiry_of(row, expiries, now_ms, closes, index=index, exchange=exchange)
     if expiry is None:
-        return Resolution("missing", None, None, None, None, price, "no_expiry")
+        return Resolution("missing", None, None, None, None, price, why)
     until = close_ms(expiry, closes, index=index, exchange=exchange)
     if row["kind"] == "month_future":
         state = "closed" if price.state == "closed" else "ok"

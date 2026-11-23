@@ -206,6 +206,7 @@ const MOVES: Record<ExpiryRule, string> = {
   next: 'When the nearest expiry ends, this row moves to the one after it.',
   month: "When it expires, this row moves to next month's expiry.",
   next_month: "When this month's expiry ends, this row moves to the month after.",
+  date: 'When it expires the row stops and says so; it does not move to the next expiry.', // M8.11
 }
 
 /**

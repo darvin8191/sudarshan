@@ -114,6 +114,7 @@ def test_cli_check_passes():
 def test_the_enum_golden_values():
     """Hand-typed from the design: a rename in the contract must be a deliberate one."""
     assert c.ENUMS["FollowKind"] == ("atm_option", "month_future", "strike_pair")
-    assert c.ENUMS["ExpiryRule"] == ("nearest", "next", "month", "next_month")
+    assert c.ENUMS["ExpiryRule"] == ("nearest", "next", "month", "next_month", "date")  # M8.11
+    assert c.ENUMS["Figure"] == ("high", "low", "open", "prev", "volume", "oi", "atp", "iv")  # M8.3
     assert c.ENUMS["Sort"] == ("list", "change", "price", "name", "exchange")
     assert len(c.ENUMS["RankCategory"]) == 12
