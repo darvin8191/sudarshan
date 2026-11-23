@@ -105,8 +105,10 @@ const PICK_NAMES: Record<Figure, string> = {
   atp: 'Average price (ATP)',
   iv: 'IV (options)',
 }
+// v0.17.0 review M1, L3: upright, two show only where a row has room beside its whole name and its
+// price; with Larger text or a long name that is often none, so the sheet promises no more.
 export const FIGURES_HELP =
-  'Pick up to six. The first two show with the phone upright, up to six when it is turned on its side.'
+  'Pick up to six. With the phone upright the first two show where a row has room beside its name and price, so fewer with Larger text or a long name; turned on its side, up to six.'
 export const FIGURES_DATA =
   'Day high, Day low, Volume, OI, ATP and IV come with every tick and use more mobile data than the price alone. IV is Upstox’s; the strike sheet works its own out.'
 export const FIGURES_LEFT_OUT =

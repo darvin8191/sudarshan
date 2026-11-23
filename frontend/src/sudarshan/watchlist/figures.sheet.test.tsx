@@ -136,8 +136,11 @@ describe('Figures in the rows (M8.3, the View sheet)', () => {
   it('saves each pick at once, in the order made, and numbers the picks', async () => {
     const user = userEvent.setup()
     const sheet = await mount([])
+    // L3: it promises no figure upright that Larger text or a long name leaves no room for.
     expect(
-      sheet.getByText(/^Pick up to six\. The first two show with the phone upright/)
+      sheet.getByText(
+        'Pick up to six. With the phone upright the first two show where a row has room beside its name and price, so fewer with Larger text or a long name; turned on its side, up to six.'
+      )
     ).toBeVisible()
     await user.click(sheet.getByRole('checkbox', { name: 'Volume' }))
     await user.click(sheet.getByRole('checkbox', { name: 'Day high' }))
