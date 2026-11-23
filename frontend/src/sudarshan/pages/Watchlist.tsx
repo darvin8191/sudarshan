@@ -47,13 +47,14 @@ import { useRanked } from '@/sudarshan/watchlist/useRanked' // F16
 import { MAX_ITEMS, MAX_LISTS, useWatchlists } from '@/sudarshan/watchlist/useWatchlists'
 import { useViewPref } from '@/sudarshan/watchlist/ViewSheet'
 import { BUILT_IN } from '@/sudarshan/watchlist/v2/arrange'
+import { useDraftReturn } from '@/sudarshan/watchlist/v2/draftStore' // GA6.4
 import { useAlertOffers } from '@/sudarshan/watchlist/v2/listAlert'
 import { FLAG_LIST_WORDS, flagName, itemsOf, renameFlag } from '@/sudarshan/watchlist/v2/marks'
 import { kindOfRef, tvFor } from '@/sudarshan/watchlist/v2/menuRules'
 import { parseRankedRef, rankedLabel } from '@/sudarshan/watchlist/v2/ranked' // F16
 import { groupsOf, SECTIONS_FULL, useCollapsed } from '@/sudarshan/watchlist/v2/sections'
 import { LIMITS, type RefKind } from '@/sudarshan/watchlist/v2/types'
-import { useListView, useV2State } from '@/sudarshan/watchlist/v2/useListView'
+import { useListView, useV2State, viewKey } from '@/sudarshan/watchlist/v2/useListView'
 import { usePush } from '@/sudarshan/watchlist/v2/usePush'
 import { toast } from '@/utils/toast'
 
@@ -296,7 +297,8 @@ export default function Watchlist() {
           : undefined
   // F3 (v2): the open own list in sections, read from the `view` op; flat while it is not read.
   const sectionsRef = v2 && active && otherRef === null ? ownRef(active.id) : null
-  const view = useListView(sectionsRef).data
+  const viewRead = useListView(sectionsRef)
+  const view = viewRead.data
   // F11: a row's sheet or form for a row the list no longer has (removed here or on another screen) is closed.
   const followGone =
     (overlay?.kind === 'followRow' ||
@@ -361,6 +363,23 @@ export default function Watchlist() {
   // moves. The address changes in a transition, after the state set with it, so what the tap was for
   // is forgotten only once the question's entry has gone, never by the answer itself.
   const unsaved = arrange.edit?.dirty === true
+  // GA6.4: moves not saved when the page was left by the bottom bar come back, in edit mode.
+  const ownIds = useMemo(() => watchlists.lists.map((list) => list.id), [watchlists.lists])
+  useDraftReturn({
+    settled: settled && !v2Read.isPending,
+    v2,
+    listId: activeId,
+    listIds: ownIds,
+    listName: active?.name ?? '',
+    view:
+      view && sectionsRef ? { version: view.version, readAt: viewRead.dataUpdatedAt } : undefined,
+    reread: () => {
+      if (sectionsRef)
+        void queryClient.invalidateQueries({ queryKey: viewKey(sectionsRef), exact: true })
+    },
+    restore: () => setEditing(true),
+    dropped: (words) => toast.info(words),
+  })
   const asking = useRef(false)
   const ask = useCallback(
     (next: Leaving, over = false) => {

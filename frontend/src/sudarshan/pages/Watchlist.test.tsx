@@ -221,22 +221,23 @@ const MAIN: List = {
     { id: 12, symbol: 'NIFTY', exchange: 'NSE_INDEX', position: 1 },
   ],
 }
+// The contracts here expire far ahead: one whose day has passed reads as expired, unread (M8.2 TD1).
 const OPTIONS: List = {
   id: 2,
   name: 'Options',
   position: 1,
-  items: [{ id: 21, symbol: 'NIFTY28OCT2625000CE', exchange: 'NFO', position: 0 }],
+  items: [{ id: 21, symbol: 'NIFTY28OCT3625000CE', exchange: 'NFO', position: 0 }],
 }
 
 /** Last price and previous close, as the snapshot reads them. */
 const QUOTES: Record<string, [number, number]> = {
   'NSE:SBIN': [812.4, 800],
   'NSE_INDEX:NIFTY': [25874.3, 25714.85],
-  'NFO:NIFTY28OCT2625000CE': [125.4, 112.95],
+  'NFO:NIFTY28OCT3625000CE': [125.4, 112.95],
   'NSE:HDFCBANK': [1640, 1650],
   'NSE:ICICIBANK': [1420, 1410],
   'NSE:INFY': [1500, 1490],
-  'CDS:USDINR28OCT26FUT': [83.2525, 83.1],
+  'CDS:USDINR28OCT36FUT': [83.2525, 83.1],
 }
 
 function answer(_apiKey: string, symbols: Array<{ symbol: string; exchange: string }>) {
@@ -417,7 +418,7 @@ describe('Watchlist lists', () => {
     expect(tabs.map((tab) => tab.textContent)).toEqual(['Main2', 'Options1'])
     expect(screen.getByRole('tab', { name: /Options/ })).toHaveAttribute('aria-selected', 'true')
     expect(await screen.findByRole('button', { name: /^NIFTY 25000 CE/ })).toHaveTextContent(
-      'NFO · 28 Oct 2026'
+      'NFO · 28 Oct 2036'
     )
   })
 
@@ -808,7 +809,7 @@ describe('Watchlist prices', () => {
       id: 3,
       name: 'FX',
       position: 2,
-      items: [{ id: 31, symbol: 'USDINR28OCT26FUT', exchange: 'CDS', position: 0 }],
+      items: [{ id: 31, symbol: 'USDINR28OCT36FUT', exchange: 'CDS', position: 0 }],
     })
     localStorage.setItem(OPEN_LIST_KEY, '3')
     renderPage()
@@ -816,7 +817,7 @@ describe('Watchlist prices', () => {
     expect(await screen.findByRole('button', { name: /^USDINR FUT/ })).toHaveTextContent(
       '83.2525+0.1525 (+0.18%)'
     )
-    tick('USDINR28OCT26FUT', 'CDS', { ltp: 83.255 })
+    tick('USDINR28OCT36FUT', 'CDS', { ltp: 83.255 })
     expect(row(/^USDINR FUT/)).toHaveTextContent('83.2550+0.1550 (+0.19%)')
   })
 
@@ -903,7 +904,7 @@ describe('Watchlist prices', () => {
     await waitFor(() => expect(feed.live()).toEqual(['NSE:SBIN:LTP', 'NSE_INDEX:NIFTY:LTP']))
 
     await user.click(screen.getByRole('tab', { name: /Options/ }))
-    await waitFor(() => expect(feed.live()).toEqual(['NFO:NIFTY28OCT2625000CE:LTP']))
+    await waitFor(() => expect(feed.live()).toEqual(['NFO:NIFTY28OCT3625000CE:LTP']))
     expect(feed.closed).toEqual(['NSE:SBIN:LTP', 'NSE_INDEX:NIFTY:LTP'])
     expect(localStorage.getItem(OPEN_LIST_KEY)).toBe('2')
 
@@ -1081,7 +1082,7 @@ describe('Watchlist sheet', () => {
     await waitFor(() => expect(sell).toBeEnabled())
     await user.click(sell)
     expect(screen.getByRole('region', { name: 'Order ticket' })).toHaveTextContent(
-      'SELL NIFTY28OCT2625000CE NFO lot 750 tick 0.05 product MIS Watchlist'
+      'SELL NIFTY28OCT3625000CE NFO lot 750 tick 0.05 product MIS Watchlist'
     )
   })
 
@@ -1410,7 +1411,7 @@ describe('Watchlist market alerts (M10.2)', () => {
       id: 3,
       name: 'FX',
       position: 2,
-      items: [{ id: 31, symbol: 'USDINR28OCT26FUT', exchange: 'CDS', position: 0 }],
+      items: [{ id: 31, symbol: 'USDINR28OCT36FUT', exchange: 'CDS', position: 0 }],
     })
     localStorage.setItem(OPEN_LIST_KEY, '3')
     const user = userEvent.setup()
@@ -1494,5 +1495,103 @@ describe('Watchlist market alerts (M10.2)', () => {
     await screen.findByRole('tab', { name: /Main/ })
     await waitFor(() => expect(where()).toHaveTextContent(/^\/watchlist$/))
     expect(screen.queryByRole('dialog', { name: 'New alert' })).toBeNull()
+  })
+})
+
+describe('an expired contract in a list (M8.2 TD1)', () => {
+  // 23 Nov 2026: the put expired on 3 Nov and the master no longer lists it.
+  const TODAY = Date.parse('2026-11-23T11:20:00+05:30')
+  const EXPIRED = { id: 13, symbol: 'NIFTY03NOV2622700PE', exchange: 'NFO', position: 2 }
+  /** What the server's master does not list. */
+  const unlisted = new Set<string>()
+  /** Every symbol the page asked a quote for, in order. */
+  const asked = () =>
+    remote.getMultiQuotes.mock.calls.flatMap(([, symbols]) =>
+      (symbols as Array<{ symbol: string }>).map((each) => each.symbol)
+    )
+
+  beforeEach(() => {
+    server.state.lists[0].items.push({ ...EXPIRED })
+    unlisted.clear()
+    unlisted.add(EXPIRED.symbol)
+    // The server, as `get_multiquotes_with_auth` answers: an error entry for a symbol its master
+    // lacks, and 400 naming them when it lists none of the call.
+    remote.getMultiQuotes.mockImplementation(
+      (key: string, symbols: Array<{ symbol: string; exchange: string }>) => {
+        const listed = symbols.filter((each) => !unlisted.has(each.symbol))
+        if (listed.length === 0)
+          return Promise.reject(
+            Object.assign(new Error('Request failed with status code 400'), {
+              response: { status: 400, data: { status: 'error', invalid_symbols: symbols } },
+            })
+          )
+        return answer(key, listed)
+      }
+    )
+    fakeClock()
+    vi.setSystemTime(TODAY)
+  })
+
+  it('says when it expired, is never read or followed, and never raises the notice', async () => {
+    renderPage()
+    const row = await screen.findByRole('button', { name: /^NIFTY 22700 PE/ })
+    await screen.findByText('812.40')
+    expect(row).toHaveTextContent('Expired on 3 Nov 2026')
+    expect(row).not.toHaveTextContent('No price yet')
+    // The other rows tick, so the expired one would be the only quiet row a re-sync asks for.
+    for (let i = 0; i < 8; i += 1) {
+      tick('SBIN', 'NSE', { ltp: 812 + i })
+      tick('NIFTY', 'NSE_INDEX', { ltp: 25_874 + i })
+      await pass(20_000)
+    }
+    expect(screen.queryByText(/Prices could not be refreshed/)).toBeNull()
+    act(() => feed.setState({ connectionEpoch: 2 }))
+    await settle()
+    expect(asked()).toContain('SBIN')
+    expect(asked()).not.toContain(EXPIRED.symbol)
+    expect(feed.live().some((key) => key.includes(EXPIRED.symbol))).toBe(false)
+    expect(screen.queryByText(/Prices could not be refreshed/)).toBeNull()
+    expect(screen.queryByText(/Prices are not available/)).toBeNull()
+  })
+
+  it('follows a contract on its expiry day until the server says its master no longer lists it', async () => {
+    const DUE = { id: 14, symbol: 'NIFTY23NOV2625900CE', exchange: 'NFO', position: 3 }
+    server.state.lists[0].items.push({ ...DUE })
+    unlisted.add(DUE.symbol)
+    renderPage()
+    const row = await screen.findByRole('button', { name: /^NIFTY 25900 CE/ })
+    await screen.findByText('812.40')
+    expect(feed.live()).toContain(`NFO:${DUE.symbol}:LTP`)
+    for (let i = 0; i < 8; i += 1) {
+      tick('SBIN', 'NSE', { ltp: 812 + i })
+      tick('NIFTY', 'NSE_INDEX', { ltp: 25_874 + i })
+      await pass(20_000)
+    }
+    // The quiet re-sync asked for it alone and the server refused it: it has expired today.
+    expect(row).toHaveTextContent('Expired on 23 Nov 2026')
+    expect(feed.live().some((key) => key.includes(DUE.symbol))).toBe(false)
+    expect(screen.queryByText(/Prices could not be refreshed/)).toBeNull()
+    const asks = asked().filter((symbol) => symbol === DUE.symbol).length
+    act(() => feed.setState({ connectionEpoch: 2 }))
+    await pass(70_000)
+    expect(asked().filter((symbol) => symbol === DUE.symbol)).toHaveLength(asks)
+  })
+
+  it('opens a sheet that says so and asks before it removes the row', async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    renderPage()
+    const sheet = await openSheet(user, /^NIFTY 22700 PE/, 'NIFTY 22700 PE')
+    expect(sheet).toHaveTextContent('Expired on 3 Nov 2026')
+    expect(sheet).toHaveTextContent('It is no longer quoted or traded. Remove it from Main?')
+    expect(within(sheet).queryByRole('button', { name: /^(Buy|Sell)/ })).toBeNull()
+    await user.click(within(sheet).getByRole('button', { name: 'Keep it' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(server.api.removeItem).not.toHaveBeenCalled()
+
+    const again = await openSheet(user, /^NIFTY 22700 PE/, 'NIFTY 22700 PE')
+    await user.click(within(again).getByRole('button', { name: 'Remove' }))
+    await settle()
+    expect(server.api.removeItem).toHaveBeenCalledTimes(1)
+    expect(server.api.removeItem).toHaveBeenCalledWith(1, EXPIRED.id)
   })
 })

@@ -421,7 +421,7 @@ describe('adding', () => {
     expect(row.queryByText('Added')).toBeNull()
   })
 
-  it('opens F12’s form from Add as one row, on that strike and the tab’s expiry rule', async () => {
+  it('opens F12’s form from Add as one row, on that strike, the tab’s date and its rule', async () => {
     const onFollow = vi.fn<(form: FollowForm) => void>()
     await opened(25910, { picker: { onFollow } })
     fireEvent.click(
@@ -435,7 +435,7 @@ describe('adding', () => {
       underlying: 'NIFTY',
       exchange: 'NSE_INDEX',
       sectionId: null,
-      fixed: { strike: 25950, expiry: 'nearest', expiries },
+      fixed: { strike: 25950, date: '2026-11-24', expiry: 'nearest', expiries },
     })
     fireEvent.click(within(picker()).getByRole('button', { name: '1 Dec' }))
     await settle()
@@ -443,7 +443,9 @@ describe('adding', () => {
       within(strikeRow(25900)).getByRole('button', { name: 'Add as one row at 25,900' })
     )
     expect(onFollow).toHaveBeenLastCalledWith(
-      expect.objectContaining({ fixed: { strike: 25900, expiry: 'next', expiries } })
+      expect.objectContaining({
+        fixed: { strike: 25900, date: '2026-12-01', expiry: 'next', expiries },
+      })
     )
     fireEvent.click(within(picker()).getByRole('button', { name: '29 Dec (month)' }))
     await settle()
@@ -451,20 +453,29 @@ describe('adding', () => {
       within(strikeRow(25900)).getByRole('button', { name: 'Add as one row at 25,900' })
     )
     expect(onFollow).toHaveBeenLastCalledWith(
-      expect.objectContaining({ fixed: { strike: 25900, expiry: 'next_month', expiries } })
+      expect.objectContaining({
+        fixed: { strike: 25900, date: '2026-12-29', expiry: 'next_month', expiries },
+      })
     )
   })
 
-  it('does not offer Add as one row on a weekly no rule can follow, and says why', async () => {
-    const onFollow = vi.fn()
+  it('offers Add as one row on every tab: on a weekly no rule follows, the row stays on its date (M8.11)', async () => {
+    const onFollow = vi.fn<(form: FollowForm) => void>()
     await opened(25910, { picker: { onFollow } })
     fireEvent.click(within(picker()).getByRole('button', { name: '8 Dec' }))
     await settle()
-    expect(screen.getByText(/A row can follow the nearest/)).toBeInTheDocument()
-    const one = within(strikeRow(25900)).getByRole('button', { name: 'Add as one row at 25,900' })
-    expect(one).toBeDisabled()
-    expect(onFollow).not.toHaveBeenCalled()
-    expect(within(strikeRow(25900)).getByRole('button', { name: 'Add CE at 25,900' })).toBeEnabled()
+    expect(screen.queryByText(/A row can follow the nearest/)).toBeNull()
+    expect(document.querySelector('[data-no-rule]')).toBeNull()
+    for (const each of document.querySelectorAll<HTMLElement>('[data-strike]'))
+      expect(within(each).getByRole('button', { name: /^Add as one row at / })).toBeEnabled()
+    fireEvent.click(
+      within(strikeRow(25900)).getByRole('button', { name: 'Add as one row at 25,900' })
+    )
+    const expiries = EXP.map(([, date, label, month]) => ({ date, label, month }))
+    expect(onFollow).toHaveBeenLastCalledWith(
+      expect.objectContaining({ fixed: { strike: 25900, date: '2026-12-08', expiries } })
+    )
+    expect(onFollow.mock.lastCall?.[0]).not.toHaveProperty('fixed.expiry')
   })
 
   it('opens F11’s ATM form from Add ATM row', async () => {

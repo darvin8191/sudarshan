@@ -1,11 +1,13 @@
-"""The watchlist store's tables, schema 1, in ``db/sudarshan_watchlists.db`` (M8.4).
+"""The watchlist store's tables, schema 2, in ``db/sudarshan_watchlists.db`` (M8.4).
 
 A file of its own, so no upstream table changes and a rebase never meets it, and in ``db/`` so a
 deploy's backup and a rollback copy it together with ``openalgo.db``: every row here is keyed to an
 OpenAlgo list id, and the two files must come back as one. ``SUDARSHAN_WATCHLISTS_DB`` points
 elsewhere (tests, a dev checkout).
 
-Schema 1 is frozen here (design 2.2). Times are epoch milliseconds, prices are paise, and every
+Schema 1 is frozen here (design 2.2); schema 2 (M8.11) adds a fifth expiry rule, ``date``, with
+the ``expiry_on`` column of ``wl_row``: SQLite cannot change a check in place, so a schema-1 table
+is rebuilt (``rebuild_row_checks``). Times are epoch milliseconds, prices are paise, and every
 table carries ``principal`` ("owner" in v2). Limits that need a count (20 sections or follow rows a
 list) are the store's to enforce; the checks below hold the ranges and the enums, so a bug in a
 writer cannot store a value no reader understands.
@@ -26,6 +28,7 @@ from sqlalchemy import (
     Column,
     Index,
     Integer,
+    MetaData,
     String,
     Text,
     UniqueConstraint,
@@ -40,7 +43,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 DB_FILENAME = "sudarshan_watchlists.db"
 PATH_ENV = "SUDARSHAN_WATCHLISTS_DB"  # the same name as contract.DB_ENV; a test holds them equal
 #: The schema this code writes. A file whose ``wl_meta.schema`` is higher is never touched.
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 OWNER = "owner"
 
 Base = declarative_base()
@@ -113,7 +116,8 @@ class SectionItemRow(Base):
 
 FOLLOW_KINDS = ("atm_option", "month_future", "strike_pair")
 UNDERLYING_EXCHANGES = ("NSE_INDEX", "NSE", "BSE_INDEX", "BSE")
-EXPIRY_RULES = ("nearest", "next", "month", "next_month")
+#: ``date`` (schema 2): the row stays on the expiry in ``expiry_on`` and ends with it.
+EXPIRY_RULES = ("nearest", "next", "month", "next_month", "date")
 STRIKE_RULES = ("atm", "fixed")
 
 
@@ -130,6 +134,7 @@ class FollowRow(Base):
     underlying = Column(String(80), nullable=False)
     underlying_exchange = Column(String(16), nullable=False)
     expiry_rule = Column(String(16), nullable=False)
+    expiry_on = Column(String(10))  # the date rule's ISO day, and only its (schema 2)
     strike_rule = Column(String(8), nullable=False, server_default="atm")
     offset = Column("offset", Integer, nullable=False, server_default="0")
     strike_paise = Column(BigInteger)  # a fixed strike only
@@ -142,6 +147,7 @@ class FollowRow(Base):
         CheckConstraint(_in("kind", FOLLOW_KINDS), name="ck_wl_row_kind"),
         CheckConstraint(_in("underlying_exchange", UNDERLYING_EXCHANGES), name="ck_wl_row_exch"),
         CheckConstraint(_in("expiry_rule", EXPIRY_RULES), name="ck_wl_row_expiry"),
+        CheckConstraint("(expiry_rule = 'date') = (expiry_on IS NOT NULL)", name="ck_wl_row_date"),
         CheckConstraint(_in("strike_rule", STRIKE_RULES), name="ck_wl_row_strike"),
         CheckConstraint('"offset" BETWEEN -10 AND 10', name="ck_wl_row_offset"),
         CheckConstraint("opt_right IS NULL OR opt_right IN ('CE', 'PE')", name="ck_wl_row_right"),
@@ -208,7 +214,12 @@ BASES = ("close", "open")
 
 
 class PrefRow(Base):
-    """How the owner views one ref: sort, direction, change basis and the holdings line."""
+    """How the owner views one ref: sort, direction, change basis and the holdings line.
+
+    ``cols`` (M8.3, GA6.1) is the figures the rows show beside the price, their ids in the order
+    picked, joined by commas; NULL is none. No check: an id a later release adds is dropped where it
+    is read (``view._pref``), so a release rolled back still reads the row. Added in place by the
+    migration and by the app's first use, so the schema stays 1."""
 
     __tablename__ = "wl_pref"
     principal = _principal()
@@ -218,6 +229,7 @@ class PrefRow(Base):
     basis = Column(String(8), nullable=False, server_default="close")
     held = Column(Integer, nullable=False, server_default="0")
     updated_at = Column(BigInteger, nullable=False)
+    cols = Column(String(80))
 
     __table_args__ = (
         CheckConstraint(_in("sort", SORTS), name="ck_wl_pref_sort"),
@@ -309,11 +321,69 @@ def record_schema(engine) -> None:
         )
 
 
+_ROW_SQL = text("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'wl_row'")
+
+
+def needs_row_rebuild(engine) -> bool:
+    """Whether ``wl_row`` is schema 1's: its stored definition has no ``date`` rule in its checks.
+    False while there is no such table. Reads only."""
+    with engine.connect() as connection:
+        found = connection.execute(_ROW_SQL).first()
+    return found is not None and "'date'" not in (found[0] or "")
+
+
+def rebuild_row_checks(engine) -> bool:
+    """Schema 1 to 2 for ``wl_row`` (M8.11): the table made again from the ORM, with the date rule
+    in its checks and the ``expiry_on`` column, every row copied with its own ``id`` and
+    ``expiry_on`` NULL, the old table dropped and the new one renamed, then its indexes; all in one
+    IMMEDIATE transaction, so a failure leaves schema 1 as it was. True when it rebuilt. A second
+    caller at the same moment waits for the lock, finds the new table and does nothing."""
+    if not needs_row_rebuild(engine):
+        return False
+    table = FollowRow.__table__
+    fresh = table.to_metadata(MetaData(), name=f"{table.name}__new")
+    make = str(CreateTable(fresh).compile(dialect=engine.dialect))
+    indexes = [str(CreateIndex(i, if_not_exists=True).compile(dialect=engine.dialect))
+               for i in sorted(table.indexes, key=lambda i: i.name)]  # fmt: skip
+    raw = engine.raw_connection()
+    try:
+        db = raw.driver_connection
+        db.isolation_level = None  # the transaction below is this function's own
+        db.execute("BEGIN IMMEDIATE")
+        try:
+            found = db.execute(str(_ROW_SQL)).fetchone()
+            if found is None or "'date'" in (found[0] or ""):
+                db.execute("ROLLBACK")
+                return False
+            have = {row[1] for row in db.execute("PRAGMA table_info(wl_row)")}
+            columns = ", ".join(f'"{c.name}"' for c in table.columns if c.name in have)
+            db.execute(f"DROP TABLE IF EXISTS {fresh.name}")
+            db.execute(make)
+            db.execute(f"INSERT INTO {fresh.name} ({columns}) SELECT {columns} FROM wl_row")
+            counts = [db.execute(f"SELECT count(*) FROM {name}").fetchone()[0]
+                      for name in ("wl_row", fresh.name)]  # fmt: skip
+            if counts[0] != counts[1]:
+                raise RuntimeError(f"wl_row rebuild copied {counts[1]} of {counts[0]} rows")
+            db.execute("DROP TABLE wl_row")
+            db.execute(f"ALTER TABLE {fresh.name} RENAME TO wl_row")
+            for statement in indexes:
+                db.execute(statement)
+            db.execute("COMMIT")
+        except BaseException:
+            db.execute("ROLLBACK")
+            raise
+    finally:
+        raw.close()
+    return True
+
+
 def create_missing(engine) -> None:
-    """Every table, column and index, each only when missing, then the ``schema`` row. Two first
-    uses at once (the app and the migration) never trip over each other. A caller checks
-    ``stored_schema`` first, so a newer file is never reached here."""
+    """Every table, column and index, each only when missing, then the ``schema`` row; a schema-1
+    ``wl_row`` is rebuilt first (``rebuild_row_checks``). Two first uses at once (the app and the
+    migration) never trip over each other. A caller checks ``stored_schema`` first, so a newer file
+    is never reached here."""
     create_tables(engine)
+    rebuild_row_checks(engine)
     add_missing_columns(engine)
     create_indexes(engine)
     record_schema(engine)

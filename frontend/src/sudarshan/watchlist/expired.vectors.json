@@ -1,0 +1,21 @@
+{
+  "about": "M8.2 TD1: when a contract in a list has expired. Typed by hand from OpenAlgo's symbol format (base, DDMMMYY, then FUT or a strike and CE/PE) and the rule: expired once its day is behind today in India, or on that day once the master no longer lists it. Nothing here is computed by the code under test.",
+  "cases": [
+    { "name": "a weekly put three weeks gone", "symbol": "NIFTY03NOV2622700PE", "exchange": "NFO", "today": "2026-11-23", "gone": false, "day": "2026-11-03", "expired": "2026-11-03", "words": "Expired on 3 Nov 2026" },
+    { "name": "the same, refused by the server too", "symbol": "NIFTY03NOV2622700PE", "exchange": "NFO", "today": "2026-11-23", "gone": true, "day": "2026-11-03", "expired": "2026-11-03", "words": "Expired on 3 Nov 2026" },
+    { "name": "on its own expiry day it still trades", "symbol": "NIFTY03NOV2622700PE", "exchange": "NFO", "today": "2026-11-03", "gone": false, "day": "2026-11-03", "expired": null, "words": null },
+    { "name": "on its day, once the master no longer lists it", "symbol": "NIFTY03NOV2622700PE", "exchange": "NFO", "today": "2026-11-03", "gone": true, "day": "2026-11-03", "expired": "2026-11-03", "words": "Expired on 3 Nov 2026" },
+    { "name": "a day ahead, refused for another reason: not expired", "symbol": "NIFTY03NOV2622700PE", "exchange": "NFO", "today": "2026-11-02", "gone": true, "day": "2026-11-03", "expired": null, "words": null },
+    { "name": "a monthly future the day after", "symbol": "NIFTY25NOV26FUT", "exchange": "NFO", "today": "2026-11-26", "gone": false, "day": "2026-11-25", "expired": "2026-11-25", "words": "Expired on 25 Nov 2026" },
+    { "name": "a future still to come", "symbol": "NIFTY29DEC26FUT", "exchange": "NFO", "today": "2026-11-23", "gone": false, "day": "2026-12-29", "expired": null, "words": null },
+    { "name": "a BSE weekly call", "symbol": "SENSEX20NOV2680000CE", "exchange": "BFO", "today": "2026-11-23", "gone": false, "day": "2026-11-20", "expired": "2026-11-20", "words": "Expired on 20 Nov 2026" },
+    { "name": "a commodity future two years gone", "symbol": "CRUDEOILM20MAY24FUT", "exchange": "MCX", "today": "2026-11-23", "gone": false, "day": "2024-05-20", "expired": "2024-05-20", "words": "Expired on 20 May 2024" },
+    { "name": "a currency option with a decimal strike", "symbol": "USDINR26NOV2683.5CE", "exchange": "CDS", "today": "2026-11-27", "gone": false, "day": "2026-11-26", "expired": "2026-11-26", "words": "Expired on 26 Nov 2026" },
+    { "name": "a base that ends in digits", "symbol": "NIFTYNXT5025NOV26FUT", "exchange": "NFO", "today": "2026-11-26", "gone": false, "day": "2026-11-25", "expired": "2026-11-25", "words": "Expired on 25 Nov 2026" },
+    { "name": "across a year end", "symbol": "BANKNIFTY30DEC2652000PE", "exchange": "NFO", "today": "2027-01-04", "gone": false, "day": "2026-12-30", "expired": "2026-12-30", "words": "Expired on 30 Dec 2026" },
+    { "name": "a share never expires, even refused", "symbol": "INFY", "exchange": "NSE", "today": "2026-11-23", "gone": true, "day": null, "expired": null, "words": null },
+    { "name": "an index never expires", "symbol": "NIFTY 50", "exchange": "NSE_INDEX", "today": "2026-11-23", "gone": true, "day": null, "expired": null, "words": null },
+    { "name": "a contract's name on a cash exchange is not one", "symbol": "NIFTY03NOV2622700PE", "exchange": "NSE", "today": "2026-11-23", "gone": false, "day": null, "expired": null, "words": null },
+    { "name": "a day no calendar has", "symbol": "NIFTY31NOV2622700PE", "exchange": "NFO", "today": "2026-12-23", "gone": false, "day": null, "expired": null, "words": null }
+  ]
+}

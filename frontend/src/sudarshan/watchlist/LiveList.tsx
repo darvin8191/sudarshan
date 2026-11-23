@@ -8,11 +8,14 @@ import { keyOf, type MarketOpen } from '@/sudarshan/dashboard/live'
 import type { MemberRow } from '@/sudarshan/screener/api'
 import { exitedToday, tagsOf, usePin } from '@/sudarshan/screener/feed'
 import type { ArrangeEdit } from './ArrangeSheet'
+import { ExpiredSheet } from './ExpiredSheet'
+import { type Drawn, drawnColumns, useFigureColumns } from './FigureCells'
 import { FollowRowItem, followNames } from './FollowRows'
+import { needsQuote, shownFigures } from './figures'
 import { FOLLOW_CAP } from './follow'
 import {
-  dayLabel,
-  derivativesExchange,
+  detailOf,
+  ended,
   type FollowForm,
   followsWords,
   lineOf,
@@ -175,6 +178,25 @@ export const LiveList = memo(function LiveList({
     [members]
   )
   const pref = viewPref?.pref // F6
+  // M8.3 GA6.2: the figures beside the price, as many as the list's width holds; none while editing
+  // and in a family render.
+  const room = useFigureColumns()
+  const picked = pref?.cols?.join(',') ?? ''
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `picked` is the identity of the figures picked
+  const shownCols = useMemo(
+    () =>
+      flagNames !== undefined && !readOnly && !editing
+        ? shownFigures(pref?.cols, room.columns)
+        : [],
+    [picked, room.columns, flagNames !== undefined, readOnly, editing]
+  )
+  // What the rows really draw (a column with no room beside a long price is left out): a figure
+  // no row draws costs no data, and the line under the tabs says how many show.
+  const [drawn, setDrawn] = useState<Drawn | null>(null)
+  const drawnCols = useMemo(
+    () => (drawn === null ? shownCols : shownCols.slice(0, drawn.most * 2)),
+    [drawn, shownCols]
+  )
   // F9 (v2): the cap and the window. The open sheet's instrument is followed first; a list longer than the
   // cap follows the window over the rows in the order they are shown, which a sort changes.
   const v2 = flagNames !== undefined
@@ -295,6 +317,20 @@ export const LiveList = memo(function LiveList({
     return map
   }, [fr.states])
   const quoteKeys = useMemo(() => [...strikeKeys.values()].flat(), [strikeKeys])
+  // M8.3 GA6.2 (T1): a figure that comes only with Quote frames streams every row in Quote mode, and
+  // only while one is shown; the cap counts a key once whatever its mode.
+  const figureKeys = useMemo(
+    () =>
+      needsQuote(drawnCols)
+        ? [
+            ...items.map((item) => keyOf(item.symbol, item.exchange)),
+            ...fr.states.flatMap((each) =>
+              each.item && !each.peItem ? [keyOf(each.item.symbol, each.item.exchange)] : []
+            ),
+          ]
+        : [],
+    [drawnCols, items, fr.states]
+  )
   const followKeys = followItems
     .map((each) => `${each.id}:${keyOf(each.symbol, each.exchange)}`)
     .join(',')
@@ -303,8 +339,16 @@ export const LiveList = memo(function LiveList({
     () => (followItems.length > 0 ? [...followItems, ...items] : items),
     [followKeys, items]
   )
+  // M8.11: a row that stayed on its date and ended follows nothing, so it counts 0 in the cap.
   const underlyings = useMemo(
-    () => (followOn ? [...new Set(fr.states.map((each) => underlyingKey(each.rule)))] : undefined),
+    () =>
+      followOn
+        ? [
+            ...new Set(
+              fr.states.filter((each) => !ended(each)).map((each) => underlyingKey(each.rule))
+            ),
+          ]
+        : undefined,
     [followOn, fr.states]
   )
   const openKeys = useMemo(() => {
@@ -328,10 +372,22 @@ export const LiveList = memo(function LiveList({
             order: order?.split(','),
             listKey,
             strikes: strikeKeys, // F12
-            quote: sheetPin?.pair ? [...quoteKeys, ...openKeys] : quoteKeys, // F12
+            quote: [...quoteKeys, ...(sheetPin?.pair ? openKeys : []), ...figureKeys], // F12, M8.3
+            open: drawnCols.includes('open'), // M8.3
           }
         : undefined,
-    [v2, openKeys, underlyings, order, listKey, strikeKeys, quoteKeys, sheetPin?.pair]
+    [
+      v2,
+      openKeys,
+      underlyings,
+      order,
+      listKey,
+      strikeKeys,
+      quoteKeys,
+      sheetPin?.pair,
+      figureKeys,
+      drawnCols,
+    ]
   )
   const live = useLiveRows({
     items: liveItems,
@@ -341,6 +397,13 @@ export const LiveList = memo(function LiveList({
     follow,
   })
   useFollowTicks(fr.core, live.lines, live.feed, followOn)
+  // M8.3: counted again when what the rows draw can change: the width, the figures, the list, the first read.
+  const shownKey = shownCols.join(',')
+  // biome-ignore lint/correctness/useExhaustiveDependencies: each is a moment the rows' figures are laid out anew
+  useEffect(
+    () => setDrawn(drawnColumns(room.node)),
+    [room.node, room.size, shownKey, items, live.read]
+  )
   // The list's own rows: the follow rows' contracts are drawn by `FollowRowItem`, not sorted with them.
   const ownRows = useMemo(
     () => (followItems.length > 0 ? live.rows.filter((row) => row.item.id > 0) : live.rows),
@@ -427,6 +490,7 @@ export const LiveList = memo(function LiveList({
                       key={`follow-${each.id}`}
                       state={each}
                       live={liveById.get(-each.id) ?? null}
+                      shown={shownCols} // M8.3
                       now={live.now}
                       onOpen={(rowId) =>
                         each.item ? onOpenRow?.(rowId) : onForm?.({ mode: 'edit', rowId })
@@ -436,7 +500,7 @@ export const LiveList = memo(function LiveList({
                 ),
           }
         : undefined,
-    [followOn, fr.states, liveById, live.now, onOpenRow, onForm]
+    [followOn, fr.states, liveById, live.now, onOpenRow, onForm, shownCols]
   )
   // A row's sheet that has no contract to show (it went missing meanwhile) opens the row's form instead.
   const isPair = current?.rule.kind === 'strike_pair' // F12: a pair with no contract says why in its sheet
@@ -486,7 +550,7 @@ export const LiveList = memo(function LiveList({
     return (
       <StrikeSheet
         title={`${current.rule.underlying} ${pair?.strike === null || !pair ? names.middle : num(pair.strike)}`}
-        detail={`${derivativesExchange(current.rule)}${pair?.ce.expiry ? ` · ${dayLabel(pair.ce.expiry)}` : ''} · follows ${current.rule.underlying}`}
+        detail={detailOf(current.rule, pair?.ce ?? null)} // M8.11: a dated row says it stays on its date
         chip={names.chip}
         help={names.help}
         words={lineOf(current, live.now)}
@@ -562,7 +626,21 @@ export const LiveList = memo(function LiveList({
       )}
 
       {pref && !editing && (
-        <ViewLine pref={pref} at={sorted.at} readAt={sorted.readAt} onAgain={sorted.again} />
+        <ViewLine
+          pref={pref}
+          at={sorted.at}
+          readAt={sorted.readAt}
+          onAgain={sorted.again}
+          figures={
+            shownCols.length > 0
+              ? {
+                  picked: (pref.cols ?? []).length,
+                  shown: drawnCols.length,
+                  uneven: drawn !== null && drawn.least < drawn.most,
+                }
+              : undefined
+          } // M8.3
+        />
       )}
 
       {preset && (
@@ -575,6 +653,7 @@ export const LiveList = memo(function LiveList({
 
       <section
         {...panel}
+        ref={room.ref} // M8.3: its width decides how many figures show
         className={cn(
           'rounded-[1.125rem] border bg-card shadow-[var(--shadow-card)]',
           // Review M4: the draft's Save bar is sticky, which overflow-hidden would hold in place.
@@ -596,6 +675,7 @@ export const LiveList = memo(function LiveList({
           marks={marks} // F8
           follow={slots} // F11
           metrics={metrics} // F16
+          figures={shownCols} // M8.3
         />
       </section>
       {exited.length > 0 && (
@@ -608,8 +688,18 @@ export const LiveList = memo(function LiveList({
         </p>
       )}
 
+      {sheetRow?.expired && (
+        <ExpiredSheet // TD1: nothing to quote or trade; it asks before it removes the row
+          item={sheetRow.item}
+          day={sheetRow.expired}
+          listName={listName}
+          flags={readOnly ? undefined : flagNames}
+          onClose={onCloseSheet}
+          onRemove={noRemove || readOnly ? undefined : onRemove}
+        />
+      )}
       <SymbolSheet
-        row={sheetRow}
+        row={sheetRow?.expired ? null : sheetRow}
         listName={listName}
         apiKey={apiKey}
         marketOpen={sheetRow ? isOpen(sheetRow.item.exchange) : null}

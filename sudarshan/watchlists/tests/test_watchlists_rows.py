@@ -12,6 +12,7 @@ from watchlists_follow_master import build_master
 
 import blueprints.sudarshan_watchlists as bp_module
 from sudarshan.watchlists import contract, engine, master, ops, schema, versions, view
+from sudarshan.watchlists.words import dynamic as dwords
 from sudarshan.watchlists.words import rows as words
 from sudarshan.watchlists.words import sections as section_words
 
@@ -509,3 +510,81 @@ def test_a_stored_id_the_page_sent_is_never_taken_for_a_draft(client, world):
     got = ask_drafts(client, [draft()], rows=[page(2**31), page(-1)]).get_json()["data"]
     assert [(x["id"], x["state"]) for x in got["rows"]] == [(2**31, "missing"), (-1, "missing")]
     assert len(got["drafts"]) == 1 and got["drafts"][0]["state"] == "ok"
+
+
+# -- a row that stays on its date (M8.11), at 11:00 IST on Friday 20 Nov 2026 ---------------------
+
+
+def dated(client, lid, version, day, **more):
+    return add(client, lid, version, kind="strike_pair", opt_right=None, expiry_rule="date",
+               expiry_on=day, strike_rule="fixed", strike=25900, **more)  # fmt: skip
+
+
+def test_a_strike_row_stays_on_a_listed_date_and_the_view_says_which(client, world):
+    lid, _ = make_list()
+    r = dated(client, lid, "0", "2026-12-01")
+    assert r.status_code == 200, r.get_json()
+    rid = r.get_json()["data"]["id"]
+    with engine.open_session() as s:
+        assert s.scalar(select(schema.FollowRow.expiry_on)) == "2026-12-01"
+    follow = client.get("/sudarshan/watchlists/api/view", query_string={"ref": f"list:{lid}"})
+    (row,) = follow.get_json()["data"]["follow"]
+    assert (row["id"], row["expiry_rule"], row["expiry_on"]) == (rid, "date", "2026-12-01")
+    got = ask(client, [page(rid)]).get_json()["data"]["rows"][0]
+    assert (got["state"], got["ce"]["symbol"], got["pe"]["symbol"]) == (
+        "ok", "NIFTY01DEC2625900CE", "NIFTY01DEC2625900PE")  # fmt: skip
+    assert got["ce"]["expiry"] == "2026-12-01"  # not the nearest, 24 Nov
+
+
+def test_a_date_past_or_not_listed_or_a_dated_future_is_refused_at_add(client, world):
+    lid, _ = make_list()
+    cases = [
+        (dated(client, lid, "0", "2026-11-17"), words.DATE_GONE, "expiry_on"),
+        (dated(client, lid, "0", "2026-11-26"), dwords.no_date("NIFTY", "2026-11-26"), "expiry_on"),
+        (
+            add(
+                client,
+                lid,
+                "0",
+                kind="month_future",
+                opt_right=None,
+                expiry_rule="date",
+                expiry_on="2026-11-24",
+            ),
+            words.DATE_FUTURE,
+            "expiry_rule",
+        ),  # fmt: skip
+        (
+            add(client, lid, "0", kind="strike_pair", opt_right=None, expiry_rule="date"),
+            words.DATE_NEEDED,
+            "expiry_on",
+        ),  # fmt: skip
+    ]
+    for r, sentence, field in cases:
+        body = r.get_json()
+        assert (r.status_code, body["code"], body["message"], body["field"]) == (
+            400, "invalid", sentence, field)  # fmt: skip
+    assert table("wl_row") == []
+
+
+def test_an_edit_to_a_date_is_checked_and_a_dated_row_ends_without_a_roll(
+    client, world, monkeypatch
+):
+    from sudarshan.watchlists.ops import rows as rows_ops
+
+    lid, _ = make_list()
+    rid = add(client, lid, "0", kind="strike_pair", opt_right=None, strike_rule="fixed",
+              strike=25900).get_json()["data"]["id"]  # fmt: skip
+    gone = edit(client, rid, v(1), expiry_rule="date", expiry_on="2026-11-17").get_json()
+    assert (gone["code"], gone["message"]) == ("invalid", words.DATE_GONE)
+    assert edit(client, rid, v(1), expiry_rule="date", expiry_on="2026-11-24").status_code == 200
+    first = ask(client, [page(rid)]).get_json()["data"]["rows"][0]
+    assert first["ce"]["expiry"] == "2026-11-24"
+    assert first["valid_until"] == AT + (4 * 24 * 3600 + 4 * 3600 + 40 * 60) * 1000  # 15:40
+    monkeypatch.setattr(rows_ops, "_now_ms", lambda: first["valid_until"] + 1000)
+    ended = ask(client, [page(rid)]).get_json()["data"]["rows"][0]
+    assert (ended["state"], ended["ce"], ended["pe"], ended["rolled"]) == (
+        "missing", None, None, False)  # fmt: skip
+    assert ended["words"] == dwords.date_past("2026-11-24")
+    # the row is still in the list, saying so; it never moved to 1 Dec
+    assert len(table("wl_row")) == 1

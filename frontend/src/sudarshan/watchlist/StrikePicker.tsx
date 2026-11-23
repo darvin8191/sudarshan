@@ -13,7 +13,7 @@ import { BottomSheet } from './BottomSheet'
 import { type FollowForm, num } from './followRows'
 import { priceDecimals, statusLine } from './rows'
 import { chainPath } from './SymbolSheet'
-import { NO_RULE, ruleFor } from './strikePicker'
+import { ruleFor } from './strikePicker'
 import type { LiveRow } from './useLiveRows'
 import type { Ladder } from './useStrikeLadder'
 import type { Contract, Strike } from './v2/types'
@@ -114,14 +114,16 @@ function Leg({
  * server labels them, and the strikes ATM plus or minus ten, the ATM marked by the word "ATM". Each
  * strike's CE and PE tick while it is open (the page follows them, counted in the cap, and lets them go
  * when it closes or the tab changes); Add CE and Add PE add that contract to the list, Add as one row opens
- * F11/F12's form on that strike and the tab's expiry.
+ * F11/F12's form on that strike, staying on the tab's date or following the rule the tab stands for
+ * (M8.11: every tab).
  */
 export function StrikePicker(props: StrikePickerProps) {
   const { ladder, under, lines, held, full } = props
   const [busy, setBusy] = useState<string | null>(null)
   const [done, setDone] = useState<ReadonlySet<string>>(() => new Set())
   const data = ladder.data
-  const rule = ladder.tab ? ruleFor(ladder.expiries, ladder.tab) : null
+  const tab = ladder.tab
+  const rule = tab ? ruleFor(ladder.expiries, tab) : null
 
   const line = statusLine({
     now: props.now,
@@ -191,16 +193,22 @@ export function StrikePicker(props: StrikePickerProps) {
         </div>
         <button
           type="button"
-          disabled={rule === null || each.ce === null || each.pe === null}
+          disabled={tab === null || each.ce === null || each.pe === null}
           onClick={() =>
-            rule &&
+            tab !== null &&
             props.onFollow({
               mode: 'add',
               kind: 'strike_pair',
               underlying: props.underlying,
               exchange: props.exchange,
               sectionId: null,
-              fixed: { strike: each.strike, expiry: rule, expiries: ladder.expiries }, // review M3: the form says the dates
+              // M8.11: on the tab's date, or its rule when one stands for it; review M3: the form says the dates
+              fixed: {
+                strike: each.strike,
+                date: tab,
+                ...(rule ? { expiry: rule } : {}),
+                expiries: ladder.expiries,
+              },
             })
           }
           aria-label={`Add as one row at ${num(each.strike)}`}
@@ -286,14 +294,6 @@ export function StrikePicker(props: StrikePickerProps) {
           <output className="block shrink-0 rounded-[0.875rem] bg-[color:var(--gold-tint)] px-3 py-2 text-sm font-semibold text-[color:var(--gold-ink)]">
             {props.listName} is full. Remove a symbol to add another.
           </output>
-        )}
-        {rule === null && data && (
-          <p
-            data-no-rule="true"
-            className="shrink-0 px-1 text-sm font-medium text-muted-foreground"
-          >
-            {NO_RULE}
-          </p>
         )}
 
         <div className="grid shrink-0 grid-cols-2 gap-2">

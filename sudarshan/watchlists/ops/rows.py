@@ -85,6 +85,31 @@ def _check_master(rule: dict) -> None:
         raise OpError("invalid", words.no_options(name, fo), "underlying")
 
 
+def _check_date(rule: dict) -> None:
+    """A row that stays on a date (M8.11) needs that expiry still trading: listed for the
+    underlying today and its stop not passed, by the resolver's own rule. Raises OpError."""
+    if rule["expiry_rule"] != "date":
+        return
+    from sudarshan.watchlists import dynamic, master, sessions
+    from sudarshan.watchlists import expiry as stops
+    from sudarshan.watchlists.resolver import Book, fo_exchange
+    from sudarshan.watchlists.words import dynamic as dwords
+
+    m = master.shared()
+    ix = m.index() if m.loaded() else None
+    if ix is None:
+        raise OpError("failed", words.NOT_LOADED)
+    name, fo = rule["underlying"], fo_exchange(rule["underlying_exchange"])
+    regime = {"index": stops.is_index(name, sessions.index_underlyings()), "exchange": fo}
+    closes = sessions.closes([rule["expiry_on"]], fo)
+    expiries = sorted(Book(ix).options(name, fo))
+    _, why = dynamic.expiry_of(rule, expiries, _now_ms(), closes, **regime)
+    if why == "date_past":
+        raise OpError("invalid", words.DATE_GONE, "expiry_on")
+    if why is not None:
+        raise OpError("invalid", dwords.no_date(name, rule["expiry_on"]), "expiry_on")
+
+
 def _rule(base: dict | None, patch: dict) -> dict:
     try:
         return store.normalize(base, patch)
@@ -110,6 +135,7 @@ def row_add(args: dict) -> dict:
     held, list_id = _held(args["version"]), args["list"]
     rule = _rule(None, args)
     _check_master(rule)
+    _check_date(rule)  # M8.11
     created = _created(list_id)
     try:
         with engine.open_session() as s, s.begin():
@@ -156,6 +182,8 @@ def row_edit(args: dict) -> dict:
             rule = _rule(before, args)
             if any(rule[k] != before[k] for k in ("kind", "underlying", "underlying_exchange")):
                 _check_master(rule)
+            if any(rule[k] != before[k] for k in ("expiry_rule", "expiry_on", "underlying")):
+                _check_date(rule)  # M8.11: a date moved to, or kept on another underlying
             section = (_section(s, list_id, args["section_id"]) if "section_id" in args
                        else row.section_id)  # fmt: skip
             if rule == before and section == row.section_id:

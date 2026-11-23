@@ -1,0 +1,159 @@
+{
+ "about": "Hand-typed vectors for a follow row that stays on one expiry date (M8.11, schema 2). Times are IST. Until 6 Dec 2026 every NFO contract trades to 15:40 on its expiry day; from 7 Dec 2026 an index contract stops at 15:30 and a stock contract at 15:45; a special session day takes its close from the market calendar.",
+ "expiries": [
+  "2026-11-24",
+  "2026-12-01",
+  "2026-12-08",
+  "2026-12-29"
+ ],
+ "cases": [
+  {
+   "name": "a date that is listed and open gives its own expiry, not the nearest",
+   "expiry_on": "2026-12-01",
+   "now": "2026-11-20T11:00:00+05:30",
+   "index": true,
+   "expiry": "2026-12-01",
+   "why": null
+  },
+  {
+   "name": "until 6 Dec 2026 an index contract is open at 15:39:59 on its day",
+   "expiry_on": "2026-11-24",
+   "now": "2026-11-24T15:39:59+05:30",
+   "index": true,
+   "expiry": "2026-11-24",
+   "why": null
+  },
+  {
+   "name": "at 15:40 it has expired, and the row does not move to the next expiry",
+   "expiry_on": "2026-11-24",
+   "now": "2026-11-24T15:40:00+05:30",
+   "index": true,
+   "expiry": null,
+   "why": "date_past"
+  },
+  {
+   "name": "from 7 Dec 2026 an index contract is open at 15:29:59",
+   "expiry_on": "2026-12-08",
+   "now": "2026-12-08T15:29:59+05:30",
+   "index": true,
+   "expiry": "2026-12-08",
+   "why": null
+  },
+  {
+   "name": "and has expired at 15:30",
+   "expiry_on": "2026-12-08",
+   "now": "2026-12-08T15:30:00+05:30",
+   "index": true,
+   "expiry": null,
+   "why": "date_past"
+  },
+  {
+   "name": "a stock contract trades to 15:45 from 7 Dec 2026",
+   "expiry_on": "2026-12-29",
+   "now": "2026-12-29T15:44:59+05:30",
+   "index": false,
+   "expiry": "2026-12-29",
+   "why": null
+  },
+  {
+   "name": "and has expired at 15:45",
+   "expiry_on": "2026-12-29",
+   "now": "2026-12-29T15:45:00+05:30",
+   "index": false,
+   "expiry": null,
+   "why": "date_past"
+  },
+  {
+   "name": "a date that is not in today's contract list",
+   "expiry_on": "2026-11-25",
+   "now": "2026-11-20T11:00:00+05:30",
+   "index": true,
+   "expiry": null,
+   "why": "no_expiry"
+  },
+  {
+   "name": "a date already past and no longer listed says it has expired",
+   "expiry_on": "2026-11-17",
+   "now": "2026-11-20T11:00:00+05:30",
+   "index": true,
+   "expiry": null,
+   "why": "date_past"
+  },
+  {
+   "name": "a special session day is open until the calendar's close",
+   "expiry_on": "2026-11-24",
+   "closes": {
+    "2026-11-24": "2026-11-24T18:15:00+05:30"
+   },
+   "now": "2026-11-24T17:00:00+05:30",
+   "index": true,
+   "expiry": "2026-11-24",
+   "why": null
+  },
+  {
+   "name": "and has expired at that close",
+   "expiry_on": "2026-11-24",
+   "closes": {
+    "2026-11-24": "2026-11-24T18:15:00+05:30"
+   },
+   "now": "2026-11-24T18:15:00+05:30",
+   "index": true,
+   "expiry": null,
+   "why": "date_past"
+  }
+ ],
+ "words": [
+  {
+   "why": "date_past",
+   "underlying": "NIFTY",
+   "expiry_on": "2026-11-24",
+   "text": "24 Nov has expired. This row stays on that date: remove it, or change it to follow the nearest expiry."
+  },
+  {
+   "why": "no_expiry",
+   "underlying": "NIFTY",
+   "expiry_on": "2026-11-25",
+   "text": "NIFTY has no 25 Nov expiry in today's contract list."
+  }
+ ],
+ "refused": [
+  {
+   "name": "a future row follows the month",
+   "rule": {
+    "kind": "month_future",
+    "underlying": "NIFTY",
+    "underlying_exchange": "NSE_INDEX",
+    "expiry_rule": "date",
+    "expiry_on": "2026-11-24"
+   },
+   "field": "expiry_rule",
+   "text": "A future row follows the month. Add a dated future to the list as a symbol."
+  },
+  {
+   "name": "the date rule needs its date",
+   "rule": {
+    "kind": "strike_pair",
+    "underlying": "NIFTY",
+    "underlying_exchange": "NSE_INDEX",
+    "expiry_rule": "date",
+    "strike_rule": "fixed",
+    "strike": 25900
+   },
+   "field": "expiry_on",
+   "text": "Pick the date this row stays on."
+  },
+  {
+   "name": "a date written another way is not one",
+   "rule": {
+    "kind": "atm_option",
+    "underlying": "NIFTY",
+    "underlying_exchange": "NSE_INDEX",
+    "expiry_rule": "date",
+    "expiry_on": "24-11-2026",
+    "opt_right": "CE"
+   },
+   "field": "expiry_on",
+   "text": "Pick the date this row stays on."
+  }
+ ]
+}

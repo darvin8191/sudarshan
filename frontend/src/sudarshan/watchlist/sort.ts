@@ -12,7 +12,13 @@ import type { LiveRow } from './useLiveRows'
 import type { Basis, Pref, Sort } from './v2/types'
 
 /** What a list is when nothing was chosen: its own order, change from the previous close. */
-export const DEFAULT_PREF: Pref = { sort: 'list', descending: false, basis: 'close', held: false }
+export const DEFAULT_PREF: Pref = {
+  sort: 'list',
+  descending: false,
+  basis: 'close',
+  held: false,
+  cols: [], // M8.3: no figures beside the price
+}
 
 /** Whether the choice leaves the list as it is: then no line is shown under the tabs. */
 export function isDefaultView(pref: Pref): boolean {

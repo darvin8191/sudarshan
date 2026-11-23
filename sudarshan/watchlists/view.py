@@ -31,8 +31,11 @@ from datetime import datetime
 from typing import Any
 
 from sudarshan.watchlists import search
+from sudarshan.watchlists.contract import ENUMS
 
-DEFAULT_PREF = {"sort": "list", "descending": False, "basis": "close", "held": False}
+DEFAULT_PREF = {"sort": "list", "descending": False, "basis": "close", "held": False, "cols": []}
+#: The most figures a list shows beside the price (M8.3): two with the phone upright, six on its side.
+MAX_FIGURES = 6
 
 
 def created_key(value: Any) -> str:
@@ -77,6 +80,7 @@ def _follow(f: dict, section_id: int | None) -> dict:
         "underlying": f["underlying"],
         "underlying_exchange": f["underlying_exchange"],
         "expiry_rule": f["expiry_rule"],
+        "expiry_on": f.get("expiry_on"),
         "strike_rule": None if month else f.get("strike_rule"),
         "offset": None if month else f.get("offset", 0),
         "strike": None if month or paise is None else paise / 100,
@@ -84,11 +88,22 @@ def _follow(f: dict, section_id: int | None) -> dict:
     }
 
 
+def figures_of(text: str | None) -> list[str]:
+    """The stored figures (ids joined by commas) as the ``cols`` of a ``Pref``: in the order picked,
+    an id this release does not know (a later one wrote it) or a repeat dropped, six at most."""
+    known, out = ENUMS["Figure"], []
+    for part in (text or "").split(","):
+        if part in known and part not in out:
+            out.append(part)
+    return out[:MAX_FIGURES]
+
+
 def _pref(raw: dict | None) -> dict:
     if not raw:
-        return dict(DEFAULT_PREF)
+        return {**DEFAULT_PREF, "cols": []}
     return {"sort": raw["sort"], "descending": bool(raw["descending"]),
-            "basis": raw["basis"], "held": bool(raw["held"])}  # fmt: skip
+            "basis": raw["basis"], "held": bool(raw["held"]),
+            "cols": figures_of(raw.get("cols"))}  # fmt: skip
 
 
 def merge(

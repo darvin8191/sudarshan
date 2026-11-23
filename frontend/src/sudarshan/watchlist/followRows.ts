@@ -87,8 +87,13 @@ export function titleOf(rule: Rule, strike: number | null): string {
     : `${rule.underlying} ${num(strike)} ${right}`.trim()
 }
 
-/** The line under the title: NFO · 24 Nov 2026 · follows NIFTY (no date while there is no contract). */
+/**
+ * The line under the title: NFO · 24 Nov 2026 · follows NIFTY (no date while there is no contract).
+ * A row that stays on its date says so, with the date, contract or not (M8.11).
+ */
 export function detailOf(rule: Rule, contract: Contract | null): string {
+  if (rule.expiry_rule === 'date' && rule.expiry_on)
+    return `${derivativesExchange(rule)} · ${dayLabel(rule.expiry_on)} · stays on this date`
   const expiry = contract?.expiry ? ` · ${dayLabel(contract.expiry)}` : ''
   return `${derivativesExchange(rule)}${expiry} · follows ${rule.underlying}`
 }
@@ -102,6 +107,14 @@ export function contractOf(rule: Rule, got: Resolved): Contract | null {
   if (isPair(rule)) return got.ce && got.pe ? got.ce : null // F12: both, or neither
   return rule.opt_right === 'PE' ? got.pe : rule.opt_right === 'CE' ? got.ce : null
 }
+
+/**
+ * M8.11: a row that stays on its date and has no contract on it (the date has expired, or today's
+ * contract list does not have it). It shows the server's sentence and no price, and follows nothing,
+ * not even its underlying, so it counts 0 in the cap.
+ */
+export const ended = (row: Pick<RowState, 'rule' | 'answer'>): boolean =>
+  row.rule.expiry_rule === 'date' && row.answer?.state === 'missing'
 
 /** The server's own words for a row that has just rolled to the next expiry. */
 export const isRoll = (words: string): boolean => words.startsWith('Rolled to ')
@@ -160,11 +173,12 @@ export type FollowForm =
       sectionId: number | null
       /**
        * F12, the seam of F14's strike picker ("Add as one row"): `kind: 'strike_pair'` with `fixed` adds a
-       * row on this strike, instead of the ATM plus an offset. `expiry` is the rule the picked expiry
-       * stands for (nearest when absent); every rule is relative, so the row still moves to another
-       * expiry, and `expiries` (the open expiries the picker showed) lets the form say when (review M3).
+       * row on this strike, instead of the ATM plus an offset. `date` is the expiry of the picker's tab:
+       * the row stays on it unless the trader picks the rule (M8.11, W4). `expiry` is the rule that tab
+       * stands for, when one does (`ruleFor`), and `expiries` (the open expiries the picker showed) lets
+       * the form say when that rule moves the row to another expiry (review M3).
        */
-      fixed?: { strike: number; expiry?: ExpiryRule; expiries?: readonly Expiry[] }
+      fixed?: { strike: number; date: string; expiry?: ExpiryRule; expiries?: readonly Expiry[] }
     }
   | { mode: 'edit'; rowId: number }
   | { mode: 'remove'; rowId: number }
@@ -176,49 +190,76 @@ export interface Draft {
   expiry: ExpiryRule
   offset: number
   right: OptRight
-  /** F12: a row on one strike (from the strike picker), its expiry still moving by the rule; null follows the ATM. */
+  /** F12: a row on one strike (from the strike picker); null follows the ATM. */
   strike: number | null
+  /** M8.11: the date the row stays on when `expiry` is `date`, else null. */
+  expiryOn: string | null
 }
 
 /** The form's start: from a new row of this kind, or from the row being edited. */
 export function draftOf(
   kind: FollowKind,
   rule?: Rule,
-  fixed?: { strike: number; expiry?: ExpiryRule }
+  fixed?: { strike: number; date?: string; expiry?: ExpiryRule }
 ): Draft {
   const strike = rule?.strike_rule === 'fixed' ? rule.strike : (fixed?.strike ?? null)
   return {
     kind,
-    expiry: rule?.expiry_rule ?? fixed?.expiry ?? defaultExpiry(kind),
+    // M8.11 (W4): a strike picked on a tab stays on that tab's date until the rule is picked.
+    expiry: rule?.expiry_rule ?? (fixed?.date ? 'date' : fixed?.expiry) ?? defaultExpiry(kind),
     offset: rule?.offset ?? 0,
     right: rule?.opt_right ?? 'CE',
     strike,
+    expiryOn: rule?.expiry_on ?? fixed?.date ?? null,
   }
 }
 
-/** The form's line for a row kept on one strike: the strike is fixed, the expiry is not (review M3). */
+/**
+ * M8.11: the expiries the form offers. A strike picked on a tab stays on that tab's date, or follows
+ * the rule that tab stands for when one does (W4); a row that stays on a date keeps it or takes any
+ * rule of its kind; any other row takes the rules of its kind.
+ */
+export function expiryChoices(
+  kind: FollowKind,
+  on: string | null,
+  fixed?: { date: string; expiry?: ExpiryRule }
+): ReadonlyArray<{ value: ExpiryRule; label: string }> {
+  const rules = expiriesFor(kind).map((each) => ({ value: each.rule, label: each.label }))
+  const stays = (day: string) => ({ value: 'date' as const, label: `Stays on ${dayShort(day)}` })
+  if (fixed) return [stays(fixed.date), ...rules.filter((each) => each.value === fixed.expiry)]
+  return on ? [stays(on), ...rules] : rules
+}
+
+/** The form's line for a row kept on one strike: the strike is fixed, the expiry by its own choice (review M3). */
 export const fixedWords = (strike: number): string =>
   `Strike ${num(strike)}, fixed: it does not move with the price.`
 
-/** When a row on a fixed strike moves to another expiry, when the dates are not known (an edit). */
+/** What a row on a fixed strike does when its expiry ends, when the dates are not known (an edit). */
 const MOVES: Record<ExpiryRule, string> = {
   nearest: 'When it expires, this row moves to the next expiry.',
   next: 'When the nearest expiry ends, this row moves to the one after it.',
   month: "When it expires, this row moves to next month's expiry.",
   next_month: "When this month's expiry ends, this row moves to the month after.",
+  date: 'When it expires the row stops and says so; it does not move to the next expiry.', // M8.11
 }
 
 /**
- * The preview line over the buttons: what the row will follow, in the words of the form. A row on a
- * fixed strike still moves to another expiry, because every rule the server keeps is relative (a rule
- * on a date needs a schema step), so the line says the date it is on today and when it moves, from the
- * open expiries the strike picker showed: "NIFTY 25,900 CE and PE as one row, next expiry (1 Dec
- * today). When 24 Nov expires, this row moves to 8 Dec." (review M3).
+ * The preview line over the buttons: what the row will follow, in the words of the form. A row that
+ * stays on its date says the date and that it stops there (M8.11). A row on a fixed strike that follows
+ * a rule still moves to another expiry, so the line says the date it is on today and when it moves,
+ * from the open expiries the strike picker showed: "NIFTY 25,900 CE and PE as one row, next expiry
+ * (1 Dec today). When 24 Nov expires, this row moves to 8 Dec." (review M3).
  */
 export function previewOf(name: string, draft: Draft, expiries?: readonly Expiry[]): string {
   const expiry = EXPIRIES.find((each) => each.rule === draft.expiry)?.words ?? ''
   if (draft.kind === 'month_future') return `${name} future, ${expiry}.`
   const side = draft.kind === 'strike_pair' ? 'CE and PE as one row' : draft.right // F12
+  const picked = ' The strike is picked from the price when the row is added, and moves with it.'
+  if (draft.expiry === 'date' && draft.expiryOn) {
+    const strike = draft.strike === null ? offsetLabel(draft.offset) : num(draft.strike)
+    const atm = draft.strike === null ? picked : ''
+    return `${name} ${strike} ${side}. Stays on ${dayLabel(draft.expiryOn)}.${atm} ${MOVES.date}`
+  }
   if (draft.strike !== null) {
     const what = `${name} ${num(draft.strike)} ${side}, ${expiry}`
     const roll = expiries ? rollOf(expiries, draft.expiry) : null
@@ -226,8 +267,14 @@ export function previewOf(name: string, draft: Draft, expiries?: readonly Expiry
     const to = roll.to ? dayShort(roll.to) : 'the expiry after it'
     return `${what} (${dayShort(roll.on)} today). When ${dayShort(roll.ends)} expires, this row moves to ${to}.`
   }
-  return `${name} ${offsetLabel(draft.offset)} ${side}, ${expiry}. The strike is picked from the price when the row is added, and moves with it.`
+  return `${name} ${offsetLabel(draft.offset)} ${side}, ${expiry}.${picked}`
 }
+
+/** The expiry a draft sends: its rule, and the date for a row that stays on one (M8.11). */
+const expiryFields = (draft: Draft) =>
+  draft.expiry === 'date'
+    ? { expiry_rule: draft.expiry, expiry_on: draft.expiryOn }
+    : { expiry_rule: draft.expiry }
 
 /** The fields of `row_add` for a draft (the list and its version are the caller's). */
 export function addBody(
@@ -239,7 +286,7 @@ export function addBody(
     kind: draft.kind,
     underlying: under.underlying,
     underlying_exchange: under.underlying_exchange,
-    expiry_rule: draft.expiry,
+    ...expiryFields(draft),
     ...(section === null ? {} : { section_id: section }),
   }
   return draft.kind === 'month_future' ? base : { ...base, ...optionFields(draft) }
@@ -257,8 +304,8 @@ function optionFields(draft: Draft) {
 /** The fields of `row_edit` for a draft: what the form can change, nothing of the underlying. */
 export function editBody(draft: Draft) {
   return draft.kind === 'month_future'
-    ? { expiry_rule: draft.expiry }
-    : { expiry_rule: draft.expiry, kind: draft.kind, ...optionFields(draft) }
+    ? expiryFields(draft)
+    : { ...expiryFields(draft), kind: draft.kind, ...optionFields(draft) }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -312,6 +359,7 @@ const signature = (rule: Rule): string =>
     rule.underlying_exchange,
     rule.underlying,
     rule.expiry_rule,
+    rule.expiry_on, // M8.11
     rule.strike_rule,
     rule.offset,
     rule.strike,

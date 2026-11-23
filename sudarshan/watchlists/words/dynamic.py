@@ -47,10 +47,28 @@ def rolled(expiry: str, at_ms: int) -> str:
     return f"Rolled to {numfmt.day(expiry)} at {numfmt.hm(at_ms)}"
 
 
+def date_past(expiry_on: str) -> str:
+    """A row that stays on a date, once that expiry has stopped (M8.11)."""
+    return (
+        f"{numfmt.short_day(expiry_on)} has expired. This row stays on that date: remove it, "
+        "or change it to follow the nearest expiry."
+    )
+
+
+def no_date(underlying: str, expiry_on: str) -> str:
+    """A date that is not in today's contract list (M8.11)."""
+    return f"{underlying} has no {numfmt.short_day(expiry_on)} expiry in today's contract list."
+
+
 def missing(res: Resolution, underlying: str, row: dict, rule_word: str = "") -> str:
     """Why a row has no contract, in a sentence with the next step."""
     exp = numfmt.day(res.expiry) if res.expiry else ""
+    dated = row.get("expiry_rule") == "date" and row.get("expiry_on")
+    if res.why == "date_past" and dated:
+        return date_past(row["expiry_on"])
     if res.why == "no_expiry":
+        if dated:
+            return no_date(underlying, row["expiry_on"])
         return f"{underlying} has no {rule_word or 'matching'} expiry in today's contract list."
     if res.why == "past_end":
         n = res.steps or 0

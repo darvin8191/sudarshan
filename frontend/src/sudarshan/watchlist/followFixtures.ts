@@ -9,6 +9,7 @@ export const rule = (over: Partial<FollowRow> = {}): FollowRow => ({
   underlying: 'NIFTY',
   underlying_exchange: 'NSE_INDEX',
   expiry_rule: 'nearest',
+  expiry_on: null,
   strike_rule: 'atm',
   offset: 0,
   strike: null,

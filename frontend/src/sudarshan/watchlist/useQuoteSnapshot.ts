@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { tradingApi } from '@/api/trading'
-import { keyOf } from '@/sudarshan/dashboard/live'
-import type { Snapshot } from './rows'
+import { istDay, keyOf } from '@/sudarshan/dashboard/live'
+import { expiredOn, type Snapshot } from './rows'
 
 /** A quote read less than this long ago is not read again when a list opens or grows. */
 export const SNAPSHOT_FRESH_MS = 15_000
@@ -43,6 +43,22 @@ interface Queued {
   keys: Set<string> | null
 }
 
+/**
+ * M8.2 TD1: the instruments a refused read names. The server answers 400 with `invalid_symbols` only
+ * when its master lists none of the call's instruments; any other failure is null.
+ */
+function refusalOf(error: unknown): { refused: Instrument[] } | null {
+  const answer = (error as { response?: { status?: number; data?: { invalid_symbols?: unknown } } })
+    ?.response
+  const named = answer?.status === 400 ? answer.data?.invalid_symbols : undefined
+  if (!Array.isArray(named) || named.length === 0) return null
+  const refused = named.filter(
+    (each): each is Instrument =>
+      typeof each?.symbol === 'string' && typeof each?.exchange === 'string'
+  )
+  return refused.length === named.length ? { refused } : null
+}
+
 /** One more request folded into what already waits: the youngest age, and every key of both. */
 function fold(queued: Queued | null, maxAgeMs: number, only: ReadonlySet<string> | null): Queued {
   if (queued === null) return { maxAgeMs, keys: only && new Set(only) }
@@ -72,12 +88,17 @@ function fold(queued: Queued | null, maxAgeMs: number, only: ReadonlySet<string>
  * list fed by a screen, a market's open or a reconnect would each read then.
  * What a hidden page would have read is owed, folded into one read, and made
  * when the page is shown again.
+ *
+ * M8.2 TD1: an expired contract is never read (`expiredOn`: its day is behind
+ * today, or the server refused it as no longer listed on that day), and a read
+ * the server refuses only for expired contracts is not a failure.
  */
 export function useQuoteSnapshot({
   apiKey,
   instruments,
   connectionEpoch,
   marketOpen,
+  onRefused,
 }: {
   apiKey: string | null
   instruments: Instrument[]
@@ -89,6 +110,8 @@ export function useQuoteSnapshot({
    * opening.
    */
   marketOpen: boolean | null
+  /** M8.2 TD1: told the instruments (EXCHANGE:SYMBOL) a read was refused for, as no longer listed. */
+  onRefused?: (keys: readonly string[]) => void
 }): QuoteSnapshot {
   const [quotes, setQuotes] = useState<ReadonlyMap<string, Snapshot>>(() => new Map())
   const [status, setStatus] = useState<SnapshotStatus>('idle')
@@ -100,6 +123,12 @@ export function useQuoteSnapshot({
   /** What a hidden page was asked to read, for the moment it is shown (SCR-F). */
   const owed = useRef<Queued | null>(null)
   const alive = useRef(true)
+  /** M8.2 TD1: what the server refused as no longer listed, while it stays in the list. */
+  const refused = useRef(new Set<string>())
+  const told = useRef(onRefused)
+  useEffect(() => {
+    told.current = onRefused
+  }, [onRefused])
   /** F9: who is waiting for a full read, and how the last read ended (the quotes, or null for a failure). */
   const waiters = useRef<Array<(quotes: ReadonlyMap<string, Snapshot> | null) => void>>([])
   const outcome = useRef<ReadonlyMap<string, Snapshot> | null>(null)
@@ -134,9 +163,11 @@ export function useQuoteSnapshot({
         return
       }
       const at = Date.now()
+      const today = istDay(at)
       const due = active.current.filter(({ symbol, exchange }) => {
         const key = keyOf(symbol, exchange)
         if (only && !only.has(key)) return false
+        if (expiredOn(symbol, exchange, today, refused.current.has(key)) !== null) return false // TD1
         const held = store.current.get(key)
         return !held || at - held.at > maxAgeMs
       })
@@ -155,15 +186,22 @@ export function useQuoteSnapshot({
         for (let from = 0; from < due.length; from += QUOTE_KEYS_PER_CALL)
           calls.push(due.slice(from, from + QUOTE_KEYS_PER_CALL))
         const responses = await Promise.all(
-          calls.map((call) => tradingApi.getMultiQuotes(apiKey, call).catch(() => null))
+          calls.map((call) => tradingApi.getMultiQuotes(apiKey, call).catch(refusalOf))
         )
         if (!alive.current) return
         const wanted = new Set(active.current.map((each) => keyOf(each.symbol, each.exchange)))
         const next = new Map(store.current)
         let failed = false
         let landed = false
+        const named: string[] = []
         for (const response of responses) {
-          if (response?.status === 'success' && Array.isArray(response.results)) {
+          if (response && 'refused' in response) {
+            // TD1: no longer listed. Only an instrument that is not an expired contract fails the read.
+            for (const { symbol, exchange } of response.refused) {
+              named.push(keyOf(symbol, exchange))
+              if (expiredOn(symbol, exchange, today, true) === null) failed = true
+            }
+          } else if (response?.status === 'success' && Array.isArray(response.results)) {
             landed = true
             for (const result of response.results) {
               const key = keyOf(result.symbol, result.exchange)
@@ -178,6 +216,10 @@ export function useQuoteSnapshot({
         if (landed) {
           store.current = next
           setQuotes(next)
+        }
+        if (named.length > 0) {
+          for (const key of named) refused.current.add(key)
+          told.current?.(named)
         }
         setStatus(failed ? 'error' : 'ready')
         outcome.current = failed ? null : next
@@ -203,6 +245,7 @@ export function useQuoteSnapshot({
   useEffect(() => {
     active.current = instruments
     const wanted = new Set(instruments.map(({ symbol, exchange }) => keyOf(symbol, exchange)))
+    for (const key of refused.current) if (!wanted.has(key)) refused.current.delete(key) // TD1
     if ([...store.current.keys()].some((key) => !wanted.has(key))) {
       store.current = new Map([...store.current].filter(([key]) => wanted.has(key)))
       setQuotes(store.current)

@@ -1,10 +1,14 @@
 import { Clock } from 'lucide-react'
+import { cn } from '@/lib/utils'
+import { FigureCells } from './FigureCells'
+import { cellsOf } from './figures'
 import { outsideNote, outsideSpeech } from './follow'
-import { ATM_HELP, chipOf, detailOf, lineOf, titleOf } from './followRows'
+import { ATM_HELP, chipOf, detailOf, ended, lineOf, titleOf } from './followRows'
 import { priceDecimals } from './rows'
 import type { FollowState } from './useFollowRows'
 import type { LiveRow } from './useLiveRows'
 import { CLOCK } from './ViewSheet'
+import type { Figure } from './v2/types'
 import { Figures, figuresOf } from './WatchlistRows'
 
 const NO_FIGURES = {
@@ -19,7 +23,8 @@ const NO_FIGURES = {
 export function followNames(state: FollowState) {
   const { rule, shown } = state
   return {
-    title: titleOf(rule, shown?.strike ?? null),
+    // M8.11: a fixed strike is named from its rule while there is no contract (a dated row that ended)
+    title: titleOf(rule, shown?.strike ?? (rule.strike_rule === 'fixed' ? rule.strike : null)),
     chip: chipOf(rule),
     detail: detailOf(rule, shown?.contract ?? null),
     help:
@@ -33,24 +38,33 @@ export function followNames(state: FollowState) {
  * One row that follows the price (F11). It looks like any row (the contract's price and change, live
  * from the feed) with a chip for its rule and, under it, the one line that says what happened to it:
  * a move, a roll, waiting, closed, or the server's words for a contract it cannot find. A row with no
- * contract yet opens its form instead of a sheet.
+ * contract yet opens its form instead of a sheet. A row that stayed on its date and ended shows the
+ * server's sentence and no price at all (M8.11).
  */
 export function FollowRowItem({
   state,
   live,
   now,
   onOpen,
+  shown,
 }: {
   state: FollowState
   live: LiveRow | null
   now: number
   onOpen: (rowId: number) => void
+  /** M8.3 GA6.2: the figures shown beside the price at this width. */
+  shown?: readonly Figure[]
 }) {
   const names = followNames(state)
   const line = lineOf(state, now)
   const outside = live?.outside
   const figures = live ? figuresOf(live) : NO_FIGURES
   const exchange = state.shown?.contract.exchange ?? 'NFO'
+  const contract = state.shown?.contract
+  const cells =
+    shown && shown.length > 0 && contract
+      ? cellsOf(shown, contract.symbol, contract.exchange, live?.snap, live?.line)
+      : []
   return (
     <li data-follow-row={state.id} data-stale={live?.stale || undefined}>
       <button
@@ -61,7 +75,12 @@ export function FollowRowItem({
         className="flex min-h-14 w-full flex-col justify-center gap-1 px-4 py-2 text-left outline-none active:bg-accent focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
       >
         <span className="flex w-full items-center gap-3">
-          <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <span
+            className={cn(
+              'flex flex-1 flex-col gap-0.5',
+              cells.length > 0 ? 'min-w-[7rem]' : 'min-w-0'
+            )}
+          >
             <span className="flex min-w-0 items-center gap-2">
               <span className="truncate text-[0.9375rem] leading-tight font-semibold">
                 {names.title}
@@ -78,7 +97,10 @@ export function FollowRowItem({
               {names.detail}
             </span>
           </span>
-          <Figures {...figures} outside={outside} decimals={priceDecimals(exchange)} />
+          <FigureCells cells={cells} grey={figures.stale || outside !== undefined} />
+          {!ended(state) && (
+            <Figures {...figures} outside={outside} decimals={priceDecimals(exchange)} />
+          )}
         </span>
         {line && (
           <span

@@ -60,8 +60,9 @@ export type Why =
 export type RefKind = 'list' | 'preset' | 'ranked' | 'flag'
 export type Sort = 'list' | 'change' | 'price' | 'name' | 'exchange'
 export type Basis = 'close' | 'open'
+export type Figure = 'high' | 'low' | 'open' | 'prev' | 'volume' | 'oi' | 'atp' | 'iv'
 export type FollowKind = 'atm_option' | 'month_future' | 'strike_pair'
-export type ExpiryRule = 'nearest' | 'next' | 'month' | 'next_month'
+export type ExpiryRule = 'nearest' | 'next' | 'month' | 'next_month' | 'date'
 export type StrikeRule = 'atm' | 'fixed'
 export type OptRight = 'CE' | 'PE'
 export type UnderlyingExchange = 'NSE_INDEX' | 'NSE' | 'BSE_INDEX' | 'BSE'
@@ -159,6 +160,7 @@ export interface Pref {
   descending: boolean
   basis: Basis
   held: boolean
+  cols: Figure[]
 }
 
 export interface Section {
@@ -187,6 +189,7 @@ export interface FollowRow {
   underlying: string
   underlying_exchange: UnderlyingExchange
   expiry_rule: ExpiryRule
+  expiry_on: string | null
   strike_rule: StrikeRule | null
   offset: number | null
   strike: number | null
@@ -244,6 +247,7 @@ export interface Draft {
   underlying: string
   underlying_exchange: string
   expiry_rule?: ExpiryRule
+  expiry_on?: string | null
   strike_rule?: StrikeRule
   offset?: number
   strike?: number
@@ -619,6 +623,7 @@ export interface PrefReq {
   descending?: boolean
   basis?: Basis
   held?: boolean
+  cols?: Figure[]
 }
 
 export interface RowAddReq {
@@ -629,6 +634,7 @@ export interface RowAddReq {
   underlying: string
   underlying_exchange: string
   expiry_rule?: ExpiryRule
+  expiry_on?: string | null
   strike_rule?: StrikeRule
   offset?: number
   strike?: number
@@ -643,6 +649,7 @@ export interface RowEditReq {
   underlying?: string
   underlying_exchange?: string
   expiry_rule?: ExpiryRule
+  expiry_on?: string | null
   strike_rule?: StrikeRule
   offset?: number
   strike?: number

@@ -224,10 +224,18 @@ describe('?sheet=add', () => {
       x: 'NSE_INDEX',
     })
     await user.click(await screen.findByRole('button', { name: 'Add as one row at 25,900' }))
-    // Review M3: the form says the expiry it is on today and that it moves, never "kept for good".
     expect(
       await screen.findByText('Strike 25,900, fixed: it does not move with the price.')
     ).toBeInTheDocument()
+    // M8.11 (W4): the row stays on the tab's date unless the rule is picked.
+    expect(screen.getByLabelText('Stays on 24 Nov')).toBeChecked()
+    expect(
+      screen.getByText(
+        'NIFTY 25,900 CE and PE as one row. Stays on 24 Nov 2026. When it expires the row stops and says so; it does not move to the next expiry.'
+      )
+    ).toBeInTheDocument()
+    // Review M3: on the rule, the form says the expiry it is on today and that it moves.
+    await user.click(screen.getByLabelText('Nearest'))
     expect(
       screen.getByText(
         'NIFTY 25,900 CE and PE as one row, nearest expiry (24 Nov today). When 24 Nov expires, this row moves to the expiry after it.'

@@ -6,6 +6,7 @@ compare-and-set as its sections. Pure data in and out: a rule is a plain dict, a
 
 from __future__ import annotations
 
+from datetime import date
 from fractions import Fraction
 
 from sqlalchemy import func, select
@@ -16,8 +17,8 @@ from sudarshan.watchlists.store import sections as _sections
 from sudarshan.watchlists.words import rows as words
 
 FIELDS = (
-    "kind", "underlying", "underlying_exchange", "expiry_rule", "strike_rule", "offset",
-    "strike", "opt_right",
+    "kind", "underlying", "underlying_exchange", "expiry_rule", "expiry_on", "strike_rule",
+    "offset", "strike", "opt_right",
 )  # fmt: skip
 _LATER = ("MCX", "NCDEX", "NCO", "CDS", "BCD", "GLOBAL_INDEX")
 
@@ -36,7 +37,7 @@ def as_rule(row) -> dict:
     return {
         "kind": row.kind, "underlying": row.underlying,
         "underlying_exchange": row.underlying_exchange, "expiry_rule": row.expiry_rule,
-        "strike_rule": row.strike_rule, "offset": row.offset,
+        "expiry_on": row.expiry_on, "strike_rule": row.strike_rule, "offset": row.offset,
         "strike": None if paise is None else paise / 100, "opt_right": row.opt_right,
     }  # fmt: skip
 
@@ -49,6 +50,18 @@ def _paise(strike) -> int:
     if exact <= 0 or exact.denominator != 1 or exact > 10**12:
         raise Bad("strike", words.STRIKE_BAD)
     return int(exact)
+
+
+def _day(value) -> str | None:
+    """An ISO day (``2026-11-24``) as it is stored, else None."""
+    try:
+        return (
+            value
+            if isinstance(value, str) and date.fromisoformat(value).isoformat() == value
+            else None
+        )
+    except ValueError:
+        return None
 
 
 def normalize(base: dict | None, patch: dict) -> dict:
@@ -71,8 +84,14 @@ def normalize(base: dict | None, patch: dict) -> dict:
     if expiry not in schema.EXPIRY_RULES:
         raise Bad("expiry_rule", words.NOTHING)
     out = {"kind": kind, "underlying": name, "underlying_exchange": exchange,
-           "expiry_rule": expiry, "strike_rule": "atm", "offset": 0, "strike": None,
-           "opt_right": None}  # fmt: skip
+           "expiry_rule": expiry, "expiry_on": None, "strike_rule": "atm", "offset": 0,
+           "strike": None, "opt_right": None}  # fmt: skip
+    if expiry == "date":  # M8.11: the row stays on that expiry
+        if month:
+            raise Bad("expiry_rule", words.DATE_FUTURE)
+        out["expiry_on"] = _day(rule.get("expiry_on"))
+        if out["expiry_on"] is None:
+            raise Bad("expiry_on", words.DATE_NEEDED)
     if month:
         return out
     fixed = rule.get("strike_rule") == "fixed"
@@ -123,6 +142,7 @@ def section_exists(s, list_id: int, section_id: int) -> bool:
 def _set(row, rule: dict) -> None:
     row.kind, row.underlying = rule["kind"], rule["underlying"]
     row.underlying_exchange, row.expiry_rule = rule["underlying_exchange"], rule["expiry_rule"]
+    row.expiry_on = rule["expiry_on"]
     row.strike_rule, row.offset = rule["strike_rule"], rule["offset"]
     row.strike_paise = None if rule["strike"] is None else _paise(rule["strike"])
     row.opt_right = rule["opt_right"]

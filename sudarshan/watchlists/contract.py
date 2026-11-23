@@ -89,8 +89,10 @@ ENUMS = {
     "RefKind": ("list", "preset", "ranked", "flag"),
     "Sort": ("list", "change", "price", "name", "exchange"),
     "Basis": ("close", "open"),
+    #: The figures a row can show beside its price (M8.3, GA6.1), in the View sheet's order.
+    "Figure": ("high", "low", "open", "prev", "volume", "oi", "atp", "iv"),
     "FollowKind": ("atm_option", "month_future", "strike_pair"),
-    "ExpiryRule": ("nearest", "next", "month", "next_month"),
+    "ExpiryRule": ("nearest", "next", "month", "next_month", "date"),
     "StrikeRule": ("atm", "fixed"),
     "OptRight": ("CE", "PE"),
     "UnderlyingExchange": ("NSE_INDEX", "NSE", "BSE_INDEX", "BSE"),
@@ -122,8 +124,8 @@ ENUMS = {
 _ROW = "list:int, section_id?:int|null, version:string"
 _FOLLOW = (
     "kind:FollowKind, underlying:string, underlying_exchange:string, "
-    "expiry_rule?:ExpiryRule, strike_rule?:StrikeRule, offset?:int, strike?:number, "
-    "opt_right?:OptRight|null"
+    "expiry_rule?:ExpiryRule, expiry_on?:string|null, strike_rule?:StrikeRule, offset?:int, "
+    "strike?:number, opt_right?:OptRight|null"
 )
 
 RECORDS = {
@@ -137,13 +139,13 @@ RECORDS = {
     "locked:bool, note:string|null",
     "Contract": "exchange:string, symbol:string, key:string, name:string, lot:int|null, "
     "tick:number|null, expiry:string|null, isin:string|null",
-    "Pref": "sort:Sort, descending:bool, basis:Basis, held:bool",
+    "Pref": "sort:Sort, descending:bool, basis:Basis, held:bool, cols:Figure[]",
     "Section": "id:int, name:string, mark:int, position:int, count:int",
     "Row": "item:int|null, contract:Contract, section_id:int|null, flag:int|null, "
     "has_note:bool, expired:bool, metric:string|null",
     "FollowRow": "id:int, kind:FollowKind, section_id:int|null, position:int, underlying:string, "
-    "underlying_exchange:UnderlyingExchange, expiry_rule:ExpiryRule, strike_rule:StrikeRule|null, "
-    "offset:int|null, strike:number|null, opt_right:OptRight|null",
+    "underlying_exchange:UnderlyingExchange, expiry_rule:ExpiryRule, expiry_on:string|null, "
+    "strike_rule:StrikeRule|null, offset:int|null, strike:number|null, opt_right:OptRight|null",
     "View": "ref:string, kind:RefKind, name:string, version:string, locked:bool, "
     "as_of:string|null, lines:string[], total:int, missing:string[], sections:Section[], "
     "rows:Row[], follow:FollowRow[], pref:Pref",
@@ -261,7 +263,8 @@ OPS = (
            "k:string, flag?:int|null, note?:string|null, version?:int|null", "Done"),
     OpSpec("expired_clear", "POST", "/symbols/expired/clear", "write", "version:int", "Done"),
     OpSpec("pref", "PUT", "/prefs/<ref>", "write",
-           "ref:string, sort?:Sort, descending?:bool, basis?:Basis, held?:bool", "Done"),
+           "ref:string, sort?:Sort, descending?:bool, basis?:Basis, held?:bool, cols?:Figure[]",
+           "Done"),
     OpSpec("row_add", "POST", "/rows", "write", f"{_ROW}, {_FOLLOW}", "Done"),
     OpSpec("row_edit", "PATCH", "/rows/<id>", "write",
            "id:int, version:string, section_id?:int|null, " + _FOLLOW.replace("kind:", "kind?:")
