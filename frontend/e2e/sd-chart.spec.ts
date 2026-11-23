@@ -545,11 +545,11 @@ async function checkTicket(page: Page, ticket: Locator, held: string, tag: strin
 /**
  * The ticket's first fields on its first screen, upright, in their order: side, quantity, price
  * type, product, price. As many as the screen holds (v0.16.0 phone review H2): all five on a
- * 360 x 800 phone at either text size; on a 320 x 640 one the first four. With Larger text there
- * the title lets its "Place Order -" go (v0.17.0 verification V5), so the price type and the
- * product come onto the first screen beside the side and the quantity: each a whole 48 dp target
- * with its value, the last 2 px of their boxes under its edge. The price is reached by scrolling,
- * and the line beside Place says every one of them.
+ * 360 x 800 phone at either text size; on a 320 x 640 one the first four, whole, at either size.
+ * With Larger text there the title lets its "Place Order -" go (v0.17.0 verification V5) and the
+ * body its top padding (test day V5), so the price type and the product, whose boxes' last 1.6 px
+ * sat under the edge before, are whole. The price is reached by scrolling, and the line beside
+ * Place says every one of them.
  */
 async function checkFirstScreen(page: Page, ticket: Locator) {
   const height = page.viewportSize()?.height ?? 800
@@ -568,19 +568,11 @@ async function checkFirstScreen(page: Page, ticket: Locator) {
     ticket.getByRole('combobox', { name: 'Product' }),
     ticket.getByRole('spinbutton', { name: 'Price', exact: true }),
   ]
-  const whole = height >= 800 ? 5 : larger ? 2 : 4
+  const whole = height >= 800 ? 5 : 4
   for (const field of fields.slice(0, whole)) {
     const box = (await field.boundingBox()) as DOMRect
     expect(box.y, 'starts inside the body').toBeGreaterThanOrEqual(body.y - 0.5)
     expect(box.y + box.height, 'ends inside the body').toBeLessThanOrEqual(end + 0.5)
-  }
-  if (whole !== 2) return
-  for (const field of fields.slice(2, 4)) {
-    const box = (await field.boundingBox()) as DOMRect
-    const value = (await field.locator('[data-slot="select-value"]').boundingBox()) as DOMRect
-    expect(box.y, 'starts inside the body').toBeGreaterThanOrEqual(body.y - 0.5)
-    expect(Math.min(box.y + box.height, end) - box.y, 'a whole 48 dp target on screen').toBeGreaterThanOrEqual(48)
-    expect(value.y + value.height, 'its value read on screen').toBeLessThanOrEqual(end + 0.5)
   }
 }
 
@@ -893,9 +885,9 @@ test.describe('the phone chart on its side, 800 x 360', () => {
  * cut now, every control stays 48 dp, and the line beside Place, which says the side, quantity,
  * type, price and product, is whole and in view whatever the body has scrolled to. Upright, the
  * fields come first in their order, as many on the first screen as it holds: all five at 360 x
- * 800 at either text size; at 320 x 640 the side, quantity, type and product, with Larger text
- * once the title has let its "Place Order -" go (v0.17.0 verification V5; `checkFirstScreen`
- * says how whole). The price is reached by scrolling (`checkTicket`).
+ * 800 at either text size; at 320 x 640 the side, quantity, type and product, whole, with Larger
+ * text once the title has let its "Place Order -" go (v0.17.0 verification V5) and the body its
+ * top padding (test day V5). The price is reached by scrolling (`checkTicket`).
  */
 const LARGER = { 'sudarshan-text': 'large', 'sudarshan-density': 'compact' }
 for (const { viewport, larger } of [

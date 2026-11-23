@@ -540,7 +540,11 @@ export function PlaceOrderDialog({
           <X className="size-5" aria-hidden="true" />
         </DialogClose>
 
-        <div data-testid="ticket-body" className="space-y-3 py-1 min-h-0 overflow-y-auto">
+        {/* M20.2 (test day V5): below 360 px with Larger text its top padding goes (`sd-ticket-body`). */}
+        <div
+          data-testid="ticket-body"
+          className="sd-ticket-body space-y-3 py-1 min-h-0 overflow-y-auto"
+        >
           {/* SUDARSHAN M20.7: the kill switch's line; it disables nothing (a Buy can close a short). */}
           <KillSwitchNote />
           {/* Quote Header - merged WebSocket + REST data */}

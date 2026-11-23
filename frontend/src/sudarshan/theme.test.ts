@@ -410,16 +410,26 @@ describe('display density and text size', () => {
   })
 
   // v0.17.0 verification V5: the ticket's title gives the first screen one more line.
+  const narrowLarger =
+    /@media \(width < 22\.5rem\) \{((?:\s*:root\[data-text='large'\] \.sd-ticket-[a-z]+ \{[^}]*\})+)\s*\}/.exec(
+      css
+    )?.[1] ?? ''
+  const narrowRule = (name: string) =>
+    new RegExp(`\\.sd-ticket-${name} \\{([^}]*)\\}`).exec(narrowLarger)?.[1] ?? ''
+
   it("lets the ticket title's lead go from the screen below 360 px with Larger text, never from a screen reader", () => {
-    const rule =
-      /@media \(width < 22\.5rem\) \{\s*:root\[data-text='large'\] \.sd-ticket-lead \{([^}]*)\}\s*\}/.exec(
-        css
-      )?.[1] ?? ''
+    const rule = narrowRule('lead')
     expect(rule).toMatch(/position:\s*absolute;/)
     expect(rule).toMatch(/width:\s*1px;/)
     expect(rule).toMatch(/clip-path:\s*inset\(50%\);/)
     expect(rule).not.toMatch(/display:\s*none|visibility:\s*hidden/)
     expect(css.match(/\.sd-ticket-lead/g)).toHaveLength(1) // nowhere else, at no other size
+  })
+
+  // Test day V5: the body's top padding gives the price type and product their last 1.6 px.
+  it("takes the ticket body's top padding away there, and only its top padding, only there", () => {
+    expect(narrowRule('body').trim()).toBe('padding-top: 0;')
+    expect(css.match(/\.sd-ticket-body/g)).toHaveLength(1)
   })
 
   it('changes no colour', () => {

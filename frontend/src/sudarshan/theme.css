@@ -203,7 +203,9 @@ html {
 }
 /* Below 360 px with Larger text the order ticket's title lets its "Place Order -" go from the
    screen (v0.17.0 verification V5): the side and the symbol share one line, and the price type
-   and the product come onto the first screen. It is still read: the dialog keeps its whole name. */
+   and the product come onto the first screen. It is still read: the dialog keeps its whole name.
+   The body's top padding goes too (test day V5): it gives the 1.6 px those two boxes lacked, so
+   both are whole on a 320 x 640 phone. */
 @media (width < 22.5rem) {
   :root[data-text='large'] .sd-ticket-lead {
     position: absolute;
@@ -213,6 +215,9 @@ html {
     overflow: hidden;
     clip-path: inset(50%);
     white-space: nowrap;
+  }
+  :root[data-text='large'] .sd-ticket-body {
+    padding-top: 0;
   }
 }
 /* With larger text the books' four-up figure cards (Positions, Holdings, the wide pages a phone
