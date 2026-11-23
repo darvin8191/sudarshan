@@ -47,6 +47,24 @@ const ROWS = [
   // Review M1: an index option whose name is longer than a 7rem floor, priced in four digits.
   { symbol: 'BANKNIFTY30DEC2658500PE', exchange: 'NFO', ltp: 1048.25, prev: 1002.6, high: 1112.4, low: 962.15, open: 1006, volume: 8_14_220, oi: 19_87_300 },
 ]
+/**
+ * The server round's L3: a resting sell stop on INFY whose trigger the last price (1,552.40) is
+ * already below, for its Repeat ticket's passed-trigger line. Made up, as every figure here.
+ */
+const STOP_ORDER = {
+  symbol: 'INFY',
+  exchange: 'NSE',
+  action: 'SELL',
+  quantity: 10,
+  price: 1555,
+  trigger_price: 1560,
+  pricetype: 'SL',
+  product: 'CNC',
+  orderid: '261123000000041',
+  order_status: 'trigger pending',
+  timestamp: '2026-11-23 10:05:00',
+}
+
 /** M1: the row whose name may leave no room for a figure column upright. */
 const LONG = 'BANKNIFTY 58500 PE'
 
@@ -189,6 +207,8 @@ async function serve(page: Page, fixture: Fixture) {
       Object.assign(pref, body as object)
       return ok({ version: null, id: null, words: null })
     },
+    '/api/v1/orderbook': () =>
+      json({ status: 'success', data: { orders: [STOP_ORDER], statistics: {} } }),
     // M20.2 L5: what the order ticket reads of an instrument: its lot and tick, its book's top level.
     '/api/v1/symbol': (body) => {
       const { symbol, exchange } = body as { symbol: string; exchange: string }
@@ -570,6 +590,40 @@ for (const viewport of [
     })
   }
 }
+
+/**
+ * The Repeat ticket's passed-trigger line (v0.17.0 server review L3), which no other phone spec
+ * opens, at 320 x 640 with Larger text: it wraps whole inside the ticket, nothing of the ticket is
+ * cut, and the line beside Place stays in view. Place is never pressed.
+ */
+test.describe('the Repeat ticket of a stop the price has passed, 320 x 640, large text', () => {
+  test.use({ viewport: { width: 320, height: 640 }, hasTouch: true, isMobile: true })
+
+  test('says so in a line that wraps whole', async ({ page }, info) => {
+    await page.addInitScript(() => localStorage.setItem('sudarshan-text', 'large'))
+    await serve(page, { cols: [] })
+    await page.goto('/orderbook')
+    await page.getByRole('button', { name: /INFY/ }).first().click()
+    await page.waitForTimeout(700) // the sheet's fade and its half-second guard
+    await page.getByRole('dialog').getByRole('button', { name: /^Repeat/ }).click()
+    const ticket = page.getByRole('dialog', { name: /^Place Order - SELL/ })
+    await expect(ticket).toBeVisible()
+    const line = ticket.getByTestId('ticket-trigger-passed')
+    await expect(line).toHaveText(
+      'The trigger 1560.00 is already above the last price 1552.40: this stop would trigger at once and rest as a limit order at 1555.00.'
+    )
+    await page.waitForTimeout(700)
+    await expect(line).toBeInViewport({ ratio: 1 })
+    const lines = await line.evaluate((el) =>
+      Math.round(el.getBoundingClientRect().height / Number.parseFloat(getComputedStyle(el).lineHeight))
+    )
+    expect(lines, 'the line wraps').toBeGreaterThan(1)
+    expect(await ticketCuts(ticket), 'parts of the ticket that are cut').toEqual([])
+    await expect(ticket.getByTestId('ticket-summary')).toBeInViewport({ ratio: 1 })
+    await expect(ticket.getByRole('button', { name: 'Place SELL Order' })).toBeInViewport({ ratio: 1 })
+    await page.screenshot({ path: info.outputPath('repeat-passed-trigger-320-large.png') })
+  })
+})
 
 test.describe('an expired contract in the list, upright (M8.2 TD1)', () => {
   test.use({ viewport: { width: 360, height: 800 }, hasTouch: true, isMobile: true })
