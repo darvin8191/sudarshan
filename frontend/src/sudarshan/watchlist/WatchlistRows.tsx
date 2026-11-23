@@ -13,7 +13,14 @@ import { cellsOf, type FigureCell, sameCells } from './figures'
 import { FOLLOW_CAP, outsideNote, outsideSpeech } from './follow'
 import { type HeldFigures, HoldingLine } from './HoldingLine'
 import { MarkGlyph } from './marks'
-import { describe, formatChange, OPEN_UNKNOWN, priceDecimals, type TickDirection } from './rows'
+import {
+  describe,
+  expiredWords,
+  formatChange,
+  OPEN_UNKNOWN,
+  priceDecimals,
+  type TickDirection,
+} from './rows'
 import { SectionHeader } from './SectionHeader'
 import type { LiveRow } from './useLiveRows'
 import { CLOCK } from './ViewSheet'
@@ -43,9 +50,9 @@ export interface FigureValues {
   outsideAt?: number | null
 }
 
-/** M8.3 GA6.2: a row's figures beside the price, or none. */
+/** M8.3 GA6.2: a row's figures beside the price, or none (an expired contract has none, TD1). */
 function cellsFor(row: LiveRow, shown: readonly Figure[] | undefined) {
-  return shown && shown.length > 0
+  return shown && shown.length > 0 && row.expired === undefined
     ? cellsOf(shown, row.item.symbol, row.item.exchange, row.snap, row.line)
     : undefined
 }
@@ -217,6 +224,8 @@ export function Figures({
 type PriceRowProps = FigureValues & {
   /** M8.3 GA6.2: the figures beside the price, in the order shown. */
   cells?: readonly FigureCell[]
+  /** M8.2 TD1: the day its contract expired: said where the price would be. */
+  expired?: string
   metric?: string // F16
   /** F9: its place in a list longer than the cap, which the window is worked out from. */
   rowIndex?: number
@@ -250,6 +259,7 @@ const PriceRow = memo(function PriceRow({
   onOpen,
   rowIndex,
   cells,
+  expired,
   ...figures
 }: PriceRowProps) {
   const shown = cells !== undefined && cells.length > 0
@@ -261,12 +271,22 @@ const PriceRow = memo(function PriceRow({
         chip={chip}
         holding={holding}
         position={position}
-        mark={mark}
+        mark={expired && mark ? { ...mark, expired: false } : mark} // TD1: said once, with its day
         metric={metric} // F16
         roomy={shown} // M8.3
       />
       {shown && <FigureCells cells={cells} grey={figures.stale || figures.outside !== undefined} />}
-      <Figures {...figures} decimals={priceDecimals(exchange)} />
+      {expired ? (
+        <span
+          data-expired-on={expired}
+          className="flex max-w-[8.5rem] shrink-0 items-start gap-1 text-right text-xs leading-tight font-semibold text-[color:var(--warning-text)]"
+        >
+          <Clock aria-hidden="true" className="mt-px size-3 shrink-0" />
+          {expiredWords(expired)}
+        </span>
+      ) : (
+        <Figures {...figures} decimals={priceDecimals(exchange)} />
+      )}
     </>
   )
   const { outside, outsideAt } = figures
@@ -363,6 +383,7 @@ function Sectioned({
                   position={held?.get(row.key)?.position} // F7
                   mark={marks?.get(row.key)} // F8
                   cells={cellsFor(row, figures)} // M8.3
+                  expired={row.expired} // TD1
                   onOpen={onOpen}
                   {...figuresOf(row)}
                 />,
@@ -516,6 +537,7 @@ export function WatchlistRows({
               mark={marks?.get(row.key)} // F8
               metric={metrics?.get(row.key)} // F16
               cells={cellsFor(row, figures)} // M8.3
+              expired={row.expired} // TD1
               onOpen={onOpen}
               rowIndex={rows.length > FOLLOW_CAP ? index : undefined} // F9
               {...figuresOf(row)}

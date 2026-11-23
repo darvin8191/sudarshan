@@ -8,6 +8,7 @@ import { keyOf, type MarketOpen } from '@/sudarshan/dashboard/live'
 import type { MemberRow } from '@/sudarshan/screener/api'
 import { exitedToday, tagsOf, usePin } from '@/sudarshan/screener/feed'
 import type { ArrangeEdit } from './ArrangeSheet'
+import { ExpiredSheet } from './ExpiredSheet'
 import { type Drawn, drawnColumns, useFigureColumns } from './FigureCells'
 import { FollowRowItem, followNames } from './FollowRows'
 import { needsQuote, shownFigures } from './figures'
@@ -687,8 +688,18 @@ export const LiveList = memo(function LiveList({
         </p>
       )}
 
+      {sheetRow?.expired && (
+        <ExpiredSheet // TD1: nothing to quote or trade; it asks before it removes the row
+          item={sheetRow.item}
+          day={sheetRow.expired}
+          listName={listName}
+          flags={readOnly ? undefined : flagNames}
+          onClose={onCloseSheet}
+          onRemove={noRemove || readOnly ? undefined : onRemove}
+        />
+      )}
       <SymbolSheet
-        row={sheetRow}
+        row={sheetRow?.expired ? null : sheetRow}
         listName={listName}
         apiKey={apiKey}
         marketOpen={sheetRow ? isOpen(sheetRow.item.exchange) : null}

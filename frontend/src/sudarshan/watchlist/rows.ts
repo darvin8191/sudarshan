@@ -219,6 +219,39 @@ export function describe(symbol: string, exchange: string): Described {
   }
 }
 
+/** The expiry day a contract's symbol names, as 2026-11-03; null for anything that is not a dated contract. */
+export function contractDay(symbol: string, exchange: string): string | null {
+  const parsed = DERIVATIVE_EXCHANGES.has(exchange.toUpperCase()) ? CONTRACT.exec(symbol) : null
+  if (!parsed) return null
+  const [, , day, month, year] = parsed
+  const iso = `20${year}-${String(MONTHS.indexOf(month) + 1).padStart(2, '0')}-${day}`
+  const date = new Date(`${iso}T00:00:00Z`)
+  return Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== iso ? null : iso
+}
+
+/**
+ * M8.2 TD1: the day a row's contract expired, or null while it has not (or it is not a dated
+ * contract). It has once its expiry day is behind `today` (India's date, 2026-11-23), or on that day
+ * itself once the master no longer lists it (`gone`: the server refused to quote it for that reason).
+ * Such a row is never read or followed again: the server no longer quotes it.
+ */
+export function expiredOn(
+  symbol: string,
+  exchange: string,
+  today: string,
+  gone = false
+): string | null {
+  const day = contractDay(symbol, exchange)
+  return day !== null && (day < today || (gone && day <= today)) ? day : null
+}
+
+/** "Expired on 3 Nov 2026": what an expired row says where its price would be. */
+export function expiredWords(day: string): string {
+  const [year, month, date] = day.split('-').map(Number)
+  const name = MONTHS[month - 1]
+  return `Expired on ${date} ${name.charAt(0)}${name.slice(1).toLowerCase()} ${year}`
+}
+
 /** Where an instrument's options trade, for the option chain. */
 const CHAIN_EXCHANGE: Record<string, string> = {
   NSE: 'NFO',

@@ -13,6 +13,10 @@
  * figure they draw needs it; and a tick moves the figures it carries. The View sheet's chooser is
  * used on the phone upright: picks saved one by one with their figures, the seventh refused in its
  * words, every row at least 48 x 48 CSS px.
+ *
+ * M8.2 TD1: a list holding a contract that expired on 3 Nov 2026 (the server's master no longer
+ * lists it) shows "Expired on 3 Nov 2026" in its row, never asks a quote for it or follows it on the
+ * socket, never raises the refresh notice, and its sheet asks before it removes the row.
  */
 import { expect, type Page, test, type WebSocketRoute } from '@playwright/test'
 
@@ -39,15 +43,26 @@ const ROWS = [
   { symbol: 'NIFTY24NOV2625900CE', exchange: 'NFO', ltp: 133.5, prev: 120.4, high: 151.2, low: 101.75, open: 118, volume: 81_23_450, oi: 1_23_45_600 },
 ]
 
+/** TD1: expired on 3 Nov 2026; the server's master no longer lists it. */
+const EXPIRED = { symbol: 'NIFTY03NOV2622700PE', exchange: 'NFO', ltp: 0, prev: 0, high: 0, low: 0, open: 0, volume: 0, oi: 0 }
+
 interface Fixture {
   cols: string[]
+  /** TD1: the list also holds the expired contract. */
+  expired?: boolean
 }
 
-const caught = { outside: [] as string[], unrouted: [] as string[], prefs: [] as unknown[] }
+const caught = {
+  outside: [] as string[],
+  unrouted: [] as string[],
+  prefs: [] as unknown[],
+  asked: [] as string[],
+}
 test.beforeEach(() => {
   caught.outside = []
   caught.unrouted = []
   caught.prefs = []
+  caught.asked = []
 })
 test.afterEach(() => {
   expect(caught.outside, 'a request to another host').toEqual([])
@@ -60,6 +75,7 @@ const json = (body: unknown, status = 200) => ({
 })
 
 async function serve(page: Page, fixture: Fixture) {
+  const rows = fixture.expired ? [...ROWS, EXPIRED] : ROWS
   await page.clock.install({ time: NOW })
   const pref = { sort: 'list', descending: false, basis: 'close', held: false, cols: fixture.cols }
   const timings = ['NSE', 'BSE', 'NFO', 'BFO', 'MCX', 'CDS'].map((exchange) => ({
@@ -85,16 +101,16 @@ async function serve(page: Page, fixture: Fixture) {
     locked: false,
     as_of: null,
     lines: [],
-    total: ROWS.length,
+    total: rows.length,
     missing: [],
     sections: [],
-    rows: ROWS.map((row, index) => ({
+    rows: rows.map((row, index) => ({
       item: index + 1,
       contract: contract(row),
       section_id: null,
       flag: null,
       has_note: false,
-      expired: false,
+      expired: row === EXPIRED,
       metric: null,
     })),
     follow: [],
@@ -132,7 +148,7 @@ async function serve(page: Page, fixture: Fixture) {
             id: 1,
             name: 'Core',
             position: 0,
-            items: ROWS.map((row, index) => ({
+            items: rows.map((row, index) => ({
               id: index + 1,
               symbol: row.symbol,
               exchange: row.exchange,
@@ -146,18 +162,37 @@ async function serve(page: Page, fixture: Fixture) {
         enabled: true,
         versions: { lists: 'a:1', favourites: 1, flags: 1 },
         flag_names: [],
-        favourites: [{ slot: 1, ref: 'list:1', kind: 'list', name: 'Core', count: ROWS.length }],
+        favourites: [{ slot: 1, ref: 'list:1', kind: 'list', name: 'Core', count: rows.length }],
       }),
     '/sudarshan/watchlists/api/view': () => ok(view()),
+    // TD1: the expired contract's sheet shows its flag and note.
+    '/sudarshan/watchlists/api/symbol': () =>
+      ok({
+        key: `NFO:${EXPIRED.symbol}`,
+        flag: null,
+        flag_name: null,
+        note: null,
+        note_at: null,
+        expired: true,
+        version: null,
+        lists: [{ ref: 'list:1', name: 'Core' }],
+      }),
     '/sudarshan/watchlists/api/prefs/list%3A1': (body) => {
       caught.prefs.push(body)
       Object.assign(pref, body as object)
       return ok({ version: null, id: null, words: null })
     },
-    '/api/v1/multiquotes': () =>
-      json({
+    // As the server answers: an error entry for a symbol its master lacks, 400 naming them when it
+    // lists none of the call (TD1).
+    '/api/v1/multiquotes': (body) => {
+      const symbols = (body as { symbols: Array<{ symbol: string; exchange: string }> }).symbols
+      caught.asked.push(...symbols.map((each) => each.symbol))
+      const listed = ROWS.filter((row) => symbols.some((each) => each.symbol === row.symbol))
+      if (listed.length === 0)
+        return json({ status: 'error', message: 'Not listed.', invalid_symbols: symbols }, 400)
+      return json({
         status: 'success',
-        results: ROWS.map((row) => ({
+        results: listed.map((row) => ({
           symbol: row.symbol,
           exchange: row.exchange,
           data: {
@@ -172,7 +207,8 @@ async function serve(page: Page, fixture: Fixture) {
             ask: 0,
           },
         })),
-      }),
+      })
+    },
   }
   await page.route(
     (url) => !['localhost', '127.0.0.1'].includes(url.hostname),
@@ -351,5 +387,40 @@ test.describe('choosing the figures, upright', () => {
     await expect(sheet.getByRole('checkbox', { name: 'Day low, place 1' })).toBeChecked()
     expect((await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)), 'sideways scroll').toBe(false)
     await page.screenshot({ path: info.outputPath('watchlist-figures-chooser-360.png') })
+  })
+})
+
+test.describe('an expired contract in the list, upright (M8.2 TD1)', () => {
+  test.use({ viewport: { width: 360, height: 800 }, hasTouch: true, isMobile: true })
+
+  test('says when it expired, is never read or followed, and asks before it goes', async ({
+    page,
+  }, info) => {
+    const feed = await serve(page, { cols: [], expired: true })
+    const row = page.getByRole('button', { name: /^NIFTY 22700 PE/ })
+    await expect(row).toContainText('Expired on 3 Nov 2026')
+    await expect(row).not.toContainText('No price yet')
+    // Past two quiet re-syncs: nothing asks for it, and no notice.
+    await page.clock.fastForward('02:10')
+    await expect(page.getByText(/Prices could not be refreshed|Prices are not available/)).toHaveCount(0)
+    expect(caught.asked).toContain('INFY')
+    expect(caught.asked).not.toContain(EXPIRED.symbol)
+    expect([...feed.subscribed.keys()]).not.toContain(`NFO:${EXPIRED.symbol}`)
+    expect(feed.subscribed.size).toBe(ROWS.length)
+    await row.tap()
+    await page.waitForTimeout(700) // the sheet's fade and its guard
+    const sheet = page.getByRole('dialog', { name: 'NIFTY 22700 PE' })
+    await expect(sheet).toContainText('It is no longer quoted or traded. Remove it from Core?')
+    await expect(sheet).not.toContainText('Not answered in this test.')
+    for (const name of ['Keep it', 'Remove']) {
+      const size = await sheet.getByRole('button', { name, exact: true }).boundingBox()
+      expect(size && size.height >= 47.5 && size.width >= 47.5, `${name} under 48 x 48`).toBe(true)
+    }
+    expect([...feed.subscribed.keys()]).not.toContain(`NFO:${EXPIRED.symbol}`)
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth),
+      'sideways scroll'
+    ).toBe(false)
+    await page.screenshot({ path: info.outputPath('watchlist-expired-360.png') })
   })
 })

@@ -81,8 +81,17 @@ interface Props {
   editing?: boolean
   readOnly?: boolean
   rules?: FollowRow[]
+  /** The item whose sheet is open. */
+  open?: number | null
 }
-function Page({ cols, list = items(), editing = false, readOnly = false, rules }: Props) {
+function Page({
+  cols,
+  list = items(),
+  editing = false,
+  readOnly = false,
+  rules,
+  open = null,
+}: Props) {
   return (
     <LiveList
       items={list}
@@ -92,7 +101,7 @@ function Page({ cols, list = items(), editing = false, readOnly = false, rules }
       editing={editing}
       readOnly={readOnly}
       listName="Swing"
-      openItemId={null}
+      openItemId={open}
       panel={{ 'aria-label': 'Watchlist' }}
       onOpen={() => {}}
       onMove={() => {}}
@@ -326,5 +335,69 @@ describe('the figures in the rows (M8.3)', () => {
     const strike = document.querySelector('[data-strike-row="2"]') as HTMLElement
     expect(strike.querySelector('[data-figures]')).toBeNull()
     expect(feed.live()).toContain('NFO:NIFTY24NOV2625900CE:Quote')
+  })
+})
+
+describe('an expired contract in a v2 list (M8.2 TD1)', () => {
+  const EXPIRED = { id: 9, symbol: 'NIFTY03NOV2622700PE', exchange: 'NFO', position: 1 }
+
+  it('says it once, with its day: the expired mark is not drawn beside the name again', () => {
+    const gone: LiveRow = {
+      item: EXPIRED,
+      key: 'NFO:NIFTY03NOV2622700PE',
+      view: rowView(undefined, undefined),
+      direction: null,
+      stale: false,
+      tickAt: null,
+      expired: '2026-11-03',
+    }
+    const marks = new Map([[gone.key, { flag: null, note: false, expired: true }]])
+    render(
+      <WatchlistRows
+        rows={[gone]}
+        loading={false}
+        editing={false}
+        onOpen={() => {}}
+        onMove={() => {}}
+        onRemove={() => {}}
+        marks={marks}
+        figures={['high']}
+      />
+    )
+    const button = row('NIFTY 22700 PE')
+    expect(button.querySelector('[data-expired-on="2026-11-03"]')).toHaveTextContent(
+      'Expired on 3 Nov 2026'
+    )
+    expect(button.querySelector('[data-expired]')).toBeNull()
+    expect(button.textContent?.match(/Expired/g)).toHaveLength(1)
+  })
+
+  it('draws no figure and no price, and is neither read nor followed, its sheet open or not', async () => {
+    vi.setSystemTime(Date.parse('2026-11-23T11:20:00+05:30'))
+    b().on('symbol', () => ({
+      key: 'NFO:NIFTY03NOV2622700PE',
+      flag: null,
+      flag_name: null,
+      note: null,
+      note_at: null,
+      expired: true,
+      version: 1,
+      lists: [],
+    }))
+    const page = mount({ cols: ['high', 'volume'], list: [...items(1), EXPIRED] })
+    await settle()
+    const gone = row('NIFTY 22700 PE')
+    expect(within(gone).getByText('Expired on 3 Nov 2026')).toBeInTheDocument()
+    expect(cells(gone)).toEqual([])
+    expect(gone.closest('li')?.textContent).not.toMatch(/not real-time|No price/)
+    expect(cells(row('INFY'))).toEqual(['high', 'volume'])
+    page.again({ cols: ['high', 'volume'], list: [...items(1), EXPIRED], open: EXPIRED.id })
+    await settle(60_000)
+    expect(screen.getByRole('dialog', { name: 'NIFTY 22700 PE' })).toHaveTextContent(
+      'It is no longer quoted or traded. Remove it from Swing?'
+    )
+    expect(feed.live().some((key) => key.includes(EXPIRED.symbol))).toBe(false)
+    expect(quotes.reads.flat()).not.toContain(`NFO:${EXPIRED.symbol}`)
+    expect(quotes.reads.flat()).toContain('NSE:INFY')
   })
 })
