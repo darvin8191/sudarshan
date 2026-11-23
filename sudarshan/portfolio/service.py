@@ -195,6 +195,7 @@ class Service:
                 self.settings.upstox_url,
                 clock=lambda: self.clock(),
                 decorate=matcher(self.ensure_resolver(), self.ensure_prices()),
+                calendar=self.ensure_calendar(),
             )
             self.upstox.on_verdict = lambda state, at, sig: heard(self, state, at, sig)
         return self.upstox

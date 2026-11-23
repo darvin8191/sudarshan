@@ -399,6 +399,14 @@ two exists in this release. Each purpose has its own principal and its own list 
   or positions, a 401 on another read of that file is that refusal, and the tab's words are
   chosen once a refresh's answers are all in, so holdings, positions, MTF and funds say one thing
   whatever order Upstox answers in (v0.17.0 review M1).
+* **A read refused alone is asked again** (v0.17.0 review M2), by whoever reads it next once its
+  time has come (the tab, the journal, the closing record, a report's Read again), through the
+  budget like any read: first at the token's retry time (`probe.next_try`: 15 minutes later in
+  market hours), so a passing fault clears itself; once that try is refused too, at 08:00 on the
+  next trading day (`probe.next_daily_try`), one call a day while the refusal is real. The first
+  read sent then is the try (`UpstoxReader.sending`); a fault answer to it waits for the next
+  retry time, and any 200 ends the pause (`answered`). Its words say when, with the day, so a
+  kept report stays true: "... SUDARSHAN asks Upstox again after 08:00 on Tue 24 Nov."
 * **Asked again** (v0.17.0 verification V2). While holdings and positions pause on a refused
   token, the job `token_retry` (`probe.retry_step`, checked every 30 s) lets one holdings read
   through (`UpstoxReader.ask_again`) 15 minutes after the last refusal or try when that falls in

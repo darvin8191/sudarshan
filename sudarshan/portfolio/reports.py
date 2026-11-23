@@ -48,7 +48,16 @@ from .budget import PAUSE_S
 from .core.days import day_of_instant, financial_year, is_day
 from .core.kinds import PRICE_SCALE, QTY_SCALE, REPORT_SEGMENTS, REPORT_YEARS
 from .store import Scope
-from .upstox import RATE_CODE, TIMEOUT_S, Unreadable, _signature, paise, price_u, qty_u
+from .upstox import (
+    RATE_CODE,
+    TIMEOUT_S,
+    Unreadable,
+    _signature,
+    again_words,
+    paise,
+    price_u,
+    qty_u,
+)
 
 log = logging.getLogger("sudarshan.portfolio.reports")
 
@@ -163,6 +172,21 @@ NOT_ALLOWED = {"trades": "trades_not_allowed", "pnl_meta": "pnl_not_allowed",
 def _refusal(api: str, why: str) -> str:
     """The words key for a read the live book's pauses stop (``UpstoxReader.stopped``)."""
     return "token_refused" if why == "token" else NOT_ALLOWED[api]
+
+
+#: The reads each sentence of a read refused alone stands for (review M2).
+ALONE = {"trades_not_allowed": ("trades",), "pnl_not_allowed": ("pnl_meta", "pnl", "charges"),
+         "history_not_allowed": ("order_history",)}  # fmt: skip
+
+
+def again_note(note: str | None, upstox: Any) -> str | None:
+    """``note``, and when SUDARSHAN asks Upstox again when it says a read was refused alone, with
+    kept figures or not (review M2). The time is written with its day, so a kept report still
+    says it truly when it is opened days later."""
+    for key, apis in ALONE.items():
+        if note is not None and note in (WORDS[key], WORDS.get(f"{key}_kept")):
+            return f"{note} {again_words(upstox.again_at(apis), upstox.clock())}".strip()
+    return note
 
 
 # ---- the years ---------------------------------------------------------------------------------
@@ -387,6 +411,7 @@ class ReportReader:
 
     async def _put(self, kind: str, fy: int, segment: str, state: str, read_at, note, payload):
         store, now = self.service.store, self.clock()
+        note = again_note(note, self.upstox)  # a read refused alone says when it is asked again
 
         def run(tx):
             tx.report_put(kind, fy, segment, state, read_at, note, payload, now)
@@ -530,6 +555,8 @@ class ReportReader:
             await asyncio.sleep(wait)
             if not upstox.budget.take(api, principal):
                 return "busy", None
+        if not upstox.sending(api, sig):  # another read took this one's try meanwhile (M2)
+            return _refusal(api, "read"), None
         headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
         try:
             answer = await upstox.client.get(
@@ -553,6 +580,7 @@ class ReportReader:
         if status != 200:
             log.warning("Upstox %s refused the request (%d)", api, status)
             return "refused", None
+        upstox.answered(api, sig)
         try:
             payload = json.loads(answer.text, parse_float=Decimal)
         except ValueError:

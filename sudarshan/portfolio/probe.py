@@ -80,7 +80,8 @@ RETRY_EVERY_MS = 15 * 60_000
 MARKET = "NSE_EQ"
 #: Two more tries on a trading day, in IST minutes (v0.17.0 review L1): 08:00, before the morning
 #: brief and the session, and 15:45, before the closing record (15:55; 16:00 from 7 Dec 2026).
-EXTRA_TRIES_MIN = (8 * 60, 15 * 60 + 45)
+MORNING_MIN = 8 * 60
+EXTRA_TRIES_MIN = (MORNING_MIN, 15 * 60 + 45)
 #: How many days ahead a try is looked for, as ``sessions.next_session`` looks for a session.
 HORIZON_DAYS = 15
 
@@ -240,6 +241,27 @@ def next_try(calendar: Any, since: int) -> int | None:
     )
     start = None if found is None else found.start
     return min((when for when in (start, _slot(calendar, at)) if when is not None), default=None)
+
+
+def next_daily_try(calendar: Any, since: int) -> int | None:
+    """When a read Upstox refused alone, and refused again when it was asked again at
+    ``next_try``, is asked next (v0.17.0 review M2): 08:00 on the first trading day after
+    ``since``'s day, so a refusal that is real costs one call a day."""
+    first = datetime.fromtimestamp(since / 1000, IST).date() + timedelta(days=1)
+    return _slot(calendar, sessions.epoch_ms(first, 0), minutes=(MORNING_MIN,))
+
+
+class Weekdays:
+    """The calendar of a reader made without the service's (a test): every weekday trades, at
+    its usual hours."""
+
+    @staticmethod
+    def is_trading_day(day: Any) -> bool:
+        return day.weekday() < 5
+
+    @staticmethod
+    def day_window(day: Any) -> None:
+        return None
 
 
 def _slot(calendar: Any, at: int, minutes: tuple[int, ...] = EXTRA_TRIES_MIN) -> int | None:

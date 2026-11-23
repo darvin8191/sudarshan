@@ -2,7 +2,8 @@
 
 A 401 on holdings or positions is Upstox refusing the Analytics Token itself: every read pauses
 and the token line fails. A 401 on any other read may only mean this token may not make that read:
-that read alone pauses, in its own words, and everything else keeps reading. The vectors
+that read alone pauses, in its own words that say when it is asked again (review M2), and
+everything else keeps reading. The vectors
 (``vectors/token_refusals.json``, written out in ``make_token_refusals.py``) give each of the
 twelve kinds of read; the scenario below runs the journal's refused day trades through the sealed
 API and checks the Upstox tab, the reports, Performance and the closing record. Upstox is a
@@ -153,9 +154,11 @@ def test_a_read_refused_alone_never_says_the_token_was_refused_or_suggests_anoth
         ca.WORDS["not_allowed"],
     ]
     assert len(alone) == 10
-    for sentence in alone:
+    alone.append(up.again_words(ist(8, 0, day=27), ist(11)))  # when it is asked again (M2)
+    for sentence in alone[:-1]:
         assert sentence.startswith("Upstox did not let SUDARSHAN's read-only token read "), sentence
         assert "not affected" in sentence, sentence
+    for sentence in alone:
         assert not re.search(r"accept|creat|revok|renew|replace|new token|\b[45]\d\d\b", sentence)
 
 
@@ -239,10 +242,14 @@ def test_a_401_after_the_token_was_refused_for_the_same_file_is_that_refusal(tmp
         assert reader.refused(api, sig) == "token", api
     assert reader._paused == {}
     other = (sig[0] + 1, sig[1])
-    assert reader.refused("funds", other) == "read" and reader._paused == {"funds": other}
+    assert reader.refused("funds", other) == "read" and reader._paused["funds"].sig == other
 
 
 # ---- the journal's day trades refused, through the sealed API ----------------------------------
+#: Refused at 13:03 on Monday 26 Oct 2026 (the rig's clock): asked again 15 minutes later (M2).
+AT_1318 = " SUDARSHAN asks Upstox again after 13:18 on Mon 26 Oct."
+
+
 @scenario
 async def test_a_refusal_of_the_days_trades_alone_leaves_everything_else_working(rig, fake):
     """The premise of the verification's V1: Upstox answers 401 when this token reads the day's
@@ -254,7 +261,7 @@ async def test_a_refusal_of_the_days_trades_alone_leaves_everything_else_working
     status, body = await rig.journal("trades_day")
     day = body["data"]
     assert status == 200 and day["state"] == "unavailable" and day["data"] is None
-    assert day["note"] == up.WORDS["not_allowed_trades"]
+    assert day["note"] == up.WORDS["not_allowed_trades"] + AT_1318
 
     tab = await rig.owner("upstox_book")
     assert {part: tab[part]["state"] for part in tab} == dict.fromkeys(
@@ -262,7 +269,8 @@ async def test_a_refusal_of_the_days_trades_alone_leaves_everything_else_working
     )
     assert tab["funds"]["data"]["available_paise"] == 12_500_050
     again = (await rig.journal("trades_day"))[1]["data"]
-    assert again["note"] == up.WORDS["not_allowed_trades"] and fake.count("day_trades") == 1
+    assert again["note"] == up.WORDS["not_allowed_trades"] + AT_1318
+    assert fake.count("day_trades") == 1
 
     history = await rig.owner("report_trades", fy=2026, segment="EQ")
     assert history["state"] == "ok" and history["note"] is None and fake.count("trades") == 1
@@ -281,3 +289,13 @@ async def test_a_refusal_of_the_days_trades_alone_leaves_everything_else_working
     assert json.loads(record["funds"])["available_paise"] == 12_500_050
     assert record["holdings_value_paise"] is not None
     assert probe.view(rig.svc.token_check, rig.svc.upstox.token_file)["state"] == "ok"
+
+
+@scenario
+async def test_the_journal_is_told_when_an_order_history_refused_alone_is_asked_again(rig, fake):
+    """An order's history the journal asks for (review M2): refused alone, the answer says when
+    SUDARSHAN asks Upstox again, with its day, since the journal keeps what it is told."""
+    fake.status["order_history"] = 401
+    status, body = await rig.journal("order_history", order_id="250101000000001")
+    assert status == 200 and body["data"]["state"] == "unavailable"
+    assert body["data"]["note"] == reports.WORDS["history_not_allowed"] + AT_1318

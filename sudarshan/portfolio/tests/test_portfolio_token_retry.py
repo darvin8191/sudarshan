@@ -12,13 +12,14 @@ from __future__ import annotations
 
 import asyncio
 import itertools
-from datetime import date
+from datetime import date, datetime
 
 import pytest
 from test_portfolio_orders_trades import ProbeService, ist, make, run
 from test_portfolio_orders_trades import fake as fake  # noqa: F401  (fixtures)
 from test_portfolio_orders_trades import token_file as token_file  # noqa: F401
 
+from sudarshan.autologin.schedule import IST
 from sudarshan.portfolio import probe
 from sudarshan.portfolio import service as service_module
 from sudarshan.portfolio import upstox as up
@@ -121,7 +122,12 @@ def test_the_first_answer_ends_the_pause_and_the_line_says_accepted_again(
         finally:
             await reader.aclose()
 
-    assert run(trades())["note"] == up.WORDS["not_allowed_trades"]  # refused alone at 10:00
+    refused = run(trades())["note"]  # refused alone at 10:00, asked again 15 minutes on (M2)
+    assert (
+        refused
+        == up.WORDS["not_allowed_trades"]
+        + " SUDARSHAN asks Upstox again after 10:15 on Mon 26 Oct."
+    )
     asked = _checks(service, fake, ist(11, 0), tab=False, at={ist(10, 20): mended})
     assert asked == [ist(10, 0), ist(10, 15), ist(10, 30)]  # none after the answer
     assert probe.view(service.token_check, token_file) == {"state": "ok", "at": ist(10, 30) // 1000}
@@ -222,3 +228,120 @@ def test_the_job_is_registered_and_ends_with_the_service(monkeypatch, fake, toke
 
     task = run(go())
     assert task.done() and task.cancelled()
+
+
+# ---- a read Upstox refused alone is asked again (review M2) ------------------------------------
+NOT_FUNDS = up.WORDS["not_allowed_funds"]
+
+
+def _again(hm: str, on: str) -> str:
+    return f"{NOT_FUNDS} SUDARSHAN asks Upstox again after {hm} on {on}."
+
+
+def _funds_reads(fake, token_file, start, until_ms, *, step_s=60, at=None):
+    """The tab's funds read every ``step_s`` seconds from ``start`` to ``until_ms``; ``at`` maps a
+    time to a change of what Upstox answers. The times Upstox was asked for funds, the view at
+    each time, and the reader."""
+    reader, clock = make(fake, token_file, at=start)
+
+    async def go():
+        asked, views = [], {}
+        try:
+            while True:
+                for when, change in (at or {}).items():
+                    if clock() == when:
+                        change()
+                before = fake.count("funds")
+                views[clock()] = (await reader.book(["funds"], 0))["funds"]
+                asked += [clock()] * (fake.count("funds") - before)
+                if clock() >= until_ms:
+                    return asked, views, reader
+                clock.advance(step_s)
+        finally:
+            await reader.aclose()
+
+    return run(go())
+
+
+def test_a_read_refused_alone_by_a_passing_fault_is_answered_15_minutes_later(fake, token_file):
+    """The reviewer's case: at 11:00 on Monday 26 Oct Upstox answers one 401 to the funds read
+    on a token that works. Funds pauses alone and says when it is asked again; the tab asks every
+    30 seconds, but nothing goes to Upstox before 11:15. The read at 11:15 is answered, the pause
+    ends, and funds is read as usual from then on."""
+    fake.status["funds"] = 401
+    mend = {ist(11, 0, 30): lambda: fake.status.pop("funds")}
+    asked, views, reader = _funds_reads(
+        fake, token_file, ist(11, 0), ist(11, 16), step_s=30, at=mend
+    )
+    assert asked == [ist(11, 0), ist(11, 15), ist(11, 15, 30), ist(11, 16)]
+    assert views[ist(11, 5)]["note"] == _again("11:15", "Mon 26 Oct")
+    assert views[ist(11, 15)]["state"] == "ok" and reader._paused == {}
+
+
+def test_a_read_refused_alone_for_real_costs_one_call_a_day(fake, token_file):
+    """Funds always refused from Monday 26 Oct at 11:00, the tab asking every minute until
+    Wednesday 09:00: Upstox is asked at 11:00, once more at 11:15 (where a passing fault would
+    have cleared), then at 08:00 on Tuesday and on Wednesday, and never in between; the words say
+    each time when it is asked next."""
+    fake.status["funds"] = 401
+    asked, views, _ = _funds_reads(fake, token_file, ist(11, 0), ist(9, 0, day=28))
+    assert asked == [ist(11, 0), ist(11, 15), ist(8, 0, day=27), ist(8, 0, day=28)]
+    assert views[ist(11, 10)]["note"] == _again("11:15", "Mon 26 Oct")
+    assert views[ist(11, 16)]["note"] == _again("08:00", "Tue 27 Oct")
+    assert views[ist(23, 0)]["note"] == _again("08:00", "Tue 27 Oct")
+    assert views[ist(8, 1, day=27)]["note"] == _again("08:00", "Wed 28 Oct")
+
+
+def test_a_try_that_meets_a_fault_is_tried_again_15_minutes_on_not_tomorrow(fake, token_file):
+    """The try at 11:15 gets no answer Upstox gave (a fault): it says so, the next try is at
+    11:30, not a day later, and its answer ends the pause."""
+    fake.status["funds"] = 401
+    changes = {ist(11, 14): lambda: fake.status.update(funds=503),
+               ist(11, 29): lambda: fake.status.pop("funds")}  # fmt: skip
+    asked, views, reader = _funds_reads(fake, token_file, ist(11, 0), ist(11, 31), at=changes)
+    assert asked == [ist(11, 0), ist(11, 15), ist(11, 30), ist(11, 31)]
+    assert views[ist(11, 15)]["note"] == up.WORDS["silent"]
+    assert views[ist(11, 20)]["note"] == _again("11:30", "Mon 26 Oct")
+    assert views[ist(11, 30)]["state"] == "ok" and reader._paused == {}
+
+
+@pytest.mark.parametrize("held", ["a 429 pause", "an empty bucket"])
+def test_a_try_the_budget_holds_back_sends_nothing_and_keeps_its_turn(fake, token_file, held):
+    """The try goes through the budget like any read: at 11:15 Upstox's 429 pause, or a bucket
+    with nothing left, sends nothing and leaves the try for the next read, which is answered."""
+    fake.status["funds"] = 401
+    reader, clock = make(fake, token_file, at=ist(11, 0))
+
+    async def go():
+        try:
+            await reader.book(["funds"], 0)  # refused alone: asked again after 11:15
+            clock.advance(15 * 60)
+            take = reader.budget.take
+            if held == "a 429 pause":
+                reader.budget.pause("funds", 60)
+            else:
+                reader.budget.take = lambda api, principal="owner": False
+            first = (await reader.book(["funds"], 0))["funds"]
+            reader.budget.take = take
+            clock.advance(61)
+            fake.status.pop("funds")
+            return first, (await reader.book(["funds"], 0))["funds"]
+        finally:
+            await reader.aclose()
+
+    first, then = run(go())
+    assert first["note"].startswith(up.WORDS["slow" if held == "a 429 pause" else "busy"])
+    assert then["state"] == "ok" and fake.count("funds") == 2 and reader._paused == {}
+
+
+def test_a_refusal_that_is_real_is_asked_again_at_the_next_trading_day_s_08_00():
+    week, holiday = Calendar(), Calendar(holidays=[date(2026, 10, 27)])  # Tuesday 27 Oct
+    assert probe.next_daily_try(week, ist(11, 15)) == ist(8, 0, day=27)
+    assert probe.next_daily_try(week, ist(7, 0)) == ist(8, 0, day=27)  # never the same day
+    assert probe.next_daily_try(holiday, ist(11, 15)) == ist(8, 0, day=28)
+    friday, monday = ist(11, 15, day=30), ist(8, 0) + 7 * 24 * 60 * MIN
+    assert probe.next_daily_try(week, friday) == monday
+    assert up.again_words(monday, friday) == "SUDARSHAN asks Upstox again after 08:00 on Mon 2 Nov."
+    new_year = int(datetime(2027, 1, 4, 8, 0, tzinfo=IST).timestamp() * 1000)
+    assert up.again_words(new_year, ist(11, 0)).endswith("after 08:00 on Mon 4 Jan 2027.")
+    assert up.again_words(None, ist(11, 0)) == ""
