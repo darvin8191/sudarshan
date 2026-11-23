@@ -3,6 +3,10 @@
 
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { cn } from '@/lib/utils'
+import { groupedNumber } from '@/sudarshan/dashboard/format'
+
+// M20.3 (v0.16.0 phone review L3): the ticket's sizes are grouped the way Display settings ask.
+const SIZES = groupedNumber()
 
 export interface DepthLevel {
   price: number
@@ -56,7 +60,7 @@ function DepthRow({
         {price.toFixed(2)}
       </span>
       <span className="relative z-10 font-mono text-xs text-muted-foreground">
-        {quantity.toLocaleString()}
+        {SIZES.format(quantity)}
       </span>
     </div>
   )
@@ -149,12 +153,12 @@ export function MarketDepthPanel({
               <div className="px-2 py-1.5 text-xs text-muted-foreground flex justify-between">
                 <span>Total</span>
                 <span className="font-mono text-[color:var(--buy-solid)]">
-                  {buyLevels.reduce((sum, l) => sum + l.quantity, 0).toLocaleString()}
+                  {SIZES.format(buyLevels.reduce((sum, l) => sum + l.quantity, 0))}
                 </span>
               </div>
               <div className="px-2 py-1.5 text-xs text-muted-foreground flex justify-between">
                 <span className="font-mono text-[color:var(--sell-solid)]">
-                  {sellLevels.reduce((sum, l) => sum + l.quantity, 0).toLocaleString()}
+                  {SIZES.format(sellLevels.reduce((sum, l) => sum + l.quantity, 0))}
                 </span>
                 <span>Total</span>
               </div>

@@ -35,6 +35,7 @@ import {
 } from '@/sudarshan/automation/types'
 import { useAutoSheet } from '@/sudarshan/automation/useAutoSheet'
 import { applied } from '@/sudarshan/automation/words'
+import { useMarketCalendar } from '@/sudarshan/books/market'
 
 const NOTE =
   'flex items-start gap-2 rounded-xl border border-[color:var(--warning-text)] bg-[color:var(--gold-tint)] p-3 text-[0.875rem] font-semibold text-[color:var(--warning-text)]'
@@ -107,6 +108,9 @@ export default function Automation() {
     refetchOnWindowFocus: 'always',
   })
   const others = useQuery({ queryKey: OTHERS_KEY, queryFn: automationApi.others })
+  // v0.16.0 phone review L4: the market calendar, read once for every card, so a card greys its
+  // P&L when the books would (the market open and the price old), not merely when it is quiet.
+  const { isOpen } = useMarketCalendar()
 
   useEffect(() => {
     if (!socket) return
@@ -199,6 +203,7 @@ export default function Automation() {
             <StrategyCard
               key={strategy.id}
               strategy={strategy}
+              marketOpen={isOpen}
               actions={
                 <div className="mt-3 grid grid-cols-2 gap-2">
                   <Button

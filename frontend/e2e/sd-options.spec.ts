@@ -32,6 +32,7 @@ import {
   test,
   type WebSocketRoute,
 } from '@playwright/test'
+import { ticketCuts } from './sd-ticket'
 
 test.use({ viewport: { width: 360, height: 800 }, deviceScaleFactor: 3, hasTouch: true, isMobile: true })
 
@@ -278,7 +279,9 @@ async function serve(page: Page, state: State, path = '/options/NFO/NIFTY') {
   await page.goto(path)
   await page.clock.resume()
   await expect(page.getByRole('heading', { level: 1, name: 'NIFTY' })).toBeVisible()
-  return { ticks, seen, hold, release }
+  /** How many sockets the page holds open. */
+  const sockets = () => open.size
+  return { ticks, seen, hold, release, sockets }
 }
 
 /** The page's own checks: sideways scroll, small targets, colour-only figures. */
@@ -466,6 +469,7 @@ test.describe('the options screen at 360 x 800', () => {
     const ticket = page.getByRole('dialog').filter({ hasText: 'NIFTY17NOV2625900CE' })
     await expect(ticket).toBeVisible()
     await page.screenshot({ path: info.outputPath('ticket.png') })
+    expect(await ticketCuts(ticket), 'parts of the ticket that are cut').toEqual([])
     await page.goBack()
     await expect(page.getByRole('dialog')).toHaveCount(0)
     await expect(page.locator('[data-strike]')).toHaveCount(21)
@@ -586,7 +590,7 @@ test.describe('the options screen at 360 x 800', () => {
   })
 
   test('back from sleep: reconnecting from the first frame, real-time again with the ticks', async ({ page }, info) => {
-    const { ticks, seen, hold, release } = await serve(page, OPEN)
+    const { ticks, seen, hold, release, sockets } = await serve(page, OPEN)
     await expect(page.locator('[data-feed="live"]').first()).toBeVisible()
     const hide = (hidden: boolean) =>
       page.evaluate((state) => {
@@ -596,6 +600,11 @@ test.describe('the options screen at 360 x 800', () => {
     // The phone sleeps for 12 minutes: the shared socket closes 5 s after the page hides.
     await hide(true)
     await page.clock.fastForward('12:00')
+    // v0.16.0 phone review M2: the page wakes only once that socket has closed. The 5 s are set
+    // when the page has taken the hide in, which a busy machine can do after the jump; the page
+    // then woke with the socket still signed in, and said "Updated 12m ago" with no
+    // "Reconnecting". The wait is for the close itself, never a step of the clock.
+    await expect.poll(sockets, { message: 'the socket closes while the page is hidden', timeout: 15_000 }).toBe(0)
     expect(seen.chain, 'nothing is read while the page is hidden').toBe(1)
     // The proxy answers nothing until the waking screen has been read: the new socket signs in
     // and ticks within milliseconds of the wake, and the words below would be gone by the time a
@@ -706,3 +715,43 @@ test.describe('the options screen at 360 x 800', () => {
     expect(seen.subscribed.size, 'still the 84 instruments').toBe(84)
   })
 })
+
+// v0.16.0 phone review H2: with Larger text the option ticket read "Total qty: 6" for 65 and its
+// Shares button was cut by the ticket's edge. Opened from the strike sheet; nothing is sent.
+for (const { viewport, larger } of [
+  { viewport: { width: 360, height: 800 }, larger: true },
+  { viewport: { width: 320, height: 640 }, larger: false },
+  { viewport: { width: 320, height: 640 }, larger: true },
+]) {
+  const size = `${viewport.width} x ${viewport.height}${larger ? ', Larger text' : ''}`
+  test.describe(`the option ticket at ${size}`, () => {
+    test.use({ viewport })
+
+    test('the lot, the total and both quantity units whole', async ({ page }, info) => {
+      if (larger)
+        await page.addInitScript(() => {
+          localStorage.setItem('sudarshan-text', 'large')
+          localStorage.setItem('sudarshan-density', 'compact')
+        })
+      const { seen } = await serve(page, OPEN)
+      await page.locator('[data-strike="25900"] [data-leg="CE"]').tap()
+      const sheet = page.getByRole('dialog', { name: 'NIFTY 25,900' })
+      await settled(page, sheet)
+      await sheet.getByRole('button', { name: 'Buy CE' }).tap()
+      const ticket = page.getByRole('dialog').filter({ hasText: 'NIFTY17NOV2625900CE' })
+      await settled(page, ticket)
+      await expect(ticket.getByText('Total qty: 65', { exact: true })).toBeVisible()
+      await expect(ticket.getByTestId('ticket-summary')).toHaveText(/^BUY 65 \(1 lot\) NIFTY17NOV2625900CE · /)
+      for (const unit of ['Lots', 'Shares']) {
+        const box = (await ticket.getByRole('button', { name: unit, exact: true }).boundingBox()) as DOMRect
+        expect(box.width, `${unit} is a 48 dp target`).toBeGreaterThanOrEqual(47.5)
+        expect(box.height, `${unit} is a 48 dp target`).toBeGreaterThanOrEqual(47.5)
+      }
+      await page.screenshot({ path: info.outputPath('ticket.png') })
+      expect(await ticketCuts(ticket), 'parts of the ticket that are cut').toEqual([])
+      const checks = await pageChecks(page, '[role="dialog"]')
+      expect(checks.sideways, 'no sideways scroll').toBe(false)
+      expect(seen.orders, 'no order was sent').toBe(0)
+    })
+  })
+}

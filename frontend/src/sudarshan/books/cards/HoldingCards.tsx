@@ -461,8 +461,10 @@ const HoldingCard = memo(function HoldingCard({
           <Money value={pnl} stale={stale} className="text-base leading-tight font-bold" />
         </span>
         <span className="flex items-baseline justify-between gap-3">
-          <span className="min-w-0 truncate text-xs leading-tight font-medium text-[color:var(--text-tertiary)]">
-            Qty {units(quantity)} · Avg {price(average, exchange)}
+          {/* v0.16.0 phone review L5, as on the position card: the line wraps, each figure whole. */}
+          <span className="min-w-0 text-xs leading-tight font-medium text-[color:var(--text-tertiary)]">
+            <span className="whitespace-nowrap">Qty {units(quantity)}</span> ·{' '}
+            <span className="whitespace-nowrap">Avg {price(average, exchange)}</span>
           </span>
           <SignedPercent value={pnlPercent} stale={stale} className="text-xs font-semibold" />
         </span>

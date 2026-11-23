@@ -160,6 +160,11 @@ describe('Display settings', () => {
     expect(toggle).toBeChecked()
     expect(toggle).toHaveAccessibleDescription(/Now: ₹1,234,567.89 and 1.2M\./)
     expect(localStorage.getItem('sudarshan-number-grouping')).toBe('international')
+    // v0.16.0 phone review M1: one short line names what keeps the Indian way; the Trading
+    // page's dock follows the switch now, its watchlist and chart do not.
+    expect(toggle).toHaveAccessibleDescription(
+      /Messages the server writes \(alerts, Telegram\), the watchlist and chart on the Trading page, and some figures on the Tools pages keep the Indian way\.$/
+    )
 
     await user.click(toggle)
     expect(toggle).not.toBeChecked()
@@ -188,5 +193,14 @@ describe('Display settings', () => {
     expect(toggle).not.toBeChecked()
     expect(html.hasAttribute(attribute)).toBe(false)
     expect(localStorage.getItem(key)).toBeNull()
+  })
+
+  // SUDARSHAN (v0.16.0 phone review H1): the app bar is drawn at its usual size under Larger
+  // text, and the row says so rather than "everywhere".
+  it('says the top bar keeps its size under Larger text', () => {
+    render(<DisplaySettings />)
+    expect(screen.getByRole('switch', { name: 'Larger text' })).toHaveAccessibleDescription(
+      /The top bar keeps its size, so the name and the mode stay whole\./
+    )
   })
 })

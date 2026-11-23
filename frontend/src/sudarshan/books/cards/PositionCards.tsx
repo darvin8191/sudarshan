@@ -777,8 +777,11 @@ const PositionCard = memo(function PositionCard({
           <Money value={pnl} stale={stale} className="text-base leading-tight font-bold" />
         </span>
         <span className="flex items-baseline justify-between gap-3">
-          <span className="min-w-0 truncate text-xs leading-tight font-medium text-[color:var(--text-tertiary)]">
-            {named.detail} · Avg {price(average, exchange)}
+          {/* v0.16.0 phone review L5: with Larger text at 320 px it read "Avg 25,850...". The
+              line wraps, the average price whole on its own line where it must. */}
+          <span className="min-w-0 text-xs leading-tight font-medium text-[color:var(--text-tertiary)]">
+            {named.detail} ·{' '}
+            <span className="whitespace-nowrap">Avg {price(average, exchange)}</span>
           </span>
           <SignedPercent value={pnlPercent} stale={stale} className="text-xs font-semibold" />
         </span>

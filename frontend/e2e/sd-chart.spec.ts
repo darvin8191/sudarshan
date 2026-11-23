@@ -32,6 +32,7 @@ import { expect, type Locator, type Page, test, type WebSocketRoute } from '@pla
 import { MAX_STUDIES } from '../src/sudarshan/chart/phoneStudies'
 import { textHash } from '../src/sudarshan/charts/docSync'
 import { depthFrame } from '../src/test/tickTape'
+import { ticketCuts } from './sd-ticket'
 
 test.skip(({ browserName }) => browserName !== 'chromium', 'touch and throttling are Chromium only')
 
@@ -498,6 +499,8 @@ async function checkScreen(page: Page) {
  * its contrast; the side from the buy and sell tokens, and a word beside it.
  */
 async function checkTicket(page: Page, ticket: Locator, held: string, tag: string) {
+  // v0.16.0 phone review H2: nothing in it is cut, at either text size.
+  expect(await ticketCuts(ticket), `${tag}: parts of the ticket that are cut`).toEqual([])
   const priceText = Number(held.replaceAll(',', '')).toFixed(2)
   const side = (await ticket.getByRole('button', { name: /^Place (BUY|SELL) Order$/ }).textContent())?.split(' ')[1]
   const line = ticket.getByTestId('ticket-summary')
@@ -534,6 +537,31 @@ async function checkTicket(page: Page, ticket: Locator, held: string, tag: strin
   )
   expect(controls, `${tag}: every control of the ticket at least 48 x 48`).toEqual([])
   await checkScreen(page)
+}
+
+/**
+ * The ticket's first fields on its first screen, upright, in their order: side, quantity, price
+ * type, product, price. As many as the screen holds (v0.16.0 phone review H2): all five on a
+ * 360 x 800 phone at either text size; on a 320 x 640 one the first four, or the side and the
+ * quantity with Larger text. The rest are reached by scrolling, and the line beside Place says
+ * every one of them.
+ */
+async function checkFirstScreen(page: Page, ticket: Locator) {
+  const height = page.viewportSize()?.height ?? 800
+  const larger = await page.evaluate(() => document.documentElement.dataset.text === 'large')
+  const body = (await ticket.getByTestId('ticket-body').boundingBox()) as DOMRect
+  const fields = [
+    ticket.getByRole('button', { name: 'SELL', exact: true }),
+    ticket.getByRole('spinbutton', { name: 'Quantity' }),
+    ticket.getByRole('combobox', { name: 'Price Type' }),
+    ticket.getByRole('combobox', { name: 'Product' }),
+    ticket.getByRole('spinbutton', { name: 'Price', exact: true }),
+  ]
+  for (const field of fields.slice(0, height >= 800 ? 5 : larger ? 2 : 4)) {
+    const box = (await field.boundingBox()) as DOMRect
+    expect(box.y, 'starts inside the body').toBeGreaterThanOrEqual(body.y - 0.5)
+    expect(box.y + box.height, 'ends inside the body').toBeLessThanOrEqual(body.y + body.height + 0.5)
+  }
 }
 
 /** The chart's freshness words, and "Real-time" nowhere unless ticks are arriving. */
@@ -637,20 +665,11 @@ test.describe('the phone chart at 360 x 800', () => {
     })
     await settled(page, ticket)
     await page.screenshot({ path: info.outputPath('ticket.png') })
-    // Upright, the fields themselves are on the first screen, in the body as it opened.
+    // Upright, the fields themselves are on the first screen, in the body as it opened: as many
+    // as the screen holds (all five here; v0.16.0 phone review H2 for smaller screens).
     const body = (await ticket.getByTestId('ticket-body').boundingBox()) as DOMRect
     expect(await ticket.getByTestId('ticket-body').evaluate((el) => el.scrollTop)).toBe(0)
-    for (const field of [
-      ticket.getByRole('button', { name: 'SELL', exact: true }),
-      ticket.getByRole('spinbutton', { name: 'Quantity' }),
-      ticket.getByRole('combobox', { name: 'Price Type' }),
-      ticket.getByRole('combobox', { name: 'Product' }),
-      ticket.getByRole('spinbutton', { name: 'Price', exact: true }),
-    ]) {
-      const box = (await field.boundingBox()) as DOMRect
-      expect(box.y, 'starts inside the body').toBeGreaterThanOrEqual(body.y - 0.5)
-      expect(box.y + box.height, 'ends inside the body').toBeLessThanOrEqual(body.y + body.height + 0.5)
-    }
+    await checkFirstScreen(page, ticket)
     await checkTicket(page, ticket, held, 'upright')
     // A stop-loss limit adds its trigger: still on the first screen, and in the line.
     await ticket.getByRole('combobox', { name: 'Price Type' }).click()
@@ -786,9 +805,10 @@ test.describe('the phone chart on its side, 800 x 360', () => {
     await expect(strip.locator('[data-feed]')).toHaveText('Real-time')
     await expect(strip.getByTestId('chart-change')).toHaveText(/^[+−]₹[\d,.]+ \([+−][\d.]+%\)$/)
     // The strip is the 48 dp the design gives it, and the chart takes the rest of the height.
+    // At least 48: with Larger text its targets grow to 54 (v0.16.0 phone review L6).
     const stripBox = await strip.boundingBox()
     const surfaceBox = await page.getByTestId('chart-surface').boundingBox()
-    expect(stripBox?.height).toBe(48)
+    expect(stripBox?.height ?? 0).toBeGreaterThanOrEqual(48)
     expect(Math.round((surfaceBox?.height ?? 0) + (stripBox?.height ?? 0))).toBe(360)
     await page.screenshot({ path: info.outputPath('sideways.png') })
     await checkScreen(page)
@@ -830,6 +850,58 @@ test.describe('the phone chart on its side, 800 x 360', () => {
     await checkScreen(page)
   })
 })
+
+/**
+ * v0.16.0 phone review H2: the ticket on the narrowest phone, and with Larger text, upright and on
+ * its side. Larger text cut figures on the right, the title's symbol and Place's label; nothing is
+ * cut now, every control stays 48 dp, and the line beside Place, which says the side, quantity,
+ * type, price and product, is whole and in view whatever the body has scrolled to. Upright, the
+ * fields come first in their order, as many on the first screen as it holds: all five at 360 x
+ * 800 at either text size; at 320 x 640 the side, quantity, type and product, or with Larger text
+ * the side and quantity. The rest are reached by scrolling (`checkTicket`).
+ */
+const LARGER = { 'sudarshan-text': 'large', 'sudarshan-density': 'compact' }
+for (const { viewport, larger } of [
+  { viewport: { width: 320, height: 640 }, larger: false },
+  { viewport: { width: 320, height: 640 }, larger: true },
+  { viewport: { width: 640, height: 320 }, larger: false },
+  { viewport: { width: 640, height: 320 }, larger: true },
+  { viewport: { width: 360, height: 800 }, larger: true },
+  { viewport: { width: 800, height: 360 }, larger: true },
+]) {
+  const upright = viewport.width < viewport.height
+  const size = `${viewport.width} x ${viewport.height}${larger ? ', Larger text' : ''}`
+  test.describe(`the order ticket at ${size}`, () => {
+    test.use({ viewport })
+
+    test('every part of it whole, the order said beside Place', async ({ page }, info) => {
+      if (larger) await keep(page, LARGER)
+      const served = await serve(page, { now: ist(10, 0, 30) })
+      await open(page)
+      await expect(page.getByRole('button', { name: 'BUY' }).first()).toBeEnabled()
+      await page.clock.runFor(500)
+      await tick(page, await socketOpened(served), ist(10, 0, 31), 6)
+      const surface = (await page.getByTestId('chart-surface').boundingBox()) as DOMRect
+      if (!upright) {
+        // L6: the strip is at least 48 dp at either text size, and the chart takes the rest.
+        const strip = (await page.getByTestId('chart-strip').boundingBox()) as DOMRect
+        expect(strip.height).toBeGreaterThanOrEqual(48)
+        expect(Math.round(surface.height + strip.height)).toBe(viewport.height)
+      }
+      await holdAt(page, surface.x + surface.width * 0.5, surface.y + surface.height * (upright ? 0.55 : 0.6))
+      const side = upright ? 'Sell' : 'Buy'
+      const at = page.getByRole('button', { name: new RegExp(`^${side} at [\\d,]+\\.\\d{2}$`) })
+      await settled(page, at)
+      const held = (await at.textContent())?.replace(`${side} at `, '') ?? ''
+      await at.click()
+      const ticket = page.getByRole('dialog', { name: `Place Order - ${side.toUpperCase()} SBIN` })
+      await settled(page, ticket)
+      await page.screenshot({ path: info.outputPath('ticket.png') })
+      if (upright) await checkFirstScreen(page, ticket)
+      await checkTicket(page, ticket, held, size)
+    })
+  })
+}
 
 /**
  * The cost run's studies: the costliest the common list offers, in the order

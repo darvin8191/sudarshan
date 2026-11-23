@@ -87,12 +87,14 @@ export function AllocationBars({
                     className="absolute inset-y-0 left-0 bg-[color:var(--brand-tint)]"
                     style={{ width: `${width}%` }}
                   />
-                  <span className="relative flex w-full items-center justify-between gap-3 px-3 py-2">
+                  {/* v0.16.0 phone review L5, as in the Upstox tab's bars: the name is never
+                      cut; the figures go under it where both do not fit on one line. */}
+                  <span className="relative flex w-full flex-wrap items-center justify-between gap-x-3 gap-y-0.5 px-3 py-2">
                     <span className="flex min-w-0 items-center gap-1.5 text-sm font-semibold">
                       {active && <Check aria-hidden="true" className="size-4 shrink-0" />}
-                      <span className="truncate">{row.label}</span>
+                      <span className="min-w-0 break-words">{row.label}</span>
                     </span>
-                    <span className="flex shrink-0 flex-col items-end text-sm">
+                    <span className="ml-auto flex min-w-0 flex-col items-end text-right text-sm">
                       <span className="font-bold">{formatAmount(pctOf(row), 2)}%</span>
                       <span className="text-xs text-[color:var(--text-secondary)]">
                         {rupeesText(row.value_paise)} · {row.holdings}{' '}

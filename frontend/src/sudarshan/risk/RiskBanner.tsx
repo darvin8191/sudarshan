@@ -158,6 +158,8 @@ export function RiskBanner() {
  * The same state as a chip in the account controls, which the navbar and the /trading toolbar
  * share. Not a control: the banner above both is the 48dp way to Settings > Risk, so this stays
  * small. The icon always; the words where there is room, and for a screen reader always.
+ * In the navbar the words wait for a laptop's width (v0.16.0 phone review H1): a phone on its
+ * side scrolled sideways with them, and the banner above says it in full at every width.
  */
 export function RiskChip({ variant = 'navbar' }: { variant?: 'navbar' | 'toolbar' }) {
   const state = useKillSwitch()
@@ -190,11 +192,11 @@ export function RiskChip({ variant = 'navbar' }: { variant?: 'navbar' | 'toolbar
       className={cn(
         'sd-risk-chip inline-flex shrink-0 items-center gap-1.5 rounded-full border font-bold uppercase tracking-[0.06em]',
         !on && !unread && 'sd-risk-chip--day',
-        toolbar ? 'h-6 px-2 text-[11px]' : 'h-7 px-2.5 text-xs'
+        toolbar ? 'h-6 px-2 text-[11px]' : 'h-7 px-2.5 text-xs max-[359.98px]:px-1.5'
       )}
     >
       <Icon aria-hidden="true" className={toolbar ? 'size-3.5' : 'size-4'} />
-      <span className={toolbar ? 'sr-only min-[1800px]:not-sr-only' : 'sr-only sm:not-sr-only'}>
+      <span className={toolbar ? 'sr-only min-[1800px]:not-sr-only' : 'sr-only lg:not-sr-only'}>
         {unread
           ? 'Kill switch unread'
           : on
