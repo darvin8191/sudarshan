@@ -23,6 +23,7 @@ import blueprints.sudarshan_journal as bp_module
 from database import user_db
 from limiter import limiter
 from sudarshan.autologin.handoff import HandoffRejected, NonceBook, open_sealed
+from sudarshan.tests.session_clock import login_moment
 from sudarshan.vault import JOURNAL_API_INFO, fernet_for
 
 OWNER = "owner"
@@ -68,7 +69,7 @@ def reset_users() -> None:
 
 def login_session(client, username: str = OWNER) -> None:
     """A signed session for ``username``: for the viewer, a session forged with the app's key."""
-    now_ist = datetime.now(pytz.timezone("Asia/Kolkata"))
+    now_ist = login_moment()
     with client.session_transaction() as session:
         session["user"] = username
         session["logged_in"] = True

@@ -21,6 +21,7 @@ from database import user_db, watchlist_db
 from limiter import limiter
 from sudarshan.screener import contract
 from sudarshan.screener.api import ScreenerApi
+from sudarshan.tests.session_clock import login_moment
 from sudarshan.vault import SCREENER_API_INFO, fernet_for
 
 OWNER = "owner"
@@ -75,7 +76,7 @@ def reset_watchlists() -> None:
 
 
 def login_session(client, username: str = OWNER) -> None:
-    now_ist = datetime.now(pytz.timezone("Asia/Kolkata"))
+    now_ist = login_moment()
     with client.session_transaction() as session:
         session["user"] = username
         session["logged_in"] = True

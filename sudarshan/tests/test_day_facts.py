@@ -15,6 +15,7 @@ import pytest
 from sudarshan import index_contracts, regimes
 from sudarshan import instrument_session as facts_module
 from sudarshan.autologin.schedule import IST
+from sudarshan.tests.session_clock import login_stamp
 
 VECTORS = json.loads(Path(__file__).with_name("regimes_vectors.json").read_text(encoding="utf-8"))
 DAY_FACTS = VECTORS["day_facts"]
@@ -189,7 +190,7 @@ def client(world, monkeypatch):
 
 def sign_in(client) -> None:
     with client.session_transaction() as session:
-        session.update(logged_in=True, user="owner", login_time=datetime.now(IST).isoformat())
+        session.update(logged_in=True, user="owner", login_time=login_stamp())
 
 
 PATH = "/sudarshan/session/today"

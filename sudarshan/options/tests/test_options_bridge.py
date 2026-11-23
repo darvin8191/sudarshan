@@ -23,6 +23,7 @@ import blueprints.sudarshan_options as bridge
 from database import user_db
 from limiter import limiter
 from sudarshan.options import chainsnap, snapshot, words
+from sudarshan.tests.session_clock import login_stamp
 from sudarshan.watchlists import master
 from utils.thread_safe_cache import LockedTTLCache
 
@@ -95,7 +96,7 @@ def make_app(rate_limits=False) -> Flask:
 def sign_in(client, username=OWNER, broker="upstox"):
     with client.session_transaction() as session:
         session.update(user=username, logged_in=True, broker=broker,
-                       login_time=datetime.now(pytz.timezone("Asia/Kolkata")).isoformat())  # fmt: skip
+                       login_time=login_stamp())  # fmt: skip
     return client
 
 

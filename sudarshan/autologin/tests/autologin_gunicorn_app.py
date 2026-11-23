@@ -22,6 +22,7 @@ import services.order_update_service as order_updates  # noqa: E402
 import services.telegram_alert_service as telegram_alerts  # noqa: E402
 import websocket_proxy.broker_factory as broker_factory  # noqa: E402
 from database import auth_db, user_db  # noqa: E402
+from sudarshan.tests.session_clock import login_stamp
 
 
 def _quiet(*args, **kwargs):
@@ -68,5 +69,5 @@ def login_for_tests():
 
     session["user"] = OWNER
     session["logged_in"] = True
-    session["login_time"] = datetime.now(pytz.timezone("Asia/Kolkata")).isoformat()
+    session["login_time"] = login_stamp()
     return {"status": "success"}

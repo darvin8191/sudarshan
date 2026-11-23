@@ -26,7 +26,6 @@ from datetime import datetime
 from pathlib import Path
 
 import pytest
-import pytz
 from flask import Flask
 
 sys.path.insert(0, str(Path(__file__).parents[1]))
@@ -35,6 +34,7 @@ from blueprints import strategy_module  # noqa: E402
 from database import strategy_module_db as store  # noqa: E402
 from database.engine_factory import create_db_engine  # noqa: E402
 from limiter import limiter  # noqa: E402
+from sudarshan.tests.session_clock import login_stamp  # noqa: E402  # SUDARSHAN M0.1
 
 USER = "tester"
 OTHER = "somebody-else"
@@ -86,7 +86,7 @@ def _log_in(client, username=USER):
     with client.session_transaction() as flask_session:
         flask_session["logged_in"] = True
         flask_session["user"] = username
-        flask_session["login_time"] = datetime.now(pytz.timezone("Asia/Kolkata")).isoformat()
+        flask_session["login_time"] = login_stamp()  # SUDARSHAN M0.1
 
 
 @pytest.fixture

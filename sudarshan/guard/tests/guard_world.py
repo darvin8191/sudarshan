@@ -11,6 +11,7 @@ from flask import Flask
 from flask_wtf.csrf import CSRFProtect, generate_csrf
 
 from sudarshan.guard import killswitch, words
+from sudarshan.tests.session_clock import login_moment
 
 OWNER = "owner"
 # Fake credentials, for the throwaway test database only.
@@ -239,7 +240,7 @@ def add_owner(*, api_key: bool = False) -> None:
 
 
 def login_session(client, username: str = OWNER, broker: str | None = None) -> None:
-    now_ist = datetime.now(pytz.timezone("Asia/Kolkata"))
+    now_ist = login_moment()
     with client.session_transaction() as session:
         session["user"] = username
         session["logged_in"] = True
