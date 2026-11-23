@@ -16,6 +16,7 @@ from sudarshan import index_contracts
 from sudarshan import instrument_session as facts_module
 from sudarshan.alerts.market import sessions
 from sudarshan.autologin.schedule import IST
+from sudarshan.tests.session_clock import login_stamp
 
 VECTORS = json.loads(Path(__file__).with_name("regimes_vectors.json").read_text(encoding="utf-8"))
 
@@ -143,7 +144,7 @@ def test_the_route_answers_the_facts_and_refuses_a_request_without_an_instrument
     refused = client.get(path, query_string=asked, headers={"Accept": "application/json"})
     assert refused.status_code == 401  # no session: the logged-in owner only
     with client.session_transaction() as session:
-        session.update(logged_in=True, user="owner", login_time=datetime.now(IST).isoformat())
+        session.update(logged_in=True, user="owner", login_time=login_stamp())
     answer = client.get(path, query_string=asked)
     assert answer.status_code == 200
     assert answer.get_json()["data"]["stops_at"] == ms(date(2026, 12, 8), "15:30")

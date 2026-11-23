@@ -18,6 +18,7 @@ from werkzeug.serving import make_server
 import blueprints.sudarshan_autologin as bp_module
 from database import auth_db, user_db
 from limiter import limiter
+from sudarshan.tests.session_clock import login_moment
 
 OWNER = "owner"
 # Fake credentials, for the throwaway test database only.
@@ -130,7 +131,7 @@ def add_owner() -> None:
 
 
 def login_session(client, username: str = OWNER) -> None:
-    now_ist = datetime.now(pytz.timezone("Asia/Kolkata"))
+    now_ist = login_moment()
     with client.session_transaction() as session:
         session["user"] = username
         session["logged_in"] = True

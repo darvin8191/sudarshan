@@ -120,6 +120,7 @@ APP = textwrap.dedent(
     # The real kill switch routes, for the owner's session; nothing they reach leaves the box.
     from datetime import timedelta, timezone
     from flask import session
+    from sudarshan.tests.session_clock import login_stamp
     from database import auth_db, user_db
     from limiter import limiter
     import blueprints.sudarshan_risk as risk_routes
@@ -144,7 +145,7 @@ APP = textwrap.dedent(
         session["user"] = "owner"
         session["logged_in"] = True
         india = timezone(timedelta(hours=5, minutes=30))
-        session["login_time"] = datetime.now(india).isoformat()
+        session["login_time"] = login_stamp()
         return jsonify(ok=True)
 
     @app.teardown_appcontext

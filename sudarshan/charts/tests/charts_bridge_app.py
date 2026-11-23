@@ -13,6 +13,7 @@ from flask_wtf.csrf import CSRFProtect, generate_csrf
 import blueprints.sudarshan_charts as bp_module
 from database import user_db
 from limiter import limiter
+from sudarshan.tests.session_clock import login_moment
 
 OWNER = "owner"
 VIEWER = "family-viewer"
@@ -56,7 +57,7 @@ def reset_users() -> None:
 
 
 def login_session(client, username: str = OWNER) -> None:
-    now_ist = datetime.now(pytz.timezone("Asia/Kolkata"))
+    now_ist = login_moment()
     with client.session_transaction() as session:
         session["user"] = username
         session["logged_in"] = True
