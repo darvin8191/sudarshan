@@ -11,6 +11,7 @@ import {
   priceOf,
 } from '@/sudarshan/dashboard/live'
 import { type FeedState, useFrameLines } from '@/sudarshan/live/useFrameLines'
+import { figureNumber } from './figures'
 import { type FollowRow, followPlan, instrumentOf, rowFollowed } from './follow'
 import {
   QUIET_RESYNC_MS,
@@ -48,6 +49,10 @@ export interface LiveRow {
    * It then shows the last figure it had, with the time of it, and is never re-read on a timer.
    */
   outside?: 'cap' | 'window'
+  /** M8.3 GA6.2: the cache line its figures beside the price are read from (the last tick kept, when not followed). */
+  line?: SymbolData
+  /** M8.3 GA6.2: its REST snapshot, for the figures a tick does not carry yet. */
+  snap?: Snapshot
 }
 
 /** F9 (v2): what the page follows besides its rows. Absent with the switch off: every row is followed, as it always was. */
@@ -64,6 +69,8 @@ export interface FollowOptions {
   order?: readonly string[]
   /** Changes when another list opens: the window starts at its top. */
   listKey?: string
+  /** M8.3 GA6.2: today's open is shown beside the price, so a row without it is read again at its first tick. */
+  open?: boolean
 }
 
 /**
@@ -211,11 +218,24 @@ export function useLiveRows({
     const key = keyOf(item.symbol, item.exchange)
     if (plan && !rowFollowed({ key, keys: strikes?.get(key) }, plan)) {
       // Not followed: the newer of the last tick it had and the last read, with the time of it, grey.
-      const view = rowView(snapshot.quotes.get(key), lastTicks.current.get(key), basis)
-      return { item, key, view, direction: null, stale: false, tickAt: null, outside: reason }
+      const snap = snapshot.quotes.get(key)
+      const kept = lastTicks.current.get(key)
+      const view = rowView(snap, kept, basis)
+      return {
+        item,
+        key,
+        view,
+        direction: null,
+        stale: false,
+        tickAt: null,
+        outside: reason,
+        line: kept,
+        snap,
+      }
     }
     const line = lines.get(key)
-    const view = rowView(snapshot.quotes.get(key), line, basis) // F6
+    const snap = snapshot.quotes.get(key)
+    const view = rowView(snap, line, basis) // F6
     const tick = priceOf(line)
     return {
       item,
@@ -224,6 +244,8 @@ export function useLiveRows({
       direction: directions.get(key) ?? null,
       stale: rowStale(view, now, openOf(item.exchange), feed.connected),
       tickAt: tick?.live ? tick.at : null,
+      line, // M8.3 GA6.2
+      snap,
     }
   })
 
@@ -253,12 +275,17 @@ export function useLiveRows({
 
   // F6: from today's open, a row whose open is not known gets one more read at its first tick
   // after the opening, once; the market opening resets it (the snapshot reads on that event itself).
+  // M8.3 GA6.2: the same for a row showing today's open beside its price.
+  const openFigure = follow?.open === true
   const noOpen =
-    basis === 'open'
+    basis === 'open' || openFigure
       ? rows
           .filter(
             (row) =>
-              row.view.openMissing && row.tickAt !== null && openOf(row.item.exchange) === true
+              (row.view.openMissing ||
+                (openFigure && figureNumber('open', row.snap, row.line) === null)) &&
+              row.tickAt !== null &&
+              openOf(row.item.exchange) === true
           )
           .map((row) => row.key)
           .join(',')

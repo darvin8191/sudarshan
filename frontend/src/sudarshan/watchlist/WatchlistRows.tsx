@@ -8,6 +8,8 @@ import { TREND_TEXT, TrendArrow } from '@/sudarshan/dashboard/Trend'
 import { ChipMark } from '@/sudarshan/screener/ChipMark'
 import type { Chip } from '@/sudarshan/screener/types'
 import { type ArrangeEdit, ArrangeRows } from './ArrangeSheet'
+import { FigureCells } from './FigureCells'
+import { cellsOf, type FigureCell, sameCells } from './figures'
 import { FOLLOW_CAP, outsideNote, outsideSpeech } from './follow'
 import { type HeldFigures, HoldingLine } from './HoldingLine'
 import { MarkGlyph } from './marks'
@@ -17,7 +19,7 @@ import type { LiveRow } from './useLiveRows'
 import { CLOCK } from './ViewSheet'
 import { markWords, type RowMark } from './v2/marks'
 import type { Group } from './v2/sections'
-import type { Section } from './v2/types'
+import type { Figure, Section } from './v2/types'
 
 /** Grey for a level that has stopped arriving; its sign and arrow stay. */
 const STALE = 'text-[color:var(--stale)]'
@@ -41,6 +43,13 @@ export interface FigureValues {
   outsideAt?: number | null
 }
 
+/** M8.3 GA6.2: a row's figures beside the price, or none. */
+function cellsFor(row: LiveRow, shown: readonly Figure[] | undefined) {
+  return shown && shown.length > 0
+    ? cellsOf(shown, row.item.symbol, row.item.exchange, row.snap, row.line)
+    : undefined
+}
+
 export function figuresOf(row: LiveRow): FigureValues {
   return {
     ltp: row.view.ltp,
@@ -62,6 +71,7 @@ function Name({
   position,
   mark,
   metric,
+  roomy,
 }: {
   symbol: string
   exchange: string
@@ -74,10 +84,12 @@ function Name({
   /** F7: the quantity held and the net position, on the second line. */
   holding?: number
   position?: number
+  /** M8.3 GA6.2: figures sit beside it, so it keeps at least 7rem and they give way first (7rem, not 7.5: a five-digit index price and two figures then fit a phone upright). */
+  roomy?: boolean
 }) {
   const named = describe(symbol, exchange)
   return (
-    <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+    <span className={cn('flex flex-1 flex-col gap-0.5', roomy ? 'min-w-[7rem]' : 'min-w-0')}>
       <span className="flex min-w-0 items-center gap-2">
         {mark?.flag != null && <MarkGlyph mark={mark.flag} /> /* F8 */}
         <span className="truncate text-[0.9375rem] leading-tight font-semibold" title={symbol}>
@@ -202,6 +214,29 @@ export function Figures({
   )
 }
 
+type PriceRowProps = FigureValues & {
+  /** M8.3 GA6.2: the figures beside the price, in the order shown. */
+  cells?: readonly FigureCell[]
+  metric?: string // F16
+  /** F9: its place in a list longer than the cap, which the window is worked out from. */
+  rowIndex?: number
+  mark?: RowMark // F8
+  itemId: number
+  symbol: string
+  exchange: string
+  chip?: Chip
+  holding?: number // F7
+  position?: number // F7
+  onOpen: (itemId: number) => void
+}
+
+/** Redrawn when a plain value changes, or what its figures say (M8.3: they come as a new list each frame). */
+function samePriceRow(a: PriceRowProps, b: PriceRowProps): boolean {
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)]) as Set<keyof PriceRowProps>
+  for (const key of keys) if (key !== 'cells' && a[key] !== b[key]) return false
+  return sameCells(a.cells, b.cells)
+}
+
 /** One row of the open list: redrawn only when its own figures change. */
 const PriceRow = memo(function PriceRow({
   itemId,
@@ -214,20 +249,10 @@ const PriceRow = memo(function PriceRow({
   metric,
   onOpen,
   rowIndex,
+  cells,
   ...figures
-}: FigureValues & {
-  metric?: string // F16
-  /** F9: its place in a list longer than the cap, which the window is worked out from. */
-  rowIndex?: number
-  mark?: RowMark // F8
-  itemId: number
-  symbol: string
-  exchange: string
-  chip?: Chip
-  holding?: number // F7
-  position?: number // F7
-  onOpen: (itemId: number) => void
-}) {
+}: PriceRowProps) {
+  const shown = cells !== undefined && cells.length > 0
   const body = (
     <>
       <Name
@@ -238,7 +263,9 @@ const PriceRow = memo(function PriceRow({
         position={position}
         mark={mark}
         metric={metric} // F16
+        roomy={shown} // M8.3
       />
+      {shown && <FigureCells cells={cells} grey={figures.stale || figures.outside !== undefined} />}
       <Figures {...figures} decimals={priceDecimals(exchange)} />
     </>
   )
@@ -277,7 +304,7 @@ const PriceRow = memo(function PriceRow({
       )}
     </li>
   )
-})
+}, samePriceRow)
 
 /** F3 (v2): the open own list in sections: the view's groups, what is folded, and the taps. */
 export interface SectionLayout {
@@ -301,8 +328,10 @@ function Sectioned({
   tags,
   held,
   marks,
+  figures,
   onOpen,
 }: {
+  figures?: readonly Figure[] // M8.3
   marks?: ReadonlyMap<string, RowMark> // F8
   rows: LiveRow[]
   follow?: FollowSlots // F11
@@ -333,6 +362,7 @@ function Sectioned({
                   holding={held?.get(row.key)?.holding} // F7
                   position={held?.get(row.key)?.position} // F7
                   mark={marks?.get(row.key)} // F8
+                  cells={cellsFor(row, figures)} // M8.3
                   onOpen={onOpen}
                   {...figuresOf(row)}
                 />,
@@ -382,7 +412,10 @@ export function WatchlistRows({
   marks,
   follow,
   metrics,
+  figures,
 }: {
+  /** v2 (M8.3 GA6.2): the figures shown beside each price at this width, in the order picked. */
+  figures?: readonly Figure[]
   /** v2 (F16): a ranked list's own figure per row, by EXCHANGE:SYMBOL. */
   metrics?: ReadonlyMap<string, string>
   /** v2 (F11): the rows that follow the price. Absent with the switch off. */
@@ -460,6 +493,7 @@ export function WatchlistRows({
         tags={tags}
         held={held}
         marks={marks} // F8
+        figures={figures} // M8.3
         onOpen={onOpen}
       />
     )
@@ -481,6 +515,7 @@ export function WatchlistRows({
               position={held?.get(row.key)?.position} // F7
               mark={marks?.get(row.key)} // F8
               metric={metrics?.get(row.key)} // F16
+              cells={cellsFor(row, figures)} // M8.3
               onOpen={onOpen}
               rowIndex={rows.length > FOLLOW_CAP ? index : undefined} // F9
               {...figuresOf(row)}

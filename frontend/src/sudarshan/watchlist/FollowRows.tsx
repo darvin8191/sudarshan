@@ -1,10 +1,14 @@
 import { Clock } from 'lucide-react'
+import { cn } from '@/lib/utils'
+import { FigureCells } from './FigureCells'
+import { cellsOf } from './figures'
 import { outsideNote, outsideSpeech } from './follow'
 import { ATM_HELP, chipOf, detailOf, lineOf, titleOf } from './followRows'
 import { priceDecimals } from './rows'
 import type { FollowState } from './useFollowRows'
 import type { LiveRow } from './useLiveRows'
 import { CLOCK } from './ViewSheet'
+import type { Figure } from './v2/types'
 import { Figures, figuresOf } from './WatchlistRows'
 
 const NO_FIGURES = {
@@ -40,17 +44,25 @@ export function FollowRowItem({
   live,
   now,
   onOpen,
+  shown,
 }: {
   state: FollowState
   live: LiveRow | null
   now: number
   onOpen: (rowId: number) => void
+  /** M8.3 GA6.2: the figures shown beside the price at this width. */
+  shown?: readonly Figure[]
 }) {
   const names = followNames(state)
   const line = lineOf(state, now)
   const outside = live?.outside
   const figures = live ? figuresOf(live) : NO_FIGURES
   const exchange = state.shown?.contract.exchange ?? 'NFO'
+  const contract = state.shown?.contract
+  const cells =
+    shown && shown.length > 0 && contract
+      ? cellsOf(shown, contract.symbol, contract.exchange, live?.snap, live?.line)
+      : []
   return (
     <li data-follow-row={state.id} data-stale={live?.stale || undefined}>
       <button
@@ -61,7 +73,12 @@ export function FollowRowItem({
         className="flex min-h-14 w-full flex-col justify-center gap-1 px-4 py-2 text-left outline-none active:bg-accent focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
       >
         <span className="flex w-full items-center gap-3">
-          <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <span
+            className={cn(
+              'flex flex-1 flex-col gap-0.5',
+              cells.length > 0 ? 'min-w-[7rem]' : 'min-w-0'
+            )}
+          >
             <span className="flex min-w-0 items-center gap-2">
               <span className="truncate text-[0.9375rem] leading-tight font-semibold">
                 {names.title}
@@ -78,6 +95,7 @@ export function FollowRowItem({
               {names.detail}
             </span>
           </span>
+          <FigureCells cells={cells} grey={figures.stale || outside !== undefined} />
           <Figures {...figures} outside={outside} decimals={priceDecimals(exchange)} />
         </span>
         {line && (
