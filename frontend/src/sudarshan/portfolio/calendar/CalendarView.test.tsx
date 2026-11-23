@@ -328,6 +328,21 @@ describe('the calendar', () => {
     expect(document.body.textContent).not.toMatch(/Real-time|Live/)
   })
 
+  // v0.17.0 phone review L7: "Infrastructur" over "e Holdings" at 320 px with Larger text. jsdom
+  // lays nothing out, so what breaks a name between words is pinned here; e2e/sd-calendar measures.
+  it('lets a name keep its longest word whole and the chips move under it', async () => {
+    serve({ ca_list: LIST })
+    show()
+    const coming = within(await screen.findByRole('region', { name: 'Coming up' }))
+    const name = coming.getByText('Beta Bank')
+    expect(name.className.split(/\s+/)).toEqual(
+      expect.arrayContaining(['flex-[1_1_0%]', 'max-w-full', 'break-words'])
+    )
+    expect(name).not.toHaveClass('min-w-0')
+    expect(name.parentElement).toHaveClass('flex-wrap')
+    expect(name.nextElementSibling).toHaveClass('ml-auto', 'shrink-0')
+  })
+
   it('says so when Upstox lists no future events, and when nothing is listed at all', async () => {
     serve({
       ca_list: LIST,

@@ -55,6 +55,14 @@ export function leftOutWords(count: number): string {
 }
 
 const CARD = 'rounded-[1.125rem] border bg-card px-4 py-3.5 shadow-[var(--shadow-card)]'
+/**
+ * A row's name and its chips (v0.17.0 phone review L7): the name never narrows below its longest
+ * word (the flex item's own minimum), so it breaks between words ("Infrastructur" over "e
+ * Holdings" at 320 px with Larger text); where that word and the chips do not fit side by side,
+ * the chips move under it, at the right. Only a word wider than the whole row is broken.
+ */
+const NAME_ROW = 'flex flex-wrap items-start justify-between gap-x-3 gap-y-1'
+const NAME = 'max-w-full flex-[1_1_0%] text-[0.9375rem] font-semibold break-words'
 
 async function need<T>(call: Promise<PortfolioResult<T>>): Promise<T> {
   const result = await call
@@ -82,11 +90,9 @@ function Confirmed({ rows, onDone }: { rows: readonly CaConfirmed[]; onDone: () 
           const Icon = KINDS[row.kind].icon
           return (
             <li key={row.event_id} className="flex flex-col gap-0.5 py-2.5">
-              <div className="flex items-start justify-between gap-3">
-                <span className="min-w-0 text-[0.9375rem] font-semibold break-words">
-                  {row.name ?? row.isin}
-                </span>
-                <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-[color:var(--border-strong)] px-2 py-0.5 text-xs font-semibold">
+              <div className={NAME_ROW}>
+                <span className={NAME}>{row.name ?? row.isin}</span>
+                <span className="ml-auto inline-flex shrink-0 items-center gap-1 rounded-full border border-[color:var(--border-strong)] px-2 py-0.5 text-xs font-semibold">
                   <Icon aria-hidden="true" className="size-3.5" />
                   {KINDS[row.kind].word}
                 </span>
@@ -113,11 +119,9 @@ function Event({ row, today }: { row: CalendarRow; today: number }) {
   const hold = holdText(row, today)
   return (
     <li className="flex flex-col gap-0.5 py-2.5">
-      <div className="flex items-start justify-between gap-3">
-        <span className="min-w-0 text-[0.9375rem] font-semibold break-words">
-          {row.name ?? row.isin}
-        </span>
-        <span className="flex shrink-0 flex-col items-end gap-1 sm:flex-row sm:items-start">
+      <div className={NAME_ROW}>
+        <span className={NAME}>{row.name ?? row.isin}</span>
+        <span className="ml-auto flex shrink-0 flex-col items-end gap-1 sm:flex-row sm:items-start">
           <span className="inline-flex items-center gap-1 rounded-full border border-[color:var(--border-strong)] px-2 py-0.5 text-xs font-semibold">
             <Icon aria-hidden="true" className="size-3.5" />
             {KINDS[row.kind].word}

@@ -243,6 +243,29 @@ async function segmentChecks(page: Page) {
   })
 }
 
+/**
+ * v0.17.0 phone review L7: every row's name breaks between words, never inside one ("Infrastructur"
+ * over "e Holdings" at 320 px with Larger text): each word of it lies on one line.
+ */
+async function brokenWords(page: Page) {
+  return page.locator('main').evaluate((main) => {
+    const out: string[] = []
+    for (const name of main.querySelectorAll<HTMLElement>('li > div:first-child > span:first-child')) {
+      const node = name.firstChild
+      if (!node || node.nodeType !== Node.TEXT_NODE) continue
+      const words = node.textContent ?? ''
+      for (const found of words.matchAll(/\S+/g)) {
+        const range = document.createRange()
+        range.setStart(node, found.index ?? 0)
+        range.setEnd(node, (found.index ?? 0) + found[0].length)
+        const lines = new Set([...range.getClientRects()].map((rect) => Math.round(rect.top)))
+        if (lines.size > 1) out.push(`"${found[0]}" in "${words}" is broken over ${lines.size} lines`)
+      }
+    }
+    return out
+  })
+}
+
 for (const viewport of [
   { width: 320, height: 640 },
   { width: 360, height: 800 },
@@ -252,7 +275,9 @@ for (const viewport of [
     test.describe(`the calendar at ${viewport.width} x ${viewport.height}, ${text} text`, () => {
       test.use({ viewport, hasTouch: true, isMobile: true })
 
-      test('Holdings, Watchlists and All keep their words inside them (L1)', async ({ page }, info) => {
+      test('Holdings, Watchlists and All keep their words inside them (L1); names break between words (L7)', async ({
+        page,
+      }, info) => {
         if (text === 'Larger')
           await page.addInitScript(() => localStorage.setItem('sudarshan-text', 'large'))
         await serve(page)
@@ -262,6 +287,11 @@ for (const viewport of [
           await expect(tabs.getByRole('tab', { name })).toHaveAttribute('aria-selected', 'true')
           expect(await segmentChecks(page), `${name} chosen`).toEqual([])
         }
+        await tabs.getByRole('tab', { name: 'All' }).click()
+        expect(await brokenWords(page), 'a word broken inside itself').toEqual([])
+        expect(
+          await page.getByRole('listitem').filter({ hasText: 'Infrastructure' }).count()
+        ).toBeGreaterThan(0)
         await page.screenshot({ path: info.outputPath(`calendar-${viewport.width}-${text}.png`) })
       })
     })
