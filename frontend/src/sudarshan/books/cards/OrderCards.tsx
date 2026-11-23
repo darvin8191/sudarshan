@@ -185,6 +185,20 @@ export function cancelWords(
   return { chip: 'Cancel sent', note: null, button: 'Cancel sent' }
 }
 
+/** What Cancel's question says, on the phone's cards and the wide book alike (TD4). */
+export function cancelSentence(order: BookOrder, sandbox: boolean): string {
+  const where = sandbox
+    ? `The order stops working in the sandbox. ${SANDBOX_SENTENCE}`
+    : 'The order stops working at the exchange.'
+  return `${order.action} ${remainingText(order)} ${describe(order.symbol, order.exchange).title} · ${priceText(order)}. ${where}`
+}
+
+/** What Cancel all's question says, for this many open orders. */
+export function cancelAllSentence(count: number, sandbox: boolean): string {
+  const orders = `${count} open ${count === 1 ? 'order' : 'orders'}`
+  return `This will cancel all ${orders}${sandbox ? ` in the sandbox. ${SANDBOX_SENTENCE}` : '. This cannot be undone.'}`
+}
+
 /** What a confirmation says first when an earlier cancel's time ran out with the order working. */
 export function cancelWarning(mark: SentMark | undefined): string | null {
   if (!mark?.expired) return null
@@ -538,7 +552,7 @@ const OrderBoard = memo(function OrderBoard({
           cancelShown ? (
             <>
               {cancelEarlier && <WarningLine text={cancelEarlier} />}
-              {`${cancelShown.action} ${remainingText(cancelShown)} ${describe(cancelShown.symbol, cancelShown.exchange).title} · ${priceText(cancelShown)}. ${sandbox ? `The order stops working in the sandbox. ${SANDBOX_SENTENCE}` : 'The order stops working at the exchange.'}`}
+              {cancelSentence(cancelShown, sandbox)}
             </>
           ) : (
             ''
@@ -563,7 +577,7 @@ const OrderBoard = memo(function OrderBoard({
         description={
           <>
             {allEarlier && <WarningLine text={allEarlier} />}
-            {`This will cancel all ${cancellable} open ${cancellable === 1 ? 'order' : 'orders'}${sandbox ? ` in the sandbox. ${SANDBOX_SENTENCE}` : '. This cannot be undone.'}`}
+            {cancelAllSentence(cancellable, sandbox)}
           </>
         }
         cancelLabel="Keep orders"

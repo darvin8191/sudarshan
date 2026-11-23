@@ -16,17 +16,6 @@ import {
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { tradingApi } from '@/api/trading'
 import GttTab from '@/components/trading/GttTab'
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from '@/components/ui/alert-dialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -53,13 +42,14 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { type PriceableItem, useLivePrice } from '@/hooks/useLivePrice'
 import { useLiveQuote } from '@/hooks/useLiveQuote'
-// Note: AlertDialog still used for Cancel All Orders
 import { useSupportedExchanges } from '@/hooks/useSupportedExchanges'
 import { cn, makeFormatCurrency, sanitizeCSV } from '@/lib/utils'
 import { useAuthStore } from '@/stores/authStore'
 import { onModeChange, useThemeStore } from '@/stores/themeStore'
 // SUDARSHAN M6.9: on a phone the orders are cards (src/sudarshan/books/cards).
 import { OrderCards } from '@/sudarshan/books/cards/OrderCards'
+// SUDARSHAN TD4: the table's Cancel and Cancel All ask first and send once, as the cards do.
+import { useOrderCancels } from '@/sudarshan/books/cards/useOrderCancels'
 // SUDARSHAN: live status, the LTP of working orders, the book re-read (src/sudarshan/books).
 import { useBookFeed } from '@/sudarshan/books/feed'
 import { TickPrice } from '@/sudarshan/books/LiveFigures'
@@ -411,6 +401,14 @@ export default function OrderBook() {
     return 'refused'
   }
 
+  // SUDARSHAN TD4 (M6.9): the question and the hold only; the two calls above are unchanged.
+  const cancels = useOrderCancels({
+    orders,
+    loading: isLoading,
+    onCancel: handleCancelOrder,
+    onCancelAll: handleCancelAllOrders,
+  })
+
   const openModifyDialog = async (order: Order) => {
     setModifyingOrder(order)
     setModifyForm({
@@ -601,27 +599,16 @@ export default function OrderBook() {
               <Download className="h-4 w-4 mr-2" />
               Export
             </Button>
-            <AlertDialog>
-              <AlertDialogTrigger asChild>
-                <Button variant="destructive" size="sm" disabled={openOrders.length === 0}>
-                  <X className="h-4 w-4 mr-2" />
-                  Cancel All
-                </Button>
-              </AlertDialogTrigger>
-              <AlertDialogContent>
-                <AlertDialogHeader>
-                  <AlertDialogTitle>Cancel All Orders?</AlertDialogTitle>
-                  <AlertDialogDescription>
-                    This will cancel all {openOrders.length} open orders. This action cannot be
-                    undone.
-                  </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                  <AlertDialogCancel>Keep Orders</AlertDialogCancel>
-                  <AlertDialogAction onClick={handleCancelAllOrders}>Cancel All</AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
+            <Button
+              variant="destructive"
+              size="sm"
+              disabled={openOrders.length === 0}
+              aria-haspopup="dialog"
+              onClick={cancels.askAll}
+            >
+              <X className="h-4 w-4 mr-2" />
+              Cancel All
+            </Button>
           </div>
 
           {/* Active Filters Bar */}
@@ -871,7 +858,8 @@ export default function OrderBook() {
                                   variant="ghost"
                                   size="icon"
                                   className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10"
-                                  onClick={() => handleCancelOrder(order.orderid)}
+                                  onClick={() => cancels.ask(order)}
+                                  aria-haspopup="dialog"
                                   aria-label={`Cancel order ${order.orderid}`}
                                 >
                                   <X className="h-4 w-4" />
@@ -914,6 +902,7 @@ export default function OrderBook() {
           <GttTab cards={phone} />
         </TabsContent>
       </Tabs>
+      {cancels.dialog}
 
       {/* Modify Order Dialog */}
       <Dialog open={modifyDialogOpen} onOpenChange={setModifyDialogOpen}>

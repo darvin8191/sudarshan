@@ -899,13 +899,17 @@ describe('Order book on a phone: the sheet and its actions', () => {
     )
   })
 
-  it('makes the same cancel call as the wide table’s button', async () => {
+  it('makes the same cancel call as the wide table’s button, which asks first too (TD4)', async () => {
     const tap = user()
     api.getOrders.mockResolvedValue(book(WORKING))
     fakeScreen('wide')
     renderBook('/orderbook', <OrderBook />)
     await settle()
     await tap.click(screen.getByRole('button', { name: 'Cancel order 1001' }))
+    expect(api.cancelOrder).not.toHaveBeenCalled()
+    const asked = screen.getByRole('dialog', { name: 'Cancel this order?' })
+    await tap.click(within(asked).getByRole('button', { name: 'Cancel order' }))
+    await settle()
     expect(api.cancelOrder).toHaveBeenLastCalledWith('1001')
   })
 
