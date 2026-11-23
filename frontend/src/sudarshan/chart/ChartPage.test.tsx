@@ -1440,6 +1440,67 @@ describe('an expired contract (TD2)', () => {
     expect(await screen.findByRole('heading', { name: said })).toBeVisible()
     await waitFor(() => expect(fakes.charts.at(-1)?.destroy).toHaveBeenCalled())
     expect(screen.queryByRole('button', { name: /Try again/ })).toBeNull()
+    // v0.17.0 review M2: taken as unlisted because NIFTY's expiries came back with dates.
+    expect(fakes.reads.slice(0, 2)).toEqual([`symbol NFO:${today}`, 'expiry NFO:NIFTY options'])
+  })
+
+  /** Noon in India today, with timeouts the test moves on (real time moving them too). */
+  function middayWithTimers(): string {
+    const day = new Date(Date.now() + 19_800_000).toISOString().slice(0, 10)
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'], shouldAdvanceTime: true })
+    vi.setSystemTime(Date.parse(`${day}T06:30:00Z`))
+    return day
+  }
+  const passOn = (ms: number) =>
+    act(async () => {
+      await vi.advanceTimersByTimeAsync(ms)
+    })
+  const symbolReads = (symbol: string) =>
+    fakes.reads.filter((read) => read === `symbol NFO:${symbol}`).length
+
+  it('on its expiry day, a 404 while no NIFTY expiry comes back is the contract list loading, never an expiry (review M2)', async () => {
+    middayWithTimers()
+    const today = niftyIn(0, '25000CE')
+    fakes.instrument = 'unlisted'
+    fakes.expiries = () => [] // the morning login has emptied the list and is loading it again
+    renderAt(`/chart/NFO/${today}`)
+    const notice = await screen.findByTestId('chart-list-loading')
+    expect(
+      within(notice).getByRole('heading', { name: "Today's contract list is not ready" })
+    ).toBeVisible()
+    expect(notice).toHaveTextContent(
+      `The server does not list ${today} just now, and no NIFTY expiry came back either`
+    )
+    expect(screen.queryByText(/Expired on/)).toBeNull()
+    expect(screen.queryByRole('button', { name: /Try again/ })).toBeNull()
+    await waitFor(() => expect(fakes.charts.at(-1)?.destroy).toHaveBeenCalled())
+    expect(localStorage.getItem('sudarshan-chart-last')).toBeNull()
+    // The list is back: read again 30 s on, it is listed, and the chart opens.
+    fakes.instrument = { name: 'NIFTY 25000 CE', lotSize: 65, tickSize: 0.05 }
+    await passOn(29_000)
+    expect(symbolReads(today)).toBe(1)
+    await passOn(1_500)
+    await waitFor(() => expect(screen.queryByTestId('chart-list-loading')).toBeNull())
+    await waitFor(() => expect(chart().load).toHaveBeenCalledWith(today, 'NFO', '5m'))
+    expect(chart().destroy).not.toHaveBeenCalled()
+    expect(symbolReads(today)).toBe(2)
+  })
+
+  it('a failed expiry read is no proof either; after twenty reads it says only that the list does not have it (review M2)', async () => {
+    middayWithTimers()
+    const today = niftyIn(0, '25000CE')
+    fakes.instrument = 'unlisted'
+    fakes.expiries = () => null
+    renderAt(`/chart/NFO/${today}`)
+    await screen.findByTestId('chart-list-loading')
+    for (let read = 1; read < 20; read += 1) await passOn(30_000)
+    expect(
+      await screen.findByRole('heading', { name: "Not in today's contract list" })
+    ).toBeVisible()
+    expect(screen.queryByText(/Expired on/)).toBeNull()
+    expect(symbolReads(today)).toBe(20)
+    await passOn(120_000)
+    expect(symbolReads(today)).toBe(20)
   })
 })
 

@@ -1,4 +1,4 @@
-import { CalendarX2, ChevronRight } from 'lucide-react'
+import { CalendarX2, ChevronRight, Hourglass } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { expiredWords, spokenContract } from '@/sudarshan/watchlist/rows'
 import { loadExpiries, loadInstrument } from './api'
@@ -17,6 +17,54 @@ async function nearest(apiKey: string, contract: Contract, exchange: string): Pr
   const listed = await loadInstrument(apiKey, symbol, exchange)
   if (listed === null) return null
   return listed === 'unlisted' ? 'none' : { symbol, exchange }
+}
+
+/** M2: how often the page reads a contract again while no expiry of its underlying comes back, and how many times. */
+export const LIST_RETRY_MS = 30_000
+export const LIST_TRIES = 20
+
+/**
+ * v0.17.0 phone review M2: whether the master lists the expiries of a contract's underlying (of
+ * its kind). The master answers 404 for every contract while a login loads the contract list
+ * again, so a 404 means "not listed" only when this comes back with dates; a symbol that is not a
+ * dated contract has nothing to wait for.
+ */
+export async function expiriesListed(
+  apiKey: string,
+  symbol: string,
+  exchange: string
+): Promise<boolean> {
+  const contract = contractOf(symbol, exchange)
+  if (!contract) return true
+  const kind = contract.strike ? 'options' : 'futures'
+  const expiries = await loadExpiries(apiKey, contract.base, exchange, kind)
+  return expiries !== null && expiries.length > 0
+}
+
+/**
+ * In place of the chart while the master answers 404 and no expiry of the underlying comes back
+ * (M2): never "Expired", never Try again; the page reads it again on its own (`LIST_RETRY_MS`).
+ */
+export function ListLoadingNotice({ symbol, exchange }: { symbol: string; exchange: string }) {
+  const base = contractOf(symbol, exchange)?.base ?? symbol
+  return (
+    <section
+      aria-labelledby="chart-list"
+      data-testid="chart-list-loading"
+      className="m-4 flex flex-col gap-3 rounded-2xl border bg-card p-4 text-sm shadow-[var(--shadow-card)]"
+    >
+      <h2 id="chart-list" className="flex items-start gap-2 text-base font-semibold">
+        <Hourglass
+          aria-hidden="true"
+          className="mt-0.5 size-5 shrink-0 text-[color:var(--warning-text)]"
+        />
+        Today's contract list is not ready
+      </h2>
+      <p className="text-muted-foreground [overflow-wrap:anywhere]">
+        {`The server does not list ${symbol} just now, and no ${base} expiry came back either: that is how the contract list looks while a login loads it again, which takes a minute or two. This page checks every 30 seconds and opens the chart once it is listed.`}
+      </p>
+    </section>
+  )
 }
 
 /**

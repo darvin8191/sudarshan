@@ -86,7 +86,13 @@ import { ChainLink } from './ChainLink'
 import { DepthSheet, DepthStrip } from './DepthStrip'
 import { DrawingSheet } from './DrawingSheet'
 import { DRAW_ROW, DrawRow } from './DrawRow'
-import { ExpiredNotice } from './ExpiredNotice' // SUDARSHAN TD2
+import {
+  ExpiredNotice,
+  expiriesListed,
+  LIST_RETRY_MS,
+  LIST_TRIES,
+  ListLoadingNotice,
+} from './ExpiredNotice' // SUDARSHAN TD2, M2
 import { expiredOn, isDerivative } from './expired'
 import { IndicatorSettingsSheet } from './IndicatorSettingsSheet'
 import { IndicatorSheet } from './IndicatorSheet'
@@ -352,11 +358,16 @@ const ChartScreen = memo(function ChartScreen({
   // rule), or one the master does not list, has nothing to chart: no chart is built and the page
   // says which. Unlisted on its own expiry day, it has expired that day, as a list says too.
   const [unlisted, setUnlisted] = useState(false)
+  // SUDARSHAN M2 (v0.17.0 phone review): the reads that found it unlisted while no expiry of its
+  // underlying came back, as while a login loads the contract list again: never "Expired" then.
+  // It is read again; after LIST_TRIES of them it is only "not in today's contract list".
+  const [listless, setListless] = useState(0)
   const endedOn = useMemo(
     () => expiredOn(symbol, exchange, Date.now(), unlisted),
     [symbol, exchange, unlisted]
   )
-  const gone = endedOn !== null || unlisted
+  const gone = endedOn !== null || unlisted || listless >= LIST_TRIES
+  const waiting = !gone && listless > 0
 
   // What a bare /chart opens next: a share or an index at once, a contract once the master has
   // listed it, and never one that has expired (TD2).
@@ -385,19 +396,34 @@ const ChartScreen = memo(function ChartScreen({
   useEffect(() => {
     if (!config || endedOn) return
     let alive = true
-    void loadInstrument(config.apiKey, symbol, exchange).then((value) => {
-      if (!alive) return
-      if (value === 'unlisted' && isDerivative(exchange)) setUnlisted(true)
-      setInfo(value === 'unlisted' ? null : value)
-    })
+    let tries = 0
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const look = () =>
+      void loadInstrument(config.apiKey, symbol, exchange).then(async (value) => {
+        if (!alive) return
+        if (value === 'unlisted' && isDerivative(exchange)) {
+          // M2: unlisted only while the master lists its underlying's expiries.
+          const listed = await expiriesListed(config.apiKey, symbol, exchange)
+          if (!alive) return
+          if (listed) return setUnlisted(true)
+          tries += 1
+          setListless(tries)
+          if (tries < LIST_TRIES) timer = setTimeout(look, LIST_RETRY_MS)
+          return
+        }
+        setListless(0)
+        setInfo(value === 'unlisted' ? null : value)
+      })
+    look()
     return () => {
       alive = false
+      clearTimeout(timer)
     }
   }, [config, symbol, exchange, endedOn])
 
   // One engine host for this screen, built once the key is known; let go if the contract is gone.
   useEffect(() => {
-    if (!config || !host.current || gone) return
+    if (!config || !host.current || gone || waiting) return
     // The same gate a /trading pane uses: a quick load never flashes its card.
     const gate = createChartStateGate(setLoad)
     const next = new PhoneChart({
@@ -424,7 +450,7 @@ const ChartScreen = memo(function ChartScreen({
       gate.destroy()
       next.destroy()
     }
-  }, [config, prices, gone])
+  }, [config, prices, gone, waiting])
 
   useEffect(() => {
     owner?.setAppMode(appMode)
@@ -709,6 +735,17 @@ const ChartScreen = memo(function ChartScreen({
           onOpen={(next) => navigate(chartPath(next.symbol, next.exchange), { replace: true })}
         />
         {searchDialog}
+      </Screen>
+    )
+  }
+
+  // SUDARSHAN M2: the master answers 404 and no expiry of the underlying comes back: the contract
+  // list is being loaded again, so the page says so and reads it again, with no "Expired".
+  if (waiting) {
+    return (
+      <Screen>
+        <AppBar symbol={symbol} exchange={exchange} onBack={back} />
+        <ListLoadingNotice symbol={symbol} exchange={exchange} />
       </Screen>
     )
   }
