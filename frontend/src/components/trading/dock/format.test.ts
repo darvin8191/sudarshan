@@ -16,7 +16,7 @@ describe('the dock’s figures', () => {
     expect(signed(-1234567.5)).toBe('-12,34,567.50')
     expect(signed(0)).toBe('0.00')
     expect(signedQty(150000)).toBe('+1,50,000')
-    expect(makeFormatCurrency('upstox')(1234567.89)).toBe('₹12,34,567.89')
+    expect(makeFormatCurrency(null)(1234567.89)).toBe('₹12,34,567.89')
   })
 
   it('follow international grouping the moment it is chosen, as the header does', () => {
@@ -25,7 +25,7 @@ describe('the dock’s figures', () => {
     expect(signed(1234567.5)).toBe('+1,234,567.50')
     expect(signedQty(-150000)).toBe('-150,000')
     expect(signedQty(0.5)).toBe('+0.5')
-    expect(makeFormatCurrency('upstox')(1234567.89)).toBe('₹1,234,567.89')
+    expect(makeFormatCurrency(null)(1234567.89)).toBe('₹1,234,567.89')
     setNumberGrouping('indian')
     expect(fmt2(1234567.891)).toBe('12,34,567.89')
   })
