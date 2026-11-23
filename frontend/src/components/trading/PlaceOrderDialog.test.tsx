@@ -10,10 +10,13 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { tradingApi } from '@/api/trading'
+import { setNumberGrouping } from '@/sudarshan/dashboard/numberStyle'
 import { noteKillSwitch, resetKillSwitchForTests } from '@/sudarshan/risk/killSwitch'
 import { act, fireEvent, render, screen, userEvent, waitFor } from '@/test/test-utils'
 import { showToast } from '@/utils/toast'
+import { MarketDepthPanel } from './MarketDepthPanel'
 import { lotsFor, orderLine, PlaceOrderDialog, roundToTick, tickDecimals } from './PlaceOrderDialog'
+import { QuoteHeader } from './QuoteHeader'
 
 vi.mock('@/api/trading', async () => {
   const actual = await vi.importActual<typeof import('@/api/trading')>('@/api/trading')
@@ -287,6 +290,41 @@ describe('PlaceOrderDialog on a phone', () => {
     )
   })
 
+  // v0.16.0 phone review L3: the line's quantity, the total beside the box, the quote sizes and
+  // the depth's sizes follow Display settings' grouping; what is sent is the same number.
+  it('groups its quantities and sizes the way Display settings ask (L3)', () => {
+    const units = (quantity: number) =>
+      orderLine({ ...nifty, quantity, price: 0, trigger: 0 } as Parameters<typeof orderLine>[0])
+        .rest
+    expect(units(150_000)).toMatch(/^1,50,000 NIFTY28MAR2420800CE/)
+    setNumberGrouping('international')
+    try {
+      expect(units(150_000)).toMatch(/^150,000 NIFTY28MAR2420800CE/)
+      render(<PlaceOrderDialog {...nifty} quantity={150_000} />)
+      expect(screen.getByText('Total qty: 150,000')).toBeInTheDocument()
+      render(
+        <QuoteHeader
+          exchange="NSE"
+          ltp={803.8}
+          bidPrice={803.75}
+          askPrice={803.8}
+          bidSize={124_000}
+          askSize={1_250}
+        />
+      )
+      expect(screen.getByText('x124,000')).toBeInTheDocument()
+      expect(screen.getByText('x1,250')).toBeInTheDocument()
+      const depth = {
+        buy: [{ price: 803.75, quantity: 124_000 }],
+        sell: [{ price: 803.8, quantity: 1_250 }],
+      }
+      render(<MarketDepthPanel depth={depth} isExpanded onToggle={() => {}} />)
+      expect(screen.getAllByText('124,000').length).toBeGreaterThan(0)
+    } finally {
+      setNumberGrouping('indian')
+    }
+  })
+
   it('names the Action, Price Type, Product and Exchange pickers and the steppers (M2)', () => {
     render(<PlaceOrderDialog {...nifty} symbol="SBIN" exchange="NSE" lotSize={1} priceType="SL" />)
     const action = screen.getByRole('group', { name: 'Action' })
@@ -315,6 +353,27 @@ describe('PlaceOrderDialog on a phone', () => {
       expect(tall(screen.getByRole('combobox', { name })), name).toBe(true)
     for (const box of screen.getAllByRole('spinbutton')) expect(tall(box)).toBe(true)
     expect(screen.getByRole('button', { name: 'Lots', pressed: true })).toBeInTheDocument()
+  })
+
+  // v0.16.0 phone review H2: with Larger text the label row read "Total qty: 6" for 65, the Shares
+  // button and the ask size ran past the ticket's edge, and the title's symbol was cut. jsdom
+  // draws nothing, so what makes each whole is pinned here; e2e/sd-chart and sd-options measure.
+  it('lets each row of the ticket wrap or give way rather than be cut (H2)', () => {
+    render(<PlaceOrderDialog {...nifty} />)
+    const classes = (element: Element | null | undefined) => element?.className.split(/\s+/) ?? []
+    expect(classes(screen.getByRole('spinbutton', { name: 'Quantity' }))).toEqual(
+      expect.arrayContaining(['min-w-0', 'flex-1'])
+    )
+    expect(classes(screen.getByRole('group', { name: 'Quantity in' }))).toContain('shrink-0')
+    const total = screen.getByText('Total qty: 150')
+    expect(classes(total)).toContain('whitespace-nowrap')
+    expect(classes(total.parentElement?.parentElement)).toContain('flex-wrap')
+    expect(classes(screen.getByText('NIFTY28MAR2420800CE'))).not.toContain('truncate')
+    // Bid and ask take a half each, with no separator to hang at a line's end.
+    expect(classes(screen.getByText('Ask:').parentElement?.parentElement)).toContain('grid-cols-2')
+    expect(screen.queryByText('|')).toBeNull()
+    for (const name of ['Place BUY Order', 'Cancel'])
+      expect(classes(screen.getByRole('button', { name }))).toContain('whitespace-normal')
   })
 
   it('colours the side from --buy-solid and --sell-solid, and keeps no upstream green or red (M2)', async () => {

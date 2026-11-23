@@ -2,7 +2,9 @@
 // read, from the book of the strategy's own mode (the sandbox's for a Sandbox strategy), and the
 // books' own tick pipeline moves it: the broker's P&L moved by the price since the read
 // (books/prices.ts). Read only: nothing here can send an order. "Real-time" only while ticks
-// arrive; otherwise the time the figure was last read.
+// arrive; otherwise the time the figure was last read. v0.16.0 phone review L4: the figure is
+// greyed when the books would grey it (the market open and its price old), by the books' own
+// rule and the page's market calendar; its sign and arrow stay.
 import { Clock } from 'lucide-react'
 import { useMemo } from 'react'
 import type { PriceableItem } from '@/hooks/useLivePrice'
@@ -21,7 +23,14 @@ const NOT_KNOWN: MarketOpen = () => null
 /** Where the figure comes from, as the card says it. */
 const BOOK = { sandbox: 'the Sandbox book', live: "Upstox's positions" } as const
 
-export function HeldPnl({ strategy }: { strategy: Strategy }) {
+export function HeldPnl({
+  strategy,
+  marketOpen = NOT_KNOWN,
+}: {
+  strategy: Strategy
+  /** The page's market calendar, for the books' stale rule; not known, nothing is greyed. */
+  marketOpen?: MarketOpen
+}) {
   const book = strategy.held_book
   const symbol = strategy.held_symbol
   const exchange = strategy.held_exchange
@@ -49,17 +58,14 @@ export function HeldPnl({ strategy }: { strategy: Strategy }) {
     marketOpen: NOT_KNOWN,
     enabled: open,
   })
-  const { line } = useBookFeed(
-    rows.map((row) => ({
-      exchange: row.item.exchange,
-      ltp: row.ltp ?? undefined,
-      quantity: row.item.quantity,
-      _at: row.at,
-      _live: row.live,
-    })),
-    feed,
-    NOT_KNOWN
-  )
+  const feedRows = rows.map((row) => ({
+    exchange: row.item.exchange,
+    ltp: row.ltp ?? undefined,
+    quantity: row.item.quantity,
+    _at: row.at,
+    _live: row.live,
+  }))
+  const { line, stale } = useBookFeed(feedRows, feed, marketOpen)
 
   const where = BOOK[strategy.mode]
   if (book === null) {
@@ -86,7 +92,11 @@ export function HeldPnl({ strategy }: { strategy: Strategy }) {
         {book.quantity > 0 ? 'Long' : 'Short'} {units(Math.abs(book.quantity))}
       </span>
       <span aria-hidden="true">·</span>
-      <Money value={row?.pnl ?? null} className="font-semibold" />
+      <Money
+        value={row?.pnl ?? null}
+        stale={feedRows[0] !== undefined && stale(feedRows[0])}
+        className="font-semibold"
+      />
       {live ? (
         <span
           data-feed="live"

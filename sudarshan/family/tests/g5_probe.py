@@ -70,6 +70,8 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from sudarshan.tests.session_clock import login_stamp
+
 REPO = Path(__file__).resolve().parents[3]
 APP_PY = REPO / "app.py"
 HOST = "g5.invalid"
@@ -252,7 +254,7 @@ def add_owner() -> None:
 def ist_now() -> str:
     import pytz
 
-    return datetime.now(pytz.timezone("Asia/Kolkata")).isoformat()
+    return login_stamp()
 
 
 def session_cookie(app, values: dict | None) -> tuple[str, str]:

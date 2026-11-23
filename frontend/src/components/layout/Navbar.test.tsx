@@ -66,6 +66,24 @@ describe('Navbar', () => {
     expect(css).toMatch(/\.sd-lockup-room \{\s*container-type:\s*inline-size/)
   })
 
+  // SUDARSHAN (v0.16.0 phone review H1): with Larger text and the kill switch chip the name read
+  // "सुद" at 360 px in Analyze mode. Measured in e2e/sd-dashboard.spec.ts; pinned here by what
+  // makes it hold.
+  it('keeps the app bar at its usual size under Larger text, and the name inside its room', () => {
+    renderNavbar('/dashboard')
+    const row = screen.getByTestId('navbar-row')
+    const classes = row.className.split(/\s+/)
+    // theme.css draws `sd-app-bar` at the usual size under Larger text (theme.test.ts).
+    expect(classes).toContain('sd-app-bar')
+    // Under 360 px the bar's edges give their padding to the name.
+    expect(classes).toEqual(expect.arrayContaining(['max-[359.98px]:pl-0', 'max-[359.98px]:pr-0']))
+
+    const css = readFileSync(join(process.cwd(), 'src/sudarshan/theme.css'), 'utf8')
+    // The Devanagari follows the room as the caps do: smaller, never cut.
+    const mark = /\.sd-lockup--bar \.sd-lockup__wordmark \{([^}]*)\}/.exec(css)?.[1] ?? ''
+    expect(mark).toMatch(/height:\s*min\(1\.875rem, 48cqw\)/)
+  })
+
   it('marks only the active route as current in desktop navigation', () => {
     renderNavbar('/positions')
 

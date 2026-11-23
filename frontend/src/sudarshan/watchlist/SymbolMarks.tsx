@@ -1,18 +1,22 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { Clock } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { showToast } from '@/utils/toast'
 import { FlagPicker } from './FlagPicker'
 import { NoteField } from './NoteField'
+import { dropNoteDraft, keepNoteDraft, noteDraft } from './noteDrafts'
 import { callOp } from './v2/api'
 import { checkNote, inLists, PRIVATE_WORDS, readAgain, useSymbolInfo } from './v2/marks'
 import type { FlagName, MarkReq } from './v2/types'
 
-/** Said once a note typed in the sheet was saved as the sheet closed (M8.6, GA10.8). */
+/** Said once a note typed in the sheet was saved after the sheet closed (M8.6, GA10.8). */
 export const NOTE_SAVED = 'Note saved'
-/** Said when it could not be: the reason follows, then what to do. */
-export const NOTE_NOT_SAVED = 'The note you typed was not saved.'
-const NOTE_TOO_LONG_LEFT = 'It is over 500 characters. Open the symbol and type a shorter one.'
+/** Said when it could not be: the reason follows, then what to do (v0.16.0 phone review L2). */
+export const NOTE_NOT_SAVED = 'Note not saved:'
+/** What to do then: the words are kept for the symbol's sheet (L2). */
+export const NOTE_KEPT = 'Open the symbol to save it again: what you typed is kept there.'
+const NOTE_TOO_LONG_LEFT =
+  'It is over 500 characters. Open the symbol to shorten it: what you typed is kept there.'
 
 /**
  * The symbol sheet's flag, note and "In lists" (M8.6 F8). Every write names the symbol's version
@@ -44,17 +48,32 @@ export function SymbolMarks({ k, names }: { k: string; names: readonly FlagName[
     return send(change)
   }
   // GA10.8: the sheet closed with a note typed and not saved. It is saved now, the owner's
-  // default, and said in one quiet line once it is; a refusal says why and what to do.
+  // default, and said in one quiet line once it is. L2: a note the server does not take after
+  // the sheet has gone, whether saved on closing or by a Save still on its way when Back came,
+  // is kept for the symbol's sheet, and the line says why and what to do.
+  const answeredAway = (note: string, said: string | null) => {
+    if (said === null) {
+      dropNoteDraft(k)
+      showToast.info(NOTE_SAVED, undefined, { duration: 2_000 })
+      return
+    }
+    keepNoteDraft(k, note)
+    showToast.error(`${NOTE_NOT_SAVED} ${said} ${NOTE_KEPT}`)
+  }
   const leave = (note: string) => {
     if (checkNote(note)) {
+      keepNoteDraft(k, note)
       showToast.error(`${NOTE_NOT_SAVED} ${NOTE_TOO_LONG_LEFT}`)
       return
     }
-    void send({ note }).then((said) => {
-      if (said) showToast.error(`${NOTE_NOT_SAVED} ${said} Open the symbol to type it again.`)
-      else showToast.info(NOTE_SAVED, undefined, { duration: 2_000 })
-    })
+    void send({ note }).then((said) => answeredAway(note, said))
   }
+  // A note kept from before is in the field from its first frame; the store lets it go then.
+  const draft = noteDraft(k)
+  const shown = !info.isPending && !info.isError && data !== undefined
+  useEffect(() => {
+    if (shown) dropNoteDraft(k)
+  }, [shown, k])
 
   if (info.isPending) {
     return <p className="text-sm font-medium text-muted-foreground">Reading flag and note.</p>
@@ -102,8 +121,10 @@ export function SymbolMarks({ k, names }: { k: string; names: readonly FlagName[
       )}
       <NoteField
         saved={data.note ?? ''}
+        draft={draft}
         onSave={(note) => write({ note: note || null })}
         onLeave={leave}
+        onAnsweredAway={answeredAway}
       />
       <p className="text-xs font-medium text-[color:var(--text-tertiary)]">{PRIVATE_WORDS}</p>
       <p className="text-[0.8125rem] font-medium">

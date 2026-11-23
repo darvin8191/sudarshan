@@ -9,22 +9,29 @@ import { LIMITS } from './v2/types'
  * is refused before anything is sent, in the server's words. `onSave` answers null when the note
  * was kept, or the sentence to show. A note typed and not saved when the field goes (the sheet
  * closed) is handed to `onLeave`, the owner's default (GA10.8); an empty or unchanged one is not,
- * nor one already being saved.
+ * nor one already being saved: that one's answer goes to `onAnsweredAway` when it comes, since
+ * the field is no longer there to show it (v0.16.0 phone review L2).
  */
 export function NoteField({
   saved,
+  draft,
   disabled,
   onSave,
   onLeave,
+  onAnsweredAway,
 }: {
   /** The note as the server holds it. */
   saved: string
+  /** A note typed before and not taken, shown in place of the saved one, ready to save (L2). */
+  draft?: string
   disabled?: boolean
   onSave: (note: string) => Promise<string | null>
   onLeave?: (note: string) => void
+  /** A Save on its way when the field went has come back: null when kept, else the refusal. */
+  onAnsweredAway?: (note: string, refused: string | null) => void
 }) {
   const id = useId()
-  const [text, setText] = useState(saved)
+  const [text, setText] = useState(draft ?? saved)
   const [held, setHeld] = useState(saved)
   const [busy, setBusy] = useState(false)
   const [problem, setProblem] = useState<string | null>(null)
@@ -42,16 +49,25 @@ export function NoteField({
   useEffect(() => {
     leaving.current = { text, saved, busy, disabled, onLeave }
   })
-  useEffect(
-    () => () => {
+  // Whether the field is still on screen when a Save comes back (L2).
+  const shown = useRef(true)
+  // The leave is acted on a moment later, and dropped if the field comes straight back: React's
+  // development check mounts it twice, and a kept note is unsaved from the first frame.
+  const leave = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => {
+    shown.current = true
+    if (leave.current !== null) clearTimeout(leave.current)
+    leave.current = null
+    return () => {
+      shown.current = false
       const last = leaving.current
       const note = last.text.trim()
-      if (!last.onLeave || last.busy || last.disabled) return
+      const handOver = last.onLeave
+      if (!handOver || last.busy || last.disabled) return
       if (note === '' || note === last.saved.trim()) return
-      last.onLeave(note)
-    },
-    []
-  )
+      leave.current = setTimeout(() => handOver(note), 0)
+    }
+  }, [])
 
   const save = async () => {
     const refused = checkNote(text)
@@ -60,9 +76,16 @@ export function NoteField({
       setProblem(refused)
       return
     }
+    const note = text.trim()
     setBusy(true)
     setProblem(null)
-    const answer = await onSave(text.trim())
+    const answer = await onSave(note)
+    // L2: the field went while this was on its way (Back). A refusal shown here would be shown
+    // to nobody and the words lost, so the answer goes where the owner is.
+    if (!shown.current) {
+      onAnsweredAway?.(note, answer)
+      return
+    }
     setBusy(false)
     if (answer) setProblem(answer)
     else setDone(true)

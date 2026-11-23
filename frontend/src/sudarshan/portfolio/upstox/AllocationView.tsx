@@ -41,11 +41,14 @@ function Bars({ by, rows, stale }: { by: BookBy; rows: readonly AllocationRow[];
             className="absolute inset-y-0 left-0 bg-[color:var(--brand-tint)]"
             style={{ width: `${Math.min(100, Math.max(0, pctOf(row)))}%` }}
           />
-          <span className="relative flex w-full items-center justify-between gap-3 px-3 py-2">
-            <span className="min-w-0 truncate text-sm font-semibold">{row.label}</span>
+          {/* v0.16.0 phone review L5: with Larger text at 320 px the label read "E..". The name
+              is never cut: where it and the figures do not fit on one line, the figures go under
+              it, and a long name wraps. */}
+          <span className="relative flex w-full flex-wrap items-center justify-between gap-x-3 gap-y-0.5 px-3 py-2">
+            <span className="min-w-0 text-sm font-semibold break-words">{row.label}</span>
             <span
               className={cn(
-                'flex shrink-0 flex-col items-end text-sm',
+                'ml-auto flex min-w-0 flex-col items-end text-right text-sm',
                 stale && 'text-muted-foreground'
               )}
             >

@@ -174,6 +174,11 @@ describe('Allocation', () => {
       'Equity75.00%₹15,000.00 · 1 holding',
       'Not classified25.00%₹5,000.00 · 1 holding',
     ])
+    // v0.16.0 phone review L5: a name is never cut ("E.." at 320 px with Larger text); where it
+    // and its figures do not fit on one line, the figures go under it.
+    const name = screen.getByText('Not classified')
+    expect(name).not.toHaveClass('truncate')
+    expect(name.parentElement).toHaveClass('flex-wrap')
     expect(screen.getByText('₹20,000.00')).toBeTruthy()
     expect(screen.getByText('Read 10:41:05')).toBeTruthy()
     expect(screen.getByText(unclassifiedWords(1))).toBeTruthy()

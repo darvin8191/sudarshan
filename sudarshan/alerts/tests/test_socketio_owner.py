@@ -59,6 +59,7 @@ import database.user_db as user_db
 from events.order_events import OrderPlacedEvent
 from extensions import socketio
 from subscribers import socketio_subscriber
+from sudarshan.tests.session_clock import login_moment
 from utils import session as session_utils
 from utils.event_bus import EventBus
 from utils.socketio_error_handler import init_socketio_error_handling
@@ -182,7 +183,7 @@ def world(monkeypatch):
     def browser(user: str | None = OWNER, *, expired: bool = False, half: bool = False):
         http = app.test_client()
         if user is not None:
-            now = datetime.now(IST)
+            now = login_moment()
             sign_in(http, user, now - timedelta(days=1) if expired else now, half=half)
         return http
 

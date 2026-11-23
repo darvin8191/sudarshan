@@ -402,6 +402,13 @@ describe('display density and text size', () => {
     )
   })
 
+  // v0.16.0 phone review H1: one size up, the app bar left its name no room.
+  it('draws the app bar at its usual size under Larger text', () => {
+    expect(css).toMatch(
+      /:root\[data-text='large'\] \.sd-app-bar \{\s*zoom:\s*calc\(1 \/ var\(--sd-text-scale\)\);\s*\}/
+    )
+  })
+
   it('changes no colour', () => {
     for (const selector of [":root[data-text='large']", ":root[data-density='compact']"]) {
       const escaped = selector.replace(/[[\]]/g, '\\$&')

@@ -16,6 +16,7 @@ import blueprints.sudarshan_system as bp_module
 from database import user_db
 from limiter import limiter
 from sudarshan.tests.fdwatch import FdWatch
+from sudarshan.tests.session_clock import login_stamp
 
 OWNER, VIEWER = "owner", "family-viewer"
 PASSWORD = "Fake-Pass-123!"  # pragma: allowlist secret
@@ -64,7 +65,7 @@ def login(client, username: str = OWNER) -> None:
     with client.session_transaction() as session:
         session["user"] = username
         session["logged_in"] = True
-        session["login_time"] = datetime.now(pytz.timezone("Asia/Kolkata")).isoformat()
+        session["login_time"] = login_stamp()
 
 
 def csrf(client) -> dict:
