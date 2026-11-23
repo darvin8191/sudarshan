@@ -7,9 +7,11 @@
  *   npx playwright test -c playwright.sd.config.ts e2e/sd-watchlist-figures.spec.ts
  *
  * Each screen asserts: no sideways scroll; every figure drawn is whole (its own width holds its
- * text and it sits inside its row and its block), never cut; how many a row draws (upright, two
- * with normal text and none with Larger text, where a 7rem name and the price leave no room, and
- * the line under the tabs says so; on its side, six); the rows stream in Quote mode only while a
+ * text and it sits inside its row and its block), never cut; every name whole beside its figures
+ * (v0.17.0 review M1: a BANKNIFTY strike read "BANKNIFTY 5850..." upright), a figure column being
+ * left out first; how many a row draws (upright, two where the whole name and the price leave room
+ * for them, with either text size, an option's longer name leaving fewer and the line under the
+ * tabs then saying "up to"; on its side, six); the rows stream in Quote mode only while a
  * figure they draw needs it; and a tick moves the figures it carries. The View sheet's chooser is
  * used on the phone upright: picks saved one by one with their figures, the seventh refused in its
  * words, every row at least 48 x 48 CSS px.
@@ -41,7 +43,11 @@ const ROWS = [
   { symbol: 'HDFCBANK', exchange: 'NSE', ltp: 1718.3, prev: 1725.65, high: 1729.9, low: 1711.05, open: 1724, volume: 9_650_201, oi: 0 },
   { symbol: 'NIFTY 50', exchange: 'NSE_INDEX', ltp: 25912.35, prev: 25803.9, high: 25950.1, low: 25790.45, open: 25810, volume: 0, oi: 0 },
   { symbol: 'NIFTY24NOV2625900CE', exchange: 'NFO', ltp: 133.5, prev: 120.4, high: 151.2, low: 101.75, open: 118, volume: 81_23_450, oi: 1_23_45_600 },
+  // Review M1: an index option whose name is longer than a 7rem floor, priced in four digits.
+  { symbol: 'BANKNIFTY30DEC2658500PE', exchange: 'NFO', ltp: 1048.25, prev: 1002.6, high: 1112.4, low: 962.15, open: 1006, volume: 8_14_220, oi: 19_87_300 },
 ]
+/** M1: the row whose name may leave no room for a figure column upright. */
+const LONG = 'BANKNIFTY 58500 PE'
 
 /** TD1: expired on 3 Nov 2026; the server's master no longer lists it. */
 const EXPIRED = { symbol: 'NIFTY03NOV2622700PE', exchange: 'NFO', ltp: 0, prev: 0, high: 0, low: 0, open: 0, volume: 0, oi: 0 }
@@ -284,8 +290,11 @@ async function figureChecks(page: Page) {
           )
         })
         .map((cell) => cell.dataset.figure)
+      // M1: the name, as wide as its words, beside the figures.
+      const title = button.querySelector<HTMLElement>('span[title]')
       return {
-        name: (button.textContent ?? '').slice(0, 12),
+        name: (title?.textContent ?? button.textContent ?? '').trim(),
+        nameCut: !title || title.scrollWidth > title.clientWidth,
         shown: shown.map((cell) => cell.dataset.figure),
         cut,
         sizes: {
@@ -301,7 +310,7 @@ async function figureChecks(page: Page) {
 }
 
 for (const screen of [
-  { label: 'upright', viewport: { width: 360, height: 800 }, shown: { normal: 2, large: 0 } },
+  { label: 'upright', viewport: { width: 360, height: 800 }, shown: { normal: 2, large: 2 } },
   { label: 'on its side', viewport: { width: 800, height: 360 }, shown: { normal: 6, large: 6 } },
 ]) {
   for (const text of ['normal', 'large'] as const) {
@@ -322,18 +331,19 @@ for (const screen of [
         expect(checks.rows).toHaveLength(ROWS.length)
         for (const row of checks.rows) {
           expect(row.cut, `${row.name}: a figure cut`).toEqual([])
-          expect(row.shown, `${row.name}: figures shown`).toEqual(SIX.slice(0, shown))
+          expect(row.nameCut, `${row.name}: the name is cut`).toBe(false)
+          if (/ (CE|PE)$/.test(row.name)) {
+            // M1: an option's longer name: as many columns as the whole name leaves room for.
+            expect(row.shown.length % 2, `${row.name}: a column split`).toBe(0)
+            expect(row.shown, `${row.name}: figures shown`).toEqual(SIX.slice(0, row.shown.length))
+            expect(row.shown.length).toBeLessThanOrEqual(shown)
+          } else expect(row.shown, `${row.name}: figures shown`).toEqual(SIX.slice(0, shown))
         }
+        const uneven = checks.rows.some((row) => row.shown.length < shown)
+        // Upright, BANKNIFTY's whole name and its price leave no room for a column (measured).
+        if (screen.label === 'upright')
+          expect(checks.rows.find((row) => row.name === LONG)?.shown).toEqual([])
         await expect(page.locator('main')).not.toContainText(/Real-time/)
-        if (shown === 0) {
-          // Nothing drawn: the line says so, and no row streams in Quote mode for figures not shown.
-          await expect(
-            page.getByText('Figures: 0 of 6 shown here; turn the phone on its side for the rest.')
-          ).toBeVisible()
-          await expect.poll(() => feed.subscribed.size).toBe(ROWS.length)
-          expect(new Set(feed.subscribed.values())).toEqual(new Set(['LTP']))
-          return
-        }
         // The rows stream in Quote mode while a figure they draw needs it (T1).
         await expect
           .poll(() => [...feed.subscribed.values()].filter((mode) => mode === 'Quote').length)
@@ -345,7 +355,9 @@ for (const screen of [
         ).toContainText('1,563.50')
         if (shown < SIX.length)
           await expect(
-            page.getByText('Figures: 2 of 6 shown here; turn the phone on its side for the rest.')
+            page.getByText(
+              `Figures: ${uneven ? 'up to ' : ''}2 of 6 shown here; turn the phone on its side for the rest.`
+            )
           ).toBeVisible()
         await page.screenshot({
           path: info.outputPath(`watchlist-figures-${screen.viewport.width}-${text}.png`),

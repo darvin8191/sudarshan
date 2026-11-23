@@ -64,8 +64,10 @@ export function drawnColumns(list: HTMLElement | null): Drawn | null {
 
 /**
  * A row's figures, in columns of two (the first over the second), between the name and the price.
- * A column that does not fit whole wraps below the first line, which is all that is drawn, so a
- * number is never cut (the zero-width first item lets even the first column go). Label in ink-3,
+ * They take only the room the whole name and the price leave (`flex-1` from nothing, beside a name
+ * that keeps its width: review M1), so a figure never cuts the name. A column that does not fit
+ * whole wraps below the first line, which is all that is drawn, so a number is never cut either
+ * (the zero-width first item lets even the first column go). Label in ink-3,
  * value in ink, no colour; grey with the row when it is stale or not followed. A figure that does
  * not apply to the row is blank, and said so to a screen reader.
  */
@@ -76,7 +78,7 @@ export function FigureCells({ cells, grey }: { cells: readonly FigureCell[]; gre
   return (
     <span
       data-figures="true"
-      className="relative -ml-3 flex h-8 min-w-0 shrink flex-wrap content-start justify-end overflow-hidden"
+      className="relative -ml-3 flex h-8 min-w-0 flex-1 flex-wrap content-start justify-end overflow-hidden"
     >
       {/* As tall as a column, so a column that wraps lands below the first line, out of sight. */}
       <span aria-hidden="true" className="h-8 w-0 shrink-0" />

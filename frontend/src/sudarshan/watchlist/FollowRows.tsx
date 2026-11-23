@@ -75,10 +75,11 @@ export function FollowRowItem({
         className="flex min-h-14 w-full flex-col justify-center gap-1 px-4 py-2 text-left outline-none active:bg-accent focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
       >
         <span className="flex w-full items-center gap-3">
+          {/* M1: with figures the name keeps its whole width and they take what is left. */}
           <span
             className={cn(
-              'flex flex-1 flex-col gap-0.5',
-              cells.length > 0 ? 'min-w-[7rem]' : 'min-w-0'
+              'flex min-w-0 flex-col gap-0.5',
+              cells.length > 0 ? 'flex-initial' : 'flex-1'
             )}
           >
             <span className="flex min-w-0 items-center gap-2">

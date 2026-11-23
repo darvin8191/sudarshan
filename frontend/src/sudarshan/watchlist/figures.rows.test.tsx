@@ -201,6 +201,29 @@ describe('the figures in the rows (M8.3)', () => {
     )
   })
 
+  // v0.17.0 review M1: at a 7rem floor "BANKNIFTY 58500 PE" was cut to "BANKNIFTY 5850..." beside
+  // the figures. jsdom lays nothing out, so what keeps the name whole is pinned here; the phone spec
+  // (e2e/sd-watchlist-figures) measures it upright and on its side.
+  it('keeps the name its whole width and gives the figures only what is left', async () => {
+    mount({ cols: ['high', 'low'] })
+    await settle()
+    const name = row('INFY').querySelector('span[title="INFY"]')?.parentElement?.parentElement
+    expect(name?.className.split(/\s+/)).toEqual(
+      expect.arrayContaining(['flex-initial', 'min-w-0'])
+    )
+    expect(name?.className).not.toMatch(/min-w-\[|flex-1/)
+    expect(row('INFY').querySelector('[data-figures]')?.className.split(/\s+/)).toEqual(
+      expect.arrayContaining(['flex-1', 'min-w-0', 'flex-wrap', 'overflow-hidden'])
+    )
+    // Without figures the name takes the room, as before.
+    mount({ cols: [] })
+    await settle()
+    const bare = screen.getAllByRole('button', { name: /^INFY/ }).at(-1) as HTMLElement
+    expect(
+      bare.querySelector('span[title="INFY"]')?.parentElement?.parentElement?.className
+    ).toMatch(/\bflex-1\b/)
+  })
+
   it('moves tick by tick and says each figure to a screen reader', async () => {
     mount({ cols: ['high', 'volume'] })
     await settle()

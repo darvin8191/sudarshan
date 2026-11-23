@@ -91,12 +91,17 @@ function Name({
   /** F7: the quantity held and the net position, on the second line. */
   holding?: number
   position?: number
-  /** M8.3 GA6.2: figures sit beside it, so it keeps at least 7rem and they give way first (7rem, not 7.5: a five-digit index price and two figures then fit a phone upright). */
+  /**
+   * M8.3 GA6.2: figures sit beside it. v0.17.0 review M1: it keeps its whole width (`flex-initial`)
+   * and the figures take only what is left (`FigureCells` grows from nothing), so a figure column is
+   * drawn only while the name stays whole ("BANKNIFTY 58500 PE" was cut to "BANKNIFTY 5850..." at a
+   * 7rem floor); only a name that cannot fit beside the price at all is cut, with no figure shown.
+   */
   roomy?: boolean
 }) {
   const named = describe(symbol, exchange)
   return (
-    <span className={cn('flex flex-1 flex-col gap-0.5', roomy ? 'min-w-[7rem]' : 'min-w-0')}>
+    <span className={cn('flex min-w-0 flex-col gap-0.5', roomy ? 'flex-initial' : 'flex-1')}>
       <span className="flex min-w-0 items-center gap-2">
         {mark?.flag != null && <MarkGlyph mark={mark.flag} /> /* F8 */}
         <span className="truncate text-[0.9375rem] leading-tight font-semibold" title={symbol}>
