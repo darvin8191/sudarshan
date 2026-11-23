@@ -17,6 +17,7 @@ from flask import Flask
 import blueprints.auth as auth_module
 import database.auth_db as auth_db
 from limiter import limiter
+from sudarshan.tests.session_clock import login_stamp
 
 OWNER = "owner"
 
@@ -38,7 +39,7 @@ def browser(app, who: str):
             session["user"] = OWNER
             if who == "logged in":
                 session["logged_in"] = True
-                session["login_time"] = datetime.now(pytz.timezone("Asia/Kolkata")).isoformat()
+                session["login_time"] = login_stamp()
     return client
 
 

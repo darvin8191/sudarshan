@@ -19,6 +19,7 @@ from flask import request, session  # noqa: E402
 from signals_bridge_app import OWNER, make_app, reset_users  # noqa: E402
 
 from extensions import socketio  # noqa: E402
+from sudarshan.tests.session_clock import login_stamp
 from utils.socketio_error_handler import init_socketio_error_handling  # noqa: E402
 
 reset_users()
@@ -32,5 +33,5 @@ def login_for_tests():
     session.clear()
     session["user"] = request.args.get("user", OWNER)
     session["logged_in"] = True
-    session["login_time"] = datetime.now(pytz.timezone("Asia/Kolkata")).isoformat()
+    session["login_time"] = login_stamp()
     return {"status": "success"}

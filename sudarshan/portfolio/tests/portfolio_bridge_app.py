@@ -21,6 +21,7 @@ from database import user_db
 from limiter import limiter
 from sudarshan.portfolio.api import PortfolioApi
 from sudarshan.portfolio.core import kinds
+from sudarshan.tests.session_clock import login_moment
 from sudarshan.vault import PORTFOLIO_API_INFO, PORTFOLIO_FAMILY_API_INFO, fernet_for
 
 OWNER = "owner"
@@ -65,7 +66,7 @@ def reset_users() -> None:
 
 
 def login_session(client, username: str = OWNER) -> None:
-    now_ist = datetime.now(pytz.timezone("Asia/Kolkata"))
+    now_ist = login_moment()
     with client.session_transaction() as session:
         session["user"] = username
         session["logged_in"] = True

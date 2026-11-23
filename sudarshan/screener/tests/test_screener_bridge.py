@@ -29,6 +29,7 @@ from database import watchlist_db
 from sudarshan.autologin.handoff import seal
 from sudarshan.screener import contract
 from sudarshan.screener.ops import ApiError
+from sudarshan.tests.session_clock import login_stamp
 from sudarshan.vault import SCREENER_API_INFO, SCREENER_INTERNAL_INFO, fernet_for
 from utils.thread_safe_cache import LockedTTLCache
 
@@ -460,7 +461,7 @@ def test_the_join_handler_admits_the_owner_only(bridge, monkeypatch):
         from flask import session
 
         session["user"], session["logged_in"] = VIEWER, True
-        session["login_time"] = datetime.now(pytz.timezone("Asia/Kolkata")).isoformat()
+        session["login_time"] = login_stamp()
         assert bp_module._join_owner_room()["ok"] is False
         session["user"] = OWNER
         assert bp_module._join_owner_room()["ok"] is True and joined == [bp_module.ROOM]

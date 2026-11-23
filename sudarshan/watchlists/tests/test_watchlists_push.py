@@ -17,6 +17,7 @@ from watchlists_bridge_app import (
 )
 
 import blueprints.sudarshan_watchlists as bp_module
+from sudarshan.tests.session_clock import login_stamp
 from sudarshan.watchlists import contract, engine, ops, schema, versions
 from sudarshan.watchlists.bridge import push
 from sudarshan.watchlists.ops import state as state_ops
@@ -593,7 +594,7 @@ def join_as(app, monkeypatch, who):
 
         import pytz
 
-        session["login_time"] = datetime.now(pytz.timezone("Asia/Kolkata")).isoformat()
+        session["login_time"] = login_stamp()
         return push.join_owner_room({}), joined
 
 
