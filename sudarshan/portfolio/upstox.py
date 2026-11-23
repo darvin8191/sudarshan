@@ -685,7 +685,12 @@ class UpstoxReader:
             del token, headers
         now = self.clock()
         status = answer.status_code
-        if name in JUDGES and status in (200, 401):
+        # V3: a 200 that lands after a refusal of the same token file was sent before it (the
+        # tab reads holdings and positions at once), so it never replaces "failed"; a holdings
+        # read asked again (``retry``) is newer than the refusal and does.
+        refused_now = self._confirmed_at is not None and self._confirmed_at == sig
+        late = status == 200 and not retry and refused_now
+        if name in JUDGES and status in (200, 401) and not late:
             self._verdict("ok" if status == 200 else "failed", now, sig)
         if retry and status == 200:
             self._recover()

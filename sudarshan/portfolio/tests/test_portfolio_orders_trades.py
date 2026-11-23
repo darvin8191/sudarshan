@@ -10,7 +10,7 @@ import logging
 from datetime import datetime
 
 import pytest
-from portfolio_fakes import DAY_TRADES, ORDERS, FakeUpstox
+from portfolio_fakes import DAY_TRADES, HOLDINGS, ORDERS, FakeUpstox
 
 from sudarshan.autologin.schedule import IST
 from sudarshan.portfolio import probe
@@ -524,6 +524,54 @@ def test_a_dead_token_another_read_saw_first_is_failed_at_the_next_holdings_read
     asked, again = run(go())
     assert asked == fake.count() == 2  # once refused itself, holdings and positions pause too
     assert again["positions"]["note"] == up.WORDS["token_refused"]
+    assert _checked(service, token_file) == {"state": "failed", "at": ist(11) // 1000}
+
+
+@pytest.mark.parametrize("refused_first", [True, False], ids=["401 lands first", "200 first"])
+def test_holdings_answered_and_positions_refused_in_one_batch_leave_the_line_failing(
+    token_file, tmp_path, refused_first
+):
+    """v0.17.0 verification V3: the tab reads both at once and the token is ended between the
+    two requests. Whichever answer lands last, an "ok" never replaces the "failed" of the same
+    token file: the line fails while the tab says the token was not accepted."""
+    import httpx
+
+    clock = Clock(ist(11))
+    order: list[str] = []
+    landed = {"holdings": asyncio.Event(), "positions": asyncio.Event()}
+
+    async def answer(request):
+        part = "holdings" if request.url.path.endswith("long-term-holdings") else "positions"
+        other = landed["positions" if part == "holdings" else "holdings"]
+        if (part == "holdings") == refused_first:
+            await other.wait()  # this one is answered after the other has been taken
+        order.append(part)
+        if part == "holdings":
+            return httpx.Response(200, json=HOLDINGS)
+        return httpx.Response(401, json={"status": "error", "errors": []})
+
+    async def go():
+        client = httpx.AsyncClient(transport=httpx.MockTransport(answer))
+        reader = UpstoxReader(token_file, "http://upstox.test", clock=clock, client=client,
+                              budget=Budget(clock=lambda: clock.mono))  # fmt: skip
+        service = ProbeService(tmp_path, reader, clock)
+        told = reader.on_verdict
+
+        def heard(state, at, sig):
+            told(state, at, sig)
+            landed["holdings" if state == "ok" else "positions"].set()
+
+        reader.on_verdict = heard
+        try:
+            book = await reader.book(["holdings", "positions"], 0)
+        finally:
+            await client.aclose()
+        return service, book
+
+    service, book = run(go())
+    assert order == (["positions", "holdings"] if refused_first else ["holdings", "positions"])
+    assert book["holdings"]["state"] == "ok"  # what Upstox did answer is shown
+    assert book["positions"]["note"] == up.WORDS["token_refused"]
     assert _checked(service, token_file) == {"state": "failed", "at": ist(11) // 1000}
 
 

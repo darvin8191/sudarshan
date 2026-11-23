@@ -383,7 +383,9 @@ two exists in this release. Each purpose has its own principal and its own list 
   `changed` when the token file is not the one that was read with. It is judged only from the
   reads the token is known to make, holdings and positions (`upstox.JUDGES`): `failed` when
   Upstox refused one of them (401), `ok` when it answered one. The Upstox tab, the family view and
-  the closing record after each trading day read them anyway, so no call is made for it. Kept in
+  the closing record after each trading day read them anyway, so no call is made for it. An `ok`
+  that lands after a `failed` of the same token file (the tab reads both at once) does not
+  replace it; only a holdings read asked again does (v0.17.0 verification V3). Kept in
   `token-check` in the state folder. Never the token: the server's watch and the System page read
   this field.
 * **Which reads a 401 pauses** (v0.17.0 verification V1) follows the read, until the token file
