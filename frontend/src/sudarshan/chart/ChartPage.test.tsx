@@ -1275,7 +1275,7 @@ describe('an expired contract (TD2)', () => {
     renderAt(`/chart/NFO/${EXPIRED}`)
     expect(await screen.findByRole('heading', { name: 'Expired on 17 Nov 2026' })).toBeVisible()
     expect(gone()).toHaveTextContent(
-      'NIFTY17NOV2625000CE expired on 17 Nov 2026. An expired contract has no prices and takes no orders, so there is nothing to chart.'
+      'NIFTY17NOV2625000CE has expired. An expired contract has no prices and takes no orders, so there is nothing to chart.'
     )
     await within(gone()).findByRole('button', { name: /NIFTY 24 NOV 25000 CE/ })
     expect(fakes.charts).toHaveLength(0)
@@ -1406,7 +1406,19 @@ describe('an expired contract (TD2)', () => {
     ).toBeVisible()
   })
 
+  /** Noon in India today, the clock running on from there: no test about today straddles midnight. */
+  function middayInIndia(): string {
+    const day = new Date(Date.now() + 19_800_000).toISOString().slice(0, 10)
+    vi.useFakeTimers({ toFake: ['Date'], shouldAdvanceTime: true })
+    vi.setSystemTime(Date.parse(`${day}T06:30:00Z`))
+    return day
+  }
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
   it('a contract on its expiry day is still charted', async () => {
+    middayInIndia()
     const today = niftyIn(0, '25000CE')
     fakes.instrument = { name: 'NIFTY 25000 CE', lotSize: 65, tickSize: 0.05 }
     await opened(`/chart/NFO/${today}`)
@@ -1416,6 +1428,18 @@ describe('an expired contract (TD2)', () => {
         JSON.stringify({ symbol: today, exchange: 'NFO' })
       )
     )
+  })
+
+  it('on its expiry day, once the master no longer lists it, it has expired that day (as a list says)', async () => {
+    const day = middayInIndia()
+    const today = niftyIn(0, '25000CE')
+    fakes.instrument = 'unlisted'
+    renderAt(`/chart/NFO/${today}`)
+    const [year, month, date] = day.split('-').map(Number)
+    const said = `Expired on ${date} ${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][month - 1]} ${year}`
+    expect(await screen.findByRole('heading', { name: said })).toBeVisible()
+    await waitFor(() => expect(fakes.charts.at(-1)?.destroy).toHaveBeenCalled())
+    expect(screen.queryByRole('button', { name: /Try again/ })).toBeNull()
   })
 })
 

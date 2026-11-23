@@ -348,10 +348,14 @@ const ChartScreen = memo(function ChartScreen({
   const [drawing, setDrawing] = useState(false)
   /** Asks for a placed note's words, as the page is now. */
   const askNote = useRef<(id: string) => void>(() => {})
-  // SUDARSHAN TD2: a contract whose expiry day has passed (from its symbol), or one the master
-  // does not list, has nothing to chart: no chart is built and the page says which.
-  const endedOn = useMemo(() => expiredOn(symbol, exchange), [symbol, exchange])
+  // SUDARSHAN TD2: a contract whose expiry day has passed (from its symbol, by the watchlist's
+  // rule), or one the master does not list, has nothing to chart: no chart is built and the page
+  // says which. Unlisted on its own expiry day, it has expired that day, as a list says too.
   const [unlisted, setUnlisted] = useState(false)
+  const endedOn = useMemo(
+    () => expiredOn(symbol, exchange, Date.now(), unlisted),
+    [symbol, exchange, unlisted]
+  )
   const gone = endedOn !== null || unlisted
 
   // What a bare /chart opens next: a share or an index at once, a contract once the master has

@@ -1,25 +1,23 @@
 /**
  * An expired contract on the phone chart (test day TD2, M4.15). OpenAlgo writes a future's or an
  * option's expiry in its symbol (NIFTY17NOV2625000CE), so from the next day in India it has no
- * prices, no bars and takes no orders, and trying again changes nothing. Pure.
+ * prices, no bars and takes no orders, and trying again changes nothing. The symbol is read by the
+ * watchlist's own parser (`watchlist/rows.ts`, TD1), so a list and the chart call the same
+ * contract expired on the same day. Pure.
  */
 import { istDay } from '@/sudarshan/dashboard/live'
+import {
+  contractDay,
+  contractParts,
+  isDerivative,
+  expiredOn as rowExpiredOn,
+} from '@/sudarshan/watchlist/rows'
 
-const DERIVATIVE_EXCHANGES = new Set(['NFO', 'BFO', 'MCX', 'CDS', 'BCD', 'NCDEX', 'NCO'])
-const MONTHS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']
-/** Base, expiry DDMMMYY, then FUT or a strike and CE/PE. */
-const CONTRACT = new RegExp(
-  `^(.+?)(\\d{2})(${MONTHS.join('|')})(\\d{2})(?:FUT|(\\d+(?:\\.\\d+)?)(CE|PE))$`
-)
+export { isDerivative }
+
 /** Index underlyings, charted on their index exchange; any other base is a share. */
 const INDICES = new Set(['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'NIFTYNXT50'])
 const BSE_INDICES = new Set(['SENSEX', 'BANKEX', 'SENSEX50'])
-const DAY_WORDS = new Intl.DateTimeFormat('en-IN', {
-  timeZone: 'UTC',
-  day: 'numeric',
-  month: 'short',
-  year: 'numeric',
-})
 
 export interface Contract {
   /** NIFTY, RELIANCE, CRUDEOILM. */
@@ -36,28 +34,24 @@ export interface Instrument {
   exchange: string
 }
 
-export function isDerivative(exchange: string): boolean {
-  return DERIVATIVE_EXCHANGES.has(exchange.toUpperCase())
-}
-
 /** A future or an option read from its symbol; null for anything else. */
 export function contractOf(symbol: string, exchange: string): Contract | null {
-  const found = isDerivative(exchange) ? CONTRACT.exec(symbol.toUpperCase()) : null
-  if (!found) return null
-  const [, base, day, month, year, strike, right] = found
-  const expiry = `20${year}-${String(MONTHS.indexOf(month) + 1).padStart(2, '0')}-${day}`
-  return strike ? { base, expiry, strike, right: right as 'CE' | 'PE' } : { base, expiry }
+  const parts = contractParts(symbol, exchange)
+  const expiry = contractDay(symbol, exchange)
+  return parts && expiry ? { ...parts, expiry } : null
 }
 
-/** The day a contract expired, YYYY-MM-DD, once it is over in India; null while it trades. */
-export function expiredOn(symbol: string, exchange: string, now = Date.now()): string | null {
-  const contract = contractOf(symbol, exchange)
-  return contract && contract.expiry < istDay(now) ? contract.expiry : null
-}
-
-/** "17 Nov 2026". */
-export function dayWords(day: string): string {
-  return DAY_WORDS.format(Date.parse(`${day}T12:00:00Z`))
+/**
+ * The day a contract expired, YYYY-MM-DD, once it is over in India, or on the day itself once the
+ * master no longer lists it (`gone`); null while it trades. The watchlist's rule (`rows.expiredOn`).
+ */
+export function expiredOn(
+  symbol: string,
+  exchange: string,
+  now = Date.now(),
+  gone = false
+): string | null {
+  return rowExpiredOn(symbol, exchange, istDay(now), gone)
 }
 
 /** An index on its index exchange, a share on its cash one; null where it is a future (MCX). */
@@ -70,10 +64,14 @@ export function underlyingOf(contract: Contract, exchange: string): Instrument |
   return null
 }
 
-/** The same contract on an expiry as the master's list writes it ("24-NOV-26"), or null. */
-export function onExpiry(contract: Contract, expiry: string): string | null {
+/**
+ * The same contract on an expiry as the master's list writes it ("24-NOV-26"), or null; the symbol
+ * built is read back by the same parser, so only a real contract symbol comes out.
+ */
+export function onExpiry(contract: Contract, expiry: string, exchange: string): string | null {
   const found = /^(\d{2})-([A-Z]{3})-(?:20)?(\d{2})$/.exec(expiry.trim().toUpperCase())
-  if (!found || !MONTHS.includes(found[2])) return null
+  if (!found) return null
   const tail = contract.strike ? `${contract.strike}${contract.right}` : 'FUT'
-  return `${contract.base}${found[1]}${found[2]}${found[3]}${tail}`
+  const symbol = `${contract.base}${found[1]}${found[2]}${found[3]}${tail}`
+  return contractDay(symbol, exchange) ? symbol : null
 }

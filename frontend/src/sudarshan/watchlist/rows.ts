@@ -252,6 +252,22 @@ export function expiredWords(day: string): string {
   return `Expired on ${date} ${name.charAt(0)}${name.slice(1).toLowerCase()} ${year}`
 }
 
+/** Whether an exchange's symbols carry an expiry (M4.15 TD2: the phone chart asks too). */
+export function isDerivative(exchange: string): boolean {
+  return DERIVATIVE_EXCHANGES.has(exchange.toUpperCase())
+}
+
+/** M4.15 TD2: a dated contract's base, and an option's strike and side; null for anything else. */
+export function contractParts(
+  symbol: string,
+  exchange: string
+): { base: string; strike?: string; right?: 'CE' | 'PE' } | null {
+  const parsed = isDerivative(exchange) ? CONTRACT.exec(symbol) : null
+  if (!parsed) return null
+  const [, base, , , , future, strike, right] = parsed
+  return future ? { base } : { base, strike, right: right as 'CE' | 'PE' }
+}
+
 /** Where an instrument's options trade, for the option chain. */
 const CHAIN_EXCHANGE: Record<string, string> = {
   NSE: 'NFO',

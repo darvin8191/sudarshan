@@ -1,15 +1,8 @@
 import { CalendarX2, ChevronRight } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import { spokenContract } from '@/sudarshan/watchlist/rows'
+import { expiredWords, spokenContract } from '@/sudarshan/watchlist/rows'
 import { loadExpiries, loadInstrument } from './api'
-import {
-  type Contract,
-  contractOf,
-  dayWords,
-  type Instrument,
-  onExpiry,
-  underlyingOf,
-} from './expired'
+import { type Contract, contractOf, type Instrument, onExpiry, underlyingOf } from './expired'
 
 /** Found, not listed, or not read. */
 type Found = Instrument | 'none' | null
@@ -19,7 +12,7 @@ async function nearest(apiKey: string, contract: Contract, exchange: string): Pr
   const kind = contract.strike ? 'options' : 'futures'
   const expiries = await loadExpiries(apiKey, contract.base, exchange, kind)
   if (expiries === null) return null
-  const symbol = expiries.length > 0 ? onExpiry(contract, expiries[0]) : null
+  const symbol = expiries.length > 0 ? onExpiry(contract, expiries[0], exchange) : null
   if (symbol === null) return 'none'
   const listed = await loadInstrument(apiKey, symbol, exchange)
   if (listed === null) return null
@@ -105,11 +98,11 @@ export function ExpiredNotice({
           aria-hidden="true"
           className="mt-0.5 size-5 shrink-0 text-[color:var(--warning-text)]"
         />
-        {endedOn ? `Expired on ${dayWords(endedOn)}` : "Not in today's contract list"}
+        {endedOn ? expiredWords(endedOn) : "Not in today's contract list"}
       </h2>
       <p className="text-muted-foreground">
         {endedOn
-          ? `${symbol} expired on ${dayWords(endedOn)}. An expired contract has no prices and takes no orders, so there is nothing to chart.`
+          ? `${symbol} has expired. An expired contract has no prices and takes no orders, so there is nothing to chart.`
           : `Today's contract list does not have ${symbol}, so it cannot be charted or traded. Check its expiry and strike.`}
       </p>
       {offers.length > 0 && (

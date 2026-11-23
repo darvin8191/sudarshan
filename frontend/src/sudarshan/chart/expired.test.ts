@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { contractOf, dayWords, expiredOn, isDerivative, onExpiry, underlyingOf } from './expired'
+import { contractOf, expiredOn, isDerivative, onExpiry, underlyingOf } from './expired'
 
 /** A moment in India on a day of November 2026. */
 const ist = (day: number, h: number, m = 0) => Date.UTC(2026, 10, day, h, m) - 19_800_000
@@ -33,6 +33,8 @@ describe('a contract read from its symbol (TD2)', () => {
     expect(contractOf('NIFTY', 'NSE_INDEX')).toBeNull()
     expect(contractOf('NIFTY17NOV2625000CE', 'NSE')).toBeNull()
     expect(contractOf('NIFTY17XYZ2625000CE', 'NFO')).toBeNull()
+    // The watchlist's parser checks the day is one: there is no 31 February.
+    expect(contractOf('NIFTY31FEB2725000CE', 'NFO')).toBeNull()
     expect(isDerivative('nfo')).toBe(true)
     expect(isDerivative('NSE_INDEX')).toBe(false)
   })
@@ -53,9 +55,9 @@ describe('when a contract has expired', () => {
     expect(expiredOn('SBIN', 'NSE', ist(23, 11, 38))).toBeNull()
   })
 
-  it('says the day as a trader reads it', () => {
-    expect(dayWords('2026-11-17')).toBe('17 Nov 2026')
-    expect(dayWords('2027-01-05')).toBe('5 Jan 2027')
+  it('on its expiry day, has expired once the master no longer lists it (the watchlist rule)', () => {
+    expect(expiredOn('NIFTY17NOV2625000CE', 'NFO', ist(17, 15, 45), true)).toBe('2026-11-17')
+    expect(expiredOn('NIFTY24NOV2625000CE', 'NFO', ist(23, 11, 38), true)).toBeNull()
   })
 })
 
@@ -80,11 +82,12 @@ describe('what trades in its place', () => {
     const future = contractOf('CRUDEOILM20NOV26FUT', 'MCX')
     const half = contractOf('VEDL25APR24292.5CE', 'NFO')
     if (!option || !future || !half) throw new Error('not read')
-    expect(onExpiry(option, '24-NOV-26')).toBe('NIFTY24NOV2625000CE')
-    expect(onExpiry(option, '01-dec-2026')).toBe('NIFTY01DEC2625000CE')
-    expect(onExpiry(future, '18-DEC-26')).toBe('CRUDEOILM18DEC26FUT')
-    expect(onExpiry(half, '30-MAY-24')).toBe('VEDL30MAY24292.5CE')
-    expect(onExpiry(option, '2026-11-24')).toBeNull()
-    expect(onExpiry(option, '24-ABC-26')).toBeNull()
+    expect(onExpiry(option, '24-NOV-26', 'NFO')).toBe('NIFTY24NOV2625000CE')
+    expect(onExpiry(option, '01-dec-2026', 'NFO')).toBe('NIFTY01DEC2625000CE')
+    expect(onExpiry(future, '18-DEC-26', 'MCX')).toBe('CRUDEOILM18DEC26FUT')
+    expect(onExpiry(half, '30-MAY-24', 'NFO')).toBe('VEDL30MAY24292.5CE')
+    expect(onExpiry(option, '2026-11-24', 'NFO')).toBeNull()
+    expect(onExpiry(option, '24-ABC-26', 'NFO')).toBeNull()
+    expect(onExpiry(option, '31-FEB-27', 'NFO')).toBeNull()
   })
 })
