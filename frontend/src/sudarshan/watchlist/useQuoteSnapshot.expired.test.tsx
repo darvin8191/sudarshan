@@ -119,7 +119,8 @@ describe('expired contracts in the quote snapshot (M8.2 TD1)', () => {
     act(() => view.result.current.resync(new Set(['NSE:NOSUCHCO']), 0))
     await settle()
     expect(view.result.current.status).toBe('error')
-    expect(onRefused).toHaveBeenCalledWith(['NSE:NOSUCHCO'])
+    // Review M2: such a refusal marks nothing gone.
+    expect(onRefused).not.toHaveBeenCalled()
     act(() => view.result.current.resync(new Set(['NSE:NOSUCHCO']), 0))
     await settle()
     expect(reads()).toEqual(['SBIN,NOSUCHCO', 'NOSUCHCO', 'NOSUCHCO'])
@@ -134,5 +135,119 @@ describe('expired contracts in the quote snapshot (M8.2 TD1)', () => {
     const { view } = mount([SBIN])
     await settle()
     expect(view.result.current.status).toBe('error')
+  })
+})
+
+/**
+ * v0.17.0 phone review M2: the morning login deletes the server's contract list and loads it
+ * again (`master_contract_db.py`), and in between the server refuses every call, as it does a
+ * call of expired contracts. 24 Nov 2026 is a NIFTY expiry; at 09:05 the list is not back yet.
+ */
+describe('a read while the contract list is being replaced (M2)', () => {
+  const MORNING = Date.parse('2026-11-24T09:05:00+05:30')
+  const KEY = 'NFO:NIFTY24NOV2625900CE'
+  const state = { listless: true }
+  /** The server during the download: it lists nothing, so every call is refused whole. */
+  async function downloading(key: string, asked: Instrument[]) {
+    if (!state.listless) return server(key, asked)
+    throw Object.assign(new Error('Request failed with status code 400'), {
+      response: {
+        status: 400,
+        data: {
+          status: 'error',
+          message: `Symbol '${asked[0].symbol}' not found for exchange '${asked[0].exchange}'.`,
+          invalid_symbols: asked.map((each) => ({ ...each, error: 'not found' })),
+        },
+      },
+    })
+  }
+  const mountListed = (instruments: Instrument[]) => {
+    const onListed = vi.fn()
+    const onRefused = vi.fn()
+    const view = renderHook(() =>
+      useQuoteSnapshot({
+        apiKey: 'key',
+        instruments,
+        connectionEpoch: 1,
+        marketOpen: false,
+        onRefused,
+        onListed,
+      })
+    )
+    return { view, onRefused, onListed }
+  }
+
+  beforeEach(() => {
+    vi.setSystemTime(MORNING)
+    state.listless = true
+    UNLISTED.delete(KEY) // today's contract trades all day once the list is back
+    getMultiQuotes.mockImplementation(downloading)
+  })
+  afterEach(() => {
+    UNLISTED.add(KEY)
+  })
+
+  it("takes a refusal naming a share with today's contract as a failed read, and reads both once the list is back (the review's probe)", async () => {
+    const { view, onRefused } = mountListed([SBIN, TODAY])
+    await settle()
+    expect(view.result.current.status).toBe('error')
+    expect(onRefused).not.toHaveBeenCalled()
+    state.listless = false
+    await pass(20_000)
+    act(() => view.result.current.retry())
+    await settle()
+    expect(reads()).toEqual(['SBIN,NIFTY24NOV2625900CE', 'SBIN,NIFTY24NOV2625900CE'])
+    expect(view.result.current.status).toBe('ready')
+    expect(view.result.current.quotes.get(KEY)?.quote.ltp).toBe(100)
+  })
+
+  it('asks a contract refused alone on its expiry day again when told, and lists it once it is quoted', async () => {
+    const { view, onRefused, onListed } = mountListed([TODAY])
+    await settle()
+    expect(onRefused).toHaveBeenCalledWith([KEY])
+    act(() => view.result.current.retry())
+    await settle()
+    expect(reads()).toHaveLength(1) // gone: no read asks for it
+    // Asked again while the list is still loading: refused again, still gone.
+    act(() => view.result.current.reask(new Set([KEY])))
+    await settle()
+    expect(reads()).toHaveLength(2)
+    expect(onListed).not.toHaveBeenCalled()
+    act(() => view.result.current.retry())
+    await settle()
+    expect(reads()).toHaveLength(2)
+    // The list is back: asked again, quoted, listed, and read like any other row from then on.
+    state.listless = false
+    act(() => view.result.current.reask(new Set([KEY])))
+    await settle()
+    expect(onListed).toHaveBeenCalledWith([KEY])
+    expect(view.result.current.quotes.get(KEY)?.quote.ltp).toBe(100)
+    await pass(1_000)
+    act(() => view.result.current.retry())
+    await settle()
+    expect(reads()).toEqual([
+      'NIFTY24NOV2625900CE',
+      'NIFTY24NOV2625900CE',
+      'NIFTY24NOV2625900CE',
+      'NIFTY24NOV2625900CE',
+    ])
+  })
+
+  it('keeps it gone when the read asking again fails another way, and asks only for what is refused', async () => {
+    const { view, onListed } = mountListed([SBIN, TODAY])
+    // SBIN is listed again first; then today's contract is asked alone and refused.
+    state.listless = false
+    UNLISTED.add(KEY)
+    await settle()
+    act(() => view.result.current.resync(new Set([KEY]), 0))
+    await settle()
+    getMultiQuotes.mockRejectedValueOnce(new Error('Network Error'))
+    act(() => view.result.current.reask(new Set([KEY, 'NSE:SBIN'])))
+    await settle()
+    expect(reads().slice(-1)).toEqual(['NIFTY24NOV2625900CE'])
+    expect(onListed).not.toHaveBeenCalled()
+    act(() => view.result.current.retry())
+    await settle()
+    expect(reads().slice(-1)).toEqual(['SBIN'])
   })
 })

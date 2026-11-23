@@ -17,7 +17,9 @@ import { type FollowRow, followPlan, instrumentOf, rowFollowed } from './follow'
 import {
   expiredOn,
   QUIET_RESYNC_MS,
+  REASK_MS,
   type RowView,
+  reaskable,
   rowStale,
   rowView,
   type Snapshot,
@@ -141,6 +143,17 @@ export function useLiveRows({
       setRefused((was) => (keys.every((key) => was.has(key)) ? was : new Set([...was, ...keys]))),
     []
   )
+  // Review M2: one asked again and found quoted after all was missing only while the contract list
+  // was being replaced: it is read and followed again.
+  const onListed = useCallback(
+    (keys: readonly string[]) =>
+      setRefused((was) =>
+        keys.some((key) => was.has(key))
+          ? new Set([...was].filter((key) => !keys.includes(key)))
+          : was
+      ),
+    []
+  )
   useEffect(() => {
     const inList = new Set(itemsKey.split(','))
     setRefused((was) =>
@@ -230,6 +243,7 @@ export function useLiveRows({
     connectionEpoch: feed.epoch,
     marketOpen: anyOpen(MAIN_EXCHANGES.map((exchange) => marketOpen(exchange))),
     onRefused, // TD1
+    onListed, // M2
   })
 
   // Whether each exchange is open, asked once a render rather than once a row.
@@ -314,6 +328,29 @@ export function useLiveRows({
     lastResync.current = now
     resync(new Set(quietKeys.split(',')), QUIET_FRESH_MS)
   }, [quietKeys, now, apiKey, resync])
+
+  // Review M2: a contract refused on its own expiry day looks the same as one refused while the
+  // morning login replaces the contract list, so it is asked again every two minutes until its
+  // exchange's session for the day is over (`reaskable`); the first ask comes two minutes after.
+  const reaskKeys = [...refused]
+    .filter((key) => {
+      const { symbol, exchange } = instrumentOf(key)
+      return reaskable(symbol, exchange, today, openOf(exchange), now)
+    })
+    .sort()
+    .join(',')
+  const lastReask = useRef<number | null>(null)
+  const reask = snapshot.reask
+  useEffect(() => {
+    if (reaskKeys === '' || apiKey === null) {
+      lastReask.current = null
+      return
+    }
+    if (lastReask.current === null) lastReask.current = now
+    if (now - lastReask.current < REASK_MS) return
+    lastReask.current = now
+    reask(new Set(reaskKeys.split(',')))
+  }, [reaskKeys, now, apiKey, reask])
 
   // F6: from today's open, a row whose open is not known gets one more read at its first tick
   // after the opening, once; the market opening resets it (the snapshot reads on that event itself).

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { tradingApi } from '@/api/trading'
 import { istDay, keyOf } from '@/sudarshan/dashboard/live'
-import { expiredOn, type Snapshot } from './rows'
+import { expiredOn, refusalVerdict, type Snapshot } from './rows'
 
 /** A quote read less than this long ago is not read again when a list opens or grows. */
 export const SNAPSHOT_FRESH_MS = 15_000
@@ -35,6 +35,11 @@ export interface QuoteSnapshot {
    * when any call failed. A sort on a list longer than the window ranks on that one instant.
    */
   readAll: () => Promise<ReadonlyMap<string, Snapshot> | null>
+  /**
+   * v0.17.0 review M2: ask these contracts again although the server refused them as no longer
+   * listed; one that comes back quoted is listed again (`onListed`), any other answer keeps it gone.
+   */
+  reask: (keys: ReadonlySet<string>) => void
 }
 
 /** A read waiting its turn: the youngest age asked for, per key or (null) for the whole list. */
@@ -45,7 +50,8 @@ interface Queued {
 
 /**
  * M8.2 TD1: the instruments a refused read names. The server answers 400 with `invalid_symbols` only
- * when its master lists none of the call's instruments; any other failure is null.
+ * when its master lists none of the call's instruments (also while the master is being replaced,
+ * review M2: `refusalVerdict`); any other failure is null.
  */
 function refusalOf(error: unknown): { refused: Instrument[] } | null {
   const answer = (error as { response?: { status?: number; data?: { invalid_symbols?: unknown } } })
@@ -91,7 +97,9 @@ function fold(queued: Queued | null, maxAgeMs: number, only: ReadonlySet<string>
  *
  * M8.2 TD1: an expired contract is never read (`expiredOn`: its day is behind
  * today, or the server refused it as no longer listed on that day), and a read
- * the server refuses only for expired contracts is not a failure.
+ * the server refuses only for expired contracts is not a failure. A refusal
+ * that also names a share, an index or a later contract is a failed read that
+ * marks nothing gone: the server's contract list was not there (review M2).
  */
 export function useQuoteSnapshot({
   apiKey,
@@ -99,6 +107,7 @@ export function useQuoteSnapshot({
   connectionEpoch,
   marketOpen,
   onRefused,
+  onListed,
 }: {
   apiKey: string | null
   instruments: Instrument[]
@@ -112,6 +121,8 @@ export function useQuoteSnapshot({
   marketOpen: boolean | null
   /** M8.2 TD1: told the instruments (EXCHANGE:SYMBOL) a read was refused for, as no longer listed. */
   onRefused?: (keys: readonly string[]) => void
+  /** Review M2: told the refused instruments a read asked again found quoted after all. */
+  onListed?: (keys: readonly string[]) => void
 }): QuoteSnapshot {
   const [quotes, setQuotes] = useState<ReadonlyMap<string, Snapshot>>(() => new Map())
   const [status, setStatus] = useState<SnapshotStatus>('idle')
@@ -129,6 +140,12 @@ export function useQuoteSnapshot({
   useEffect(() => {
     told.current = onRefused
   }, [onRefused])
+  /** Review M2: refused keys being asked again: read although refused, until a read answers them. */
+  const asking = useRef(new Set<string>())
+  const toldListed = useRef(onListed)
+  useEffect(() => {
+    toldListed.current = onListed
+  }, [onListed])
   /** F9: who is waiting for a full read, and how the last read ended (the quotes, or null for a failure). */
   const waiters = useRef<Array<(quotes: ReadonlyMap<string, Snapshot> | null) => void>>([])
   const outcome = useRef<ReadonlyMap<string, Snapshot> | null>(null)
@@ -167,7 +184,8 @@ export function useQuoteSnapshot({
       const due = active.current.filter(({ symbol, exchange }) => {
         const key = keyOf(symbol, exchange)
         if (only && !only.has(key)) return false
-        if (expiredOn(symbol, exchange, today, refused.current.has(key)) !== null) return false // TD1
+        const gone = refused.current.has(key) && !asking.current.has(key) // TD1, M2
+        if (expiredOn(symbol, exchange, today, gone) !== null) return false
         const held = store.current.get(key)
         return !held || at - held.at > maxAgeMs
       })
@@ -180,6 +198,7 @@ export function useQuoteSnapshot({
       busy.current = true
       setStatus((previous) => (previous === 'ready' ? previous : 'loading'))
       outcome.current = null
+      const dueKeys = due.map(({ symbol, exchange }) => keyOf(symbol, exchange))
       try {
         // F9: one call per 500 keys, all at once, so the whole list is read at one instant.
         const calls: Instrument[][] = []
@@ -194,25 +213,31 @@ export function useQuoteSnapshot({
         let failed = false
         let landed = false
         const named: string[] = []
+        const quoted = new Set<string>()
         for (const response of responses) {
           if (response && 'refused' in response) {
-            // TD1: no longer listed. Only an instrument that is not an expired contract fails the read.
-            for (const { symbol, exchange } of response.refused) {
-              named.push(keyOf(symbol, exchange))
-              if (expiredOn(symbol, exchange, today, true) === null) failed = true
-            }
+            // TD1, M2: no longer listed. Gone only when every instrument it names could have expired.
+            const verdict = refusalVerdict(response.refused, today)
+            if (verdict.failed) failed = true
+            named.push(...verdict.gone)
           } else if (response?.status === 'success' && Array.isArray(response.results)) {
             landed = true
             for (const result of response.results) {
               const key = keyOf(result.symbol, result.exchange)
               // A symbol the broker could not quote comes back with an error and
               // no data; one that left the list while the read was out is dropped.
-              if (result?.data && wanted.has(key)) next.set(key, { quote: result.data, at })
+              if (result?.data && wanted.has(key)) {
+                next.set(key, { quote: result.data, at })
+                quoted.add(key)
+              }
             }
           } else {
             failed = true
           }
         }
+        // M2: a refused contract asked again is listed again once it comes back quoted.
+        const listed = dueKeys.filter((key) => asking.current.has(key) && quoted.has(key))
+        for (const key of listed) refused.current.delete(key)
         if (landed) {
           store.current = next
           setQuotes(next)
@@ -221,11 +246,13 @@ export function useQuoteSnapshot({
           for (const key of named) refused.current.add(key)
           told.current?.(named)
         }
+        if (listed.length > 0) toldListed.current?.(listed)
         setStatus(failed ? 'error' : 'ready')
         outcome.current = failed ? null : next
       } catch {
         if (alive.current) setStatus('error')
       } finally {
+        for (const key of dueKeys) asking.current.delete(key) // M2: answered, one way or another
         busy.current = false
         const queued = again.current
         again.current = null
@@ -246,6 +273,7 @@ export function useQuoteSnapshot({
     active.current = instruments
     const wanted = new Set(instruments.map(({ symbol, exchange }) => keyOf(symbol, exchange)))
     for (const key of refused.current) if (!wanted.has(key)) refused.current.delete(key) // TD1
+    for (const key of asking.current) if (!wanted.has(key)) asking.current.delete(key) // M2
     if ([...store.current.keys()].some((key) => !wanted.has(key))) {
       store.current = new Map([...store.current].filter(([key]) => wanted.has(key)))
       setQuotes(store.current)
@@ -304,5 +332,14 @@ export function useQuoteSnapshot({
       }),
     [read]
   )
-  return { quotes, status, retry, resync, readAll }
+  const reask = useCallback(
+    (keys: ReadonlySet<string>) => {
+      const again = [...keys].filter((key) => refused.current.has(key))
+      if (again.length === 0) return
+      for (const key of again) asking.current.add(key)
+      void read(0, new Set(again))
+    },
+    [read]
+  )
+  return { quotes, status, retry, resync, readAll, reask }
 }

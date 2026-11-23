@@ -23,6 +23,7 @@ import {
   feedLine,
   type IndexView,
   indexView,
+  keyOf,
   STALE_MS,
 } from '@/sudarshan/dashboard/live'
 import type { Basis } from './v2/types'
@@ -243,6 +244,55 @@ export function expiredOn(
 ): string | null {
   const day = contractDay(symbol, exchange)
   return day !== null && (day < today || (gone && day <= today)) ? day : null
+}
+
+/**
+ * M8.2 (v0.17.0 review M2): what a quote read the server refused as "not listed" says. The server
+ * refuses a call only when its contract list has none of the call's instruments: true of a call of
+ * contracts that have expired, and of every call while the list is being replaced (the morning
+ * login deletes it, then loads it again). So, as the server's own view does (`view.py`: with the
+ * list absent no row is called expired), a refusal that also names an instrument that cannot have
+ * expired today (a share, an index, a later contract) says the list was not there: the read
+ * failed and nothing is gone. One that names only contracts on or past their day takes them as
+ * gone (EXCHANGE:SYMBOL).
+ */
+export function refusalVerdict(
+  refused: ReadonlyArray<{ symbol: string; exchange: string }>,
+  today: string
+): { failed: boolean; gone: string[] } {
+  const listless = refused.some(
+    ({ symbol, exchange }) => expiredOn(symbol, exchange, today, true) === null
+  )
+  if (listless) return { failed: true, gone: [] }
+  return { failed: false, gone: refused.map(({ symbol, exchange }) => keyOf(symbol, exchange)) }
+}
+
+/**
+ * M2: a contract refused on its own expiry day may only be missing while the contract list is
+ * being replaced, so it is asked again this long after, and no more often than this.
+ */
+export const REASK_MS = 120_000
+
+/** Noon in India, as milliseconds into the day there (UTC+5:30). */
+const IST_OFFSET_MS = 19_800_000
+const DAY_MS = 86_400_000
+const NOON_MS = 43_200_000
+
+/**
+ * M2: whether a contract taken as gone is asked again: only on its own expiry day (one whose day
+ * has passed has expired whatever the server says), and only until its exchange's session for the
+ * day is over, after which it has expired anyway. Every exchange opens in the morning, so a market
+ * known to be closed after noon in India has closed for the day; one not known yet is asked.
+ */
+export function reaskable(
+  symbol: string,
+  exchange: string,
+  today: string,
+  open: boolean | null,
+  now: number
+): boolean {
+  const afternoon = (now + IST_OFFSET_MS) % DAY_MS >= NOON_MS
+  return contractDay(symbol, exchange) === today && !(open === false && afternoon)
 }
 
 /** "Expired on 3 Nov 2026": what an expired row says where its price would be. */

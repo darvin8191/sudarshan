@@ -1571,10 +1571,51 @@ describe('an expired contract in a list (M8.2 TD1)', () => {
     expect(row).toHaveTextContent('Expired on 23 Nov 2026')
     expect(feed.live().some((key) => key.includes(DUE.symbol))).toBe(false)
     expect(screen.queryByText(/Prices could not be refreshed/)).toBeNull()
-    const asks = asked().filter((symbol) => symbol === DUE.symbol).length
+    // v0.17.0 review M2: refused on its own expiry day, it may only have been missing while the
+    // morning login replaced the contract list, so it is asked again two minutes after the
+    // refusal (about 60 s in) and every two minutes after that, never sooner; a reconnect does not
+    // ask for it, and while the server still refuses it, it stays expired.
+    const asks = () => asked().filter((symbol) => symbol === DUE.symbol).length
     act(() => feed.setState({ connectionEpoch: 2 }))
-    await pass(70_000)
-    expect(asked().filter((symbol) => symbol === DUE.symbol)).toHaveLength(asks)
+    await settle()
+    let seen = asks()
+    const times: number[] = []
+    for (let step = 0; step < 60; step += 1) {
+      await pass(5_000)
+      if (asks() > seen) times.push(Date.now())
+      seen = asks()
+    }
+    expect(times.length).toBeGreaterThanOrEqual(2)
+    for (let i = 1; i < times.length; i += 1) {
+      expect(times[i] - times[i - 1]).toBeGreaterThanOrEqual(120_000)
+      expect(times[i] - times[i - 1]).toBeLessThanOrEqual(125_000)
+    }
+    expect(row).toHaveTextContent('Expired on 23 Nov 2026')
+    expect(screen.queryByText(/Prices could not be refreshed/)).toBeNull()
+  })
+
+  it('reads a contract on its expiry day again once the contract list is back (review M2)', async () => {
+    const DUE = { id: 14, symbol: 'NIFTY23NOV2625900CE', exchange: 'NFO', position: 3 }
+    server.state.lists[0].items.push({ ...DUE })
+    unlisted.add(DUE.symbol)
+    renderPage()
+    const row = await screen.findByRole('button', { name: /^NIFTY 25900 CE/ })
+    await screen.findByText('812.40')
+    for (let i = 0; i < 4; i += 1) {
+      tick('SBIN', 'NSE', { ltp: 812 + i })
+      tick('NIFTY', 'NSE_INDEX', { ltp: 25_874 + i })
+      await pass(20_000)
+    }
+    // Refused while the list was being replaced: it reads expired for now.
+    expect(row).toHaveTextContent('Expired on 23 Nov 2026')
+    unlisted.delete(DUE.symbol)
+    for (let i = 0; i < 6; i += 1) {
+      tick('SBIN', 'NSE', { ltp: 812 + i })
+      tick('NIFTY', 'NSE_INDEX', { ltp: 25_874 + i })
+      await pass(20_000)
+    }
+    expect(row).not.toHaveTextContent('Expired')
+    expect(feed.live()).toContain(`NFO:${DUE.symbol}:LTP`)
   })
 
   it('opens a sheet that says so and asks before it removes the row', async () => {

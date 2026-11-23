@@ -1,0 +1,25 @@
+{
+  "about": "M8.2 (v0.17.0 phone review M2): what a quote read the server refused as not listed says, and when a contract taken as gone is asked again. The server refuses a call only when its contract list has none of the call's instruments, which is also true of every call while the morning login replaces that list. Typed by hand from the rule: a refusal that names anything that cannot have expired today (a share, an index, a later contract) is a failed read and marks nothing gone; one naming only contracts on or past their day takes them as gone. A gone contract is asked again only on its own expiry day, until its exchange's session is over (closed after noon in India). Nothing here is computed by the code under test.",
+  "refusals": [
+    { "name": "a share and a contract expiring today: the list was not there", "today": "2026-11-24", "refused": [{ "symbol": "SBIN", "exchange": "NSE" }, { "symbol": "NIFTY24NOV2625900CE", "exchange": "NFO" }], "failed": true, "gone": [] },
+    { "name": "an index and today's contract", "today": "2026-11-24", "refused": [{ "symbol": "NIFTY", "exchange": "NSE_INDEX" }, { "symbol": "NIFTY24NOV2625900CE", "exchange": "NFO" }], "failed": true, "gone": [] },
+    { "name": "a later contract and today's contract", "today": "2026-11-24", "refused": [{ "symbol": "NIFTY24NOV2625900CE", "exchange": "NFO" }, { "symbol": "NIFTY01DEC2625900CE", "exchange": "NFO" }], "failed": true, "gone": [] },
+    { "name": "a later future alone", "today": "2026-11-24", "refused": [{ "symbol": "BANKNIFTY29DEC26FUT", "exchange": "NFO" }], "failed": true, "gone": [] },
+    { "name": "a share alone: refused, the cause not known, nothing gone", "today": "2026-11-24", "refused": [{ "symbol": "NOSUCHCO", "exchange": "NSE" }], "failed": true, "gone": [] },
+    { "name": "a commodity option on its day and the month's future", "today": "2026-11-24", "refused": [{ "symbol": "CRUDEOIL24NOV266000CE", "exchange": "MCX" }, { "symbol": "CRUDEOIL18DEC26FUT", "exchange": "MCX" }], "failed": true, "gone": [] },
+    { "name": "only contracts expiring today: gone, and asked again later", "today": "2026-11-24", "refused": [{ "symbol": "NIFTY24NOV2625900CE", "exchange": "NFO" }, { "symbol": "NIFTY24NOV2625800PE", "exchange": "NFO" }], "failed": false, "gone": ["NFO:NIFTY24NOV2625900CE", "NFO:NIFTY24NOV2625800PE"] },
+    { "name": "a contract whose day has passed", "today": "2026-11-24", "refused": [{ "symbol": "NIFTY17NOV2625000CE", "exchange": "NFO" }], "failed": false, "gone": ["NFO:NIFTY17NOV2625000CE"] },
+    { "name": "today's contract and one past", "today": "2026-11-24", "refused": [{ "symbol": "SENSEX24NOV2680000CE", "exchange": "BFO" }, { "symbol": "SENSEX20NOV2680000CE", "exchange": "BFO" }], "failed": false, "gone": ["BFO:SENSEX24NOV2680000CE", "BFO:SENSEX20NOV2680000CE"] }
+  ],
+  "reasks": [
+    { "name": "refused on its expiry day before the market opens (the morning login)", "symbol": "NIFTY24NOV2625900CE", "exchange": "NFO", "today": "2026-11-24", "at": "2026-11-24T08:50:00+05:30", "open": false, "reask": true },
+    { "name": "during the session", "symbol": "NIFTY24NOV2625900CE", "exchange": "NFO", "today": "2026-11-24", "at": "2026-11-24T11:20:00+05:30", "open": true, "reask": true },
+    { "name": "the calendar not read yet", "symbol": "NIFTY24NOV2625900CE", "exchange": "NFO", "today": "2026-11-24", "at": "2026-11-24T16:00:00+05:30", "open": null, "reask": true },
+    { "name": "after the close: it has expired anyway", "symbol": "NIFTY24NOV2625900CE", "exchange": "NFO", "today": "2026-11-24", "at": "2026-11-24T15:31:00+05:30", "open": false, "reask": false },
+    { "name": "a commodity option in the evening session", "symbol": "CRUDEOIL24NOV266000CE", "exchange": "MCX", "today": "2026-11-24", "at": "2026-11-24T19:00:00+05:30", "open": true, "reask": true },
+    { "name": "a commodity option after its close", "symbol": "CRUDEOIL24NOV266000CE", "exchange": "MCX", "today": "2026-11-24", "at": "2026-11-24T23:56:00+05:30", "open": false, "reask": false },
+    { "name": "a contract whose day has passed is never asked again", "symbol": "NIFTY24NOV2625900CE", "exchange": "NFO", "today": "2026-11-25", "at": "2026-11-25T10:00:00+05:30", "open": true, "reask": false },
+    { "name": "a later contract is not one taken as gone", "symbol": "NIFTY01DEC2625900CE", "exchange": "NFO", "today": "2026-11-24", "at": "2026-11-24T10:00:00+05:30", "open": true, "reask": false },
+    { "name": "a share is never asked as gone", "symbol": "SBIN", "exchange": "NSE", "today": "2026-11-24", "at": "2026-11-24T10:00:00+05:30", "open": true, "reask": false }
+  ]
+}
