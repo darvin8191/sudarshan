@@ -16,14 +16,15 @@ Analytics Token, with no static IP). They are public facts, kept in ``ca_event``
   request governor (whose list is market-data GETs). It spends from a ``Budget`` of its own, one
   API name, 1 a second, 20 a minute and 200 in 30 minutes (a tenth of Upstox's per-API figures),
   paced so that the minute bucket is never the stop, with the same 60 second pause on a 429 and
-  the same pause on a refused token as the live book (``UpstoxReader``), through its token and
-  its one HTTP client. No thread, task or client of its own.
+  the live book's pause while Upstox refuses the token itself (``UpstoxReader.stopped``), through
+  its token and its one HTTP client. No thread, task or client of its own.
 * **Nothing is guessed.** A row that cannot be read is left out and counted in the read's note;
   an answer that is not Upstox's shape changes nothing; an event Upstox no longer lists is marked
   gone and kept, and comes back if it is listed again.
 * **Only a clean answer is a read.** "Nothing listed" is a 200 with an empty list, or a 404 (no
-  such instrument at Upstox), and nothing else. A refusal (403) ends the night: the token is not
-  allowed to read this list. Any other request Upstox turns down (a 400, say, for one ISIN it
+  such instrument at Upstox), and nothing else. A refusal (403, or a 401 on this list alone)
+  ends the night: the token is not allowed to read this list, and nothing else pauses for it
+  (v0.17.0 verification V1). Any other request Upstox turns down (a 400, say, for one ISIN it
   does not cover) and an answer that cannot be read are failed reads of that instrument, and
   three in a row end the night. Nothing failed is kept as read; an instrument never read that
   failed is tried again each night after the others, the one tried longest ago first.
@@ -85,7 +86,7 @@ SILENT_STOP = 3
 ON_DEMAND_EVERY_MS = 60_000
 ISIN = re.compile(r"IN[A-Z0-9]{10}")
 #: Outcomes that end a run: asking again tonight would only repeat them.
-STOPS = ("slow", "busy", "no_token", "token_refused", "refused")
+STOPS = ("slow", "busy", "no_token", "token_refused", "refused", "not_allowed")
 #: Outcomes that are a failed read of one instrument: nothing is kept as read.
 FAILED = ("silent", "unreadable", "rejected")
 WORDS = {
@@ -100,6 +101,8 @@ WORDS = {
     "no_token": "SUDARSHAN cannot find its Upstox token on this server.",
     "token_refused": "Upstox did not accept SUDARSHAN's read-only token.",
     "silent": "Upstox did not answer; the rest is read tomorrow night.",
+    "not_allowed": "Upstox did not let SUDARSHAN's read-only token read the list of corporate "
+    "actions; the Upstox tab is not affected.",
 }
 
 
@@ -175,11 +178,8 @@ class CorpActions:
         upstox = self.upstox
         if not ISIN.fullmatch(isin):
             return "none", None
-        if upstox._refused:
-            if _signature(upstox.token_file) == upstox._refused_at:
-                return "token_refused", None
-            upstox._refused = False
-            upstox._told.discard("401")
+        if upstox.stopped(API, _signature(upstox.token_file)) == "token":
+            return "token_refused", None
         if self.budget.paused_for(API):
             return "slow", None
         token = upstox._token()
@@ -199,9 +199,10 @@ class CorpActions:
             del token, headers
         status = answer.status_code
         if status == 401:
-            upstox._refused, upstox._refused_at = True, _signature(upstox.token_file)
-            log.warning("Upstox refused the read-only token; reads pause until it changes.")
-            return "token_refused", None
+            # This list alone (v0.17.0 verification V1): the night ends, as on a 403, and the
+            # live book reads on; only a refusal at a holdings or positions read pauses them all.
+            log.warning("Upstox refused the read-only token for corporate actions (401)")
+            return "not_allowed", None
         if status == 429 or upstox._rate_coded(answer):
             self.budget.pause(API, PAUSE_S)
             log.warning("Upstox asked for a pause on corporate actions: %d seconds", int(PAUSE_S))

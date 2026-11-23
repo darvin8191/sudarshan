@@ -15,11 +15,13 @@ portfolio page does not show them). All are GETs with ``Authorization: Bearer``,
 * **Funds window.** No funds read between 00:00 and 05:30 IST by this service's own clock; a 423
   at any other hour is handled the same way.
 * **429.** That API rests for 60 seconds.
-* **401.** Reads of the token pause until the token file changes: the same token is shared with
-  other services and a second guess would only be refused again. Holdings and positions
-  (``JUDGES``, the reads the token is known to make) are the exception while no read of theirs
-  has been refused with this token file: a 401 on another read (the day's orders or trades, a
-  report) may only mean that this token may not make that read (v0.16.0 review H1).
+* **401.** A refused read pauses until the token file changes: the same token is shared with
+  other services and a second guess would only be refused again. Which reads pause follows the
+  read (v0.17.0 verification V1): a 401 on holdings or positions (``JUDGES``, the reads the token
+  is known to make) means Upstox refused the token itself, so every read pauses, here and in the
+  report reader (``stopped``, ``refused``); a 401 on any other read (MTF, funds, the day's orders
+  or trades, a report) may only mean that this token may not make that read, so that read alone
+  pauses and says so in its own words, never that the token was refused.
 * **The token check.** Each holdings or positions read Upstox answers is told to ``on_verdict``
   (``probe.heard``): accepted (200) or refused (401), with the token file's signature.
 * **The token** is read from its file for every call and is never logged or kept in a message.
@@ -84,6 +86,15 @@ WORDS = {
     "window": "Upstox does not give funds between midnight and 5:30 AM.",
     "window_none": "Funds are available from 5:30 AM.",
     "held_back": "SUDARSHAN is keeping its Upstox reads for the account owner just now.",
+    # A read Upstox refused alone (v0.17.0 verification V1): the token reads everything else.
+    "not_allowed_mtf": "Upstox did not let SUDARSHAN's read-only token read your MTF positions; "
+    "the rest of the Upstox tab is not affected.",
+    "not_allowed_funds": "Upstox did not let SUDARSHAN's read-only token read your funds; the "
+    "rest of the Upstox tab is not affected.",
+    "not_allowed_orders": "Upstox did not let SUDARSHAN's read-only token read the day's orders; "
+    "the Upstox tab is not affected.",
+    "not_allowed_trades": "Upstox did not let SUDARSHAN's read-only token read the day's trades; "
+    "the Upstox tab is not affected.",
 }
 
 
@@ -478,11 +489,12 @@ class UpstoxReader:
         #: Fills exchange, symbol and the auction fields of rows (set by the service).
         self.decorate = decorate
         self._memory = {name: PartMemory() for name in UPSTOX_PARTS}
-        self._refused_at: tuple[int, int] | None = None
-        self._refused = False
-        #: The token file's signature when a read in JUDGES was refused (401): only then does
-        #: the pause hold the holdings and positions reads too.
+        #: The token file's signature when Upstox refused a read in JUDGES (401): while the file
+        #: is that one, every read pauses, here and in the report reader.
         self._confirmed_at: tuple[int, int] | None = None
+        #: Each other read Upstox refused, by the budget's name of its API: the token file's
+        #: signature then. Only that read pauses, until the file changes (verification V1).
+        self._paused: dict[str, tuple[int, int] | None] = {}
         self._told: set[str] = set()
         #: Told of each read in JUDGES that Upstox answered: ("ok" or "failed", the time, the
         #: token file's signature before the read). Set by the service (probe.heard).
@@ -573,21 +585,52 @@ class UpstoxReader:
             return None
         return token if len(token) >= TOKEN_MIN and not any(c.isspace() for c in token) else None
 
+    # ---- the pauses a 401 sets (verification V1) -------------------------------------------
+    def stopped(self, api: str, sig: tuple[int, int] | None) -> str | None:
+        """Why a read of ``api`` (the budget's name) with the token file ``sig`` is not sent:
+        ``"token"`` while Upstox refuses the token itself (every read pauses), ``"read"`` while
+        it refuses this read alone, None when it may go. A changed file is asked again."""
+        if self._confirmed_at is not None and self._confirmed_at != sig:
+            self._confirmed_at = None
+            self._told.discard("401")
+        for name in [n for n, at in self._paused.items() if at != sig]:
+            del self._paused[name]
+            self._told.discard(f"401 {name}")
+        if self._confirmed_at is not None:
+            return "token"
+        return "read" if api in self._paused else None
+
+    def refused(self, api: str, sig: tuple[int, int] | None) -> str:
+        """Upstox answered 401 to a read of ``api`` sent with the token file ``sig``: a read in
+        JUDGES pauses every read (``"token"``), any other read pauses itself (``"read"``)."""
+        if api in JUDGES:
+            self._confirmed_at = sig
+            self._say_once(
+                "401", "Upstox refused the read-only token at a holdings or positions read; "
+                "every read pauses until the token file changes."
+            )  # fmt: skip
+            return "token"
+        self._paused[api] = sig
+        self._say_once(
+            f"401 {api}", "Upstox refused the read-only token for its %s read; that read alone "
+            "pauses until the token file changes.", api,
+        )  # fmt: skip
+        return "read"
+
+    @staticmethod
+    def _refusal(name: str, why: str) -> str:
+        return WORDS["token_refused"] if why == "token" else WORDS[f"not_allowed_{name}"]
+
     async def _read(self, name: str, memory: PartMemory, principal: str = OWNER) -> str | None:
         """One read into ``memory``; ``"held"`` when the owner's reserve refused it."""
         now = self.clock()
         sig = _signature(self.token_file)  # the file whose token this read sends
-        if self._refused:
-            if sig != self._refused_at:
-                self._refused = False  # the file changed: try again
-                self._told.discard("401")
-            elif name not in JUDGES or self._confirmed_at == sig:
-                return self._fail(memory, now, WORDS["token_refused"])
-            # else: the pause came from a read the token may not be allowed to make, and no
-            # holdings or positions read has been refused with this file: this one asks.
+        api = API_OF.get(name, name)
+        why = self.stopped(api, sig)
+        if why is not None:
+            return self._fail(memory, now, self._refusal(name, why))
         if name == "funds" and in_funds_window(now):
             return self._window(memory, now)
-        api = API_OF.get(name, name)
         left = self.budget.paused_for(api)
         if left:
             return self._fail(memory, now, WORDS["slow"], figures=" They refresh in a minute.")
@@ -616,13 +659,7 @@ class UpstoxReader:
         if name in JUDGES and status in (200, 401):
             self._verdict("ok" if status == 200 else "failed", now, sig)
         if status == 401:
-            self._refused, self._refused_at = True, sig
-            if name in JUDGES:
-                self._confirmed_at = sig
-            self._say_once(
-                "401", "Upstox refused the read-only token; reads pause until it changes."
-            )
-            return self._fail(memory, now, WORDS["token_refused"])
+            return self._fail(memory, now, self._refusal(name, self.refused(api, sig)))
         if status == 423 and name == "funds":
             return self._window(memory, now)
         if status == 429 or self._rate_coded(answer):

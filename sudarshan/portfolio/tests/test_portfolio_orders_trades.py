@@ -483,20 +483,22 @@ def test_no_other_read_decides_the_check(fake, token_file, tmp_path, part, path)
     assert not (tmp_path / probe.RESULT_FILE).exists()
 
 
-def test_a_pause_another_read_set_never_keeps_holdings_and_positions_from_asking(
-    fake, token_file, tmp_path
-):
-    """The day's trades refused (the journal's 22:00 read, say): the other parts pause as
-    before, but holdings and positions still ask, so the Upstox tab keeps working and the check
-    hears Upstox's own answer."""
+def test_a_read_refused_alone_pauses_that_read_and_nothing_else(fake, token_file, tmp_path):
+    """v0.17.0 verification V1. The day's trades refused (the journal's 22:00 read, say): that
+    read pauses, in words that do not say the token was refused, and every other part still
+    asks: the Upstox tab's four, the day's orders. The check hears holdings' own answer."""
     fake.status["day_trades"] = 401
     reader, clock = make(fake, token_file)
     service = ProbeService(tmp_path, reader, clock)
-    trades, tab, orders = _reads(reader, ["trades"], ["holdings", "positions"], ["orders"])
-    assert trades["trades"]["note"] == up.WORDS["token_refused"]
-    assert tab["holdings"]["state"] == tab["positions"]["state"] == "ok"
-    assert orders["orders"]["note"] == up.WORDS["token_refused"]
-    assert fake.count("day_orders") == 0  # still paused
+    every = [*kinds.UPSTOX_PAGE_PARTS, "orders"]
+    trades, tab, again = _reads(reader, ["trades"], every, ["trades"])
+    assert trades["trades"]["note"] == up.WORDS["not_allowed_trades"]
+    assert "did not accept" not in trades["trades"]["note"]
+    assert {part: tab[part]["state"] for part in every} == dict.fromkeys(every, "ok")
+    assert again["trades"]["note"] == up.WORDS["not_allowed_trades"]
+    assert fake.count("day_trades") == 1  # the refused read asks nothing more
+    asked = [fake.count(p) for p in ("holdings", "positions", "mtf", "funds", "day_orders")]
+    assert asked == [1, 1, 1, 1, 1]
     assert _checked(service, token_file) == {"state": "ok", "at": ist(11) // 1000}
 
 
