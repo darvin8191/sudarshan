@@ -31,9 +31,10 @@ vi.mock('@/utils/toast', () => ({ showToast: toast }))
 import { useState } from 'react'
 import { createQueryClient } from '@/app/providers'
 import { LiveList } from './LiveList'
+import { clearNoteDraftsForTests } from './noteDrafts'
 import { OPEN_GUARD } from './openGuard'
 import { rowView } from './rows'
-import { NOTE_NOT_SAVED, NOTE_SAVED } from './SymbolMarks'
+import { NOTE_KEPT, NOTE_NOT_SAVED, NOTE_SAVED } from './SymbolMarks'
 import type { LiveRow } from './useLiveRows'
 import { NOTE_LONG, PRIVATE_WORDS } from './v2/marks'
 import type { FlagName, Row, SymbolInfo, View } from './v2/types'
@@ -181,6 +182,7 @@ async function mount(props: Parameters<typeof Page>[0] = {}) {
 beforeEach(() => {
   b().reset()
   vi.clearAllMocks()
+  clearNoteDraftsForTests()
   OPEN_GUARD.ms = 0
   server.info = info()
   server.rows = [rowOf('RELIANCE', 2, true), rowOf('TCS', null, false), rowOf('INFY', 5, false)]
@@ -460,9 +462,101 @@ describe('a note typed and not saved when the sheet closes', () => {
     await closeSheet()
     await waitFor(() => expect(toast.error).toHaveBeenCalledTimes(1))
     const said = toast.error.mock.calls[0][0] as string
-    expect(said).toBe(`${NOTE_NOT_SAVED} ${CONFLICT} Open the symbol to type it again.`)
+    expect(said).toBe(`${NOTE_NOT_SAVED} ${CONFLICT} ${NOTE_KEPT}`)
     expect(said).not.toMatch(/40\d|conflict/)
     expect(toast.info).not.toHaveBeenCalled()
+  })
+
+  // v0.16.0 phone review L2: what the server did not take is kept for the symbol's sheet.
+  async function reopen() {
+    fireEvent.click(row('RELIANCE').querySelector('button[aria-haspopup="dialog"]') as HTMLElement)
+    return screen.findByRole('textbox', { name: 'Note' })
+  }
+
+  it('opens the sheet again with a note the server refused, ready to save', async () => {
+    b().on('mark', () => ({ status: 'error', code: 'conflict', message: CONFLICT }))
+    const field = await openSheet()
+    fireEvent.change(field, { target: { value: 'Exit below 1,380' } })
+    await closeSheet()
+    await waitFor(() => expect(toast.error).toHaveBeenCalledTimes(1))
+    const again = await reopen()
+    expect(again).toHaveValue('Exit below 1,380')
+    expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled()
+    // Closed again, it is saved as any typed note is, on the version read since.
+    b().on('mark', () => ({ version: '5', id: null, words: null }))
+    await closeSheet()
+    await waitFor(() =>
+      expect(toast.info).toHaveBeenCalledWith(NOTE_SAVED, undefined, { duration: 2_000 })
+    )
+    expect(
+      b()
+        .calls.filter((c) => c.op === 'mark')
+        .map((c) => c.body)
+    ).toEqual([
+      { k: 'NSE:RELIANCE', note: 'Exit below 1,380', version: 3 },
+      { k: 'NSE:RELIANCE', note: 'Exit below 1,380', version: 3 },
+    ])
+  })
+
+  it('says the answer of a Save still on its way when the sheet closed, and keeps a refused note', async () => {
+    let answer: (value: unknown) => void = () => {}
+    b().on(
+      'mark',
+      () =>
+        new Promise((resolve) => {
+          answer = resolve
+        })
+    )
+    const user = userEvent.setup()
+    const field = await openSheet()
+    fireEvent.change(field, { target: { value: 'Typed, then Back' } })
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(b().count('mark')).toBe(1))
+    await closeSheet()
+    await act(async () => answer({ status: 'error', code: 'conflict', message: CONFLICT }))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledTimes(1))
+    expect(toast.error.mock.calls[0][0]).toBe(`${NOTE_NOT_SAVED} ${CONFLICT} ${NOTE_KEPT}`)
+    expect(b().count('mark'), 'one write, never a second on closing').toBe(1)
+    expect(await reopen()).toHaveValue('Typed, then Back')
+    b().on('mark', () => ({ version: '5', id: null, words: null }))
+    await closeSheet()
+    await waitFor(() => expect(toast.info).toHaveBeenCalledTimes(1))
+    expect(b().count('mark')).toBe(2)
+  })
+
+  it('says Note saved when a Save still on its way when the sheet closed is kept', async () => {
+    let answer: (value: unknown) => void = () => {}
+    b().on(
+      'mark',
+      () =>
+        new Promise((resolve) => {
+          answer = resolve
+        })
+    )
+    const user = userEvent.setup()
+    const field = await openSheet()
+    fireEvent.change(field, { target: { value: 'Typed, then Back' } })
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(b().count('mark')).toBe(1))
+    await closeSheet()
+    await act(async () => answer({ version: '4', id: null, words: null }))
+    await waitFor(() =>
+      expect(toast.info).toHaveBeenCalledWith(NOTE_SAVED, undefined, { duration: 2_000 })
+    )
+    expect(toast.error).not.toHaveBeenCalled()
+    expect(b().count('mark')).toBe(1)
+  })
+
+  it('lets a kept note go once the sheet has shown it: emptied and closed, it is not back', async () => {
+    b().on('mark', () => ({ status: 'error', code: 'conflict', message: CONFLICT }))
+    const field = await openSheet()
+    fireEvent.change(field, { target: { value: 'Exit below 1,380' } })
+    await closeSheet()
+    await waitFor(() => expect(toast.error).toHaveBeenCalledTimes(1))
+    fireEvent.change(await reopen(), { target: { value: '' } })
+    await closeSheet()
+    expect(b().count('mark'), 'an emptied note writes nothing').toBe(1)
+    expect(await reopen()).toHaveValue('Wait for the retest')
   })
 
   it('is not sent twice when Save was pressed before closing', async () => {

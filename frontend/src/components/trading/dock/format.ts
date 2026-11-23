@@ -1,12 +1,16 @@
+import { groupedNumber } from '@/sudarshan/dashboard/format'
+
 /**
  * How the dock prints a figure. Right-aligned tabular numbers are the
  * tables' job; this is what goes in the cell.
+ *
+ * M20.3 (v0.16.0 phone review M1): grouped the way Display settings ask,
+ * Indian unless changed, as the dock's header already is. Each format asks
+ * for the grouping when it runs, so the tables follow the switch at once.
  */
 
-const TWO_DP = new Intl.NumberFormat('en-IN', {
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-})
+const TWO_DP = groupedNumber({ minimumFractionDigits: 2, maximumFractionDigits: 2 })
+const QUANTITY = groupedNumber({ maximumFractionDigits: 4 })
 
 /** A price or a value: grouped, two decimals, no currency. */
 export function fmt2(value: number): string {
@@ -22,9 +26,7 @@ export function signed(value: number): string {
 
 /** A signed whole quantity, for net positions. */
 export function signedQty(value: number): string {
-  const grouped = new Intl.NumberFormat('en-IN', { maximumFractionDigits: 4 }).format(
-    Math.abs(value)
-  )
+  const grouped = QUANTITY.format(Math.abs(value))
   if (value > 0) return `+${grouped}`
   if (value < 0) return `-${grouped}`
   return '0'

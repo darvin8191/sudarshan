@@ -45,6 +45,27 @@ describe('the options screen’s words', () => {
     }
   })
 
+  // v0.16.0 phone review L1: the unit is chosen after rounding, so a figure at a unit's edge is
+  // never "1,000 k", "100.0 L" or "1,000.00 M".
+  it('moves up a unit when the figure would round to a whole next one, either grouping', () => {
+    expect(oiWords(99_94_999)).toBe('99.9 L')
+    expect(oiWords(99_95_000)).toBe('1.00 Cr')
+    expect(oiWords(99_99_999)).toBe('1.00 Cr')
+    expect(oiWords(1_00_00_000)).toBe('1.00 Cr')
+    setNumberGrouping('international')
+    try {
+      expect(oiWords(999_499)).toBe('999 k')
+      expect(oiWords(999_500)).toBe('1.00 M')
+      expect(oiWords(-999_999)).toBe('1.00 M')
+      expect(oiWords(1_000_000)).toBe('1.00 M')
+      expect(oiWords(999_994_999)).toBe('999.99 M')
+      expect(oiWords(999_995_000)).toBe('1.00 B')
+      expect(oiWords(99_999)).toBe('99,999')
+    } finally {
+      setNumberGrouping('indian')
+    }
+  })
+
   it('writes a strike as it is listed', () => {
     expect(strikeWords(25_900)).toBe('25,900')
     expect(strikeWords(84_500)).toBe('84,500')

@@ -89,10 +89,12 @@ export function Navbar({ fluid = false }: NavbarProps = {}) {
   return (
     // SUDARSHAN: the D app bar, white and solid (no blur over a tinted page).
     <nav className="sticky top-0 z-50 w-full border-b bg-card">
+      {/* SUDARSHAN (v0.16.0 phone review H1): `sd-app-bar` keeps the row at its usual size under
+          Larger text (theme.css), and under 360 px its edges give their padding to the name. */}
       <div
         data-testid="navbar-row"
         className={cn(
-          'flex h-16 items-center pl-1 pr-1 md:px-4',
+          'sd-app-bar flex h-16 items-center pl-1 pr-1 max-[359.98px]:pl-0 max-[359.98px]:pr-0 md:px-4',
           fluid ? 'w-full' : 'container mx-auto'
         )}
       >
@@ -198,7 +200,7 @@ export function Navbar({ fluid = false }: NavbarProps = {}) {
         {/* SUDARSHAN (v0.13.0 delta review L5): the room the account controls leave is measured
             here (`sd-lockup-room`, a size container on a phone), so the Latin name tightens its
             tracking to fit it and is never cut mid-word. */}
-        <div className="sd-lockup-room ml-1 mr-2 flex min-w-0 flex-1 md:ml-0 md:mr-6 md:flex-none md:shrink-0">
+        <div className="sd-lockup-room ml-1 mr-2 flex min-w-0 flex-1 max-[359.98px]:ml-0 max-[359.98px]:mr-1 md:ml-0 md:mr-6 md:flex-none md:shrink-0">
           <Link
             to="/dashboard"
             className="flex min-h-12 min-w-0 items-center rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-ring"

@@ -110,11 +110,13 @@ export function AccountControls({ variant = 'navbar' }: { variant?: 'navbar' | '
       <RiskChip variant={variant} />
 
       {/* Mode Badge: the Live and Analyze status chips */}
+      {/* M20.2 (v0.16.0 phone review H1): under 360 px the chip's padding goes to the app bar's
+          name, which needs it in Analyze mode beside the kill switch chip. */}
       <Badge
         variant="outline"
         className={cn(
           MODE_CHIP_BASE,
-          toolbar ? 'h-6 px-2 text-[11px]' : 'h-7 px-2.5 text-xs',
+          toolbar ? 'h-6 px-2 text-[11px]' : 'h-7 px-2.5 text-xs max-[359.98px]:px-1.5',
           MODE_CHIP[appMode]
         )}
       >

@@ -39,21 +39,40 @@ export function expirySpeech(expiry: string, now: number): string {
   return `${expiryDay(expiry)}, ${when}`
 }
 
+/** A unit of open interest: the size it starts at, what it counts, its letter and its decimals. */
+type OiUnit = readonly [from: number, per: number, letter: string, decimals: number]
+
+const OI_UNITS: Record<'indian' | 'international', readonly OiUnit[]> = {
+  indian: [
+    [1e5, 1e5, 'L', 1],
+    [1e7, 1e7, 'Cr', 2],
+  ],
+  international: [
+    [1e5, 1e3, 'k', 0],
+    [1e6, 1e6, 'M', 2],
+    [1e9, 1e9, 'B', 2],
+  ],
+}
+
 /**
  * Open interest in lakh and crore: "42.1 L", "1.12 Cr"; below a lakh, the number itself. In
  * international grouping: "4.21 M", "1.12 B", and thousands from a lakh up ("320 k").
+ *
+ * The unit is chosen after rounding (v0.16.0 phone review L1): a figure that would be shown as a
+ * whole next unit is said in that unit. 999,600 is "1.00 M", never "1,000 k"; 99,96,000 is
+ * "1.00 Cr", never "100.0 L"; 999,996,000 is "1.00 B", never "1,000.00 M".
  */
 export function oiWords(value: number): string {
   const size = Math.abs(value)
-  if (numberGrouping() === 'international') {
-    if (size >= 1e9) return `${formatAmount(size / 1e9, 2)} B`
-    if (size >= 1e6) return `${formatAmount(size / 1e6, 2)} M`
-    if (size >= 1e5) return `${formatAmount(size / 1e3, 0)} k`
-    return formatAmount(size, 0)
-  }
-  if (size >= 1e7) return `${formatAmount(size / 1e7, 2)} Cr`
-  if (size >= 1e5) return `${formatAmount(size / 1e5, 1)} L`
-  return formatAmount(size, 0)
+  const units = OI_UNITS[numberGrouping()]
+  let at = -1
+  for (let i = 0; i < units.length; i += 1) if (size >= units[i][0]) at = i
+  if (at < 0) return formatAmount(size, 0)
+  // What the reader would see in this unit, rounded as it is shown, against the next unit's start.
+  const shown = (unit: OiUnit) => Number(formatAmount(size / unit[1], unit[3]).replaceAll(',', ''))
+  while (at + 1 < units.length && shown(units[at]) * units[at][1] >= units[at + 1][0]) at += 1
+  const [, per, letter, decimals] = units[at]
+  return `${formatAmount(size / per, decimals)} ${letter}`
 }
 
 /** A strike as it is listed: no decimals unless it has them ("25,900", "102.5"). */

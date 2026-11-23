@@ -29,6 +29,8 @@ import { useAuthStore } from '@/stores/authStore'
 import { useThemeStore } from '@/stores/themeStore'
 // SUDARSHAN: where the quote stands (Real-time, Reconnecting, Updated, Market closed).
 import { QuoteStatus } from '@/sudarshan/books/QuoteStatus'
+// M20.3 (v0.16.0 phone review L3): quantities grouped the way Display settings ask.
+import { groupedNumber } from '@/sudarshan/dashboard/format'
 // SUDARSHAN M20.7: the kill switch's line on the ticket.
 import { KillSwitchNote } from '@/sudarshan/risk/RiskBanner'
 // SUDARSHAN B6 (M5.10): the journal's charges estimate for the order; it changes nothing sent.
@@ -169,8 +171,11 @@ const SIDE_INK = {
 } as const
 /** A control a thumb can hit: 48 dp. */
 const TOUCH = 'h-12 min-w-12'
+/** The footer's two buttons: at least 48 dp tall, a long label on two lines inside it. */
+const FOOT = 'h-auto min-h-12 whitespace-normal leading-tight'
 const STEP = 'size-12 shrink-0 px-0 text-lg'
-const UNITS = new Intl.NumberFormat('en-IN')
+/** Quantities, grouped the way Display settings ask at every call (Indian unless changed). */
+const UNITS = groupedNumber()
 
 /**
  * The order as one line, shown beside the Place button (v0.13.0 review H1): on a phone the body
@@ -515,10 +520,14 @@ export function PlaceOrderDialog({
         showCloseButton={false}
       >
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2 pr-10 text-left">
+          {/* M20.2 (v0.16.0 phone review H2): the symbol wraps under the side when the title
+              has no room for it (Larger text at 320 px read "SELL S..."); it is never cut. */}
+          <DialogTitle className="flex flex-wrap items-center gap-x-2 gap-y-0.5 pr-10 text-left">
             <span>Place Order -</span>
             <span className={SIDE_INK[formAction]}>{formAction}</span>
-            <span className="text-muted-foreground font-normal text-sm truncate">{symbol}</span>
+            <span className="min-w-0 text-muted-foreground font-normal text-sm [overflow-wrap:anywhere]">
+              {symbol}
+            </span>
           </DialogTitle>
         </DialogHeader>
         {/* SUDARSHAN (review M2): the close button at 48 dp, over the title row's corner. */}
@@ -586,15 +595,18 @@ export function PlaceOrderDialog({
           </div>
 
           {/* Quantity with Mode Toggle */}
+          {/* M20.2 (v0.16.0 phone review H2): with Larger text the label row read "Total qty:
+              6" for 65 and the Shares button was cut by the ticket's edge. The row wraps, each
+              figure whole, and the box gives way to the Lots and Shares pair, never the pair. */}
           <div className="space-y-1">
-            <div className="flex items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5">
               <Label htmlFor={`${fieldId}-quantity`} className="text-xs">
                 Quantity
               </Label>
               {usesLots && (
-                <div className="flex gap-3 text-xs text-muted-foreground">
-                  <span>Lot size: {lotSize}</span>
-                  <span>Total qty: {formQuantity}</span>
+                <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
+                  <span className="whitespace-nowrap">Lot size: {lotSize}</span>
+                  <span className="whitespace-nowrap">Total qty: {UNITS.format(formQuantity)}</span>
                 </div>
               )}
             </div>
@@ -606,14 +618,14 @@ export function PlaceOrderDialog({
                 value={displayQuantity}
                 onChange={(e) => handleQuantityChange(e.target.value)}
                 min={1}
-                className="h-12 flex-1"
+                className="h-12 min-w-0 flex-1"
               />
               {/* Cash equity trades in shares - there is no lot. Showing a
                   Lots/Shares toggle and "Lot size: 1" on NSE/BSE is noise that
                   implies a concept the segment does not have. */}
               {usesLots && (
                 // biome-ignore lint/a11y/useSemanticElements: a pressed pair, not a form fieldset
-                <div role="group" aria-label="Quantity in" className="flex gap-1">
+                <div role="group" aria-label="Quantity in" className="flex shrink-0 gap-1">
                   {(['lots', 'shares'] as const).map((mode) => (
                     <button
                       key={mode}
@@ -689,11 +701,13 @@ export function PlaceOrderDialog({
           {/* Price Input (conditional) */}
           {needsPrice && (
             <div className="space-y-1">
-              <div className="flex items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5">
                 <Label htmlFor={`${fieldId}-price`} className="text-xs">
                   Price
                 </Label>
-                <span className="text-xs text-muted-foreground">Tick size: {tickSize}</span>
+                <span className="whitespace-nowrap text-xs text-muted-foreground">
+                  Tick size: {tickSize}
+                </span>
               </div>
               <div className="flex gap-2">
                 <Button
@@ -864,10 +878,12 @@ export function PlaceOrderDialog({
           >
             <span className={cn('font-bold', SIDE_INK[formAction])}>{line.side}</span> {line.rest}
           </p>
+          {/* M20.2 (v0.16.0 phone review H2): a label wider than its half of the row (Larger
+              text at 320 px) goes onto a second line inside its button, never past its edge. */}
           <div className="grid grid-cols-2 gap-2 sm:flex sm:shrink-0">
             <Button
               variant="outline"
-              className={TOUCH}
+              className={cn(TOUCH, FOOT)}
               onClick={() => onOpenChange(false)}
               disabled={isSubmitting}
             >
@@ -877,7 +893,7 @@ export function PlaceOrderDialog({
               onClick={handleSubmit}
               disabled={!isValid() || isSubmitting || guard.settling}
               aria-describedby={`${fieldId}-summary`}
-              className={cn(TOUCH, 'font-bold', SIDE_FILL[formAction])}
+              className={cn(TOUCH, FOOT, 'font-bold', SIDE_FILL[formAction])}
             >
               {isSubmitting ? 'Placing...' : `Place ${formAction} Order`}
             </Button>

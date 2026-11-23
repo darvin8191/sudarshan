@@ -6,7 +6,7 @@
 
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { act, render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -102,6 +102,11 @@ describe('the kill switch banner and chip', () => {
     const chip = screen.getByTestId('risk-chip')
     expect(chip).toHaveTextContent('Kill switch on')
     expect(chip.querySelector('svg')).toHaveAttribute('aria-hidden', 'true')
+    // v0.16.0 phone review H1: in the navbar the chip's words wait for a laptop's width (a phone
+    // on its side scrolled sideways with them); a screen reader hears them at every width.
+    const words = within(chip).getByText('Kill switch on').className.split(/\s+/)
+    expect(words).toEqual(expect.arrayContaining(['sr-only', 'lg:not-sr-only']))
+    expect(words).not.toContain('sm:not-sr-only')
     expect(screen.getByTestId('kill-switch-note')).toHaveTextContent(
       'An order that closes a position you hold still goes'
     )

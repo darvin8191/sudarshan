@@ -90,6 +90,35 @@ describe('the automation card’s P&L line', () => {
     expect(line).toHaveTextContent(`${MINUS}₹6,500.00`)
   })
 
+  // v0.16.0 phone review L4: the books grey a P&L whose price should be moving and is not; the
+  // card kept its up or down colour. Sign and arrow stay either way.
+  it('greys the P&L as the books do: in market hours, while it is not real-time', () => {
+    const open = () => true
+    render(<HeldPnl strategy={held({})} marketOpen={open} />)
+    const money = () => screen.getByTestId('auto-pnl').querySelector('[data-direction]')
+    // The book's figure, read 30 s ago, with no tick since.
+    expect(money()).toHaveAttribute('data-stale', 'true')
+    expect(money()).toHaveTextContent('+₹650.00')
+    tick(25050)
+    expect(screen.getByTestId('auto-pnl')).toHaveTextContent('Real-time')
+    expect(money()).not.toHaveAttribute('data-stale')
+    act(() => {
+      vi.advanceTimersByTime(STALE_MS + 1_000)
+    })
+    expect(screen.getByTestId('auto-pnl')).not.toHaveTextContent('Real-time')
+    expect(money()).toHaveAttribute('data-stale', 'true')
+    expect(money()).toHaveAttribute('data-direction', 'up')
+  })
+
+  it('keeps the colour of a closing figure, and of one whose market is not known', () => {
+    render(<HeldPnl strategy={held({})} marketOpen={() => false} />)
+    render(<HeldPnl strategy={held({})} />)
+    for (const line of screen.getAllByTestId('auto-pnl')) {
+      expect(line).toHaveTextContent('Read at 10:15:02')
+      expect(line.querySelector('[data-direction="up"]')).not.toHaveAttribute('data-stale')
+    }
+  })
+
   it('prices a short the other way', () => {
     render(<HeldPnl strategy={held({ quantity: -65, pnl: -650 })} />)
     tick(24990)
