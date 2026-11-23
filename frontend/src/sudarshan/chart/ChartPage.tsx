@@ -86,6 +86,8 @@ import { ChainLink } from './ChainLink'
 import { DepthSheet, DepthStrip } from './DepthStrip'
 import { DrawingSheet } from './DrawingSheet'
 import { DRAW_ROW, DrawRow } from './DrawRow'
+import { ExpiredNotice } from './ExpiredNotice' // SUDARSHAN TD2
+import { expiredOn, isDerivative } from './expired'
 import { IndicatorSettingsSheet } from './IndicatorSettingsSheet'
 import { IndicatorSheet } from './IndicatorSheet'
 import { LineLabels } from './LineLabels'
@@ -346,10 +348,18 @@ const ChartScreen = memo(function ChartScreen({
   const [drawing, setDrawing] = useState(false)
   /** Asks for a placed note's words, as the page is now. */
   const askNote = useRef<(id: string) => void>(() => {})
+  // SUDARSHAN TD2: a contract whose expiry day has passed (from its symbol), or one the master
+  // does not list, has nothing to chart: no chart is built and the page says which.
+  const endedOn = useMemo(() => expiredOn(symbol, exchange), [symbol, exchange])
+  const [unlisted, setUnlisted] = useState(false)
+  const gone = endedOn !== null || unlisted
 
+  // What a bare /chart opens next: a share or an index at once, a contract once the master has
+  // listed it, and never one that has expired (TD2).
   useEffect(() => {
+    if (gone || (isDerivative(exchange) && !info)) return
     saveLastInstrument(symbol, exchange)
-  }, [symbol, exchange])
+  }, [symbol, exchange, gone, info])
 
   // Read once prices can be read at all; until then the chart is not built, and
   // a chart built before is let go, so it is built again on a fresh host.
@@ -369,19 +379,21 @@ const ChartScreen = memo(function ChartScreen({
   }, [ready, attempt])
 
   useEffect(() => {
-    if (!config) return
+    if (!config || endedOn) return
     let alive = true
     void loadInstrument(config.apiKey, symbol, exchange).then((value) => {
-      if (alive) setInfo(value)
+      if (!alive) return
+      if (value === 'unlisted' && isDerivative(exchange)) setUnlisted(true)
+      setInfo(value === 'unlisted' ? null : value)
     })
     return () => {
       alive = false
     }
-  }, [config, symbol, exchange])
+  }, [config, symbol, exchange, endedOn])
 
-  // One engine host for this screen, built once the key is known.
+  // One engine host for this screen, built once the key is known; let go if the contract is gone.
   useEffect(() => {
-    if (!config || !host.current) return
+    if (!config || !host.current || gone) return
     // The same gate a /trading pane uses: a quick load never flashes its card.
     const gate = createChartStateGate(setLoad)
     const next = new PhoneChart({
@@ -408,7 +420,7 @@ const ChartScreen = memo(function ChartScreen({
       gate.destroy()
       next.destroy()
     }
-  }, [config, prices])
+  }, [config, prices, gone])
 
   useEffect(() => {
     owner?.setAppMode(appMode)
@@ -428,7 +440,7 @@ const ChartScreen = memo(function ChartScreen({
 
   // Once per contract opened: the open interest the header's change runs from.
   useEffect(() => {
-    if (!config || !hasOpenInterest(exchange)) return
+    if (!config || !hasOpenInterest(exchange) || endedOn) return
     let alive = true
     void loadPreviousOi(config.apiKey, symbol, exchange).then((value) => {
       if (alive) setPrevOi(value)
@@ -436,7 +448,7 @@ const ChartScreen = memo(function ChartScreen({
     return () => {
       alive = false
     }
-  }, [config, symbol, exchange])
+  }, [config, symbol, exchange, endedOn])
 
   useEffect(() => {
     if (!config) return
@@ -469,7 +481,7 @@ const ChartScreen = memo(function ChartScreen({
   const marketOpen = useCallback(() => (shut.current ? false : null), [])
   const books = useChartBooks({
     apiKey: config?.apiKey ?? null,
-    enabled: !quoteOnly,
+    enabled: !quoteOnly && !gone,
     marketOpen,
   })
   const drawn = useChartLines({
@@ -655,6 +667,47 @@ const ChartScreen = memo(function ChartScreen({
   }, [sheetKind, navigate])
 
   const dp = (ltp: number) => priceDp(info?.tickSize, ltp)
+
+  const searchDialog = (
+    <SymbolSearchDialog
+      open={searching}
+      onOpenChange={(open) => !open && closeSheet()}
+      search={search}
+      initialQuery={symbol}
+      onPick={(row) => {
+        if (!row.exchange) {
+          closeSheet()
+          showToast.info('A computed chart opens in the full terminal.')
+          return
+        }
+        picked.current = { symbol: String(row.symbol), exchange: String(row.exchange) }
+        closeSheet()
+      }}
+    />
+  )
+
+  // SUDARSHAN TD2: an expired or unlisted contract, in words, with what trades in its place.
+  // Before the login check: the day it expired needs no login, and nothing here reads prices.
+  if (gone) {
+    return (
+      <Screen>
+        <AppBar
+          symbol={symbol}
+          exchange={exchange}
+          onBack={back}
+          onSearch={config ? () => openSheet({ sheet: 'search' }) : undefined}
+        />
+        <ExpiredNotice
+          symbol={symbol}
+          exchange={exchange}
+          endedOn={endedOn}
+          apiKey={config?.apiKey ?? null}
+          onOpen={(next) => navigate(chartPath(next.symbol, next.exchange), { replace: true })}
+        />
+        {searchDialog}
+      </Screen>
+    )
+  }
 
   // Checking the login, Upstox not logged in today, or no API key: the same
   // words as every other screen, in place of the chart.
@@ -1104,21 +1157,7 @@ const ChartScreen = memo(function ChartScreen({
         }}
         onTogglePin={flipPin}
       />
-      <SymbolSearchDialog
-        open={searching}
-        onOpenChange={(open) => !open && closeSheet()}
-        search={search}
-        initialQuery={symbol}
-        onPick={(row) => {
-          if (!row.exchange) {
-            closeSheet()
-            showToast.info('A computed chart opens in the full terminal.')
-            return
-          }
-          picked.current = { symbol: String(row.symbol), exchange: String(row.exchange) }
-          closeSheet()
-        }}
-      />
+      {searchDialog}
     </Screen>
   )
 })

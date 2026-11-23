@@ -48,7 +48,12 @@ const fakes = vi.hoisted(() => ({
   orders: [] as unknown[],
   alerts: [] as unknown[],
   config: { apiKey: 'test-key', wsUrl: 'ws://test.invalid' } as unknown,
+  /** The master's answer for an instrument, or one per symbol (TD2: 'unlisted' when it has none). */
   instrument: { name: 'STATE BANK OF INDIA', lotSize: 1, tickSize: 0.05 } as unknown,
+  /** TD2: the expiry days the master lists, per underlying, exchange and kind. */
+  expiries: (() => null) as (symbol: string, exchange: string, kind: string) => string[] | null,
+  /** TD2: every read the page made of the master (symbol) and of the expiry list. */
+  reads: [] as string[],
   /** What the broker offers, as the terminal groups it (Upstox's set). */
   intervals: null as unknown,
   /** Every study on offer, and the owner's files that failed, as the host gives them (C4). */
@@ -59,6 +64,16 @@ const fakes = vi.hoisted(() => ({
   /** The price at a held finger's height, as the host gives it (C10). */
   heldPrice: 814.35 as number | null,
 }))
+
+const MONTHS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']
+/** A NIFTY contract expiring `days` from today in India, as OpenAlgo writes it: still trading. */
+function niftyIn(days: number, tail: string): string {
+  const day = new Date(Date.now() + 19_800_000 + days * 86_400_000)
+  const dd = String(day.getUTCDate()).padStart(2, '0')
+  return `NIFTY${dd}${MONTHS[day.getUTCMonth()]}${String(day.getUTCFullYear()).slice(2)}${tail}`
+}
+/** TD2: a call that trades whatever day the tests run on (a dated one expires under them). */
+const LIVE_CALL = niftyIn(7, '25900CE')
 
 const UPSTOX_INTERVALS = [
   { label: 'minutes', items: ['1m', '2m', '3m', '5m', '10m', '15m', '30m'] },
@@ -199,7 +214,14 @@ vi.mock('@/api/trading', () => ({
 }))
 vi.mock('./api', () => ({
   loadFeedConfig: async () => fakes.config,
-  loadInstrument: async () => fakes.instrument,
+  loadInstrument: async (_key: string, symbol: string, exchange: string) => {
+    fakes.reads.push(`symbol ${exchange}:${symbol}`)
+    return typeof fakes.instrument === 'function' ? fakes.instrument(symbol) : fakes.instrument
+  },
+  loadExpiries: async (_key: string, symbol: string, exchange: string, kind: string) => {
+    fakes.reads.push(`expiry ${exchange}:${symbol} ${kind}`)
+    return fakes.expiries(symbol, exchange, kind)
+  },
   loadIntervals: async () => fakes.intervals,
   loadPreviousOi: async () => fakes.prevOi,
   searchSymbols: async () => [],
@@ -411,6 +433,8 @@ beforeEach(() => {
   fakes.config = { apiKey: 'test-key', wsUrl: 'ws://test.invalid' }
   useAuthStore.setState({ apiKey: 'test-key', sessionChecked: true, brokerSessionExpired: false })
   fakes.instrument = { name: 'STATE BANK OF INDIA', lotSize: 1, tickSize: 0.05 }
+  fakes.expiries = () => null
+  fakes.reads = []
   fakes.intervals = UPSTOX_INTERVALS
   fakes.catalogue = [
     { id: 'ichimoku', name: 'Ichimoku Cloud', category: 'Trend', mine: false },
@@ -686,7 +710,7 @@ describe('the phone chart page at 390 px', () => {
 
   it('offers open interest on a contract, and gives the chart its tick', async () => {
     fakes.instrument = { name: 'NIFTY 27 OCT 25900 CE', lotSize: 65, tickSize: 0.05 }
-    await opened('/chart/NFO/NIFTY27OCT2625900CE')
+    await opened(`/chart/NFO/${LIVE_CALL}`)
     await waitFor(() => expect(chart().setTick).toHaveBeenCalledWith(0.05))
     await userEvent.click(screen.getByRole('button', { name: 'Indicators' }))
     const sheet = await screen.findByRole('dialog', { name: 'Indicators' })
@@ -806,7 +830,7 @@ describe('the phone chart page at 390 px', () => {
   it("shows a contract's open interest and its change since yesterday, with a sign and an arrow", async () => {
     fakes.instrument = { name: 'NIFTY 27 OCT 25900 CE', lotSize: 65, tickSize: 0.05 }
     fakes.prevOi = 1_150_000
-    await opened('/chart/NFO/NIFTY27OCT2625900CE')
+    await opened(`/chart/NFO/${LIVE_CALL}`)
     const line = screen.getByTestId('chart-oi')
     expect(line).toHaveTextContent('OIwaiting for the first tick')
     emit((cb) =>
@@ -825,7 +849,7 @@ describe('the phone chart page at 390 px', () => {
 
   it("says the change is not available where yesterday's open interest is not known, and shows none for a share", async () => {
     fakes.instrument = { name: 'NIFTY 27 OCT 25900 CE', lotSize: 65, tickSize: 0.05 }
-    await opened('/chart/NFO/NIFTY27OCT2625900CE')
+    await opened(`/chart/NFO/${LIVE_CALL}`)
     emit((cb) =>
       cb.onTick({
         ltp: 142.3,
@@ -1225,6 +1249,173 @@ describe('the phone chart page at 390 px', () => {
     const { unmount } = await opened()
     unmount()
     expect(chart().destroy).toHaveBeenCalled()
+  })
+})
+
+/**
+ * Test day TD2: the chart reopened a contract that had expired on 17 Nov, with "No price yet",
+ * "Try again" and "ordering is off here". An expired contract says it expired, on its day,
+ * builds no chart, offers what trades in its place and is never the chart a bare /chart opens.
+ */
+describe('an expired contract (TD2)', () => {
+  const EXPIRED = 'NIFTY17NOV2625000CE'
+  const NEXT = 'NIFTY24NOV2625000CE'
+  const listed = { name: 'NIFTY 24 NOV 25000 CE', lotSize: 65, tickSize: 0.05 }
+  const gone = () => screen.getByTestId('chart-gone')
+
+  beforeEach(() => {
+    fakes.expiries = (symbol, exchange, kind) =>
+      symbol === 'NIFTY' && exchange === 'NFO' && kind === 'options'
+        ? ['24-NOV-26', '01-DEC-26']
+        : []
+    fakes.instrument = (symbol: string) => (symbol === NEXT ? listed : 'unlisted')
+  })
+
+  it('says it expired on its day, builds no chart and never offers to try again', async () => {
+    renderAt(`/chart/NFO/${EXPIRED}`)
+    expect(await screen.findByRole('heading', { name: 'Expired on 17 Nov 2026' })).toBeVisible()
+    expect(gone()).toHaveTextContent(
+      'NIFTY17NOV2625000CE expired on 17 Nov 2026. An expired contract has no prices and takes no orders, so there is nothing to chart.'
+    )
+    await within(gone()).findByRole('button', { name: /NIFTY 24 NOV 25000 CE/ })
+    expect(fakes.charts).toHaveLength(0)
+    // Nothing is asked of the expired contract itself: no master read, no history.
+    expect(fakes.reads).toEqual(['expiry NFO:NIFTY options', `symbol NFO:${NEXT}`])
+    for (const words of [/Try again/, /No price yet/, /did not load/, /ordering is off/])
+      expect(screen.queryByText(words)).toBeNull()
+    expect(screen.queryByRole('button', { name: /Try again/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'BUY' })).toBeNull()
+  })
+
+  it('offers the same strike and side on the nearest expiry and the index, each opening its chart here', async () => {
+    renderAt(`/chart/NFO/${EXPIRED}`, ['/dashboard'])
+    const offers = within(await screen.findByRole('list', { name: 'Open instead' }))
+    const next = await offers.findByRole('button', {
+      name: 'NIFTY 24 NOV 25000 CE, Same strike and side, nearest expiry',
+    })
+    expect(offers.getByRole('button', { name: 'NIFTY, The index' })).toBeVisible()
+    expect(next.className).toMatch(/\bmin-h-12\b/)
+    await userEvent.click(next)
+    expect(screen.getByRole('status', { name: 'Location' })).toHaveTextContent(`/chart/NFO/${NEXT}`)
+    await waitFor(() => expect(chart().load).toHaveBeenCalledWith(NEXT, 'NFO', '5m'))
+    // The new chart took the expired one's place: Back leaves the chart.
+    await userEvent.click(screen.getByRole('button', { name: 'Phone back' }))
+    expect(screen.getByText('Elsewhere')).toBeVisible()
+  })
+
+  it('opens the index from the offer', async () => {
+    renderAt(`/chart/NFO/${EXPIRED}`)
+    await userEvent.click(await screen.findByRole('button', { name: 'NIFTY, The index' }))
+    expect(screen.getByRole('status', { name: 'Location' })).toHaveTextContent(
+      '/chart/NSE_INDEX/NIFTY'
+    )
+  })
+
+  it('says when the nearest expiry does not list the strike, and still offers the index', async () => {
+    fakes.instrument = 'unlisted'
+    renderAt(`/chart/NFO/${EXPIRED}`)
+    expect(
+      await within(await screen.findByTestId('chart-gone')).findByText(
+        '25000 CE is not listed on the nearest expiry.'
+      )
+    ).toBeVisible()
+    expect(screen.queryAllByRole('button', { name: /Same strike/ })).toHaveLength(0)
+    expect(screen.getByRole('button', { name: 'NIFTY, The index' })).toBeVisible()
+  })
+
+  it("offers a stock option's share, and says when the expiry list cannot be read", async () => {
+    fakes.expiries = () => null
+    renderAt('/chart/NFO/RELIANCE17NOV261400PE')
+    expect(await screen.findByRole('button', { name: 'RELIANCE, The share' })).toBeVisible()
+    expect(await screen.findByText('The nearest expiry could not be read just now.')).toBeVisible()
+    await userEvent.click(screen.getByRole('button', { name: 'RELIANCE, The share' }))
+    expect(screen.getByRole('status', { name: 'Location' })).toHaveTextContent(
+      '/chart/NSE/RELIANCE'
+    )
+  })
+
+  it("offers a commodity option's nearest future as its underlying", async () => {
+    fakes.expiries = (symbol, exchange, kind) =>
+      symbol === 'CRUDEOIL' && exchange === 'MCX'
+        ? kind === 'options'
+          ? ['16-DEC-26']
+          : ['18-DEC-26']
+        : null
+    fakes.instrument = (symbol: string) =>
+      symbol === 'CRUDEOIL18DEC26FUT' ? { name: 'CRUDEOIL', lotSize: 100, tickSize: 1 } : 'unlisted'
+    renderAt('/chart/MCX/CRUDEOIL17NOV265000CE')
+    expect(
+      await screen.findByRole('button', {
+        name: 'CRUDEOIL 18 DEC FUT, The underlying future, nearest expiry',
+      })
+    ).toBeVisible()
+    expect(await screen.findByText('5000 CE is not listed on the nearest expiry.')).toBeVisible()
+  })
+
+  it('is never the chart a bare /chart opens, and one kept from before it expired says so', async () => {
+    localStorage.setItem('sudarshan-chart-last', '{"symbol":"SBIN","exchange":"NSE"}')
+    const { unmount } = renderAt(`/chart/NFO/${EXPIRED}`)
+    await screen.findByRole('heading', { name: 'Expired on 17 Nov 2026' })
+    expect(localStorage.getItem('sudarshan-chart-last')).toBe('{"symbol":"SBIN","exchange":"NSE"}')
+    unmount()
+    // Kept by a build before this one, the day it was opened: a bare /chart shows it expired.
+    localStorage.setItem(
+      'sudarshan-chart-last',
+      JSON.stringify({ symbol: EXPIRED, exchange: 'NFO' })
+    )
+    renderAt('/chart')
+    expect(screen.getByRole('status', { name: 'Location' })).toHaveTextContent(
+      `/chart/NFO/${EXPIRED}`
+    )
+    expect(await screen.findByRole('heading', { name: 'Expired on 17 Nov 2026' })).toBeVisible()
+    expect(fakes.charts).toHaveLength(0)
+  })
+
+  it('says it expired even before prices can be read, and looks nothing up', async () => {
+    useAuthStore.setState({ apiKey: null, sessionChecked: true, brokerSessionExpired: true })
+    renderAt(`/chart/NFO/${EXPIRED}`)
+    expect(await screen.findByRole('heading', { name: 'Expired on 17 Nov 2026' })).toBeVisible()
+    expect(screen.getByRole('button', { name: 'NIFTY, The index' })).toBeVisible()
+    expect(fakes.reads).toEqual([])
+    expect(screen.queryByText(/Looking for/)).toBeNull()
+  })
+
+  it('a contract the master no longer lists: says so, lets the chart go, and is not kept', async () => {
+    const LATER = niftyIn(30, '99950CE')
+    fakes.instrument = 'unlisted'
+    localStorage.setItem('sudarshan-chart-last', '{"symbol":"SBIN","exchange":"NSE"}')
+    renderAt(`/chart/NFO/${LATER}`)
+    expect(
+      await screen.findByRole('heading', { name: "Not in today's contract list" })
+    ).toBeVisible()
+    expect(gone()).toHaveTextContent(
+      `Today's contract list does not have ${LATER}, so it cannot be charted or traded. Check its expiry and strike.`
+    )
+    // Built while the master was being asked, then let go.
+    await waitFor(() => expect(fakes.charts.at(-1)?.destroy).toHaveBeenCalled())
+    expect(screen.queryByRole('button', { name: /Try again/ })).toBeNull()
+    expect(localStorage.getItem('sudarshan-chart-last')).toBe('{"symbol":"SBIN","exchange":"NSE"}')
+  })
+
+  it('a share the master does not list keeps the chart and its own words', async () => {
+    fakes.instrument = 'unlisted'
+    await opened('/chart/NSE/SBINX')
+    expect(screen.queryByTestId('chart-gone')).toBeNull()
+    expect(
+      await screen.findByText(/The contract details did not load, so ordering is off here/)
+    ).toBeVisible()
+  })
+
+  it('a contract on its expiry day is still charted', async () => {
+    const today = niftyIn(0, '25000CE')
+    fakes.instrument = { name: 'NIFTY 25000 CE', lotSize: 65, tickSize: 0.05 }
+    await opened(`/chart/NFO/${today}`)
+    expect(screen.queryByTestId('chart-gone')).toBeNull()
+    await waitFor(() =>
+      expect(localStorage.getItem('sudarshan-chart-last')).toBe(
+        JSON.stringify({ symbol: today, exchange: 'NFO' })
+      )
+    )
   })
 })
 

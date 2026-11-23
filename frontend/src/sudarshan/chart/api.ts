@@ -32,7 +32,11 @@ export async function loadFeedConfig(): Promise<FeedConfig | null> {
   }
 }
 
-async function post<T>(path: string, body: Record<string, unknown>): Promise<T | null> {
+/** The answer's data; `missing` when the server said it has no such thing (404); null when not read. */
+async function ask<T>(
+  path: string,
+  body: Record<string, unknown>
+): Promise<{ data: T } | 'missing' | null> {
   try {
     const res = await fetch(`/api/v1/${path}`, {
       method: 'POST',
@@ -40,10 +44,16 @@ async function post<T>(path: string, body: Record<string, unknown>): Promise<T |
       body: JSON.stringify(body),
     })
     const json = (await res.json()) as { status?: string; data?: T }
-    return res.ok && json.status !== 'error' && json.data !== undefined ? json.data : null
+    if (res.status === 404 && json.status === 'error') return 'missing'
+    return res.ok && json.status !== 'error' && json.data !== undefined ? { data: json.data } : null
   } catch {
     return null
   }
+}
+
+async function post<T>(path: string, body: Record<string, unknown>): Promise<T | null> {
+  const answer = await ask<T>(path, body)
+  return answer && answer !== 'missing' ? answer.data : null
 }
 
 /** The contract facts an order ticket needs. */
@@ -53,18 +63,40 @@ export interface InstrumentInfo {
   tickSize: number
 }
 
+/** The master's facts for an instrument; `unlisted` when the master does not list it (TD2). */
 export async function loadInstrument(
   apiKey: string,
   symbol: string,
   exchange: string
-): Promise<InstrumentInfo | null> {
-  const data = await post<Record<string, unknown>>('symbol', { apikey: apiKey, symbol, exchange })
+): Promise<InstrumentInfo | 'unlisted' | null> {
+  const answer = await ask<Record<string, unknown>>('symbol', { apikey: apiKey, symbol, exchange })
+  if (answer === 'missing') return 'unlisted'
+  const data = answer?.data
   if (!data) return null
   return {
     name: typeof data.name === 'string' ? data.name : '',
     lotSize: Number(data.lotsize) > 0 ? Number(data.lotsize) : 1,
     tickSize: Number(data.tick_size) > 0 ? Number(data.tick_size) : 0.05,
   }
+}
+
+/**
+ * The expiry days the master lists for an underlying's futures or options, nearest first and
+ * none already past ("24-NOV-26"; the server drops those); null when not read (TD2).
+ */
+export async function loadExpiries(
+  apiKey: string,
+  symbol: string,
+  exchange: string,
+  kind: 'futures' | 'options'
+): Promise<string[] | null> {
+  const data = await post<unknown>('expiry', {
+    apikey: apiKey,
+    symbol,
+    exchange,
+    instrumenttype: kind,
+  })
+  return Array.isArray(data) ? data.filter((day): day is string => typeof day === 'string') : null
 }
 
 /** The timeframes the broker offers, grouped as the terminal groups them; null when not read. */
