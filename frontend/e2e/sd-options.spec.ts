@@ -717,11 +717,16 @@ test.describe('the options screen at 360 x 800', () => {
 })
 
 // v0.16.0 phone review H2: with Larger text the option ticket read "Total qty: 6" for 65 and its
-// Shares button was cut by the ticket's edge. Opened from the strike sheet; nothing is sent.
+// Shares button was cut by the ticket's edge. Opened from the strike sheet; nothing is sent. On
+// the phone's side too (v0.17.0 verification V5: the title, the longest with an option's symbol).
 for (const { viewport, larger } of [
   { viewport: { width: 360, height: 800 }, larger: true },
   { viewport: { width: 320, height: 640 }, larger: false },
   { viewport: { width: 320, height: 640 }, larger: true },
+  { viewport: { width: 640, height: 320 }, larger: false },
+  { viewport: { width: 640, height: 320 }, larger: true },
+  { viewport: { width: 800, height: 360 }, larger: false },
+  { viewport: { width: 800, height: 360 }, larger: true },
 ]) {
   const size = `${viewport.width} x ${viewport.height}${larger ? ', Larger text' : ''}`
   test.describe(`the option ticket at ${size}`, () => {

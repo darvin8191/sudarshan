@@ -3,18 +3,23 @@ import { Clock } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { showToast } from '@/utils/toast'
 import { FlagPicker } from './FlagPicker'
-import { NoteField } from './NoteField'
+import { NoteField, type NoteProblem } from './NoteField'
 import { dropNoteDraft, keepNoteDraft, noteDraft } from './noteDrafts'
-import { callOp } from './v2/api'
+import { callOp, WatchlistsError } from './v2/api'
 import { checkNote, inLists, PRIVATE_WORDS, readAgain, useSymbolInfo } from './v2/marks'
 import type { FlagName, MarkReq } from './v2/types'
 
 /** Said once a note typed in the sheet was saved after the sheet closed (M8.6, GA10.8). */
 export const NOTE_SAVED = 'Note saved'
-/** Said when it could not be: the reason follows, then what to do (v0.16.0 phone review L2). */
+/** Said when the server refused it: the reason follows, then what to do (v0.16.0 review L2). */
 export const NOTE_NOT_SAVED = 'Note not saved:'
 /** What to do then: the words are kept for the symbol's sheet (L2). */
 export const NOTE_KEPT = 'Open the symbol to save it again: what you typed is kept there.'
+/** Said when no answer came (a timeout, no network): it may have been saved, so it is never
+ *  called not saved (v0.17.0 verification V4). */
+export const NOTE_NOT_CONFIRMED = 'Note not confirmed:'
+export const NOTE_UNANSWERED =
+  'No answer came from OpenAlgo. Open the symbol to see whether it was saved: what you typed is kept there.'
 const NOTE_TOO_LONG_LEFT =
   'It is over 500 characters. Open the symbol to shorten it: what you typed is kept there.'
 
@@ -32,33 +37,41 @@ export function SymbolMarks({ k, names }: { k: string; names: readonly FlagName[
   const [flagging, setFlagging] = useState(false)
   const data = info.data
 
-  const send = async (change: Pick<MarkReq, 'flag' | 'note'>): Promise<string | null> => {
-    let said: string | null = null
+  const send = async (change: Pick<MarkReq, 'flag' | 'note'>): Promise<NoteProblem | null> => {
+    let problem: NoteProblem | null = null
     try {
       await callOp('mark', { k, ...change, version: data?.version ?? null })
     } catch (error) {
-      said = error instanceof Error ? error.message : 'The change could not be saved.'
+      problem = {
+        message: error instanceof Error ? error.message : 'The change could not be saved.',
+        unanswered: error instanceof WatchlistsError && error.code === 'unanswered',
+      }
     }
     // Read again either way: after a refusal the symbol is the other screen's.
     await readAgain(client, k)
-    return said
+    return problem
   }
-  const write = (change: Pick<MarkReq, 'flag' | 'note'>): Promise<string | null> => {
+  const write = (change: Pick<MarkReq, 'flag' | 'note'>): Promise<NoteProblem | null> => {
     setProblem(null)
     return send(change)
   }
   // GA10.8: the sheet closed with a note typed and not saved. It is saved now, the owner's
   // default, and said in one quiet line once it is. L2: a note the server does not take after
   // the sheet has gone, whether saved on closing or by a Save still on its way when Back came,
-  // is kept for the symbol's sheet, and the line says why and what to do.
-  const answeredAway = (note: string, said: string | null) => {
-    if (said === null) {
+  // is kept for the symbol's sheet, and the line says why and what to do. V4: a write that got
+  // no answer may have been saved, so the line says it is not confirmed, never not saved.
+  const answeredAway = (note: string, problem: NoteProblem | null) => {
+    if (problem === null) {
       dropNoteDraft(k)
       showToast.info(NOTE_SAVED, undefined, { duration: 2_000 })
       return
     }
     keepNoteDraft(k, note)
-    showToast.error(`${NOTE_NOT_SAVED} ${said} ${NOTE_KEPT}`)
+    showToast.error(
+      problem.unanswered
+        ? `${NOTE_NOT_CONFIRMED} ${NOTE_UNANSWERED}`
+        : `${NOTE_NOT_SAVED} ${problem.message} ${NOTE_KEPT}`
+    )
   }
   const leave = (note: string) => {
     if (checkNote(note)) {
@@ -66,7 +79,7 @@ export function SymbolMarks({ k, names }: { k: string; names: readonly FlagName[
       showToast.error(`${NOTE_NOT_SAVED} ${NOTE_TOO_LONG_LEFT}`)
       return
     }
-    void send({ note }).then((said) => answeredAway(note, said))
+    void send({ note }).then((answer) => answeredAway(note, answer))
   }
   // A note kept from before is in the field from its first frame; the store lets it go then.
   const draft = noteDraft(k)
@@ -109,7 +122,7 @@ export function SymbolMarks({ k, names }: { k: string; names: readonly FlagName[
             if (flagging) return
             setFlagging(true)
             void write({ flag })
-              .then(setProblem)
+              .then((answer) => setProblem(answer?.message ?? null))
               .finally(() => setFlagging(false))
           }}
         />

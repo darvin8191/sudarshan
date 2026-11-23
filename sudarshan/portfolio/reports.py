@@ -18,8 +18,10 @@ every answer carries the time it was read.
   when it is complete, so a complete year never shrinks or doubles.
 * **Inside the reader's budget.** Every call is one ``Budget.take`` on its own API name (``trades``,
   ``pnl_meta``, ``pnl``, ``charges``: 2 a second, 30 a minute, 200 in 30 minutes each), the same
-  60 second pause on a 429 and the same pause on a refused token as the live book
-  (``UpstoxReader``). A read waits out the per-second bucket (under a second); a read that
+  60 second pause on a 429 and the same pauses on a 401 as the live book (``UpstoxReader``):
+  every read while Upstox refuses the token itself at a holdings or positions read, and the one
+  API alone when only its read was refused (v0.17.0 verification V1), said in words that never
+  claim the token was refused. A read waits out the per-second bucket (under a second); a read that
   finds the minute or 30-minute bucket empty stops where it is, keeps what it has, and says so.
 * **Integers.** Rupees become paise, quantities ``qty_u`` and prices ``price_u`` at the parser,
   half away from zero; a float never reaches the store or the phone. Dates become ``YYYYMMDD``.
@@ -109,6 +111,19 @@ WORDS = {
     "token_refused_kept": "Upstox did not accept SUDARSHAN's read-only token, so these are the "
     "figures from the last complete read. The token is shared with TRINETRA: do not create a new "
     "one in the Upstox app; check the server first.",
+    # A read Upstox refused alone (v0.17.0 verification V1): the token reads everything else.
+    "trades_not_allowed": "Upstox did not let SUDARSHAN's read-only token read your trade "
+    "history; the rest of the Upstox tab is not affected.",
+    "pnl_not_allowed": "Upstox did not let SUDARSHAN's read-only token read your trade-wise P&L "
+    "report; the rest of the Upstox tab is not affected.",
+    "history_not_allowed": "Upstox did not let SUDARSHAN's read-only token read this order's "
+    "history; the Upstox tab is not affected.",
+    "trades_not_allowed_kept": "Upstox did not let SUDARSHAN's read-only token read your trade "
+    "history, so these are the figures from the last complete read; the rest of the Upstox tab "
+    "is not affected.",
+    "pnl_not_allowed_kept": "Upstox did not let SUDARSHAN's read-only token read your trade-wise "
+    "P&L report, so these are the figures from the last complete read; the rest of the Upstox "
+    "tab is not affected.",
     "early": "This year was read before it had closed and settled. SUDARSHAN reads it again once "
     "it has; tap Read again to do it now.",
     "no_pnl_mf": "Upstox has no trade-wise P&L report for mutual funds; their trades are in "
@@ -133,7 +148,21 @@ def _kept_words(note: str | None) -> str:
         return WORDS["no_token_kept"]
     if note == WORDS["token_refused"]:
         return WORDS["token_refused_kept"]
+    for key in ("trades_not_allowed", "pnl_not_allowed"):
+        if note == WORDS[key]:
+            return WORDS[f"{key}_kept"]
     return WORDS["kept"]
+
+
+#: The words of a report read Upstox refused alone, by the budget's name of its API (V1).
+NOT_ALLOWED = {"trades": "trades_not_allowed", "pnl_meta": "pnl_not_allowed",
+               "pnl": "pnl_not_allowed", "charges": "pnl_not_allowed",
+               "order_history": "history_not_allowed"}  # fmt: skip
+
+
+def _refusal(api: str, why: str) -> str:
+    """The words key for a read the live book's pauses stop (``UpstoxReader.stopped``)."""
+    return "token_refused" if why == "token" else NOT_ALLOWED[api]
 
 
 # ---- the years ---------------------------------------------------------------------------------
@@ -479,13 +508,14 @@ class ReportReader:
         self, api: str, params: Mapping[str, str], principal: str = "owner"
     ) -> tuple[str, Any]:
         """``("ok", payload)`` or ``("<words key>", None)``; spends one read of the budget. A
-        principal other than the owner (the journal) leaves the owner's reserve (budget.RESERVE)."""
+        principal other than the owner (the journal) leaves the owner's reserve (budget.RESERVE).
+        The live book's pauses on a 401 hold here too (``UpstoxReader.stopped``): every read
+        while Upstox refuses the token itself, this read alone while it refuses only this one."""
         upstox = self.upstox
-        if upstox._refused:
-            if _signature(upstox.token_file) == upstox._refused_at:
-                return "token_refused", None
-            upstox._refused = False
-            upstox._told.discard("401")
+        sig = _signature(upstox.token_file)
+        why = upstox.stopped(api, sig)
+        if why is not None:
+            return _refusal(api, why), None
         if upstox.budget.paused_for(api):
             return "slow", None
         token = upstox._token()
@@ -512,9 +542,7 @@ class ReportReader:
             del token, headers
         status = answer.status_code
         if status == 401:
-            upstox._refused, upstox._refused_at = True, _signature(upstox.token_file)
-            log.warning("Upstox refused the read-only token; report reads pause until it changes.")
-            return "token_refused", None
+            return _refusal(api, upstox.refused(api, sig)), None
         if status == 429 or upstox._rate_coded(answer):
             upstox.budget.pause(api, PAUSE_S)
             log.warning("Upstox asked for a pause on %s: %d seconds", api, int(PAUSE_S))

@@ -409,6 +409,19 @@ describe('display density and text size', () => {
     )
   })
 
+  // v0.17.0 verification V5: the ticket's title gives the first screen one more line.
+  it("lets the ticket title's lead go from the screen below 360 px with Larger text, never from a screen reader", () => {
+    const rule =
+      /@media \(width < 22\.5rem\) \{\s*:root\[data-text='large'\] \.sd-ticket-lead \{([^}]*)\}\s*\}/.exec(
+        css
+      )?.[1] ?? ''
+    expect(rule).toMatch(/position:\s*absolute;/)
+    expect(rule).toMatch(/width:\s*1px;/)
+    expect(rule).toMatch(/clip-path:\s*inset\(50%\);/)
+    expect(rule).not.toMatch(/display:\s*none|visibility:\s*hidden/)
+    expect(css.match(/\.sd-ticket-lead/g)).toHaveLength(1) // nowhere else, at no other size
+  })
+
   it('changes no colour', () => {
     for (const selector of [":root[data-text='large']", ":root[data-density='compact']"]) {
       const escaped = selector.replace(/[[\]]/g, '\\$&')

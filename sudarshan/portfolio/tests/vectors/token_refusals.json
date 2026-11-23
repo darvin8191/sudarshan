@@ -1,0 +1,272 @@
+{
+ "note": "M13.12, v0.17.0 verification V1, written out in make_token_refusals.py: after a 401 on one read, which reads still ask Upstox, which pause and in what words, and the token line.",
+ "reads": [
+  "holdings",
+  "positions",
+  "mtf",
+  "funds",
+  "orders",
+  "day_trades",
+  "trades",
+  "pnl_meta",
+  "pnl",
+  "charges",
+  "order_history",
+  "corporate_actions"
+ ],
+ "words": {
+  "tab_token": "Upstox did not accept SUDARSHAN's read-only token, so the Upstox tab cannot be read now. The token is shared with TRINETRA: do not create a new one in the Upstox app; check the server first.",
+  "reports_token": "Upstox did not accept SUDARSHAN's read-only token, so the reports cannot be read now. The token is shared with TRINETRA: do not create a new one in the Upstox app; check the server first.",
+  "corporate_actions_token": "Upstox did not accept SUDARSHAN's read-only token.",
+  "mtf": "Upstox did not let SUDARSHAN's read-only token read your MTF positions; the rest of the Upstox tab is not affected.",
+  "funds": "Upstox did not let SUDARSHAN's read-only token read your funds; the rest of the Upstox tab is not affected.",
+  "orders": "Upstox did not let SUDARSHAN's read-only token read the day's orders; the Upstox tab is not affected.",
+  "day_trades": "Upstox did not let SUDARSHAN's read-only token read the day's trades; the Upstox tab is not affected.",
+  "trades": "Upstox did not let SUDARSHAN's read-only token read your trade history; the rest of the Upstox tab is not affected.",
+  "pnl": "Upstox did not let SUDARSHAN's read-only token read your trade-wise P&L report; the rest of the Upstox tab is not affected.",
+  "order_history": "Upstox did not let SUDARSHAN's read-only token read this order's history; the Upstox tab is not affected.",
+  "corporate_actions": "Upstox did not let SUDARSHAN's read-only token read the list of corporate actions; the Upstox tab is not affected."
+ },
+ "cases": [
+  {
+   "id": "R1 holdings refused: the token itself, so every read pauses",
+   "refused": "holdings",
+   "first": "tab_token",
+   "token_line": "failed",
+   "then": {
+    "holdings": "tab_token",
+    "positions": "tab_token",
+    "mtf": "tab_token",
+    "funds": "tab_token",
+    "orders": "tab_token",
+    "day_trades": "tab_token",
+    "trades": "reports_token",
+    "pnl_meta": "reports_token",
+    "pnl": "reports_token",
+    "charges": "reports_token",
+    "order_history": "reports_token",
+    "corporate_actions": "corporate_actions_token"
+   }
+  },
+  {
+   "id": "R2 positions refused: the token itself, so every read pauses",
+   "refused": "positions",
+   "first": "tab_token",
+   "token_line": "failed",
+   "then": {
+    "holdings": "tab_token",
+    "positions": "tab_token",
+    "mtf": "tab_token",
+    "funds": "tab_token",
+    "orders": "tab_token",
+    "day_trades": "tab_token",
+    "trades": "reports_token",
+    "pnl_meta": "reports_token",
+    "pnl": "reports_token",
+    "charges": "reports_token",
+    "order_history": "reports_token",
+    "corporate_actions": "corporate_actions_token"
+   }
+  },
+  {
+   "id": "R3 mtf refused: that read alone pauses, in its own words",
+   "refused": "mtf",
+   "first": "mtf",
+   "token_line": "ok",
+   "then": {
+    "holdings": "asks",
+    "positions": "asks",
+    "mtf": "mtf",
+    "funds": "asks",
+    "orders": "asks",
+    "day_trades": "asks",
+    "trades": "asks",
+    "pnl_meta": "asks",
+    "pnl": "asks",
+    "charges": "asks",
+    "order_history": "asks",
+    "corporate_actions": "asks"
+   }
+  },
+  {
+   "id": "R4 funds refused: that read alone pauses, in its own words",
+   "refused": "funds",
+   "first": "funds",
+   "token_line": "ok",
+   "then": {
+    "holdings": "asks",
+    "positions": "asks",
+    "mtf": "asks",
+    "funds": "funds",
+    "orders": "asks",
+    "day_trades": "asks",
+    "trades": "asks",
+    "pnl_meta": "asks",
+    "pnl": "asks",
+    "charges": "asks",
+    "order_history": "asks",
+    "corporate_actions": "asks"
+   }
+  },
+  {
+   "id": "R5 orders refused: that read alone pauses, in its own words",
+   "refused": "orders",
+   "first": "orders",
+   "token_line": "ok",
+   "then": {
+    "holdings": "asks",
+    "positions": "asks",
+    "mtf": "asks",
+    "funds": "asks",
+    "orders": "orders",
+    "day_trades": "asks",
+    "trades": "asks",
+    "pnl_meta": "asks",
+    "pnl": "asks",
+    "charges": "asks",
+    "order_history": "asks",
+    "corporate_actions": "asks"
+   }
+  },
+  {
+   "id": "R6 day_trades refused: that read alone pauses, in its own words",
+   "refused": "day_trades",
+   "first": "day_trades",
+   "token_line": "ok",
+   "then": {
+    "holdings": "asks",
+    "positions": "asks",
+    "mtf": "asks",
+    "funds": "asks",
+    "orders": "asks",
+    "day_trades": "day_trades",
+    "trades": "asks",
+    "pnl_meta": "asks",
+    "pnl": "asks",
+    "charges": "asks",
+    "order_history": "asks",
+    "corporate_actions": "asks"
+   }
+  },
+  {
+   "id": "R7 trades refused: that read alone pauses, in its own words",
+   "refused": "trades",
+   "first": "trades",
+   "token_line": "ok",
+   "then": {
+    "holdings": "asks",
+    "positions": "asks",
+    "mtf": "asks",
+    "funds": "asks",
+    "orders": "asks",
+    "day_trades": "asks",
+    "trades": "trades",
+    "pnl_meta": "asks",
+    "pnl": "asks",
+    "charges": "asks",
+    "order_history": "asks",
+    "corporate_actions": "asks"
+   }
+  },
+  {
+   "id": "R8 pnl_meta refused: that read alone pauses, in its own words",
+   "refused": "pnl_meta",
+   "first": "pnl",
+   "token_line": "ok",
+   "then": {
+    "holdings": "asks",
+    "positions": "asks",
+    "mtf": "asks",
+    "funds": "asks",
+    "orders": "asks",
+    "day_trades": "asks",
+    "trades": "asks",
+    "pnl_meta": "pnl",
+    "pnl": "asks",
+    "charges": "asks",
+    "order_history": "asks",
+    "corporate_actions": "asks"
+   }
+  },
+  {
+   "id": "R9 pnl refused: that read alone pauses, in its own words",
+   "refused": "pnl",
+   "first": "pnl",
+   "token_line": "ok",
+   "then": {
+    "holdings": "asks",
+    "positions": "asks",
+    "mtf": "asks",
+    "funds": "asks",
+    "orders": "asks",
+    "day_trades": "asks",
+    "trades": "asks",
+    "pnl_meta": "asks",
+    "pnl": "pnl",
+    "charges": "asks",
+    "order_history": "asks",
+    "corporate_actions": "asks"
+   }
+  },
+  {
+   "id": "R10 charges refused: that read alone pauses, in its own words",
+   "refused": "charges",
+   "first": "pnl",
+   "token_line": "ok",
+   "then": {
+    "holdings": "asks",
+    "positions": "asks",
+    "mtf": "asks",
+    "funds": "asks",
+    "orders": "asks",
+    "day_trades": "asks",
+    "trades": "asks",
+    "pnl_meta": "asks",
+    "pnl": "asks",
+    "charges": "pnl",
+    "order_history": "asks",
+    "corporate_actions": "asks"
+   }
+  },
+  {
+   "id": "R11 order_history refused: that read alone pauses, in its own words",
+   "refused": "order_history",
+   "first": "order_history",
+   "token_line": "ok",
+   "then": {
+    "holdings": "asks",
+    "positions": "asks",
+    "mtf": "asks",
+    "funds": "asks",
+    "orders": "asks",
+    "day_trades": "asks",
+    "trades": "asks",
+    "pnl_meta": "asks",
+    "pnl": "asks",
+    "charges": "asks",
+    "order_history": "order_history",
+    "corporate_actions": "asks"
+   }
+  },
+  {
+   "id": "R12 corporate actions refused: the night ends, nothing pauses",
+   "refused": "corporate_actions",
+   "first": "corporate_actions",
+   "token_line": "ok",
+   "then": {
+    "holdings": "asks",
+    "positions": "asks",
+    "mtf": "asks",
+    "funds": "asks",
+    "orders": "asks",
+    "day_trades": "asks",
+    "trades": "asks",
+    "pnl_meta": "asks",
+    "pnl": "asks",
+    "charges": "asks",
+    "order_history": "asks",
+    "corporate_actions": "asks_again"
+   }
+  }
+ ]
+}

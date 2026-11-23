@@ -5,9 +5,19 @@ import { checkNote } from './v2/marks'
 import { LIMITS } from './v2/types'
 
 /**
+ * What a write of the note came back with, when it was not kept: the sentence to show, and
+ * whether no answer came at all (a timeout, no network), so it may have been saved after all
+ * (v0.17.0 verification V4).
+ */
+export interface NoteProblem {
+  message: string
+  unanswered: boolean
+}
+
+/**
  * Note (M8.6 F8): a text field with "123 of 500", Save and a "Saved" state. A note over the limit
  * is refused before anything is sent, in the server's words. `onSave` answers null when the note
- * was kept, or the sentence to show. A note typed and not saved when the field goes (the sheet
+ * was kept, or the problem to show. A note typed and not saved when the field goes (the sheet
  * closed) is handed to `onLeave`, the owner's default (GA10.8); an empty or unchanged one is not,
  * nor one already being saved: that one's answer goes to `onAnsweredAway` when it comes, since
  * the field is no longer there to show it (v0.16.0 phone review L2).
@@ -25,10 +35,10 @@ export function NoteField({
   /** A note typed before and not taken, shown in place of the saved one, ready to save (L2). */
   draft?: string
   disabled?: boolean
-  onSave: (note: string) => Promise<string | null>
+  onSave: (note: string) => Promise<NoteProblem | null>
   onLeave?: (note: string) => void
-  /** A Save on its way when the field went has come back: null when kept, else the refusal. */
-  onAnsweredAway?: (note: string, refused: string | null) => void
+  /** A Save on its way when the field went has come back: null when kept, else the problem. */
+  onAnsweredAway?: (note: string, problem: NoteProblem | null) => void
 }) {
   const id = useId()
   const [text, setText] = useState(draft ?? saved)
@@ -87,7 +97,7 @@ export function NoteField({
       return
     }
     setBusy(false)
-    if (answer) setProblem(answer)
+    if (answer) setProblem(answer.message)
     else setDone(true)
   }
 

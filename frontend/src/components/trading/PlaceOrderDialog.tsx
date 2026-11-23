@@ -521,9 +521,11 @@ export function PlaceOrderDialog({
       >
         <DialogHeader>
           {/* M20.2 (v0.16.0 phone review H2): the symbol wraps under the side when the title
-              has no room for it (Larger text at 320 px read "SELL S..."); it is never cut. */}
+              has no room for it (Larger text at 320 px read "SELL S..."); it is never cut.
+              v0.17.0 verification V5: below 360 px with Larger text the lead is read, not shown
+              (`sd-ticket-lead`, theme.css), so the side and the symbol share one line. */}
           <DialogTitle className="flex flex-wrap items-center gap-x-2 gap-y-0.5 pr-10 text-left">
-            <span>Place Order -</span>
+            <span className="sd-ticket-lead">Place Order -</span>
             <span className={SIDE_INK[formAction]}>{formAction}</span>
             <span className="min-w-0 text-muted-foreground font-normal text-sm [overflow-wrap:anywhere]">
               {symbol}

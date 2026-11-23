@@ -550,11 +550,15 @@ async def test_two_opens_at_once_make_one_request(rig):
 
 @scenario_of
 async def test_a_refused_token_that_changed_is_told_again_when_it_is_refused_again(rig):
+    """Pauses kept for a token file that is no longer the one on the server are let go at the
+    next read, the token's and each read's alone (verification V1), and so is their log line."""
     upstox = rig.svc.upstox
-    upstox._refused, upstox._refused_at = True, ("stale",)
-    upstox._told.add("401")
-    await rig.call("report_trades", fy=2026, segment="EQ")
-    assert "401" not in upstox._told and upstox._refused is False
+    upstox._confirmed_at, upstox._paused = ("stale",), {"trades": ("stale",), "pnl": ("stale",)}
+    upstox._told |= {"401", "401 trades", "401 pnl"}
+    data = (await rig.call("report_trades", fy=2026, segment="EQ"))["data"]
+    assert data["state"] == "ok" and rig.fake.count("trades") == 1
+    assert not upstox._told & {"401", "401 trades", "401 pnl"}
+    assert upstox._confirmed_at is None and upstox._paused == {}
 
 
 def test_a_date_in_either_of_upstox_s_shapes_is_read_in_both_rows():

@@ -383,10 +383,25 @@ two exists in this release. Each purpose has its own principal and its own list 
   `changed` when the token file is not the one that was read with. It is judged only from the
   reads the token is known to make, holdings and positions (`upstox.JUDGES`): `failed` when
   Upstox refused one of them (401), `ok` when it answered one. The Upstox tab, the family view and
-  the closing record after each trading day read them anyway, so no call is made for it. A 401 on
-  any other read (the day's orders or trades, a report) pauses the other parts as before but
-  never holdings and positions, until one of those is refused itself. Kept in `token-check` in
-  the state folder. Never the token: the server's watch and the System page read this field.
+  the closing record after each trading day read them anyway, so no call is made for it. An `ok`
+  that lands after a `failed` of the same token file (the tab reads both at once) does not
+  replace it; only a holdings read asked again does (v0.17.0 verification V3). Kept in
+  `token-check` in the state folder. Never the token: the server's watch and the System page read
+  this field.
+* **Which reads a 401 pauses** (v0.17.0 verification V1) follows the read, until the token file
+  changes. A 401 on holdings or positions pauses every read (the four parts, the day's orders and
+  trades, the reports, corporate actions), in the words that say Upstox did not accept the token.
+  A 401 on any other read pauses that read alone (`UpstoxReader.stopped`, one entry per API), in
+  its own words ("Upstox did not let SUDARSHAN's read-only token read your funds; the rest of the
+  Upstox tab is not affected."), which never say the token was refused: the closing record still
+  gets its funds after the day's trades were refused. Corporate actions keep no pause of their
+  own: a 401 there ends the night, as a 403 does.
+* **Asked again** (v0.17.0 verification V2). While holdings and positions pause on a refused
+  token, the job `token_retry` (`probe.retry_step`, checked every 30 s) lets one holdings read
+  through (`UpstoxReader.ask_again`) 15 minutes after the last refusal or try when that falls in
+  market hours (09:15 to 15:30 on a trading day, by the exchange's calendar), else at the next
+  session's start: at most 4 calls an hour, through the reader's budget and 429 pause. Its 200
+  ends every pause and tells the check `ok`, so the watch says the token is accepted again.
 * **Schema step 4** adds `tab_share` and `member_privacy`.
 * **Set from the owner's Family page** (v0.12.0). The four sharing ops are routes of the owner's
   bridge (`/sudarshan/portfolio/api/family/shares` and `/family/privacy`), sealed under the owner's

@@ -452,12 +452,36 @@ async def test_a_429_pauses_this_api_for_a_minute_and_ends_the_run(n):
 
 
 @night
-async def test_a_refused_token_stops_every_read_until_the_token_file_changes(n):
-    n.upstox.answers[HELD] = 401
+async def test_a_401_on_the_list_alone_ends_the_night_and_pauses_nothing_else(n):
+    """v0.17.0 verification V1: it may only mean this token may not read the list. The night
+    ends, as on a 403, in words that never say the token was refused; the live book is not
+    paused, and the next read asks again."""
+    n.reader._held_now = lambda: [{"isin": HELD}, {"isin": TRADED}]
+    n.upstox.answers.update({TRADED: 401, HELD: []})  # read in the order of their ISINs
+    status, note = await n.reader.run(NIGHT)
+    assert status == "failed" and note.endswith(ca.WORDS["not_allowed"])
+    assert n.upstox.asked == [TRADED]
+    assert "did not accept" not in ca.WORDS["not_allowed"]
+    sig = token_sig(n)
+    assert n.svc.upstox.stopped("holdings", sig) is None and n.svc.upstox._paused == {}
+    assert await n.read_one(HELD, NOW) == "none" and n.upstox.asked == [TRADED, HELD]
+
+
+@night
+async def test_a_token_refused_at_a_holdings_read_stops_every_read_until_the_file_changes(n):
+    sig = token_sig(n)
+    assert n.svc.upstox.refused("holdings", sig) == "token"  # the live book was refused
     assert await n.read_one(HELD, NOW) == "token_refused"
-    assert n.svc.upstox._refused is True  # the live book pauses with it
     assert await n.read_one(HELD, NOW) == "token_refused"
-    assert n.upstox.asked == [HELD]
+    assert n.upstox.asked == []
+    n.svc.upstox.token_file.write_text(TOKEN + "-new")  # the file changed: asked again
+    assert await n.read_one(HELD, NOW) == "none" and n.upstox.asked == [HELD]
+
+
+def token_sig(n):
+    from sudarshan.portfolio.upstox import _signature
+
+    return _signature(n.svc.upstox.token_file)
 
 
 @night
