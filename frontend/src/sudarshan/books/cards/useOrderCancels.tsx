@@ -17,10 +17,11 @@ import {
   cancelHeldWhy,
   cancelSentence,
   cancelWarning,
+  cancelWords,
   EVERY_CANCEL_SENT,
   NOTHING_TO_CANCEL,
 } from './OrderCards'
-import { Confirm, useSandbox, WarningLine } from './parts'
+import { Confirm, SentChip, SentNote, useSandbox, WarningLine } from './parts'
 import { useHeld } from './useLatest'
 
 /**
@@ -41,7 +42,15 @@ export function useOrderCancels({
   onCancel: (orderid: string) => unknown
   /** The page's cancel-all call. */
   onCancelAll: () => unknown
-}): { ask: (order: Order) => void; askAll: () => void; dialog: ReactNode } {
+}): {
+  ask: (order: Order) => void
+  askAll: () => void
+  dialog: ReactNode
+  /** v0.17.0 review L4: its cancel is on its way, so the row's Modify waits, as the cards' does. */
+  held: (orderid: string) => boolean
+  /** L4: "Cancel sent" (or what to check first), beside the row's status, in the cards' words. */
+  mark: (orderid: string) => ReactNode
+} {
   const sandbox = useSandbox()
   const marks = useSentMarks()
   /** An order's id while its Cancel asks, or `all` while Cancel all does. */
@@ -73,8 +82,20 @@ export function useOrderCancels({
       .sort((a, b) => b.sentAt - a.sentAt)[0]
   )
   const close = () => setAsking(null)
+  const heldWords = (orderid: string) => cancelWords(cancelMark(marks, sandbox, orderid))
 
   return {
+    held: (orderid) => heldWords(orderid) !== null,
+    mark: (orderid) => {
+      const words = heldWords(orderid)
+      if (!words) return null
+      return (
+        <>
+          {words.chip && <SentChip label={words.chip} />}
+          {words.note && <SentNote text={words.note} />}
+        </>
+      )
+    },
     ask: (order) => {
       const mark = cancelMark(sentMarksNow(), sandbox, order.orderid)
       if (isHeld(mark)) return void showToast.warning(cancelHeldWhy(mark), 'orders')

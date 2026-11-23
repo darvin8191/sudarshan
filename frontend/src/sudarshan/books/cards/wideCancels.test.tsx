@@ -215,6 +215,36 @@ describe("the wide order book's row Cancel (TD4)", () => {
     expect(question('Cancel this order?')).toHaveTextContent('BUY 1 RELIANCE')
   })
 
+  // v0.17.0 review L4: Modify stayed open and the row said nothing while the cancel was held.
+  it('greys the held order’s Modify and says Cancel sent beside its status, as the cards do', async () => {
+    const tap = user()
+    await open(STOP, LIMIT)
+    const row = () =>
+      screen.getByRole('button', { name: 'Cancel order 2001' }).closest('tr') as HTMLElement
+    expect(within(row()).queryByText('Cancel sent')).toBeNull()
+    expect(
+      screen.getByRole('button', { name: 'Modify order for NIFTY24NOV2625800PE' })
+    ).toBeEnabled()
+    await tap.click(screen.getByRole('button', { name: 'Cancel order 2001' }))
+    await settled()
+    await tap.click(
+      within(question('Cancel this order?')).getByRole('button', { name: 'Cancel order' })
+    )
+    await settle()
+    expect(within(row()).getByText('Cancel sent')).toBeVisible()
+    expect(row().querySelector('[data-sent="true"] svg')).not.toBeNull() // an icon beside the words
+    expect(
+      screen.getByRole('button', { name: 'Modify order for NIFTY24NOV2625800PE' })
+    ).toBeDisabled()
+    // The other order is untouched.
+    expect(screen.getByRole('button', { name: 'Modify order for RELIANCE' })).toBeEnabled()
+    const other = screen
+      .getByRole('button', { name: 'Cancel order 2002' })
+      .closest('tr') as HTMLElement
+    expect(within(other).queryByText('Cancel sent')).toBeNull()
+    expect(api.modifyOrder).not.toHaveBeenCalled()
+  })
+
   it('lets go once the book shows the order final', async () => {
     const tap = user()
     await open(STOP)

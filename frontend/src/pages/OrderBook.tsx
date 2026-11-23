@@ -844,9 +844,13 @@ export default function OrderBook() {
                             )}
                             <TableCell className="font-mono text-xs">{order.orderid}</TableCell>
                             <TableCell>
-                              <div className={cn('flex items-center gap-1', status.color)}>
-                                <StatusIcon className="h-4 w-4" />
-                                <span className="text-sm">{status.label}</span>
+                              {/* SUDARSHAN L4 (v0.17.0 review): a cancel on its way, as the cards say it. */}
+                              <div className="flex flex-col items-start gap-1">
+                                <div className={cn('flex items-center gap-1', status.color)}>
+                                  <StatusIcon className="h-4 w-4" />
+                                  <span className="text-sm">{status.label}</span>
+                                </div>
+                                {cancels.mark(order.orderid)}
                               </div>
                             </TableCell>
                             <TableCell className="text-sm text-muted-foreground">
@@ -873,6 +877,8 @@ export default function OrderBook() {
                                   size="icon"
                                   className="h-8 w-8 text-primary hover:text-primary/80"
                                   onClick={() => openModifyDialog(order)}
+                                  // SUDARSHAN L4: greyed while its cancel is on its way, as on the cards.
+                                  disabled={cancels.held(order.orderid)}
                                   aria-label={`Modify order for ${order.symbol}`}
                                 >
                                   <Pencil className="h-4 w-4" />
