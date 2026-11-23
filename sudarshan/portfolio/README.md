@@ -395,7 +395,10 @@ two exists in this release. Each purpose has its own principal and its own list 
   its own words ("Upstox did not let SUDARSHAN's read-only token read your funds; the rest of the
   Upstox tab is not affected."), which never say the token was refused: the closing record still
   gets its funds after the day's trades were refused. Corporate actions keep no pause of their
-  own: a 401 there ends the night, as a 403 does.
+  own: a 401 there ends the night, as a 403 does. While Upstox refuses a token file at holdings
+  or positions, a 401 on another read of that file is that refusal, and the tab's words are
+  chosen once a refresh's answers are all in, so holdings, positions, MTF and funds say one thing
+  whatever order Upstox answers in (v0.17.0 review M1).
 * **Asked again** (v0.17.0 verification V2). While holdings and positions pause on a refused
   token, the job `token_retry` (`probe.retry_step`, checked every 30 s) lets one holdings read
   through (`UpstoxReader.ask_again`) 15 minutes after the last refusal or try when that falls in

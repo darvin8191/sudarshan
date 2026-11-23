@@ -21,7 +21,10 @@ portfolio page does not show them). All are GETs with ``Authorization: Bearer``,
   is known to make) means Upstox refused the token itself, so every read pauses, here and in the
   report reader (``stopped``, ``refused``); a 401 on any other read (MTF, funds, the day's orders
   or trades, a report) may only mean that this token may not make that read, so that read alone
-  pauses and says so in its own words, never that the token was refused.
+  pauses and says so in its own words, never that the token was refused. Such a 401 that lands
+  while Upstox refuses that very token file at holdings or positions is that refusal, and a
+  batch's words are settled once all its answers are in (``book``), so one refresh of the tab
+  never says both (v0.17.0 review M1).
 * **Asked again** (verification V2). While Upstox refuses the token itself, one holdings read is
   let through (``ask_again``) at most every 15 minutes in market hours, else at the next
   session's start (the token check's job, ``probe.retry_step``). Its 200 ends every pause.
@@ -461,6 +464,9 @@ class PartMemory:
     tried_at: int = 0
     state: str = "unavailable"
     note: str | None = None
+    #: Why the note says the read was refused (a 401): "token" or "read" (UpstoxReader.stopped);
+    #: None for any other note. ``book`` settles a batch's words by it (v0.17.0 review M1).
+    refused: str | None = None
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
     def view(self) -> dict[str, Any]:
@@ -537,7 +543,24 @@ class UpstoxReader:
         age = MAX_AGE_S if max_age_s is None else max_age_s
         names = [n for n in UPSTOX_PARTS if n in parts]
         views = await asyncio.gather(*(self._part(name, age, principal) for name in names))
-        return dict(zip(names, views, strict=True))
+        return self._one_voice(dict(zip(names, views, strict=True)))
+
+    def _one_voice(self, views: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
+        """A batch's words, chosen once all its answers are in (v0.17.0 review M1): the parts are
+        read at once, so MTF's or funds' 401 can land before the holdings or positions 401 that
+        says Upstox refuses the token. While it refuses this very token file, a part that says
+        its read alone was refused was refused with the token: it says the token's words too and
+        keeps no pause of its own, so one refresh never says both."""
+        sig = _signature(self.token_file)
+        if self._confirmed_at is None or self._confirmed_at != sig:
+            return views
+        for name, view in views.items():
+            memory = self._memory[name]
+            if memory.refused == "read" and view["note"] == memory.note:
+                self._paused.pop(API_OF.get(name, name), None)
+                self._fail(memory, memory.tried_at, WORDS["token_refused"], refused="token")
+                views[name] = memory.view()
+        return views
 
     async def _part(self, name: str, age_s: float, principal: str = OWNER) -> dict[str, Any]:
         memory = self._memory[name]
@@ -592,9 +615,17 @@ class UpstoxReader:
             self._told.add(key)
             log.warning(text, *args)
 
-    def _fail(self, memory: PartMemory, now: int, words: str, *, figures: str = "") -> None:
-        """Keep the last good figures and say why they are not fresh."""
-        memory.tried_at = now
+    def _fail(
+        self,
+        memory: PartMemory,
+        now: int,
+        words: str,
+        *,
+        figures: str = "",
+        refused: str | None = None,
+    ) -> None:
+        """Keep the last good figures and say why they are not fresh (``refused``: a 401's)."""
+        memory.tried_at, memory.refused = now, refused
         if memory.data is not None and memory.read_at is not None:
             memory.state = "stale"
             memory.note = f"{words} Figures from {at_clock(memory.read_at)}.{figures}".strip()
@@ -625,13 +656,18 @@ class UpstoxReader:
 
     def refused(self, api: str, sig: tuple[int, int] | None) -> str:
         """Upstox answered 401 to a read of ``api`` sent with the token file ``sig``: a read in
-        JUDGES pauses every read (``"token"``), any other read pauses itself (``"read"``)."""
+        JUDGES pauses every read (``"token"``), any other read pauses itself (``"read"``), unless
+        Upstox already refuses that very token file at holdings or positions: then this 401 is
+        that refusal, landed after it, and the read keeps no pause of its own (review M1)."""
         if api in JUDGES:
             self._confirmed_at, self._paused_since = sig, self.clock()
             self._say_once(
                 "401", "Upstox refused the read-only token at a holdings or positions read; "
                 "every read pauses until the token file changes."
             )  # fmt: skip
+            return "token"
+        if self._confirmed_at is not None and self._confirmed_at == sig:
+            self._paused.pop(api, None)
             return "token"
         self._paused[api] = sig
         self._say_once(
@@ -655,7 +691,7 @@ class UpstoxReader:
         why = self.stopped(api, sig)
         retry = retry and why == "token" and name == "holdings"
         if why is not None and not retry:
-            return self._fail(memory, now, self._refusal(name, why))
+            return self._fail(memory, now, self._refusal(name, why), refused=why)
         if name == "funds" and in_funds_window(now):
             return self._window(memory, now)
         left = self.budget.paused_for(api)
@@ -695,7 +731,8 @@ class UpstoxReader:
         if retry and status == 200:
             self._recover()
         if status == 401:
-            return self._fail(memory, now, self._refusal(name, self.refused(api, sig)))
+            why = self.refused(api, sig)
+            return self._fail(memory, now, self._refusal(name, why), refused=why)
         if status == 423 and name == "funds":
             return self._window(memory, now)
         if status == 429 or self._rate_coded(answer):
@@ -720,7 +757,7 @@ class UpstoxReader:
             except Exception:  # names and auction times are a convenience; the figures stand
                 log.exception("the %s rows could not be matched to the master contract", name)
         memory.data, memory.read_at, memory.tried_at = data, now, now
-        memory.state, memory.note = "ok", None
+        memory.state, memory.note, memory.refused = "ok", None, None
 
     def _recover(self) -> None:
         """A holdings read asked again while the token was refused was answered: Upstox accepts
@@ -748,7 +785,7 @@ class UpstoxReader:
         return any(isinstance(e, dict) and e.get("errorCode") == RATE_CODE for e in errors)
 
     def _window(self, memory: PartMemory, now: int) -> None:
-        memory.tried_at = now
+        memory.tried_at, memory.refused = now, None
         if memory.data is not None and memory.read_at is not None:
             memory.state = "stale"
             memory.note = f"{WORDS['window']} Showing the figures read at {at_12h(memory.read_at)}."
