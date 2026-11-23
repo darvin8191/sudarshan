@@ -27,6 +27,15 @@ reached no answer (no token, no network) is not counted, so the next start tries
 
 The order history is asked for an order id that cannot exist: an answer that is not 401 or 403
 tells that the token may read the endpoint at all; the status is what is logged, never a body.
+
+**Asked again** (v0.17.0 verification V2). A holdings or positions read Upstox refused pauses
+every read until the token file changes; a refusal that was Upstox's passing fault would keep the
+line failing until the next release. So while it holds, the job ``token_retry`` lets one holdings
+read through (``UpstoxReader.ask_again``) 15 minutes after the last refusal or try, if that falls
+in market hours (09:15 to 15:30 on a trading day by the exchange's calendar, a special day's own
+window), else at the next session's start: never more often, and through the reader's budget and
+429 pause. The first 200 ends the pause and tells the check ``ok``: the watch then says the token
+is accepted again.
 """
 
 from __future__ import annotations
@@ -36,10 +45,14 @@ import contextlib
 import json
 import logging
 import os
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 import httpx
+
+from sudarshan.alerts.market import sessions
+from sudarshan.autologin.schedule import IST
 
 from .core.days import day_of_instant
 from .upstox import API_OF, _signature
@@ -59,6 +72,10 @@ PROBES = (
     ("trades", "/v2/order/trades/get-trades-for-day", {}),
     ("order_history", "/v2/order/history", {"order_id": "0"}),
 )
+#: A refused token's holdings read is asked again at most this often (verification V2).
+RETRY_EVERY_MS = 15 * 60_000
+#: The session whose hours are the market's for it: 09:15 to 15:30 on a usual trading day.
+MARKET = "NSE_EQ"
 
 
 async def probe(upstox: Any) -> dict[str, int | str]:
@@ -198,8 +215,40 @@ async def at_start(service: Any, delay_s: float = DELAY_S) -> dict[str, int | st
     return found
 
 
+def next_try(calendar: Any, since: int) -> int | None:
+    """When a refused token's holdings read is asked again: 15 minutes after ``since`` (the last
+    refusal or try, epoch ms) if that falls in the market's hours of its day, else the start of
+    the next session after it; None when the calendar gives none in its horizon."""
+    at = since + RETRY_EVERY_MS
+    day = datetime.fromtimestamp(at / 1000, IST).date()
+    hours = sessions.session(
+        MARKET, day, trading_day=calendar.is_trading_day(day), window=calendar.day_window(day)
+    )
+    if hours is not None and hours.start <= at < hours.end:
+        return at
+    found = sessions.next_session(
+        MARKET, at, is_trading_day=calendar.is_trading_day, window_of=calendar.day_window
+    )
+    return None if found is None else found.start
+
+
+async def retry_step(service: Any, now: int) -> bool:
+    """One holdings read when its time has come while Upstox refuses the token itself; True when
+    it was asked. Nothing is read while the token is not refused, or before the reader exists."""
+    reader = getattr(service, "upstox", None)
+    since = None if reader is None else reader.paused_since()
+    if since is None:
+        return False
+    due = next_try(service.ensure_calendar(), since)
+    if due is None or now < due:
+        return False
+    await reader.ask_again()
+    return True
+
+
 def register_job() -> None:
     from .service import job
+    from .timers import run_forever
 
     @job("probe")
     async def probe_job(service) -> None:
@@ -207,3 +256,7 @@ def register_job() -> None:
             await at_start(service)
         except Exception:
             log.exception("the Analytics Token probe could not run")
+
+    @job("token_retry")
+    async def token_retry_job(service) -> None:
+        await run_forever(service, "token_retry", retry_step)
