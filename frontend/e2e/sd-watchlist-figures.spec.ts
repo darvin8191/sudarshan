@@ -513,7 +513,8 @@ for (const viewport of [
  */
 async function ticketHead(page: Page) {
   return page.getByRole('dialog', { name: /^Place Order - BUY/ }).evaluate((dialog) => {
-    const tops = (el: Element) => new Set([...el.getClientRects()].map((rect) => Math.round(rect.top)))
+    const tops = (box: Element | Range) =>
+      new Set([...box.getClientRects()].map((rect) => Math.round(rect.top)))
     // Each side is what holds its word ("Bid:", "Ask:"), found by the words alone.
     const sides = ['Bid:', 'Ask:'].map(
       (word) =>
