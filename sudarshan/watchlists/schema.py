@@ -219,7 +219,8 @@ class PrefRow(Base):
     ``cols`` (M8.3, GA6.1) is the figures the rows show beside the price, their ids in the order
     picked, joined by commas; NULL is none. No check: an id a later release adds is dropped where it
     is read (``view._pref``), so a release rolled back still reads the row. Added in place by the
-    migration and by the app's first use, so the schema stays 1."""
+    migration and by the app's first use (``add_missing_columns``), never by a rebuild: the step to
+    schema 2 is the dated strike rows' (M8.11), not this column's."""
 
     __tablename__ = "wl_pref"
     principal = _principal()

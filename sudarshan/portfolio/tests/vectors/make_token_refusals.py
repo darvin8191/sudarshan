@@ -19,6 +19,11 @@ Each case refuses one of them with a 401 and then makes every read once more.
 (Upstox is asked and refuses it again, in the words of ``first``), or the key in ``words`` of the
 sentence it shows without asking. ``first`` is the refused read's own sentence.
 
+A read refused alone is asked again (v0.17.0 review M2): the live book's parts say when, refused at
+11:00 on Monday 26 Oct 2026 (the test's clock), 15 minutes later in market hours. A report's
+sentence gets its time where the report is kept (``reports.again_note``), so its key here is the
+sentence alone.
+
 Run: python3 make_token_refusals.py
 """
 
@@ -39,6 +44,7 @@ JUDGES = ("holdings", "positions")
 LET = "Upstox did not let SUDARSHAN's read-only token read "
 REST = "; the rest of the Upstox tab is not affected."
 TAB_NOT = "; the Upstox tab is not affected."
+AGAIN = " SUDARSHAN asks Upstox again after 11:15 on Mon 26 Oct."
 WORDS = {
     "tab_token": (
         "Upstox did not accept SUDARSHAN's read-only token, so the Upstox tab cannot be read now. "
@@ -51,10 +57,10 @@ WORDS = {
         "server first."
     ),
     "corporate_actions_token": "Upstox did not accept SUDARSHAN's read-only token.",
-    "mtf": LET + "your MTF positions" + REST,
-    "funds": LET + "your funds" + REST,
-    "orders": LET + "the day's orders" + TAB_NOT,
-    "day_trades": LET + "the day's trades" + TAB_NOT,
+    "mtf": LET + "your MTF positions" + REST + AGAIN,
+    "funds": LET + "your funds" + REST + AGAIN,
+    "orders": LET + "the day's orders" + TAB_NOT + AGAIN,
+    "day_trades": LET + "the day's trades" + TAB_NOT + AGAIN,
     "trades": LET + "your trade history" + REST,
     "pnl": LET + "your trade-wise P&L report" + REST,
     "order_history": LET + "this order's history" + TAB_NOT,

@@ -193,7 +193,8 @@ async def test_a_refresh_refused_for_the_history_alone_keeps_the_figures_in_its_
     rig.now += 7 * HOUR
     got = (await rig.call("report_trades", fy=fy, segment="EQ", force=True))["data"]
     assert got["state"] == "ok" and len(got["rows"]) == 5, got
-    assert got["note"] == reports.WORDS["trades_not_allowed_kept"], got["note"]
+    again = " SUDARSHAN asks Upstox again after 08:00 on Tue 27 Oct."  # after 15:30 (M2)
+    assert got["note"] == reports.WORDS["trades_not_allowed_kept"] + again, got["note"]
     assert "last complete read" in got["note"] and "not affected" in got["note"]
     for word in ("did not accept", "TRINETRA", "create", "Upstox app", "new token"):
         assert word not in got["note"], word

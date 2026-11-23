@@ -492,10 +492,13 @@ def test_a_read_refused_alone_pauses_that_read_and_nothing_else(fake, token_file
     service = ProbeService(tmp_path, reader, clock)
     every = [*kinds.UPSTOX_PAGE_PARTS, "orders"]
     trades, tab, again = _reads(reader, ["trades"], every, ["trades"])
-    assert trades["trades"]["note"] == up.WORDS["not_allowed_trades"]
+    alone = (
+        up.WORDS["not_allowed_trades"] + " SUDARSHAN asks Upstox again after 11:15 on Mon 26 Oct."
+    )
+    assert trades["trades"]["note"] == alone
     assert "did not accept" not in trades["trades"]["note"]
     assert {part: tab[part]["state"] for part in every} == dict.fromkeys(every, "ok")
-    assert again["trades"]["note"] == up.WORDS["not_allowed_trades"]
+    assert again["trades"]["note"] == alone
     assert fake.count("day_trades") == 1  # the refused read asks nothing more
     asked = [fake.count(p) for p in ("holdings", "positions", "mtf", "funds", "day_orders")]
     assert asked == [1, 1, 1, 1, 1]

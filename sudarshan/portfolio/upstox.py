@@ -15,16 +15,26 @@ portfolio page does not show them). All are GETs with ``Authorization: Bearer``,
 * **Funds window.** No funds read between 00:00 and 05:30 IST by this service's own clock; a 423
   at any other hour is handled the same way.
 * **429.** That API rests for 60 seconds.
-* **401.** A refused read pauses until the token file changes: the same token is shared with
-  other services and a second guess would only be refused again. Which reads pause follows the
-  read (v0.17.0 verification V1): a 401 on holdings or positions (``JUDGES``, the reads the token
-  is known to make) means Upstox refused the token itself, so every read pauses, here and in the
-  report reader (``stopped``, ``refused``); a 401 on any other read (MTF, funds, the day's orders
-  or trades, a report) may only mean that this token may not make that read, so that read alone
-  pauses and says so in its own words, never that the token was refused.
+* **401.** A refused read pauses until the token file changes or it is asked again (below): the
+  same token is shared with other services and a guess would only be refused. Which reads pause
+  follows the read (v0.17.0 verification V1): a 401 on holdings or positions (``JUDGES``, the reads
+  the token is known to make) means Upstox refused the token itself, so every read pauses, here and
+  in the report reader (``stopped``, ``refused``); a 401 on any other read (MTF, funds, the day's
+  orders or trades, a report) may only mean that this token may not make that read, so that read
+  alone pauses and says so in its own words, never that the token was refused. Such a 401 that
+  lands while Upstox refuses that very token file at holdings or positions is that refusal, and a
+  batch's words are settled once all its answers are in (``book``), so one refresh of the tab never
+  says both (v0.17.0 review M1).
 * **Asked again** (verification V2). While Upstox refuses the token itself, one holdings read is
-  let through (``ask_again``) at most every 15 minutes in market hours, else at the next
-  session's start (the token check's job, ``probe.retry_step``). Its 200 ends every pause.
+  let through (``ask_again``) at most every 15 minutes in market hours, else at a trading day's
+  08:00 or 15:45 or the next session's start, whichever comes first (the token check's job,
+  ``probe.retry_step``, review L1). Its 200 ends every pause.
+* **A read refused alone is asked again too** (review M2), by whoever reads it next once its time
+  has come, through the budget: first at the token's retry time (``probe.next_try``), so a
+  passing fault clears itself; once that try is refused too, at the next trading day's 08:00, one
+  call a day while the refusal is real. The first read sent then is the try (``sending``); any
+  200 to that read ends its pause (``answered``). Its words say when it is asked again
+  (``again_words``).
 * **The token check.** Each holdings or positions read Upstox answers is told to ``on_verdict``
   (``probe.heard``): accepted (200) or refused (401), with the token file's signature.
 * **The token** is read from its file for every call and is never logged or kept in a message.
@@ -44,13 +54,14 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 import httpx
 
 from .budget import OWNER, PAUSE_S, Budget
-from .core.days import IST_OFFSET_MS, MS_PER_DAY
+from .core.days import IST_OFFSET_MS, MS_PER_DAY, day_of_instant, to_date
 from .core.kinds import PRICE_SCALE, QTY_SCALE, UPSTOX_PARTS
+from .core.words import date_short
 
 log = logging.getLogger("sudarshan.portfolio.upstox")
 
@@ -453,6 +464,21 @@ def at_12h(ms: int) -> str:
     return f"{(hour + 11) % 12 + 1}:{minute:02d} {'AM' if hour < 12 else 'PM'}"
 
 
+WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+
+
+def again_words(at_ms: int | None, now_ms: int) -> str:
+    """When a read Upstox refused alone is asked again, as the owner reads it (v0.17.0 review
+    M2): "SUDARSHAN asks Upstox again after 08:00 on Tue 24 Nov." The day is always named, so
+    the sentence stays true wherever it is kept and read later (a report, the journal's line).
+    Empty when nothing but a new token file asks it again."""
+    if at_ms is None:
+        return ""
+    day = day_of_instant(at_ms)
+    on = f"{WEEKDAYS[to_date(day).weekday()]} {date_short(day, day_of_instant(now_ms))}"
+    return f"SUDARSHAN asks Upstox again after {at_clock(at_ms)[:5]} on {on}."
+
+
 # ---- the reader ------------------------------------------------------------------------------
 @dataclass
 class PartMemory:
@@ -461,6 +487,9 @@ class PartMemory:
     tried_at: int = 0
     state: str = "unavailable"
     note: str | None = None
+    #: Why the note says the read was refused (a 401): "token" or "read" (UpstoxReader.stopped);
+    #: None for any other note. ``book`` settles a batch's words by it (v0.17.0 review M1).
+    refused: str | None = None
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
     def view(self) -> dict[str, Any]:
@@ -475,6 +504,16 @@ def _signature(path: Path) -> tuple[int, int] | None:
     return stat.st_mtime_ns, stat.st_size
 
 
+class Pause(NamedTuple):
+    """A read Upstox refused alone (verification V1, review M2): the token file's signature then,
+    when it may be asked again (epoch ms; None: only a new token file asks it), and whether it has
+    been asked again since (a refusal of that try is a real one: once a day from then)."""
+
+    sig: tuple[int, int] | None
+    due: int | None
+    tried: bool = False
+
+
 class UpstoxReader:
     def __init__(
         self,
@@ -485,9 +524,13 @@ class UpstoxReader:
         budget: Budget | None = None,
         client: httpx.AsyncClient | None = None,
         decorate: Callable[[list[dict[str, Any]], int], None] | None = None,
+        calendar: Any = None,
     ):
         self.token_file, self.base_url = Path(token_file), base_url.rstrip("/")
         self.clock, self.budget = clock, budget or Budget()
+        #: The exchange's calendar, for when a read refused alone is asked again (the service's;
+        #: without one, every weekday trades).
+        self.calendar = calendar
         self._client, self._own_client = client, client is None
         #: Fills exchange, symbol and the auction fields of rows (set by the service).
         self.decorate = decorate
@@ -498,9 +541,9 @@ class UpstoxReader:
         #: While that holds: when Upstox last refused such a read, or a holdings read was last
         #: asked again (``ask_again``, verification V2); the next try is counted from it.
         self._paused_since: int | None = None
-        #: Each other read Upstox refused, by the budget's name of its API: the token file's
-        #: signature then. Only that read pauses, until the file changes (verification V1).
-        self._paused: dict[str, tuple[int, int] | None] = {}
+        #: Each other read Upstox refused, by the budget's name of its API (verification V1): only
+        #: that read pauses, until it is asked again (review M2) or the token file changes.
+        self._paused: dict[str, Pause] = {}
         self._told: set[str] = set()
         #: Told of each read in JUDGES that Upstox answered: ("ok" or "failed", the time, the
         #: token file's signature before the read). Set by the service (probe.heard).
@@ -537,7 +580,24 @@ class UpstoxReader:
         age = MAX_AGE_S if max_age_s is None else max_age_s
         names = [n for n in UPSTOX_PARTS if n in parts]
         views = await asyncio.gather(*(self._part(name, age, principal) for name in names))
-        return dict(zip(names, views, strict=True))
+        return self._one_voice(dict(zip(names, views, strict=True)))
+
+    def _one_voice(self, views: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
+        """A batch's words, chosen once all its answers are in (v0.17.0 review M1): the parts are
+        read at once, so MTF's or funds' 401 can land before the holdings or positions 401 that
+        says Upstox refuses the token. While it refuses this very token file, a part that says
+        its read alone was refused was refused with the token: it says the token's words too and
+        keeps no pause of its own, so one refresh never says both."""
+        sig = _signature(self.token_file)
+        if self._confirmed_at is None or self._confirmed_at != sig:
+            return views
+        for name, view in views.items():
+            memory = self._memory[name]
+            if memory.refused == "read" and view["note"] == memory.note:
+                self._paused.pop(API_OF.get(name, name), None)
+                self._fail(memory, memory.tried_at, WORDS["token_refused"], refused="token")
+                views[name] = memory.view()
+        return views
 
     async def _part(self, name: str, age_s: float, principal: str = OWNER) -> dict[str, Any]:
         memory = self._memory[name]
@@ -592,9 +652,17 @@ class UpstoxReader:
             self._told.add(key)
             log.warning(text, *args)
 
-    def _fail(self, memory: PartMemory, now: int, words: str, *, figures: str = "") -> None:
-        """Keep the last good figures and say why they are not fresh."""
-        memory.tried_at = now
+    def _fail(
+        self,
+        memory: PartMemory,
+        now: int,
+        words: str,
+        *,
+        figures: str = "",
+        refused: str | None = None,
+    ) -> None:
+        """Keep the last good figures and say why they are not fresh (``refused``: a 401's)."""
+        memory.tried_at, memory.refused = now, refused
         if memory.data is not None and memory.read_at is not None:
             memory.state = "stale"
             memory.note = f"{words} Figures from {at_clock(memory.read_at)}.{figures}".strip()
@@ -612,20 +680,70 @@ class UpstoxReader:
     def stopped(self, api: str, sig: tuple[int, int] | None) -> str | None:
         """Why a read of ``api`` (the budget's name) with the token file ``sig`` is not sent:
         ``"token"`` while Upstox refuses the token itself (every read pauses), ``"read"`` while
-        it refuses this read alone, None when it may go. A changed file is asked again."""
+        it refuses this read alone and its time to be asked again has not come (review M2),
+        None when it may go. A changed file is asked again."""
         if self._confirmed_at is not None and self._confirmed_at != sig:
             self._confirmed_at = self._paused_since = None
             self._told.discard("401")
-        for name in [n for n, at in self._paused.items() if at != sig]:
+        for name in [n for n, pause in self._paused.items() if pause.sig != sig]:
             del self._paused[name]
             self._told.discard(f"401 {name}")
         if self._confirmed_at is not None:
             return "token"
-        return "read" if api in self._paused else None
+        pause = self._paused.get(api)
+        return "read" if pause is not None and not self._due(pause) else None
+
+    def _due(self, pause: Pause) -> bool:
+        return pause.due is not None and self.clock() >= pause.due
+
+    def _again_at(self, now: int, *, daily: bool) -> int | None:
+        """When a read refused alone at ``now`` is asked again (review M2): the token's own retry
+        time (``probe.next_try``: 15 minutes later in market hours, else a trading day's 08:00 or
+        15:45 or the next session), or, once a try of it was refused too, the next trading day's
+        08:00 (``probe.next_daily_try``): one call a day while the refusal is real."""
+        from . import probe  # probe imports this module
+
+        calendar = probe.Weekdays() if self.calendar is None else self.calendar
+        return (probe.next_daily_try if daily else probe.next_try)(calendar, now)
+
+    def sending(self, api: str, sig: tuple[int, int] | None) -> bool:
+        """Called right before a read of ``api`` is sent: False when it pauses alone and its time
+        has not come (another read took the try meanwhile), so it is not sent. A read whose time
+        has come is that try: the next waits for the next try time whatever Upstox answers, so a
+        fault answer never makes a storm (review M2)."""
+        pause = self._paused.get(api)
+        if pause is None or pause.sig != sig:
+            return True
+        if not self._due(pause):
+            return False
+        self._paused[api] = Pause(sig, self._again_at(self.clock(), daily=False), True)
+        return True
+
+    def answered(self, api: str, sig: tuple[int, int] | None) -> None:
+        """Upstox answered a read of ``api`` sent with the token file ``sig`` (200): a pause of
+        that read alone ends, so a refusal that was a passing fault clears itself (review M2)."""
+        pause = self._paused.get(api)
+        if pause is not None and pause.sig == sig:
+            del self._paused[api]
+            self._told.discard(f"401 {api}")
+            log.info("Upstox answered the %s read again; it is read as usual.", api)
+
+    def again_at(self, apis: tuple[str, ...]) -> int | None:
+        """When a read of ``apis`` that pauses alone is asked again (the latest of them); None
+        when none pauses alone, or nothing but a new token file asks one again."""
+        sig = _signature(self.token_file)
+        dues = [
+            pause.due for api, pause in self._paused.items() if api in apis and pause.sig == sig
+        ]
+        return None if not dues or None in dues else max(dues)
 
     def refused(self, api: str, sig: tuple[int, int] | None) -> str:
         """Upstox answered 401 to a read of ``api`` sent with the token file ``sig``: a read in
-        JUDGES pauses every read (``"token"``), any other read pauses itself (``"read"``)."""
+        JUDGES pauses every read (``"token"``), any other read pauses itself (``"read"``), unless
+        Upstox already refuses that very token file at holdings or positions: then this 401 is
+        that refusal, landed after it, and the read keeps no pause of its own (review M1). A read
+        refused alone is asked again at the token's retry time; once that try is refused too, at
+        the next trading day's 08:00 (review M2)."""
         if api in JUDGES:
             self._confirmed_at, self._paused_since = sig, self.clock()
             self._say_once(
@@ -633,16 +751,30 @@ class UpstoxReader:
                 "every read pauses until the token file changes."
             )  # fmt: skip
             return "token"
-        self._paused[api] = sig
+        if self._confirmed_at is not None and self._confirmed_at == sig:
+            self._paused.pop(api, None)
+            return "token"
+        now, pause = self.clock(), self._paused.get(api)
+        if pause is None or pause.sig != sig:
+            self._paused[api] = Pause(sig, self._again_at(now, daily=False))
+        elif pause.tried:  # it was asked again and refused again: a real refusal
+            self._paused[api] = Pause(sig, self._again_at(now, daily=True), True)
+            log.warning("Upstox refused the %s read again. %s", api, self._again(api, now))
+        # else a read sent before the first refusal landed: that pause stands as it is
         self._say_once(
             f"401 {api}", "Upstox refused the read-only token for its %s read; that read alone "
-            "pauses until the token file changes.", api,
+            "pauses. %s", api, self._again(api, now),
         )  # fmt: skip
         return "read"
 
-    @staticmethod
-    def _refusal(name: str, why: str) -> str:
-        return WORDS["token_refused"] if why == "token" else WORDS[f"not_allowed_{name}"]
+    def _again(self, api: str, now: int) -> str:
+        return again_words(self.again_at((api,)), now)
+
+    def _refusal(self, name: str, why: str) -> str:
+        if why == "token":
+            return WORDS["token_refused"]
+        api = API_OF.get(name, name)
+        return f"{WORDS[f'not_allowed_{name}']} {self._again(api, self.clock())}".strip()
 
     async def _read(
         self, name: str, memory: PartMemory, principal: str = OWNER, *, retry: bool = False
@@ -655,7 +787,7 @@ class UpstoxReader:
         why = self.stopped(api, sig)
         retry = retry and why == "token" and name == "holdings"
         if why is not None and not retry:
-            return self._fail(memory, now, self._refusal(name, why))
+            return self._fail(memory, now, self._refusal(name, why), refused=why)
         if name == "funds" and in_funds_window(now):
             return self._window(memory, now)
         left = self.budget.paused_for(api)
@@ -674,6 +806,8 @@ class UpstoxReader:
             return self._fail(memory, now, WORDS["busy"], figures=" They refresh in a moment.")
         if retry:
             self._paused_since = now  # this try is spent, whatever Upstox answers
+        elif not self.sending(api, sig):
+            return self._fail(memory, now, self._refusal(name, "read"), refused="read")
         path, extra = PATHS[name]
         headers = {"Authorization": f"Bearer {token}", "Accept": "application/json", **extra}
         try:
@@ -695,7 +829,8 @@ class UpstoxReader:
         if retry and status == 200:
             self._recover()
         if status == 401:
-            return self._fail(memory, now, self._refusal(name, self.refused(api, sig)))
+            why = self.refused(api, sig)
+            return self._fail(memory, now, self._refusal(name, why), refused=why)
         if status == 423 and name == "funds":
             return self._window(memory, now)
         if status == 429 or self._rate_coded(answer):
@@ -708,6 +843,7 @@ class UpstoxReader:
         if status != 200:
             log.warning("Upstox %s refused the request (%d)", name, status)
             return self._fail(memory, now, WORDS["refused"])
+        self.answered(api, sig)
         try:
             payload = json.loads(answer.text, parse_float=Decimal)
             data = parse_part(name, payload)
@@ -720,7 +856,7 @@ class UpstoxReader:
             except Exception:  # names and auction times are a convenience; the figures stand
                 log.exception("the %s rows could not be matched to the master contract", name)
         memory.data, memory.read_at, memory.tried_at = data, now, now
-        memory.state, memory.note = "ok", None
+        memory.state, memory.note, memory.refused = "ok", None, None
 
     def _recover(self) -> None:
         """A holdings read asked again while the token was refused was answered: Upstox accepts
@@ -748,7 +884,7 @@ class UpstoxReader:
         return any(isinstance(e, dict) and e.get("errorCode") == RATE_CODE for e in errors)
 
     def _window(self, memory: PartMemory, now: int) -> None:
-        memory.tried_at = now
+        memory.tried_at, memory.refused = now, None
         if memory.data is not None and memory.read_at is not None:
             memory.state = "stale"
             memory.note = f"{WORDS['window']} Showing the figures read at {at_12h(memory.read_at)}."

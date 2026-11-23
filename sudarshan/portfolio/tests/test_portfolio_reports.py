@@ -290,21 +290,37 @@ async def test_a_slow_down_from_upstox_pauses_the_api_and_the_figures_say_so(rig
 @scenario_of
 async def test_a_report_read_refused_alone_pauses_that_read_until_the_token_file_changes(rig):
     """v0.17.0 verification V1: a 401 on the P&L may only mean this token may not read it. The
-    P&L pauses, in words that never say the token was refused; the trade history and the live
-    book still read."""
+    P&L pauses, in words that never say the token was refused and that say when it is asked
+    again (review M2); the trade history and the live book still read."""
     rig.fake.status["pnl_meta"] = 401
     data = (await rig.call("report_pnl", fy=FY, segment="EQ"))["data"]
-    assert data["state"] == "unavailable" and data["note"] == reports.WORDS["pnl_not_allowed"]
+    alone = (
+        reports.WORDS["pnl_not_allowed"] + " SUDARSHAN asks Upstox again after 13:18 on Mon 26 Oct."
+    )
+    assert data["state"] == "unavailable" and data["note"] == alone
     assert "did not accept" not in data["note"] and "TRINETRA" not in data["note"]
     trades = (await rig.call("report_trades", fy=FY, segment="EQ"))["data"]
     assert trades["state"] == "ok" and rig.fake.count("trades") == 1
     assert (await rig.svc.upstox.book(["holdings"], 0))["holdings"]["state"] == "ok"
     rig.fake.status.pop("pnl_meta")
     again = (await rig.call("report_pnl", fy=FY, segment="EQ", force=True))["data"]
-    assert again["note"] == reports.WORDS["pnl_not_allowed"] and rig.fake.count("pnl_meta") == 1
+    assert again["note"] == alone and rig.fake.count("pnl_meta") == 1  # before its time (M2)
     rig.svc.upstox.token_file.write_text(TOKEN + "x")  # the file changed: try again
     data = (await rig.call("report_pnl", fy=FY, segment="EQ", force=True))["data"]
     assert data["state"] == "ok" and rig.fake.count("pnl_meta") == 2
+
+
+@scenario_of
+async def test_a_report_refused_alone_is_read_again_once_its_time_has_come(rig):
+    """Review M2: before its time Read again asks Upstox nothing (above); after it, Read again
+    asks once, and Upstox's answer ends the pause, so a passing fault clears itself."""
+    rig.fake.status["pnl_meta"] = 401
+    await rig.call("report_pnl", fy=FY, segment="EQ")
+    rig.fake.status.pop("pnl_meta")
+    rig.now += 15 * 60_000 + 1
+    data = (await rig.call("report_pnl", fy=FY, segment="EQ", force=True))["data"]
+    assert data["state"] == "ok" and data["note"] is None and rig.fake.count("pnl_meta") == 2
+    assert rig.svc.upstox._paused == {}
 
 
 @scenario_of

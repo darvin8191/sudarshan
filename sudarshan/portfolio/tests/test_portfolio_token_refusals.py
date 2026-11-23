@@ -2,7 +2,8 @@
 
 A 401 on holdings or positions is Upstox refusing the Analytics Token itself: every read pauses
 and the token line fails. A 401 on any other read may only mean this token may not make that read:
-that read alone pauses, in its own words, and everything else keeps reading. The vectors
+that read alone pauses, in its own words that say when it is asked again (review M2), and
+everything else keeps reading. The vectors
 (``vectors/token_refusals.json``, written out in ``make_token_refusals.py``) give each of the
 twelve kinds of read; the scenario below runs the journal's refused day trades through the sealed
 API and checks the Upstox tab, the reports, Performance and the closing record. Upstox is a
@@ -12,6 +13,7 @@ transport in memory or a fake on loopback; nothing here leaves the machine.
 from __future__ import annotations
 
 import asyncio
+import itertools
 import json
 import re
 from pathlib import Path
@@ -152,13 +154,102 @@ def test_a_read_refused_alone_never_says_the_token_was_refused_or_suggests_anoth
         ca.WORDS["not_allowed"],
     ]
     assert len(alone) == 10
-    for sentence in alone:
+    alone.append(up.again_words(ist(8, 0, day=27), ist(11)))  # when it is asked again (M2)
+    for sentence in alone[:-1]:
         assert sentence.startswith("Upstox did not let SUDARSHAN's read-only token read "), sentence
         assert "not affected" in sentence, sentence
+    for sentence in alone:
         assert not re.search(r"accept|creat|revok|renew|replace|new token|\b[45]\d\d\b", sentence)
 
 
+# ---- a refused token says one thing in one refresh (v0.17.0 review M1) --------------------------
+FOUR = ("holdings", "positions", "mtf", "funds")
+TAIL = {"long-term-holdings": "holdings", "short-term-positions": "positions",
+        "mtf-positions": "mtf", "get-funds-and-margin": "funds"}  # fmt: skip
+
+
+@pytest.mark.parametrize("order", list(itertools.permutations(FOUR)), ids="-".join)
+def test_a_refused_token_says_one_thing_in_one_refresh_whatever_order_upstox_answers(
+    tmp_path, order
+):
+    """The token stops being accepted and the tab's next refresh gets 401 on all four reads,
+    sent at once and answered in ``order`` (each answer waits until the one before it has been
+    taken: an event, not a timer). Holdings, positions, MTF and funds all say the token was not
+    accepted, in that refresh and the next; no part keeps a pause of its own and the token line
+    is failed. The reviewer's two probes are holdings-positions-mtf-funds and its reverse."""
+
+    async def go():
+        token = tmp_path / "token"
+        token.write_text(TOKEN + "\n")
+        clock = Clock(ist(11))
+        taken = {name: asyncio.Event() for name in FOUR}
+        sent, all_sent = [], asyncio.Event()
+
+        async def answer(request: httpx.Request) -> httpx.Response:
+            part = TAIL[request.url.path.rsplit("/", 1)[-1]]
+            sent.append(part)
+            if len(sent) == len(FOUR):
+                all_sent.set()
+            await all_sent.wait()  # all four are in flight before any answer lands
+            turn = order.index(part)
+            if turn:
+                await taken[order[turn - 1]].wait()
+            return httpx.Response(401, json={"status": "error", "errors": []})
+
+        client = httpx.AsyncClient(transport=httpx.MockTransport(answer))
+        reader = up.UpstoxReader(token, "http://upstox.test", clock=clock, client=client,
+                                 budget=Budget(clock=lambda: clock.mono))  # fmt: skip
+        line, landed = [], []
+        reader.on_verdict = lambda state, at, sig: line.append(state)
+        refused = reader.refused
+
+        def took(api, sig):
+            why = refused(api, sig)
+            landed.append(api)
+            taken[api].set()
+            return why
+
+        reader.refused = took
+        try:
+            first = await reader.book(list(FOUR), 0)
+            clock.advance(3)
+            then = await reader.book(list(FOUR), 0)
+        finally:
+            await client.aclose()
+        return first, then, landed, line, reader, sent
+
+    first, then, landed, line, reader, sent = asyncio.run(go())
+    assert sorted(sent) == sorted(FOUR) and landed == list(order)
+    for views in (first, then):
+        assert {part: view["note"] for part, view in views.items()} == dict.fromkeys(
+            FOUR, up.WORDS["token_refused"]
+        )
+        assert {view["state"] for view in views.values()} == {"unavailable"}
+    assert reader._paused == {} and line == ["failed", "failed"]
+
+
+def test_a_401_after_the_token_was_refused_for_the_same_file_is_that_refusal(tmp_path):
+    """A report or a part read sent before the holdings refusal and answered after it says the
+    token's words and keeps no pause of its own; a 401 to a read sent with another token file is
+    still that read's alone."""
+    token = tmp_path / "token"
+    token.write_text(TOKEN + "\n")
+    reader = up.UpstoxReader(token, "http://upstox.test", clock=Clock(ist(11)))
+    sig = up._signature(token)
+    assert reader.refused("funds", sig) == "read" and set(reader._paused) == {"funds"}
+    assert reader.refused("positions", sig) == "token"
+    for api in ("mtf", "funds", "orders", "day_trades", "trades", "pnl", "order_history"):
+        assert reader.refused(api, sig) == "token", api
+    assert reader._paused == {}
+    other = (sig[0] + 1, sig[1])
+    assert reader.refused("funds", other) == "read" and reader._paused["funds"].sig == other
+
+
 # ---- the journal's day trades refused, through the sealed API ----------------------------------
+#: Refused at 13:03 on Monday 26 Oct 2026 (the rig's clock): asked again 15 minutes later (M2).
+AT_1318 = " SUDARSHAN asks Upstox again after 13:18 on Mon 26 Oct."
+
+
 @scenario
 async def test_a_refusal_of_the_days_trades_alone_leaves_everything_else_working(rig, fake):
     """The premise of the verification's V1: Upstox answers 401 when this token reads the day's
@@ -170,7 +261,7 @@ async def test_a_refusal_of_the_days_trades_alone_leaves_everything_else_working
     status, body = await rig.journal("trades_day")
     day = body["data"]
     assert status == 200 and day["state"] == "unavailable" and day["data"] is None
-    assert day["note"] == up.WORDS["not_allowed_trades"]
+    assert day["note"] == up.WORDS["not_allowed_trades"] + AT_1318
 
     tab = await rig.owner("upstox_book")
     assert {part: tab[part]["state"] for part in tab} == dict.fromkeys(
@@ -178,7 +269,8 @@ async def test_a_refusal_of_the_days_trades_alone_leaves_everything_else_working
     )
     assert tab["funds"]["data"]["available_paise"] == 12_500_050
     again = (await rig.journal("trades_day"))[1]["data"]
-    assert again["note"] == up.WORDS["not_allowed_trades"] and fake.count("day_trades") == 1
+    assert again["note"] == up.WORDS["not_allowed_trades"] + AT_1318
+    assert fake.count("day_trades") == 1
 
     history = await rig.owner("report_trades", fy=2026, segment="EQ")
     assert history["state"] == "ok" and history["note"] is None and fake.count("trades") == 1
@@ -197,3 +289,13 @@ async def test_a_refusal_of_the_days_trades_alone_leaves_everything_else_working
     assert json.loads(record["funds"])["available_paise"] == 12_500_050
     assert record["holdings_value_paise"] is not None
     assert probe.view(rig.svc.token_check, rig.svc.upstox.token_file)["state"] == "ok"
+
+
+@scenario
+async def test_the_journal_is_told_when_an_order_history_refused_alone_is_asked_again(rig, fake):
+    """An order's history the journal asks for (review M2): refused alone, the answer says when
+    SUDARSHAN asks Upstox again, with its day, since the journal keeps what it is told."""
+    fake.status["order_history"] = 401
+    status, body = await rig.journal("order_history", order_id="250101000000001")
+    assert status == 200 and body["data"]["state"] == "unavailable"
+    assert body["data"]["note"] == reports.WORDS["history_not_allowed"] + AT_1318

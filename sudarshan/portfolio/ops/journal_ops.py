@@ -58,9 +58,11 @@ def _segment(message: Mapping[str, Any], allowed: tuple[str, ...] = REPORT_SEGME
     return segment
 
 
-def _failed(now: int, outcome: str, **more: Any) -> dict[str, Any]:
-    """An answer for a read that did not happen: why, in words, and no figures."""
-    return {"state": "unavailable", "read_at": None, "note": reports.WORDS[outcome], **more}
+def _failed(ctx, outcome: str, **more: Any) -> dict[str, Any]:
+    """An answer for a read that did not happen: why, in words (with when it is asked again, for
+    a read Upstox refused alone: review M2), and no figures."""
+    note = reports.again_note(reports.WORDS[outcome], ctx.ensure_upstox())
+    return {"state": "unavailable", "read_at": None, "note": note, **more}
 
 
 async def _part(ctx, name: str) -> dict[str, Any]:
@@ -100,7 +102,7 @@ async def order_history(ctx, message):
         "order_history", {"order_id": order_id}, caller().principal
     )
     if outcome != "ok":
-        return _failed(ctx.clock(), outcome, order_id=order_id, rows=[])
+        return _failed(ctx, outcome, order_id=order_id, rows=[])
     rows = [parse_order(i) for i in payload.get("data") or [] if isinstance(i, Mapping)]
     return {
         "state": "ok",
@@ -135,13 +137,11 @@ async def historical_trades(ctx, message):
     )
     base = {"segment": segment, "from": start, "to": end, "page": page}
     if outcome != "ok":
-        return _failed(ctx.clock(), outcome, **base, rows=[], total_pages=None, total_records=None)
+        return _failed(ctx, outcome, **base, rows=[], total_pages=None, total_records=None)
     try:
         rows = [reports.parse_trade(i) for i in payload.get("data") or [] if isinstance(i, Mapping)]
     except reports.Unreadable:
-        return _failed(
-            ctx.clock(), "unreadable", **base, rows=[], total_pages=None, total_records=None
-        )
+        return _failed(ctx, "unreadable", **base, rows=[], total_pages=None, total_records=None)
     meta = reports._page_meta(payload)
     return {
         "state": "ok",
@@ -176,7 +176,7 @@ async def pnl_report(ctx, message):
     outcome, payload = await ctx.ensure_reports()._call(api, params, caller().principal)
     head = {"segment": segment, "fy": fy, "part": part, "page": page, **span}
     if outcome != "ok":
-        return _failed(ctx.clock(), outcome, **head)
+        return _failed(ctx, outcome, **head)
     data = payload.get("data") or {}
     try:
         if part == "metadata":
@@ -190,7 +190,7 @@ async def pnl_report(ctx, message):
                 "page_size": size,
             }
     except reports.Unreadable:
-        return _failed(ctx.clock(), "unreadable", **head)
+        return _failed(ctx, "unreadable", **head)
     return {"state": "ok", "read_at": ctx.clock(), "note": None, **head, **found}
 
 

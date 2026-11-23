@@ -37,6 +37,8 @@ import { KillSwitchNote } from '@/sudarshan/risk/RiskBanner'
 import { ChargesLine } from '@/sudarshan/ticket/ChargesLine'
 // SUDARSHAN B5 (M5.9): the margin the order needs and the funds available; it holds nothing back.
 import { MarginLine } from '@/sudarshan/ticket/MarginLine'
+// SUDARSHAN (v0.17.0 review L3): a Repeat of a stop the price has passed says so before Place.
+import { PassedTriggerLine, passedTriggerText } from '@/sudarshan/ticket/PassedTriggerLine'
 import { SettlementLine } from '@/sudarshan/ticket/SettlementLine'
 // SUDARSHAN B4 (M5.11): size by risk, which fills the quantity box and sends nothing.
 import { SizeByRisk } from '@/sudarshan/ticket/SizeByRisk'
@@ -102,6 +104,11 @@ export interface PlaceOrderDialogProps {
    * open unseen and take focus. Null or absent means body, as before.
    */
   container?: HTMLElement | null
+  /**
+   * SUDARSHAN (v0.17.0 review L3): Repeat's ticket. A stop whose trigger the last price has
+   * already passed gets a line before Place saying it would fill (or trigger) at once. Words only.
+   */
+  warnPassedTrigger?: boolean
   onSuccess?: (orderId: string) => void
   onError?: (error: string) => void
 }
@@ -241,6 +248,7 @@ export function PlaceOrderDialog({
   strategy = 'OptionChain',
   place,
   container,
+  warnPassedTrigger = false,
   onSuccess,
   onError,
 }: PlaceOrderDialogProps) {
@@ -508,6 +516,17 @@ export function PlaceOrderDialog({
     exchange: exchange_,
     usualExchange: exchange,
   })
+  // SUDARSHAN (v0.17.0 review L3): from the fields as they stand, so it follows an edit or a tick.
+  const passed = warnPassedTrigger
+    ? passedTriggerText({
+        action: formAction,
+        priceType: formPriceType,
+        trigger: formTriggerPrice,
+        price: formPrice,
+        ltp: mergedData.ltp,
+        tickSize,
+      })
+    : null
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -878,6 +897,9 @@ export function PlaceOrderDialog({
           />
         </div>
 
+        {/* SUDARSHAN (v0.17.0 review L3): outside the body, so it is on screen when Place is. */}
+        {passed && <PassedTriggerLine id={`${fieldId}-passed`} text={passed} />}
+
         {/* SUDARSHAN (review H1): the order in one line beside its button, always on screen. */}
         <DialogFooter className="flex-col gap-2 sm:flex-row sm:items-center sm:gap-2">
           <p
@@ -901,7 +923,9 @@ export function PlaceOrderDialog({
             <Button
               onClick={handleSubmit}
               disabled={!isValid() || isSubmitting || guard.settling}
-              aria-describedby={`${fieldId}-summary`}
+              aria-describedby={
+                passed ? `${fieldId}-summary ${fieldId}-passed` : `${fieldId}-summary`
+              }
               className={cn(TOUCH, FOOT, 'font-bold', SIDE_FILL[formAction])}
             >
               {isSubmitting ? 'Placing...' : `Place ${formAction} Order`}

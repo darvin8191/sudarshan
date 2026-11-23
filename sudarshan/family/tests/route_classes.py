@@ -322,7 +322,7 @@ internal      /sudarshan/family/internal/watchlists    sudarshan_family.internal
 internal      /sudarshan/screener/internal/push        sudarshan_screener_internal.internal_push       # sudarshan-screener pushes results: sealed, 404 through nginx
 internal      /sudarshan/screener/internal/watchlist   sudarshan_screener_internal.internal_watchlist  # sudarshan-screener reads and fills a watchlist: sealed, 404 through nginx
 internal      /sudarshan/signals/internal/push         sudarshan_signals.internal_push                 # sudarshan-signals pushes the TRINETRA view's updates: sealed, 404 through nginx
-internal      /sudarshan/watchlists/internal/read      sudarshan_watchlists_internal.read              # sudarshan-alerts reads a list's members: sealed, 404 through nginx
+internal      /sudarshan/watchlists/internal/read      sudarshan_watchlists_internal.read              # sudarshan-alerts reads a list's members and the portfolio the owner's listed shares (own_members): sealed, 404 through nginx
 
 # --- protected: the owner's session only ---
 protected     /<broker>/callback                                                        brlogin.broker_callback

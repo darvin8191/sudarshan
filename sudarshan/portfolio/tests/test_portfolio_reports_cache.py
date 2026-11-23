@@ -18,7 +18,7 @@ from test_portfolio_reports import _rows, _wire, fake  # noqa: F401  (fixtures)
 from sudarshan.portfolio import reports
 from sudarshan.portfolio.budget import Budget
 from sudarshan.portfolio.core.days import day_of_instant
-from sudarshan.portfolio.upstox import Unreadable
+from sudarshan.portfolio.upstox import Pause, Unreadable
 
 IST = timezone(timedelta(hours=5, minutes=30))
 HOUR = 3_600_000
@@ -553,7 +553,8 @@ async def test_a_refused_token_that_changed_is_told_again_when_it_is_refused_aga
     """Pauses kept for a token file that is no longer the one on the server are let go at the
     next read, the token's and each read's alone (verification V1), and so is their log line."""
     upstox = rig.svc.upstox
-    upstox._confirmed_at, upstox._paused = ("stale",), {"trades": ("stale",), "pnl": ("stale",)}
+    stale = Pause(("stale",), None)
+    upstox._confirmed_at, upstox._paused = ("stale",), {"trades": stale, "pnl": stale}
     upstox._told |= {"401", "401 trades", "401 pnl"}
     data = (await rig.call("report_trades", fy=2026, segment="EQ"))["data"]
     assert data["state"] == "ok" and rig.fake.count("trades") == 1
