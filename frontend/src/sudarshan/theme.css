@@ -201,6 +201,20 @@ html {
 :root[data-text='large'] .sd-app-bar {
   zoom: calc(1 / var(--sd-text-scale));
 }
+/* Below 360 px with Larger text the order ticket's title lets its "Place Order -" go from the
+   screen (v0.17.0 verification V5): the side and the symbol share one line, and the price type
+   and the product come onto the first screen. It is still read: the dialog keeps its whole name. */
+@media (width < 22.5rem) {
+  :root[data-text='large'] .sd-ticket-lead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}
 /* With larger text the books' four-up figure cards (Positions, Holdings, the wide pages a phone
    shows on its side) go two-up below 1024 px, so a six-digit figure stays inside its card and the
    page never scrolls sideways. Outside any layer, so it wins over the grid's own columns. */
