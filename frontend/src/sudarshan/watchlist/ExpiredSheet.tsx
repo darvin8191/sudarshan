@@ -71,7 +71,14 @@ export function ExpiredSheet({
             </button>
           </div>
         )}
-        {flags && <SymbolMarks k={`${item.exchange}:${item.symbol}`.toUpperCase()} names={flags} />}
+        {flags && (
+          // v0.17.0 review L6: Expired is said once, above, with its day.
+          <SymbolMarks
+            k={`${item.exchange}:${item.symbol}`.toUpperCase()}
+            names={flags}
+            expiredSaid
+          />
+        )}
       </div>
     </BottomSheet>
   )

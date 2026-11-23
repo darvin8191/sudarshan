@@ -28,7 +28,16 @@ const NOTE_TOO_LONG_LEFT =
  * it was decided on; a refusal (a `conflict` among them) shows the server's sentence and reads the
  * symbol again, so the screen shows what the other screen did. Not drawn in a family render.
  */
-export function SymbolMarks({ k, names }: { k: string; names: readonly FlagName[] }) {
+export function SymbolMarks({
+  k,
+  names,
+  expiredSaid = false,
+}: {
+  k: string
+  names: readonly FlagName[]
+  /** The sheet around it already says the contract expired, with its day (`ExpiredSheet`): its own line is left out (review L6). */
+  expiredSaid?: boolean
+}) {
   const client = useQueryClient()
   const info = useSymbolInfo(k)
   const [problem, setProblem] = useState<string | null>(null)
@@ -100,7 +109,7 @@ export function SymbolMarks({ k, names }: { k: string; names: readonly FlagName[
   }
   return (
     <section aria-label="Flag and note" className="flex flex-col gap-3">
-      {data.expired && (
+      {data.expired && !expiredSaid && (
         <p
           data-expired="true"
           className="flex items-center gap-1.5 text-[0.8125rem] font-semibold text-[color:var(--warning-text)]"
