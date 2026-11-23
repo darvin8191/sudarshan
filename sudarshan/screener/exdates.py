@@ -57,6 +57,7 @@ WORDS = {
     "not_ready": "the portfolio's corporate actions are switched off (SUDARSHAN_PORTFOLIO_INSIGHTS)",
     "refused": "the portfolio did not accept the screener's key; restart both services",
     "failed": "the portfolio's answer could not be read",
+    "fault": "an unexpected error stopped the read; the error above has its details",
 }
 
 
@@ -151,6 +152,12 @@ class ExDatesLink:
         self.read_day = day if after else None
         self._say("ok")
 
+    def fault(self, now: int) -> None:
+        """A tick met an unexpected error (the job has logged it): /health says so, the last facts
+        are kept, and the read is tried again 10 minutes later, as after a failed read."""
+        self.retry_at = now + RETRY_MS
+        self._say("fault")
+
     async def read(self) -> Facts:
         held = loopback.holder(self.url, self.tables, expected_uid=self.uid())
         if held in (loopback.NOBODY, loopback.OTHER):
@@ -202,12 +209,19 @@ class ExDatesLink:
 
 async def run_ex_dates(service, *, tick_s: float = TICK_S) -> None:
     """The job: the day's ex-dates (``ExDatesLink.refresh``), looked at once a minute; nothing
-    while the service holds no key for the portfolio (a test without a pepper)."""
+    while the service holds no key for the portfolio (a test without a pepper). A tick that meets
+    an unexpected error is logged with its traceback and shown in /health, and the job carries
+    on, as the other screener jobs do (v0.17.0 review L2)."""
     link = service.parts.get("exdates")
     if link is None:
         return
     while True:
-        await link.refresh(service.clock())
+        now = service.clock()
+        try:
+            await link.refresh(now)
+        except Exception:
+            log.exception("the ex-dates job failed on a tick; it tries again in 10 minutes")
+            link.fault(now)
         await asyncio.sleep(tick_s)
 
 

@@ -23,7 +23,14 @@ from test_screener_universe import master as master_fixture  # noqa: F401  (the 
 from sudarshan.alerts.market.feedlink import HEALTH
 from sudarshan.autologin.schedule import IST
 from sudarshan.screener import check, config, engine, events, spec
-from sudarshan.screener.exdates import ExDatesLink, Facts, Unread, parse, run_ex_dates
+from sudarshan.screener.exdates import (
+    RETRY_MS,
+    ExDatesLink,
+    Facts,
+    Unread,
+    parse,
+    run_ex_dates,
+)
 from sudarshan.screener.runs import Member
 from sudarshan.screener.types import HIT, MISS, NO_EVENTS, NOT_CHECKED, Why
 from sudarshan.tasks import cancel_and_wait
@@ -209,6 +216,53 @@ def test_the_job_reads_while_the_service_holds_a_key(tmp_path):
 
     asyncio.run(go())
     assert len(portfolio.asked) == 1  # the same day: read once
+
+
+def test_an_unexpected_error_on_a_tick_is_logged_shown_and_the_job_carries_on(tmp_path, caplog):
+    """v0.17.0 review L2: the other screener jobs guard each tick; this one ended silently while
+    /health kept saying ok, and three days later every share read "Not checked". Now the error is
+    logged with its traceback, the part says ``fault`` in /health, the read is tried again 10
+    minutes on (not at every tick), and the job keeps running."""
+    portfolio, now = Portfolio(), {"ms": at(TUESDAY, "09:00")}
+    link = link_to(tmp_path, portfolio)
+    tried, read = [], link.read
+
+    async def read_once_broken():
+        tried.append(now["ms"])
+        if len(tried) == 1:
+            raise RuntimeError("an error no read was written for")
+        return await read()
+
+    link.read = read_once_broken
+
+    class Service:
+        parts = {"exdates": link}
+        clock = staticmethod(lambda: now["ms"])
+
+    async def until(done):
+        for _ in range(500):
+            if done():
+                return True
+            await asyncio.sleep(0.01)
+        return False
+
+    async def go():
+        task = asyncio.create_task(run_ex_dates(Service(), tick_s=0.01))
+        try:
+            assert await until(lambda: link.state == "fault")
+            await asyncio.sleep(0.1)  # ten ticks: nothing is read before its 10 minutes
+            seen = (link.status(), len(tried), task.done())
+            now["ms"] += RETRY_MS
+            assert await until(lambda: link.state == "ok")
+            return seen, task.done()
+        finally:
+            await cancel_and_wait(task)
+
+    (status, tries, ended), ended_later = asyncio.run(go())
+    assert status == {"state": "fault", "as_of": None, "shares": 0} and tries == 1
+    assert not ended and not ended_later and len(portfolio.asked) == 1
+    failed = [r for r in caplog.records if r.getMessage().startswith("the ex-dates job failed")]
+    assert len(failed) == 1 and failed[0].exc_info is not None
 
 
 def test_the_service_reads_the_portfolio_on_this_server_only(tmp_path):
