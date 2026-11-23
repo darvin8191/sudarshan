@@ -12,3 +12,7 @@ REF_TWICE = "A list can be a favourite once."
 GONE = "That list is no longer there, so it cannot be a favourite."
 PREF_NOTHING = "Give a sort, a direction, what to change from, or the holdings line."
 PREF_GONE = "That list is no longer there."
+#: The figures beside the price (M8.3, GA6.1).
+FIGURE_BAD = "That figure is not one the watchlist shows. Pick from the list."
+FIGURE_TWICE = "Each figure can be picked once."
+FIGURES_SIX = "Six figures at most. Remove one first."

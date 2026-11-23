@@ -208,7 +208,12 @@ BASES = ("close", "open")
 
 
 class PrefRow(Base):
-    """How the owner views one ref: sort, direction, change basis and the holdings line."""
+    """How the owner views one ref: sort, direction, change basis and the holdings line.
+
+    ``cols`` (M8.3, GA6.1) is the figures the rows show beside the price, their ids in the order
+    picked, joined by commas; NULL is none. No check: an id a later release adds is dropped where it
+    is read (``view._pref``), so a release rolled back still reads the row. Added in place by the
+    migration and by the app's first use, so the schema stays 1."""
 
     __tablename__ = "wl_pref"
     principal = _principal()
@@ -218,6 +223,7 @@ class PrefRow(Base):
     basis = Column(String(8), nullable=False, server_default="close")
     held = Column(Integer, nullable=False, server_default="0")
     updated_at = Column(BigInteger, nullable=False)
+    cols = Column(String(80))
 
     __table_args__ = (
         CheckConstraint(_in("sort", SORTS), name="ck_wl_pref_sort"),

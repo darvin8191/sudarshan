@@ -57,7 +57,8 @@ def _populate(path: Path) -> None:
     )
     _sql(path, "INSERT INTO wl_flag VALUES ('owner', 2, 'Watch closely')")
     _sql(path, "INSERT INTO wl_favourite VALUES ('owner', 1, 'list:3', 8, '2026-01-01 00:00:00')")
-    _sql(path, "INSERT INTO wl_pref VALUES ('owner', 'list:3', 'change', 1, 'open', 1, 9)")
+    _sql(path, "INSERT INTO wl_pref (principal, ref, sort, descending, basis, held, updated_at)"
+         " VALUES ('owner', 'list:3', 'change', 1, 'open', 1, 9)")  # fmt: skip
     _sql(path, "INSERT INTO wl_meta VALUES ('flags_version', '5')")
 
 
@@ -140,6 +141,60 @@ def test_a_populated_copy_forced_back_keeps_every_row_and_value(tmp_path):
     ]
     assert after["wl_favourite"] == []
     assert "Up to date. Nothing to do." in _run(copy, "--status").stdout
+
+
+def _without_figures(path: Path) -> None:
+    """``wl_pref`` as schema 1 shipped it before M8.3's figures: no ``cols`` column."""
+    _sql(path, "ALTER TABLE wl_pref DROP COLUMN cols")
+
+
+def test_a_populated_copy_without_the_figures_column_gets_it_and_keeps_every_value(tmp_path):
+    path = tmp_path / "w.db"
+    assert _run(path).returncode == 0
+    _populate(path)
+    _without_figures(path)
+    owners = _dump(path)
+    for sibling in path.parent.glob("w.db-*"):
+        sibling.unlink()
+    before = path.read_bytes()
+
+    status = _run(path, "--status")
+    assert "column wl_pref.cols MISSING" in status.stdout and "Migration needed." in status.stdout
+    assert "schema record" not in status.stdout  # the schema stays 1
+    assert path.read_bytes() == before  # --status changed not a byte
+
+    done = _run(path)
+    assert done.returncode == 0, done.stdout + done.stderr
+    after = _dump(path)
+    assert {t: v for t, v in after.items() if t != "wl_pref"} == {
+        t: v for t, v in owners.items() if t != "wl_pref"
+    }
+    # Every value the owner chose stays; the new column is NULL, which is what each row says.
+    assert _sql(path, "SELECT ref, sort, descending, basis, held, cols FROM wl_pref") == [
+        ("list:3", "change", 1, "open", 1, None)
+    ]
+    assert _sql(path, "SELECT value FROM wl_meta WHERE name = 'schema'") == [("1",)]
+    again = _run(path)
+    assert again.returncode == 0 and "[OK]" not in again.stdout, again.stdout
+    assert "Up to date. Nothing to do." in _run(path, "--status").stdout
+
+
+def test_the_apps_first_use_adds_the_figures_column_too(tmp_path, monkeypatch):
+    from sudarshan.watchlists import engine, schema
+
+    path = tmp_path / "w.db"
+    assert _run(path).returncode == 0
+    _populate(path)
+    _without_figures(path)
+    monkeypatch.setenv(schema.PATH_ENV, str(path))
+    engine.dispose()
+    try:
+        with engine.open_session() as s:
+            got = s.execute(schema.text("SELECT ref, cols FROM wl_pref")).all()
+    finally:
+        engine.dispose()
+    assert [tuple(r) for r in got] == [("list:3", None)]
+    assert "Up to date. Nothing to do." in _run(path, "--status").stdout
 
 
 def test_a_schema_record_the_owner_cannot_have_set_is_never_lowered_or_written_over(tmp_path):

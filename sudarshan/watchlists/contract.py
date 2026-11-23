@@ -89,6 +89,8 @@ ENUMS = {
     "RefKind": ("list", "preset", "ranked", "flag"),
     "Sort": ("list", "change", "price", "name", "exchange"),
     "Basis": ("close", "open"),
+    #: The figures a row can show beside its price (M8.3, GA6.1), in the View sheet's order.
+    "Figure": ("high", "low", "open", "prev", "volume", "oi", "atp", "iv"),
     "FollowKind": ("atm_option", "month_future", "strike_pair"),
     "ExpiryRule": ("nearest", "next", "month", "next_month"),
     "StrikeRule": ("atm", "fixed"),
@@ -137,7 +139,7 @@ RECORDS = {
     "locked:bool, note:string|null",
     "Contract": "exchange:string, symbol:string, key:string, name:string, lot:int|null, "
     "tick:number|null, expiry:string|null, isin:string|null",
-    "Pref": "sort:Sort, descending:bool, basis:Basis, held:bool",
+    "Pref": "sort:Sort, descending:bool, basis:Basis, held:bool, cols:Figure[]",
     "Section": "id:int, name:string, mark:int, position:int, count:int",
     "Row": "item:int|null, contract:Contract, section_id:int|null, flag:int|null, "
     "has_note:bool, expired:bool, metric:string|null",
@@ -261,7 +263,8 @@ OPS = (
            "k:string, flag?:int|null, note?:string|null, version?:int|null", "Done"),
     OpSpec("expired_clear", "POST", "/symbols/expired/clear", "write", "version:int", "Done"),
     OpSpec("pref", "PUT", "/prefs/<ref>", "write",
-           "ref:string, sort?:Sort, descending?:bool, basis?:Basis, held?:bool", "Done"),
+           "ref:string, sort?:Sort, descending?:bool, basis?:Basis, held?:bool, cols?:Figure[]",
+           "Done"),
     OpSpec("row_add", "POST", "/rows", "write", f"{_ROW}, {_FOLLOW}", "Done"),
     OpSpec("row_edit", "PATCH", "/rows/<id>", "write",
            "id:int, version:string, section_id?:int|null, " + _FOLLOW.replace("kind:", "kind?:")

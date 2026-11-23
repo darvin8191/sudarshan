@@ -31,6 +31,7 @@ from sudarshan.watchlists import engine, master, presets, schema, sessions, vers
 from sudarshan.watchlists import view as merge_view
 from sudarshan.watchlists.ops import OpError
 from sudarshan.watchlists.schema import OWNER
+from sudarshan.watchlists.store import prefs
 from sudarshan.watchlists.words import presets as words
 from utils import real_threading
 from utils.logging import get_logger
@@ -124,8 +125,7 @@ def read_pref(ref: str) -> dict | None:
     with engine.open_session() as s:
         p = s.scalars(select(schema.PrefRow).where(
             schema.PrefRow.principal == OWNER, schema.PrefRow.ref == ref)).first()  # fmt: skip
-        return None if p is None else {"sort": p.sort, "descending": p.descending,
-                                       "basis": p.basis, "held": p.held}  # fmt: skip
+        return prefs.raw(p)
 
 
 def view(ident: str, user: str) -> dict:

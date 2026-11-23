@@ -229,7 +229,8 @@ def test_view_reads_a_list_with_its_overlay(client):
     assert data["rows"][0]["contract"]["isin"] == "INE009A01021"
     assert data["sections"] == [{"id": 10, "name": "Banks", "mark": 2, "position": 1, "count": 2}]
     assert [f["id"] for f in data["follow"]] == [1]
-    assert data["pref"] == {"sort": "name", "descending": True, "basis": "close", "held": False}
+    assert data["pref"] == {"sort": "name", "descending": True, "basis": "close", "held": False,
+                            "cols": []}  # fmt: skip
     assert "price" not in json.dumps(data).lower()
 
 

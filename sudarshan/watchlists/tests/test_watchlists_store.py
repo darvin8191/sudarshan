@@ -34,7 +34,7 @@ FROZEN = {
     "wl_symbol": "principal exchange symbol flag flag_at note note_at version updated_at",
     "wl_flag": "principal mark name",
     "wl_favourite": "principal slot ref updated_at oa_created_at",
-    "wl_pref": "principal ref sort descending basis held updated_at",
+    "wl_pref": "principal ref sort descending basis held updated_at cols",  # cols: M8.3 GA6.1
     "wl_meta": "name value",
 }
 KEYS = {

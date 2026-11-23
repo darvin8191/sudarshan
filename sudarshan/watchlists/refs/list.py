@@ -26,6 +26,7 @@ from sudarshan.watchlists import members as merge_members
 from sudarshan.watchlists import view as merge_view
 from sudarshan.watchlists.ops import OpError
 from sudarshan.watchlists.schema import OWNER
+from sudarshan.watchlists.store import prefs
 from sudarshan.watchlists.words import members as members_words
 from sudarshan.watchlists.words import view as words
 
@@ -97,8 +98,7 @@ def read_overlay(lid: int, items: list) -> dict:
         } if pairs else {}  # fmt: skip
         pref = schema.PrefRow  # a preference is kept for a list that has no guard row yet (W10)
         p = s.scalars(select(pref).where(pref.principal == OWNER, pref.ref == ref)).first()
-        out["pref"] = None if p is None else {"sort": p.sort, "descending": p.descending,
-                                              "basis": p.basis, "held": p.held}  # fmt: skip
+        out["pref"] = prefs.raw(p)
         if guard is None:
             return out
         sec, item, fol = schema.SectionRow, schema.SectionItemRow, schema.FollowRow

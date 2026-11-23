@@ -16,7 +16,7 @@ from sudarshan.watchlists import members as merge_members
 from sudarshan.watchlists import view as merge_view
 from sudarshan.watchlists.ops import OpError
 from sudarshan.watchlists.schema import OWNER
-from sudarshan.watchlists.store import symbols
+from sudarshan.watchlists.store import prefs, symbols
 from sudarshan.watchlists.words import marks as words
 
 KIND = "flag"
@@ -38,8 +38,7 @@ def view(ident: str, user: str) -> dict:
         name = next(f["name"] for f in symbols.flag_names(s) if f["mark"] == mark)
         pref = s.scalars(select(schema.PrefRow).where(
             schema.PrefRow.principal == OWNER, schema.PrefRow.ref == ref)).first()  # fmt: skip
-        raw = None if pref is None else {"sort": pref.sort, "descending": pref.descending,
-                                         "basis": pref.basis, "held": pref.held}  # fmt: skip
+        raw = prefs.raw(pref)
     m = master.shared()  # the process's one master: a request never builds its own
     return merge_view.merge_flag(mark, name, rows, m.row, loaded=m.loaded(), isin=m.isin,
                                  pref=raw, lines=[words.FLAG_LIST])  # fmt: skip

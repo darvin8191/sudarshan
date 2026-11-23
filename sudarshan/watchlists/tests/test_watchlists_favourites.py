@@ -275,7 +275,7 @@ def test_a_favourites_write_pushes_once_with_the_new_version_and_bumps_no_lists_
 def test_a_list_with_no_preference_reads_as_the_defaults_and_a_read_writes_nothing(client):
     (a,) = make_lists("Swing")
     assert pref_of(client, a) == {"sort": "list", "descending": False, "basis": "close",
-                                  "held": False}  # fmt: skip
+                                  "held": False, "cols": []}  # fmt: skip
     assert rows(schema.PrefRow) == []
 
 
@@ -284,10 +284,10 @@ def test_a_preference_round_trips_and_only_the_fields_sent_change(client, emitte
     ref, before = f"list:{a}", versions.read()
     assert set_pref(client, ref, sort="change", descending=True).get_json()["status"] == "ok"
     assert pref_of(client, a) == {"sort": "change", "descending": True, "basis": "close",
-                                  "held": False}  # fmt: skip
+                                  "held": False, "cols": []}  # fmt: skip
     assert set_pref(client, ref, basis="open", held=True).get_json()["status"] == "ok"
     assert pref_of(client, a) == {"sort": "change", "descending": True, "basis": "open",
-                                  "held": True}  # fmt: skip
+                                  "held": True, "cols": []}  # fmt: skip
     assert set_pref(client, ref, descending=False).status_code == 200
     assert pref_of(client, a)["descending"] is False
     assert len(rows(schema.PrefRow)) == 1
@@ -305,6 +305,71 @@ def test_a_preference_can_be_kept_for_a_ranked_list_and_is_refused_for_what_is_n
     assert (nothing["code"], nothing["message"]) == ("invalid", words.PREF_NOTHING)
     assert set_pref(client, f"list:{a}", sort="sideways").get_json()["code"] == "invalid"
     assert len(rows(schema.PrefRow)) == 1
+
+
+# -- the figures beside the price (M8.3, GA6.1) --------------------------------------------------
+def stored_cols(ref):
+    with engine.open_session() as s:
+        return s.scalar(select(schema.PrefRow.cols).where(schema.PrefRow.ref == ref))
+
+
+def test_figures_round_trip_in_the_order_picked_and_other_fields_keep_theirs(client, emitted):
+    (a,) = make_lists("Swing")
+    ref, before = f"list:{a}", versions.read()
+    assert set_pref(client, ref, sort="change", held=True).status_code == 200
+    assert set_pref(client, ref, cols=["iv", "high", "volume"]).get_json()["status"] == "ok"
+    assert pref_of(client, a) == {"sort": "change", "descending": False, "basis": "close",
+                                  "held": True, "cols": ["iv", "high", "volume"]}  # fmt: skip
+    assert stored_cols(ref) == "iv,high,volume"
+    assert set_pref(client, ref, basis="open").status_code == 200  # a pref without cols keeps them
+    assert pref_of(client, a)["cols"] == ["iv", "high", "volume"]
+    six = ["high", "low", "open", "prev", "volume", "oi"]
+    assert set_pref(client, ref, cols=six).status_code == 200
+    assert pref_of(client, a)["cols"] == six
+    assert set_pref(client, ref, cols=[]).status_code == 200  # none: stored as NULL, not ""
+    assert stored_cols(ref) is None and pref_of(client, a)["cols"] == []
+    assert emitted == [] and versions.read() == before  # a preference bumps nothing
+
+
+@pytest.mark.parametrize(
+    ("cols", "sentence"),
+    [
+        (["high", "high"], words.FIGURE_TWICE),
+        (["high", "low", "open", "prev", "volume", "oi", "atp"], words.FIGURES_SIX),
+    ],
+)
+def test_a_repeat_or_a_seventh_figure_is_refused_in_words_and_nothing_changes(
+    client, cols, sentence
+):
+    (a,) = make_lists("Swing")
+    ref = f"list:{a}"
+    assert set_pref(client, ref, cols=["oi"]).status_code == 200
+    got = set_pref(client, ref, cols=cols).get_json()
+    assert (got["code"], got["message"], got["field"]) == ("invalid", sentence, "cols")
+    assert stored_cols(ref) == "oi"
+
+
+def test_a_figure_the_contract_does_not_name_is_refused_before_the_op_and_by_the_op(client):
+    (a,) = make_lists("Swing")
+    ref = f"list:{a}"
+    got = set_pref(client, ref, cols=["high", "sparkline"]).get_json()  # an app older or newer
+    assert (got["code"], got["field"]) == ("invalid", "cols")
+    assert "Update the app" in got["message"] and rows(schema.PrefRow) == []
+    # The op's own check, for any caller that reaches it without the bridge's.
+    from sudarshan.watchlists.ops import prefs as pref_op
+
+    with pytest.raises(ops.OpError) as refused:
+        pref_op._figures(["high", "sparkline"])
+    assert (refused.value.code, refused.value.message) == ("invalid", words.FIGURE_BAD)
+
+
+def test_a_stored_figure_this_release_does_not_know_is_dropped_at_read(client):
+    (a,) = make_lists("Swing")
+    ref = f"list:{a}"
+    with engine.open_session() as s, s.begin():
+        s.add(schema.PrefRow(ref=ref, cols="high,sparkline,iv,high", updated_at=NOW))
+    assert pref_of(client, a)["cols"] == ["high", "iv"]
+    assert stored_cols(ref) == "high,sparkline,iv,high"  # a read writes nothing
 
 
 # -- the lists op ------------------------------------------------------------------------------

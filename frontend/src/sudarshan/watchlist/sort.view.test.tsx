@@ -4,7 +4,7 @@
  * (`useLiveRows` mocked), so a test decides each tick.
  */
 import { QueryClientProvider } from '@tanstack/react-query'
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -289,6 +289,28 @@ describe('the View sheet and the saved preference', () => {
       basis: 'open',
       held: false,
     })
+  })
+
+  it('sends the figures the View has with a pick, and never none for a View read before figures (M8.3 GA6.1)', async () => {
+    const user = userEvent.setup()
+    setFeed(rowsOf([101, 110, 105, 103, 108]))
+    await mount(pref({ cols: ['iv', 'high'] }))
+    await user.click(screen.getByRole('button', { name: 'Open View' }))
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Price' }))
+    await waitFor(() => expect(b().count('pref')).toBe(1))
+    expect(b().calls.find((call) => call.op === 'pref')?.body).toMatchObject({
+      sort: 'price',
+      cols: ['iv', 'high'],
+    })
+    cleanup()
+    b().calls.length = 0
+    // An answer from before figures existed has no `cols`: a pick must not clear the owner's.
+    const { cols: _none, ...older } = pref()
+    await mount(older as Pref)
+    await user.click(screen.getByRole('button', { name: 'Open View' }))
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Price' }))
+    await waitFor(() => expect(b().count('pref')).toBe(1))
+    expect(b().calls.find((call) => call.op === 'pref')?.body).not.toHaveProperty('cols')
   })
 
   it('shows the pick at once, by name, with the pressed choice carrying a check as well as a state', async () => {

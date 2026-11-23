@@ -163,7 +163,8 @@
      "sort": "list",
      "descending": false,
      "basis": "close",
-     "held": false
+     "held": false,
+     "cols": []
     }
    }
   },
@@ -247,7 +248,8 @@
      "sort": "list",
      "descending": false,
      "basis": "close",
-     "held": false
+     "held": false,
+     "cols": []
     }
    }
   },
@@ -397,7 +399,8 @@
      "sort": "list",
      "descending": false,
      "basis": "close",
-     "held": false
+     "held": false,
+     "cols": []
     }
    }
   },
@@ -488,7 +491,8 @@
      "sort": "list",
      "descending": false,
      "basis": "close",
-     "held": false
+     "held": false,
+     "cols": []
     }
    }
   },
@@ -560,7 +564,8 @@
      "sort": "list",
      "descending": false,
      "basis": "close",
-     "held": false
+     "held": false,
+     "cols": []
     }
    }
   },
@@ -669,7 +674,8 @@
      "sort": "list",
      "descending": false,
      "basis": "close",
-     "held": false
+     "held": false,
+     "cols": []
     },
     "flags": {
      "NSE:INFY": 2
@@ -762,7 +768,8 @@
      "sort": "list",
      "descending": false,
      "basis": "close",
-     "held": false
+     "held": false,
+     "cols": []
     }
    }
   },
@@ -821,7 +828,8 @@
      "sort": "list",
      "descending": false,
      "basis": "close",
-     "held": false
+     "held": false,
+     "cols": []
     }
    }
   },
@@ -869,7 +877,114 @@
      "sort": "change",
      "descending": true,
      "basis": "open",
-     "held": false
+     "held": false,
+     "cols": []
+    }
+   }
+  },
+  {
+   "name": "the figures are read in the order picked; an id this release does not know, a repeat and any past the sixth are left out (M8.3)",
+   "live": {
+    "id": 7,
+    "name": "Swing",
+    "created_at": "2026-11-10 09:00:00",
+    "items": [
+     [
+      1,
+      "NSE",
+      "INFY",
+      0
+     ]
+    ]
+   },
+   "overlay": {
+    "version": 3,
+    "oa_created_at": "2026-11-10 09:00:00",
+    "sections": [],
+    "items": {},
+    "follow": [],
+    "symbols": {},
+    "pref": {
+     "sort": "change",
+     "descending": 1,
+     "basis": "open",
+     "held": 0,
+     "cols": "iv,high,sparkline,iv,low,open,prev,volume,oi,atp"
+    }
+   },
+   "expect": {
+    "rows": [
+     [
+      "NSE:INFY",
+      null
+     ]
+    ],
+    "sections": [],
+    "follow": [],
+    "total": 1,
+    "version": "3",
+    "pref": {
+     "sort": "change",
+     "descending": true,
+     "basis": "open",
+     "held": false,
+     "cols": [
+      "iv",
+      "high",
+      "low",
+      "open",
+      "prev",
+      "volume"
+     ]
+    }
+   }
+  },
+  {
+   "name": "a preference stored before figures existed (no cols) reads as no figures (M8.3)",
+   "live": {
+    "id": 7,
+    "name": "Swing",
+    "created_at": "2026-11-10 09:00:00",
+    "items": [
+     [
+      1,
+      "NSE",
+      "INFY",
+      0
+     ]
+    ]
+   },
+   "overlay": {
+    "version": 3,
+    "oa_created_at": "2026-11-10 09:00:00",
+    "sections": [],
+    "items": {},
+    "follow": [],
+    "symbols": {},
+    "pref": {
+     "sort": "change",
+     "descending": 1,
+     "basis": "open",
+     "held": 0
+    }
+   },
+   "expect": {
+    "rows": [
+     [
+      "NSE:INFY",
+      null
+     ]
+    ],
+    "sections": [],
+    "follow": [],
+    "total": 1,
+    "version": "3",
+    "pref": {
+     "sort": "change",
+     "descending": true,
+     "basis": "open",
+     "held": false,
+     "cols": []
     }
    }
   },
@@ -931,7 +1046,8 @@
      "sort": "list",
      "descending": false,
      "basis": "close",
-     "held": false
+     "held": false,
+     "cols": []
     },
     "flags": {
      "NSE:INFY": 3,
@@ -1003,7 +1119,8 @@
      "sort": "list",
      "descending": false,
      "basis": "close",
-     "held": false
+     "held": false,
+     "cols": []
     },
     "isin": {
      "NSE:INFY": "INE009A01021",
@@ -1069,7 +1186,8 @@
      "sort": "list",
      "descending": false,
      "basis": "close",
-     "held": false
+     "held": false,
+     "cols": []
     },
     "missing": [
      "NFO:NIFTY24OCT2625000PE"
@@ -1131,7 +1249,8 @@
      "sort": "list",
      "descending": false,
      "basis": "close",
-     "held": false
+     "held": false,
+     "cols": []
     },
     "missing": [],
     "expired": {
@@ -1205,7 +1324,8 @@
      "sort": "list",
      "descending": false,
      "basis": "close",
-     "held": false
+     "held": false,
+     "cols": []
     },
     "follow": [
      [

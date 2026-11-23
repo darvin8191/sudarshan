@@ -60,6 +60,7 @@ export type Why =
 export type RefKind = 'list' | 'preset' | 'ranked' | 'flag'
 export type Sort = 'list' | 'change' | 'price' | 'name' | 'exchange'
 export type Basis = 'close' | 'open'
+export type Figure = 'high' | 'low' | 'open' | 'prev' | 'volume' | 'oi' | 'atp' | 'iv'
 export type FollowKind = 'atm_option' | 'month_future' | 'strike_pair'
 export type ExpiryRule = 'nearest' | 'next' | 'month' | 'next_month'
 export type StrikeRule = 'atm' | 'fixed'
@@ -159,6 +160,7 @@ export interface Pref {
   descending: boolean
   basis: Basis
   held: boolean
+  cols: Figure[]
 }
 
 export interface Section {
@@ -619,6 +621,7 @@ export interface PrefReq {
   descending?: boolean
   basis?: Basis
   held?: boolean
+  cols?: Figure[]
 }
 
 export interface RowAddReq {

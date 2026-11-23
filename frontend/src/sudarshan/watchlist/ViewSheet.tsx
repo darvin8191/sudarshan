@@ -42,6 +42,7 @@ export function useViewPref(ref: string | null, view: View | undefined) {
           descending: next.descending,
           basis: next.basis,
           held: next.held, // F7
+          ...(next.cols ? { cols: next.cols } : {}), // M8.3 GA6.1: never sent as none when not known
         })
         void client.invalidateQueries({ queryKey: key })
       } catch (error) {
