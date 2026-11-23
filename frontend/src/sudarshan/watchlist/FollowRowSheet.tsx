@@ -9,7 +9,7 @@ import {
   type Draft,
   draftOf,
   editBody,
-  expiriesFor,
+  expiryChoices,
   type FollowForm,
   fixedWords,
   num,
@@ -95,7 +95,10 @@ function Choices<T extends string>({
   )
 }
 
-/** The form of a row: Expiry, Strike (ATM, ATM+1 to +10, ATM-1 to -10), Side, and what the row will follow. */
+/**
+ * The form of a row: Expiry, Strike (ATM, ATM+1 to +10, ATM-1 to -10), Side, and what the row will
+ * follow. A strike from the picker offers its tab's date first (M8.11, W4).
+ */
 function Form({
   form,
   view,
@@ -173,7 +176,7 @@ function Form({
       <Choices
         legend="Expiry"
         name="follow-expiry"
-        options={expiriesFor(kind).map((each) => ({ value: each.rule, label: each.label }))}
+        options={expiryChoices(kind, rule?.expiry_rule === 'date' ? rule.expiry_on : null, fixed)}
         value={draft.expiry}
         onChange={(expiry) => setDraft({ ...draft, expiry })}
       />
@@ -350,7 +353,7 @@ export function FollowRowSheet({
         <Form
           key={
             form.mode === 'add'
-              ? `add-${form.kind}-${form.underlying}-${form.fixed?.strike ?? ''}`
+              ? `add-${form.kind}-${form.underlying}-${form.fixed?.strike ?? ''}-${form.fixed?.date ?? ''}`
               : `row-${form.rowId}`
           }
           form={form}

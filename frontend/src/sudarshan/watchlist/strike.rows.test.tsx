@@ -54,7 +54,7 @@ import { fakeClock, frames } from '@/test/frames'
 import { feed } from '@/test/marketDataHarness'
 import { FollowRowSheet } from './FollowRowSheet'
 import { followPlan } from './follow'
-import { pairAnswer, pairRule } from './followFixtures'
+import { answer, pairAnswer, pairRule, rule } from './followFixtures'
 import type { FollowForm } from './followRows'
 import { LiveList } from './LiveList'
 import type { FollowRow, Resolved, View } from './v2/types'
@@ -212,6 +212,49 @@ describe('a strike row', () => {
     expect(feed.live().some((key) => key.includes('NIFTY24NOV'))).toBe(false)
   })
 
+  it('an ended dated row shows the server’s sentence and no price, and follows nothing (M8.11)', async () => {
+    const words =
+      '24 Nov has expired. This row stays on that date: remove it, or change it to follow the nearest expiry.'
+    const over = { state: 'missing', ce: null, pe: null, strike: null, band: null, words } as const
+    answers.set(1, () => pairAnswer(25900, over))
+    answers.set(2, () => answer(25900, { ...over, id: 2 }))
+    const dated = { expiry_rule: 'date', expiry_on: '2026-11-24', strike_rule: 'fixed' } as const
+    mount({
+      rules: [
+        pairRule({ ...dated, strike: 25900 }),
+        rule({ ...dated, id: 2, position: 2, strike: 25900, opt_right: 'PE' }),
+      ],
+    })
+    await settle()
+    const pair = document.querySelector('[data-strike-row="1"]') as HTMLElement
+    expect(pair).toHaveTextContent(words)
+    expect(within(pair).getByText('25,900 \u00b7 24 Nov')).toBeInTheDocument()
+    expect(pair.querySelector('[data-leg]')).toBeNull()
+    const one = document.querySelector('[data-follow-row="2"]') as HTMLElement
+    expect(within(one).getByText('NIFTY 25,900 PE')).toBeInTheDocument()
+    expect(
+      within(one).getByText('NFO \u00b7 24 Nov 2026 \u00b7 stays on this date')
+    ).toBeInTheDocument()
+    expect(one).toHaveTextContent(words)
+    for (const row of [pair, one]) expect(row.textContent).not.toMatch(/No price yet|\u2014/)
+    // Counts 0 in the cap: neither its contracts nor its underlying are followed.
+    expect(feed.live()).toEqual([])
+  })
+
+  it('opens an ended dated strike row’s sheet on its date and the server’s sentence (M8.11)', async () => {
+    const words =
+      '24 Nov has expired. This row stays on that date: remove it, or change it to follow the nearest expiry.'
+    answers.set(1, () => pairAnswer(25900, { state: 'missing', ce: null, pe: null, words }))
+    const dated = { expiry_rule: 'date', expiry_on: '2026-11-24', strike_rule: 'fixed' } as const
+    mount({ rules: [pairRule({ ...dated, strike: 25900 })], openRowId: 1 })
+    await settle()
+    const sheet = within(screen.getByRole('dialog'))
+    expect(sheet.getByText('NFO \u00b7 24 Nov 2026 \u00b7 stays on this date')).toBeInTheDocument()
+    expect(sheet.getByText(words)).toBeInTheDocument()
+    expect(sheet.getByRole('button', { name: 'Edit row' })).toBeInTheDocument()
+    expect(sheet.getByRole('button', { name: 'Remove row' })).toBeInTheDocument()
+  })
+
   it('draws nothing of it with the switch off', async () => {
     mount({ rules: [pairRule()], v2: false })
     await settle()
@@ -239,14 +282,30 @@ describe('the form, with Both as one row', () => {
     sectionId: null,
     ...over,
   })
-  const sheet = (form: FollowForm) => {
-    render(
-      <QueryClientProvider client={createQueryClient()}>
-        <FollowRowSheet form={form} view={view([])} onClose={() => {}} onSwap={() => {}} />
-      </QueryClientProvider>
-    )
-  }
-  beforeEach(() => b().on('row_add', () => ({ version: '42', id: 9, words: null })))
+  const tree = (form: FollowForm, follow: FollowRow[] = []) => (
+    <QueryClientProvider client={createQueryClient()}>
+      <FollowRowSheet form={form} view={view(follow)} onClose={() => {}} onSwap={() => {}} />
+    </QueryClientProvider>
+  )
+  const sheet = (form: FollowForm, follow: FollowRow[] = []) => render(tree(form, follow))
+  /** The Expiry choices as the form offers them, in order. */
+  const expiries = () =>
+    within(screen.getByRole('group', { name: 'Expiry' }))
+      .getAllByRole('radio')
+      .map((each) => each.closest('label')?.textContent)
+  const sent = (op: string) =>
+    b()
+      .calls.filter((each) => each.op === op)
+      .at(-1)?.body
+  const open = [
+    { date: '2026-11-24', label: 'Nearest 24 Nov', month: true },
+    { date: '2026-12-01', label: '1 Dec', month: false },
+    { date: '2026-12-08', label: '8 Dec', month: false },
+  ]
+  beforeEach(() => {
+    b().on('row_add', () => ({ version: '42', id: 9, words: null }))
+    b().on('row_edit', () => ({ version: '42', id: null, words: null }))
+  })
 
   it('sends a strike pair on the ATM rule with the offset and no side', async () => {
     sheet(adding())
@@ -272,18 +331,15 @@ describe('the form, with Both as one row', () => {
     })
   })
 
-  it("keeps a picked strike fixed (the seam of F14's picker), and says when its expiry moves", async () => {
-    const expiries = [
-      { date: '2026-11-24', label: 'Nearest 24 Nov', month: true },
-      { date: '2026-12-01', label: '1 Dec', month: false },
-      { date: '2026-12-08', label: '8 Dec', month: false },
-    ]
-    sheet(adding({ kind: 'strike_pair', fixed: { strike: 25900, expiry: 'next', expiries } }))
+  it("keeps a picked strike fixed (the seam of F14's picker), and says when its rule moves it", async () => {
+    const fixed = { strike: 25900, date: '2026-12-01', expiry: 'next', expiries: open } as const
+    sheet(adding({ kind: 'strike_pair', fixed }))
     expect(screen.queryByLabelText('Strike')).toBeNull()
-    // Review M3: the strike is fixed, the expiry is not, and the form says the date and the move.
     expect(
       screen.getByText('Strike 25,900, fixed: it does not move with the price.')
     ).toBeInTheDocument()
+    // Review M3: on the rule the tab stands for, the form says the date and the move.
+    fireEvent.click(screen.getByLabelText('Next'))
     expect(
       screen.getByText(
         'NIFTY 25,900 CE and PE as one row, next expiry (1 Dec today). When 24 Nov expires, this row moves to 8 Dec.'
@@ -309,12 +365,103 @@ describe('the form, with Both as one row', () => {
   })
 
   it('says how a fixed strike moves when the dates are not known, and never that it is kept for good', () => {
-    sheet(adding({ kind: 'strike_pair', fixed: { strike: 25900, expiry: 'month' } }))
+    sheet(
+      adding({ kind: 'strike_pair', fixed: { strike: 25900, date: '2026-11-24', expiry: 'month' } })
+    )
+    fireEvent.click(screen.getByLabelText("This month's"))
     expect(
       screen.getByText(
         "NIFTY 25,900 CE and PE as one row, this month's expiry. When it expires, this row moves to next month's expiry."
       )
     ).toBeInTheDocument()
     expect(screen.getByRole('dialog').textContent).not.toMatch(/for good|stays where it is/)
+  })
+
+  // M8.11 (W4): a strike picked on a tab stays on that tab's date unless the rule is picked.
+  it('stays on the tab’s date by default, offers the tab’s rule beside it, and sends the date', async () => {
+    sheet(
+      adding({
+        kind: 'strike_pair',
+        fixed: { strike: 25900, date: '2026-12-01', expiry: 'next', expiries: open },
+      })
+    )
+    expect(expiries()).toEqual(['Stays on 1 Dec', 'Next'])
+    expect(screen.getByLabelText('Stays on 1 Dec')).toBeChecked()
+    expect(
+      screen.getByText(
+        'NIFTY 25,900 CE and PE as one row. Stays on 1 Dec 2026. When it expires the row stops and says so; it does not move to the next expiry.'
+      )
+    ).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Add row' }))
+    await settle()
+    expect(sent('row_add')).toEqual({
+      list: 3,
+      version: '41',
+      kind: 'strike_pair',
+      underlying: 'NIFTY',
+      underlying_exchange: 'NSE_INDEX',
+      expiry_rule: 'date',
+      expiry_on: '2026-12-01',
+      strike_rule: 'fixed',
+      strike: 25900,
+    })
+  })
+
+  it('offers the date alone on a tab no rule stands for, and a new tab’s date when opened again', () => {
+    const view = sheet(
+      adding({ kind: 'strike_pair', fixed: { strike: 25900, date: '2026-12-08', expiries: open } })
+    )
+    expect(expiries()).toEqual(['Stays on 8 Dec'])
+    expect(screen.getByLabelText('Stays on 8 Dec')).toBeChecked()
+    view.rerender(
+      tree(
+        adding({
+          kind: 'strike_pair',
+          fixed: { strike: 25900, date: '2026-11-24', expiry: 'nearest', expiries: open },
+        })
+      )
+    )
+    expect(expiries()).toEqual(['Stays on 24 Nov', 'Nearest'])
+    expect(screen.getByLabelText('Stays on 24 Nov')).toBeChecked()
+    expect(
+      screen.getByText(/^NIFTY 25,900 CE and PE as one row\. Stays on 24 Nov 2026\./)
+    ).toBeInTheDocument()
+  })
+
+  it('lets a dated row keep its date or take any rule, and sends no date with a rule', async () => {
+    const dated = pairRule({
+      expiry_rule: 'date',
+      expiry_on: '2026-11-24',
+      strike_rule: 'fixed',
+      strike: 25900,
+    })
+    sheet({ mode: 'edit', rowId: 1 }, [dated])
+    expect(expiries()).toEqual([
+      'Stays on 24 Nov',
+      'Nearest',
+      'Next',
+      "This month's",
+      "Next month's",
+    ])
+    expect(screen.getByLabelText('Stays on 24 Nov')).toBeChecked()
+    expect(
+      screen.getByText(/^NIFTY 25,900 CE and PE as one row\. Stays on 24 Nov 2026\./)
+    ).toBeInTheDocument()
+    fireEvent.click(screen.getByLabelText('Nearest'))
+    expect(
+      screen.getByText(
+        'NIFTY 25,900 CE and PE as one row, nearest expiry. When it expires, this row moves to the next expiry.'
+      )
+    ).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await settle()
+    expect(sent('row_edit')).toEqual({
+      id: 1,
+      version: '41',
+      expiry_rule: 'nearest',
+      kind: 'strike_pair',
+      strike_rule: 'fixed',
+      strike: 25900,
+    })
   })
 })

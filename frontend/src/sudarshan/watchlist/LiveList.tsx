@@ -13,8 +13,8 @@ import { FollowRowItem, followNames } from './FollowRows'
 import { needsQuote, shownFigures } from './figures'
 import { FOLLOW_CAP } from './follow'
 import {
-  dayLabel,
-  derivativesExchange,
+  detailOf,
+  ended,
   type FollowForm,
   followsWords,
   lineOf,
@@ -338,8 +338,16 @@ export const LiveList = memo(function LiveList({
     () => (followItems.length > 0 ? [...followItems, ...items] : items),
     [followKeys, items]
   )
+  // M8.11: a row that stayed on its date and ended follows nothing, so it counts 0 in the cap.
   const underlyings = useMemo(
-    () => (followOn ? [...new Set(fr.states.map((each) => underlyingKey(each.rule)))] : undefined),
+    () =>
+      followOn
+        ? [
+            ...new Set(
+              fr.states.filter((each) => !ended(each)).map((each) => underlyingKey(each.rule))
+            ),
+          ]
+        : undefined,
     [followOn, fr.states]
   )
   const openKeys = useMemo(() => {
@@ -541,7 +549,7 @@ export const LiveList = memo(function LiveList({
     return (
       <StrikeSheet
         title={`${current.rule.underlying} ${pair?.strike === null || !pair ? names.middle : num(pair.strike)}`}
-        detail={`${derivativesExchange(current.rule)}${pair?.ce.expiry ? ` · ${dayLabel(pair.ce.expiry)}` : ''} · follows ${current.rule.underlying}`}
+        detail={detailOf(current.rule, pair?.ce ?? null)} // M8.11: a dated row says it stays on its date
         chip={names.chip}
         help={names.help}
         words={lineOf(current, live.now)}

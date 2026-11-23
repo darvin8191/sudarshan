@@ -6,8 +6,10 @@ import {
   detailOf,
   draftOf,
   editBody,
-  fixedWords,
+  ended,
+  expiryChoices,
   FollowResolver,
+  fixedWords,
   GAP_MS,
   leftBand,
   lineOf,
@@ -144,6 +146,106 @@ describe('the form', () => {
         "NIFTY 25,900 CE and PE as one row, next month's expiry (29 Dec today). When 24 Nov expires, this row moves to the expiry after it."
       )
     })
+  })
+})
+
+// M8.11: a row that stays on its date.
+describe('a row that stays on its date', () => {
+  const dated = (over = {}) =>
+    rule({
+      expiry_rule: 'date',
+      expiry_on: '2026-11-24',
+      strike_rule: 'fixed',
+      strike: 25900,
+      ...over,
+    })
+
+  it('says its date and that it stays there, contract or not', () => {
+    expect(detailOf(dated(), contract(25900))).toBe('NFO · 24 Nov 2026 · stays on this date')
+    expect(detailOf(dated(), null)).toBe('NFO · 24 Nov 2026 · stays on this date')
+    expect(detailOf(rule(), null)).toBe('NFO · follows NIFTY')
+  })
+
+  it('has ended only when the server finds no contract on its date', () => {
+    const missing = answer(25900, { state: 'missing', ce: null, strike: null })
+    expect(ended({ rule: dated(), answer: missing })).toBe(true)
+    expect(ended({ rule: dated(), answer: answer(25900) })).toBe(false)
+    expect(ended({ rule: dated(), answer: null })).toBe(false)
+    expect(ended({ rule: rule(), answer: missing })).toBe(false)
+  })
+
+  it('starts the picker’s form on the tab’s date, and offers that tab’s rule beside it (W4)', () => {
+    const fixed = { strike: 25900, date: '2026-12-01', expiry: 'next' as const }
+    expect(draftOf('strike_pair', undefined, fixed)).toMatchObject({
+      expiry: 'date',
+      expiryOn: '2026-12-01',
+      strike: 25900,
+    })
+    expect(expiryChoices('strike_pair', null, fixed)).toEqual([
+      { value: 'date', label: 'Stays on 1 Dec' },
+      { value: 'next', label: 'Next' },
+    ])
+    expect(expiryChoices('strike_pair', null, { date: '2026-12-08' })).toEqual([
+      { value: 'date', label: 'Stays on 8 Dec' },
+    ])
+    expect(expiryChoices('atm_option', '2026-11-24').map((each) => each.value)).toEqual([
+      'date',
+      'nearest',
+      'next',
+      'month',
+      'next_month',
+    ])
+    expect(expiryChoices('atm_option', null).map((each) => each.value)).toEqual([
+      'nearest',
+      'next',
+      'month',
+      'next_month',
+    ])
+  })
+
+  it('says it stops on its date, and sends the date only with the date rule', () => {
+    const draft = draftOf('strike_pair', undefined, { strike: 25900, date: '2026-12-01' })
+    expect(previewOf('NIFTY', draft)).toBe(
+      'NIFTY 25,900 CE and PE as one row. Stays on 1 Dec 2026. When it expires the row stops and says so; it does not move to the next expiry.'
+    )
+    expect(
+      previewOf('NIFTY', { ...draftOf('atm_option', dated({ strike_rule: 'atm', strike: null })) })
+    ).toBe(
+      'NIFTY ATM CE. Stays on 24 Nov 2026. The strike is picked from the price when the row is added, and moves with it. When it expires the row stops and says so; it does not move to the next expiry.'
+    )
+    const under = { underlying: 'NIFTY', underlying_exchange: 'NSE_INDEX' }
+    expect(addBody(draft, under, null)).toEqual({
+      kind: 'strike_pair',
+      underlying: 'NIFTY',
+      underlying_exchange: 'NSE_INDEX',
+      expiry_rule: 'date',
+      expiry_on: '2026-12-01',
+      strike_rule: 'fixed',
+      strike: 25900,
+    })
+    expect(editBody(draftOf('atm_option', dated()))).toEqual({
+      expiry_rule: 'date',
+      expiry_on: '2026-11-24',
+      kind: 'atm_option',
+      strike_rule: 'fixed',
+      strike: 25900,
+      opt_right: 'CE',
+    })
+    expect(editBody({ ...draftOf('atm_option', dated()), expiry: 'nearest' })).not.toHaveProperty(
+      'expiry_on'
+    )
+  })
+
+  it('asks the server again when its date changes', async () => {
+    const { resolver, sent } = make([[answer(25900)], [answer(25900)]])
+    resolver.sync([dated()])
+    await flush()
+    resolver.sync([dated()])
+    await flush()
+    expect(sent).toHaveLength(1)
+    resolver.sync([dated({ expiry_on: '2026-12-01' })])
+    await flush()
+    expect(sent).toHaveLength(2)
   })
 })
 

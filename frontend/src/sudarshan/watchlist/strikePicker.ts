@@ -33,8 +33,8 @@ export function atmOf(price: number | null, strikes: readonly number[]): number 
  *
  * The first tab is Nearest. The first monthly tab is This month's, even in second place: Next would
  * leave that date when the nearest expires, This month's keeps it until its own close. Then the second
- * tab is Next and the second monthly tab Next month's. A weekly further out has no rule, and a row
- * cannot follow it.
+ * tab is Next and the second monthly tab Next month's. A weekly further out has no rule: a row on it
+ * stays on its date (M8.11).
  */
 export function ruleFor(expiries: readonly Expiry[], date: string): ExpiryRule | null {
   const at = expiries.findIndex((each) => each.date === date)
@@ -50,8 +50,8 @@ export function ruleFor(expiries: readonly Expiry[], date: string): ExpiryRule |
  * Where a rule stands among the open expiries, as the server moves it (`dynamic.pick_expiries`): the
  * expiry it is on now (`on`), the one whose close moves it (`ends`: the nearest for Nearest and Next,
  * this month's for both monthly rules), and the one it moves to (`to`, null when the contract list
- * does not show it yet). Null when the rule names no open expiry. Every rule is relative, so a row
- * kept on a picked strike still moves to another expiry, and the form says when (review M3).
+ * does not show it yet). Null when the rule names no open expiry. A relative rule moves a row kept on
+ * a picked strike to another expiry, and the form says when (review M3); a row on a date never moves.
  */
 export function rollOf(
   expiries: readonly Expiry[],
@@ -68,7 +68,3 @@ export function rollOf(
   }[rule]
   return on && ends ? { on, ends, to: to ?? null } : null
 }
-
-/** Said under Add as one row on a tab no rule can follow. */
-export const NO_RULE =
-  'A row can follow the nearest, the next, this month’s or next month’s expiry only. Add CE and Add PE work on this one.'

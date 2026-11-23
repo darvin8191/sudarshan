@@ -1,6 +1,6 @@
 import { Clock } from 'lucide-react'
 import { outsideNote, outsideSpeech } from './follow'
-import { ATM_HELP, chipOf, dayShort, lineOf, num } from './followRows'
+import { ATM_HELP, chipOf, dayShort, ended, lineOf, num } from './followRows'
 import { priceDecimals } from './rows'
 import type { FollowState } from './useFollowRows'
 import type { LiveRow } from './useLiveRows'
@@ -18,8 +18,9 @@ const NO_FIGURES = {
 /** The words of a strike row: what the middle block says, its chip and the chip's help text. */
 export function strikeNames(state: FollowState) {
   const { rule, shown } = state
-  const strike = shown?.strike ?? null
-  const expiry = shown?.contract.expiry ?? null
+  // M8.11: with no contract (a dated row that ended) a fixed strike and a kept date come from the rule
+  const strike = shown?.strike ?? (rule.strike_rule === 'fixed' ? rule.strike : null)
+  const expiry = shown?.contract.expiry ?? (rule.expiry_rule === 'date' ? rule.expiry_on : null)
   return {
     middle:
       strike === null ? rule.underlying : `${num(strike)}${expiry ? ` · ${dayShort(expiry)}` : ''}`,
@@ -60,7 +61,8 @@ function Leg({
  * strike and the expiry in the middle with the rule's chip, the PE's on the right. Each price carries
  * its own tick arrow and each change its sign, never colour alone. The one line under it is the one a
  * follow row has (a move, a roll, waiting, closed), and the server's own words when a side is not in
- * the contract list; the row then has no prices, and opens its sheet to say so again.
+ * the contract list; the row then has no prices, and opens its sheet to say so again. A row that stayed
+ * on its date and ended draws no price block at all, only the server's sentence (M8.11).
  */
 export function StrikeRowItem({
   state,
@@ -77,6 +79,7 @@ export function StrikeRowItem({
 }) {
   const names = strikeNames(state)
   const line = lineOf(state, now)
+  const over = ended(state)
   const outside = ce?.outside ?? pe?.outside
   const at = ce?.view.at ?? pe?.view.at ?? null
   return (
@@ -89,7 +92,7 @@ export function StrikeRowItem({
         className="flex min-h-14 w-full flex-col justify-center gap-1 px-4 py-2 text-left outline-none active:bg-accent focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
       >
         <span className="grid w-full grid-cols-[1fr_auto_1fr] items-center gap-2">
-          <Leg side="CE" live={ce} align="start" />
+          {over ? <span /> : <Leg side="CE" live={ce} align="start" />}
           <span className="flex min-w-0 flex-col items-center gap-1 text-center">
             <span className="text-[0.9375rem] leading-tight font-semibold">{names.middle}</span>
             <span
@@ -100,7 +103,7 @@ export function StrikeRowItem({
             </span>
             {names.help && <span className="sr-only">{names.help}</span>}
           </span>
-          <Leg side="PE" live={pe} align="end" />
+          {over ? <span /> : <Leg side="PE" live={pe} align="end" />}
         </span>
         {line && (
           <span

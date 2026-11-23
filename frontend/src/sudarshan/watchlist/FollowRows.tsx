@@ -3,7 +3,7 @@ import { cn } from '@/lib/utils'
 import { FigureCells } from './FigureCells'
 import { cellsOf } from './figures'
 import { outsideNote, outsideSpeech } from './follow'
-import { ATM_HELP, chipOf, detailOf, lineOf, titleOf } from './followRows'
+import { ATM_HELP, chipOf, detailOf, ended, lineOf, titleOf } from './followRows'
 import { priceDecimals } from './rows'
 import type { FollowState } from './useFollowRows'
 import type { LiveRow } from './useLiveRows'
@@ -23,7 +23,8 @@ const NO_FIGURES = {
 export function followNames(state: FollowState) {
   const { rule, shown } = state
   return {
-    title: titleOf(rule, shown?.strike ?? null),
+    // M8.11: a fixed strike is named from its rule while there is no contract (a dated row that ended)
+    title: titleOf(rule, shown?.strike ?? (rule.strike_rule === 'fixed' ? rule.strike : null)),
     chip: chipOf(rule),
     detail: detailOf(rule, shown?.contract ?? null),
     help:
@@ -37,7 +38,8 @@ export function followNames(state: FollowState) {
  * One row that follows the price (F11). It looks like any row (the contract's price and change, live
  * from the feed) with a chip for its rule and, under it, the one line that says what happened to it:
  * a move, a roll, waiting, closed, or the server's words for a contract it cannot find. A row with no
- * contract yet opens its form instead of a sheet.
+ * contract yet opens its form instead of a sheet. A row that stayed on its date and ended shows the
+ * server's sentence and no price at all (M8.11).
  */
 export function FollowRowItem({
   state,
@@ -96,7 +98,9 @@ export function FollowRowItem({
             </span>
           </span>
           <FigureCells cells={cells} grey={figures.stale || outside !== undefined} />
-          <Figures {...figures} outside={outside} decimals={priceDecimals(exchange)} />
+          {!ended(state) && (
+            <Figures {...figures} outside={outside} decimals={priceDecimals(exchange)} />
+          )}
         </span>
         {line && (
           <span
