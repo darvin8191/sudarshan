@@ -26,8 +26,9 @@ portfolio page does not show them). All are GETs with ``Authorization: Bearer``,
   batch's words are settled once all its answers are in (``book``), so one refresh of the tab
   never says both (v0.17.0 review M1).
 * **Asked again** (verification V2). While Upstox refuses the token itself, one holdings read is
-  let through (``ask_again``) at most every 15 minutes in market hours, else at the next
-  session's start (the token check's job, ``probe.retry_step``). Its 200 ends every pause.
+  let through (``ask_again``) at most every 15 minutes in market hours, else at a trading day's
+  08:00 or 15:45 or the next session's start, whichever comes first (the token check's job,
+  ``probe.retry_step``, review L1). Its 200 ends every pause.
 * **The token check.** Each holdings or positions read Upstox answers is told to ``on_verdict``
   (``probe.heard``): accepted (200) or refused (401), with the token file's signature.
 * **The token** is read from its file for every call and is never logged or kept in a message.

@@ -402,9 +402,12 @@ two exists in this release. Each purpose has its own principal and its own list 
 * **Asked again** (v0.17.0 verification V2). While holdings and positions pause on a refused
   token, the job `token_retry` (`probe.retry_step`, checked every 30 s) lets one holdings read
   through (`UpstoxReader.ask_again`) 15 minutes after the last refusal or try when that falls in
-  market hours (09:15 to 15:30 on a trading day, by the exchange's calendar), else at the next
-  session's start: at most 4 calls an hour, through the reader's budget and 429 pause. Its 200
-  ends every pause and tells the check `ok`, so the watch says the token is accepted again.
+  market hours (09:15 to 15:30 on a trading day, by the exchange's calendar), else at the first
+  of a trading day's 08:00 (before the morning brief) or 15:45 (before the closing record) and
+  the next session's start (v0.17.0 review L1), never sooner than 15 minutes after the last: at
+  most 4 calls an hour, through the reader's budget and 429 pause. A refusal on a Friday at 15:40
+  is asked again on Monday at 08:00. Its 200 ends every pause and tells the check `ok`, so the
+  watch says the token is accepted again.
 * **Schema step 4** adds `tab_share` and `member_privacy`.
 * **Set from the owner's Family page** (v0.12.0). The four sharing ops are routes of the owner's
   bridge (`/sudarshan/portfolio/api/family/shares` and `/family/privacy`), sealed under the owner's

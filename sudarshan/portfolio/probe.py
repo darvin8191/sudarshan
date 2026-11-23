@@ -33,9 +33,11 @@ every read until the token file changes; a refusal that was Upstox's passing fau
 line failing until the next release. So while it holds, the job ``token_retry`` lets one holdings
 read through (``UpstoxReader.ask_again``) 15 minutes after the last refusal or try, if that falls
 in market hours (09:15 to 15:30 on a trading day by the exchange's calendar, a special day's own
-window), else at the next session's start: never more often, and through the reader's budget and
-429 pause. The first 200 ends the pause and tells the check ``ok``: the watch then says the token
-is accepted again.
+window), else at the first of the next session's start and a trading day's 08:00 (before the
+morning brief) or 15:45 (before the closing record), v0.17.0 review L1: never sooner than 15
+minutes after the last, and through the reader's budget and 429 pause. A refusal on a Friday at
+15:40 is asked again on Monday at 08:00, not 65 hours later at 09:15. The first 200 ends the pause
+and tells the check ``ok``: the watch then says the token is accepted again.
 """
 
 from __future__ import annotations
@@ -45,7 +47,7 @@ import contextlib
 import json
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -76,6 +78,11 @@ PROBES = (
 RETRY_EVERY_MS = 15 * 60_000
 #: The session whose hours are the market's for it: 09:15 to 15:30 on a usual trading day.
 MARKET = "NSE_EQ"
+#: Two more tries on a trading day, in IST minutes (v0.17.0 review L1): 08:00, before the morning
+#: brief and the session, and 15:45, before the closing record (15:55; 16:00 from 7 Dec 2026).
+EXTRA_TRIES_MIN = (8 * 60, 15 * 60 + 45)
+#: How many days ahead a try is looked for, as ``sessions.next_session`` looks for a session.
+HORIZON_DAYS = 15
 
 
 async def probe(upstox: Any) -> dict[str, int | str]:
@@ -217,8 +224,10 @@ async def at_start(service: Any, delay_s: float = DELAY_S) -> dict[str, int | st
 
 def next_try(calendar: Any, since: int) -> int | None:
     """When a refused token's holdings read is asked again: 15 minutes after ``since`` (the last
-    refusal or try, epoch ms) if that falls in the market's hours of its day, else the start of
-    the next session after it; None when the calendar gives none in its horizon."""
+    refusal or try, epoch ms) if that falls in the market's hours of its day, else the first of
+    the next session's start and a trading day's 08:00 or 15:45 (review L1) that is at least 15
+    minutes after ``since``; None when the calendar gives none in its horizon. So a refusal at
+    15:20 is asked again at 15:45, and one at 15:40 at the next trading day's 08:00."""
     at = since + RETRY_EVERY_MS
     day = datetime.fromtimestamp(at / 1000, IST).date()
     hours = sessions.session(
@@ -229,7 +238,21 @@ def next_try(calendar: Any, since: int) -> int | None:
     found = sessions.next_session(
         MARKET, at, is_trading_day=calendar.is_trading_day, window_of=calendar.day_window
     )
-    return None if found is None else found.start
+    start = None if found is None else found.start
+    return min((when for when in (start, _slot(calendar, at)) if when is not None), default=None)
+
+
+def _slot(calendar: Any, at: int, minutes: tuple[int, ...] = EXTRA_TRIES_MIN) -> int | None:
+    """The first of ``minutes`` (IST) on a trading day at or after ``at``; None past the horizon."""
+    first = datetime.fromtimestamp(at / 1000, IST).date()
+    for offset in range(HORIZON_DAYS + 1):
+        day = first + timedelta(days=offset)
+        if calendar.is_trading_day(day):
+            for minute in minutes:
+                when = sessions.epoch_ms(day, minute)
+                if when >= at:
+                    return when
+    return None
 
 
 async def retry_step(service: Any, now: int) -> bool:
