@@ -51,8 +51,8 @@ after the close, or later.**
   not confirmed", not "Note not saved", because it may have been saved. Open the symbol to see:
   what you typed is kept there.
 - **On an expiry morning,** while the morning login loads the day's contract list (about 08:35 to
-  09:00), a contract that expires that day is no longer called expired, in a list or on the phone
-  chart (below).
+  09:00), a contract that expires that day is no longer marked expired for the rest of the day, in
+  a list or on the phone chart (below).
 - **On a phone narrower than 360 px with "Larger text",** the order ticket's title shows only the
   side and the symbol, so the price type and product fit on the first screen. With "Larger text"
   on any phone, the bid and ask take two lines at most and a long option symbol breaks between its
@@ -141,10 +141,13 @@ after the close, or later.**
   day is behind today in India, or on that day once Upstox's contract list no longer lists it. Both
   use the same words, so they call a contract expired on the same day.
 - **During the morning login** (about 08:35 to 09:00), while the server loads the day's contract
-  list again, it refuses price reads for a minute or two. A contract that expires that day is no
-  longer called "Expired" then: a list asks again every two minutes and shows its price within
-  about two minutes of the list loading, and the phone chart says "Today's contract list is not
-  ready" and opens the chart by itself once it is, never "Expired" or "Try again".
+  list again, it refuses price reads for a minute or two. The watchlist no longer marks a contract
+  that expires that day as expired for the day. In a list that also holds a share or an index it
+  never says "Expired"; the list may say "Prices could not be refreshed just now.": tap Try again
+  once the login has finished, or wait for the open. A list of nothing but that day's contracts
+  may show "Expired" for a minute or two, then shows the price by itself. The phone chart says
+  "Today's contract list is not ready" and opens the chart by itself once it is, never "Expired"
+  or "Try again".
 - **An expired contract's row is never read or followed again,** also while its sheet is open.
 
 ### What ships switched off, and how you would switch each on
@@ -164,7 +167,8 @@ Nothing below changes anything until you switch it on, and none of it is promise
   mode only, and each goes to the Sandbox once.
   - Watchlist: in a list that still holds an expired option, its row says "Expired on" and its day
     in place of a price, and in market hours no "Prices could not be refreshed" notice comes for
-    five minutes. Tap the row: it asks "Remove it from" the list; "Keep it" closes the sheet.
+    five minutes. Tap the row: it asks whether to remove it from the list; "Keep it" closes the
+    sheet.
   - Phone chart: open the chart of an expired option (the chart page reopens the last one you
     opened). It says "Expired on" and its day, with the offers and no "Try again". Tap the
     nearest-expiry offer, then open the chart page again: it opens the new contract.
@@ -191,12 +195,14 @@ Nothing below changes anything until you switch it on, and none of it is promise
   - Upstox tab, then the System page: funds and MTF read normally, with no "did not let" sentence,
     and the token line says "Accepted ...".
 - **Later, once each.**
-  - Tuesday 1 Dec, the next NIFTY weekly expiry, during the morning login (about 08:35 to 09:00):
-    a NIFTY contract that expires that day, in one of your lists (add one the evening before if you
-    have none), may show the refresh notice for a moment but never "Expired on 1 Dec 2026"; if it
-    does, it shows its price again within about two minutes. Its phone chart says "Today's contract
-    list is not ready", then opens, never "Expired". If not, note the time for the next work
-    session.
+  - Tuesday 1 Dec, the next NIFTY weekly expiry. The evening before, put one NIFTY 1 Dec strike in
+    a list that also holds a share or an index (and, if you like, in a second list on its own).
+    Between 08:35 and 09:00, while the login loads the contract list: the mixed list never says
+    "Expired on 1 Dec 2026"; it may say "Prices could not be refreshed just now.", and Try again
+    after about 09:00 fills it. The list on its own may say "Expired on 1 Dec 2026" for up to two
+    minutes, then shows the price by itself. The contract's phone chart says "Today's contract list
+    is not ready", then opens, never "Expired". After 09:15 it ticks and says "Real-time". If any
+    of this differs, note the time for the next work session.
   - Only if a part of the Upstox tab ever says "Upstox did not let SUDARSHAN's read-only token read
     ...": the sentence ends with when SUDARSHAN asks again. Open the tab after that time: the part
     reads again by itself if Upstox allows it.
@@ -225,7 +231,6 @@ Nothing below changes anything until you switch it on, and none of it is promise
   and Sell), which had no data for it; its tap asks whether to remove the row.
 - **The phone chart** builds no chart for an expired contract, and asks Upstox for no history,
   quotes or depth of it.
-- **With Watchlists v2 on,** a seventh figure is refused in words.
 - **A downgrade by hand** to v0.16.0 or older would find the Watchlists v2 record in its new layout
   and refuse it. The install's own rollback never meets this, because it puts back the copy it took
   first.
@@ -240,12 +245,18 @@ Nothing below changes anything until you switch it on, and none of it is promise
 - **A read refused alone is asked again only when something reads it after its time:** with the
   Upstox tab closed and no evening read due, nothing is asked. The pauses are kept in memory, so a
   restart (an install) forgets them and asks at the next read.
+- **If the Upstox tab's Funds view is the first to meet a refused token,** it may say only funds
+  were refused ("the rest of the Upstox tab is not affected") while the System page still says
+  "Accepted". Open Holdings or Positions to see whether the token itself was refused. The next
+  release asks Upstox once before choosing the words.
 - **The token's retry follows the cash session** (09:15 to 15:30, with 08:00 and 15:45); the evening
   commodity hours are not used.
-- **Repeat's warning says "would fill at once",** which is what the Sandbox does. In Live, Upstox
-  may refuse such a stop instead; check it on the first Live use. On a 320 px phone with "Larger
-  text" the warning takes four lines, and the ticket's first screen then shows only the side and
-  the top of the quantity; the rest scrolls.
+- **Repeat's warning for a passed stop says what the Sandbox does** (it fills at once), in Live
+  too. In Live, Upstox may refuse such a stop instead, and the position would then stay open with
+  no stop until you see the rejection, which the book and Telegram show at once: to close a
+  position at once, use Market or Limit. The next release gives Live its own words. On a 320 px
+  phone with "Larger text" the warning takes four lines, and the ticket's first screen then shows
+  only the side and the top of the quantity; the rest scrolls.
 - **A share or an index that the server refuses as not listed** (not a contract) still brings the
   refresh notice, as before: its cause is not known, so no words are guessed for it.
 - **A contract Upstox truly drops on its own expiry day** is asked again every two minutes, only
@@ -263,6 +274,11 @@ Nothing below changes anything until you switch it on, and none of it is promise
 - **Watchlists v2 figures:** how much more mobile data the fuller price stream uses is not measured,
   and whether an index's stream carries its day's high and low, and the unit of OI, are not yet
   checked against Upstox.
+- **With Watchlists v2 on, the list's read at the open or the close can be missed** for the rest of
+  the session (how often is not measured). The rows of a long list outside the part being followed
+  then keep their figures from before the open, grey with their time, until you scroll to them or
+  open the page again. With Watchlists v2 off every row is followed, so nothing shows. The next
+  release fixes it.
 - **The Calendar's watchlist rows:** the first night must still confirm Upstox's date format and
   that coming events are listed, as for the Calendar's first release. The screener's ex-date line
   shows its read time only in its health check, not on the results.
@@ -286,7 +302,14 @@ Nothing below changes anything until you switch it on, and none of it is promise
   v2's figures could cut a long option name; and during the morning login a contract that expires
   that day could be called "Expired" and never read again. The phone fix round made both, and its
   seven smaller layout and wording points.
-- VERIFIER: to be filled in.
+- **A verifier then checked both fix rounds against the reviews: publish yes.** Every finding is
+  fixed and no order path changed: it sent the same orders through the old and the new order
+  ticket, at both text sizes and both groupings, Repeats of a passed stop included, and all 80
+  matched; it ran the phone checks three times, with each setting. It found nothing that holds the
+  release. Its three small points go to the next release and are written above until then:
+  Repeat's warning in Live, the Funds view meeting a refused token first, and the watchlist's read
+  at the open with Watchlists v2 on. The last is also why one work-session check sometimes failed;
+  the fix belongs in the page, not in the check.
 
 ## v0.16.0 (23 Nov 2026)
 
