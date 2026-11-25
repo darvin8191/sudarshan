@@ -1,10 +1,11 @@
 /**
  * v0.17.0 server review L3 (M6.1): Repeat copies a stop's trigger as the order had it, even when
- * the last price has already passed it. Such a stop fills at once (the sandbox fills an SL-M at
- * the market the moment Place is pressed), and an owner placing a protective stop again may take
- * it for one that rests. Repeat's ticket now says so before Place, in a line beside the order's,
- * for buy and sell stops, SL and SL-M. Nothing else changes: Place stays as it was and sends the
- * same request, and a ticket opened anywhere else shows no such line.
+ * the last price has already passed it. Such a stop fills at once in the sandbox (it fills an SL-M
+ * at the market the moment Place is pressed), and an owner placing a protective stop again may
+ * take it for one that rests. Repeat's ticket now says so before Place, in a line beside the
+ * order's, for buy and sell stops, SL and SL-M; in Live it says Upstox may refuse such a stop or
+ * take it at once, and how to close now (v0.18.0 verification V3). Nothing else changes: Place
+ * stays as it was and sends the same request, and a ticket opened anywhere else shows no such line.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { tradingApi } from '@/api/trading'
@@ -60,58 +61,75 @@ function stop(fields: Partial<StopFields>): StopFields {
   }
 }
 
+const LIVE_TAIL = ' To close a position now, use Market or Limit.'
+
+/** The line in Analyze mode and in Live (v0.18.0 verification V3). */
+function both(fields: Partial<StopFields>) {
+  return [passedTriggerText(stop(fields), true), passedTriggerText(stop(fields), false)]
+}
+
 describe('the words', () => {
-  it('say a sell stop above the last price would fill at once (the decided sentence)', () => {
-    expect(passedTriggerText(stop({}))).toBe(
-      'The trigger 270.00 is already above the last price 268.40: this stop would fill at once.'
-    )
+  it('say a sell stop the price has passed would fill at once in the sandbox, and in Live never guess', () => {
+    expect(both({})).toEqual([
+      'The last price 268.40 has already passed the trigger 270.00: in the sandbox this stop would fill at once.',
+      `The last price 268.40 has already passed the trigger 270.00: Upstox may refuse such a stop or fill it at once.${LIVE_TAIL}`,
+    ])
   })
 
-  it('say a buy stop below the last price would fill at once', () => {
-    expect(passedTriggerText(stop({ action: 'BUY', trigger: 265 }))).toBe(
-      'The trigger 265.00 is already below the last price 268.40: this stop would fill at once.'
-    )
+  it('say the same of a buy stop below the last price', () => {
+    expect(both({ action: 'BUY', trigger: 265 })).toEqual([
+      'The last price 268.40 has already passed the trigger 265.00: in the sandbox this stop would fill at once.',
+      `The last price 268.40 has already passed the trigger 265.00: Upstox may refuse such a stop or fill it at once.${LIVE_TAIL}`,
+    ])
   })
 
   it('say an SL whose limit the price is within fills at once, and one past it rests', () => {
-    expect(passedTriggerText(stop({ priceType: 'SL', price: 268 }))).toBe(
-      'The trigger 270.00 is already above the last price 268.40: this stop would fill at once.'
-    )
-    expect(passedTriggerText(stop({ priceType: 'SL', price: 269.5 }))).toBe(
-      'The trigger 270.00 is already above the last price 268.40: this stop would trigger at once and rest as a limit order at 269.50.'
-    )
-    expect(
-      passedTriggerText(stop({ action: 'BUY', priceType: 'SL', trigger: 265, price: 270 }))
-    ).toBe(
-      'The trigger 265.00 is already below the last price 268.40: this stop would fill at once.'
-    )
-    expect(
-      passedTriggerText(stop({ action: 'BUY', priceType: 'SL', trigger: 265, price: 266 }))
-    ).toBe(
-      'The trigger 265.00 is already below the last price 268.40: this stop would trigger at once and rest as a limit order at 266.00.'
-    )
+    expect(both({ priceType: 'SL', price: 268 })).toEqual([
+      'The last price 268.40 has already passed the trigger 270.00: in the sandbox this stop would fill at once.',
+      `The last price 268.40 has already passed the trigger 270.00: Upstox may refuse such a stop or fill it at once.${LIVE_TAIL}`,
+    ])
+    expect(both({ priceType: 'SL', price: 269.5 })).toEqual([
+      'The last price 268.40 has already passed the trigger 270.00: in the sandbox this stop would trigger at once and rest as a limit order at 269.50.',
+      `The last price 268.40 has already passed the trigger 270.00: Upstox may refuse such a stop or trigger it at once and rest it as a limit order at 269.50.${LIVE_TAIL}`,
+    ])
+    expect(both({ action: 'BUY', priceType: 'SL', trigger: 265, price: 270 })).toEqual([
+      'The last price 268.40 has already passed the trigger 265.00: in the sandbox this stop would fill at once.',
+      `The last price 268.40 has already passed the trigger 265.00: Upstox may refuse such a stop or fill it at once.${LIVE_TAIL}`,
+    ])
+    expect(both({ action: 'BUY', priceType: 'SL', trigger: 265, price: 266 })).toEqual([
+      'The last price 268.40 has already passed the trigger 265.00: in the sandbox this stop would trigger at once and rest as a limit order at 266.00.',
+      `The last price 268.40 has already passed the trigger 265.00: Upstox may refuse such a stop or trigger it at once and rest it as a limit order at 266.00.${LIVE_TAIL}`,
+    ])
+  })
+
+  it('say an SL with no limit price would trigger at once', () => {
+    expect(both({ priceType: 'SL', price: 0 })).toEqual([
+      'The last price 268.40 has already passed the trigger 270.00: in the sandbox this stop would trigger at once.',
+      `The last price 268.40 has already passed the trigger 270.00: Upstox may refuse such a stop or trigger it at once.${LIVE_TAIL}`,
+    ])
   })
 
   it('say a trigger at the last price is already there, on the tick the order carries', () => {
-    expect(passedTriggerText(stop({ trigger: 268.4 }))).toBe(
-      'The trigger 268.40 is already at the last price 268.40: this stop would fill at once.'
-    )
-    expect(passedTriggerText(stop({ action: 'BUY', trigger: 268.38 }))).toBe(
-      'The trigger 268.40 is already at the last price 268.40: this stop would fill at once.'
-    )
+    const at = [
+      'The last price 268.40 is already at the trigger 268.40: in the sandbox this stop would fill at once.',
+      `The last price 268.40 is already at the trigger 268.40: Upstox may refuse such a stop or fill it at once.${LIVE_TAIL}`,
+    ]
+    expect(both({ trigger: 268.4 })).toEqual(at)
+    expect(both({ action: 'BUY', trigger: 268.38 })).toEqual(at)
   })
 
   it('say nothing of a stop not yet passed, of an order that is no stop, or without a price', () => {
-    expect(passedTriggerText(stop({ trigger: 260 }))).toBeNull()
-    expect(passedTriggerText(stop({ action: 'BUY', trigger: 275 }))).toBeNull()
-    expect(
-      passedTriggerText(stop({ action: 'BUY', priceType: 'SL', trigger: 275, price: 276 }))
-    ).toBeNull()
-    for (const priceType of ['MARKET', 'LIMIT']) {
-      expect(passedTriggerText(stop({ priceType, price: 280 }))).toBeNull()
+    for (const sandbox of [true, false]) {
+      const said = (fields: Partial<StopFields>) => passedTriggerText(stop(fields), sandbox)
+      expect(said({ trigger: 260 })).toBeNull()
+      expect(said({ action: 'BUY', trigger: 275 })).toBeNull()
+      expect(said({ action: 'BUY', priceType: 'SL', trigger: 275, price: 276 })).toBeNull()
+      for (const priceType of ['MARKET', 'LIMIT']) {
+        expect(said({ priceType, price: 280 })).toBeNull()
+      }
+      expect(said({ ltp: undefined })).toBeNull()
+      expect(said({ trigger: 0 })).toBeNull()
     }
-    expect(passedTriggerText(stop({ ltp: undefined }))).toBeNull()
-    expect(passedTriggerText(stop({ trigger: 0 }))).toBeNull()
   })
 })
 
@@ -143,22 +161,22 @@ describe("Repeat's ticket", () => {
     [
       'a sell SL-M',
       {},
-      'The trigger 270.00 is already above the last price 268.40: this stop would fill at once.',
+      `The last price 268.40 has already passed the trigger 270.00: Upstox may refuse such a stop or fill it at once.${LIVE_TAIL}`,
     ],
     [
       'a sell SL',
       { pricetype: 'SL', price: 269.5 },
-      'The trigger 270.00 is already above the last price 268.40: this stop would trigger at once and rest as a limit order at 269.50.',
+      `The last price 268.40 has already passed the trigger 270.00: Upstox may refuse such a stop or trigger it at once and rest it as a limit order at 269.50.${LIVE_TAIL}`,
     ],
     [
       'a buy SL-M',
       { action: 'BUY', trigger_price: 265 },
-      'The trigger 265.00 is already below the last price 268.40: this stop would fill at once.',
+      `The last price 268.40 has already passed the trigger 265.00: Upstox may refuse such a stop or fill it at once.${LIVE_TAIL}`,
     ],
     [
       'a buy SL',
       { action: 'BUY', pricetype: 'SL', trigger_price: 265, price: 270 },
-      'The trigger 265.00 is already below the last price 268.40: this stop would fill at once.',
+      `The last price 268.40 has already passed the trigger 265.00: Upstox may refuse such a stop or fill it at once.${LIVE_TAIL}`,
     ],
   ])('says before Place that %s the price has passed would fill or trigger at once', async (_, fields, words) => {
     const order = bookOrder(fields as Partial<BookOrder>)

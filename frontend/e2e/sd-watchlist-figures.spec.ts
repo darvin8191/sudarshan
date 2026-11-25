@@ -75,6 +75,8 @@ interface Fixture {
   cols: string[]
   /** TD1: the list also holds the expired contract. */
   expired?: boolean
+  /** v0.18.0 V3: the app in Live mode; otherwise Analyze. */
+  live?: boolean
 }
 
 const caught = {
@@ -156,7 +158,8 @@ async function serve(page: Page, fixture: Fixture) {
       }),
     '/auth/csrf-token': () => json({ csrf_token: 'test' }),
     '/auth/app-info': () => json({ status: 'success', data: {} }),
-    '/auth/analyzer-mode': () => json({ status: 'success', data: { analyze_mode: true } }),
+    '/auth/analyzer-mode': () =>
+      json({ status: 'success', data: { analyze_mode: !fixture.live } }),
     '/api/broker/capabilities': () =>
       json({ status: 'success', data: { broker_type: 'equity', leverage_config: false } }),
     '/admin/api/timings': () => json({ status: 'success', data: [], market_status: timings }),
@@ -594,37 +597,43 @@ for (const viewport of [
 
 /**
  * The Repeat ticket's passed-trigger line (v0.17.0 server review L3), which no other phone spec
- * opens, at 320 x 640 with Larger text: it wraps whole inside the ticket, nothing of the ticket is
- * cut, and the line beside Place stays in view. Place is never pressed.
+ * opens, at 320 x 640 with Larger text, in Analyze mode and in Live, each with its own words
+ * (v0.18.0 verification V3): it wraps whole inside the ticket, nothing of the ticket is cut, and
+ * the line beside Place stays in view. Place is never pressed.
  */
-test.describe('the Repeat ticket of a stop the price has passed, 320 x 640, large text', () => {
-  test.use({ viewport: { width: 320, height: 640 }, hasTouch: true, isMobile: true })
+const PASSED = 'The last price 1552.40 has already passed the trigger 1560.00'
+const PASSED_SAYS = {
+  Analyze: `${PASSED}: in the sandbox this stop would trigger at once and rest as a limit order at 1555.00.`,
+  Live: `${PASSED}: Upstox may refuse such a stop or trigger it at once and rest it as a limit order at 1555.00. To close a position now, use Market or Limit.`,
+}
+for (const [mode, says] of Object.entries(PASSED_SAYS)) {
+  test.describe(`the Repeat ticket of a stop the price has passed, 320 x 640, large text, ${mode}`, () => {
+    test.use({ viewport: { width: 320, height: 640 }, hasTouch: true, isMobile: true })
 
-  test('says so in a line that wraps whole', async ({ page }, info) => {
-    await page.addInitScript(() => localStorage.setItem('sudarshan-text', 'large'))
-    await serve(page, { cols: [] })
-    await page.goto('/orderbook')
-    await page.getByRole('button', { name: /INFY/ }).first().click()
-    await page.waitForTimeout(700) // the sheet's fade and its half-second guard
-    await page.getByRole('dialog').getByRole('button', { name: /^Repeat/ }).click()
-    const ticket = page.getByRole('dialog', { name: /^Place Order - SELL/ })
-    await expect(ticket).toBeVisible()
-    const line = ticket.getByTestId('ticket-trigger-passed')
-    await expect(line).toHaveText(
-      'The trigger 1560.00 is already above the last price 1552.40: this stop would trigger at once and rest as a limit order at 1555.00.'
-    )
-    await page.waitForTimeout(700)
-    await expect(line).toBeInViewport({ ratio: 1 })
-    const lines = await line.evaluate((el) =>
-      Math.round(el.getBoundingClientRect().height / Number.parseFloat(getComputedStyle(el).lineHeight))
-    )
-    expect(lines, 'the line wraps').toBeGreaterThan(1)
-    expect(await ticketCuts(ticket), 'parts of the ticket that are cut').toEqual([])
-    await expect(ticket.getByTestId('ticket-summary')).toBeInViewport({ ratio: 1 })
-    await expect(ticket.getByRole('button', { name: 'Place SELL Order' })).toBeInViewport({ ratio: 1 })
-    await page.screenshot({ path: info.outputPath('repeat-passed-trigger-320-large.png') })
+    test('says so in a line that wraps whole', async ({ page }, info) => {
+      await page.addInitScript(() => localStorage.setItem('sudarshan-text', 'large'))
+      await serve(page, { cols: [], live: mode === 'Live' })
+      await page.goto('/orderbook')
+      await page.getByRole('button', { name: /INFY/ }).first().click()
+      await page.waitForTimeout(700) // the sheet's fade and its half-second guard
+      await page.getByRole('dialog').getByRole('button', { name: /^Repeat/ }).click()
+      const ticket = page.getByRole('dialog', { name: /^Place Order - SELL/ })
+      await expect(ticket).toBeVisible()
+      const line = ticket.getByTestId('ticket-trigger-passed')
+      await expect(line).toHaveText(says)
+      await page.waitForTimeout(700)
+      await expect(line).toBeInViewport({ ratio: 1 })
+      const lines = await line.evaluate((el) =>
+        Math.round(el.getBoundingClientRect().height / Number.parseFloat(getComputedStyle(el).lineHeight))
+      )
+      expect(lines, 'the line wraps').toBeGreaterThan(1)
+      expect(await ticketCuts(ticket), 'parts of the ticket that are cut').toEqual([])
+      await expect(ticket.getByTestId('ticket-summary')).toBeInViewport({ ratio: 1 })
+      await expect(ticket.getByRole('button', { name: 'Place SELL Order' })).toBeInViewport({ ratio: 1 })
+      await page.screenshot({ path: info.outputPath(`repeat-passed-trigger-320-large-${mode}.png`) })
+    })
   })
-})
+}
 
 test.describe('an expired contract in the list, upright (M8.2 TD1)', () => {
   test.use({ viewport: { width: 360, height: 800 }, hasTouch: true, isMobile: true })

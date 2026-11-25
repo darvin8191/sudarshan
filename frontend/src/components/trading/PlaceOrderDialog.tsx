@@ -516,16 +516,20 @@ export function PlaceOrderDialog({
     exchange: exchange_,
     usualExchange: exchange,
   })
-  // SUDARSHAN (v0.17.0 review L3): from the fields as they stand, so it follows an edit or a tick.
+  // SUDARSHAN (v0.17.0 review L3): from the fields as they stand, so it follows an edit or a tick;
+  // in the words of where the order goes, the sandbox or Upstox (v0.18.0 verification V3).
   const passed = warnPassedTrigger
-    ? passedTriggerText({
-        action: formAction,
-        priceType: formPriceType,
-        trigger: formTriggerPrice,
-        price: formPrice,
-        ltp: mergedData.ltp,
-        tickSize,
-      })
+    ? passedTriggerText(
+        {
+          action: formAction,
+          priceType: formPriceType,
+          trigger: formTriggerPrice,
+          price: formPrice,
+          ltp: mergedData.ltp,
+          tickSize,
+        },
+        sandbox
+      )
     : null
 
   return (

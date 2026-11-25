@@ -1,0 +1,467 @@
+{
+  "about": "v0.18.0 verification V3 (M6.1): every Repeat case of a stop the last price has passed. Each case is a book row, the contract's lot and tick, and the last price. 'sends' is the request Place sent for it on v0.17.0 (6787dfae6), recorded through the real ticket in Analyze mode and in Live before the words changed (the same in both modes); 'says' is the passed-trigger line in each mode from v0.18.0. Made-up figures.",
+  "cases": [
+    {
+      "name": "NSE cash, sell SL-M above the price",
+      "ltp": 268.4,
+      "contract": {
+        "lotSize": 1,
+        "tickSize": 0.05
+      },
+      "order": {
+        "symbol": "ENGINERSIN",
+        "exchange": "NSE",
+        "action": "SELL",
+        "quantity": 2,
+        "pricetype": "SL-M",
+        "price": 0,
+        "trigger_price": 270,
+        "product": "CNC",
+        "orderid": "5001",
+        "order_status": "cancelled"
+      },
+      "sends": {
+        "apikey": "test-api-key",
+        "strategy": "Orders",
+        "exchange": "NSE",
+        "symbol": "ENGINERSIN",
+        "action": "SELL",
+        "quantity": 2,
+        "pricetype": "SL-M",
+        "product": "CNC",
+        "trigger_price": 270
+      },
+      "says": {
+        "analyze": "The last price 268.40 has already passed the trigger 270.00: in the sandbox this stop would fill at once.",
+        "live": "The last price 268.40 has already passed the trigger 270.00: Upstox may refuse such a stop or fill it at once. To close a position now, use Market or Limit."
+      }
+    },
+    {
+      "name": "NSE cash, sell SL-M at the price",
+      "ltp": 268.4,
+      "contract": {
+        "lotSize": 1,
+        "tickSize": 0.05
+      },
+      "order": {
+        "symbol": "ENGINERSIN",
+        "exchange": "NSE",
+        "action": "SELL",
+        "quantity": 2,
+        "pricetype": "SL-M",
+        "price": 0,
+        "trigger_price": 268.4,
+        "product": "MIS",
+        "orderid": "5002",
+        "order_status": "cancelled"
+      },
+      "sends": {
+        "apikey": "test-api-key",
+        "strategy": "Orders",
+        "exchange": "NSE",
+        "symbol": "ENGINERSIN",
+        "action": "SELL",
+        "quantity": 2,
+        "pricetype": "SL-M",
+        "product": "MIS",
+        "trigger_price": 268.4
+      },
+      "says": {
+        "analyze": "The last price 268.40 is already at the trigger 268.40: in the sandbox this stop would fill at once.",
+        "live": "The last price 268.40 is already at the trigger 268.40: Upstox may refuse such a stop or fill it at once. To close a position now, use Market or Limit."
+      }
+    },
+    {
+      "name": "NSE cash, buy SL-M below the price",
+      "ltp": 268.4,
+      "contract": {
+        "lotSize": 1,
+        "tickSize": 0.05
+      },
+      "order": {
+        "symbol": "ENGINERSIN",
+        "exchange": "NSE",
+        "action": "BUY",
+        "quantity": 5,
+        "pricetype": "SL-M",
+        "price": 0,
+        "trigger_price": 265,
+        "product": "MIS",
+        "orderid": "5003",
+        "order_status": "rejected"
+      },
+      "sends": {
+        "apikey": "test-api-key",
+        "strategy": "Orders",
+        "exchange": "NSE",
+        "symbol": "ENGINERSIN",
+        "action": "BUY",
+        "quantity": 5,
+        "pricetype": "SL-M",
+        "product": "MIS",
+        "trigger_price": 265
+      },
+      "says": {
+        "analyze": "The last price 268.40 has already passed the trigger 265.00: in the sandbox this stop would fill at once.",
+        "live": "The last price 268.40 has already passed the trigger 265.00: Upstox may refuse such a stop or fill it at once. To close a position now, use Market or Limit."
+      }
+    },
+    {
+      "name": "NSE cash, sell SL whose limit the price is within",
+      "ltp": 268.4,
+      "contract": {
+        "lotSize": 1,
+        "tickSize": 0.05
+      },
+      "order": {
+        "symbol": "ENGINERSIN",
+        "exchange": "NSE",
+        "action": "SELL",
+        "quantity": 2,
+        "pricetype": "SL",
+        "price": 268,
+        "trigger_price": 270,
+        "product": "CNC",
+        "orderid": "5004",
+        "order_status": "cancelled"
+      },
+      "sends": {
+        "apikey": "test-api-key",
+        "strategy": "Orders",
+        "exchange": "NSE",
+        "symbol": "ENGINERSIN",
+        "action": "SELL",
+        "quantity": 2,
+        "pricetype": "SL",
+        "product": "CNC",
+        "price": 268,
+        "trigger_price": 270
+      },
+      "says": {
+        "analyze": "The last price 268.40 has already passed the trigger 270.00: in the sandbox this stop would fill at once.",
+        "live": "The last price 268.40 has already passed the trigger 270.00: Upstox may refuse such a stop or fill it at once. To close a position now, use Market or Limit."
+      }
+    },
+    {
+      "name": "NSE cash, sell SL whose limit the price is past",
+      "ltp": 268.4,
+      "contract": {
+        "lotSize": 1,
+        "tickSize": 0.05
+      },
+      "order": {
+        "symbol": "ENGINERSIN",
+        "exchange": "NSE",
+        "action": "SELL",
+        "quantity": 2,
+        "pricetype": "SL",
+        "price": 269.5,
+        "trigger_price": 270,
+        "product": "CNC",
+        "orderid": "5005",
+        "order_status": "cancelled"
+      },
+      "sends": {
+        "apikey": "test-api-key",
+        "strategy": "Orders",
+        "exchange": "NSE",
+        "symbol": "ENGINERSIN",
+        "action": "SELL",
+        "quantity": 2,
+        "pricetype": "SL",
+        "product": "CNC",
+        "price": 269.5,
+        "trigger_price": 270
+      },
+      "says": {
+        "analyze": "The last price 268.40 has already passed the trigger 270.00: in the sandbox this stop would trigger at once and rest as a limit order at 269.50.",
+        "live": "The last price 268.40 has already passed the trigger 270.00: Upstox may refuse such a stop or trigger it at once and rest it as a limit order at 269.50. To close a position now, use Market or Limit."
+      }
+    },
+    {
+      "name": "NSE cash, buy SL whose limit the price is within",
+      "ltp": 268.4,
+      "contract": {
+        "lotSize": 1,
+        "tickSize": 0.05
+      },
+      "order": {
+        "symbol": "ENGINERSIN",
+        "exchange": "NSE",
+        "action": "BUY",
+        "quantity": 5,
+        "pricetype": "SL",
+        "price": 270,
+        "trigger_price": 265,
+        "product": "MIS",
+        "orderid": "5006",
+        "order_status": "cancelled"
+      },
+      "sends": {
+        "apikey": "test-api-key",
+        "strategy": "Orders",
+        "exchange": "NSE",
+        "symbol": "ENGINERSIN",
+        "action": "BUY",
+        "quantity": 5,
+        "pricetype": "SL",
+        "product": "MIS",
+        "price": 270,
+        "trigger_price": 265
+      },
+      "says": {
+        "analyze": "The last price 268.40 has already passed the trigger 265.00: in the sandbox this stop would fill at once.",
+        "live": "The last price 268.40 has already passed the trigger 265.00: Upstox may refuse such a stop or fill it at once. To close a position now, use Market or Limit."
+      }
+    },
+    {
+      "name": "NSE cash, buy SL whose limit the price is past",
+      "ltp": 268.4,
+      "contract": {
+        "lotSize": 1,
+        "tickSize": 0.05
+      },
+      "order": {
+        "symbol": "ENGINERSIN",
+        "exchange": "NSE",
+        "action": "BUY",
+        "quantity": 5,
+        "pricetype": "SL",
+        "price": 266,
+        "trigger_price": 265,
+        "product": "MIS",
+        "orderid": "5007",
+        "order_status": "cancelled"
+      },
+      "sends": {
+        "apikey": "test-api-key",
+        "strategy": "Orders",
+        "exchange": "NSE",
+        "symbol": "ENGINERSIN",
+        "action": "BUY",
+        "quantity": 5,
+        "pricetype": "SL",
+        "product": "MIS",
+        "price": 266,
+        "trigger_price": 265
+      },
+      "says": {
+        "analyze": "The last price 268.40 has already passed the trigger 265.00: in the sandbox this stop would trigger at once and rest as a limit order at 266.00.",
+        "live": "The last price 268.40 has already passed the trigger 265.00: Upstox may refuse such a stop or trigger it at once and rest it as a limit order at 266.00. To close a position now, use Market or Limit."
+      }
+    },
+    {
+      "name": "NSE cash, sell SL with no limit price in the book row (the ticket takes the last price)",
+      "ltp": 268.4,
+      "contract": {
+        "lotSize": 1,
+        "tickSize": 0.05
+      },
+      "order": {
+        "symbol": "ENGINERSIN",
+        "exchange": "NSE",
+        "action": "SELL",
+        "quantity": 2,
+        "pricetype": "SL",
+        "price": 0,
+        "trigger_price": 270,
+        "product": "CNC",
+        "orderid": "5008",
+        "order_status": "cancelled"
+      },
+      "sends": {
+        "apikey": "test-api-key",
+        "strategy": "Orders",
+        "exchange": "NSE",
+        "symbol": "ENGINERSIN",
+        "action": "SELL",
+        "quantity": 2,
+        "pricetype": "SL",
+        "product": "CNC",
+        "price": 268.4,
+        "trigger_price": 270
+      },
+      "says": {
+        "analyze": "The last price 268.40 has already passed the trigger 270.00: in the sandbox this stop would fill at once.",
+        "live": "The last price 268.40 has already passed the trigger 270.00: Upstox may refuse such a stop or fill it at once. To close a position now, use Market or Limit."
+      }
+    },
+    {
+      "name": "NSE cash, sell SL-M with a trigger off the tick (270.03 on a 0.05 tick)",
+      "ltp": 268.4,
+      "contract": {
+        "lotSize": 1,
+        "tickSize": 0.05
+      },
+      "order": {
+        "symbol": "ENGINERSIN",
+        "exchange": "NSE",
+        "action": "SELL",
+        "quantity": 2,
+        "pricetype": "SL-M",
+        "price": 0,
+        "trigger_price": 270.03,
+        "product": "CNC",
+        "orderid": "5009",
+        "order_status": "cancelled"
+      },
+      "sends": {
+        "apikey": "test-api-key",
+        "strategy": "Orders",
+        "exchange": "NSE",
+        "symbol": "ENGINERSIN",
+        "action": "SELL",
+        "quantity": 2,
+        "pricetype": "SL-M",
+        "product": "CNC",
+        "trigger_price": 270.05
+      },
+      "says": {
+        "analyze": "The last price 268.40 has already passed the trigger 270.05: in the sandbox this stop would fill at once.",
+        "live": "The last price 268.40 has already passed the trigger 270.05: Upstox may refuse such a stop or fill it at once. To close a position now, use Market or Limit."
+      }
+    },
+    {
+      "name": "NFO option, sell SL-M above the price",
+      "ltp": 95.1,
+      "contract": {
+        "lotSize": 65,
+        "tickSize": 0.05
+      },
+      "order": {
+        "symbol": "NIFTY24NOV2625800PE",
+        "exchange": "NFO",
+        "action": "SELL",
+        "quantity": 65,
+        "pricetype": "SL-M",
+        "price": 0,
+        "trigger_price": 96.35,
+        "product": "MIS",
+        "orderid": "5010",
+        "order_status": "rejected"
+      },
+      "sends": {
+        "apikey": "test-api-key",
+        "strategy": "Orders",
+        "exchange": "NFO",
+        "symbol": "NIFTY24NOV2625800PE",
+        "action": "SELL",
+        "quantity": 65,
+        "pricetype": "SL-M",
+        "product": "MIS",
+        "trigger_price": 96.35
+      },
+      "says": {
+        "analyze": "The last price 95.10 has already passed the trigger 96.35: in the sandbox this stop would fill at once.",
+        "live": "The last price 95.10 has already passed the trigger 96.35: Upstox may refuse such a stop or fill it at once. To close a position now, use Market or Limit."
+      }
+    },
+    {
+      "name": "NFO option, sell SL whose limit the price is within",
+      "ltp": 95.1,
+      "contract": {
+        "lotSize": 65,
+        "tickSize": 0.05
+      },
+      "order": {
+        "symbol": "NIFTY24NOV2625800PE",
+        "exchange": "NFO",
+        "action": "SELL",
+        "quantity": 130,
+        "pricetype": "SL",
+        "price": 95,
+        "trigger_price": 96,
+        "product": "NRML",
+        "orderid": "5011",
+        "order_status": "cancelled"
+      },
+      "sends": {
+        "apikey": "test-api-key",
+        "strategy": "Orders",
+        "exchange": "NFO",
+        "symbol": "NIFTY24NOV2625800PE",
+        "action": "SELL",
+        "quantity": 130,
+        "pricetype": "SL",
+        "product": "NRML",
+        "price": 95,
+        "trigger_price": 96
+      },
+      "says": {
+        "analyze": "The last price 95.10 has already passed the trigger 96.00: in the sandbox this stop would fill at once.",
+        "live": "The last price 95.10 has already passed the trigger 96.00: Upstox may refuse such a stop or fill it at once. To close a position now, use Market or Limit."
+      }
+    },
+    {
+      "name": "NFO option, buy SL whose limit the price is past",
+      "ltp": 95.1,
+      "contract": {
+        "lotSize": 65,
+        "tickSize": 0.05
+      },
+      "order": {
+        "symbol": "NIFTY24NOV2625800PE",
+        "exchange": "NFO",
+        "action": "BUY",
+        "quantity": 65,
+        "pricetype": "SL",
+        "price": 95,
+        "trigger_price": 94,
+        "product": "MIS",
+        "orderid": "5012",
+        "order_status": "cancelled"
+      },
+      "sends": {
+        "apikey": "test-api-key",
+        "strategy": "Orders",
+        "exchange": "NFO",
+        "symbol": "NIFTY24NOV2625800PE",
+        "action": "BUY",
+        "quantity": 65,
+        "pricetype": "SL",
+        "product": "MIS",
+        "price": 95,
+        "trigger_price": 94
+      },
+      "says": {
+        "analyze": "The last price 95.10 has already passed the trigger 94.00: in the sandbox this stop would trigger at once and rest as a limit order at 95.00.",
+        "live": "The last price 95.10 has already passed the trigger 94.00: Upstox may refuse such a stop or trigger it at once and rest it as a limit order at 95.00. To close a position now, use Market or Limit."
+      }
+    },
+    {
+      "name": "NFO option, buy SL-M at the price",
+      "ltp": 95.1,
+      "contract": {
+        "lotSize": 65,
+        "tickSize": 0.05
+      },
+      "order": {
+        "symbol": "NIFTY24NOV2625800PE",
+        "exchange": "NFO",
+        "action": "BUY",
+        "quantity": 65,
+        "pricetype": "SL-M",
+        "price": 0,
+        "trigger_price": 95.1,
+        "product": "NRML",
+        "orderid": "5013",
+        "order_status": "cancelled"
+      },
+      "sends": {
+        "apikey": "test-api-key",
+        "strategy": "Orders",
+        "exchange": "NFO",
+        "symbol": "NIFTY24NOV2625800PE",
+        "action": "BUY",
+        "quantity": 65,
+        "pricetype": "SL-M",
+        "product": "NRML",
+        "trigger_price": 95.1
+      },
+      "says": {
+        "analyze": "The last price 95.10 is already at the trigger 95.10: in the sandbox this stop would fill at once.",
+        "live": "The last price 95.10 is already at the trigger 95.10: Upstox may refuse such a stop or fill it at once. To close a position now, use Market or Limit."
+      }
+    }
+  ]
+}
