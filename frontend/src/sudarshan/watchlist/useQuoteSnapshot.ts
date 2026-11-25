@@ -294,12 +294,17 @@ export function useQuoteSnapshot({
   }, [connectionEpoch, read])
 
   // A market opening or closing. Not the calendar arriving: unknown to known is no change.
+  // v0.18.0 verification V1: compared after every committed render, not keyed on `marketOpen`. The
+  // caller works the open state out from the clock while rendering, and React can throw such a render
+  // away (nothing in its state changed) while keeping its new dependencies and dropping its effect, so
+  // a keyed effect missed the change for good. `lastOpen` moves only here, after a commit: the next
+  // committed render (the clock ticks every second) still sees the change, and reads once.
   const lastOpen = useRef(marketOpen)
   useEffect(() => {
     const before = lastOpen.current
     lastOpen.current = marketOpen
     if (before !== null && marketOpen !== null && before !== marketOpen) void read(0, null)
-  }, [marketOpen, read])
+  })
 
   // Back on the page after a while away.
   useEffect(() => {
