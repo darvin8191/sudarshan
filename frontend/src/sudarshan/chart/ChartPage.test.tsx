@@ -1264,6 +1264,12 @@ describe('an expired contract (TD2)', () => {
   const gone = () => screen.getByTestId('chart-gone')
 
   beforeEach(() => {
+    // The contracts above are dated, so these tests run on Friday 20 Nov 2026 at noon in India,
+    // when 17 Nov has expired and 24 Nov is the nearest expiry, whatever day the suite runs on.
+    // Run from 25 Nov on, 24 Nov had expired too and its offer opened an expired chart. The clock
+    // runs on from there; the helpers below that pin noon read this day as today.
+    vi.useFakeTimers({ toFake: ['Date'], shouldAdvanceTime: true })
+    vi.setSystemTime(Date.parse('2026-11-20T06:30:00Z'))
     fakes.expiries = (symbol, exchange, kind) =>
       symbol === 'NIFTY' && exchange === 'NFO' && kind === 'options'
         ? ['24-NOV-26', '01-DEC-26']
