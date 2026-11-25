@@ -19,8 +19,8 @@ that stay on their expiry, all behind its switch, which stays off. **The screene
 gains two lines: days to an ex-date and days to an expiry. No switch changes and no setting is
 added. The reviews found no order path changed: what changed is what a ticket shows before you
 press Place, and the question before a cancel, never what is sent. It includes everything in
-v0.16.0. **Publish only after v0.16.0 has installed and run one trading day: Wednesday 25 Nov
-after the close, or later.**
+v0.16.0. **Publish only once v0.16.0 has installed, which About shows; the evening of Wednesday
+25 Nov is fine.**
 
 ### What changes for you from the day you install it
 - **Watchlist: a row for an expired contract says "Expired on 3 Nov 2026"** in place of its price
@@ -158,10 +158,12 @@ Nothing below changes anything until you switch it on, and none of it is promise
   alerts:** unchanged from v0.16.0, whose notes give the steps.
 
 ### What you must do
-- **Publish after v0.16.0's first trading day.** v0.16.0 must be published and installed first and
-  must have run Wednesday 25 Nov's session. Published on Wednesday 25 Nov after 15:30, this release
-  installs after 16:00 that day, and Thursday 26 Nov is its first trading day. If v0.16.0 is not
-  installed by then, publish it first and this release one trading day after it.
+- **Publish once v0.16.0 has installed.** v0.16.0 was published on Wednesday 25 Nov at 08:52 and
+  installed after 16:00 that day. This release can follow the same evening, once About shows
+  v0.16.0: it installs within about ten minutes, and Thursday 26 Nov is the first trading day of
+  both. v0.16.0 has no trading day of its own, so a fault on Thursday may come from either release;
+  both were reviewed and verified, and this one changes no order path. If About still shows
+  v0.15.0, v0.16.0's install did not finish: do not publish, and tell the next work session.
 - **Nothing on the server.** No setting is added or changed.
 - **Once after the install, on the phone and the laptop.** The orders below are placed in analyzer
   mode only, and each goes to the Sandbox once.
