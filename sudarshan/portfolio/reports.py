@@ -133,6 +133,15 @@ WORDS = {
     "pnl_not_allowed_kept": "Upstox did not let SUDARSHAN's read-only token read your trade-wise "
     "P&L report, so these are the figures from the last complete read; the rest of the Upstox "
     "tab is not affected.",
+    # The same, while it is not known whether Upstox still accepts the token (v0.18.0 verification
+    # V2: the holdings read that would tell could not be made): nothing is said about the rest.
+    "trades_unsure": "Upstox did not let SUDARSHAN's read-only token read your trade history.",
+    "pnl_unsure": "Upstox did not let SUDARSHAN's read-only token read your trade-wise P&L report.",
+    "history_unsure": "Upstox did not let SUDARSHAN's read-only token read this order's history.",
+    "trades_unsure_kept": "Upstox did not let SUDARSHAN's read-only token read your trade "
+    "history, so these are the figures from the last complete read.",
+    "pnl_unsure_kept": "Upstox did not let SUDARSHAN's read-only token read your trade-wise P&L "
+    "report, so these are the figures from the last complete read.",
     "early": "This year was read before it had closed and settled. SUDARSHAN reads it again once "
     "it has; tap Read again to do it now.",
     "no_pnl_mf": "Upstox has no trade-wise P&L report for mutual funds; their trades are in "
@@ -157,7 +166,7 @@ def _kept_words(note: str | None) -> str:
         return WORDS["no_token_kept"]
     if note == WORDS["token_refused"]:
         return WORDS["token_refused_kept"]
-    for key in ("trades_not_allowed", "pnl_not_allowed"):
+    for key in ("trades_not_allowed", "pnl_not_allowed", "trades_unsure", "pnl_unsure"):
         if note == WORDS[key]:
             return WORDS[f"{key}_kept"]
     return WORDS["kept"]
@@ -169,14 +178,24 @@ NOT_ALLOWED = {"trades": "trades_not_allowed", "pnl_meta": "pnl_not_allowed",
                "order_history": "history_not_allowed"}  # fmt: skip
 
 
-def _refusal(api: str, why: str) -> str:
-    """The words key for a read the live book's pauses stop (``UpstoxReader.stopped``)."""
-    return "token_refused" if why == "token" else NOT_ALLOWED[api]
+#: The same, while it is not known whether Upstox still accepts the token (v0.18.0 verification V2).
+UNSURE = {"trades": "trades_unsure", "pnl_meta": "pnl_unsure", "pnl": "pnl_unsure",
+          "charges": "pnl_unsure", "order_history": "history_unsure"}  # fmt: skip
+
+
+def _refusal(api: str, why: str, upstox: Any) -> str:
+    """The words key for a read the live book's pauses stop (``UpstoxReader.stopped``): the
+    rest is said not to be affected only when the read is known to be refused alone (V2)."""
+    if why == "token":
+        return "token_refused"
+    return (NOT_ALLOWED if upstox.alone(api) else UNSURE)[api]
 
 
 #: The reads each sentence of a read refused alone stands for (review M2).
 ALONE = {"trades_not_allowed": ("trades",), "pnl_not_allowed": ("pnl_meta", "pnl", "charges"),
-         "history_not_allowed": ("order_history",)}  # fmt: skip
+         "history_not_allowed": ("order_history",), "trades_unsure": ("trades",),
+         "pnl_unsure": ("pnl_meta", "pnl", "charges"),
+         "history_unsure": ("order_history",)}  # fmt: skip
 
 
 def again_note(note: str | None, upstox: Any) -> str | None:
@@ -540,7 +559,7 @@ class ReportReader:
         sig = _signature(upstox.token_file)
         why = upstox.stopped(api, sig)
         if why is not None:
-            return _refusal(api, why), None
+            return _refusal(api, why, upstox), None
         if upstox.budget.paused_for(api):
             return "slow", None
         token = upstox._token()
@@ -556,8 +575,9 @@ class ReportReader:
             if not upstox.budget.take(api, principal):
                 return "busy", None
         if not upstox.sending(api, sig):  # another read took this one's try meanwhile (M2)
-            return _refusal(api, "read"), None
+            return _refusal(api, "read", upstox), None
         headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+        sent_at = upstox.clock()
         try:
             answer = await upstox.client.get(
                 upstox.base_url + PATHS[api], headers=headers, params=dict(params)
@@ -569,7 +589,10 @@ class ReportReader:
             del token, headers
         status = answer.status_code
         if status == 401:
-            return _refusal(api, upstox.refused(api, sig)), None
+            why = upstox.refused(api, sig)
+            if why == "read":  # settled before the words are chosen (V2)
+                why = await upstox.judge(api, sig, sent_at, principal)
+            return _refusal(api, why, upstox), None
         if status == 429 or upstox._rate_coded(answer):
             upstox.budget.pause(api, PAUSE_S)
             log.warning("Upstox asked for a pause on %s: %d seconds", api, int(PAUSE_S))

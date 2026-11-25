@@ -24,7 +24,12 @@ portfolio page does not show them). All are GETs with ``Authorization: Bearer``,
   alone pauses and says so in its own words, never that the token was refused. Such a 401 that
   lands while Upstox refuses that very token file at holdings or positions is that refusal, and a
   batch's words are settled once all its answers are in (``book``), so one refresh of the tab never
-  says both (v0.17.0 review M1).
+  says both (v0.17.0 review M1). Before a 401 on another read is worded, it is settled whether
+  Upstox still accepts the token (``judge``, v0.18.0 verification V2): a holdings or positions read
+  of that token file answered since the refused read was sent says so; else one holdings read goes,
+  single flight and through the budget, and its 401 makes the refusal the token's. Only a read
+  Upstox refused alone while it accepted the token says the rest of the tab is not affected; one
+  refused while that could not be told says nothing about the rest.
 * **Asked again** (verification V2). While Upstox refuses the token itself, one holdings read is
   let through (``ask_again``) at most every 15 minutes in market hours, else at a trading day's
   08:00 or 15:45 or the next session's start, whichever comes first (the token check's job,
@@ -67,6 +72,7 @@ log = logging.getLogger("sudarshan.portfolio.upstox")
 
 TIMEOUT_S = httpx.Timeout(10.0)
 MAX_AGE_S = 5
+MAX_AGE_MS = MAX_AGE_S * 1000
 FAILED_REUSE_MS = 2000  # a failed read is not repeated for two seconds
 FUNDS_OPENS_MIN = 5 * 60 + 30  # IST minutes after midnight; no funds read before this
 TOKEN_MIN = 16
@@ -109,6 +115,12 @@ WORDS = {
     "the Upstox tab is not affected.",
     "not_allowed_trades": "Upstox did not let SUDARSHAN's read-only token read the day's trades; "
     "the Upstox tab is not affected.",
+    # The same, while it is not known whether Upstox still accepts the token (v0.18.0 verification
+    # V2: the holdings read that would tell could not be made): nothing is said about the rest.
+    "unsure_mtf": "Upstox did not let SUDARSHAN's read-only token read your MTF positions.",
+    "unsure_funds": "Upstox did not let SUDARSHAN's read-only token read your funds.",
+    "unsure_orders": "Upstox did not let SUDARSHAN's read-only token read the day's orders.",
+    "unsure_trades": "Upstox did not let SUDARSHAN's read-only token read the day's trades.",
 }
 
 
@@ -506,12 +518,15 @@ def _signature(path: Path) -> tuple[int, int] | None:
 
 class Pause(NamedTuple):
     """A read Upstox refused alone (verification V1, review M2): the token file's signature then,
-    when it may be asked again (epoch ms; None: only a new token file asks it), and whether it has
-    been asked again since (a refusal of that try is a real one: once a day from then)."""
+    when it may be asked again (epoch ms; None: only a new token file asks it), whether it has
+    been asked again since (a refusal of that try is a real one: once a day from then), and
+    whether Upstox accepted the token at a holdings or positions read since it was refused (v0.18.0
+    verification V2: only then do its words say the rest is not affected)."""
 
     sig: tuple[int, int] | None
     due: int | None
     tried: bool = False
+    alone: bool = False
 
 
 class UpstoxReader:
@@ -544,6 +559,9 @@ class UpstoxReader:
         #: Each other read Upstox refused, by the budget's name of its API (verification V1): only
         #: that read pauses, until it is asked again (review M2) or the token file changes.
         self._paused: dict[str, Pause] = {}
+        #: The token file's signature and the time of the last read in JUDGES Upstox answered (200):
+        #: what a 401 on another read is judged by (``judge``, v0.18.0 verification V2).
+        self._accepted: tuple[tuple[int, int] | None, int] | None = None
         self._told: set[str] = set()
         #: Told of each read in JUDGES that Upstox answered: ("ok" or "failed", the time, the
         #: token file's signature before the read). Set by the service (probe.heard).
@@ -618,6 +636,65 @@ class UpstoxReader:
         async with memory.lock:
             await self._read("holdings", memory, retry=True)
         return memory.view()
+
+    async def judge(
+        self, api: str, sig: tuple[int, int] | None, sent_at: int, principal: str = OWNER
+    ) -> str:
+        """A read of ``api`` sent at ``sent_at`` that Upstox refused (401) and ``refused`` paused
+        alone: whether it was refused alone, settled before its words are chosen (v0.18.0
+        verification V2), since Upstox may be refusing the token itself, first met on this read.
+        A holdings or positions read of this token file answered since then (one in flight is
+        waited for), or this read already found refused alone, settles it with no call; else one
+        holdings read goes, single flight with the tab's and through the budget. "token" when
+        Upstox refuses the token (the read keeps no pause of its own, and the token line fails),
+        else "read": its pause is alone when Upstox accepted the token, and stays unsure when that
+        read could not tell (a fault, a 429 pause, an empty bucket)."""
+        if not self._settled(api, sig, sent_at):
+            for name in JUDGES:  # a read the same refresh has in flight answers first
+                async with self._memory[name].lock:
+                    pass
+            memory = self._memory["holdings"]
+            async with memory.lock:
+                if not self._settled(api, sig, sent_at):
+                    await self._read("holdings", memory, principal)
+        if self._confirmed_at is not None and self._confirmed_at == sig:
+            self._paused.pop(api, None)  # that refusal (review M1)
+            return "token"
+        pause = self._paused.get(api)
+        if pause is not None and pause.sig == sig and self._accepted_since(sig, sent_at):
+            self._paused[api] = pause._replace(alone=True)
+        return "read"
+
+    def _accepted_since(self, sig: tuple[int, int] | None, sent_at: int) -> bool:
+        """Upstox answered a read in JUDGES of the token file ``sig`` since ``sent_at``, or within
+        the five seconds before it that a read is fresh for."""
+        accepted = self._accepted
+        return accepted is not None and accepted[0] == sig and accepted[1] >= sent_at - MAX_AGE_MS
+
+    def _settled(self, api: str, sig: tuple[int, int] | None, sent_at: int) -> bool:
+        """Whether Upstox's view of the token file ``sig`` is known for a read of ``api`` sent at
+        ``sent_at``: it refuses the token, this read's pause is already alone, or it answered a
+        read in JUDGES since then."""
+        if self._confirmed_at is not None and self._confirmed_at == sig:
+            return True
+        pause = self._paused.get(api)
+        if pause is not None and pause.sig == sig and pause.alone:
+            return True
+        return self._accepted_since(sig, sent_at)
+
+    def _accept(self, sig: tuple[int, int] | None, now: int) -> None:
+        """Upstox answered a read in JUDGES sent with the token file ``sig``: it accepts the token
+        as of ``now``, so each read it refused alone with that file was refused alone."""
+        self._accepted = (sig, now)
+        for api, pause in list(self._paused.items()):
+            if pause.sig == sig and not pause.alone:
+                self._paused[api] = pause._replace(alone=True)
+
+    def alone(self, api: str) -> bool:
+        """Whether the read of ``api`` that pauses alone is known to be refused alone (V2): its
+        words then say the rest is not affected; otherwise they say nothing about the rest."""
+        pause = self._paused.get(api)
+        return pause is not None and pause.alone and pause.sig == _signature(self.token_file)
 
     def paused_since(self) -> int | None:
         """While Upstox refuses the token itself: when it last refused a holdings or positions
@@ -716,7 +793,9 @@ class UpstoxReader:
             return True
         if not self._due(pause):
             return False
-        self._paused[api] = Pause(sig, self._again_at(self.clock(), daily=False), True)
+        self._paused[api] = pause._replace(
+            due=self._again_at(self.clock(), daily=False), tried=True
+        )
         return True
 
     def answered(self, api: str, sig: tuple[int, int] | None) -> None:
@@ -758,7 +837,7 @@ class UpstoxReader:
         if pause is None or pause.sig != sig:
             self._paused[api] = Pause(sig, self._again_at(now, daily=False))
         elif pause.tried:  # it was asked again and refused again: a real refusal
-            self._paused[api] = Pause(sig, self._again_at(now, daily=True), True)
+            self._paused[api] = pause._replace(due=self._again_at(now, daily=True))
             log.warning("Upstox refused the %s read again. %s", api, self._again(api, now))
         # else a read sent before the first refusal landed: that pause stands as it is
         self._say_once(
@@ -774,7 +853,8 @@ class UpstoxReader:
         if why == "token":
             return WORDS["token_refused"]
         api = API_OF.get(name, name)
-        return f"{WORDS[f'not_allowed_{name}']} {self._again(api, self.clock())}".strip()
+        key = f"not_allowed_{name}" if self.alone(api) else f"unsure_{name}"  # V2
+        return f"{WORDS[key]} {self._again(api, self.clock())}".strip()
 
     async def _read(
         self, name: str, memory: PartMemory, principal: str = OWNER, *, retry: bool = False
@@ -810,6 +890,7 @@ class UpstoxReader:
             return self._fail(memory, now, self._refusal(name, "read"), refused="read")
         path, extra = PATHS[name]
         headers = {"Authorization": f"Bearer {token}", "Accept": "application/json", **extra}
+        sent_at = now
         try:
             answer = await self.client.get(self.base_url + path, headers=headers)
         except httpx.HTTPError as exc:
@@ -826,10 +907,14 @@ class UpstoxReader:
         late = status == 200 and not retry and refused_now
         if name in JUDGES and status in (200, 401) and not late:
             self._verdict("ok" if status == 200 else "failed", now, sig)
+            if status == 200:
+                self._accept(sig, now)
         if retry and status == 200:
             self._recover()
         if status == 401:
             why = self.refused(api, sig)
+            if why == "read":  # settled before the words are chosen (V2)
+                why = await self.judge(api, sig, sent_at, principal)
             return self._fail(memory, now, self._refusal(name, why), refused=why)
         if status == 423 and name == "funds":
             return self._window(memory, now)

@@ -474,13 +474,15 @@ def test_a_holdings_or_positions_read_upstox_refused_is_failed(fake, token_file,
     [("mtf", "mtf"), ("funds", "funds"), ("orders", "day_orders"), ("trades", "day_trades")],
 )
 def test_no_other_read_decides_the_check(fake, token_file, tmp_path, part, path):
+    """The 401 decides nothing by itself: the one holdings read it lets through before its words
+    are chosen does (v0.18.0 verification V2), here accepted, so the read was refused alone."""
     fake.status[path] = 401
     reader, clock = make(fake, token_file)
     service = ProbeService(tmp_path, reader, clock)
     (book,) = _reads(reader, [part])
-    assert book[part]["state"] == "unavailable"
-    assert service.token_check is None and _checked(service, token_file)["state"] == "unknown"
-    assert not (tmp_path / probe.RESULT_FILE).exists()
+    assert book[part]["state"] == "unavailable" and "not affected" in book[part]["note"]
+    assert fake.count("holdings") == 1 and fake.count("positions") == 0
+    assert _checked(service, token_file) == {"state": "ok", "at": ist(11) // 1000}
 
 
 def test_a_read_refused_alone_pauses_that_read_and_nothing_else(fake, token_file, tmp_path):
@@ -501,7 +503,7 @@ def test_a_read_refused_alone_pauses_that_read_and_nothing_else(fake, token_file
     assert again["trades"]["note"] == alone
     assert fake.count("day_trades") == 1  # the refused read asks nothing more
     asked = [fake.count(p) for p in ("holdings", "positions", "mtf", "funds", "day_orders")]
-    assert asked == [1, 1, 1, 1, 1]
+    assert asked == [2, 1, 1, 1, 1]  # holdings: the read the refusal let through (V2), the tab's
     assert _checked(service, token_file) == {"state": "ok", "at": ist(11) // 1000}
 
 
@@ -515,8 +517,10 @@ def test_a_dead_token_another_read_saw_first_is_failed_at_the_next_holdings_read
 
     async def go():
         try:
-            await reader.book(["trades"], 0)
-            assert service.token_check is None  # the trades refusal decides nothing
+            trades = (await reader.book(["trades"], 0))["trades"]
+            # The holdings read the trades refusal let through decides it at once (v0.18.0 V2).
+            assert trades["note"] == up.WORDS["token_refused"]
+            assert service.token_check["state"] == "failed" and fake.count("holdings") == 1
             await reader.book(["holdings"], 0)
             asked = fake.count()
             clock.advance(60)

@@ -129,7 +129,9 @@ def test_the_first_answer_ends_the_pause_and_the_line_says_accepted_again(
         + " SUDARSHAN asks Upstox again after 10:15 on Mon 26 Oct."
     )
     asked = _checks(service, fake, ist(11, 0), tab=False, at={ist(10, 20): mended})
-    assert asked == [ist(10, 0), ist(10, 15), ist(10, 30)]  # none after the answer
+    # The first 10:00 is the holdings read the trades refusal let through (v0.18.0 verification V2:
+    # accepted, so that refusal was its own); the second the refusal; none after the answer.
+    assert asked == [ist(10, 0), ist(10, 0), ist(10, 15), ist(10, 30)]
     assert probe.view(service.token_check, token_file) == {"state": "ok", "at": ist(10, 30) // 1000}
     assert reader.paused_since() is None and reader._paused == {}
 

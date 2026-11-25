@@ -6,7 +6,9 @@ nothing else, for the server's watch and the System page. It is judged only from
 token is known to make, the ones the Upstox tab shows (``upstox.JUDGES``: holdings and positions).
 Each of those Upstox answers says it: ``ok`` when Upstox answered the read (200), ``failed`` when
 it refused the token (401). No call is made for it: the Upstox tab, the family view and the
-closing record after each trading day read them anyway. Nothing else decides it, the probe below
+closing record after each trading day read them anyway, and a 401 on any other read lets one
+holdings read through before its words are chosen, unless one of these answered since
+(``UpstoxReader.judge``, v0.18.0 verification V2). Nothing else decides it, the probe below
 included: whether Upstox lets this token read the account's orders is not known, and a refusal
 there may only mean that it may not (v0.16.0 review H1). The last result is kept in the service's
 state folder (``token-check``), written when it says something new and once a day otherwise, so a
